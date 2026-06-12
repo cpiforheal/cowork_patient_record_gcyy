@@ -1,0 +1,18 @@
+0 verbose cli C:\Program Files\nodejs\node.exe E:\workstation\Nodejs\npm_global\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.12.0
+2 info using node@v24.12.0
+3 silly config load:file:E:\workstation\Nodejs\npm_global\node_modules\npm\npmrc
+4 silly config load:file:E:\CodeRESPOTORITY\hos_unitywork\.npmrc
+5 silly config load:file:C:\Users\Administrator\.npmrc
+6 silly config load:file:E:\workstation\Nodejs\npm_global\etc\npmrc
+7 verbose title npm config get prefix
+8 verbose argv "config" "get" "prefix"
+9 verbose logfile logs-max:10 dir:E:\CodeRESPOTORITY\hos_unitywork\%USERPROFILE%\.npm-cache\_logs\2026-06-11T01_11_24_770Z-
+10 verbose logfile E:\CodeRESPOTORITY\hos_unitywork\%USERPROFILE%\.npm-cache\_logs\2026-06-11T01_11_24_770Z-debug-0.log
+11 silly logfile done cleaning log files
+12 verbose cwd E:\CodeRESPOTORITY\hos_unitywork
+13 verbose os Windows_NT 10.0.26200
+14 verbose node v24.12.0
+15 verbose npm  v11.12.0
+16 verbose exit 0
+17 info ok
