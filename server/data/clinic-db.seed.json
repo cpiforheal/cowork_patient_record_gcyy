@@ -1,186 +1,24 @@
 {
   "version": 1,
   "updatedAt": "2026-06-13T00:00:00.000Z",
-  "roles": [
+  "patients": [],
+  "records": {},
+  "archive": {},
+  "documents": {},
+  "accounts": [
     {
-      "key": "frontdesk",
-      "label": "Front desk",
-      "permissions": ["patient:create", "patient:read", "patient:update", "document:upload"],
-      "editableSections": ["basic"]
-    },
-    {
-      "key": "lab",
-      "label": "Laboratory",
-      "permissions": ["patient:read", "document:upload", "field:edit"],
-      "editableSections": ["auxiliary"]
-    },
-    {
-      "key": "doctor",
-      "label": "Doctor",
-      "permissions": ["patient:read", "field:edit", "document:download"],
-      "editableSections": ["chiefComplaint", "presentIllness", "diagnosis", "operation"]
-    },
-    {
-      "key": "quality",
-      "label": "Quality control",
-      "permissions": ["patient:read", "audit:read", "document:restore", "archive:submit"],
-      "editableSections": ["qualityCheck", "archive"]
-    },
-    {
-      "key": "admin",
-      "label": "Administrator",
-      "permissions": ["*"],
-      "editableSections": ["*"]
+      "id": "admin",
+      "username": "admin",
+      "password": "123456",
+      "name": "\u7ba1\u7406\u5458",
+      "department": "\u4fe1\u606f/\u9662\u529e",
+      "role": "admin",
+      "roleLabel": "\u7ba1\u7406\u5458",
+      "scope": "\u7cfb\u7edf\u5168\u5c40\u914d\u7f6e",
+      "status": "\u542f\u7528",
+      "createdAt": "2026-06-10 08:00:00",
+      "updatedAt": "2026-06-10 08:00:00"
     }
   ],
-  "fieldRules": [
-    {
-      "sectionKey": "basic",
-      "sectionTitle": "Basic information",
-      "fieldKey": "patientName",
-      "fieldLabel": "Patient name",
-      "editors": ["frontdesk", "admin"],
-      "required": true,
-      "evidence": "registration sheet"
-    },
-    {
-      "sectionKey": "basic",
-      "sectionTitle": "Basic information",
-      "fieldKey": "visitNo",
-      "fieldLabel": "Visit number",
-      "editors": ["frontdesk", "admin"],
-      "required": true,
-      "evidence": "registration sheet"
-    },
-    {
-      "sectionKey": "chiefComplaint",
-      "sectionTitle": "Chief complaint",
-      "fieldKey": "chiefComplaint",
-      "fieldLabel": "Chief complaint",
-      "editors": ["doctor", "admin"],
-      "required": true,
-      "evidence": "medical interview"
-    },
-    {
-      "sectionKey": "auxiliary",
-      "sectionTitle": "Auxiliary examination",
-      "fieldKey": "bloodRoutine",
-      "fieldLabel": "Blood routine",
-      "editors": ["lab", "admin"],
-      "required": true,
-      "evidence": "uploaded report"
-    },
-    {
-      "sectionKey": "qualityCheck",
-      "sectionTitle": "Quality check",
-      "fieldKey": "qualityComment",
-      "fieldLabel": "Quality comment",
-      "editors": ["quality", "admin"],
-      "required": false,
-      "evidence": "audit trail"
-    }
-  ],
-  "patients": [
-    {
-      "id": "p-001",
-      "name": "Liu Zhen",
-      "visitNo": "20260610001",
-      "visitDate": "2026-06-10",
-      "visitType": "outpatient",
-      "doctor": "Dr. Wang",
-      "currentStage": "record generation",
-      "completedCount": 4,
-      "progressPercent": 57,
-      "status": "in progress",
-      "riskType": "warning",
-      "createdAt": "2026-06-10 08:30:00",
-      "updatedAt": "2026-06-11 09:30:00"
-    },
-    {
-      "id": "p-002",
-      "name": "Zhang San",
-      "visitNo": "20260611003",
-      "visitDate": "2026-06-11",
-      "visitType": "insurance outpatient",
-      "doctor": "Dr. Li",
-      "currentStage": "doctor review",
-      "completedCount": 6,
-      "progressPercent": 86,
-      "status": "pending review",
-      "riskType": "info",
-      "createdAt": "2026-06-11 08:10:00",
-      "updatedAt": "2026-06-11 08:40:00"
-    }
-  ],
-  "records": {
-    "p-001": {
-      "patientName": "Liu Zhen",
-      "visitNo": "20260610001",
-      "chiefComplaint": "Anal mass with bleeding for 3 days, worse for 1 day.",
-      "presentIllness": "Intermittent bleeding and swelling. Symptoms worsened before visit.",
-      "bloodRoutine": "WBC 6.2, HGB 128, PLT 216",
-      "diagnosis": "mixed hemorrhoids",
-      "qualityComment": ""
-    },
-    "p-002": {
-      "patientName": "Zhang San",
-      "visitNo": "20260611003",
-      "chiefComplaint": "Anal pain for 2 days.",
-      "presentIllness": "Pain after defecation. No fever.",
-      "bloodRoutine": "pending",
-      "diagnosis": "anal fissure",
-      "qualityComment": ""
-    }
-  },
-  "archive": {
-    "p-001": {
-      "submitted": false,
-      "version": "draft-0.3",
-      "generatedAt": "2026-06-11 09:30:00"
-    },
-    "p-002": {
-      "submitted": false,
-      "version": "draft-0.2",
-      "generatedAt": "2026-06-11 08:40:00"
-    }
-  },
-  "documents": {
-    "p-001": [
-      {
-        "key": "bloodRoutineImage",
-        "title": "Blood routine report",
-        "department": "Laboratory",
-        "fieldKey": "bloodRoutine",
-        "fileName": "liu-blood-routine.jpg",
-        "url": "/record-samples/liu/blood-routine.jpg",
-        "uploadedAt": "2026-06-10 09:12",
-        "uploader": "lab"
-      },
-      {
-        "key": "ecgImage",
-        "title": "ECG report",
-        "department": "ECG",
-        "fieldKey": "ecg",
-        "fileName": "liu-ecg.jpg",
-        "url": "/record-samples/liu/ecg.jpg",
-        "uploadedAt": "2026-06-10 09:31",
-        "uploader": "ecg"
-      }
-    ]
-  },
-  "auditLogs": [
-    {
-      "id": "audit-001",
-      "time": "2026-06-11 09:31:00",
-      "operator": "lab",
-      "role": "Laboratory",
-      "patient": "Liu Zhen",
-      "patientId": "p-001",
-      "module": "document",
-      "action": "upload",
-      "targetLabel": "Blood routine report",
-      "result": "success",
-      "detail": "Uploaded examination evidence."
-    }
-  ]
+  "auditLogs": []
 }

@@ -1,13 +1,12 @@
 import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CLINIC_API_PORT || 7071);
 const DATA_FILE = resolve(__dirname, "data/clinic-db.json");
 const SEED_FILE = resolve(__dirname, "data/clinic-db.seed.json");
-const PUBLIC_DIR = resolve(__dirname, "../public");
 const BODY_LIMIT = 1024 * 1024;
 
 const sendJson = (res, status, payload) => {
@@ -21,13 +20,6 @@ const sendJson = (res, status, payload) => {
 };
 
 const readJsonFile = async file => JSON.parse(await readFile(file, "utf8"));
-
-const contentTypes = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp"
-};
 
 const writeJsonFile = async (file, payload) => {
   await mkdir(dirname(file), { recursive: true });
@@ -101,30 +93,6 @@ const route = async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && url.pathname.startsWith("/record-samples/")) {
-    const file = resolve(PUBLIC_DIR, decodeURIComponent(url.pathname.slice(1)));
-    if (!file.startsWith(`${PUBLIC_DIR}${sep}`)) {
-      sendJson(res, 403, { code: 403, msg: "Forbidden", data: null });
-      return;
-    }
-
-    try {
-      const content = await readFile(file);
-      res.writeHead(200, {
-        "Access-Control-Allow-Origin": "*",
-        "Content-Type": contentTypes[extname(file).toLowerCase()] || "application/octet-stream"
-      });
-      res.end(content);
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        sendJson(res, 404, { code: 404, msg: "Static file not found", data: null });
-        return;
-      }
-      throw error;
-    }
-    return;
-  }
-
   if (req.method === "GET" && url.pathname === "/clinic-api/db") {
     sendJson(res, 200, { code: 200, msg: "success", data: await readDb() });
     return;
@@ -136,8 +104,8 @@ const route = async (req, res) => {
       code: 200,
       msg: "success",
       data: {
-        roles: db.roles,
-        fieldRules: db.fieldRules
+        roles: db.roles || [],
+        fieldRules: db.templateFieldRules || db.fieldRules || []
       }
     });
     return;

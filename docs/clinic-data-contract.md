@@ -19,26 +19,24 @@ The service listens on `http://localhost:7071` by default. Set `CLINIC_API_PORT`
 | `PUT` | `/clinic-api/db` | Replace the current local clinic database. The payload must contain `patients`, `records`, and `archive`. |
 | `GET` | `/clinic-api/schema` | Read role and field-rule metadata for UI permission checks. |
 | `POST` | `/clinic-api/reset` | Reset runtime data from `server/data/clinic-db.seed.json`. |
-| `GET` | `/record-samples/*` | Serve demo evidence files from `public/record-samples/`. |
 
 Runtime data is written to `server/data/clinic-db.json` and intentionally ignored by Git. The tracked seed file is `server/data/clinic-db.seed.json`.
 
 ## Data Shape
 
-The seed keeps the prototype data in one document:
+The seed keeps an empty business baseline in one document:
 
 | Key | Meaning |
 | --- | --- |
-| `roles` | System roles, permissions, and editable sections. |
-| `fieldRules` | Field-level ownership, required flags, and evidence expectations. |
-| `patients` | Patient list rows for workbench or table views. |
-| `records` | Patient record field values keyed by patient id. |
-| `documents` | Uploaded evidence and report metadata keyed by patient id. |
+| `accounts` | The default login account. The baseline only keeps `admin`. |
+| `patients` | Patient list rows for workbench or table views. Starts empty. |
+| `records` | Patient record field values keyed by patient id. Starts empty. |
+| `documents` | Uploaded evidence and report metadata keyed by patient id. Starts empty. |
 | `archive` | Submission state and generated record version keyed by patient id. |
-| `auditLogs` | Operation trail for upload, edit, review, and archive actions. |
+| `auditLogs` | Operation trail for upload, edit, review, and archive actions. Starts empty. |
 
 ## Implementation Notes
 
 - Keep role and field ownership in the schema instead of hard-coding it across UI pages.
-- Treat `server/data/clinic-db.seed.json` as demo data and `server/data/clinic-db.json` as local runtime state.
+- Treat `server/data/clinic-db.seed.json` as the empty baseline and `server/data/clinic-db.json` as local runtime state.
 - Keep `Geeker-Admin/` as an external reference checkout. Do not use it as the commit target for `hos_unitywork` business changes.
