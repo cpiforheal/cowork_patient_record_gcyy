@@ -1,0 +1,22 @@
+node_modules/
+dist/
+coverage/
+
+# Local runtime data
+server/data/clinic-db.json
+
+# Local machine/cache artifacts
+%USERPROFILE%/
+.npm-cache/
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+*.sw?
