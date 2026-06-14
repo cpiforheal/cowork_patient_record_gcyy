@@ -1,0 +1,32 @@
+package com.example.coshare_patientrecord_sys;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.springframework.context.annotation.Profile;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@Profile("mysql")
+public class DbHealthController {
+
+    private final DatabaseHealthService databaseHealthService;
+
+    public DbHealthController(DatabaseHealthService databaseHealthService) {
+        this.databaseHealthService = databaseHealthService;
+    }
+
+    @GetMapping("/health")
+    public Map<String, Object> health() {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", "ok");
+        response.put("service", "coshare-patientrecord-backend");
+        response.put("profile", "mysql");
+        return response;
+    }
+
+    @GetMapping("/health/db")
+    public Map<String, Object> databaseHealth() {
+        return databaseHealthService.check();
+    }
+}

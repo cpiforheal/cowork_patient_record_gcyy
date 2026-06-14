@@ -1,22 +1,54 @@
-﻿# cowork_patient_record_gcyy
+# cowork_patient_record_gcyy
 
-协作病历资料原型工作区。`Geeker-Admin/` 已作为本仓库内的 Vue 3 前端工程纳入版本管理，不再是嵌套 Git 仓库或外部参考工程；业务前端改动直接提交到当前仓库。
+协作病历资料系统原型仓库。
 
-## 本地数据服务
+当前有效工程已经迁移为前后端分离结构：
 
-~~~bash
-pnpm api
-~~~
+- `coshare_patientrecord_sys_backend/`：Spring Boot 后端，默认使用 MySQL，并提供 `/clinic-api` 数据与附件接口。
+- `coshare_patientrecord_sys_frontend/Geeker-Admin/`：Vue 3 前端，开发环境通过 Vite 代理访问 `http://localhost:8080/clinic-api`。
 
-默认启动 http://localhost:7071，提供 /clinic-api/db、/clinic-api/schema、/clinic-api/reset 等接口。
-上传病历附件依赖这个服务写入 `server/files/clinic-attachments/`；如果只启动前端而没有启动本地数据服务，附件上传会失败。单次上传请求默认上限为 80MB，可通过 `CLINIC_API_BODY_LIMIT_MB` 调整。
+根目录下保留的 `Geeker-Admin/`、`server/` 和 `docs/` 是迁移前的 Node 本地数据服务版本，作为历史参考保留；新的业务开发优先进入 `coshare_patientrecord_sys_backend/` 和 `coshare_patientrecord_sys_frontend/`。
 
-首次读取会从 server/data/clinic-db.seed.json 生成本地运行数据 server/data/clinic-db.json；运行数据已加入 .gitignore，避免把本机调试状态提交进仓库。服务端会在读取和重置时补齐角色、字段规则等系统 schema，确保空业务数据也能支撑权限配置页面。
+## 后端启动
 
-## 重置演示数据
+```bash
+cd coshare_patientrecord_sys_backend
+mvnw.cmd spring-boot:run
+```
 
-~~~bash
-pnpm api:reset
-~~~
+默认配置见 `src/main/resources/application-mysql.properties`：
 
-接口契约见 docs/clinic-data-contract.md。
+- 服务端口：`8080`
+- 数据库：`hos_unitywork`
+- 用户名：`root`
+- 密码：`123456`
+
+可通过环境变量覆盖：`SERVER_PORT`、`MYSQL_URL`、`MYSQL_USERNAME`、`MYSQL_PASSWORD`、`CLINIC_ATTACHMENT_DIR`。
+
+后端启动后可访问：
+
+- `GET /health`
+- `GET /health/db`
+- `GET /clinic-api/db`
+- `PUT /clinic-api/db`
+- `POST /clinic-api/files`
+- `GET /clinic-api/files/{storagePath}`
+
+## 前端启动
+
+```bash
+cd coshare_patientrecord_sys_frontend/Geeker-Admin
+pnpm install
+pnpm dev
+```
+
+开发环境配置在 `.env.development` 中，`/clinic-api` 会代理到 `http://localhost:8080`。如果只启动前端而没有启动 Spring Boot 后端，上传病历附件和数据库读写会失败。
+
+## 运行数据
+
+本地运行数据和附件不进入 Git：
+
+- `coshare_patientrecord_sys_backend/runtime/`
+- `coshare_patientrecord_sys_frontend/server/data/clinic-db.json`
+- `coshare_patientrecord_sys_frontend/server/files/`
+- `coshare_patientrecord_sys_frontend/Geeker-Admin/server/data/clinic-db.json`

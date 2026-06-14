@@ -1,0 +1,27 @@
+node_modules/
+dist/
+coverage/
+
+# Local runtime data
+server/data/clinic-db.json
+server/files/
+Geeker-Admin/server/data/clinic-db.json
+
+# Local machine/cache artifacts
+.npm-cache/
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+!Geeker-Admin/.env
+!Geeker-Admin/.env.development
+!Geeker-Admin/.env.production
+!Geeker-Admin/.env.test
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+*.sw?

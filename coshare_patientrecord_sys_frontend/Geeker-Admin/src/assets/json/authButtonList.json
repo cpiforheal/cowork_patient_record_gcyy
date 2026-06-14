@@ -1,0 +1,21 @@
+{
+  "code": 200,
+  "data": {
+    "home": ["view"],
+    "workbenchUpload": ["patient:search", "document:upload"],
+    "encounterActive": ["patient:read", "field:read"],
+    "recordTemplate": ["field:read"],
+    "patientList": ["patient:create", "patient:read", "patient:update"],
+    "patientDetail": ["field:read", "field:edit", "document:read", "document:upload", "document:void", "document:download"],
+    "documentRecycle": ["document:restore", "document:read"],
+    "auditReview": ["audit:read", "quality:approve", "quality:reject"],
+    "auditLog": ["audit:read", "audit:export"],
+    "accountManage": ["user:create", "user:update", "user:disable", "user:resetPassword"],
+    "roleManage": ["role:create", "role:update", "role:grant"],
+    "departmentManage": ["department:create", "department:update"],
+    "dictManage": ["dict:create", "dict:update"],
+    "menuMange": ["menu:update"],
+    "systemLog": ["audit:read"]
+  },
+  "msg": "成功"
+}

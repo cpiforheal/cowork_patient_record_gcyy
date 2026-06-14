@@ -1,0 +1,61 @@
+/* global css variable */
+$primary-color: var(--el-color-primary);
+
+:root {
+  --hos-bg-primary: #ffffff;
+  --hos-bg-surface: #f8fafc;
+  --hos-bg-overlay: rgba(0, 0, 0, 0.45);
+  --hos-text-primary: #111827;
+  --hos-text-secondary: #6b7280;
+  --hos-text-muted: #9ca3af;
+  --hos-border: #e5e7eb;
+  --hos-border-light: #edf0f3;
+  --hos-accent-medical: #15803d;
+  --hos-accent-medical-light: #ecfdf5;
+  --hos-status-success: #16a34a;
+  --hos-status-success-soft: #ecfdf5;
+  --hos-status-warning: #d97706;
+  --hos-status-warning-soft: #fffbeb;
+  --hos-status-danger: #dc2626;
+  --hos-status-danger-soft: #fef2f2;
+  --hos-status-info: #2563eb;
+  --hos-status-info-soft: #eff6ff;
+  --hos-status-draft: #64748b;
+  --hos-status-draft-soft: #f8fafc;
+  --hos-field-locked-bg: #f8fafc;
+  --hos-field-editable-bg: #fbfdfc;
+  --hos-spacing-xs: 4px;
+  --hos-spacing-sm: 8px;
+  --hos-spacing-md: 12px;
+  --hos-spacing-lg: 16px;
+  --hos-spacing-xl: 24px;
+  --hos-spacing-2xl: 32px;
+  --hos-radius-sm: 4px;
+  --hos-radius-md: 8px;
+  --hos-radius-lg: 12px;
+}
+
+html.dark {
+  --hos-bg-primary: #1a1a2e;
+  --hos-bg-surface: #16213e;
+  --hos-bg-overlay: rgba(0, 0, 0, 0.6);
+  --hos-text-primary: #e5e7eb;
+  --hos-text-secondary: #9ca3af;
+  --hos-text-muted: #6b7280;
+  --hos-border: #374151;
+  --hos-border-light: #1f2937;
+  --hos-accent-medical: #4ade80;
+  --hos-accent-medical-light: #052e16;
+  --hos-status-success: #4ade80;
+  --hos-status-success-soft: #052e16;
+  --hos-status-warning: #fbbf24;
+  --hos-status-warning-soft: #451a03;
+  --hos-status-danger: #f87171;
+  --hos-status-danger-soft: #450a0a;
+  --hos-status-info: #60a5fa;
+  --hos-status-info-soft: #172554;
+  --hos-status-draft: #94a3b8;
+  --hos-status-draft-soft: #1f2937;
+  --hos-field-locked-bg: #1f2937;
+  --hos-field-editable-bg: #111827;
+}

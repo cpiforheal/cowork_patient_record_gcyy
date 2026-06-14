@@ -6,15 +6,24 @@ coverage/
 server/data/clinic-db.json
 server/files/
 Geeker-Admin/server/data/clinic-db.json
+coshare_patientrecord_sys_frontend/server/data/clinic-db.json
+coshare_patientrecord_sys_frontend/server/files/
+coshare_patientrecord_sys_frontend/Geeker-Admin/server/data/clinic-db.json
+coshare_patientrecord_sys_backend/runtime/
 
 # Local machine/cache artifacts
 .npm-cache/
+%USERPROFILE%/
 *.log
 
 # Environment files
 .env
 .env.*
 !.env.example
+!coshare_patientrecord_sys_frontend/Geeker-Admin/.env
+!coshare_patientrecord_sys_frontend/Geeker-Admin/.env.development
+!coshare_patientrecord_sys_frontend/Geeker-Admin/.env.production
+!coshare_patientrecord_sys_frontend/Geeker-Admin/.env.test
 
 # Editor and OS files
 .vscode/
