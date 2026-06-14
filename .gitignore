@@ -13,8 +13,8 @@ coshare_patientrecord_sys_backend/runtime/
 
 # Local machine/cache artifacts
 .npm-cache/
-%USERPROFILE%/
 *.log
+package-lock.json
 
 # Environment files
 .env

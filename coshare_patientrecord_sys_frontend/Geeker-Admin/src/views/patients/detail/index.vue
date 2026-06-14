@@ -625,7 +625,8 @@ import {
   roleLabel,
   type RecordAttachment,
   type RecordField,
-  type RecordSection
+  type RecordSection,
+  type UserRole
 } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import medicalLogoUrl from "@/assets/images/logo.jpg";
@@ -634,7 +635,7 @@ const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 
-const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
+const currentRole = computed<UserRole>(() => (userStore.userInfo.role as UserRole) || "frontdesk");
 const roleName = computed(() => roleLabel(currentRole.value));
 const patientId = computed(() => String(route.params.id || "1"));
 const recordViewMode = ref<"mine" | "full">("mine");
@@ -2118,8 +2119,7 @@ onBeforeUnmount(() => {
   min-height: 1120px;
   padding: 36px 44px 58px;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
+  background: linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
     radial-gradient(circle at 100% 0, rgb(39 174 96 / 8%), transparent 32%), #ffffff;
   border: 1px solid #dcebe5;
   border-radius: 16px;

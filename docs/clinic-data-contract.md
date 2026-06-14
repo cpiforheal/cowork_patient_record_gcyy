@@ -1,60 +1,73 @@
 # Clinic Data Contract
 
-This document records the first stable boundary for the outpatient record prototype in `hos_unitywork`.
+This document records the current stable boundary for the outpatient record prototype.
+
+## Runtime
+
+The active implementation is:
+
+- Backend: `coshare_patientrecord_sys_backend/`
+- Frontend: `coshare_patientrecord_sys_frontend/Geeker-Admin/`
+
+The backend runs as Spring Boot with the `mysql` profile enabled by default. Historical Node/JSON service code is migration reference only.
 
 ## Local API
 
-Start the local JSON service:
+Start the backend:
 
 ```bash
-pnpm api
+cd coshare_patientrecord_sys_backend
+mvnw.cmd spring-boot:run
 ```
 
-The service listens on `http://localhost:7071` by default. Set `CLINIC_API_PORT` to override the port.
-Attachment upload requests are capped at 80 MB by default; set `CLINIC_API_BODY_LIMIT_MB` to override this for larger scanner/PDF payloads.
+The service listens on `http://localhost:8080` by default. Override with `SERVER_PORT`.
 
-All responses share the `{ code, msg, data }` envelope. `code` mirrors the HTTP status; `data` is `null` on error.
+All business responses use `{ code, msg, data }`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Service health check. |
-| `GET` | `/clinic-api/db` | Read the current local clinic database. If no runtime database exists, the seed file is copied first. |
-| `PUT` | `/clinic-api/db` | Replace the current local clinic database. The payload must contain `patients`, `records`, and `archive`. |
-| `GET` | `/clinic-api/schema` | Read role and field-rule metadata for UI permission checks (see notes below). |
-| `POST` | `/clinic-api/files` | Upload one attachment encoded as a data URL. Body size is capped at 80 MB by default. |
-| `GET` | `/clinic-api/files/{storagePath}` | Download a previously stored attachment by the `storagePath` returned from upload. |
-| `POST` | `/clinic-api/reset` | Reset runtime data from `server/data/clinic-db.seed.json`. |
+| `GET` | `/health/db` | MySQL connectivity check. |
+| `GET` | `/clinic-api/db` | Read the current clinic database in the frontend-compatible shape. |
+| `PUT` | `/clinic-api/db` | Replace the current clinic database in the frontend-compatible shape. |
+| `POST` | `/clinic-api/files` | Store one attachment encoded as a data URL. |
+| `GET` | `/clinic-api/files/{storagePath}` | Download a stored attachment by returned `storagePath`. |
 
-Runtime data is written to `server/data/clinic-db.json` and intentionally ignored by Git. The tracked seed file is `server/data/clinic-db.seed.json`. Uploaded attachments are written under `server/files/clinic-attachments/` (also ignored by Git).
-
-### Upload / download details
-
-- `POST /clinic-api/files` accepts `{ fileName, contentDataUrl }`, where `contentDataUrl` is a base64 data URL like `data:image/png;base64,...`. It responds with `{ fileName, url, storagePath, size, mimeType }`.
-- `url` is the public path (`/clinic-api/files/{storagePath}`); `storagePath` is a date-foldered name (`YYYY/MM/DD/<timestamp>-<rand>-<safeName>`).
-- The download route validates that the resolved path stays inside the attachments directory, rejecting path-traversal attempts with `400`.
-- `Cache-Control: public, max-age=31536000, immutable` is set on downloads, since `storagePath` is content-unique.
-
-### Schema endpoint
-
-`GET /clinic-api/schema` returns `{ roles, fieldRules }`. The service normalizes the runtime database on read/reset and fills the default role baseline plus template field rules when `roles` or `templateFieldRules` are missing or empty. Existing administrator edits are merged by role/rule key instead of being overwritten.
+Runtime business data is stored in MySQL. Uploaded files are stored under `coshare_patientrecord_sys_backend/runtime/clinic-attachments/` by default, or the directory configured by `CLINIC_ATTACHMENT_DIR`.
 
 ## Data Shape
 
-The seed keeps an empty business baseline in one document:
+`GET /clinic-api/db` and `PUT /clinic-api/db` keep the frontend payload contract:
 
 | Key | Meaning |
 | --- | --- |
-| `accounts` | The default login account. The baseline only keeps `admin`. |
-| `patients` | Patient list rows for workbench or table views. Starts empty. |
-| `records` | Patient record field values keyed by patient id. Starts empty. |
-| `documents` | Uploaded evidence and report metadata keyed by patient id. Starts empty. |
-| `roles` | Role and permission baseline. The seed keeps the key empty; the API expands it to the default outpatient workflow roles. |
-| `templateFieldRules` | Field ownership, required-state, printability, and quality-check rules. The seed keeps the key empty; the API expands it from the default record template. |
+| `accounts` | Login accounts. |
+| `patients` | Patient master rows. |
+| `records` | Patient record field values keyed by patient id. |
+| `documents` | Uploaded evidence and report metadata keyed by patient id. |
+| `roles` | Role and permission rows. |
+| `departments` | Department rows. |
+| `dictionaries` | Upload and naming dictionaries. |
+| `templateFieldRules` | Field ownership, required-state, printability, and quality-check rules. |
 | `archive` | Submission state and generated record version keyed by patient id. |
-| `auditLogs` | Operation trail for upload, edit, review, and archive actions. Starts empty. |
+| `auditLogs` | Operation trail for upload, edit, review, and archive actions. |
 
-## Implementation Notes
+## MySQL Tables
 
-- Keep role and field ownership in the schema instead of hard-coding it across UI pages.
-- Treat `server/data/clinic-db.seed.json` as the empty baseline and `server/data/clinic-db.json` as local runtime state.
-- `Geeker-Admin/` is part of this repository (the Vue 3 admin front end). It is not a separate checkout; business changes are committed here directly.
+The backend keeps compatibility JSON snapshots while starting second-phase normalization:
+
+| Table | Purpose |
+| --- | --- |
+| `clinic_patients` | Patient master rows. |
+| `clinic_patient_encounters` | Repeat outpatient/inpatient visits for the same patient. |
+| `clinic_record_fields` | Compatibility snapshot of all record fields per patient. |
+| `clinic_record_field_values` | Per-field values for future permission, quality-control, and search work. |
+| `clinic_documents` | Attachment metadata. |
+| `clinic_archive` | Archive state. |
+| `clinic_audit_logs` | Operation logs. |
+| `clinic_accounts`, `clinic_roles`, `clinic_departments`, `clinic_dictionaries`, `clinic_template_field_rules` | System configuration. |
+| `clinic_db_snapshots` | Full payload snapshots after writes. |
+
+## Frontend Package Rule
+
+Frontend package management is pinned to `pnpm@8.15.9`. Keep `pnpm-lock.yaml` as the only frontend lock file; do not commit `package-lock.json`.

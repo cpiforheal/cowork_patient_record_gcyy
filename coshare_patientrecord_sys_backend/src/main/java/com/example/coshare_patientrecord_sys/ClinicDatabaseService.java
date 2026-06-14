@@ -8,6 +8,7 @@ import jakarta.annotation.PostConstruct;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
@@ -54,6 +55,33 @@ public class ClinicDatabaseService {
               patient_id VARCHAR(64) PRIMARY KEY,
               fields_json JSON NOT NULL,
               updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS clinic_patient_encounters (
+              id VARCHAR(128) PRIMARY KEY,
+              patient_id VARCHAR(64) NOT NULL,
+              visit_no VARCHAR(100),
+              visit_date VARCHAR(32),
+              visit_type VARCHAR(32),
+              doctor VARCHAR(100),
+              created_at VARCHAR(32),
+              sort_no INT DEFAULT 0,
+              raw_json JSON NOT NULL,
+              INDEX idx_clinic_patient_encounters_patient (patient_id),
+              INDEX idx_clinic_patient_encounters_date (visit_date),
+              INDEX idx_clinic_patient_encounters_visit_no (visit_no)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS clinic_record_field_values (
+              patient_id VARCHAR(64) NOT NULL,
+              field_key VARCHAR(128) NOT NULL,
+              field_value TEXT,
+              raw_json JSON NOT NULL,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (patient_id, field_key),
+              INDEX idx_clinic_record_field_values_field (field_key)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """);
         jdbcTemplate.execute("""
@@ -152,7 +180,7 @@ public class ClinicDatabaseService {
 
     public ObjectNode readDb() {
         ObjectNode db = objectMapper.createObjectNode();
-        db.set("patients", readArray("clinic_patients", "raw_json", "updated_at DESC, created_at DESC"));
+        db.set("patients", readPatients());
         db.set("records", readRecords());
         db.set("archive", readArchive());
         db.set("documents", readDocuments());
@@ -188,6 +216,8 @@ public class ClinicDatabaseService {
 
     private void clearTables() {
         for (String table : List.of(
+            "clinic_record_field_values",
+            "clinic_patient_encounters",
             "clinic_patients",
             "clinic_record_fields",
             "clinic_archive",
@@ -230,6 +260,7 @@ public class ClinicDatabaseService {
                 toJson(patient.path("encounterHistory").isMissingNode() ? objectMapper.createArrayNode() : patient.path("encounterHistory")),
                 toJson(patient)
             );
+            writePatientEncounters(text(patient, "id"), patient);
         }
     }
 
@@ -242,6 +273,60 @@ public class ClinicDatabaseService {
                 "INSERT INTO clinic_record_fields (patient_id, fields_json) VALUES (?, ?)",
                 entry.getKey(),
                 toJson(entry.getValue())
+            );
+            writeRecordFieldValues(entry.getKey(), entry.getValue());
+        }
+    }
+
+    private void writePatientEncounters(String patientId, JsonNode patient) {
+        JsonNode encounters = patient.path("encounterHistory");
+        if (!encounters.isArray() || encounters.isEmpty()) {
+            ObjectNode encounter = objectMapper.createObjectNode();
+            encounter.put("id", "enc-" + patientId + "-initial");
+            encounter.put("visitNo", text(patient, "visitNo"));
+            encounter.put("visitDate", text(patient, "visitDate"));
+            encounter.put("visitType", text(patient, "visitType"));
+            encounter.put("doctor", text(patient, "doctor"));
+            encounter.put("createdAt", text(patient, "createdAt"));
+            ArrayNode generated = objectMapper.createArrayNode();
+            generated.add(encounter);
+            encounters = generated;
+        }
+
+        int sortNo = 0;
+        for (JsonNode encounter : encounters) {
+            jdbcTemplate.update("""
+                INSERT INTO clinic_patient_encounters (
+                  id, patient_id, visit_no, visit_date, visit_type, doctor, created_at, sort_no, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                text(encounter, "id", patientId + "-enc-" + sortNo),
+                patientId,
+                text(encounter, "visitNo"),
+                text(encounter, "visitDate"),
+                text(encounter, "visitType"),
+                text(encounter, "doctor"),
+                text(encounter, "createdAt"),
+                sortNo,
+                toJson(encounter)
+            );
+            sortNo += 1;
+        }
+    }
+
+    private void writeRecordFieldValues(String patientId, JsonNode fields) {
+        if (!fields.isObject()) return;
+        Iterator<Map.Entry<String, JsonNode>> values = fields.fields();
+        while (values.hasNext()) {
+            Map.Entry<String, JsonNode> entry = values.next();
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.set("value", entry.getValue());
+            jdbcTemplate.update(
+                "INSERT INTO clinic_record_field_values (patient_id, field_key, field_value, raw_json) VALUES (?, ?, ?, ?)",
+                patientId,
+                entry.getKey(),
+                valueText(entry.getValue()),
+                toJson(raw)
             );
         }
     }
@@ -343,8 +428,53 @@ public class ClinicDatabaseService {
         return rows;
     }
 
+    private ArrayNode readPatients() {
+        ArrayNode rows = objectMapper.createArrayNode();
+        Map<String, ObjectNode> patientById = new LinkedHashMap<>();
+        jdbcTemplate.query("SELECT id, raw_json FROM clinic_patients ORDER BY updated_at DESC, created_at DESC", resultSet -> {
+            JsonNode raw = readJson(resultSet, "raw_json");
+            ObjectNode patient = raw.isObject() ? (ObjectNode) raw.deepCopy() : objectMapper.createObjectNode();
+            patientById.put(resultSet.getString("id"), patient);
+            rows.add(patient);
+        });
+
+        Map<String, ArrayNode> encountersByPatient = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            "SELECT patient_id, raw_json FROM clinic_patient_encounters ORDER BY patient_id ASC, sort_no ASC, visit_date ASC",
+            resultSet -> {
+                String patientId = resultSet.getString("patient_id");
+                ObjectNode patient = patientById.get(patientId);
+                if (patient == null) return;
+                ArrayNode encounters = encountersByPatient.computeIfAbsent(patientId, ignored -> {
+                    ArrayNode created = objectMapper.createArrayNode();
+                    patient.set("encounterHistory", created);
+                    return created;
+                });
+                encounters.add(readJson(resultSet, "raw_json"));
+            }
+        );
+        return rows;
+    }
+
     private ObjectNode readRecords() {
         ObjectNode records = objectMapper.createObjectNode();
+        Integer normalizedCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_record_field_values", Integer.class);
+        if (normalizedCount != null && normalizedCount > 0) {
+            jdbcTemplate.query(
+                "SELECT patient_id, field_key, raw_json FROM clinic_record_field_values ORDER BY patient_id ASC, field_key ASC",
+                resultSet -> {
+                    String patientId = resultSet.getString("patient_id");
+                    ObjectNode patientRecord = records.has(patientId) && records.get(patientId).isObject()
+                        ? (ObjectNode) records.get(patientId)
+                        : records.putObject(patientId);
+                    JsonNode raw = readJson(resultSet, "raw_json");
+                    JsonNode value = raw.has("value") ? raw.get("value") : raw;
+                    patientRecord.put(resultSet.getString("field_key"), valueText(value));
+                }
+            );
+            return records;
+        }
+
         jdbcTemplate.query("SELECT patient_id, fields_json FROM clinic_record_fields", resultSet -> {
             records.set(resultSet.getString("patient_id"), readJson(resultSet, "fields_json"));
         });
@@ -398,5 +528,10 @@ public class ClinicDatabaseService {
 
     private int integer(JsonNode node, String key) {
         return node.path(key).asInt(0);
+    }
+
+    private String valueText(JsonNode value) {
+        if (value == null || value.isNull() || value.isMissingNode()) return "";
+        return value.isValueNode() ? value.asText() : toJson(value);
     }
 }

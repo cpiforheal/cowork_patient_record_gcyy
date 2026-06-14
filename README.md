@@ -1,5 +1,22 @@
 # cowork_patient_record_gcyy
 
+## Current working structure
+
+Business development now lives in:
+
+- `coshare_patientrecord_sys_backend/`: Spring Boot backend, MySQL profile enabled by default.
+- `coshare_patientrecord_sys_frontend/Geeker-Admin/`: Vue 3 frontend.
+
+Frontend package management is standardized on `pnpm@8.15.9`. Keep `pnpm-lock.yaml` as the only frontend lock file; do not commit `package-lock.json`.
+
+The current MySQL persistence keeps the original `/clinic-api/db` payload contract while also splitting high-value business data into normalized tables:
+
+- `clinic_patients`: patient master rows.
+- `clinic_patient_encounters`: repeat outpatient/inpatient visits for the same patient.
+- `clinic_record_fields`: compatibility snapshot for record field JSON.
+- `clinic_record_field_values`: per-field record values for later permission, quality-control, and search work.
+- `clinic_documents`, `clinic_archive`, `clinic_audit_logs`, `clinic_accounts`, `clinic_roles`, `clinic_departments`, `clinic_dictionaries`, `clinic_template_field_rules`: business supporting tables.
+
 协作病历资料系统原型仓库。
 
 当前有效工程已经迁移为前后端分离结构：
