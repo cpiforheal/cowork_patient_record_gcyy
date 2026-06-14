@@ -9,6 +9,7 @@ pnpm api
 ~~~
 
 默认启动 http://localhost:7071，提供 /clinic-api/db、/clinic-api/schema、/clinic-api/reset 等接口。
+上传病历附件依赖这个服务写入 `server/files/clinic-attachments/`；如果只启动前端而没有启动本地数据服务，附件上传会失败。单次上传请求默认上限为 80MB，可通过 `CLINIC_API_BODY_LIMIT_MB` 调整。
 
 首次读取会从 server/data/clinic-db.seed.json 生成本地运行数据 server/data/clinic-db.json；运行数据已加入 .gitignore，避免把本机调试状态提交进仓库。服务端会在读取和重置时补齐角色、字段规则等系统 schema，确保空业务数据也能支撑权限配置页面。
 

@@ -11,6 +11,7 @@ pnpm api
 ```
 
 The service listens on `http://localhost:7071` by default. Set `CLINIC_API_PORT` to override the port.
+Attachment upload requests are capped at 80 MB by default; set `CLINIC_API_BODY_LIMIT_MB` to override this for larger scanner/PDF payloads.
 
 All responses share the `{ code, msg, data }` envelope. `code` mirrors the HTTP status; `data` is `null` on error.
 
@@ -20,7 +21,7 @@ All responses share the `{ code, msg, data }` envelope. `code` mirrors the HTTP 
 | `GET` | `/clinic-api/db` | Read the current local clinic database. If no runtime database exists, the seed file is copied first. |
 | `PUT` | `/clinic-api/db` | Replace the current local clinic database. The payload must contain `patients`, `records`, and `archive`. |
 | `GET` | `/clinic-api/schema` | Read role and field-rule metadata for UI permission checks (see notes below). |
-| `POST` | `/clinic-api/files` | Upload one attachment encoded as a data URL. Body size is capped at 20 MB. |
+| `POST` | `/clinic-api/files` | Upload one attachment encoded as a data URL. Body size is capped at 80 MB by default. |
 | `GET` | `/clinic-api/files/{storagePath}` | Download a previously stored attachment by the `storagePath` returned from upload. |
 | `POST` | `/clinic-api/reset` | Reset runtime data from `server/data/clinic-db.seed.json`. |
 

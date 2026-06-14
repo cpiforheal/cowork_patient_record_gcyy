@@ -9,7 +9,17 @@ const PORT = Number(process.env.CLINIC_API_PORT || 7071);
 const DATA_FILE = resolve(__dirname, "data/clinic-db.json");
 const SEED_FILE = resolve(__dirname, "data/clinic-db.seed.json");
 const FILE_DIR = resolve(__dirname, "files/clinic-attachments");
-const BODY_LIMIT = 20 * 1024 * 1024;
+const configuredBodyLimitMb = Number(process.env.CLINIC_API_BODY_LIMIT_MB || 80);
+const BODY_LIMIT_MB =
+  Number.isFinite(configuredBodyLimitMb) && configuredBodyLimitMb > 0 ? configuredBodyLimitMb : 80;
+const BODY_LIMIT = BODY_LIMIT_MB * 1024 * 1024;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const sendJson = (res, status, payload) => {
   res.writeHead(status, {
@@ -18,7 +28,11 @@ const sendJson = (res, status, payload) => {
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json; charset=utf-8",
   });
-  res.end(status === 204 ? "" : JSON.stringify(payload, null, 2));
+  res.end(
+    status === 204
+      ? ""
+      : JSON.stringify(payload ?? { code: status, msg: "", data: null }, null, 2),
+  );
 };
 
 const sendFile = async (res, filePath) => {
@@ -82,11 +96,11 @@ const storeDataUrlFile = async ({ fileName, contentDataUrl }) => {
   const matched = String(contentDataUrl || "").match(
     /^data:([^;]+);base64,(.+)$/,
   );
-  if (!matched) throw new Error("Invalid file content");
+  if (!matched) throw new HttpError(400, "Invalid file content");
 
   const [, mimeType, base64] = matched;
   const buffer = Buffer.from(base64, "base64");
-  if (!buffer.length) throw new Error("File content is empty");
+  if (!buffer.length) throw new HttpError(400, "File content is empty");
 
   const date = new Date();
   const folder = [
@@ -134,23 +148,29 @@ const readBody = (req) =>
   new Promise((resolveBody, rejectBody) => {
     const chunks = [];
     let size = 0;
+    let bodyTooLarge = false;
 
     req.on("data", (chunk) => {
       size += chunk.length;
+      if (bodyTooLarge) return;
       if (size > BODY_LIMIT) {
-        rejectBody(new Error("Request body exceeds 20MB"));
-        req.destroy();
+        bodyTooLarge = true;
+        chunks.length = 0;
         return;
       }
       chunks.push(chunk);
     });
 
     req.on("end", () => {
+      if (bodyTooLarge) {
+        rejectBody(new HttpError(413, `Request body exceeds ${BODY_LIMIT_MB}MB`));
+        return;
+      }
       try {
         const body = Buffer.concat(chunks).toString("utf8");
         resolveBody(body ? JSON.parse(body) : null);
-      } catch (error) {
-        rejectBody(error);
+      } catch {
+        rejectBody(new HttpError(400, "Invalid JSON body"));
       }
     });
 
@@ -228,6 +248,9 @@ const route = async (req, res) => {
 
   if (req.method === "POST" && url.pathname === "/clinic-api/files") {
     const body = await readBody(req);
+    if (!isPlainObject(body)) {
+      throw new HttpError(400, "File upload payload must be an object");
+    }
     const stored = await storeDataUrlFile(body || {});
     sendJson(res, 200, { code: 200, msg: "stored", data: stored });
     return;
@@ -259,7 +282,12 @@ if (process.argv.includes("--reset")) {
 } else {
   createServer((req, res) => {
     route(req, res).catch((error) => {
-      sendJson(res, 500, { code: 500, msg: error.message, data: null });
+      const status = error.status || 500;
+      if (!res.headersSent) {
+        sendJson(res, status, { code: status, msg: error.message, data: null });
+      } else {
+        res.end();
+      }
     });
   }).listen(PORT, () => {
     console.log(`Clinic API listening on http://localhost:${PORT}`);

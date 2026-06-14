@@ -4,6 +4,7 @@ coverage/
 
 # Local runtime data
 server/data/clinic-db.json
+server/files/
 Geeker-Admin/server/data/clinic-db.json
 
 # Local machine/cache artifacts
