@@ -4,9 +4,9 @@ coverage/
 
 # Local runtime data
 server/data/clinic-db.json
+Geeker-Admin/server/data/clinic-db.json
 
 # Local machine/cache artifacts
-%USERPROFILE%/
 .npm-cache/
 *.log
 

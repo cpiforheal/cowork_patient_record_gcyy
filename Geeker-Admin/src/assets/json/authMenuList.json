@@ -1,0 +1,343 @@
+{
+  "code": 200,
+  "data": [
+    {
+      "path": "/home/index",
+      "name": "home",
+      "component": "/home/index",
+      "meta": {
+        "icon": "HomeFilled",
+        "title": "我的待办",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": true,
+        "isKeepAlive": true
+      }
+    },
+    {
+      "path": "/workbench",
+      "name": "workbench",
+      "redirect": "/workbench/upload",
+      "meta": {
+        "icon": "UploadFilled",
+        "title": "岗位上传",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/workbench/upload",
+          "name": "workbenchUpload",
+          "component": "/workbench/upload/index",
+          "meta": {
+            "icon": "Upload",
+            "title": "上传本科室资料",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/workbench/legacy",
+          "name": "workbenchLegacy",
+          "component": "/workbench/upload/index",
+          "meta": {
+            "icon": "FolderOpened",
+            "title": "旧共享病历导入",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/patients",
+      "name": "patients",
+      "redirect": "/patients/list",
+      "meta": {
+        "icon": "UserFilled",
+        "title": "今日患者",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/patients/list",
+          "name": "patientList",
+          "component": "/patients/list/index",
+          "meta": {
+            "icon": "List",
+            "title": "今日患者",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/patients/detail/:id",
+          "name": "patientDetail",
+          "component": "/patients/detail/index",
+          "meta": {
+            "icon": "Document",
+            "title": "患者流程详情",
+            "activeMenu": "/encounters/active",
+            "isLink": "",
+            "isHide": true,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/encounters",
+      "name": "encounters",
+      "redirect": "/encounters/active",
+      "meta": {
+        "icon": "Guide",
+        "title": "患者流程",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/encounters/active",
+          "name": "encounterActive",
+          "component": "/encounters/active/index",
+          "meta": {
+            "icon": "Connection",
+            "title": "流程看板",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/templates",
+      "name": "templates",
+      "redirect": "/templates/record",
+      "meta": {
+        "icon": "Files",
+        "title": "病历模板",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/templates/record",
+          "name": "recordTemplate",
+          "component": "/templates/record/index",
+          "meta": {
+            "icon": "DocumentCopy",
+            "title": "模板与字段权限",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/documents",
+      "name": "documents",
+      "redirect": "/documents/recycle",
+      "meta": {
+        "icon": "FolderOpened",
+        "title": "资料管控",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/documents/recycle",
+          "name": "documentRecycle",
+          "component": "/documents/recycle/index",
+          "meta": {
+            "icon": "RefreshLeft",
+            "title": "作废与恢复",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/audit",
+      "name": "audit",
+      "redirect": "/audit/log",
+      "meta": {
+        "icon": "Tickets",
+        "title": "质控审计",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/audit/review",
+          "name": "auditReview",
+          "component": "/audit/review/index",
+          "meta": {
+            "icon": "Tickets",
+            "title": "质控审核",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/audit/log",
+          "name": "auditLog",
+          "component": "/audit/log/index",
+          "meta": {
+            "icon": "DocumentChecked",
+            "title": "操作日志",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
+      "path": "/system",
+      "name": "system",
+      "redirect": "/system/accountManage",
+      "meta": {
+        "icon": "Tools",
+        "title": "系统设置",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/system/accountManage",
+          "name": "accountManage",
+          "component": "/system/accountManage/index",
+          "meta": {
+            "icon": "User",
+            "title": "账号管理",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/system/roleManage",
+          "name": "roleManage",
+          "component": "/system/roleManage/index",
+          "meta": {
+            "icon": "Lock",
+            "title": "角色权限",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/system/departmentManage",
+          "name": "departmentManage",
+          "component": "/system/departmentManage/index",
+          "meta": {
+            "icon": "OfficeBuilding",
+            "title": "科室管理",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/system/dictManage",
+          "name": "dictManage",
+          "component": "/system/dictManage/index",
+          "meta": {
+            "icon": "Collection",
+            "title": "资料字典",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/system/menuMange",
+          "name": "menuMange",
+          "component": "/system/menuMange/index",
+          "meta": {
+            "icon": "Operation",
+            "title": "菜单权限",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/system/systemLog",
+          "name": "systemLog",
+          "component": "/system/systemLog/index",
+          "meta": {
+            "icon": "Notebook",
+            "title": "系统日志",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    }
+  ],
+  "msg": "成功"
+}

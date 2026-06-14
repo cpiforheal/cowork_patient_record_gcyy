@@ -1,0 +1,53 @@
+<template>
+  <div class="tool-bar-ri">
+    <div class="header-icon">
+      <SearchMenu id="searchMenu" />
+      <Fullscreen id="fullscreen" />
+    </div>
+    <span class="username">{{ username }}</span>
+    <Avatar />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from "vue";
+import { useUserStore } from "@/stores/modules/user";
+import SearchMenu from "./components/SearchMenu.vue";
+import Fullscreen from "./components/Fullscreen.vue";
+import Avatar from "./components/Avatar.vue";
+
+const userStore = useUserStore();
+const username = computed(() => {
+  const { name, department } = userStore.userInfo;
+  return department ? `${name}（${department}）` : name;
+});
+</script>
+
+<style scoped lang="scss">
+.tool-bar-ri {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 25px;
+
+  .header-icon {
+    display: flex;
+    align-items: center;
+
+    & > * {
+      margin-left: 18px;
+      color: var(--el-header-text-color);
+    }
+  }
+
+  .username {
+    max-width: 220px;
+    margin: 0 18px;
+    overflow: hidden;
+    font-size: 15px;
+    color: var(--el-header-text-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+</style>

@@ -5,6 +5,8 @@
   "records": {},
   "archive": {},
   "documents": {},
+  "roles": [],
+  "templateFieldRules": [],
   "accounts": [
     {
       "id": "admin",
