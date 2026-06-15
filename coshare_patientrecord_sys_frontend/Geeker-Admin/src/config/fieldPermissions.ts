@@ -4,6 +4,8 @@ export type FieldKind = "input" | "textarea" | "select";
 
 export type FieldInputType = "text" | "date" | "number" | "tel";
 
+export type LabPanelKey = "urineRoutine" | "biochemistry" | "coagulation" | "preOpEight" | "bloodRoutine";
+
 export interface RecordField {
   key: string;
   label: string;
@@ -25,6 +27,7 @@ export interface RecordField {
   maxLength?: number;
   pattern?: string;
   validationMessage?: string;
+  labPanel?: LabPanelKey;
 }
 
 export interface RecordSection {
@@ -396,14 +399,16 @@ export const recordSections: RecordSection[] = [
         label: "尿常规",
         value: "尿比重、pH、尿蛋白、尿糖、隐血、白细胞、红细胞、亚硝酸盐、酮体、胆红素、尿胆原、结晶：余无异常。",
         kind: "textarea",
-        editors: lab
+        editors: lab,
+        labPanel: "urineRoutine"
       },
       {
         key: "biochemistry",
-        label: "生化全套",
-        value: "ALT、AST、TBil、DBil、IBIL、TP、ALB、GLB、A/G、GGT、ALP、TG、TC、GLU、CREA、UA、UREA：余无异常。",
+        label: "生化/糖化",
+        value: "ALT、AST、TBil、DBil、IBIL、TP、ALB、GLB、A/G、GGT、ALP、TG、TC、GLU、糖化血红蛋白、CREA、UA、UREA：余无异常。",
         kind: "textarea",
-        editors: lab
+        editors: lab,
+        labPanel: "biochemistry"
       },
       {
         key: "coagulation",
@@ -411,7 +416,8 @@ export const recordSections: RecordSection[] = [
         value: "PT、APTT、TT、FIB、INR：余无异常。",
         kind: "textarea",
         editors: lab,
-        evidence: "凝血功能报告"
+        evidence: "凝血功能报告",
+        labPanel: "coagulation"
       },
       {
         key: "preOpEight",
@@ -419,7 +425,8 @@ export const recordSections: RecordSection[] = [
         value: "乙肝五项、丙肝抗体、梅毒抗体、艾滋病抗体：按实际填写，余无异常。",
         kind: "textarea",
         editors: lab,
-        evidence: "术前八项报告"
+        evidence: "术前八项报告",
+        labPanel: "preOpEight"
       },
       {
         key: "bloodRoutine",
@@ -427,7 +434,8 @@ export const recordSections: RecordSection[] = [
         value: "WBC、PLT、HGB 按实际填写，余无异常。",
         kind: "textarea",
         editors: lab,
-        evidence: "血常规报告"
+        evidence: "血常规报告",
+        labPanel: "bloodRoutine"
       },
       {
         key: "ecgResult",

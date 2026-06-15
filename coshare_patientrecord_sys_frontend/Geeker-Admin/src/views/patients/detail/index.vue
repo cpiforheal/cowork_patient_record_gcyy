@@ -120,7 +120,10 @@
                 v-for="item in myEditableFields"
                 :key="item.field.key"
                 class="my-field-item"
-                :class="{ wide: item.field.kind === 'textarea', complete: isFieldComplete(fieldValues[item.field.key] || '') }"
+                :class="{
+                  wide: item.field.kind === 'textarea' || isLabMetricField(item.field),
+                  complete: isFieldComplete(fieldValues[item.field.key] || '')
+                }"
               >
                 <div class="my-field-label">
                   <label>
@@ -129,8 +132,9 @@
                   </label>
                   <span>{{ shortTitle(item.section.title) }}</span>
                 </div>
+                <LabMetricEditor v-if="isLabMetricField(item.field)" v-model="fieldValues[item.field.key]" :field="item.field" />
                 <el-select
-                  v-if="selectOptions(item.field).length"
+                  v-else-if="selectOptions(item.field).length"
                   v-model="fieldValues[item.field.key]"
                   allow-create
                   clearable
@@ -267,8 +271,14 @@
                       <el-icon><Lock /></el-icon>
                       <span>由 {{ editorLabels(field.editors) }} 填写，当前账号仅可查看</span>
                     </div>
+                    <LabMetricEditor
+                      v-if="isLabMetricField(field)"
+                      v-model="fieldValues[field.key]"
+                      :field="field"
+                      :disabled="!isEditable(field)"
+                    />
                     <el-select
-                      v-if="selectOptions(field).length"
+                      v-else-if="selectOptions(field).length"
                       v-model="fieldValues[field.key]"
                       allow-create
                       clearable
@@ -356,8 +366,14 @@
               </div>
 
               <div class="field-input">
+                <LabMetricEditor
+                  v-if="isLabMetricField(field)"
+                  v-model="fieldValues[field.key]"
+                  :field="field"
+                  :disabled="!isEditable(field)"
+                />
                 <el-select
-                  v-if="selectOptions(field).length"
+                  v-else-if="selectOptions(field).length"
                   v-model="fieldValues[field.key]"
                   allow-create
                   clearable
@@ -700,6 +716,7 @@ import {
 } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import medicalLogoUrl from "@/assets/images/logo.jpg";
+import LabMetricEditor from "./components/LabMetricEditor.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -992,13 +1009,16 @@ const myEditableFields = computed(() =>
 const myRequiredMissingCount = computed(
   () => myEditableFields.value.filter(item => item.field.required && !isFieldComplete(fieldValues[item.field.key] || "")).length
 );
+const isLabMetricField = (field: RecordField) => Boolean(field.labPanel);
 const selectOptions = (field: RecordField) => {
+  if (isLabMetricField(field)) return [];
   if (field.kind === "select") return field.options || [];
   if (["date", "number", "tel"].includes(field.inputType || "")) return [];
   return field.options?.length ? field.options : fieldPresets[field.key] || [];
 };
 const fieldAssistText = (field: RecordField) => {
   if (!isEditable(field)) return `锁定：${editorLabels(field.editors)}`;
+  if (isLabMetricField(field)) return "指标面板自动生成文本";
   if (field.inputType === "date") return "YYYY-MM-DD";
   if (field.inputType === "number") {
     const range = [field.min, field.max].filter(value => value !== undefined).join("-");
