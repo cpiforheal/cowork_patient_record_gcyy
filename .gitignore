@@ -1,6 +1,7 @@
 .idea/
 %USERPROFILE%/
 runtime/
+release/
 
 **/node_modules/
 **/dist/
