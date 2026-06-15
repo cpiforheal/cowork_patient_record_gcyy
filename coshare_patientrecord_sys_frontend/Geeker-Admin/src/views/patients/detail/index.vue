@@ -1356,6 +1356,12 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .record-workspace {
   --record-accent: #166534;
+  --record-accent-soft: #ecfdf5;
+  --record-fixed: #475569;
+  --record-fixed-soft: #f8fafc;
+  --record-warning: #b45309;
+  --record-warning-soft: #fff7ed;
+  --record-danger: #dc2626;
   display: block;
   color: #1f2937;
 }
@@ -1375,9 +1381,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 14px 16px;
   margin-bottom: 10px;
-  background: #ffffff;
-  border: 1px solid #e8edf3;
+  background: linear-gradient(90deg, rgb(236 253 245 / 78%), rgb(255 255 255 / 98%) 52%), #ffffff;
+  border: 1px solid rgb(22 101 52 / 14%);
   border-radius: 12px;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 5%);
 }
 
 .workbar-main {
@@ -1395,6 +1402,7 @@ onBeforeUnmount(() => {
     color: #111827;
     font-size: 20px;
     font-weight: 650;
+    line-height: 1.35;
   }
 }
 
@@ -1472,6 +1480,7 @@ onBeforeUnmount(() => {
   background: #ffffff;
   border: 1px solid #e8edf3;
   border-radius: 12px;
+  box-shadow: 0 8px 22px rgb(15 23 42 / 5%);
 }
 
 .my-fields-head {
@@ -1509,16 +1518,32 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 7px;
   min-width: 0;
-  padding: 10px 0;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+
+  &:focus-within {
+    background: #f8fffd;
+    border-color: rgb(22 101 52 / 28%);
+    box-shadow: 0 8px 18px rgb(15 23 42 / 6%);
+  }
 
   &.wide {
     grid-column: 1 / -1;
   }
 
   &.complete {
+    background: linear-gradient(180deg, #ffffff, #fbfffd);
+    border-color: rgb(34 197 94 / 24%);
+
     .my-field-label label::after {
       margin-left: 6px;
-      color: var(--el-color-success);
+      color: var(--record-accent);
       content: "已填";
       font-size: 12px;
       font-weight: 400;
@@ -1548,8 +1573,8 @@ onBeforeUnmount(() => {
   gap: 10px;
 
   label {
-    color: #475569;
-    font-weight: 400;
+    color: #334155;
+    font-weight: 650;
   }
 
   sup {
@@ -1721,11 +1746,22 @@ onBeforeUnmount(() => {
 }
 
 .context-card {
+  position: relative;
   min-width: 0;
   padding: 13px 14px;
+  overflow: hidden;
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+
+  &::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    content: "";
+    background: #cbd5e1;
+  }
 
   span,
   strong,
@@ -1757,13 +1793,21 @@ onBeforeUnmount(() => {
   }
 
   &.fixed {
-    background: linear-gradient(135deg, #f8fafc, #ffffff);
+    background: linear-gradient(135deg, var(--record-fixed-soft), #ffffff);
     border-color: #dbe3ea;
+
+    &::before {
+      background: var(--record-fixed);
+    }
   }
 
   &.editable {
-    background: linear-gradient(135deg, #ecfdf5, #ffffff);
+    background: linear-gradient(135deg, var(--record-accent-soft), #ffffff);
     border-color: #bbf7d0;
+
+    &::before {
+      background: var(--record-accent);
+    }
 
     span,
     strong {
@@ -1772,8 +1816,12 @@ onBeforeUnmount(() => {
   }
 
   &.attachments {
-    background: linear-gradient(135deg, #fff7ed, #ffffff);
+    background: linear-gradient(135deg, var(--record-warning-soft), #ffffff);
     border-color: #fed7aa;
+
+    &::before {
+      background: var(--record-warning);
+    }
 
     span,
     strong {
@@ -1896,12 +1944,16 @@ onBeforeUnmount(() => {
   border: 1px solid #e5e7eb;
   border-left: 3px solid transparent;
   border-radius: 8px;
-  transition: border-color 200ms;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  transition:
+    border-color 200ms,
+    box-shadow 200ms;
 
   &.editable {
     border-color: #cfe8dd;
     border-left-color: #55b58a;
     background: linear-gradient(180deg, #ffffff, #fbfffd);
+    box-shadow: 0 8px 18px rgb(22 101 52 / 5%);
   }
 
   &.readonly {
@@ -1975,9 +2027,15 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid #f0f2f5;
+  transition: background 160ms ease;
 
   &:last-child {
     border-bottom: 0;
+  }
+
+  &:focus-within {
+    background: #f8fffd;
+    border-radius: 6px;
   }
 
   &.locked {
@@ -2036,6 +2094,12 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid #f0f2f5;
+  transition: background 160ms ease;
+
+  &:focus-within {
+    background: #f8fffd;
+    border-radius: 6px;
+  }
 
   &.locked {
     .field-label small {
@@ -2053,6 +2117,7 @@ onBeforeUnmount(() => {
   label {
     color: #111827;
     font-weight: 600;
+    line-height: 1.35;
   }
 
   small {

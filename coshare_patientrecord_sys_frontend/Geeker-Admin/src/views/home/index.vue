@@ -472,9 +472,18 @@ onMounted(loadTasks);
 
 <style scoped lang="scss">
 .home-page {
+  --clinic-success: #16a34a;
+  --clinic-success-soft: #f0fdf4;
+  --clinic-warning: #d97706;
+  --clinic-warning-soft: #fffbeb;
+  --clinic-danger: #dc2626;
+  --clinic-danger-soft: #fef2f2;
+  --clinic-info: #0f766e;
+  --clinic-info-soft: #ecfdf5;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  color: #1f2937;
 }
 
 .today-panel,
@@ -485,6 +494,7 @@ onMounted(loadTasks);
   background: #ffffff;
   border: 1px solid var(--el-border-color-light);
   border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
 .today-panel {
@@ -493,6 +503,10 @@ onMounted(loadTasks);
   gap: 18px;
   align-items: center;
   padding: 18px;
+  overflow: hidden;
+  background: linear-gradient(90deg, rgb(236 253 245 / 86%), rgb(255 255 255 / 98%) 48%), #ffffff;
+  border-color: rgb(20 184 166 / 18%);
+  box-shadow: 0 10px 24px rgb(15 118 110 / 8%);
 }
 
 .role-block {
@@ -507,8 +521,9 @@ onMounted(loadTasks);
   }
 
   strong {
-    color: var(--el-color-primary);
+    color: var(--clinic-info);
     font-size: 26px;
+    line-height: 1.15;
   }
 }
 
@@ -522,7 +537,9 @@ onMounted(loadTasks);
   }
 
   p {
-    color: var(--el-text-color-secondary);
+    color: var(--clinic-info);
+    font-size: 13px;
+    font-weight: 700;
   }
 
   h1 {
@@ -536,6 +553,7 @@ onMounted(loadTasks);
     display: block;
     margin-top: 4px;
     color: var(--el-text-color-regular);
+    line-height: 1.45;
   }
 }
 
@@ -546,12 +564,33 @@ onMounted(loadTasks);
 }
 
 .exception-card {
+  position: relative;
   display: grid;
   min-width: 0;
   gap: 2px;
   padding: 13px 14px;
+  overflow: hidden;
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+
+  &::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    content: "";
+    background: var(--clinic-info);
+    opacity: 0.72;
+  }
+
+  &:hover {
+    border-color: rgb(15 118 110 / 28%);
+    box-shadow: 0 10px 22px rgb(15 23 42 / 8%);
+    transform: translateY(-1px);
+  }
 
   span,
   strong,
@@ -579,19 +618,27 @@ onMounted(loadTasks);
 
   &.warning {
     border-color: rgb(245 158 11 / 28%);
-    background: #fffaf0;
+    background: var(--clinic-warning-soft);
+
+    &::before {
+      background: var(--clinic-warning);
+    }
 
     strong {
-      color: var(--el-color-warning);
+      color: var(--clinic-warning);
     }
   }
 
   &.danger {
     border-color: rgb(239 68 68 / 22%);
-    background: #fff7f7;
+    background: var(--clinic-danger-soft);
+
+    &::before {
+      background: var(--clinic-danger);
+    }
 
     strong {
-      color: var(--el-color-danger);
+      color: var(--clinic-danger);
     }
   }
 }
@@ -796,6 +843,7 @@ onMounted(loadTasks);
 
 .panel-head {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
@@ -807,6 +855,7 @@ onMounted(loadTasks);
 
   h2 {
     font-size: 18px;
+    line-height: 1.35;
   }
 
   p {
@@ -831,6 +880,16 @@ onMounted(loadTasks);
   background: #ffffff;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 6px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+
+  &:hover {
+    border-color: rgb(15 118 110 / 24%);
+    box-shadow: 0 8px 18px rgb(15 23 42 / 7%);
+    transform: translateY(-1px);
+  }
 
   strong,
   span,
@@ -853,6 +912,7 @@ onMounted(loadTasks);
     color: var(--el-text-color-primary);
     font-style: normal;
     font-weight: 600;
+    line-height: 1.45;
   }
 }
 
@@ -871,10 +931,20 @@ onMounted(loadTasks);
     background: #ffffff;
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 6px;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      transform 160ms ease;
+
+    &:hover {
+      background: #f8fffd;
+      border-color: rgb(15 118 110 / 22%);
+      transform: translateX(2px);
+    }
 
     .el-icon {
       grid-row: span 2;
-      color: var(--el-color-primary);
+      color: var(--clinic-info);
       font-size: 22px;
     }
 
@@ -947,25 +1017,25 @@ onMounted(loadTasks);
   }
 
   &.is-warning {
-    background: #fffaf0;
+    background: var(--clinic-warning-soft);
     border-color: rgb(245 158 11 / 25%);
 
     strong {
-      color: var(--el-color-warning);
+      color: var(--clinic-warning);
     }
   }
 
   &.is-danger {
-    background: #fff7f7;
+    background: var(--clinic-danger-soft);
     border-color: rgb(239 68 68 / 22%);
 
     strong {
-      color: var(--el-color-danger);
+      color: var(--clinic-danger);
     }
   }
 
   &.is-success strong {
-    color: var(--el-color-success);
+    color: var(--clinic-success);
   }
 }
 
@@ -1017,6 +1087,10 @@ onMounted(loadTasks);
 }
 
 @media (max-width: 760px) {
+  .today-panel {
+    padding: 14px;
+  }
+
   .exception-strip,
   .task-card {
     grid-template-columns: 1fr;
