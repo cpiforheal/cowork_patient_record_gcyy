@@ -82,11 +82,11 @@
         </article>
       </section>
 
-      <section v-if="workflowHint.visible" class="workflow-hint screen-only" :class="`is-${workflowHint.level}`">
+      <section v-if="workflowHint?.visible" class="workflow-hint screen-only" :class="`is-${workflowHint?.level || 'info'}`">
         <div>
           <span>下一步</span>
-          <strong>{{ workflowHint.title }}</strong>
-          <small>{{ workflowHint.desc }}</small>
+          <strong>{{ workflowHint?.title }}</strong>
+          <small>{{ workflowHint?.desc }}</small>
         </div>
         <el-button v-if="firstWorkflowIssue" text @click="focusIssue(firstWorkflowIssue)">定位处理</el-button>
       </section>
@@ -806,6 +806,18 @@ type FieldIssue = {
   message: string;
   level: "missing" | "invalid";
 };
+type WorkflowHint = {
+  visible: boolean;
+  level: "info" | "warning" | "danger" | "success";
+  title: string;
+  desc: string;
+};
+const emptyWorkflowHint: WorkflowHint = {
+  visible: false,
+  level: "info",
+  title: "",
+  desc: ""
+};
 const ruleMap = computed(() =>
   templateRules.value.reduce<Record<string, TemplateFieldRule>>((map, rule) => {
     map[rule.fieldKey] = rule;
@@ -1127,7 +1139,8 @@ const myFieldIssues = computed(() => {
   return fieldIssues.value.filter(issue => editableKeys.has(issue.fieldKey));
 });
 const firstWorkflowIssue = computed(() => myFieldIssues.value[0] || fieldIssues.value[0]);
-const workflowHint = computed(() => {
+const workflowHint = computed<WorkflowHint>(() => {
+  if (!recordSectionsByRule.value.length) return emptyWorkflowHint;
   if (myFieldIssues.value.length) {
     return {
       visible: true,
