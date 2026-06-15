@@ -134,6 +134,44 @@
             <small>{{ item.desc }}</small>
           </button>
         </div>
+
+        <div class="production-panel">
+          <div class="panel-head compact">
+            <div>
+              <h2>生产提醒</h2>
+              <p>面向内测运行的风险提示与数据维护入口。</p>
+            </div>
+            <el-button :icon="Refresh" link :loading="maintenanceLoading" @click="loadTasks">巡检</el-button>
+          </div>
+
+          <div class="reminder-list">
+            <button
+              v-for="item in workReminders"
+              :key="item.id"
+              class="reminder-item"
+              :class="`is-${item.level}`"
+              @click="router.push(item.path)"
+            >
+              <span>{{ item.title }}</span>
+              <strong>{{ item.count }}</strong>
+              <small>{{ item.desc }}</small>
+            </button>
+          </div>
+
+          <div class="maintenance-card">
+            <div>
+              <span>附件存储</span>
+              <strong>{{ storageSummary }}</strong>
+              <small>{{ maintenanceStatus?.storage.attachmentDir || "等待后端巡检" }}</small>
+            </div>
+            <div>
+              <span>数据快照</span>
+              <strong>{{ snapshotSummary }}</strong>
+              <small>{{ maintenanceStatus?.latestSnapshotAt || "尚未生成快照" }}</small>
+            </div>
+            <el-button type="primary" plain :loading="maintenanceLoading" @click="createSnapshot">生成快照</el-button>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -142,8 +180,19 @@
 <script setup lang="ts" name="home">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
 import { ArrowLeft, ArrowRight, Refresh } from "@element-plus/icons-vue";
-import { getOperationStatsApi, getPatientListApi, type OperationStats, type PatientRow } from "@/api/modules/clinic";
+import {
+  createMaintenanceSnapshotApi,
+  getMaintenanceStatusApi,
+  getOperationStatsApi,
+  getPatientListApi,
+  getWorkRemindersApi,
+  type MaintenanceStatus,
+  type OperationStats,
+  type PatientRow,
+  type WorkReminder
+} from "@/api/modules/clinic";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 
@@ -170,6 +219,9 @@ type CalendarDayCell = {
 const router = useRouter();
 const userStore = useUserStore();
 const patientRows = ref<PatientRow[]>([]);
+const workReminders = ref<WorkReminder[]>([]);
+const maintenanceStatus = ref<MaintenanceStatus>();
+const maintenanceLoading = ref(false);
 const stats = ref<OperationStats>({
   totalPatients: 0,
   pendingPatients: 0,
@@ -238,6 +290,29 @@ const roleEntries: Record<string, string[]> = {
 const quickEntries = computed(() => {
   const allowPaths = roleEntries[currentRole.value] ?? roleEntries.frontdesk;
   return allQuickEntries.filter(item => allowPaths.includes(item.path));
+});
+
+const formatBytes = (bytes?: number) => {
+  if (!bytes) return "0 MB";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+};
+
+const storageSummary = computed(() => {
+  const storage = maintenanceStatus.value?.storage;
+  if (!storage) return "等待巡检";
+  return `${storage.fileCount} 个文件 / ${formatBytes(storage.totalBytes)}，缺失 ${storage.missingFileCount}`;
+});
+
+const snapshotSummary = computed(() => {
+  if (!maintenanceStatus.value) return "等待巡检";
+  return `${maintenanceStatus.value.snapshotCount} 个快照`;
 });
 
 const pendingRows = computed(() => patientRows.value.filter(item => item.status !== "旧资料已归档" && item.status !== "待归档"));
@@ -330,12 +405,40 @@ const taskCards = computed<HomeTask[]>(() =>
 const firstTask = computed(() => taskCards.value[0]);
 
 const loadTasks = async () => {
-  const [{ data: patients }, { data: operationStats }] = await Promise.all([
-    getPatientListApi({ pageNum: 1, pageSize: 5000 }),
-    getOperationStatsApi()
-  ]);
-  patientRows.value = patients.list;
-  stats.value = operationStats;
+  try {
+    const [{ data: patients }, { data: operationStats }] = await Promise.all([
+      getPatientListApi({ pageNum: 1, pageSize: 5000 }),
+      getOperationStatsApi()
+    ]);
+    patientRows.value = patients.list;
+    stats.value = operationStats;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
+
+  maintenanceLoading.value = true;
+  try {
+    const [{ data: reminders }, { data: status }] = await Promise.all([getWorkRemindersApi(), getMaintenanceStatusApi()]);
+    workReminders.value = reminders;
+    maintenanceStatus.value = status;
+  } catch (error) {
+    ElMessage.warning(`生产巡检暂不可用：${(error as Error).message}`);
+  } finally {
+    maintenanceLoading.value = false;
+  }
+};
+
+const createSnapshot = async () => {
+  maintenanceLoading.value = true;
+  try {
+    const { data } = await createMaintenanceSnapshotApi();
+    ElMessage.success(`快照已生成，当前共 ${data.snapshotCount} 个`);
+    await loadTasks();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    maintenanceLoading.value = false;
+  }
 };
 
 const shiftCalendarMonth = (offset: number) => {
@@ -783,6 +886,119 @@ onMounted(loadTasks);
     small {
       color: var(--el-text-color-secondary);
     }
+  }
+}
+
+.production-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.panel-head.compact {
+  align-items: flex-start;
+  margin-bottom: 10px;
+
+  h2 {
+    font-size: 16px;
+  }
+
+  p {
+    font-size: 12px;
+  }
+}
+
+.reminder-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reminder-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 10px 11px;
+  text-align: left;
+  cursor: pointer;
+  background: #f8fafc;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span {
+    color: var(--el-text-color-primary);
+    font-weight: 700;
+  }
+
+  strong {
+    color: var(--el-color-primary);
+    font-size: 20px;
+  }
+
+  small {
+    grid-column: 1 / -1;
+    color: var(--el-text-color-secondary);
+    line-height: 1.45;
+  }
+
+  &.is-warning {
+    background: #fffaf0;
+    border-color: rgb(245 158 11 / 25%);
+
+    strong {
+      color: var(--el-color-warning);
+    }
+  }
+
+  &.is-danger {
+    background: #fff7f7;
+    border-color: rgb(239 68 68 / 22%);
+
+    strong {
+      color: var(--el-color-danger);
+    }
+  }
+
+  &.is-success strong {
+    color: var(--el-color-success);
+  }
+}
+
+.maintenance-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  background: #f7fbfa;
+  border: 1px solid rgb(20 184 166 / 16%);
+  border-radius: 6px;
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span,
+  small {
+    color: var(--el-text-color-secondary);
+  }
+
+  strong {
+    margin-top: 2px;
+    color: var(--el-text-color-primary);
+  }
+
+  small {
+    overflow: hidden;
+    margin-top: 2px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

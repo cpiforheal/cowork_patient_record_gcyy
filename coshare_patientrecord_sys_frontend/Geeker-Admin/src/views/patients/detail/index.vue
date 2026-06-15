@@ -680,6 +680,7 @@ import {
   getAuditLogListApi,
   getPatientDetailApi,
   getTemplateFieldRulesApi,
+  logPatientExportApi,
   revokeArchiveApi,
   savePatientRecordApi,
   submitArchiveApi,
@@ -1250,13 +1251,24 @@ const fallbackLogo = () => {
   logoVisible.value = false;
 };
 
+const logPrintAction = async () => {
+  try {
+    await logPatientExportApi({ id: patientId.value, role: currentRole.value, operator: roleName.value, action: "print" });
+    await loadPatientAuditLogs();
+  } catch (error) {
+    ElMessage.warning(`打印留痕失败，已继续打印：${(error as Error).message}`);
+  }
+};
+
 const printRecord = async () => {
+  await logPrintAction();
   await nextTick();
   window.setTimeout(() => window.print(), 120);
 };
 
 const openPreviewThenPrint = async () => {
   previewVisible.value = true;
+  await logPrintAction();
   await nextTick();
   window.setTimeout(() => window.print(), 300);
 };

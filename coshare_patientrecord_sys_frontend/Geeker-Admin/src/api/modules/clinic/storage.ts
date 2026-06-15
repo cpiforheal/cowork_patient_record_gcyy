@@ -4,6 +4,7 @@ import type { ClinicDb } from "./types";
 
 const STORAGE_KEY = "hos-unitywork-clinic-db";
 const CLINIC_API_DB_URL = import.meta.env.VITE_CLINIC_API_DB_URL || "/clinic-api/db";
+const CLINIC_API_BASE_URL = CLINIC_API_DB_URL.replace(/\/db\/?$/, "");
 const API_UNAVAILABLE_MESSAGE =
   "\u672c\u5730\u75c5\u5386\u6570\u636e\u670d\u52a1\u672a\u8fde\u63a5\uff0c\u8bf7\u786e\u8ba4\u540e\u7aef\u670d\u52a1\u6b63\u5728\u8fd0\u884c";
 const INVALID_API_DATA_MESSAGE =
@@ -119,3 +120,27 @@ export const writeDb = async (db: ClinicDb) => {
   }
   cacheDb(db);
 };
+
+export const patchDb = async (patch: Partial<ClinicDb>) => {
+  const result = await fetch(`${CLINIC_API_BASE_URL}/db/patch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch)
+  });
+
+  if (!result.ok) {
+    await throwClinicApiError(result);
+  }
+
+  const payload = await parseClinicDbResponse(result);
+  const data = isObjectRecord(payload.data) ? payload.data : {};
+  const db = assertClinicDbPayload(data.db);
+  if (typeof data._revision === "string") {
+    db._revision = data._revision;
+  }
+  const hydrated = hydrateDb(db);
+  cacheDb(hydrated);
+  return hydrated;
+};
+
+export const getClinicApiBaseUrl = () => CLINIC_API_BASE_URL;

@@ -306,6 +306,41 @@ export interface OperationStats {
   departmentWorkloads: Array<{ department: string; active: number; voided: number; total: number }>;
 }
 
+export interface MaintenanceStatus {
+  revision: string;
+  checkedAt: string;
+  patientCount: number;
+  recordCount: number;
+  documentCount: number;
+  auditLogCount: number;
+  snapshotCount: number;
+  latestSnapshotAt: string;
+  storage: {
+    attachmentDir: string;
+    totalBytes: number;
+    fileCount: number;
+    referencedFileCount: number;
+    missingFileCount: number;
+    usableSpaceBytes: number;
+    totalSpaceBytes: number;
+  };
+}
+
+export interface DuplicatePatientGroup {
+  key: string;
+  reason: "same_name_phone" | "same_visit_no";
+  patients: PatientRow[];
+}
+
+export interface WorkReminder {
+  id: string;
+  level: "danger" | "warning" | "info" | "success";
+  title: string;
+  desc: string;
+  path: string;
+  count: number;
+}
+
 export interface ClinicDb {
   _revision?: string;
   patients: PatientRow[];

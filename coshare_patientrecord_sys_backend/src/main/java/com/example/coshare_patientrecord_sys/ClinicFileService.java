@@ -8,6 +8,9 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -53,6 +56,38 @@ public class ClinicFileService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found");
         }
         return new FileSystemResource(target);
+    }
+
+    public Map<String, Object> inspectStorage(List<String> storagePaths) throws IOException {
+        Files.createDirectories(attachmentDir);
+        long totalBytes = 0;
+        long fileCount = 0;
+        try (var paths = Files.walk(attachmentDir)) {
+            var iterator = paths.filter(Files::isRegularFile).iterator();
+            while (iterator.hasNext()) {
+                Path file = iterator.next();
+                fileCount += 1;
+                totalBytes += Files.size(file);
+            }
+        }
+
+        long missingCount = storagePaths.stream()
+            .filter(path -> path != null && !path.isBlank())
+            .filter(path -> {
+                Path target = attachmentDir.resolve(path).normalize();
+                return !target.startsWith(attachmentDir) || !Files.exists(target) || !Files.isRegularFile(target);
+            })
+            .count();
+
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("attachmentDir", attachmentDir.toString());
+        status.put("totalBytes", totalBytes);
+        status.put("fileCount", fileCount);
+        status.put("referencedFileCount", storagePaths.size());
+        status.put("missingFileCount", missingCount);
+        status.put("usableSpaceBytes", attachmentDir.toFile().getUsableSpace());
+        status.put("totalSpaceBytes", attachmentDir.toFile().getTotalSpace());
+        return status;
     }
 
     private DataUrl parseDataUrl(String contentDataUrl) {

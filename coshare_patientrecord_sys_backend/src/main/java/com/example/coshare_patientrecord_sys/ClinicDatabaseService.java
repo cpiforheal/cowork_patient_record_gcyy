@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
+import java.time.Instant;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -208,6 +211,88 @@ public class ClinicDatabaseService {
     }
 
     @Transactional
+    public ObjectNode patchDb(JsonNode patch) {
+        if (patch == null || !patch.isObject()) {
+            throw new IllegalArgumentException("clinic db patch payload must be an object");
+        }
+        ObjectNode db = readDb();
+        mergePatch(db, patch);
+        String revision = writeDb(db);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("_revision", revision);
+        result.set("db", readDb());
+        return result;
+    }
+
+    public ObjectNode maintenanceStatus(Map<String, Object> fileStatus) {
+        ObjectNode status = objectMapper.createObjectNode();
+        status.put("revision", currentRevision());
+        status.put("checkedAt", Instant.now().toString());
+        status.put("patientCount", count("clinic_patients"));
+        status.put("recordCount", count("clinic_record_fields"));
+        status.put("documentCount", count("clinic_documents"));
+        status.put("auditLogCount", count("clinic_audit_logs"));
+        status.put("snapshotCount", count("clinic_db_snapshots"));
+        status.put("latestSnapshotAt", latestSnapshotAt());
+        status.set("storage", objectMapper.valueToTree(fileStatus));
+        return status;
+    }
+
+    @Transactional
+    public ObjectNode createSnapshot() {
+        ObjectNode db = readDb();
+        jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(db));
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("savedAt", latestSnapshotAt());
+        result.put("snapshotCount", count("clinic_db_snapshots"));
+        result.put("revision", currentRevision());
+        return result;
+    }
+
+    public ArrayNode findDuplicatePatients() {
+        ObjectNode db = readDb();
+        Map<String, ArrayNode> groups = new LinkedHashMap<>();
+        for (JsonNode patient : db.path("patients")) {
+            String patientId = text(patient, "id");
+            String name = normalizeIdentity(text(patient, "name"));
+            JsonNode record = db.path("records").path(patientId);
+            String phone = normalizeIdentity(text(record, "phone"));
+            if (!name.isBlank() && !phone.isBlank()) {
+                groups.computeIfAbsent("identity:" + name + ":" + phone, ignored -> objectMapper.createArrayNode()).add(patient);
+            }
+            collectVisitNos(patient).forEach(visitNo -> {
+                if (!visitNo.isBlank()) {
+                    groups.computeIfAbsent("visitNo:" + normalizeIdentity(visitNo), ignored -> objectMapper.createArrayNode()).add(patient);
+                }
+            });
+        }
+
+        ArrayNode duplicates = objectMapper.createArrayNode();
+        groups.forEach((key, patients) -> {
+            Map<String, JsonNode> uniquePatients = new LinkedHashMap<>();
+            patients.forEach(patient -> uniquePatients.put(text(patient, "id"), patient));
+            if (uniquePatients.size() > 1) {
+                ObjectNode group = objectMapper.createObjectNode();
+                group.put("key", key);
+                group.put("reason", key.startsWith("identity:") ? "same_name_phone" : "same_visit_no");
+                ArrayNode rows = objectMapper.createArrayNode();
+                uniquePatients.values().forEach(rows::add);
+                group.set("patients", rows);
+                duplicates.add(group);
+            }
+        });
+        return duplicates;
+    }
+
+    public List<String> referencedStoragePaths() {
+        List<String> paths = new ArrayList<>();
+        jdbcTemplate.query("SELECT storage_path FROM clinic_documents WHERE storage_path IS NOT NULL AND storage_path <> ''", resultSet -> {
+            paths.add(resultSet.getString("storage_path"));
+        });
+        return paths;
+    }
+
+    @Transactional
     public String writeDb(JsonNode db) {
         if (db == null || !db.isObject()) {
             throw new IllegalArgumentException("clinic db payload must be an object");
@@ -236,6 +321,79 @@ public class ClinicDatabaseService {
 
         jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(db));
         return updateRevision();
+    }
+
+    private void mergePatch(ObjectNode db, JsonNode patch) {
+        mergeArrayById(db.withArray("patients"), patch.path("patients"), "id");
+        mergeObjectProperties((ObjectNode) db.path("records"), patch.path("records"));
+        mergeObjectProperties((ObjectNode) db.path("archive"), patch.path("archive"));
+        mergeDocuments((ObjectNode) db.path("documents"), patch.path("documents"));
+        mergeArrayById(db.withArray("accounts"), patch.path("accounts"), "id");
+        mergeArrayById(db.withArray("roles"), patch.path("roles"), "id");
+        mergeArrayById(db.withArray("departments"), patch.path("departments"), "id");
+        mergeArrayById(db.withArray("dictionaries"), patch.path("dictionaries"), "id");
+        mergeArrayById(db.withArray("templateFieldRules"), patch.path("templateFieldRules"), "id");
+        mergeAuditLogs(db.withArray("auditLogs"), patch.path("auditLogs"));
+    }
+
+    private void mergeObjectProperties(ObjectNode target, JsonNode values) {
+        if (!values.isObject()) return;
+        values.fields().forEachRemaining(entry -> target.set(entry.getKey(), entry.getValue()));
+    }
+
+    private void mergeDocuments(ObjectNode target, JsonNode values) {
+        if (!values.isObject()) return;
+        values.fields().forEachRemaining(entry -> {
+            ArrayNode documents = target.has(entry.getKey()) && target.get(entry.getKey()).isArray()
+                ? (ArrayNode) target.get(entry.getKey())
+                : target.putArray(entry.getKey());
+            mergeArrayById(documents, entry.getValue(), "key");
+        });
+    }
+
+    private void mergeAuditLogs(ArrayNode target, JsonNode values) {
+        if (!values.isArray()) return;
+        mergeArrayById(target, values, "id");
+    }
+
+    private void mergeArrayById(ArrayNode target, JsonNode values, String idKey) {
+        if (!values.isArray()) return;
+        Map<String, Integer> indexById = new LinkedHashMap<>();
+        for (int index = 0; index < target.size(); index++) {
+            indexById.put(text(target.get(index), idKey), index);
+        }
+        for (JsonNode value : values) {
+            String id = text(value, idKey);
+            if (!id.isBlank() && indexById.containsKey(id)) {
+                target.set(indexById.get(id), value);
+            } else {
+                target.insert(0, value);
+            }
+        }
+    }
+
+    private int count(String table) {
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    private String latestSnapshotAt() {
+        Timestamp timestamp = jdbcTemplate.queryForObject("SELECT MAX(saved_at) FROM clinic_db_snapshots", Timestamp.class);
+        return timestamp == null ? "" : timestamp.toInstant().toString();
+    }
+
+    private List<String> collectVisitNos(JsonNode patient) {
+        List<String> visitNos = new ArrayList<>();
+        visitNos.add(text(patient, "visitNo"));
+        JsonNode encounters = patient.path("encounterHistory");
+        if (encounters.isArray()) {
+            encounters.forEach(encounter -> visitNos.add(text(encounter, "visitNo")));
+        }
+        return visitNos;
+    }
+
+    private String normalizeIdentity(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", "");
     }
 
     private void clearTables() {

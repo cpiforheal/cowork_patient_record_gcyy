@@ -2,6 +2,8 @@ package com.example.coshare_patientrecord_sys;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.Map;
@@ -47,6 +49,34 @@ public class ClinicApiController {
     public ApiResult<Map<String, String>> writeDb(@RequestBody Map<String, Object> payload) {
         String revision = databaseService.writeDb(objectMapper.valueToTree(payload));
         return ApiResult.of(200, "saved", Map.of("_revision", revision));
+    }
+
+    @PostMapping("/clinic-api/db/patch")
+    public ApiResult<Map<String, Object>> patchDb(@RequestBody Map<String, Object> payload) {
+        ObjectNode result = databaseService.patchDb(objectMapper.valueToTree(payload));
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "patched", data);
+    }
+
+    @GetMapping("/clinic-api/maintenance/status")
+    public ApiResult<Map<String, Object>> maintenanceStatus() throws IOException {
+        ObjectNode status = databaseService.maintenanceStatus(fileService.inspectStorage(databaseService.referencedStoragePaths()));
+        Map<String, Object> data = objectMapper.convertValue(status, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.success(data);
+    }
+
+    @PostMapping("/clinic-api/maintenance/snapshot")
+    public ApiResult<Map<String, Object>> createSnapshot() {
+        ObjectNode result = databaseService.createSnapshot();
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "snapshot saved", data);
+    }
+
+    @GetMapping("/clinic-api/patients/duplicates")
+    public ApiResult<Object> duplicatePatients() {
+        ArrayNode duplicates = databaseService.findDuplicatePatients();
+        Object data = objectMapper.convertValue(duplicates, Object.class);
+        return ApiResult.success(data);
     }
 
     @PostMapping("/clinic-api/files")

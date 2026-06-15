@@ -10,7 +10,7 @@ import {
 } from "@/config/fieldPermissions";
 import { initialFieldValues, roleToDepartment, seedTemplateFieldRules } from "./clinic/seed";
 import { storeClinicFileApi } from "./clinic/files";
-import { readDb, writeDb } from "./clinic/storage";
+import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./clinic/storage";
 import type {
   AccountRow,
   AuditLogRow,
@@ -20,6 +20,8 @@ import type {
   DocumentRestoreParams,
   DocumentVoidParams,
   DictRow,
+  DuplicatePatientGroup,
+  MaintenanceStatus,
   OperationStats,
   PatientDetail,
   PatientListParams,
@@ -38,7 +40,8 @@ import type {
   TemplateFieldRuleParams,
   UploadDocumentsParams,
   UploadDocumentsResult,
-  ValidationIssue
+  ValidationIssue,
+  WorkReminder
 } from "./clinic/types";
 
 export type {
@@ -49,6 +52,8 @@ export type {
   DocumentRestoreParams,
   DocumentVoidParams,
   DictRow,
+  DuplicatePatientGroup,
+  MaintenanceStatus,
   OperationStats,
   OperationContext,
   PatientDetail,
@@ -70,7 +75,8 @@ export type {
   UploadDocumentItem,
   UploadDocumentsParams,
   UploadDocumentsResult,
-  ValidationIssue
+  ValidationIssue,
+  WorkReminder
 } from "./clinic/types";
 
 const SUCCESS_CODE = 200 as unknown as string;
@@ -1613,4 +1619,112 @@ export const getAuditLogListApi = async (params: {
     return operatorMatched && patientMatched && patientIdMatched && actionMatched && moduleMatched && resultMatched;
   });
   return response(paginate(filtered, params.pageNum, params.pageSize));
+};
+
+const parseClinicApiResponse = async <T>(result: Response): Promise<T> => {
+  const payload = (await result.json()) as ResultData<T>;
+  if (!result.ok || String(payload.code) !== "200") {
+    throw new Error(payload.msg || `clinic api failed: ${result.status}`);
+  }
+  return payload.data;
+};
+
+export const getMaintenanceStatusApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/status`);
+  const data = await parseClinicApiResponse<MaintenanceStatus>(result);
+  return response(data);
+};
+
+export const createMaintenanceSnapshotApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/snapshot`, { method: "POST" });
+  const data = await parseClinicApiResponse<{ savedAt: string; snapshotCount: number; revision: string }>(result);
+  return response(data, "系统快照已生成");
+};
+
+export const getDuplicatePatientGroupsApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/patients/duplicates`);
+  const data = await parseClinicApiResponse<DuplicatePatientGroup[]>(result);
+  return response(data);
+};
+
+export const getWorkRemindersApi = async () => {
+  const [{ data: stats }, { data: duplicates }, { data: status }] = await Promise.all([
+    getOperationStatsApi(),
+    getDuplicatePatientGroupsApi(),
+    getMaintenanceStatusApi()
+  ]);
+  const reminders: WorkReminder[] = [
+    {
+      id: "returned",
+      level: stats.returnedPatients ? "danger" : "success",
+      title: "质控退回",
+      desc: stats.returnedPatients ? "优先补齐退回病历，避免患者资料长时间悬空" : "暂无退回整改",
+      path: "/audit/review",
+      count: stats.returnedPatients
+    },
+    {
+      id: "review",
+      level: stats.reviewPatients ? "warning" : "success",
+      title: "待质控",
+      desc: stats.reviewPatients ? "已有病历提交质控，建议当日完成复核" : "暂无待质控病历",
+      path: "/audit/review",
+      count: stats.reviewPatients
+    },
+    {
+      id: "overdue",
+      level: stats.overduePatients ? "warning" : "success",
+      title: "超时未闭环",
+      desc: stats.overduePatients ? "超过 24 小时未更新，建议查看是否遗漏资料" : "暂无超时未闭环",
+      path: "/encounters/active",
+      count: stats.overduePatients
+    },
+    {
+      id: "duplicates",
+      level: duplicates.length ? "danger" : "success",
+      title: "疑似重复患者",
+      desc: duplicates.length ? "存在姓名手机号或门诊号重复，需要合并或核对" : "暂无疑似重复",
+      path: "/patients/list",
+      count: duplicates.length
+    },
+    {
+      id: "missing-files",
+      level: status.storage.missingFileCount ? "danger" : "success",
+      title: "附件完整性",
+      desc: status.storage.missingFileCount ? "存在数据库引用但磁盘缺失的附件" : "附件引用正常",
+      path: "/documents/recycle",
+      count: status.storage.missingFileCount
+    }
+  ];
+  return response(reminders);
+};
+
+export const logPatientExportApi = async (params: {
+  id: string;
+  role: string;
+  operator?: string;
+  action: "print" | "export";
+}) => {
+  const db = await readDb();
+  const patient = getPatientOrThrow(db, params.id);
+  await patchDb({
+    auditLogs: [
+      {
+        id: `audit-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        time: now(),
+        operator: params.operator || roleLabel(params.role),
+        role: roleLabel(params.role),
+        patient: patient.name,
+        patientId: patient.id,
+        module: "archive",
+        actionCode: params.action === "print" ? "record.print" : "record.export",
+        targetType: "record",
+        targetKey: patient.id,
+        targetLabel: patient.visitNo,
+        action: params.action === "print" ? "打印病历" : "导出病历",
+        result: "success",
+        detail: `${roleLabel(params.role)}${params.action === "print" ? "打印" : "导出"}病历：${patient.name}/${patient.visitNo}`
+      }
+    ]
+  });
+  return response(null, params.action === "print" ? "打印操作已记录" : "导出操作已记录");
 };
