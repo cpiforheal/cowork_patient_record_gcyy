@@ -15,10 +15,6 @@ Geeker-Admin/server/data/clinic-db.json
 .env
 .env.*
 !.env.example
-!Geeker-Admin/.env
-!Geeker-Admin/.env.development
-!Geeker-Admin/.env.production
-!Geeker-Admin/.env.test
 
 # Editor and OS files
 .vscode/

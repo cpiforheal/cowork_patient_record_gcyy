@@ -1,11 +1,14 @@
 package com.example.coshare_patientrecord_sys;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.util.Map;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,21 +26,27 @@ public class ClinicApiController {
 
     private final ClinicDatabaseService databaseService;
     private final ClinicFileService fileService;
+    private final ObjectMapper objectMapper;
 
-    public ClinicApiController(ClinicDatabaseService databaseService, ClinicFileService fileService) {
+    public ClinicApiController(ClinicDatabaseService databaseService, ClinicFileService fileService, ObjectMapper objectMapper) {
         this.databaseService = databaseService;
         this.fileService = fileService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/clinic-api/db")
-    public ApiResult<JsonNode> readDb() {
-        return ApiResult.success(databaseService.readDb());
+    public ApiResult<Map<String, Object>> readDb() {
+        Map<String, Object> db = objectMapper.convertValue(
+            databaseService.readDb(),
+            new TypeReference<Map<String, Object>>() {}
+        );
+        return ApiResult.success(db);
     }
 
     @PutMapping("/clinic-api/db")
-    public ApiResult<Void> writeDb(@RequestBody JsonNode payload) {
-        databaseService.writeDb(payload);
-        return ApiResult.of(200, "saved", null);
+    public ApiResult<Map<String, String>> writeDb(@RequestBody Map<String, Object> payload) {
+        String revision = databaseService.writeDb(objectMapper.valueToTree(payload));
+        return ApiResult.of(200, "saved", Map.of("_revision", revision));
     }
 
     @PostMapping("/clinic-api/files")
@@ -51,7 +60,8 @@ public class ClinicApiController {
         FileSystemResource file = fileService.load(storagePath);
         return ResponseEntity.ok()
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .cacheControl(CacheControl.maxAge(java.time.Duration.ofDays(365)).cachePublic().immutable())
+            .cacheControl(CacheControl.noStore().cachePrivate())
+            .header(HttpHeaders.PRAGMA, "no-cache")
             .body(file);
     }
 

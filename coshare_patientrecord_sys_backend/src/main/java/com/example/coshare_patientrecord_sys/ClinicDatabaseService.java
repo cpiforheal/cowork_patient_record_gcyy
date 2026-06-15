@@ -11,14 +11,19 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @Profile("mysql")
 public class ClinicDatabaseService {
+
+    private static final String REVISION_KEY = "revision";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -176,10 +181,19 @@ public class ClinicDatabaseService {
               saved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS clinic_db_meta (
+              meta_key VARCHAR(64) PRIMARY KEY,
+              meta_value VARCHAR(128) NOT NULL,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
+        ensureRevision();
     }
 
     public ObjectNode readDb() {
         ObjectNode db = objectMapper.createObjectNode();
+        db.put("_revision", currentRevision());
         db.set("patients", readPatients());
         db.set("records", readRecords());
         db.set("archive", readArchive());
@@ -194,9 +208,18 @@ public class ClinicDatabaseService {
     }
 
     @Transactional
-    public void writeDb(JsonNode db) {
+    public String writeDb(JsonNode db) {
         if (db == null || !db.isObject()) {
             throw new IllegalArgumentException("clinic db payload must be an object");
+        }
+
+        String clientRevision = text(db, "_revision");
+        String currentRevision = currentRevision();
+        if (!clientRevision.isBlank() && !clientRevision.equals(currentRevision)) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "数据已被其他终端更新，请刷新页面后再保存"
+            );
         }
 
         clearTables();
@@ -212,6 +235,7 @@ public class ClinicDatabaseService {
         writeSimpleArray("clinic_audit_logs", db.path("auditLogs"), List.of("id", "time", "operator", "role", "patient", "patientId", "module", "action", "result"));
 
         jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(db));
+        return updateRevision();
     }
 
     private void clearTables() {
@@ -507,6 +531,44 @@ public class ClinicDatabaseService {
         } catch (Exception error) {
             throw new SQLException("Failed to parse JSON column " + column, error);
         }
+    }
+
+    private void ensureRevision() {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM clinic_db_meta WHERE meta_key = ?",
+            Integer.class,
+            REVISION_KEY
+        );
+        if (count == null || count == 0) {
+            jdbcTemplate.update(
+                "INSERT INTO clinic_db_meta (meta_key, meta_value) VALUES (?, ?)",
+                REVISION_KEY,
+                newRevision()
+            );
+        }
+    }
+
+    private String currentRevision() {
+        ensureRevision();
+        return jdbcTemplate.queryForObject(
+            "SELECT meta_value FROM clinic_db_meta WHERE meta_key = ?",
+            String.class,
+            REVISION_KEY
+        );
+    }
+
+    private String updateRevision() {
+        String revision = newRevision();
+        jdbcTemplate.update(
+            "UPDATE clinic_db_meta SET meta_value = ? WHERE meta_key = ?",
+            revision,
+            REVISION_KEY
+        );
+        return revision;
+    }
+
+    private String newRevision() {
+        return UUID.randomUUID().toString();
     }
 
     private String toJson(JsonNode node) {

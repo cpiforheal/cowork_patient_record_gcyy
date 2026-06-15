@@ -124,8 +124,14 @@
           <el-form-item label="接诊医生" prop="doctor">
             <el-input v-model="createForm.doctor" placeholder="请输入接诊医生" />
           </el-form-item>
-          <el-form-item label="联系电话">
-            <el-input v-model="createForm.phone" placeholder="可选，用于合并同一患者多次就诊" />
+          <el-form-item label="联系电话" prop="phone">
+            <el-input
+              v-model="createForm.phone"
+              maxlength="11"
+              show-word-limit
+              type="tel"
+              placeholder="可选，用于合并同一患者多次就诊"
+            />
           </el-form-item>
         </el-form>
         <template #footer>
@@ -195,12 +201,20 @@ const createForm = reactive<CreatePatientParams>({
   doctor: "",
   phone: ""
 });
+const validateOptionalMobile = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+  if (!value || /^1[3-9]\d{9}$/.test(value)) {
+    callback();
+    return;
+  }
+  callback(new Error("请输入正确的11位手机号"));
+};
 const createRules = reactive<FormRules<CreatePatientParams>>({
   name: [{ required: true, message: "请输入患者姓名", trigger: "blur" }],
   visitNo: [{ required: true, message: "请输入门诊/住院号", trigger: "blur" }],
   visitDate: [{ required: true, message: "请选择就诊日期", trigger: "change" }],
   visitType: [{ required: true, message: "请选择就诊类型", trigger: "change" }],
-  doctor: [{ required: true, message: "请输入接诊医生", trigger: "blur" }]
+  doctor: [{ required: true, message: "请输入接诊医生", trigger: "blur" }],
+  phone: [{ validator: validateOptionalMobile, trigger: "blur" }]
 });
 
 const columns = reactive<ColumnProps<PatientRow>[]>([

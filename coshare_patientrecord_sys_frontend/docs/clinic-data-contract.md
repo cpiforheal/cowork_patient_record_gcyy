@@ -1,74 +1,61 @@
 # Clinic Data Contract
 
-This document records the frontend/backend contract for the outpatient record prototype after the Spring Boot + MySQL migration.
+This document records the current API boundary for the outpatient record system after the split Spring Boot + MySQL refactor.
 
-## API Service
+## Backend API
 
-Start the backend from `coshare_patientrecord_sys_backend/`:
+Start the backend with the `mysql` profile:
 
 ```bash
-mvnw.cmd spring-boot:run
+cd coshare_patientrecord_sys_backend
+mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 
-The service listens on `http://localhost:8080` by default. The Vue development server proxies `/clinic-api` to this backend in `Geeker-Admin/.env.development`.
+The service listens on `http://localhost:8080` by default. Set `SERVER_PORT` to override the port.
 
-All JSON API responses share the `{ code, msg, data }` envelope. `code` mirrors the HTTP status; `data` is `null` on error.
+All responses share the `{ code, msg, data }` envelope. `code` mirrors the HTTP status; `data` is `null` on error.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Service health check. |
-| `GET` | `/health/db` | MySQL connection health check. |
-| `GET` | `/clinic-api/db` | Read the current clinic database as the frontend document shape. |
-| `PUT` | `/clinic-api/db` | Replace the current clinic database. The backend persists the document into MySQL tables and writes a snapshot. |
+| `GET` | `/health/db` | MySQL profile and connection health check. |
+| `GET` | `/clinic-api/db` | Read the current clinic database from MySQL. The response includes `_revision`. |
+| `PUT` | `/clinic-api/db` | Save the current clinic database. The payload must contain `patients`, `records`, `archive`, and should include the latest `_revision`. |
 | `POST` | `/clinic-api/files` | Upload one attachment encoded as a data URL. |
 | `GET` | `/clinic-api/files/{storagePath}` | Download a previously stored attachment by the `storagePath` returned from upload. |
 
-## Upload / Download
+Runtime business data is written to MySQL. Uploaded attachments are written to the configured backend file storage directory and intentionally ignored by Git.
 
-- `POST /clinic-api/files` accepts `{ fileName, contentDataUrl }`, where `contentDataUrl` is a base64 data URL like `data:image/png;base64,...`.
-- It responds with `{ fileName, url, storagePath, size, mimeType }`.
+### Upload / download details
+
+- `POST /clinic-api/files` accepts `{ fileName, contentDataUrl }`, where `contentDataUrl` is a base64 data URL like `data:image/png;base64,...`. It responds with `{ fileName, url, storagePath, size, mimeType }`.
 - `url` is the public path (`/clinic-api/files/{storagePath}`); `storagePath` is a date-foldered name (`YYYY/MM/DD/<timestamp>-<rand>-<safeName>`).
-- Files are stored on disk under `clinic.attachment-dir`, which defaults to `runtime/clinic-attachments` in the backend project.
-- The download route validates that the resolved path stays inside the attachments directory, rejecting path traversal attempts.
+- The download route validates that the resolved path stays inside the attachments directory, rejecting path-traversal attempts with `400`.
+- Downloads use private no-store cache headers because attachments may contain sensitive medical information.
+
+### Revision protection
+
+`GET /clinic-api/db` returns `_revision`. `PUT /clinic-api/db` should send the same `_revision`; if another terminal has saved newer data, the backend returns `409 Conflict` and the frontend should refresh before retrying.
 
 ## Data Shape
 
-The frontend continues to read and write one clinic document:
+The current compatibility payload keeps the existing frontend data shape:
 
 | Key | Meaning |
 | --- | --- |
-| `accounts` | Login account data. The current prototype keeps `admin` as the baseline account. |
-| `patients` | Patient list rows for workbench, patient list, and encounter views. |
+| `_revision` | Server-side optimistic version for write protection. |
+| `accounts` | Login account and department account baseline. |
+| `patients` | Patient list rows for workbench or table views. |
 | `records` | Patient record field values keyed by patient id. |
 | `documents` | Uploaded evidence and report metadata keyed by patient id. |
 | `roles` | Role and permission baseline. |
-| `departments` | Department options. |
-| `dictionaries` | Common dictionaries and preset options. |
 | `templateFieldRules` | Field ownership, required-state, printability, and quality-check rules. |
 | `archive` | Submission state and generated record version keyed by patient id. |
 | `auditLogs` | Operation trail for upload, edit, review, and archive actions. |
 
-## MySQL Persistence
-
-The backend creates these tables automatically when the `mysql` profile is active:
-
-- `clinic_patients`
-- `clinic_record_fields`
-- `clinic_archive`
-- `clinic_documents`
-- `clinic_accounts`
-- `clinic_roles`
-- `clinic_departments`
-- `clinic_dictionaries`
-- `clinic_template_field_rules`
-- `clinic_audit_logs`
-- `clinic_db_snapshots`
-
-The phase-1 migration keeps important query columns plus a `raw_json` column for lossless frontend round-trip compatibility. `PUT /clinic-api/db` currently replaces the table contents and records the submitted payload in `clinic_db_snapshots`.
-
 ## Implementation Notes
 
-- Keep role and field ownership in persisted schema data instead of hard-coding it across UI pages.
-- Keep uploaded files on disk and store only metadata/path references in MySQL.
-- Treat `coshare_patientrecord_sys_frontend/server/` as the historical Node JSON service kept for reference. New development should use the Spring Boot backend.
-
+- Keep role and field ownership in the schema instead of hard-coding it across UI pages.
+- The current `/clinic-api/db` write path is still a compatibility layer. It writes normalized MySQL tables but accepts a whole database payload.
+- The next persistence step should split the API into row-level commands for patients, records, documents, accounts, roles, dictionaries, and audit logs.
+- `coshare_patientrecord_sys_frontend/Geeker-Admin/` is part of this repository. It is not a separate checkout; business changes are committed here directly.

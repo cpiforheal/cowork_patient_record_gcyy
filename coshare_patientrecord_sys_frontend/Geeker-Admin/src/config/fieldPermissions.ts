@@ -2,11 +2,14 @@ export type UserRole = "admin" | "frontdesk" | "lab" | "ecg" | "ultrasound" | "d
 
 export type FieldKind = "input" | "textarea" | "select";
 
+export type FieldInputType = "text" | "date" | "number" | "tel";
+
 export interface RecordField {
   key: string;
   label: string;
   value: string;
   kind: FieldKind;
+  inputType?: FieldInputType;
   editors: UserRole[];
   required?: boolean;
   enabled?: boolean;
@@ -16,6 +19,12 @@ export interface RecordField {
   evidence?: string;
   placeholder?: string;
   printLabel?: string;
+  unit?: string;
+  min?: number;
+  max?: number;
+  maxLength?: number;
+  pattern?: string;
+  validationMessage?: string;
 }
 
 export interface RecordSection {
@@ -96,14 +105,69 @@ export const recordSections: RecordSection[] = [
     fields: [
       { key: "hospitalName", label: "医院名称", value: "固始中医肛肠医院", kind: "input", editors: frontdesk, required: true },
       { key: "patientName", label: "患者姓名", value: "", kind: "input", editors: frontdesk, required: true },
-      { key: "age", label: "年龄", value: "____岁", kind: "input", editors: frontdesk },
+      {
+        key: "age",
+        label: "年龄",
+        value: "____岁",
+        kind: "input",
+        inputType: "number",
+        editors: frontdesk,
+        min: 0,
+        max: 120,
+        unit: "岁",
+        placeholder: "请输入年龄"
+      },
       { key: "visitNo", label: "门诊/住院号", value: "", kind: "input", editors: frontdesk, required: true },
-      { key: "admissionCount", label: "第几次入院", value: "第____次", kind: "input", editors: frontdesk },
-      { key: "admissionDate", label: "入院日期", value: "", kind: "input", editors: frontdesk },
-      { key: "dischargeDate", label: "出院日期", value: "____年__月__日", kind: "input", editors: frontdesk },
-      { key: "hospitalDays", label: "住院天数", value: "____天", kind: "input", editors: frontdesk },
-      { key: "phone", label: "联系电话", value: "", kind: "input", editors: frontdesk },
-      { key: "contactPhone", label: "联系人电话", value: "________", kind: "input", editors: frontdesk },
+      {
+        key: "admissionCount",
+        label: "第几次入院",
+        value: "第____次",
+        kind: "input",
+        inputType: "number",
+        editors: frontdesk,
+        min: 1,
+        max: 99,
+        unit: "次",
+        placeholder: "请输入次数"
+      },
+      { key: "admissionDate", label: "入院日期", value: "", kind: "input", inputType: "date", editors: frontdesk },
+      { key: "dischargeDate", label: "出院日期", value: "____年__月__日", kind: "input", inputType: "date", editors: frontdesk },
+      {
+        key: "hospitalDays",
+        label: "住院天数",
+        value: "____天",
+        kind: "input",
+        inputType: "number",
+        editors: frontdesk,
+        min: 0,
+        max: 3650,
+        unit: "天",
+        placeholder: "请输入住院天数"
+      },
+      {
+        key: "phone",
+        label: "联系电话",
+        value: "",
+        kind: "input",
+        inputType: "tel",
+        editors: frontdesk,
+        maxLength: 11,
+        pattern: "^1[3-9]\\d{9}$",
+        placeholder: "请输入11位手机号",
+        validationMessage: "请输入正确的11位手机号"
+      },
+      {
+        key: "contactPhone",
+        label: "联系人电话",
+        value: "________",
+        kind: "input",
+        inputType: "tel",
+        editors: frontdesk,
+        maxLength: 11,
+        pattern: "^1[3-9]\\d{9}$",
+        placeholder: "请输入11位联系人手机号",
+        validationMessage: "请输入正确的11位联系人手机号"
+      },
       {
         key: "admissionWay",
         label: "入院方式",
@@ -385,6 +449,9 @@ export const recordSections: RecordSection[] = [
         label: "生命体征",
         value: "T：____℃，P：____次/分，R：____次/分，BP：____/____mmHg。",
         kind: "input",
+        pattern: "^T：\\d{2}(\\.\\d)?℃，P：\\d{2,3}次/分，R：\\d{1,2}次/分，BP：\\d{2,3}/\\d{2,3}mmHg。$",
+        placeholder: "例：T：36.5℃，P：78次/分，R：18次/分，BP：120/80mmHg。",
+        validationMessage: "生命体征请按 T：36.5℃，P：78次/分，R：18次/分，BP：120/80mmHg。格式填写",
         editors: nurse
       }
     ]
@@ -508,7 +575,14 @@ export const recordSections: RecordSection[] = [
         options: ["硬膜外麻醉", "静脉麻醉（无痛肠镜）", "局部麻醉", "其他"],
         editors: ["admin", "doctor", "nurse"]
       },
-      { key: "operationLevel", label: "手术等级", value: "____级", kind: "input", editors: quality }
+      {
+        key: "operationLevel",
+        label: "手术等级",
+        value: "____级",
+        kind: "select",
+        options: ["一类", "二类", "三类", "四类"],
+        editors: quality
+      }
     ]
   },
   {
@@ -539,7 +613,14 @@ export const recordSections: RecordSection[] = [
         ],
         editors: quality
       },
-      { key: "reasonableDays", label: "合理住院天数", value: "5-7 天", kind: "input", editors: quality },
+      {
+        key: "reasonableDays",
+        label: "合理住院天数",
+        value: "5-7 天",
+        kind: "select",
+        options: ["3-5 天", "5-7 天", "7-10 天", "10-14 天", "14 天以上"],
+        editors: quality
+      },
       {
         key: "dipCompliance",
         label: "合规判断",

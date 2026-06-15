@@ -214,9 +214,9 @@ export const hydrateDb = (db: ClinicDb) => {
       ...storedRoles.filter(role => !defaultRoleValues.has(role.role))
     ];
   }
-  db.departments ??= seedDepartments();
-  db.dictionaries ??= seedDictionaries();
-  db.templateFieldRules ??= seedTemplateFieldRules();
+  if (!db.departments?.length) db.departments = seedDepartments();
+  if (!db.dictionaries?.length) db.dictionaries = seedDictionaries();
+  if (!db.templateFieldRules?.length) db.templateFieldRules = seedTemplateFieldRules();
   db.auditLogs ??= seedAuditLogs();
 
   db.patients = db.patients.filter(patient => {
@@ -232,6 +232,7 @@ export const hydrateDb = (db: ClinicDb) => {
 
   const seedAdmin = seedAccounts()[0];
   const storedAdmin = db.accounts.find(account => account.username === "admin" || account.role === "admin");
+  const storedBusinessAccounts = db.accounts.filter(account => account.username !== "admin" && account.role !== "admin");
   db.accounts = [
     {
       ...seedAdmin,
@@ -244,11 +245,16 @@ export const hydrateDb = (db: ClinicDb) => {
       roleLabel: roleLabel("admin"),
       scope: "系统全局配置",
       status: "启用"
-    }
+    },
+    ...storedBusinessAccounts
   ];
+  const roleMemberCounts = db.accounts.reduce<Record<string, number>>((result, account) => {
+    result[account.role] = (result[account.role] || 0) + 1;
+    return result;
+  }, {});
   db.roles = db.roles.map(role => ({
     ...role,
-    members: role.role === "admin" ? 1 : 0
+    members: roleMemberCounts[role.role] || 0
   }));
   db.auditLogs = db.auditLogs.filter(log => !legacySeedAuditIds.has(log.id));
   Object.keys(db.documents).forEach(patientId => {

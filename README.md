@@ -1,71 +1,75 @@
-# cowork_patient_record_gcyy
+# 协和患者病历协同系统
 
-## Current working structure
+本仓库当前为前后端分离版本：
 
-Business development now lives in:
+- `coshare_patientrecord_sys_backend/`：Spring Boot 后端，使用 MySQL 保存患者、病历、附件索引、账号、角色、审计日志等数据。
+- `coshare_patientrecord_sys_frontend/Geeker-Admin/`：Vue 3 前端，面向内部门诊生产场景使用。
+- `runtime/`：本机运行期数据目录，建议放置附件等运行文件，不纳入 Git。
 
-- `coshare_patientrecord_sys_backend/`: Spring Boot backend, MySQL profile enabled by default.
-- `coshare_patientrecord_sys_frontend/Geeker-Admin/`: Vue 3 frontend.
+## 内测部署边界
 
-Frontend package management is standardized on `pnpm@8.15.9`. Keep `pnpm-lock.yaml` as the only frontend lock file; do not commit `package-lock.json`.
+目标主机最低需要准备：
 
-The current MySQL persistence keeps the original `/clinic-api/db` payload contract while also splitting high-value business data into normalized tables:
-
-- `clinic_patients`: patient master rows.
-- `clinic_patient_encounters`: repeat outpatient/inpatient visits for the same patient.
-- `clinic_record_fields`: compatibility snapshot for record field JSON.
-- `clinic_record_field_values`: per-field record values for later permission, quality-control, and search work.
-- `clinic_documents`, `clinic_archive`, `clinic_audit_logs`, `clinic_accounts`, `clinic_roles`, `clinic_departments`, `clinic_dictionaries`, `clinic_template_field_rules`: business supporting tables.
-
-协作病历资料系统原型仓库。
-
-当前有效工程已经迁移为前后端分离结构：
-
-- `coshare_patientrecord_sys_backend/`：Spring Boot 后端，默认使用 MySQL，并提供 `/clinic-api` 数据与附件接口。
-- `coshare_patientrecord_sys_frontend/Geeker-Admin/`：Vue 3 前端，开发环境通过 Vite 代理访问 `http://localhost:8080/clinic-api`。
-
-根目录下保留的 `Geeker-Admin/`、`server/` 和 `docs/` 是迁移前的 Node 本地数据服务版本，作为历史参考保留；新的业务开发优先进入 `coshare_patientrecord_sys_backend/` 和 `coshare_patientrecord_sys_frontend/`。
+1. JDK 17。
+2. MySQL 8.x，并创建数据库，例如 `hos_refactor`。
+3. 一个可长期保留的附件目录，建议放在大容量磁盘，并纳入备份计划。
+4. 前端静态文件部署服务，可使用 Nginx、IIS 或后端同机静态服务。
 
 ## 后端启动
 
+进入后端目录：
+
 ```bash
 cd coshare_patientrecord_sys_backend
-mvnw.cmd spring-boot:run
 ```
 
-默认配置见 `src/main/resources/application-mysql.properties`：
+使用 MySQL profile 启动：
 
-- 服务端口：`8080`
-- 数据库：`hos_unitywork`
-- 用户名：`root`
-- 密码：`123456`
+```bash
+mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=mysql
+```
 
-可通过环境变量覆盖：`SERVER_PORT`、`MYSQL_URL`、`MYSQL_USERNAME`、`MYSQL_PASSWORD`、`CLINIC_ATTACHMENT_DIR`。
+常用配置可通过环境变量覆盖：
 
-后端启动后可访问：
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `SERVER_PORT` | `8080` | 后端端口 |
+| `MYSQL_URL` | `jdbc:mysql://localhost:3306/hos_refactor?...` | MySQL 连接地址 |
+| `MYSQL_USERNAME` | `root` | MySQL 用户名 |
+| `MYSQL_PASSWORD` | `123456` | MySQL 密码 |
 
-- `GET /health`
-- `GET /health/db`
-- `GET /clinic-api/db`
-- `PUT /clinic-api/db`
-- `POST /clinic-api/files`
-- `GET /clinic-api/files/{storagePath}`
+后端健康检查：
 
-## 前端启动
+```bash
+curl http://localhost:8080/health/db
+```
+
+## 前端打包
+
+进入前端目录：
 
 ```bash
 cd coshare_patientrecord_sys_frontend/Geeker-Admin
 pnpm install
-pnpm dev
+pnpm build:pro
 ```
 
-开发环境配置在 `.env.development` 中，`/clinic-api` 会代理到 `http://localhost:8080`。如果只启动前端而没有启动 Spring Boot 后端，上传病历附件和数据库读写会失败。
+生产配置默认访问同源接口：
 
-## 运行数据
+- `/clinic-api/db`
+- `/clinic-api/files`
 
-本地运行数据和附件不进入 Git：
+如前端和后端不在同一域名或端口，需要在网关或静态服务中配置反向代理。
 
-- `coshare_patientrecord_sys_backend/runtime/`
-- `coshare_patientrecord_sys_frontend/server/data/clinic-db.json`
-- `coshare_patientrecord_sys_frontend/server/files/`
-- `coshare_patientrecord_sys_frontend/Geeker-Admin/server/data/clinic-db.json`
+## 数据与附件
+
+- MySQL 保存业务结构化数据。
+- 附件文件应存放在目标主机固定磁盘目录，不应放入 Git。
+- 医疗资料包含敏感信息，内测阶段也要做账号隔离、主机访问控制、磁盘备份和操作审计。
+- 当前附件下载已禁用公共长期缓存，减少病历附件在浏览器或中间代理中长期残留。
+
+## 当前注意事项
+
+- 系统仍保留整库保存接口 `/clinic-api/db`，已增加 `_revision` 版本保护，能降低多终端旧页面覆盖新数据的风险。
+- 下一阶段建议把高频写入动作拆成行级接口，例如新建患者、保存病历字段、上传附件、账号角色维护，逐步替代整库 PUT。
+- 内测前建议在目标主机做一次完整演练：建库、启动后端、部署前端、创建患者、上传附件、保存病历、重启服务后复查数据。

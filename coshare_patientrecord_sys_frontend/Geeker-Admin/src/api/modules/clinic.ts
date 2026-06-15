@@ -103,6 +103,8 @@ const getPatientOrThrow = (db: ClinicDb, id: string) => {
   return patient;
 };
 
+const verifyPatientSaved = async (id: string) => getPatientOrThrow(await readDb({ allowLocalFallback: false }), id);
+
 const ensureSystemManager = (role?: string) => {
   if (role !== "admin") {
     throw new Error(`${roleLabel(role)}无权修改系统管理配置`);
@@ -135,6 +137,8 @@ const normalizeIdentity = (value?: string) =>
   String(value || "")
     .trim()
     .replace(/\s/g, "");
+
+const isValidMobile = (value?: string) => !value || /^1[3-9]\d{9}$/.test(normalizeIdentity(value));
 
 const patientVisitNos = (patient: PatientRow) => [
   patient.visitNo,
@@ -237,6 +241,59 @@ const persistDocumentFile = async (document: {
 const isIncompleteValue = (value?: string) => {
   const normalized = String(value || "").trim();
   return !normalized || normalized.includes("____") || normalized.includes("________") || normalized.includes("待回报");
+};
+
+const validateFieldMeta = (field: RecordField, value?: string) => {
+  const normalized = String(value || "").trim();
+  if (!normalized || isIncompleteValue(normalized)) return "";
+
+  if (field.inputType === "number") {
+    const numberValue = Number(normalized);
+    if (!Number.isFinite(numberValue)) return `${field.label}必须填写数字`;
+    if (field.min !== undefined && numberValue < field.min) return `${field.label}不能小于 ${field.min}`;
+    if (field.max !== undefined && numberValue > field.max) return `${field.label}不能大于 ${field.max}`;
+  }
+
+  if (field.inputType === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return `${field.label}请选择正确日期`;
+  }
+
+  if (field.pattern && !new RegExp(field.pattern).test(normalized)) {
+    return field.validationMessage || `${field.label}格式不正确`;
+  }
+
+  return "";
+};
+
+const normalizeRecordFieldValue = (
+  field: RecordField,
+  value?: string,
+  incomingValues: Record<string, string> = {},
+  currentRecord: Record<string, string> = {}
+) => {
+  const normalized = String(value || "").trim();
+  if (!normalized || isIncompleteValue(normalized)) return normalized;
+
+  if (field.inputType === "number") {
+    if (/^-?\d+(\.\d+)?$/.test(normalized)) return normalized;
+    return normalized.match(/-?\d+(\.\d+)?/)?.[0] || normalized;
+  }
+
+  if (field.inputType === "date") {
+    const dateMatch = normalized.match(/^(\d{4})[年./-](\d{1,2})[月./-](\d{1,2})日?$/);
+    if (!dateMatch) return normalized;
+    const [, year, month, day] = dateMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  if (field.inputType === "tel") {
+    if (field.key === "contactPhone" && normalized.includes("同患者")) {
+      return normalizeIdentity(incomingValues.phone || currentRecord.phone);
+    }
+    return normalizeIdentity(normalized);
+  }
+
+  return normalized;
 };
 
 const findFieldSection = (fieldKey: string) =>
@@ -361,13 +418,22 @@ export const validatePatientRecord = (values: Record<string, string>, rules: Tem
   allRecordFields().forEach(field => {
     const rule = rulesByField[field.key];
     const required = rule ? rule.enabled && rule.qualityCheck && rule.required : field.required;
-    const value = (values[field.key] || "").trim();
+    const value = normalizeRecordFieldValue(field, values[field.key], values, values);
     if (required && (!value || value.includes("____") || value.includes("________"))) {
       issues.push({
         fieldKey: field.key,
         fieldLabel: rule?.fieldLabel || field.label,
         level: "error",
         message: "必填字段未完成"
+      });
+    }
+    const metaMessage = validateFieldMeta(field, value);
+    if (metaMessage) {
+      issues.push({
+        fieldKey: field.key,
+        fieldLabel: rule?.fieldLabel || field.label,
+        level: "error",
+        message: metaMessage
       });
     }
   });
@@ -449,6 +515,7 @@ export const createPatientApi = async (params: CreatePatientParams) => {
   const visitNo = params.visitNo.trim();
   if (!name) return Promise.reject(new Error("患者姓名不能为空"));
   if (!visitNo) return Promise.reject(new Error("门诊/住院号不能为空"));
+  if (!isValidMobile(params.phone)) return Promise.reject(new Error("联系电话需为正确的11位手机号"));
 
   const db = await readDb();
   if (findPatientByVisitNo(db, visitNo)) {
@@ -498,7 +565,7 @@ export const createPatientApi = async (params: CreatePatientParams) => {
       detail: `同一患者追加${params.visitType}就诊，门诊/住院号：${visitNo}，累计 ${existingPatient.encounterCount || 1} 次就诊`
     });
     await writeDb(db);
-    return response(existingPatient, "已追加到既有患者档案");
+    return response(await verifyPatientSaved(existingPatient.id), "已追加到既有患者档案");
   }
 
   const id = String(Date.now());
@@ -553,7 +620,7 @@ export const createPatientApi = async (params: CreatePatientParams) => {
     detail: `创建${params.visitType}患者，门诊/住院号：${visitNo}`
   });
   await writeDb(db);
-  return response(patient, "患者已创建");
+  return response(await verifyPatientSaved(patient.id), "患者已创建");
 };
 
 export const savePatientRecordApi = async (params: SaveRecordParams) => {
@@ -572,11 +639,12 @@ export const savePatientRecordApi = async (params: SaveRecordParams) => {
       deniedLabels.push(templateRuleMap(templateRules)[field.key]?.fieldLabel || field.label);
       return;
     }
+    const normalizedValue = normalizeRecordFieldValue(field, value, params.values, record);
     const beforeValue = record[key] || "";
-    if (beforeValue !== value) {
-      fieldChanges.push({ field, beforeValue, afterValue: value });
+    if (beforeValue !== normalizedValue) {
+      fieldChanges.push({ field, beforeValue, afterValue: normalizedValue });
     }
-    record[key] = value;
+    record[key] = normalizedValue;
   });
 
   if (deniedLabels.length) {
@@ -598,6 +666,12 @@ export const savePatientRecordApi = async (params: SaveRecordParams) => {
   }
 
   const issues = validatePatientRecord(record, templateRules);
+  const invalidInputIssues = issues.filter(
+    issue => Object.prototype.hasOwnProperty.call(params.values, issue.fieldKey) && issue.message !== "必填字段未完成"
+  );
+  if (invalidInputIssues.length) {
+    return Promise.reject(new Error(invalidInputIssues.map(issue => `${issue.fieldLabel}：${issue.message}`).join("；")));
+  }
   const completedSections = recordSections.filter(section =>
     section.fields.every(field => {
       const value = (record[field.key] || "").trim();
@@ -1472,22 +1546,36 @@ export const getOperationStatsApi = async () => {
     else list.push({ stage: patient.currentStage, count: 1 });
     return list;
   }, []);
-  const departmentWorkloads = documents.reduce<Array<{ department: string; active: number; voided: number; total: number }>>(
-    (list, document) => {
-      const target = list.find(item => item.department === document.department) || {
-        department: document.department,
-        active: 0,
-        voided: 0,
-        total: 0
-      };
-      if (!list.includes(target)) list.push(target);
-      if (document.status === "voided") target.voided += 1;
-      else target.active += 1;
-      target.total += 1;
-      return list;
-    },
-    []
-  );
+  const departmentNames = Array.from(
+    new Set([
+      ...(db.departments ?? []).map(department => department.name),
+      ...(db.accounts ?? []).map(account => account.department),
+      ...documents.map(document => document.department)
+    ])
+  ).filter(Boolean);
+  const departmentWorkloads = departmentNames.map(department => ({
+    department,
+    active: 0,
+    voided: 0,
+    total: 0
+  }));
+  documents.forEach(document => {
+    const target =
+      departmentWorkloads.find(item => item.department === document.department) ||
+      (() => {
+        const workload = {
+          department: document.department,
+          active: 0,
+          voided: 0,
+          total: 0
+        };
+        departmentWorkloads.push(workload);
+        return workload;
+      })();
+    if (document.status === "voided") target.voided += 1;
+    else target.active += 1;
+    target.total += 1;
+  });
   return response<OperationStats>({
     totalPatients: db.patients.length,
     pendingPatients: db.patients.filter(patient => !["已归档", "旧资料已归档"].includes(patient.status)).length,

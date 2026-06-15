@@ -142,11 +142,33 @@
                   <el-option v-for="option in selectOptions(item.field)" :key="option" :label="option" :value="option" />
                 </el-select>
                 <el-input
+                  v-else-if="item.field.inputType === 'number'"
+                  v-model="fieldValues[item.field.key]"
+                  :max="item.field.max"
+                  :min="item.field.min"
+                  :placeholder="item.field.placeholder"
+                  type="number"
+                  controls-position="right"
+                  class="meta-number-input"
+                >
+                  <template v-if="item.field.unit" #suffix>{{ item.field.unit }}</template>
+                </el-input>
+                <el-date-picker
+                  v-else-if="item.field.inputType === 'date'"
+                  v-model="fieldValues[item.field.key]"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  class="meta-date-input"
+                  :placeholder="item.field.placeholder || '选择日期'"
+                />
+                <el-input
                   v-else
                   v-model="fieldValues[item.field.key]"
                   :placeholder="item.field.placeholder"
+                  :maxlength="item.field.maxLength"
+                  :show-word-limit="item.field.inputType === 'tel'"
                   :rows="item.field.kind === 'textarea' ? 3 : undefined"
-                  :type="item.field.kind === 'textarea' ? 'textarea' : 'text'"
+                  :type="item.field.kind === 'textarea' ? 'textarea' : item.field.inputType === 'tel' ? 'tel' : 'text'"
                 />
                 <div v-if="matchedAttachments(item.field.key).length" class="evidence-line">
                   <button
@@ -259,12 +281,36 @@
                       <el-option v-for="option in selectOptions(field)" :key="option" :label="option" :value="option" />
                     </el-select>
                     <el-input
+                      v-else-if="field.inputType === 'number'"
+                      v-model="fieldValues[field.key]"
+                      :disabled="!isEditable(field)"
+                      :max="field.max"
+                      :min="field.min"
+                      :placeholder="field.placeholder"
+                      type="number"
+                      controls-position="right"
+                      class="meta-number-input"
+                    >
+                      <template v-if="field.unit" #suffix>{{ field.unit }}</template>
+                    </el-input>
+                    <el-date-picker
+                      v-else-if="field.inputType === 'date'"
+                      v-model="fieldValues[field.key]"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      class="meta-date-input"
+                      :disabled="!isEditable(field)"
+                      :placeholder="field.placeholder || '选择日期'"
+                    />
+                    <el-input
                       v-else
                       v-model="fieldValues[field.key]"
                       :disabled="!isEditable(field)"
                       :placeholder="field.placeholder"
+                      :maxlength="field.maxLength"
+                      :show-word-limit="field.inputType === 'tel'"
                       :rows="field.kind === 'textarea' ? 2 : undefined"
-                      :type="field.kind === 'textarea' ? 'textarea' : 'text'"
+                      :type="field.kind === 'textarea' ? 'textarea' : field.inputType === 'tel' ? 'tel' : 'text'"
                     />
                     <div v-if="matchedAttachments(field.key).length" class="evidence-line">
                       <button
@@ -324,12 +370,36 @@
                   <el-option v-for="option in selectOptions(field)" :key="option" :label="option" :value="option" />
                 </el-select>
                 <el-input
+                  v-else-if="field.inputType === 'number'"
+                  v-model="fieldValues[field.key]"
+                  :disabled="!isEditable(field)"
+                  :max="field.max"
+                  :min="field.min"
+                  :placeholder="field.placeholder"
+                  type="number"
+                  controls-position="right"
+                  class="meta-number-input"
+                >
+                  <template v-if="field.unit" #suffix>{{ field.unit }}</template>
+                </el-input>
+                <el-date-picker
+                  v-else-if="field.inputType === 'date'"
+                  v-model="fieldValues[field.key]"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  class="meta-date-input"
+                  :disabled="!isEditable(field)"
+                  :placeholder="field.placeholder || '选择日期'"
+                />
+                <el-input
                   v-else
                   v-model="fieldValues[field.key]"
                   :disabled="!isEditable(field)"
                   :placeholder="field.placeholder"
+                  :maxlength="field.maxLength"
+                  :show-word-limit="field.inputType === 'tel'"
                   :rows="field.kind === 'textarea' ? 2 : undefined"
-                  :type="field.kind === 'textarea' ? 'textarea' : 'text'"
+                  :type="field.kind === 'textarea' ? 'textarea' : field.inputType === 'tel' ? 'tel' : 'text'"
                 />
                 <div v-if="matchedAttachments(field.key).length" class="evidence-line">
                   <button
@@ -625,8 +695,7 @@ import {
   roleLabel,
   type RecordAttachment,
   type RecordField,
-  type RecordSection,
-  type UserRole
+  type RecordSection
 } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import medicalLogoUrl from "@/assets/images/logo.jpg";
@@ -635,7 +704,7 @@ const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 
-const currentRole = computed<UserRole>(() => (userStore.userInfo.role as UserRole) || "frontdesk");
+const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
 const roleName = computed(() => roleLabel(currentRole.value));
 const patientId = computed(() => String(route.params.id || "1"));
 const recordViewMode = ref<"mine" | "full">("mine");
@@ -922,9 +991,20 @@ const myEditableFields = computed(() =>
 const myRequiredMissingCount = computed(
   () => myEditableFields.value.filter(item => item.field.required && !isFieldComplete(fieldValues[item.field.key] || "")).length
 );
-const selectOptions = (field: RecordField) => (field.options?.length ? field.options : fieldPresets[field.key] || []);
+const selectOptions = (field: RecordField) => {
+  if (field.kind === "select") return field.options || [];
+  if (["date", "number", "tel"].includes(field.inputType || "")) return [];
+  return field.options?.length ? field.options : fieldPresets[field.key] || [];
+};
 const fieldAssistText = (field: RecordField) => {
   if (!isEditable(field)) return `锁定：${editorLabels(field.editors)}`;
+  if (field.inputType === "date") return "YYYY-MM-DD";
+  if (field.inputType === "number") {
+    const range = [field.min, field.max].filter(value => value !== undefined).join("-");
+    return range ? `${range}${field.unit || ""}` : field.unit || "数字";
+  }
+  if (field.inputType === "tel") return "11位手机号";
+  if (field.pattern) return field.validationMessage || "按固定格式填写";
   const count = selectOptions(field).length;
   return count ? `选择为主：${count} 个常用项` : "少量手填";
 };
@@ -2119,7 +2199,8 @@ onBeforeUnmount(() => {
   min-height: 1120px;
   padding: 36px 44px 58px;
   overflow: hidden;
-  background: linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
     radial-gradient(circle at 100% 0, rgb(39 174 96 / 8%), transparent 32%), #ffffff;
   border: 1px solid #dcebe5;
   border-radius: 16px;

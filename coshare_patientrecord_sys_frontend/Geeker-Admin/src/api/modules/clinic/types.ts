@@ -307,6 +307,7 @@ export interface OperationStats {
 }
 
 export interface ClinicDb {
+  _revision?: string;
   patients: PatientRow[];
   records: Record<string, Record<string, string>>;
   archive: Record<string, { submitted: boolean; version: string; generatedAt: string }>;
