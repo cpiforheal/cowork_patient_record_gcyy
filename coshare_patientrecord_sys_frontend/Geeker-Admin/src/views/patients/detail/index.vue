@@ -82,6 +82,15 @@
         </article>
       </section>
 
+      <section v-if="workflowHint.visible" class="workflow-hint screen-only" :class="`is-${workflowHint.level}`">
+        <div>
+          <span>下一步</span>
+          <strong>{{ workflowHint.title }}</strong>
+          <small>{{ workflowHint.desc }}</small>
+        </div>
+        <el-button v-if="firstWorkflowIssue" text @click="focusIssue(firstWorkflowIssue)">定位处理</el-button>
+      </section>
+
       <div class="record-layout" :class="`mode-${recordViewMode}`">
         <aside v-if="recordViewMode === 'full'" class="section-rail screen-only">
           <button
@@ -111,6 +120,14 @@
               </el-tag>
             </div>
 
+            <div v-if="myFieldIssues.length" class="field-issue-banner">
+              <div>
+                <strong>先处理 {{ myFieldIssues.length }} 项</strong>
+                <span>{{ myFieldIssues[0].fieldLabel }}：{{ myFieldIssues[0].message }}</span>
+              </div>
+              <el-button text @click="focusIssue(myFieldIssues[0])">定位</el-button>
+            </div>
+
             <el-empty v-if="!myEditableFields.length" description="当前岗位暂无需要填写的字段">
               <el-button type="primary" @click="recordViewMode = 'full'">查看完整病历</el-button>
             </el-empty>
@@ -120,9 +137,12 @@
                 v-for="item in myEditableFields"
                 :key="item.field.key"
                 class="my-field-item"
+                :id="`my-field-${item.field.key}`"
                 :class="{
                   wide: item.field.kind === 'textarea' || isLabMetricField(item.field),
-                  complete: isFieldComplete(fieldValues[item.field.key] || '')
+                  complete: isFieldComplete(fieldValues[item.field.key] || ''),
+                  missing: issueForField(item.field)?.level === 'missing',
+                  invalid: issueForField(item.field)?.level === 'invalid'
                 }"
               >
                 <div class="my-field-label">
@@ -183,6 +203,9 @@
                     {{ attachment.title }}
                   </button>
                 </div>
+                <p v-if="issueForField(item.field)" class="field-inline-issue">
+                  {{ issueForField(item.field)?.message }}
+                </p>
               </div>
             </div>
 
@@ -253,13 +276,23 @@
                 <span v-if="sectionEvidenceCount(section)">附件 {{ sectionEvidenceCount(section) }} 份</span>
                 <span>{{ canEditRecordSection(section) ? "本岗位可处理" : "由其他岗位维护" }}</span>
               </div>
+              <div v-if="sectionIssues(section).length" class="section-issue-line">
+                <span>待处理：{{ sectionIssues(section)[0].fieldLabel }} - {{ sectionIssues(section)[0].message }}</span>
+                <el-button text @click="focusIssue(sectionIssues(section)[0])">定位</el-button>
+              </div>
 
               <div v-show="canExpandFullSection(section) && !isSectionCollapsed(section)" class="section-fields">
                 <div
                   v-for="field in section.fields"
                   :key="field.key"
+                  :id="`section-field-${field.key}`"
                   class="field-row workbench-field-row"
-                  :class="{ locked: !isEditable(field), complete: isFieldComplete(fieldValues[field.key] || '') }"
+                  :class="{
+                    locked: !isEditable(field),
+                    complete: isFieldComplete(fieldValues[field.key] || ''),
+                    missing: issueForField(field)?.level === 'missing',
+                    invalid: issueForField(field)?.level === 'invalid'
+                  }"
                 >
                   <div class="field-label">
                     <label>{{ field.label }}</label>
@@ -331,6 +364,9 @@
                         {{ attachment.title }}
                       </button>
                     </div>
+                    <p v-if="issueForField(field)" class="field-inline-issue">
+                      {{ issueForField(field)?.message }}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -359,7 +395,17 @@
           </div>
 
           <div class="compact-form">
-            <div v-for="field in activeSection.fields" :key="field.key" class="field-row" :class="{ locked: !isEditable(field) }">
+            <div
+              v-for="field in activeSection.fields"
+              :id="`active-field-${field.key}`"
+              :key="field.key"
+              class="field-row"
+              :class="{
+                locked: !isEditable(field),
+                missing: issueForField(field)?.level === 'missing',
+                invalid: issueForField(field)?.level === 'invalid'
+              }"
+            >
               <div class="field-label">
                 <label>{{ field.label }}</label>
                 <small>{{ fieldAssistText(field) }}</small>
@@ -426,6 +472,9 @@
                     {{ attachment.title }}
                   </button>
                 </div>
+                <p v-if="issueForField(field)" class="field-inline-issue">
+                  {{ issueForField(field)?.message }}
+                </p>
               </div>
             </div>
           </div>
@@ -749,6 +798,14 @@ const logoCandidates = [medicalLogoUrl];
 const logoIndex = ref(0);
 const logoSrc = ref(logoCandidates[0]);
 const logoVisible = ref(true);
+type FieldIssue = {
+  fieldKey: string;
+  fieldLabel: string;
+  sectionKey: string;
+  sectionTitle: string;
+  message: string;
+  level: "missing" | "invalid";
+};
 const ruleMap = computed(() =>
   templateRules.value.reduce<Record<string, TemplateFieldRule>>((map, rule) => {
     map[rule.fieldKey] = rule;
@@ -956,6 +1013,28 @@ const isFieldComplete = (value: string) => {
   return Boolean(normalized) && !normalized.includes("____") && !normalized.includes("________");
 };
 
+const validateFieldValue = (field: RecordField, value?: string): string => {
+  const normalized = String(value || "").trim();
+  if (!normalized || !isFieldComplete(normalized)) return "";
+
+  if (field.inputType === "number") {
+    const numberValue = Number(normalized);
+    if (!Number.isFinite(numberValue)) return `${field.label}必须填写数字`;
+    if (field.min !== undefined && numberValue < field.min) return `${field.label}不能小于 ${field.min}${field.unit || ""}`;
+    if (field.max !== undefined && numberValue > field.max) return `${field.label}不能大于 ${field.max}${field.unit || ""}`;
+  }
+
+  if (field.inputType === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return `${field.label}请选择正确日期`;
+  }
+
+  if (field.pattern && !new RegExp(field.pattern).test(normalized)) {
+    return field.validationMessage || `${field.label}格式不正确`;
+  }
+
+  return "";
+};
+
 const completionStats = computed(() => {
   const completed = allFields.value.filter(field => isFieldComplete(fieldValues[field.key] || "")).length;
   const requiredMissing = allFields.value.filter(
@@ -1009,6 +1088,69 @@ const myEditableFields = computed(() =>
 const myRequiredMissingCount = computed(
   () => myEditableFields.value.filter(item => item.field.required && !isFieldComplete(fieldValues[item.field.key] || "")).length
 );
+const fieldIssues = computed<FieldIssue[]>(() =>
+  recordSectionsByRule.value.flatMap(section =>
+    section.fields.flatMap(field => {
+      const value = fieldValues[field.key] || "";
+      if (field.required && !isFieldComplete(value)) {
+        return [
+          {
+            fieldKey: field.key,
+            fieldLabel: field.label,
+            sectionKey: section.key,
+            sectionTitle: section.title,
+            message: "必填项待补",
+            level: "missing" as const
+          }
+        ];
+      }
+      const invalidMessage = validateFieldValue(field, value);
+      return invalidMessage
+        ? [
+            {
+              fieldKey: field.key,
+              fieldLabel: field.label,
+              sectionKey: section.key,
+              sectionTitle: section.title,
+              message: invalidMessage,
+              level: "invalid" as const
+            }
+          ]
+        : [];
+    })
+  )
+);
+const issueForField = (field: RecordField) => fieldIssues.value.find(issue => issue.fieldKey === field.key);
+const sectionIssues = (section: RecordSection) => fieldIssues.value.filter(issue => issue.sectionKey === section.key);
+const myFieldIssues = computed(() => {
+  const editableKeys = new Set(myEditableFields.value.map(item => item.field.key));
+  return fieldIssues.value.filter(issue => editableKeys.has(issue.fieldKey));
+});
+const firstWorkflowIssue = computed(() => myFieldIssues.value[0] || fieldIssues.value[0]);
+const workflowHint = computed(() => {
+  if (myFieldIssues.value.length) {
+    return {
+      visible: true,
+      level: myFieldIssues.value.some(issue => issue.level === "invalid") ? "danger" : "warning",
+      title: `${roleName.value}还有 ${myFieldIssues.value.length} 项需要处理`,
+      desc: `${myFieldIssues.value[0].sectionTitle}：${myFieldIssues.value[0].fieldLabel} - ${myFieldIssues.value[0].message}`
+    };
+  }
+  if (fieldIssues.value.length) {
+    return {
+      visible: true,
+      level: "info",
+      title: "本岗位已处理，等待其他岗位补齐",
+      desc: `${fieldIssues.value[0].sectionTitle}：${fieldIssues.value[0].fieldLabel} - ${fieldIssues.value[0].message}`
+    };
+  }
+  return {
+    visible: true,
+    level: "success",
+    title: "病历字段已齐，可提交质控",
+    desc: "保存后可预览、打印或提交质控审核。"
+  };
+});
 const isLabMetricField = (field: RecordField) => Boolean(field.labPanel);
 const selectOptions = (field: RecordField) => {
   if (isLabMetricField(field)) return [];
@@ -1074,6 +1216,49 @@ const switchSection = (offset: number) => {
 const scrollToSection = (sectionKey: string) => {
   activeSectionKey.value = sectionKey;
   document.getElementById(`record-section-${sectionKey}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const focusIssue = async (issue?: FieldIssue) => {
+  if (!issue) return;
+  activeSectionKey.value = issue.sectionKey;
+  if (recordViewMode.value === "full" && collapsedSectionKeys.value.includes(issue.sectionKey)) {
+    collapsedSectionKeys.value = collapsedSectionKeys.value.filter(key => key !== issue.sectionKey);
+  }
+  await nextTick();
+  const targetIds =
+    recordViewMode.value === "mine"
+      ? [`my-field-${issue.fieldKey}`, `section-field-${issue.fieldKey}`, `active-field-${issue.fieldKey}`]
+      : [`section-field-${issue.fieldKey}`, `active-field-${issue.fieldKey}`, `my-field-${issue.fieldKey}`];
+  const target = targetIds.map(id => document.getElementById(id)).find(Boolean);
+  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  const input = target?.querySelector<HTMLElement>("input, textarea, .el-select__wrapper");
+  input?.focus();
+};
+
+const ensureNoBlockingIssues = (scope: "mine" | "all", actionText: string) => {
+  const issues = scope === "mine" ? myFieldIssues.value : fieldIssues.value;
+  if (!issues.length) return true;
+  const issue = issues[0];
+  recordViewMode.value = scope === "mine" ? "mine" : "full";
+  ElMessage.warning(`${actionText}前请先处理：${issue.fieldLabel} - ${issue.message}`);
+  void focusIssue(issue);
+  return false;
+};
+
+const ensureNoInvalidIssues = (scope: "mine" | "section", actionText: string) => {
+  const issues =
+    scope === "mine"
+      ? myFieldIssues.value
+      : fieldIssues.value.filter(
+          issue =>
+            issue.sectionKey === activeSection.value.key &&
+            activeSection.value.fields.some(field => field.key === issue.fieldKey && isEditable(field))
+        );
+  const invalid = issues.find(issue => issue.level === "invalid");
+  if (!invalid) return true;
+  ElMessage.warning(`${actionText}前请先修正：${invalid.fieldLabel} - ${invalid.message}`);
+  void focusIssue(invalid);
+  return false;
 };
 
 const saveSection = async (sectionKey: string) => {
@@ -1187,11 +1372,18 @@ const myFieldValues = () =>
     return payload;
   }, {});
 
-const saveCurrentSection = async () => saveRecordValues(currentSectionValues(), "当前章节已保存，字段校验通过");
+const saveCurrentSection = async () => {
+  if (!ensureNoInvalidIssues("section", "保存章节")) return false;
+  return saveRecordValues(currentSectionValues(), "当前章节已保存，字段校验通过");
+};
 
-const saveMyFields = async () => saveRecordValues(myFieldValues(), "本岗位内容已保存");
+const saveMyFields = async () => {
+  if (!ensureNoInvalidIssues("mine", "保存本岗位内容")) return false;
+  return saveRecordValues(myFieldValues(), "本岗位内容已保存");
+};
 
 const saveMyFieldsAndBack = async () => {
+  if (!ensureNoBlockingIssues("mine", "返回看板")) return;
   const saved = await saveMyFields();
   if (saved) router.push("/encounters/active");
 };
@@ -1199,6 +1391,7 @@ const saveMyFieldsAndBack = async () => {
 const saveActiveMode = () => (recordViewMode.value === "mine" ? saveMyFields() : saveCurrentSection());
 
 const submitArchive = async () => {
+  if (!ensureNoBlockingIssues("all", "提交质控")) return;
   const saved = await saveActiveMode();
   if (!saved) return;
   try {
@@ -1508,6 +1701,29 @@ onBeforeUnmount(() => {
   }
 }
 
+.field-issue-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  span {
+    margin-top: 2px;
+    color: #c2410c;
+    font-size: 12px;
+  }
+}
+
 .my-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1535,6 +1751,17 @@ onBeforeUnmount(() => {
 
   &.wide {
     grid-column: 1 / -1;
+  }
+
+  &.missing,
+  &.invalid {
+    background: #fff7ed;
+    border-color: #fdba74;
+    box-shadow: 0 8px 18px rgb(251 146 60 / 12%);
+  }
+
+  &.invalid {
+    border-color: #fb923c;
   }
 
   &.complete {
@@ -1743,6 +1970,60 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.workflow-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #94a3b8;
+  border-radius: 8px;
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong {
+    margin-top: 3px;
+    color: #0f172a;
+    font-size: 15px;
+  }
+
+  small {
+    margin-top: 3px;
+    color: #475569;
+  }
+
+  &.is-warning {
+    background: #fffbeb;
+    border-color: #fde68a;
+    border-left-color: #f59e0b;
+  }
+
+  &.is-danger {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    border-left-color: #f97316;
+  }
+
+  &.is-success {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+    border-left-color: #16a34a;
+  }
 }
 
 .context-card {
@@ -2038,6 +2319,18 @@ onBeforeUnmount(() => {
     border-radius: 6px;
   }
 
+  &.missing,
+  &.invalid {
+    padding-right: 8px;
+    padding-left: 8px;
+    background: #fff7ed;
+    border-radius: 6px;
+  }
+
+  &.invalid {
+    box-shadow: inset 3px 0 0 #f97316;
+  }
+
   &.locked {
     background: #f8fafc;
     border-radius: 4px;
@@ -2101,6 +2394,18 @@ onBeforeUnmount(() => {
     border-radius: 6px;
   }
 
+  &.missing,
+  &.invalid {
+    padding-right: 8px;
+    padding-left: 8px;
+    background: #fff7ed;
+    border-radius: 6px;
+  }
+
+  &.invalid {
+    box-shadow: inset 3px 0 0 #f97316;
+  }
+
   &.locked {
     .field-label small {
       color: #9ca3af;
@@ -2145,6 +2450,13 @@ onBeforeUnmount(() => {
     background: #f8fafc;
     box-shadow: 0 0 0 1px #edf0f3 inset;
   }
+}
+
+.field-inline-issue {
+  margin: 0;
+  color: #c2410c;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .preset-select {
@@ -2869,6 +3181,20 @@ onBeforeUnmount(() => {
   &.collapsed {
     background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
   }
+}
+
+.section-issue-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-top: 10px;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  font-size: 12px;
 }
 
 .section-card-head {
