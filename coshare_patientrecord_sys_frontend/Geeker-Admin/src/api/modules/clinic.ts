@@ -226,6 +226,12 @@ const persistDocumentFile = async (document: {
   contentDataUrl?: string;
   url?: string;
   storagePath?: string;
+  patientId?: string;
+  department?: string;
+  operator?: string;
+  operatorRole?: string;
+  type?: string;
+  typeLabel?: string;
 }) => {
   if (!document.contentDataUrl) {
     return {
@@ -236,7 +242,13 @@ const persistDocumentFile = async (document: {
 
   const { data } = await storeClinicFileApi({
     fileName: document.fileName,
-    contentDataUrl: document.contentDataUrl
+    contentDataUrl: document.contentDataUrl,
+    patientId: document.patientId,
+    department: document.department,
+    operator: document.operator,
+    operatorRole: document.operatorRole,
+    type: document.type,
+    typeLabel: document.typeLabel
   });
   return {
     url: data.url,
@@ -1147,7 +1159,13 @@ export const uploadDocumentsApi = async (params: UploadDocumentsParams) => {
   const uploaded: RecordAttachment[] = [];
   for (const [index, document] of params.documents.entries()) {
     const meta = documentTypeMeta(document.type, document.typeLabel, params.role);
-    const storedFile = await persistDocumentFile(document);
+    const storedFile = await persistDocumentFile({
+      ...document,
+      patientId: patient.id,
+      department: meta.department,
+      operator: params.operator,
+      operatorRole: params.role
+    });
     uploaded.push({
       key: `upload-${patient.id}-${Date.now()}-${index}`,
       title: document.typeLabel || document.fileName,
@@ -1270,7 +1288,16 @@ export const importSharedCaseApi = async (params: SharedCaseImportParams) => {
       unassigned.push(fileName);
       continue;
     }
-    const storedFile = typeof fileItem === "string" ? { url: "", storagePath: undefined } : await persistDocumentFile(fileItem);
+    const storedFile =
+      typeof fileItem === "string"
+        ? { url: "", storagePath: undefined }
+        : await persistDocumentFile({
+            ...fileItem,
+            patientId: patient!.id,
+            department: inferred.department,
+            operator: params.operator,
+            operatorRole: params.role || params.ownerDepartment
+          });
     imported.push({
       key: `legacy-${patient!.id}-${Date.now()}-${index}`,
       title: `旧共享病历-${inferred.fieldLabel}`,

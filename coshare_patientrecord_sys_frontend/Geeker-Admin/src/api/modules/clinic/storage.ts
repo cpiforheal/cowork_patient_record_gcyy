@@ -10,6 +10,8 @@ const API_UNAVAILABLE_MESSAGE =
 const INVALID_API_DATA_MESSAGE =
   "\u672c\u5730\u75c5\u5386\u6570\u636e\u670d\u52a1\u8fd4\u56de\u5f02\u5e38\uff0c\u8bf7\u91cd\u542f hos_refactor \u540e\u7aef\u540e\u518d\u8bd5";
 
+let baselineDb: ClinicDb | undefined;
+
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -28,6 +30,61 @@ const cacheDb = (db: ClinicDb) => {
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
+};
+
+const cloneDb = (db: ClinicDb): ClinicDb => JSON.parse(JSON.stringify(db)) as ClinicDb;
+
+const rememberBaseline = (db: ClinicDb) => {
+  baselineDb = cloneDb(db);
+};
+
+const sameJson = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+
+const diffArrayById = <T extends { id: string }>(nextRows: T[] = [], previousRows: T[] = []) => {
+  const previousMap = new Map(previousRows.map(row => [row.id, row]));
+  return nextRows.filter(row => !sameJson(row, previousMap.get(row.id)));
+};
+
+const diffObjectByKey = <T>(nextRows: Record<string, T> = {}, previousRows: Record<string, T> = {}) =>
+  Object.entries(nextRows).reduce<Record<string, T>>((result, [key, value]) => {
+    if (!sameJson(value, previousRows[key])) result[key] = value;
+    return result;
+  }, {});
+
+const buildMergePayload = (db: ClinicDb): Partial<ClinicDb> => {
+  if (!baselineDb) return db;
+  const payload: Partial<ClinicDb> = {};
+  const patients = diffArrayById(db.patients, baselineDb.patients);
+  if (patients.length) payload.patients = patients;
+
+  const records = diffObjectByKey(db.records, baselineDb.records);
+  if (Object.keys(records).length) payload.records = records;
+
+  const archive = diffObjectByKey(db.archive, baselineDb.archive);
+  if (Object.keys(archive).length) payload.archive = archive;
+
+  const documents = diffObjectByKey(db.documents ?? {}, baselineDb.documents ?? {});
+  if (Object.keys(documents).length) payload.documents = documents;
+
+  const accounts = diffArrayById(db.accounts ?? [], baselineDb.accounts ?? []);
+  if (accounts.length) payload.accounts = accounts;
+
+  const roles = diffArrayById(db.roles ?? [], baselineDb.roles ?? []);
+  if (roles.length) payload.roles = roles;
+
+  const departments = diffArrayById(db.departments ?? [], baselineDb.departments ?? []);
+  if (departments.length) payload.departments = departments;
+
+  const dictionaries = diffArrayById(db.dictionaries ?? [], baselineDb.dictionaries ?? []);
+  if (dictionaries.length) payload.dictionaries = dictionaries;
+
+  const templateFieldRules = diffArrayById(db.templateFieldRules ?? [], baselineDb.templateFieldRules ?? []);
+  if (templateFieldRules.length) payload.templateFieldRules = templateFieldRules;
+
+  const auditLogs = diffArrayById(db.auditLogs ?? [], baselineDb.auditLogs ?? []);
+  if (auditLogs.length) payload.auditLogs = auditLogs;
+
+  return payload;
 };
 
 const readLocalDb = (): ClinicDb => {
@@ -85,11 +142,12 @@ export const readDb = async (options: { allowLocalFallback?: boolean } = {}): Pr
       const payload = await parseClinicDbResponse(result);
       const rawDb = assertClinicDbPayload(payload.data);
       const shouldPersistBaseline = needsBaselineMigration(rawDb);
-      const db = hydrateDb(rawDb);
+      let db = hydrateDb(rawDb);
       if (shouldPersistBaseline) {
-        await writeDb(db);
+        db = await writeDb(db);
       }
       cacheDb(db);
+      rememberBaseline(db);
       return db;
     }
 
@@ -103,11 +161,12 @@ export const readDb = async (options: { allowLocalFallback?: boolean } = {}): Pr
   throw new Error(API_UNAVAILABLE_MESSAGE);
 };
 
-export const writeDb = async (db: ClinicDb) => {
-  const result = await fetch(CLINIC_API_DB_URL, {
-    method: "PUT",
+export const writeDb = async (db: ClinicDb): Promise<ClinicDb> => {
+  const mergePayload = buildMergePayload(db);
+  const result = await fetch(`${CLINIC_API_BASE_URL}/db/merge`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(db)
+    body: JSON.stringify(mergePayload)
   });
 
   if (!result.ok) {
@@ -115,10 +174,18 @@ export const writeDb = async (db: ClinicDb) => {
   }
 
   const payload = await parseClinicDbResponse(result);
-  if (isObjectRecord(payload.data) && typeof payload.data._revision === "string") {
-    db._revision = payload.data._revision;
+  if (isObjectRecord(payload.data) && isObjectRecord(payload.data.db)) {
+    const mergedDb = hydrateDb(assertClinicDbPayload(payload.data.db));
+    if (typeof payload.data._revision === "string") {
+      mergedDb._revision = payload.data._revision;
+    }
+    cacheDb(mergedDb);
+    rememberBaseline(mergedDb);
+    return mergedDb;
   }
   cacheDb(db);
+  rememberBaseline(db);
+  return db;
 };
 
 export const patchDb = async (patch: Partial<ClinicDb>) => {
@@ -140,6 +207,7 @@ export const patchDb = async (patch: Partial<ClinicDb>) => {
   }
   const hydrated = hydrateDb(db);
   cacheDb(hydrated);
+  rememberBaseline(hydrated);
   return hydrated;
 };
 

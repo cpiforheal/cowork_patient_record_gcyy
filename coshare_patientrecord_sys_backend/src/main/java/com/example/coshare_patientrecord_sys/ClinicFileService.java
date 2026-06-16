@@ -5,12 +5,15 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -22,16 +25,31 @@ import org.springframework.web.server.ResponseStatusException;
 public class ClinicFileService {
 
     private final Path attachmentDir;
+    private final long maxSizeBytes;
+    private final Set<String> allowedMimeTypes;
 
-    public ClinicFileService(@Value("${clinic.attachment-dir}") String attachmentDir) {
+    public ClinicFileService(
+        @Value("${clinic.attachment-dir}") String attachmentDir,
+        @Value("${clinic.attachment.max-size-bytes:52428800}") long maxSizeBytes,
+        @Value("${clinic.attachment.allowed-mime-types:image/jpeg,image/png,image/webp,image/bmp,image/gif,application/pdf}") String allowedMimeTypes
+    ) {
         this.attachmentDir = Path.of(attachmentDir).toAbsolutePath().normalize();
+        this.maxSizeBytes = maxSizeBytes;
+        this.allowedMimeTypes = new HashSet<>(
+            List.of(allowedMimeTypes.split(",")).stream().map(String::trim).filter(value -> !value.isBlank()).toList()
+        );
     }
 
     public ClinicStoredFile store(ClinicFileUploadRequest request) throws IOException {
         DataUrl dataUrl = parseDataUrl(request.contentDataUrl());
+        validateFile(dataUrl);
         String datePath = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        String patientSegment = sanitizePathSegment(request.patientId());
         String safeName = sanitizeFileName(request.fileName());
-        String storagePath = datePath + "/" + System.currentTimeMillis() + "-" + UUID.randomUUID() + "-" + safeName;
+        String storagePath = String.join(
+            "/",
+            List.of(datePath, patientSegment, System.currentTimeMillis() + "-" + UUID.randomUUID() + "-" + safeName)
+        );
         Path target = attachmentDir.resolve(storagePath).normalize();
         if (!target.startsWith(attachmentDir)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file path");
@@ -45,7 +63,8 @@ public class ClinicFileService {
             "/clinic-api/files/" + storagePath.replace("\\", "/"),
             storagePath.replace("\\", "/"),
             dataUrl.bytes().length,
-            dataUrl.mimeType()
+            dataUrl.mimeType(),
+            sha256(dataUrl.bytes())
         );
     }
 
@@ -91,6 +110,9 @@ public class ClinicFileService {
     }
 
     private DataUrl parseDataUrl(String contentDataUrl) {
+        if (contentDataUrl == null || contentDataUrl.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentDataUrl is required");
+        }
         int commaIndex = contentDataUrl.indexOf(',');
         if (!contentDataUrl.startsWith("data:") || commaIndex < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentDataUrl must be a data URL");
@@ -109,9 +131,39 @@ public class ClinicFileService {
         }
     }
 
+    private void validateFile(DataUrl dataUrl) {
+        if (dataUrl.bytes().length > maxSizeBytes) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "File exceeds max upload size");
+        }
+        if (!allowedMimeTypes.contains(dataUrl.mimeType())) {
+            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported file type");
+        }
+    }
+
     private String sanitizeFileName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return "attachment";
+        }
         String safe = fileName.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
         return safe.isBlank() ? "attachment" : safe;
+    }
+
+    private String sanitizePathSegment(String value) {
+        String safe = String.valueOf(value == null ? "unassigned" : value).replaceAll("[^A-Za-z0-9._-]", "_").trim();
+        return safe.isBlank() ? "unassigned" : safe;
+    }
+
+    private String sha256(byte[] bytes) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder builder = new StringBuilder();
+            for (byte item : digest) {
+                builder.append(String.format("%02x", item));
+            }
+            return builder.toString();
+        } catch (Exception error) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to hash file", error);
+        }
     }
 
     private record DataUrl(String mimeType, byte[] bytes) {

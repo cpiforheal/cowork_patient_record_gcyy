@@ -13,7 +13,15 @@ public class SecurityConfig {
         return http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/health", "/health/db", "/clinic-api/**").permitAll()
+                .requestMatchers(
+                    "/",
+                    "/index.html",
+                    "/favicon.ico",
+                    "/assets/**",
+                    "/health",
+                    "/health/db",
+                    "/clinic-api/**"
+                ).permitAll()
                 .anyRequest().authenticated()
             )
             .httpBasic(httpBasic -> {})

@@ -51,6 +51,13 @@ public class ClinicApiController {
         return ApiResult.of(200, "saved", Map.of("_revision", revision));
     }
 
+    @PostMapping("/clinic-api/db/merge")
+    public ApiResult<Map<String, Object>> mergeDb(@RequestBody Map<String, Object> payload) {
+        ObjectNode result = databaseService.mergeDb(objectMapper.valueToTree(payload));
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "merged", data);
+    }
+
     @PostMapping("/clinic-api/db/patch")
     public ApiResult<Map<String, Object>> patchDb(@RequestBody Map<String, Object> payload) {
         ObjectNode result = databaseService.patchDb(objectMapper.valueToTree(payload));

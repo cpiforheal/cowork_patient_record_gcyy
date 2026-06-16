@@ -5,6 +5,7 @@ public record ClinicStoredFile(
     String url,
     String storagePath,
     long size,
-    String mimeType
+    String mimeType,
+    String sha256
 ) {
 }

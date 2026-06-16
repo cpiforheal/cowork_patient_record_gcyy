@@ -6,15 +6,22 @@ export interface ClinicStoredFile {
   storagePath: string;
   size: number;
   mimeType: string;
+  sha256?: string;
 }
 
 export interface ClinicStoreFileParams {
   fileName: string;
   contentDataUrl: string;
+  patientId?: string;
+  department?: string;
+  operator?: string;
+  operatorRole?: string;
+  type?: string;
+  typeLabel?: string;
 }
 
 const CLINIC_API_FILES_URL = import.meta.env.VITE_CLINIC_API_FILES_URL || "/clinic-api/files";
-const API_UNAVAILABLE_MESSAGE = "本地病历文件服务未连接，请先在项目根目录运行 npm run api 后重试";
+const API_UNAVAILABLE_MESSAGE = "本地病历文件服务未连接，请确认后端服务正在运行";
 
 const parseClinicFileResponse = async (result: Response) => {
   const text = await result.text();

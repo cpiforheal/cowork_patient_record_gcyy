@@ -20,7 +20,12 @@ All responses share the `{ code, msg, data }` envelope. `code` mirrors the HTTP 
 | `GET` | `/health` | Service health check. |
 | `GET` | `/health/db` | MySQL profile and connection health check. |
 | `GET` | `/clinic-api/db` | Read the current clinic database from MySQL. The response includes `_revision`. |
-| `PUT` | `/clinic-api/db` | Save the current clinic database. The payload must contain `patients`, `records`, `archive`, and should include the latest `_revision`. |
+| `POST` | `/clinic-api/db/merge` | Merge the submitted clinic database payload into MySQL without clearing unrelated rows. The frontend uses this for normal saves. |
+| `PUT` | `/clinic-api/db` | Legacy full replacement save. Keep it for controlled migration only; it clears and rewrites the normalized tables. |
+| `POST` | `/clinic-api/db/patch` | Compatibility patch endpoint for small partial updates. |
+| `GET` | `/clinic-api/maintenance/status` | Runtime status, including MySQL counts, snapshots, attachment directory usage, and missing attachment references. |
+| `POST` | `/clinic-api/maintenance/snapshot` | Save a JSON snapshot of the current database state. |
+| `GET` | `/clinic-api/patients/duplicates` | Detect possible duplicate patient rows by name+phone or visit number. |
 | `POST` | `/clinic-api/files` | Upload one attachment encoded as a data URL. |
 | `GET` | `/clinic-api/files/{storagePath}` | Download a previously stored attachment by the `storagePath` returned from upload. |
 
@@ -28,14 +33,18 @@ Runtime business data is written to MySQL. Uploaded attachments are written to t
 
 ### Upload / download details
 
-- `POST /clinic-api/files` accepts `{ fileName, contentDataUrl }`, where `contentDataUrl` is a base64 data URL like `data:image/png;base64,...`. It responds with `{ fileName, url, storagePath, size, mimeType }`.
-- `url` is the public path (`/clinic-api/files/{storagePath}`); `storagePath` is a date-foldered name (`YYYY/MM/DD/<timestamp>-<rand>-<safeName>`).
+- `POST /clinic-api/files` accepts `{ fileName, contentDataUrl, patientId?, department?, operator?, operatorRole?, type?, typeLabel? }`, where `contentDataUrl` is a base64 data URL like `data:image/png;base64,...`.
+- The default accepted MIME types are JPEG, PNG, WebP, BMP, GIF, and PDF. The default max size is 50 MB and can be changed with `CLINIC_ATTACHMENT_MAX_SIZE_BYTES`.
+- It responds with `{ fileName, url, storagePath, size, mimeType, sha256 }`.
+- `url` is the public path (`/clinic-api/files/{storagePath}`); `storagePath` is a date and patient foldered name (`YYYY/MM/DD/<patientId>/<timestamp>-<rand>-<safeName>`).
 - The download route validates that the resolved path stays inside the attachments directory, rejecting path-traversal attempts with `400`.
 - Downloads use private no-store cache headers because attachments may contain sensitive medical information.
 
 ### Revision protection
 
-`GET /clinic-api/db` returns `_revision`. `PUT /clinic-api/db` should send the same `_revision`; if another terminal has saved newer data, the backend returns `409 Conflict` and the frontend should refresh before retrying.
+`GET /clinic-api/db` returns `_revision`. The normal frontend save path now uses `POST /clinic-api/db/merge`, which merges submitted patients, records, archive rows, documents, system dictionaries, and audit logs without deleting rows that are absent from the caller's stale snapshot.
+
+Use `PUT /clinic-api/db` only for deliberate migration or recovery because it clears and rewrites the compatibility tables.
 
 ## Data Shape
 
@@ -56,6 +65,6 @@ The current compatibility payload keeps the existing frontend data shape:
 ## Implementation Notes
 
 - Keep role and field ownership in the schema instead of hard-coding it across UI pages.
-- The current `/clinic-api/db` write path is still a compatibility layer. It writes normalized MySQL tables but accepts a whole database payload.
-- The next persistence step should split the API into row-level commands for patients, records, documents, accounts, roles, dictionaries, and audit logs.
+- The current save path is still a compatibility layer around the existing frontend data shape, but the default operation is merge/upsert rather than clear-and-rewrite.
+- The next persistence step should split high-frequency commands into row-level endpoints for patients, records, documents, accounts, roles, dictionaries, and audit logs.
 - `coshare_patientrecord_sys_frontend/Geeker-Admin/` is part of this repository. It is not a separate checkout; business changes are committed here directly.

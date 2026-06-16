@@ -224,6 +224,22 @@ public class ClinicDatabaseService {
         return result;
     }
 
+    @Transactional
+    public ObjectNode mergeDb(JsonNode incomingDb) {
+        if (incomingDb == null || !incomingDb.isObject()) {
+            throw new IllegalArgumentException("clinic db merge payload must be an object");
+        }
+
+        ObjectNode db = readDb();
+        mergePatch(db, incomingDb);
+        upsertMergedDb(db, incomingDb);
+
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("_revision", updateRevision());
+        result.set("db", readDb());
+        return result;
+    }
+
     public ObjectNode maintenanceStatus(Map<String, Object> fileStatus) {
         ObjectNode status = objectMapper.createObjectNode();
         status.put("revision", currentRevision());
@@ -321,6 +337,200 @@ public class ClinicDatabaseService {
 
         jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(db));
         return updateRevision();
+    }
+
+    private void upsertMergedDb(ObjectNode mergedDb, JsonNode incomingDb) {
+        upsertPatients(mergedDb.path("patients"), incomingDb.path("patients"));
+        upsertRecords(mergedDb.path("records"), incomingDb.path("records"));
+        upsertArchive(mergedDb.path("archive"), incomingDb.path("archive"));
+        upsertDocuments(mergedDb.path("documents"), incomingDb.path("documents"));
+        upsertSimpleArray("clinic_accounts", mergedDb.path("accounts"), incomingDb.path("accounts"), "id");
+        upsertSimpleArray("clinic_roles", mergedDb.path("roles"), incomingDb.path("roles"), "id");
+        upsertSimpleArray("clinic_departments", mergedDb.path("departments"), incomingDb.path("departments"), "id");
+        upsertSimpleArray("clinic_dictionaries", mergedDb.path("dictionaries"), incomingDb.path("dictionaries"), "id");
+        upsertSimpleArray("clinic_template_field_rules", mergedDb.path("templateFieldRules"), incomingDb.path("templateFieldRules"), "id");
+        upsertSimpleArray("clinic_audit_logs", mergedDb.path("auditLogs"), incomingDb.path("auditLogs"), "id");
+    }
+
+    private void upsertPatients(JsonNode mergedPatients, JsonNode incomingPatients) {
+        if (!incomingPatients.isArray()) return;
+        for (JsonNode incomingPatient : incomingPatients) {
+            String patientId = text(incomingPatient, "id");
+            JsonNode patient = findArrayItemById(mergedPatients, "id", patientId);
+            if (patient == null) continue;
+            jdbcTemplate.update("DELETE FROM clinic_patient_encounters WHERE patient_id = ?", patientId);
+            jdbcTemplate.update("""
+                INSERT INTO clinic_patients (
+                  id, name, visit_no, visit_date, visit_type, doctor, current_stage, completed_count,
+                  progress_percent, status, risk_type, created_at, updated_at, encounter_count,
+                  encounter_history_json, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                  name = VALUES(name), visit_no = VALUES(visit_no), visit_date = VALUES(visit_date),
+                  visit_type = VALUES(visit_type), doctor = VALUES(doctor), current_stage = VALUES(current_stage),
+                  completed_count = VALUES(completed_count), progress_percent = VALUES(progress_percent),
+                  status = VALUES(status), risk_type = VALUES(risk_type), created_at = VALUES(created_at),
+                  updated_at = VALUES(updated_at), encounter_count = VALUES(encounter_count),
+                  encounter_history_json = VALUES(encounter_history_json), raw_json = VALUES(raw_json)
+                """,
+                patientId,
+                text(patient, "name"),
+                text(patient, "visitNo"),
+                text(patient, "visitDate"),
+                text(patient, "visitType"),
+                text(patient, "doctor"),
+                text(patient, "currentStage"),
+                integer(patient, "completedCount"),
+                integer(patient, "progressPercent"),
+                text(patient, "status"),
+                text(patient, "riskType"),
+                text(patient, "createdAt"),
+                text(patient, "updatedAt"),
+                integer(patient, "encounterCount"),
+                toJson(patient.path("encounterHistory").isMissingNode() ? objectMapper.createArrayNode() : patient.path("encounterHistory")),
+                toJson(patient)
+            );
+            writePatientEncounters(patientId, patient);
+        }
+    }
+
+    private void upsertRecords(JsonNode mergedRecords, JsonNode incomingRecords) {
+        if (!incomingRecords.isObject()) return;
+        Iterator<Map.Entry<String, JsonNode>> fields = incomingRecords.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            JsonNode record = mergedRecords.path(entry.getKey());
+            if (!record.isObject()) continue;
+            jdbcTemplate.update("""
+                INSERT INTO clinic_record_fields (patient_id, fields_json) VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE fields_json = VALUES(fields_json)
+                """,
+                entry.getKey(),
+                toJson(record)
+            );
+            jdbcTemplate.update("DELETE FROM clinic_record_field_values WHERE patient_id = ?", entry.getKey());
+            writeRecordFieldValues(entry.getKey(), record);
+        }
+    }
+
+    private void upsertArchive(JsonNode mergedArchive, JsonNode incomingArchive) {
+        if (!incomingArchive.isObject()) return;
+        Iterator<Map.Entry<String, JsonNode>> fields = incomingArchive.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            JsonNode value = mergedArchive.path(entry.getKey());
+            if (!value.isObject()) continue;
+            jdbcTemplate.update("""
+                INSERT INTO clinic_archive (patient_id, submitted, version, generated_at, raw_json) VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE submitted = VALUES(submitted), version = VALUES(version),
+                  generated_at = VALUES(generated_at), raw_json = VALUES(raw_json)
+                """,
+                entry.getKey(),
+                value.path("submitted").asBoolean(false),
+                text(value, "version"),
+                text(value, "generatedAt"),
+                toJson(value)
+            );
+        }
+    }
+
+    private void upsertDocuments(JsonNode mergedDocuments, JsonNode incomingDocuments) {
+        if (!incomingDocuments.isObject()) return;
+        Iterator<Map.Entry<String, JsonNode>> patientDocuments = incomingDocuments.fields();
+        while (patientDocuments.hasNext()) {
+            Map.Entry<String, JsonNode> entry = patientDocuments.next();
+            JsonNode documents = mergedDocuments.path(entry.getKey());
+            if (!documents.isArray()) continue;
+            for (JsonNode document : documents) {
+                jdbcTemplate.update("""
+                    INSERT INTO clinic_documents (
+                      document_key, patient_id, file_name, type, type_label, department, status,
+                      storage_path, url, uploaded_at, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), type = VALUES(type),
+                      type_label = VALUES(type_label), department = VALUES(department), status = VALUES(status),
+                      storage_path = VALUES(storage_path), url = VALUES(url), uploaded_at = VALUES(uploaded_at),
+                      raw_json = VALUES(raw_json)
+                    """,
+                    text(document, "key", text(document, "id", entry.getKey() + "-" + System.nanoTime())),
+                    entry.getKey(),
+                    text(document, "fileName"),
+                    text(document, "type"),
+                    text(document, "typeLabel"),
+                    text(document, "department"),
+                    text(document, "status"),
+                    text(document, "storagePath"),
+                    text(document, "url"),
+                    text(document, "uploadedAt", text(document, "time")),
+                    toJson(document)
+                );
+            }
+        }
+    }
+
+    private void upsertSimpleArray(String table, JsonNode mergedRows, JsonNode incomingRows, String idKey) {
+        if (!incomingRows.isArray()) return;
+        for (JsonNode incomingRow : incomingRows) {
+            String id = text(incomingRow, idKey);
+            JsonNode row = findArrayItemById(mergedRows, idKey, id);
+            if (row == null) continue;
+            switch (table) {
+                case "clinic_accounts" -> jdbcTemplate.update("""
+                    INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role),
+                      status = VALUES(status), raw_json = VALUES(raw_json)
+                    """,
+                    id, text(row, "username"), text(row, "role"), text(row, "status"), toJson(row)
+                );
+                case "clinic_roles" -> jdbcTemplate.update("""
+                    INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE role = VALUES(role), name = VALUES(name), raw_json = VALUES(raw_json)
+                    """,
+                    id, text(row, "role"), text(row, "name"), toJson(row)
+                );
+                case "clinic_departments" -> jdbcTemplate.update("""
+                    INSERT INTO clinic_departments (id, name, raw_json) VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE name = VALUES(name), raw_json = VALUES(raw_json)
+                    """,
+                    id, text(row, "name"), toJson(row)
+                );
+                case "clinic_dictionaries" -> jdbcTemplate.update("""
+                    INSERT INTO clinic_dictionaries (id, name, department, raw_json) VALUES (?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE name = VALUES(name), department = VALUES(department), raw_json = VALUES(raw_json)
+                    """,
+                    id, text(row, "name"), text(row, "department"), toJson(row)
+                );
+                case "clinic_template_field_rules" -> jdbcTemplate.update("""
+                    INSERT INTO clinic_template_field_rules (
+                      id, section_key, field_key, field_label, department, enabled, sort_no, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE section_key = VALUES(section_key), field_key = VALUES(field_key),
+                      field_label = VALUES(field_label), department = VALUES(department), enabled = VALUES(enabled),
+                      sort_no = VALUES(sort_no), raw_json = VALUES(raw_json)
+                    """,
+                    id, text(row, "sectionKey"), text(row, "fieldKey"), text(row, "fieldLabel"),
+                    text(row, "department"), row.path("enabled").asBoolean(true), integer(row, "sortNo"), toJson(row)
+                );
+                case "clinic_audit_logs" -> jdbcTemplate.update("""
+                    INSERT INTO clinic_audit_logs (
+                      id, time, operator, role, patient, patient_id, module, action, result, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE raw_json = VALUES(raw_json)
+                    """,
+                    id, text(row, "time"), text(row, "operator"), text(row, "role"), text(row, "patient"),
+                    text(row, "patientId"), text(row, "module"), text(row, "action"), text(row, "result"), toJson(row)
+                );
+                default -> throw new IllegalArgumentException("Unsupported table: " + table);
+            }
+        }
+    }
+
+    private JsonNode findArrayItemById(JsonNode rows, String idKey, String id) {
+        if (id == null || id.isBlank() || !rows.isArray()) return null;
+        for (JsonNode row : rows) {
+            if (id.equals(text(row, idKey))) return row;
+        }
+        return null;
     }
 
     private void mergePatch(ObjectNode db, JsonNode patch) {

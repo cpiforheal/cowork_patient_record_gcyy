@@ -1,75 +1,108 @@
 # 协和患者病历协同系统
 
-本仓库当前为前后端分离版本：
+本项目是面向门诊一线生产场景的患者病历协同系统，当前已重构为前后端分离架构：
 
-- `coshare_patientrecord_sys_backend/`：Spring Boot 后端，使用 MySQL 保存患者、病历、附件索引、账号、角色、审计日志等数据。
-- `coshare_patientrecord_sys_frontend/Geeker-Admin/`：Vue 3 前端，面向内部门诊生产场景使用。
-- `runtime/`：本机运行期数据目录，建议放置附件等运行文件，不纳入 Git。
+- `coshare_patientrecord_sys_backend/`：Spring Boot 后端，负责业务数据、附件上传下载、健康检查和运行维护接口。
+- `coshare_patientrecord_sys_frontend/Geeker-Admin/`：Vue 3 前端，负责患者登记、病历填写、附件查看、账号与操作记录等工作台界面。
+- `tools/`：内测打包、环境检查等交付工具。
+- `docs/`：部署清单、验收动作和运行建议。
 
-## 内测部署边界
+## 当前交付定位
 
-目标主机最低需要准备：
+系统优先满足内网门诊试运行：一台固定主机部署后端、前端和附件目录，科室电脑通过浏览器访问该主机 IP 使用系统。数据写入 MySQL，病历附件落到指定磁盘目录，便于后续备份、排查和审计。
 
-1. JDK 17。
-2. MySQL 8.x，并创建数据库，例如 `hos_refactor`。
-3. 一个可长期保留的附件目录，建议放在大容量磁盘，并纳入备份计划。
-4. 前端静态文件部署服务，可使用 Nginx、IIS 或后端同机静态服务。
+内测部署包会把前端静态文件和后端 jar 放在同一个交付目录中，目标主机启动后端即可同时访问页面和接口，降低非开发人员部署难度。
 
-## 后端启动
+## 开发环境
 
-进入后端目录：
+建议准备：
 
-```bash
-cd coshare_patientrecord_sys_backend
-```
+- JDK 17
+- MySQL 8.x
+- Node.js 18 或更高版本
+- pnpm
 
-使用 MySQL profile 启动：
+后端配置主要通过环境变量覆盖：
 
-```bash
-mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=mysql
-```
-
-常用配置可通过环境变量覆盖：
-
-| 变量 | 默认值 | 用途 |
+| 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `SERVER_PORT` | `8080` | 后端端口 |
+| `SERVER_PORT` | `8080` | 系统访问端口 |
 | `MYSQL_URL` | `jdbc:mysql://localhost:3306/hos_refactor?...` | MySQL 连接地址 |
-| `MYSQL_USERNAME` | `root` | MySQL 用户名 |
-| `MYSQL_PASSWORD` | `123456` | MySQL 密码 |
+| `MYSQL_USERNAME` | `root` | 数据库账号 |
+| `MYSQL_PASSWORD` | `123456` | 数据库密码 |
+| `CLINIC_ATTACHMENT_DIR` | `runtime/clinic-attachments` | 附件保存目录 |
+| `CLINIC_FRONTEND_DIR` | 空 | 内测包中由启动脚本自动指向前端目录 |
 
-后端健康检查：
+## 本地启动
 
-```bash
-curl http://localhost:8080/health/db
+后端：
+
+```powershell
+cd coshare_patientrecord_sys_backend
+.\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 
-## 前端打包
+前端：
 
-进入前端目录：
-
-```bash
-cd coshare_patientrecord_sys_frontend/Geeker-Admin
+```powershell
+cd coshare_patientrecord_sys_frontend\Geeker-Admin
 pnpm install
-pnpm build:pro
+pnpm dev
 ```
 
-生产配置默认访问同源接口：
+## 生成内测交付包
 
-- `/clinic-api/db`
-- `/clinic-api/files`
+在项目根目录执行：
 
-如前端和后端不在同一域名或端口，需要在网关或静态服务中配置反向代理。
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\package-pilot.ps1
+```
 
-## 数据与附件
+默认输出目录：
 
-- MySQL 保存业务结构化数据。
-- 附件文件应存放在目标主机固定磁盘目录，不应放入 Git。
-- 医疗资料包含敏感信息，内测阶段也要做账号隔离、主机访问控制、磁盘备份和操作审计。
-- 当前附件下载已禁用公共长期缓存，减少病历附件在浏览器或中间代理中长期残留。
+```text
+release\clinic-pilot-package
+```
 
-## 当前注意事项
+交付包包含：
 
-- 系统仍保留整库保存接口 `/clinic-api/db`，已增加 `_revision` 版本保护，能降低多终端旧页面覆盖新数据的风险。
-- 下一阶段建议把高频写入动作拆成行级接口，例如新建患者、保存病历字段、上传附件、账号角色维护，逐步替代整库 PUT。
-- 内测前建议在目标主机做一次完整演练：建库、启动后端、部署前端、创建患者、上传附件、保存病历、重启服务后复查数据。
+- `01-check-host.bat`
+- `02-start-system.bat`
+- `03-stop-system.bat`
+- `config\runtime.env`
+- `backend\app.jar`
+- `frontend\`
+- `logs\`
+- `docs\`
+- `README.md`
+
+目标主机第一次使用时，先编辑 `config\runtime.env` 中的数据库密码和附件目录，再双击 `01-check-host.bat`。检查通过后双击 `02-start-system.bat`，本机访问 `http://localhost:8080/`，其他内网电脑访问 `http://目标主机IP:8080/`。
+
+更完整的部署步骤见 [docs/pilot-deployment-checklist.md](docs/pilot-deployment-checklist.md)。
+
+## 内测前必须验收
+
+至少走通以下闭环：
+
+1. 登录系统。
+2. 新建患者。
+3. 填写门诊病历字段并保存。
+4. 上传图片或 PDF 附件。
+5. 关闭浏览器后重新进入，确认患者、病历和附件仍可查看。
+6. 重启系统后再次确认数据未丢失。
+7. 在另一台内网电脑访问目标主机 IP，确认查询、保存和上传正常。
+8. 运行 `01-check-host.bat`，确认数据库、附件目录和维护状态可检查。
+
+## 运行维护建议
+
+- MySQL 数据库和附件目录必须一起备份，只备份其中一个都不能完整恢复病历资料。
+- 附件目录建议放在大容量磁盘，例如 `D:\hos_patient_record_runtime\attachments`。
+- 内测主机建议固定 IP，并限制在单位内网访问。
+- 每次升级前保留上一版交付包、数据库备份和附件目录备份。
+- 如果页面打不开，先运行交付包里的 `01-check-host.bat`，再查看 `logs\backend.err.log`。
+
+## 当前仍需关注
+
+- 内测阶段已尽量降低部署门槛，但目标主机仍需要 Java 17、MySQL 8.x 和基础防火墙放行。
+- 医疗资料包含敏感信息，试运行也应明确账号权限、主机访问范围、备份责任和日志留存规则。
+- 后续如果进入更大范围生产，建议继续补强自动备份、权限审计、账号密码策略和数据库迁移脚本。
