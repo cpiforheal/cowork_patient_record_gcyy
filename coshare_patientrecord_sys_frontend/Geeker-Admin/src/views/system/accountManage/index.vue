@@ -227,8 +227,8 @@ const openAccountDrawer = (row?: AccountRow) => {
 };
 
 const saveAccount = async () => {
-  await saveAccountApi({ ...accountForm, operator: operatorName.value, operatorRole: operatorRole.value });
-  ElMessage.success("账号已保存");
+  const { data } = await saveAccountApi({ ...accountForm, operator: operatorName.value, operatorRole: operatorRole.value });
+  ElMessage.success(data?.temporaryPassword ? `账号已保存，临时密码：${data.temporaryPassword}` : "账号已保存");
   drawerVisible.value = false;
   refresh();
 };
@@ -252,14 +252,20 @@ const toggleStatusFromDrawer = async () => {
 };
 
 const resetPassword = async (row: AccountRow) => {
-  await resetAccountPasswordApi(row.id, { operator: operatorName.value, operatorRole: operatorRole.value });
-  ElMessage.success("密码已重置为 123456");
+  const { data } = await resetAccountPasswordApi(row.id, {
+    operator: operatorName.value,
+    operatorRole: operatorRole.value
+  });
+  ElMessage.success(`密码已重置，临时密码：${data.temporaryPassword}`);
 };
 
 const resetPasswordFromDrawer = async () => {
   if (!accountForm.id) return;
-  await resetAccountPasswordApi(accountForm.id, { operator: operatorName.value, operatorRole: operatorRole.value });
-  ElMessage.success("密码已重置为 123456");
+  const { data } = await resetAccountPasswordApi(accountForm.id, {
+    operator: operatorName.value,
+    operatorRole: operatorRole.value
+  });
+  ElMessage.success(`密码已重置，临时密码：${data.temporaryPassword}`);
 };
 </script>
 

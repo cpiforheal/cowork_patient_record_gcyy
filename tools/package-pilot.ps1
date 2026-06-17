@@ -97,13 +97,13 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "check-pilot-host.ps1") -Destina
 
 $runtimeEnv = @'
 # Runtime config for the pilot host.
-# Usually only MYSQL_PASSWORD and CLINIC_ATTACHMENT_DIR need to be changed.
+# MYSQL_PASSWORD must be changed to the actual database password before startup.
 SERVER_PORT=8080
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
 MYSQL_URL=jdbc:mysql://localhost:3306/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
 MYSQL_USERNAME=root
-MYSQL_PASSWORD=123456
+MYSQL_PASSWORD=CHANGE_ME_STRONG_PASSWORD
 CLINIC_ATTACHMENT_DIR=D:\hos_patient_record_runtime\attachments
 CLINIC_ATTACHMENT_MAX_SIZE_BYTES=52428800
 '@
@@ -154,6 +154,9 @@ New-Item -ItemType Directory -Force -Path $runtimeDir, $logsDir | Out-Null
 Read-RuntimeEnv -Path $configPath
 
 if (-not $env:SERVER_PORT) { $env:SERVER_PORT = "8080" }
+if (-not $env:MYSQL_PASSWORD -or $env:MYSQL_PASSWORD -eq "CHANGE_ME_STRONG_PASSWORD") {
+    throw "MYSQL_PASSWORD in config\runtime.env must be changed to the actual database password before startup."
+}
 if (-not $env:CLINIC_ATTACHMENT_DIR) { $env:CLINIC_ATTACHMENT_DIR = Join-Path $runtimeDir "attachments" }
 $env:CLINIC_FRONTEND_DIR = $frontendDir
 $env:SPRING_PROFILES_ACTIVE = "mysql"

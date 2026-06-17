@@ -91,6 +91,73 @@
     0 0 5px var(--el-color-primary) !important;
 }
 
+.hos-card {
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-card);
+}
+
+.hos-interactive {
+  min-height: var(--hos-touch-target);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.hos-interactive:hover {
+  box-shadow: var(--hos-shadow-card-hover);
+  transform: translateY(-1px);
+}
+
+.hos-interactive:active {
+  transform: translateY(0);
+}
+
+.hos-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.hos-zero {
+  color: var(--hos-text-muted) !important;
+  background: var(--hos-status-draft-soft) !important;
+  border-color: var(--hos-border-light) !important;
+}
+
+.hos-risk-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+}
+
+.hos-risk-legend span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.hos-risk-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.hos-risk-legend .danger {
+  background: var(--hos-status-danger);
+}
+
+.hos-risk-legend .warning {
+  background: var(--hos-status-warning);
+}
+
+.hos-risk-legend .success {
+  background: var(--hos-status-success);
+}
+
 /* 外边距、内边距全局样式 */
 @for $i from 0 through 100 {
   .mt#{$i} {

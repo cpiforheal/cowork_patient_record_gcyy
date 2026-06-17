@@ -531,12 +531,15 @@ onMounted(loadDateTree);
 }
 
 .tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tree-count {
+  flex: 0 0 auto;
   min-width: 28px;
   padding: 1px 7px;
   color: #008f84;

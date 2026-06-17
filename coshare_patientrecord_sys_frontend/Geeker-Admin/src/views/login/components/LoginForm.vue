@@ -7,8 +7,6 @@
         placeholder="请选择科室"
         :loading="departmentLoading"
         @change="handleDepartmentChange"
-        @focus="emit('fieldFocus', 'username')"
-        @blur="emit('fieldFocus', 'idle')"
       >
         <template #prefix>
           <el-icon class="el-input__icon">
@@ -25,8 +23,6 @@
         :disabled="!loginForm.department"
         :loading="accountLoading"
         placeholder="请选择账号"
-        @focus="emit('fieldFocus', 'username')"
-        @blur="emit('fieldFocus', 'idle')"
       >
         <template #prefix>
           <el-icon class="el-input__icon">
@@ -41,7 +37,7 @@
         >
           <div class="account-option">
             <span class="account-name">{{ account.name }}</span>
-            <span class="account-meta">{{ account.username }} · {{ account.roleLabel }}</span>
+            <span class="account-meta">{{ account.department }}</span>
           </div>
         </el-option>
       </el-select>
@@ -53,8 +49,6 @@
         placeholder="请输入登录密码"
         show-password
         autocomplete="new-password"
-        @focus="emit('fieldFocus', 'password')"
-        @blur="emit('fieldFocus', 'idle')"
       >
         <template #prefix>
           <el-icon class="el-input__icon">
@@ -78,19 +72,13 @@ import { useRouter } from "vue-router";
 import { HOME_URL } from "@/config";
 import { Login } from "@/api/interface";
 import { ElNotification } from "element-plus";
-import { loginApi } from "@/api/modules/login";
-import { getAccountListApi, getDepartmentListApi } from "@/api/modules/clinic";
-import type { AccountRow } from "@/api/modules/clinic/types";
+import { getLoginAccountsApi, getLoginOptionsApi, loginApi, type LoginAccountOption } from "@/api/modules/login";
 import { useUserStore } from "@/stores/modules/user";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
 import { CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
 import type { ElForm } from "element-plus";
-
-const emit = defineEmits<{
-  fieldFocus: ["idle" | "username" | "password"];
-}>();
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -108,7 +96,7 @@ const loginRules = reactive({
 const loading = ref(false);
 const departmentLoading = ref(false);
 const accountLoading = ref(false);
-const accountOptions = ref<AccountRow[]>([]);
+const accountOptions = ref<LoginAccountOption[]>([]);
 const departmentOptions = ref<string[]>([]);
 const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
   department: "",
@@ -116,20 +104,14 @@ const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
   password: ""
 });
 
-const activeAccounts = computed(() => accountOptions.value.filter(account => account.status === "启用"));
-const filteredAccountOptions = computed(() =>
-  activeAccounts.value.filter(account => !loginForm.department || account.department === loginForm.department)
-);
+const filteredAccountOptions = computed(() => accountOptions.value);
 
-const accountLabel = (account: AccountRow) => `${account.name}（${account.username}）`;
+const accountLabel = (account: LoginAccountOption) => account.name;
 
 const syncDepartmentOptions = (departmentNames: string[]) => {
   const names = new Set<string>();
   departmentNames.forEach(name => {
     if (name.trim()) names.add(name.trim());
-  });
-  activeAccounts.value.forEach(account => {
-    if (account.department.trim()) names.add(account.department.trim());
   });
   departmentOptions.value = Array.from(names).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
 };
@@ -137,12 +119,9 @@ const syncDepartmentOptions = (departmentNames: string[]) => {
 const loadDepartments = async () => {
   departmentLoading.value = true;
   try {
-    const [{ data: departmentData }, { data: accountData }] = await Promise.all([
-      getDepartmentListApi({ pageNum: 1, pageSize: 500 }),
-      getAccountListApi({ pageNum: 1, pageSize: 500, status: "启用" })
-    ]);
-    accountOptions.value = accountData.list;
-    syncDepartmentOptions(departmentData.list.map(item => item.name));
+    const { data } = await getLoginOptionsApi();
+    accountOptions.value = [];
+    syncDepartmentOptions(data.departments);
   } catch (error) {
     ElNotification({
       title: "登录数据加载失败",
@@ -162,11 +141,9 @@ const loadAccountsByDepartment = async (department: string) => {
   }
   accountLoading.value = true;
   try {
-    const { data } = await getAccountListApi({ pageNum: 1, pageSize: 500, department, status: "启用" });
-    const remoteAccounts = data.list.filter(account => account.status === "启用");
-    const otherAccounts = accountOptions.value.filter(account => account.department !== department);
-    accountOptions.value = [...otherAccounts, ...remoteAccounts];
-    if (remoteAccounts.length === 1) loginForm.username = remoteAccounts[0].username;
+    const { data } = await getLoginAccountsApi(department);
+    accountOptions.value = data.accounts;
+    if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
   } catch (error) {
     ElNotification({
       title: "账号列表加载失败",
@@ -182,6 +159,7 @@ const loadAccountsByDepartment = async (department: string) => {
 const handleDepartmentChange = async (department: string) => {
   loginForm.username = "";
   loginForm.password = "";
+  accountOptions.value = [];
   await loadAccountsByDepartment(department);
 };
 

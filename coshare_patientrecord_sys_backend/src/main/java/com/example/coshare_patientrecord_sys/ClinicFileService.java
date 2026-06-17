@@ -68,6 +68,20 @@ public class ClinicFileService {
         );
     }
 
+    public ClinicStoredFile store(ClinicFileUploadRequest request, AuthSessionService.SessionUser user) throws IOException {
+        ClinicFileUploadRequest trustedRequest = new ClinicFileUploadRequest(
+            request.fileName(),
+            request.contentDataUrl(),
+            request.patientId(),
+            user.department(),
+            user.name(),
+            user.role(),
+            request.type(),
+            request.typeLabel()
+        );
+        return store(trustedRequest);
+    }
+
     public FileSystemResource load(String rawStoragePath) {
         String storagePath = URLDecoder.decode(rawStoragePath, StandardCharsets.UTF_8);
         Path target = attachmentDir.resolve(storagePath).normalize();

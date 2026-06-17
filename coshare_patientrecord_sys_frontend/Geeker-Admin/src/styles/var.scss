@@ -10,6 +10,10 @@ $primary-color: var(--el-color-primary);
   --hos-text-muted: #9ca3af;
   --hos-border: #e5e7eb;
   --hos-border-light: #edf0f3;
+  --hos-primary: #0f766e;
+  --hos-primary-soft: #ecfdf5;
+  --hos-accent: #2563eb;
+  --hos-accent-soft: #eff6ff;
   --hos-accent-medical: #15803d;
   --hos-accent-medical-light: #ecfdf5;
   --hos-status-success: #16a34a;
@@ -33,6 +37,11 @@ $primary-color: var(--el-color-primary);
   --hos-radius-sm: 4px;
   --hos-radius-md: 8px;
   --hos-radius-lg: 12px;
+  --hos-radius-card: 8px;
+  --hos-shadow-card: 0 1px 2px rgb(15 23 42 / 4%);
+  --hos-shadow-card-hover: 0 10px 24px rgb(15 23 42 / 8%);
+  --hos-touch-target: 40px;
+  --hos-density-scale: 1;
 }
 
 html.dark {
@@ -44,6 +53,10 @@ html.dark {
   --hos-text-muted: #6b7280;
   --hos-border: #374151;
   --hos-border-light: #1f2937;
+  --hos-primary: #2dd4bf;
+  --hos-primary-soft: #042f2e;
+  --hos-accent: #60a5fa;
+  --hos-accent-soft: #172554;
   --hos-accent-medical: #4ade80;
   --hos-accent-medical-light: #052e16;
   --hos-status-success: #4ade80;
@@ -58,4 +71,11 @@ html.dark {
   --hos-status-draft-soft: #1f2937;
   --hos-field-locked-bg: #1f2937;
   --hos-field-editable-bg: #111827;
+  --hos-shadow-card: 0 1px 2px rgb(0 0 0 / 24%);
+  --hos-shadow-card-hover: 0 12px 28px rgb(0 0 0 / 32%);
+}
+
+html[data-density="compact"] {
+  --hos-density-scale: 0.86;
+  --hos-touch-target: 36px;
 }

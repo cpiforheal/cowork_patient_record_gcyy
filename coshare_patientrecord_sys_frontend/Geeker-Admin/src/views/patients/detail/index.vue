@@ -36,6 +36,7 @@
             <Transition name="save-status-fade">
               <span v-if="autoSaveStatus === 'saving'" class="save-indicator saving">正在保存...</span>
               <span v-else-if="autoSaveStatus === 'saved'" class="save-indicator saved">已自动保存</span>
+              <span v-else-if="autoSaveStatus === 'conflict'" class="save-indicator conflict">保存冲突，草稿已保留</span>
               <span v-else-if="autoSaveStatus === 'error'" class="save-indicator error" @click="saveActiveMode">
                 保存失败，点击重试
               </span>
@@ -58,6 +59,15 @@
           <el-button :icon="DocumentCopy" @click="copyRecord">复制</el-button>
           <el-button type="primary" :icon="Printer" @click="openPreviewThenPrint">打印/PDF</el-button>
         </div>
+      </section>
+
+      <section v-if="autoSaveStatus === 'conflict'" class="conflict-draft-banner screen-only">
+        <div>
+          <strong>检测到其他终端已更新</strong>
+          <small>当前填写已保存在本机草稿{{ conflictDraftSavedAt ? `（${conflictDraftSavedAt}）` : "" }}，先不要刷新页面。</small>
+        </div>
+        <el-button plain @click="viewServerLatest">查看服务器最新</el-button>
+        <el-button type="primary" @click="restoreConflictDraft">恢复本机草稿</el-button>
       </section>
 
       <section class="record-context-strip screen-only">
@@ -628,7 +638,7 @@
                     <div class="attachment-image-frame">
                       <img
                         v-if="isImageAttachment(attachment) && canOpenAttachment(attachment)"
-                        :src="normalizeAttachmentUrl(attachment.url)"
+                        :src="attachmentPreviewUrl(attachment.url)"
                         :alt="attachment.title"
                       />
                       <div v-else class="attachment-file-placeholder">
@@ -761,8 +771,10 @@ import {
   roleLabel,
   type RecordAttachment,
   type RecordField,
-  type RecordSection
+  type RecordSection,
+  type UserRole
 } from "@/config/fieldPermissions";
+import { fetchClinicFileBlobUrl } from "@/api/modules/clinic/files";
 import { useUserStore } from "@/stores/modules/user";
 import medicalLogoUrl from "@/assets/images/logo.jpg";
 import LabMetricEditor from "./components/LabMetricEditor.vue";
@@ -771,7 +783,9 @@ const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 
-const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
+const userRoles: UserRole[] = ["admin", "frontdesk", "lab", "ecg", "ultrasound", "doctor", "nurse", "quality"];
+const normalizeUserRole = (role?: string): UserRole => (userRoles.includes(role as UserRole) ? (role as UserRole) : "frontdesk");
+const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 const roleName = computed(() => roleLabel(currentRole.value));
 const patientId = computed(() => String(route.params.id || "1"));
 const recordViewMode = ref<"mine" | "full">("mine");
@@ -788,7 +802,10 @@ const voidDialogVisible = ref(false);
 const voiding = ref(false);
 const voidTarget = ref<RecordAttachment>();
 const voidReason = ref("");
-const autoSaveStatus = ref<"idle" | "saving" | "saved" | "error">("idle");
+const attachmentBlobUrls = ref<Record<string, string>>({});
+type AutoSaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
+const autoSaveStatus = ref<AutoSaveStatus>("idle");
+const conflictDraftSavedAt = ref("");
 const currentAttachments = ref<RecordAttachment[]>(defaultRecordAttachments);
 const patientAuditLogs = ref<AuditLogRow[]>([]);
 const templateRules = ref<TemplateFieldRule[]>([]);
@@ -859,6 +876,7 @@ const activeSection = computed(
 );
 const isFirstSection = computed(() => activeIndex.value === 0);
 const isLastSection = computed(() => activeIndex.value === recordSectionsByRule.value.length - 1);
+const conflictDraftKey = computed(() => `clinic-record-draft:${patientId.value}`);
 
 const fieldValues = reactive(
   recordSections.reduce<Record<string, string>>((values, section) => {
@@ -997,6 +1015,25 @@ const isImageAttachment = (attachment: RecordAttachment) => {
   const url = normalizeAttachmentUrl(attachment.url);
   return url.startsWith("data:image/") || imageAttachmentPattern.test(attachment.fileName) || imageAttachmentPattern.test(url);
 };
+const attachmentPreviewUrl = (url?: string) => attachmentBlobUrls.value[normalizeAttachmentUrl(url)] || "";
+const loadAttachmentBlobUrl = async (url: string) => {
+  const normalizedUrl = normalizeAttachmentUrl(url);
+  if (!normalizedUrl || normalizedUrl.startsWith("data:")) return normalizedUrl;
+  if (attachmentBlobUrls.value[normalizedUrl]) return attachmentBlobUrls.value[normalizedUrl];
+  const blobUrl = await fetchClinicFileBlobUrl(normalizedUrl);
+  attachmentBlobUrls.value = { ...attachmentBlobUrls.value, [normalizedUrl]: blobUrl };
+  return blobUrl;
+};
+const preloadAttachmentPreviews = () => {
+  currentAttachments.value
+    .filter(isImageAttachment)
+    .filter(canOpenAttachment)
+    .forEach(attachment => {
+      loadAttachmentBlobUrl(attachment.url).catch(() => {
+        // Preview failure should not block record rendering; opening the file still reports a visible error.
+      });
+    });
+};
 
 const currentVisitType = computed(() => patientInfo.value?.visitType || fieldValues.admissionWay || "门诊");
 const isInpatientRecord = computed(() => currentVisitType.value.includes("住院"));
@@ -1102,7 +1139,7 @@ const myRequiredMissingCount = computed(
 );
 const fieldIssues = computed<FieldIssue[]>(() =>
   recordSectionsByRule.value.flatMap(section =>
-    section.fields.flatMap(field => {
+    section.fields.flatMap((field): FieldIssue[] => {
       const value = fieldValues[field.key] || "";
       if (field.required && !isFieldComplete(value)) {
         return [
@@ -1339,6 +1376,7 @@ const loadPatientDetail = async () => {
     patientInfo.value = data.patient;
     Object.assign(fieldValues, data.fieldValues);
     currentAttachments.value = data.attachments;
+    preloadAttachmentPreviews();
     archiveSubmitted.value = data.archiveSubmitted;
     archiveVersion.value = data.archiveVersion;
     generatedAt.value = data.generatedAt;
@@ -1352,6 +1390,66 @@ const loadPatientDetail = async () => {
   }
 };
 
+const isConflictError = (error: unknown) => {
+  const message = String((error as Error)?.message || "");
+  return (
+    message.includes("409") || message.includes("冲突") || message.includes("已被其他终端更新") || message.includes("revision")
+  );
+};
+
+const persistLocalDraft = (values: Record<string, string>) => {
+  const savedAt = new Date().toLocaleString();
+  localStorage.setItem(
+    conflictDraftKey.value,
+    JSON.stringify({
+      patientId: patientId.value,
+      savedAt,
+      mode: recordViewMode.value,
+      sectionKey: activeSectionKey.value,
+      values
+    })
+  );
+  conflictDraftSavedAt.value = savedAt;
+};
+
+const clearLocalDraft = () => {
+  localStorage.removeItem(conflictDraftKey.value);
+  conflictDraftSavedAt.value = "";
+};
+
+const restoreConflictDraft = () => {
+  const raw = localStorage.getItem(conflictDraftKey.value);
+  if (!raw) {
+    ElMessage.warning("未找到本机草稿");
+    return;
+  }
+  try {
+    const draft = JSON.parse(raw) as {
+      values?: Record<string, string>;
+      mode?: "mine" | "full";
+      sectionKey?: string;
+      savedAt?: string;
+    };
+    if (draft.mode) recordViewMode.value = draft.mode;
+    if (draft.sectionKey && recordSectionsByRule.value.some(section => section.key === draft.sectionKey)) {
+      activeSectionKey.value = draft.sectionKey;
+    }
+    Object.assign(fieldValues, draft.values || {});
+    conflictDraftSavedAt.value = draft.savedAt || conflictDraftSavedAt.value;
+    autoSaveStatus.value = "error";
+    ElMessage.info("已恢复本机草稿，请检查后重新保存");
+  } catch {
+    ElMessage.error("本机草稿读取失败");
+  }
+};
+
+const viewServerLatest = async () => {
+  const values = recordViewMode.value === "mine" ? myFieldValues() : currentSectionValues();
+  persistLocalDraft(values);
+  await loadPatientDetail();
+  autoSaveStatus.value = "conflict";
+};
+
 const saveRecordValues = async (values: Record<string, string>, successText: string) => {
   saving.value = true;
   try {
@@ -1362,10 +1460,18 @@ const saveRecordValues = async (values: Record<string, string>, successText: str
       values
     });
     await loadPatientAuditLogs();
+    clearLocalDraft();
+    autoSaveStatus.value = "saved";
     const issueCount = data.issues.length;
     ElMessage.success(issueCount ? `已保存，仍有 ${issueCount} 个必填字段待补` : successText);
     return true;
   } catch (error) {
+    if (isConflictError(error)) {
+      persistLocalDraft(values);
+      autoSaveStatus.value = "conflict";
+      ElMessage.warning("检测到其他终端已更新，当前填写已保存到本机草稿");
+      return false;
+    }
     ElMessage.error((error as Error).message);
     return false;
   } finally {
@@ -1459,13 +1565,18 @@ const confirmVoidDocument = async () => {
   }
 };
 
-const openAttachment = (url: string) => {
+const openAttachment = async (url: string) => {
   const normalizedUrl = normalizeAttachmentUrl(url);
   if (isInvalidAttachmentUrl(normalizedUrl)) {
     ElMessage.warning("附件已建档，但原始文件地址无效，请重新上传或从旧共享目录补录");
     return;
   }
-  window.open(normalizedUrl, "_blank", "noopener,noreferrer");
+  try {
+    const blobUrl = await loadAttachmentBlobUrl(normalizedUrl);
+    window.open(blobUrl, "_blank", "noopener,noreferrer");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
 };
 
 const fallbackLogo = () => {
@@ -1502,14 +1613,20 @@ const openPreviewThenPrint = async () => {
 const debouncedAutoSave = useDebounceFn(async () => {
   if (saving.value || archiveSubmitted.value) return;
   autoSaveStatus.value = "saving";
+  const values = recordViewMode.value === "mine" ? myFieldValues() : currentSectionValues();
   try {
-    const values = recordViewMode.value === "mine" ? myFieldValues() : currentSectionValues();
     await savePatientRecordApi({ id: patientId.value, role: currentRole.value, operator: roleName.value, values });
+    clearLocalDraft();
     autoSaveStatus.value = "saved";
     window.setTimeout(() => {
       if (autoSaveStatus.value === "saved") autoSaveStatus.value = "idle";
     }, 3000);
-  } catch {
+  } catch (error) {
+    if (isConflictError(error)) {
+      persistLocalDraft(values);
+      autoSaveStatus.value = "conflict";
+      return;
+    }
     autoSaveStatus.value = "error";
   }
 }, 2000);
@@ -1556,6 +1673,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleKeydown);
+  Object.values(attachmentBlobUrls.value).forEach(url => URL.revokeObjectURL(url));
 });
 </script>
 
@@ -1966,6 +2084,11 @@ onBeforeUnmount(() => {
     cursor: pointer;
     text-decoration: underline;
   }
+
+  &.conflict {
+    color: var(--el-color-warning);
+    font-weight: 600;
+  }
 }
 
 .save-status-fade-enter-active,
@@ -1976,6 +2099,35 @@ onBeforeUnmount(() => {
 .save-status-fade-enter-from,
 .save-status-fade-leave-to {
   opacity: 0;
+}
+
+.conflict-draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: rgb(255 251 235 / 92%);
+  border: 1px solid rgb(245 158 11 / 28%);
+  border-left: 4px solid var(--el-color-warning);
+  border-radius: 8px;
+
+  div {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  strong {
+    color: #92400e;
+    font-size: 14px;
+  }
+
+  small {
+    color: #78350f;
+    line-height: 1.45;
+  }
 }
 
 .record-context-strip {
@@ -2621,8 +2773,7 @@ onBeforeUnmount(() => {
   min-height: 1120px;
   padding: 36px 44px 58px;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
+  background: linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
     radial-gradient(circle at 100% 0, rgb(39 174 96 / 8%), transparent 32%), #ffffff;
   border: 1px solid #dcebe5;
   border-radius: 16px;

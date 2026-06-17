@@ -12,6 +12,22 @@ const __APP_INFO__ = {
   lastBuildTime: dayjs().format("YYYY-MM-DD HH:mm:ss")
 };
 
+const chunkGroups = [
+  { name: "vue-vendor", deps: ["vue", "vue-router", "pinia", "pinia-plugin-persistedstate"] },
+  { name: "drag", deps: ["sortablejs"] },
+  { name: "utils", deps: ["axios", "dayjs", "mitt", "nprogress", "qs", "screenfull", "@vueuse/core"] }
+];
+
+const manualChunks = (id: string) => {
+  const normalizedId = id.replace(/\\/g, "/");
+  if (!normalizedId.includes("/node_modules/")) return;
+
+  const group = chunkGroups.find(item =>
+    item.deps.some(dep => normalizedId.includes(`/node_modules/${dep}/`) || normalizedId.includes(`/node_modules/${dep}.`))
+  );
+  return group?.name;
+};
+
 // @see: https://vitejs.dev/config/
 export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
   const root = process.cwd();
@@ -23,8 +39,7 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
     root,
     resolve: {
       alias: {
-        "@": resolve(__dirname, "./src"),
-        "vue-i18n": "vue-i18n/dist/vue-i18n.cjs.js"
+        "@": resolve(__dirname, "./src")
       }
     },
     define: {
@@ -70,7 +85,8 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
           // Static resource classification and packaging
           chunkFileNames: "assets/js/[name]-[hash].js",
           entryFileNames: "assets/js/[name]-[hash].js",
-          assetFileNames: "assets/[ext]/[name]-[hash].[ext]"
+          assetFileNames: "assets/[ext]/[name]-[hash].[ext]",
+          manualChunks
         }
       }
     }

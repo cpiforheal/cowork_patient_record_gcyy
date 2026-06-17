@@ -125,7 +125,7 @@ const seedAccounts = (): AccountRow[] => [
   {
     id: "admin",
     username: "admin",
-    password: "123456",
+    password: "Init@Coshare2026!",
     name: roleLabel("admin"),
     department: roleToDepartment.admin,
     role: "admin",
@@ -199,7 +199,8 @@ export const hydrateDb = (db: ClinicDb) => {
   db.records ??= {};
   db.archive ??= {};
   db.documents ??= {};
-  db.accounts ??= seedAccounts();
+  const existingAccounts = db.accounts ?? seedAccounts();
+  db.accounts = existingAccounts;
   const defaultRoles = seedRoles();
   const hasCompleteRoleBaseline = defaultRoles.every(defaultRole => db.roles?.some(role => role.role === defaultRole.role));
   if (!db.roles?.every(role => role.id && role.role && typeof role.members === "number") || !hasCompleteRoleBaseline) {
@@ -231,23 +232,23 @@ export const hydrateDb = (db: ClinicDb) => {
   });
 
   const seedAdmin = seedAccounts()[0];
-  const storedAdmin = db.accounts.find(account => account.username === "admin" || account.role === "admin");
-  const storedBusinessAccounts = db.accounts.filter(account => account.username !== "admin" && account.role !== "admin");
-  db.accounts = [
-    {
-      ...seedAdmin,
-      ...storedAdmin,
-      id: "admin",
-      username: "admin",
-      password: storedAdmin?.password || seedAdmin.password,
-      department: roleToDepartment.admin,
-      role: "admin",
-      roleLabel: roleLabel("admin"),
-      scope: "系统全局配置",
-      status: "启用"
-    },
-    ...storedBusinessAccounts
-  ];
+  const storedAdmin = existingAccounts.find(account => account.username === "admin" || account.role === "admin");
+  const storedBusinessAccounts = existingAccounts.filter(account => account.username !== "admin" && account.role !== "admin");
+  const adminAccount: AccountRow = {
+    ...seedAdmin,
+    ...storedAdmin,
+    id: "admin",
+    username: "admin",
+    department: roleToDepartment.admin,
+    role: "admin",
+    roleLabel: roleLabel("admin"),
+    scope: "系统全局配置",
+    status: "启用"
+  };
+  if (storedAdmin && !storedAdmin.password) {
+    delete adminAccount.password;
+  }
+  db.accounts = [adminAccount, ...storedBusinessAccounts];
   const roleMemberCounts = db.accounts.reduce<Record<string, number>>((result, account) => {
     result[account.role] = (result[account.role] || 0) + 1;
     return result;

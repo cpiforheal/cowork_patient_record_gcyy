@@ -4,6 +4,18 @@ import { getAuthButtonListApi, getAuthMenuListApi } from "@/api/modules/login";
 import { getFlatMenuList, getShowMenuList, getAllBreadcrumbList } from "@/utils";
 import { useUserStore } from "@/stores/modules/user";
 
+const INVENTORY_MENU_PATHS = [
+  "/inventory",
+  "/inventory/overview",
+  "/inventory/executive",
+  "/inventory/requests",
+  "/inventory/stock",
+  "/inventory/items",
+  "/inventory/weekly",
+  "/inventory/controls",
+  "/inventory/trace"
+];
+
 const ROLE_MENU_PATHS: Record<string, string[]> = {
   admin: ["*"],
   frontdesk: [
@@ -15,7 +27,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/templates",
-    "/templates/record"
+    "/templates/record",
+    ...INVENTORY_MENU_PATHS
   ],
   lab: [
     "/home/index",
@@ -26,7 +39,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/templates",
-    "/templates/record"
+    "/templates/record",
+    ...INVENTORY_MENU_PATHS
   ],
   ecg: [
     "/home/index",
@@ -37,7 +51,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/templates",
-    "/templates/record"
+    "/templates/record",
+    ...INVENTORY_MENU_PATHS
   ],
   ultrasound: [
     "/home/index",
@@ -48,7 +63,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/templates",
-    "/templates/record"
+    "/templates/record",
+    ...INVENTORY_MENU_PATHS
   ],
   doctor: [
     "/home/index",
@@ -58,7 +74,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/templates",
-    "/templates/record"
+    "/templates/record",
+    ...INVENTORY_MENU_PATHS
   ],
   nurse: [
     "/home/index",
@@ -69,7 +86,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/templates",
-    "/templates/record"
+    "/templates/record",
+    ...INVENTORY_MENU_PATHS
   ],
   quality: [
     "/home/index",
@@ -82,10 +100,33 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates/record",
     "/documents",
     "/documents/recycle",
+    ...INVENTORY_MENU_PATHS,
     "/audit",
     "/audit/review",
     "/audit/log"
   ]
+};
+
+const INVENTORY_STAFF_BUTTONS = {
+  inventoryOverview: ["inventory:read", "inventory:request", "inventory:receive"],
+  inventoryExecutive: ["inventory:read"],
+  inventoryRequests: ["inventory:read", "inventory:request", "inventory:receive"],
+  inventoryStock: ["inventory:read"],
+  inventoryItems: ["inventory:read"],
+  inventoryWeekly: ["inventory:read", "inventory:request", "inventory:receive"],
+  inventoryControls: ["inventory:read", "inventory:receive"],
+  inventoryTrace: ["inventory:read", "inventory:export"]
+};
+
+const INVENTORY_MANAGER_BUTTONS = {
+  inventoryOverview: ["inventory:read", "inventory:approve", "inventory:issue", "inventory:count", "inventory:export"],
+  inventoryExecutive: ["inventory:read", "inventory:approve", "inventory:issue", "inventory:count", "inventory:export"],
+  inventoryRequests: ["inventory:read", "inventory:approve", "inventory:issue", "inventory:export"],
+  inventoryStock: ["inventory:read", "inventory:issue", "inventory:export"],
+  inventoryItems: ["inventory:read", "inventory:issue", "inventory:export"],
+  inventoryWeekly: ["inventory:read", "inventory:count", "inventory:export"],
+  inventoryControls: ["inventory:read", "inventory:count", "inventory:export"],
+  inventoryTrace: ["inventory:read", "inventory:export"]
 };
 
 const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
@@ -95,7 +136,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:create", "patient:read", "patient:update"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload", "document:download"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload", "document:download"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   lab: {
     home: ["view"],
@@ -103,7 +145,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   ecg: {
     home: ["view"],
@@ -111,7 +154,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   ultrasound: {
     home: ["view"],
@@ -119,14 +163,16 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   doctor: {
     home: ["view"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:download"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:download"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   nurse: {
     home: ["view"],
@@ -134,7 +180,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   quality: {
     home: ["view"],
@@ -143,6 +190,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     patientList: ["patient:read"],
     patientDetail: ["field:read", "document:read", "document:void", "document:download"],
     documentRecycle: ["document:restore", "document:read"],
+    ...INVENTORY_MANAGER_BUTTONS,
     auditReview: ["audit:read", "quality:approve", "quality:reject"],
     auditLog: ["audit:read", "audit:export"]
   }

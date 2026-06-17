@@ -55,7 +55,7 @@ config\runtime.env
 | `SERVER_PORT` | `8080` | 系统访问端口 |
 | `MYSQL_URL` | `jdbc:mysql://localhost:3306/hos_refactor?...` | 数据库地址和库名 |
 | `MYSQL_USERNAME` | `root` | 数据库账号 |
-| `MYSQL_PASSWORD` | `123456` | 数据库密码 |
+| `MYSQL_PASSWORD` | 无默认值 | 数据库密码，内测/生产必须显式配置 |
 | `CLINIC_ATTACHMENT_DIR` | `D:\hos_patient_record_runtime\attachments` | 病历附件保存目录 |
 
 如果 MySQL 不在本机，把 `MYSQL_URL` 中的 `localhost` 改成数据库主机 IP。

@@ -10,14 +10,17 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -30,10 +33,12 @@ public class ClinicDatabaseService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final PasswordEncoder passwordEncoder;
 
-    public ClinicDatabaseService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public ClinicDatabaseService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, PasswordEncoder passwordEncoder) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @PostConstruct
@@ -192,6 +197,7 @@ public class ClinicDatabaseService {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """);
         ensureRevision();
+        migrateLegacyAccountPasswords();
     }
 
     public ObjectNode readDb() {
@@ -201,13 +207,54 @@ public class ClinicDatabaseService {
         db.set("records", readRecords());
         db.set("archive", readArchive());
         db.set("documents", readDocuments());
-        db.set("accounts", readArray("clinic_accounts", "raw_json", "username ASC"));
+        db.set("accounts", readAccounts());
         db.set("roles", readArray("clinic_roles", "raw_json", "name ASC"));
         db.set("departments", readArray("clinic_departments", "raw_json", "name ASC"));
         db.set("dictionaries", readArray("clinic_dictionaries", "raw_json", "name ASC"));
         db.set("templateFieldRules", readArray("clinic_template_field_rules", "raw_json", "sort_no ASC, id ASC"));
         db.set("auditLogs", readArray("clinic_audit_logs", "raw_json", "time DESC, id DESC"));
         return db;
+    }
+
+    public ObjectNode readDbForUser(AuthSessionService.SessionUser user) {
+        ObjectNode db = readDb();
+        if (isClinicAdmin(user)) {
+            return db;
+        }
+
+        Set<String> allowedFields = allowedFieldKeys(db.path("templateFieldRules"), user.role());
+        ObjectNode records = filterRecords(db.path("records"), allowedFields);
+        ObjectNode documents = filterDocuments(db.path("documents"), user);
+        db.set("records", records);
+        db.set("archive", objectMapper.createObjectNode());
+        db.set("documents", documents);
+        db.set("patients", filterPatients(db.path("patients"), records, documents));
+        db.set("accounts", currentAccountOnly(db.path("accounts"), user));
+        db.set("auditLogs", objectMapper.createArrayNode());
+        return db;
+    }
+
+    public ObjectNode prepareWritePayload(JsonNode payload, AuthSessionService.SessionUser user) {
+        if (payload == null || !payload.isObject()) {
+            throw new IllegalArgumentException("clinic db write payload must be an object");
+        }
+
+        ObjectNode writable = ((ObjectNode) payload).deepCopy();
+        stampAuditLogs(writable.path("auditLogs"), user);
+        stampDocuments(writable.path("documents"), user, isClinicAdmin(user));
+
+        if (isClinicAdmin(user)) {
+            return writable;
+        }
+
+        removeAdminSections(writable);
+        Set<String> allowedFields = allowedFieldKeys(
+            readArray("clinic_template_field_rules", "raw_json", "sort_no ASC, id ASC"),
+            user.role()
+        );
+        filterWritableRecords(writable.path("records"), allowedFields);
+        filterWritableDocuments(writable.path("documents"), user);
+        return writable;
     }
 
     @Transactional
@@ -308,6 +355,22 @@ public class ClinicDatabaseService {
         return paths;
     }
 
+    public boolean canReadStoragePath(String storagePath, AuthSessionService.SessionUser user) {
+        if (isClinicAdmin(user)) return true;
+        if (storagePath == null || storagePath.isBlank()) return false;
+        List<String> rows = jdbcTemplate.query(
+            "SELECT raw_json FROM clinic_documents WHERE storage_path = ? LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString("raw_json"),
+            storagePath
+        );
+        if (rows.isEmpty()) return false;
+        try {
+            return canReadDocument(objectMapper.readTree(rows.get(0)), user);
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
     @Transactional
     public String writeDb(JsonNode db) {
         if (db == null || !db.isObject()) {
@@ -323,19 +386,22 @@ public class ClinicDatabaseService {
             );
         }
 
-        clearTables();
-        writePatients(db.path("patients"));
-        writeRecords(db.path("records"));
-        writeArchive(db.path("archive"));
-        writeDocuments(db.path("documents"));
-        writeSimpleArray("clinic_accounts", db.path("accounts"), List.of("id", "username", "role", "status"));
-        writeSimpleArray("clinic_roles", db.path("roles"), List.of("id", "role", "name"));
-        writeSimpleArray("clinic_departments", db.path("departments"), List.of("id", "name"));
-        writeSimpleArray("clinic_dictionaries", db.path("dictionaries"), List.of("id", "name", "department"));
-        writeSimpleArray("clinic_template_field_rules", db.path("templateFieldRules"), List.of("id", "sectionKey", "fieldKey", "fieldLabel", "department", "enabled", "sortNo"));
-        writeSimpleArray("clinic_audit_logs", db.path("auditLogs"), List.of("id", "time", "operator", "role", "patient", "patientId", "module", "action", "result"));
+        ObjectNode writableDb = ((ObjectNode) db).deepCopy();
+        hydrateAccountPasswords(writableDb);
 
-        jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(db));
+        clearTables();
+        writePatients(writableDb.path("patients"));
+        writeRecords(writableDb.path("records"));
+        writeArchive(writableDb.path("archive"));
+        writeDocuments(writableDb.path("documents"));
+        writeSimpleArray("clinic_accounts", writableDb.path("accounts"), List.of("id", "username", "role", "status"));
+        writeSimpleArray("clinic_roles", writableDb.path("roles"), List.of("id", "role", "name"));
+        writeSimpleArray("clinic_departments", writableDb.path("departments"), List.of("id", "name"));
+        writeSimpleArray("clinic_dictionaries", writableDb.path("dictionaries"), List.of("id", "name", "department"));
+        writeSimpleArray("clinic_template_field_rules", writableDb.path("templateFieldRules"), List.of("id", "sectionKey", "fieldKey", "fieldLabel", "department", "enabled", "sortNo"));
+        writeSimpleArray("clinic_audit_logs", writableDb.path("auditLogs"), List.of("id", "time", "operator", "role", "patient", "patientId", "module", "action", "result"));
+
+        jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(writableDb));
         return updateRevision();
     }
 
@@ -475,13 +541,16 @@ public class ClinicDatabaseService {
             JsonNode row = findArrayItemById(mergedRows, idKey, id);
             if (row == null) continue;
             switch (table) {
-                case "clinic_accounts" -> jdbcTemplate.update("""
+                case "clinic_accounts" -> {
+                    ObjectNode account = secureAccountRow(row);
+                    jdbcTemplate.update("""
                     INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role),
                       status = VALUES(status), raw_json = VALUES(raw_json)
                     """,
-                    id, text(row, "username"), text(row, "role"), text(row, "status"), toJson(row)
-                );
+                    id, text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
+                    );
+                }
                 case "clinic_roles" -> jdbcTemplate.update("""
                     INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE role = VALUES(role), name = VALUES(name), raw_json = VALUES(raw_json)
@@ -533,9 +602,77 @@ public class ClinicDatabaseService {
         return null;
     }
 
+    private ObjectNode secureAccountRow(JsonNode row) {
+        ObjectNode account = asObject(row).deepCopy();
+        String id = text(account, "id");
+        String incomingPasswordHash = text(account, "passwordHash");
+        String incomingPassword = text(account, "password");
+        account.remove("password");
+        if (!incomingPasswordHash.isBlank()) {
+            account.put("passwordHash", isBcrypt(incomingPasswordHash) ? incomingPasswordHash : passwordEncoder.encode(incomingPasswordHash));
+            return account;
+        }
+        if (!incomingPassword.isBlank()) {
+            account.put("passwordHash", passwordEncoder.encode(incomingPassword));
+            return account;
+        }
+        String existingPasswordHash = existingAccountPasswordHash(id);
+        if (!existingPasswordHash.isBlank()) {
+            account.put("passwordHash", isBcrypt(existingPasswordHash) ? existingPasswordHash : passwordEncoder.encode(existingPasswordHash));
+        }
+        return account;
+    }
+
+    private String existingAccountPasswordHash(String id) {
+        if (id.isBlank()) return "";
+        List<String> values = jdbcTemplate.query(
+            "SELECT raw_json FROM clinic_accounts WHERE id = ? LIMIT 1",
+            (resultSet, rowNum) -> {
+                JsonNode raw = readJson(resultSet, "raw_json");
+                return text(raw, "passwordHash", text(raw, "password"));
+            },
+            id
+        );
+        return values.isEmpty() ? "" : values.get(0);
+    }
+
+    private void hydrateAccountPasswords(ObjectNode db) {
+        JsonNode accounts = db.path("accounts");
+        if (!accounts.isArray()) return;
+        for (JsonNode row : accounts) {
+            if (!row.isObject()) continue;
+            ObjectNode account = (ObjectNode) row;
+            if (!text(account, "passwordHash").isBlank() || !text(account, "password").isBlank()) continue;
+            String existingPassword = existingAccountPasswordHash(text(account, "id"));
+            if (!existingPassword.isBlank()) {
+                account.put("passwordHash", isBcrypt(existingPassword) ? existingPassword : passwordEncoder.encode(existingPassword));
+            }
+        }
+    }
+
+    private void migrateLegacyAccountPasswords() {
+        List<JsonNode> accounts = jdbcTemplate.query(
+            "SELECT raw_json FROM clinic_accounts",
+            (resultSet, rowNum) -> readJson(resultSet, "raw_json")
+        );
+        for (JsonNode account : accounts) {
+            ObjectNode secured = secureAccountRow(account);
+            if (secured.equals(account)) continue;
+            jdbcTemplate.update("UPDATE clinic_accounts SET raw_json = ? WHERE id = ?", toJson(secured), text(secured, "id"));
+        }
+    }
+
+    private ObjectNode asObject(JsonNode node) {
+        return node != null && node.isObject() ? (ObjectNode) node : objectMapper.createObjectNode();
+    }
+
+    private boolean isBcrypt(String value) {
+        return value != null && (value.startsWith("$2a$") || value.startsWith("$2b$") || value.startsWith("$2y$"));
+    }
+
     private void mergePatch(ObjectNode db, JsonNode patch) {
         mergeArrayById(db.withArray("patients"), patch.path("patients"), "id");
-        mergeObjectProperties((ObjectNode) db.path("records"), patch.path("records"));
+        mergeRecordProperties((ObjectNode) db.path("records"), patch.path("records"));
         mergeObjectProperties((ObjectNode) db.path("archive"), patch.path("archive"));
         mergeDocuments((ObjectNode) db.path("documents"), patch.path("documents"));
         mergeArrayById(db.withArray("accounts"), patch.path("accounts"), "id");
@@ -544,6 +681,18 @@ public class ClinicDatabaseService {
         mergeArrayById(db.withArray("dictionaries"), patch.path("dictionaries"), "id");
         mergeArrayById(db.withArray("templateFieldRules"), patch.path("templateFieldRules"), "id");
         mergeAuditLogs(db.withArray("auditLogs"), patch.path("auditLogs"));
+    }
+
+    private void mergeRecordProperties(ObjectNode target, JsonNode values) {
+        if (!values.isObject()) return;
+        values.fields().forEachRemaining(entry -> {
+            ObjectNode patientRecord = target.has(entry.getKey()) && target.get(entry.getKey()).isObject()
+                ? (ObjectNode) target.get(entry.getKey())
+                : target.putObject(entry.getKey());
+            if (entry.getValue() != null && entry.getValue().isObject()) {
+                entry.getValue().fields().forEachRemaining(field -> patientRecord.set(field.getKey(), field.getValue()));
+            }
+        });
     }
 
     private void mergeObjectProperties(ObjectNode target, JsonNode values) {
@@ -773,10 +922,13 @@ public class ClinicDatabaseService {
         if (!rows.isArray()) return;
         for (JsonNode row : rows) {
             switch (table) {
-                case "clinic_accounts" -> jdbcTemplate.update(
+                case "clinic_accounts" -> {
+                    ObjectNode account = secureAccountRow(row);
+                    jdbcTemplate.update(
                     "INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)",
-                    text(row, "id"), text(row, "username"), text(row, "role"), text(row, "status"), toJson(row)
-                );
+                    text(account, "id"), text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
+                    );
+                }
                 case "clinic_roles" -> jdbcTemplate.update(
                     "INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)",
                     text(row, "id"), text(row, "role"), text(row, "name"), toJson(row)
@@ -818,6 +970,205 @@ public class ClinicDatabaseService {
             rows.add(readJson(resultSet, jsonColumn));
         });
         return rows;
+    }
+
+    private ArrayNode readAccounts() {
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query("SELECT raw_json FROM clinic_accounts ORDER BY username ASC", resultSet -> {
+            JsonNode raw = readJson(resultSet, "raw_json");
+            ObjectNode account = raw.isObject() ? (ObjectNode) raw.deepCopy() : objectMapper.createObjectNode();
+            account.remove(List.of("password", "passwordHash"));
+            rows.add(account);
+        });
+        return rows;
+    }
+
+    private boolean isClinicAdmin(AuthSessionService.SessionUser user) {
+        return user != null && ("admin".equals(user.role()) || "quality".equals(user.role()));
+    }
+
+    private void removeAdminSections(ObjectNode payload) {
+        payload.remove(List.of("accounts", "roles", "departments", "dictionaries", "templateFieldRules"));
+    }
+
+    private void stampAuditLogs(JsonNode auditLogs, AuthSessionService.SessionUser user) {
+        if (auditLogs == null || !auditLogs.isArray()) return;
+        for (JsonNode auditLog : auditLogs) {
+            if (!auditLog.isObject()) continue;
+            ObjectNode row = (ObjectNode) auditLog;
+            row.put("operator", user.name());
+            row.put("role", user.roleLabel());
+            row.put("operatorId", user.id());
+            row.put("operatorUsername", user.username());
+            row.put("operatorDepartment", user.department());
+        }
+    }
+
+    private void stampDocuments(JsonNode documents, AuthSessionService.SessionUser user, boolean allowOriginalDepartment) {
+        if (documents == null || !documents.isObject()) return;
+        documents.fields().forEachRemaining(entry -> {
+            if (!entry.getValue().isArray()) return;
+            for (JsonNode document : entry.getValue()) {
+                if (!document.isObject()) continue;
+                ObjectNode row = (ObjectNode) document;
+                row.put("uploader", user.name());
+                row.put("uploaderRole", user.role());
+                row.put("operator", user.name());
+                row.put("operatorRole", user.role());
+                row.put("operatorId", user.id());
+                row.put("operatorUsername", user.username());
+                if (!allowOriginalDepartment || text(row, "department").isBlank()) {
+                    row.put("department", user.department());
+                }
+            }
+        });
+    }
+
+    private void filterWritableRecords(JsonNode records, Set<String> allowedFields) {
+        if (records == null || !records.isObject()) return;
+        Iterator<Map.Entry<String, JsonNode>> patientRecords = records.fields();
+        while (patientRecords.hasNext()) {
+            Map.Entry<String, JsonNode> entry = patientRecords.next();
+            if (!entry.getValue().isObject()) {
+                patientRecords.remove();
+                continue;
+            }
+            ObjectNode patientRecord = (ObjectNode) entry.getValue();
+            Iterator<Map.Entry<String, JsonNode>> fields = patientRecord.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                if (!allowedFields.contains(field.getKey())) {
+                    fields.remove();
+                }
+            }
+            if (patientRecord.isEmpty()) {
+                patientRecords.remove();
+            }
+        }
+    }
+
+    private void filterWritableDocuments(JsonNode documents, AuthSessionService.SessionUser user) {
+        if (documents == null || !documents.isObject()) return;
+        Iterator<Map.Entry<String, JsonNode>> patientDocuments = documents.fields();
+        while (patientDocuments.hasNext()) {
+            Map.Entry<String, JsonNode> entry = patientDocuments.next();
+            if (!entry.getValue().isArray()) {
+                patientDocuments.remove();
+                continue;
+            }
+            ArrayNode filtered = objectMapper.createArrayNode();
+            for (JsonNode document : entry.getValue()) {
+                if (canReadDocument(document, user)) {
+                    filtered.add(document);
+                }
+            }
+            if (filtered.isEmpty()) {
+                patientDocuments.remove();
+            } else {
+                ((ObjectNode) documents).set(entry.getKey(), filtered);
+            }
+        }
+    }
+
+    private Set<String> allowedFieldKeys(JsonNode templateFieldRules, String role) {
+        Set<String> allowedFields = new HashSet<>();
+        if (templateFieldRules != null && templateFieldRules.isArray()) {
+            for (JsonNode rule : templateFieldRules) {
+                if (!rule.path("enabled").asBoolean(true)) continue;
+                JsonNode editors = rule.path("editors");
+                if (editors.isArray()) {
+                    for (JsonNode editor : editors) {
+                        if (role.equals(editor.asText())) {
+                            String fieldKey = text(rule, "fieldKey");
+                            if (!fieldKey.isBlank()) allowedFields.add(fieldKey);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return allowedFields;
+    }
+
+    private ObjectNode filterRecords(JsonNode records, Set<String> allowedFields) {
+        ObjectNode filtered = objectMapper.createObjectNode();
+        if (records == null || !records.isObject() || allowedFields.isEmpty()) return filtered;
+        records.fields().forEachRemaining(entry -> {
+            ObjectNode patientRecord = objectMapper.createObjectNode();
+            JsonNode sourceRecord = entry.getValue();
+            if (sourceRecord != null && sourceRecord.isObject()) {
+                sourceRecord.fields().forEachRemaining(field -> {
+                    if (allowedFields.contains(field.getKey())) {
+                        patientRecord.set(field.getKey(), field.getValue());
+                    }
+                });
+            }
+            if (!patientRecord.isEmpty()) {
+                filtered.set(entry.getKey(), patientRecord);
+            }
+        });
+        return filtered;
+    }
+
+    private ObjectNode filterDocuments(JsonNode documents, AuthSessionService.SessionUser user) {
+        ObjectNode filtered = objectMapper.createObjectNode();
+        if (documents == null || !documents.isObject()) return filtered;
+        documents.fields().forEachRemaining(entry -> {
+            ArrayNode patientDocuments = objectMapper.createArrayNode();
+            if (entry.getValue() != null && entry.getValue().isArray()) {
+                for (JsonNode document : entry.getValue()) {
+                    if (canReadDocument(document, user)) {
+                        patientDocuments.add(document);
+                    }
+                }
+            }
+            filtered.set(entry.getKey(), patientDocuments);
+        });
+        return filtered;
+    }
+
+    private ArrayNode filterPatients(JsonNode patients, JsonNode records, JsonNode documents) {
+        Set<String> visiblePatientIds = new HashSet<>();
+        collectVisiblePatientIds(records, visiblePatientIds);
+        collectVisiblePatientIds(documents, visiblePatientIds);
+
+        ArrayNode filtered = objectMapper.createArrayNode();
+        if (patients == null || !patients.isArray() || visiblePatientIds.isEmpty()) return filtered;
+        for (JsonNode patient : patients) {
+            if (visiblePatientIds.contains(text(patient, "id"))) {
+                filtered.add(patient);
+            }
+        }
+        return filtered;
+    }
+
+    private void collectVisiblePatientIds(JsonNode rowsByPatient, Set<String> patientIds) {
+        if (rowsByPatient == null || !rowsByPatient.isObject()) return;
+        rowsByPatient.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            if (value != null && !value.isNull() && !value.isMissingNode() && value.size() > 0) {
+                patientIds.add(entry.getKey());
+            }
+        });
+    }
+
+    private boolean canReadDocument(JsonNode document, AuthSessionService.SessionUser user) {
+        if (document == null || !document.isObject()) return false;
+        String department = text(document, "department");
+        String uploaderRole = text(document, "uploaderRole", text(document, "role"));
+        if (!department.isBlank() && department.equals(user.department())) return true;
+        return !uploaderRole.isBlank() && uploaderRole.equals(user.role());
+    }
+
+    private ArrayNode currentAccountOnly(JsonNode accounts, AuthSessionService.SessionUser user) {
+        ArrayNode filtered = objectMapper.createArrayNode();
+        if (accounts == null || !accounts.isArray()) return filtered;
+        for (JsonNode account : accounts) {
+            if (user.id().equals(text(account, "id")) || user.username().equalsIgnoreCase(text(account, "username"))) {
+                filtered.add(account);
+            }
+        }
+        return filtered;
     }
 
     private ArrayNode readPatients() {

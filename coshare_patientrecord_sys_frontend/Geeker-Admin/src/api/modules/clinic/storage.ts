@@ -1,4 +1,5 @@
 import type { ResultData } from "@/api/interface";
+import { authHeaders } from "../authToken";
 import { createSeedDb, hydrateDb } from "./seed";
 import type { ClinicDb } from "./types";
 
@@ -21,7 +22,7 @@ const assertClinicDbPayload = (value: unknown): ClinicDb => {
   if (!Array.isArray(value.patients) || !isObjectRecord(value.records) || !isObjectRecord(value.archive)) {
     throw new Error(INVALID_API_DATA_MESSAGE);
   }
-  return value as ClinicDb;
+  return value as unknown as ClinicDb;
 };
 
 const cacheDb = (db: ClinicDb) => {
@@ -116,7 +117,14 @@ const needsBaselineMigration = (db: ClinicDb) =>
 const parseClinicDbResponse = async (result: Response) => {
   const text = await result.text();
   if (!text.trim()) throw new Error(API_UNAVAILABLE_MESSAGE);
-  return JSON.parse(text) as ResultData<unknown>;
+  if (text.trim().startsWith("<")) {
+    throw new Error(`${API_UNAVAILABLE_MESSAGE}，请检查 /clinic-api 代理或部署转发配置`);
+  }
+  try {
+    return JSON.parse(text) as ResultData<unknown>;
+  } catch {
+    throw new Error("业务数据接口返回格式异常，请检查后端服务状态");
+  }
 };
 
 const throwClinicApiError = async (result: Response) => {
@@ -137,7 +145,7 @@ const throwClinicApiError = async (result: Response) => {
 export const readDb = async (options: { allowLocalFallback?: boolean } = {}): Promise<ClinicDb> => {
   const allowLocalFallback = options.allowLocalFallback ?? false;
   try {
-    const result = await fetch(CLINIC_API_DB_URL, { method: "GET" });
+    const result = await fetch(CLINIC_API_DB_URL, { method: "GET", headers: authHeaders() });
     if (result.ok) {
       const payload = await parseClinicDbResponse(result);
       const rawDb = assertClinicDbPayload(payload.data);
@@ -165,7 +173,7 @@ export const writeDb = async (db: ClinicDb): Promise<ClinicDb> => {
   const mergePayload = buildMergePayload(db);
   const result = await fetch(`${CLINIC_API_BASE_URL}/db/merge`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(mergePayload)
   });
 
@@ -191,7 +199,7 @@ export const writeDb = async (db: ClinicDb): Promise<ClinicDb> => {
 export const patchDb = async (patch: Partial<ClinicDb>) => {
   const result = await fetch(`${CLINIC_API_BASE_URL}/db/patch`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(patch)
   });
 

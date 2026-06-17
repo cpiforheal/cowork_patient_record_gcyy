@@ -11,6 +11,7 @@ import {
 import { initialFieldValues, roleToDepartment, seedTemplateFieldRules } from "./clinic/seed";
 import { storeClinicFileApi } from "./clinic/files";
 import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./clinic/storage";
+import { authHeaders } from "./authToken";
 import type {
   AccountRow,
   AuditLogRow,
@@ -95,6 +96,15 @@ const response = <T>(data: T, msg = "成功") =>
     msg,
     data
   } as ResultData<T>);
+
+const temporaryPasswordChars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$%";
+
+const createTemporaryPassword = () => {
+  const values = new Uint32Array(12);
+  crypto.getRandomValues(values);
+  const body = Array.from(values, value => temporaryPasswordChars[value % temporaryPasswordChars.length]).join("");
+  return `Tmp@${body}`;
+};
 
 const paginate = <T>(list: T[], pageNum: number, pageSize: number) => ({
   list: list.slice((pageNum - 1) * pageSize, pageNum * pageSize),
@@ -496,38 +506,6 @@ export const getPatientDetailApi = async (id: string) => {
   });
 };
 
-export const authenticateClinicAccountApi = async (params: { username: string; password: string }) => {
-  const username = params.username.trim().toLowerCase();
-  const db = await readDb();
-  const account = (db.accounts ?? []).find(item => item.username.toLowerCase() === username);
-  if (!account) return Promise.reject(new Error("账号不存在，请先在系统设置中维护账号"));
-  if (account.status !== "启用") return Promise.reject(new Error("账号已停用，请联系管理员启用"));
-  if ((account.password || "123456") !== params.password) return Promise.reject(new Error("密码错误，默认密码为 123456"));
-
-  appendAuditLog(db, {
-    operator: account.name,
-    role: account.roleLabel,
-    patient: "-",
-    module: "system",
-    action: "账号登录",
-    actionCode: "account.login",
-    targetType: "account",
-    targetKey: account.id,
-    targetLabel: account.username,
-    detail: `${account.name} 登录系统`
-  });
-  await writeDb(db);
-
-  return response({
-    access_token: `local-${account.username}-${Date.now()}`,
-    userInfo: {
-      name: account.name,
-      role: account.role,
-      department: account.department
-    }
-  });
-};
-
 export const createPatientApi = async (params: CreatePatientParams) => {
   const name = params.name.trim();
   const visitNo = params.visitNo.trim();
@@ -846,16 +824,18 @@ export const saveAccountApi = async (params: Partial<AccountRow> & SystemOperati
   const db = await readDb();
   const list = db.accounts ?? [];
   const updatedAt = now();
+  let temporaryPassword = "";
   if (params.id) {
     const target = list.find(item => item.id === params.id);
     if (!target) return Promise.reject(new Error("账号不存在"));
     Object.assign(target, payload, { roleLabel: roleLabel(payload.role || target.role), updatedAt });
   } else {
     const role = (params.role || "frontdesk") as UserRole;
+    temporaryPassword = params.password || createTemporaryPassword();
     list.unshift({
       id: String(Date.now()),
       username: params.username || `user${Date.now()}`,
-      password: params.password || "123456",
+      password: temporaryPassword,
       name: params.name || "新账号",
       department: params.department || roleToDepartment[role],
       role,
@@ -881,7 +861,10 @@ export const saveAccountApi = async (params: Partial<AccountRow> & SystemOperati
     detail: `${params.id ? "修改" : "新增"}账号：${params.name || params.username || "-"}`
   });
   await writeDb(db);
-  return response(null, "账号已保存");
+  return response(
+    temporaryPassword ? { temporaryPassword } : null,
+    temporaryPassword ? "账号已保存，请记录临时密码" : "账号已保存"
+  );
 };
 
 export const setAccountStatusApi = async (id: string, status: AccountRow["status"], context: SystemOperationContext = {}) => {
@@ -915,7 +898,8 @@ export const resetAccountPasswordApi = async (id: string, context: SystemOperati
   const db = await readDb();
   const target = db.accounts?.find(item => item.id === id);
   if (!target) return Promise.reject(new Error("账号不存在"));
-  target.password = "123456";
+  const temporaryPassword = createTemporaryPassword();
+  target.password = temporaryPassword;
   target.updatedAt = now();
   appendAuditLog(db, {
     operator: context.operator || roleLabel(context.operatorRole || "admin"),
@@ -927,10 +911,10 @@ export const resetAccountPasswordApi = async (id: string, context: SystemOperati
     targetType: "account",
     targetKey: target.id,
     targetLabel: target.name,
-    detail: `${target.name} 密码已重置为默认密码`
+    detail: `${target.name} 密码已重置为一次性临时密码`
   });
   await writeDb(db);
-  return response(null, "密码已重置为 123456");
+  return response({ temporaryPassword }, "密码已重置，请记录临时密码");
 };
 
 export const getRoleListApi = async (params: { pageNum: number; pageSize: number; name?: string }) => {
@@ -1649,7 +1633,16 @@ export const getAuditLogListApi = async (params: {
 };
 
 const parseClinicApiResponse = async <T>(result: Response): Promise<T> => {
-  const payload = (await result.json()) as ResultData<T>;
+  const text = await result.text();
+  if (text.trim().startsWith("<")) {
+    throw new Error("业务接口未连通，请确认后端已启动，并检查 /clinic-api 代理或部署转发配置");
+  }
+  let payload: ResultData<T>;
+  try {
+    payload = JSON.parse(text) as ResultData<T>;
+  } catch {
+    throw new Error("业务接口返回格式异常，请检查后端服务状态");
+  }
   if (!result.ok || String(payload.code) !== "200") {
     throw new Error(payload.msg || `clinic api failed: ${result.status}`);
   }
@@ -1657,19 +1650,19 @@ const parseClinicApiResponse = async <T>(result: Response): Promise<T> => {
 };
 
 export const getMaintenanceStatusApi = async () => {
-  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/status`);
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/status`, { headers: authHeaders() });
   const data = await parseClinicApiResponse<MaintenanceStatus>(result);
   return response(data);
 };
 
 export const createMaintenanceSnapshotApi = async () => {
-  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/snapshot`, { method: "POST" });
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/snapshot`, { method: "POST", headers: authHeaders() });
   const data = await parseClinicApiResponse<{ savedAt: string; snapshotCount: number; revision: string }>(result);
   return response(data, "系统快照已生成");
 };
 
 export const getDuplicatePatientGroupsApi = async () => {
-  const result = await fetch(`${getClinicApiBaseUrl()}/patients/duplicates`);
+  const result = await fetch(`${getClinicApiBaseUrl()}/patients/duplicates`, { headers: authHeaders() });
   const data = await parseClinicApiResponse<DuplicatePatientGroup[]>(result);
   return response(data);
 };

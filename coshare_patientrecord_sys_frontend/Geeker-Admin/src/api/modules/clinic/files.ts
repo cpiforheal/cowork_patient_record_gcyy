@@ -1,4 +1,5 @@
 import type { ResultData } from "@/api/interface";
+import { authHeaders } from "../authToken";
 
 export interface ClinicStoredFile {
   fileName: string;
@@ -40,7 +41,7 @@ export const storeClinicFileApi = async (params: ClinicStoreFileParams) => {
   try {
     result = await fetch(CLINIC_API_FILES_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(params)
     });
   } catch {
@@ -50,4 +51,18 @@ export const storeClinicFileApi = async (params: ClinicStoreFileParams) => {
   if (!result.ok) throw new Error(payload.msg || "文件写入失败");
   if (!payload.data) throw new Error("本地病历文件服务未返回文件索引");
   return payload;
+};
+
+export const fetchClinicFileBlobUrl = async (url: string) => {
+  let result: Response;
+  try {
+    result = await fetch(url, { headers: authHeaders() });
+  } catch {
+    throw new Error(API_UNAVAILABLE_MESSAGE);
+  }
+  if (!result.ok) {
+    throw new Error(`附件读取失败（HTTP ${result.status}）`);
+  }
+  const blob = await result.blob();
+  return URL.createObjectURL(blob);
 };

@@ -19,27 +19,52 @@
     </section>
 
     <section class="exception-strip">
-      <button class="exception-card warning" @click="router.push('/encounters/active')">
+      <button
+        class="exception-card"
+        :class="{ warning: stats.pendingPatients > 0, 'is-zero': stats.pendingPatients === 0 }"
+        :aria-label="`待处理 ${stats.pendingPatients} 人`"
+        @click="router.push('/encounters/active')"
+      >
         <span>待处理</span>
         <strong>{{ stats.pendingPatients }}</strong>
         <small>今日未闭环</small>
       </button>
-      <button class="exception-card danger" @click="router.push('/audit/review')">
+      <button
+        class="exception-card"
+        :class="{ danger: stats.reviewPatients > 0, 'is-zero': stats.reviewPatients === 0 }"
+        :aria-label="`待质控 ${stats.reviewPatients} 人`"
+        @click="router.push('/audit/review')"
+      >
         <span>待质控</span>
         <strong>{{ stats.reviewPatients }}</strong>
         <small>需要复核</small>
       </button>
-      <button class="exception-card" @click="router.push('/audit/review')">
+      <button
+        class="exception-card"
+        :class="{ warning: stats.returnedPatients > 0, 'is-zero': stats.returnedPatients === 0 }"
+        :aria-label="`退回整改 ${stats.returnedPatients} 人`"
+        @click="router.push('/audit/review')"
+      >
         <span>退回整改</span>
         <strong>{{ stats.returnedPatients }}</strong>
         <small>优先补齐</small>
       </button>
-      <button class="exception-card danger" @click="router.push('/documents/recycle')">
+      <button
+        class="exception-card"
+        :class="{ danger: stats.voidedDocumentCount > 0, 'is-zero': stats.voidedDocumentCount === 0 }"
+        :aria-label="`附件作废 ${stats.voidedDocumentCount} 份`"
+        @click="router.push('/documents/recycle')"
+      >
         <span>附件作废</span>
         <strong>{{ stats.voidedDocumentCount }}</strong>
         <small>需要留痕</small>
       </button>
-      <button class="exception-card" @click="router.push('/encounters/active')">
+      <button
+        class="exception-card"
+        :class="{ 'is-zero': editableSectionCount === 0 }"
+        :aria-label="`可写章节 ${editableSectionCount} 项`"
+        @click="router.push('/encounters/active')"
+      >
         <span>可写章节</span>
         <strong>{{ editableSectionCount }}</strong>
         <small>{{ roleName }}权限</small>
@@ -113,9 +138,10 @@
             </button>
           </div>
           <div class="heatmap-legend">
-            <span>空档</span>
+            <span class="legend-anchor">0 人</span>
             <i v-for="level in [0, 1, 2, 3, 4]" :key="level" :class="`is-level-${level}`" />
-            <span>高峰</span>
+            <span class="legend-anchor">1-3 人</span>
+            <span class="legend-anchor">4+ 人</span>
           </div>
         </div>
       </div>
@@ -607,6 +633,7 @@ onMounted(loadTasks);
     margin-top: 2px;
     color: var(--el-text-color-primary);
     font-size: 22px;
+    font-variant-numeric: tabular-nums;
   }
 
   small {
@@ -639,6 +666,21 @@ onMounted(loadTasks);
 
     strong {
       color: var(--clinic-danger);
+    }
+  }
+
+  &.is-zero {
+    background: #ffffff;
+    border-color: var(--el-border-color-lighter);
+    opacity: 0.74;
+
+    &::before {
+      background: var(--el-border-color);
+      opacity: 0.55;
+    }
+
+    strong {
+      color: var(--el-text-color-secondary);
     }
   }
 }
@@ -817,6 +859,10 @@ onMounted(loadTasks);
     height: 10px;
     border: 1px solid #dfeee9;
     border-radius: 3px;
+  }
+
+  .legend-anchor {
+    font-variant-numeric: tabular-nums;
   }
 
   .is-level-0 {

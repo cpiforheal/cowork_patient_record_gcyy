@@ -55,14 +55,13 @@ public class DatabaseHealthService {
                 response.put("result", result);
                 response.put("database", metadata.getDatabaseProductName());
                 response.put("version", metadata.getDatabaseProductVersion());
-                response.put("username", username);
                 response.put("durationMs", System.currentTimeMillis() - startedAt);
                 return response;
             }
         } catch (ClassNotFoundException | SQLException error) {
             throw new ResponseStatusException(
                 HttpStatus.SERVICE_UNAVAILABLE,
-                "Database connection failed: " + error.getMessage(),
+                "数据库连接检查失败，请核对 MySQL 服务、账号权限和网络连通性",
                 error
             );
         }
