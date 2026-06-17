@@ -264,6 +264,12 @@ if (Test-Path $readmeTemplate) {
 if (Test-Path (Join-Path $root "docs\pilot-deployment-checklist.md")) {
     Copy-Item -LiteralPath (Join-Path $root "docs\pilot-deployment-checklist.md") -Destination (Join-Path $docsReleaseDir "pilot-deployment-checklist.md")
 }
+if (Test-Path (Join-Path $root "docs\inventory-operation-guide.md")) {
+    Copy-Item -LiteralPath (Join-Path $root "docs\inventory-operation-guide.md") -Destination (Join-Path $docsReleaseDir "inventory-operation-guide.md")
+}
+if (Test-Path (Join-Path $root "docs\delivery")) {
+    Copy-Item -LiteralPath (Join-Path $root "docs\delivery") -Destination (Join-Path $docsReleaseDir "delivery") -Recurse
+}
 
 Write-Step "Pilot package is ready"
 Write-Host "Directory: $releaseDir" -ForegroundColor Green

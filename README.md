@@ -13,6 +13,16 @@
 
 内测部署包会把前端静态文件和后端 jar 放在同一个交付目录中，目标主机启动后端即可同时访问页面和接口，降低非开发人员部署难度。
 
+## 交付与操作文档
+
+面向第一轮内测和交付的说明文档已单独整理到 [docs/delivery/](docs/delivery/README.md)：
+
+- [项目介绍与内测边界](docs/delivery/project-overview.md)：给领导、科室负责人和交付人员快速理解系统定位。
+- [岗位操作说明](docs/delivery/role-operation-guide.md)：给前台、医生、护士、科室负责人、库管和管理人员按岗位使用。
+- [领导检查与验收指南](docs/delivery/leader-check-guide.md)：说明每天看什么、每周查什么、怎样判断闭环。
+- [环境适配与部署交接](docs/delivery/environment-and-deployment.md)：说明目标主机、配置、启动、备份和回滚。
+- [内测复核与验收清单](docs/delivery/pilot-review-and-acceptance.md)：用于上线前逐项走查。
+
 ## 当前业务模块
 
 - 患者病历协同：患者登记、门诊/住院病历信息维护、附件上传、历史病历追溯、账号与操作日志。
