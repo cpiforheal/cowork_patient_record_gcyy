@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -122,26 +123,28 @@ public class AuthSessionService {
             }
         }
         departments.sort(String::compareTo);
-        return new LoginOptions(departments, List.of());
+        return new LoginOptions(departments, accounts.stream().map(this::toLoginAccountOption).toList());
     }
 
     public LoginAccountOptions loginAccounts(String department) {
         String normalizedDepartment = department == null ? "" : department.trim();
-        if (normalizedDepartment.isBlank()) {
-            return new LoginAccountOptions(List.of());
-        }
         List<Map<String, String>> accountOptions = new ArrayList<>();
         for (JsonNode account : loadEnabledAccounts()) {
             String accountDepartment = text(account, "department");
-            if (!normalizedDepartment.equals(accountDepartment)) continue;
-            accountOptions.add(Map.of(
-                "id", text(account, "id"),
-                "username", text(account, "id"),
-                "name", text(account, "name", text(account, "username")),
-                "department", accountDepartment
-            ));
+            if (!normalizedDepartment.isBlank() && !normalizedDepartment.equals(accountDepartment)) continue;
+            accountOptions.add(toLoginAccountOption(account));
         }
         return new LoginAccountOptions(accountOptions);
+    }
+
+    private Map<String, String> toLoginAccountOption(JsonNode account) {
+        String username = text(account, "username", text(account, "id"));
+        return Map.of(
+            "id", text(account, "id", username),
+            "username", username,
+            "name", text(account, "name", username),
+            "department", text(account, "department")
+        );
     }
 
     private Optional<JsonNode> loadAccount(String username) {
@@ -160,10 +163,14 @@ public class AuthSessionService {
 
     private List<ObjectNode> loadEnabledAccounts() {
         return jdbcTemplate.query(
-            "SELECT raw_json FROM clinic_accounts ORDER BY department, name, username",
+            "SELECT raw_json FROM clinic_accounts ORDER BY username",
             (resultSet, rowNum) -> readJson(resultSet.getString("raw_json"))
         ).stream()
             .filter(account -> "启用".equals(text(account, "status", "启用")))
+            .sorted(Comparator
+                .comparing((ObjectNode account) -> text(account, "department"))
+                .thenComparing(account -> text(account, "name", text(account, "username")))
+                .thenComparing(account -> text(account, "username", text(account, "id"))))
             .toList();
     }
 

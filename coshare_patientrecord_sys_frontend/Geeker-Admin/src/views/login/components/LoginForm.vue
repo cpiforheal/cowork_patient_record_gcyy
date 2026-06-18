@@ -3,8 +3,9 @@
     <el-form-item prop="department">
       <el-select
         v-model="loginForm.department"
+        clearable
         filterable
-        placeholder="请选择科室"
+        placeholder="选择科室（可选）"
         :loading="departmentLoading"
         @change="handleDepartmentChange"
       >
@@ -20,9 +21,9 @@
       <el-select
         v-model="loginForm.username"
         filterable
-        :disabled="!loginForm.department"
+        :disabled="accountLoading || accountOptions.length === 0"
         :loading="accountLoading"
-        placeholder="请选择账号"
+        placeholder="选择岗位账号"
       >
         <template #prefix>
           <el-icon class="el-input__icon">
@@ -43,13 +44,7 @@
       </el-select>
     </el-form-item>
     <el-form-item prop="password">
-      <el-input
-        v-model="loginForm.password"
-        type="password"
-        placeholder="请输入登录密码"
-        show-password
-        autocomplete="new-password"
-      >
+      <el-input v-model="loginForm.password" type="password" placeholder="输入登录密码" show-password autocomplete="new-password">
         <template #prefix>
           <el-icon class="el-input__icon">
             <lock />
@@ -59,9 +54,9 @@
     </el-form-item>
   </el-form>
   <div class="login-btn">
-    <el-button :icon="CircleClose" round size="large" @click="resetForm(loginFormRef)">重置</el-button>
+    <el-button :icon="CircleClose" round size="large" @click="resetForm(loginFormRef)">清空</el-button>
     <el-button :icon="UserFilled" round size="large" type="primary" :loading="loading" @click="login(loginFormRef)">
-      登录
+      进入工作台
     </el-button>
   </div>
 </template>
@@ -88,8 +83,7 @@ const keepAliveStore = useKeepAliveStore();
 type FormInstance = InstanceType<typeof ElForm>;
 const loginFormRef = ref<FormInstance>();
 const loginRules = reactive({
-  department: [{ required: true, message: "请选择科室", trigger: "change" }],
-  username: [{ required: true, message: "请选择账号", trigger: "change" }],
+  username: [{ required: true, message: "请选择登录账号", trigger: "change" }],
   password: [{ required: true, message: "请输入登录密码", trigger: "blur" }]
 });
 
@@ -120,8 +114,9 @@ const loadDepartments = async () => {
   departmentLoading.value = true;
   try {
     const { data } = await getLoginOptionsApi();
-    accountOptions.value = [];
+    accountOptions.value = data.accounts ?? [];
     syncDepartmentOptions(data.departments);
+    if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
   } catch (error) {
     ElNotification({
       title: "登录数据加载失败",
@@ -135,14 +130,10 @@ const loadDepartments = async () => {
 };
 
 const loadAccountsByDepartment = async (department: string) => {
-  if (!department) {
-    loginForm.username = "";
-    return;
-  }
   accountLoading.value = true;
   try {
     const { data } = await getLoginAccountsApi(department);
-    accountOptions.value = data.accounts;
+    accountOptions.value = data.accounts ?? [];
     if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
   } catch (error) {
     ElNotification({
@@ -202,6 +193,7 @@ const resetForm = (formEl: FormInstance | undefined) => {
   if (!formEl) return;
   formEl.resetFields();
   loginForm.password = "";
+  loadAccountsByDepartment(loginForm.department);
 };
 
 onMounted(() => {
@@ -222,14 +214,15 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .clinic-login-form {
   :deep(.el-form-item) {
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
 
   :deep(.el-input__wrapper) {
-    min-height: 48px;
-    background: #f8fbfd;
-    border-radius: 12px;
-    box-shadow: 0 0 0 1px #dbe6ef inset;
+    min-height: 50px;
+    padding: 0 16px;
+    background: #f5fcf8;
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px #d8efe3 inset;
     transition:
       background 180ms ease,
       box-shadow 180ms ease,
@@ -239,9 +232,9 @@ onBeforeUnmount(() => {
   :deep(.el-input__wrapper.is-focus) {
     background: #ffffff;
     box-shadow:
-      0 0 0 1px var(--clinic-green) inset,
-      0 10px 24px rgb(15 159 130 / 13%);
-    transform: translateY(-1px);
+      0 0 0 1px #26a876 inset,
+      0 12px 26px rgb(38 168 118 / 14%);
+    transform: translateY(-2px);
   }
 
   :deep(.el-select) {
@@ -249,10 +242,11 @@ onBeforeUnmount(() => {
   }
 
   :deep(.el-select__wrapper) {
-    min-height: 48px;
-    background: #f8fbfd;
-    border-radius: 12px;
-    box-shadow: 0 0 0 1px #dbe6ef inset;
+    min-height: 50px;
+    padding: 0 16px;
+    background: #f5fcf8;
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px #d8efe3 inset;
     transition:
       background 180ms ease,
       box-shadow 180ms ease,
@@ -262,14 +256,18 @@ onBeforeUnmount(() => {
   :deep(.el-select__wrapper.is-focused) {
     background: #ffffff;
     box-shadow:
-      0 0 0 1px var(--clinic-green) inset,
-      0 10px 24px rgb(15 159 130 / 13%);
-    transform: translateY(-1px);
+      0 0 0 1px #26a876 inset,
+      0 12px 26px rgb(38 168 118 / 14%);
+    transform: translateY(-2px);
   }
 
   :deep(.el-select__prefix) {
     margin-right: 6px;
-    color: #7a8fa2;
+    color: #76a393;
+  }
+
+  :deep(.el-input__prefix) {
+    color: #76a393;
   }
 }
 
@@ -284,7 +282,7 @@ onBeforeUnmount(() => {
     min-width: 0;
     overflow: hidden;
     font-weight: 700;
-    color: #223c56;
+    color: #173b35;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -294,7 +292,7 @@ onBeforeUnmount(() => {
     max-width: 58%;
     overflow: hidden;
     font-size: 12px;
-    color: #7a8fa2;
+    color: #719287;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -305,20 +303,36 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr 1.2fr;
   gap: 14px;
   width: 100%;
-  margin-top: 34px;
+  margin-top: 30px;
 
   .el-button {
     width: 100%;
-    height: 46px;
+    height: 48px;
     margin: 0;
-    font-weight: 700;
+    font-weight: 800;
     border-radius: 999px;
   }
 
+  :deep(.el-button:not(.el-button--primary)) {
+    color: #58786d;
+    background: #ffffff;
+    border-color: #d8efe3;
+  }
+
   :deep(.el-button--primary) {
-    background: linear-gradient(135deg, #0f9f82, #0b8d9c);
+    background: linear-gradient(135deg, #5fc999, #26a876);
     border-color: transparent;
-    box-shadow: 0 14px 26px rgb(15 159 130 / 22%);
+    box-shadow: 0 16px 28px rgb(38 168 118 / 24%);
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      filter 180ms ease;
+  }
+
+  :deep(.el-button--primary:hover) {
+    filter: saturate(1.08);
+    box-shadow: 0 18px 34px rgb(38 168 118 / 28%);
+    transform: translateY(-1px);
   }
 }
 

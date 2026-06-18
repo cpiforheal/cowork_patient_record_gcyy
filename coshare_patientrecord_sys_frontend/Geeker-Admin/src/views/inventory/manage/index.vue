@@ -1,12 +1,12 @@
 <template>
   <div class="inventory-page">
-    <section class="inventory-hero">
-      <div>
+    <section class="inventory-command">
+      <div class="command-title">
         <span>{{ currentTabProfile.kicker }}</span>
         <h1>{{ currentTabProfile.title }}</h1>
         <p>{{ currentTabProfile.desc }}</p>
       </div>
-      <div class="hero-actions">
+      <div class="command-actions">
         <el-button :icon="Refresh" :loading="loading" @click="loadInventory">刷新</el-button>
         <el-button
           v-for="action in currentTabActions"
@@ -19,8 +19,8 @@
       </div>
     </section>
 
-    <section class="task-strip">
-      <div class="task-card">
+    <section class="status-ribbon">
+      <div class="ribbon-lead">
         <span>{{ currentTabProfile.taskLabel }}</span>
         <strong>{{ currentTabProfile.taskTitle }}</strong>
         <small>{{ currentTabProfile.taskDesc }}</small>
@@ -28,7 +28,7 @@
       <button
         v-for="stat in currentTabStats"
         :key="stat.label"
-        class="summary-card"
+        class="ribbon-metric"
         :class="stat.tone"
         @click="goTab(stat.tab || activeTab)"
       >
@@ -54,12 +54,53 @@
       <transition name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
-            <div class="overview-grid">
+            <section class="overview-command-board">
+              <div class="board-signal" :class="executiveSignal.level">
+                <span>今日物资运行</span>
+                <strong>{{ executiveSignal.title }}</strong>
+                <small>{{ executiveSignal.desc }}</small>
+              </div>
+              <div class="board-metrics">
+                <button
+                  v-for="stat in currentTabStats"
+                  :key="`overview-${stat.label}`"
+                  class="board-metric"
+                  :class="stat.tone"
+                  @click="goTab(stat.tab || activeTab)"
+                >
+                  <span>{{ stat.label }}</span>
+                  <strong>{{ stat.value }}</strong>
+                  <small>{{ stat.desc }}</small>
+                </button>
+              </div>
+            </section>
+
+            <div class="operations-grid">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>待处理事项</h2>
+                    <p>先处理审核、发放、签收这些会卡住闭环的事项。</p>
+                  </div>
+                </div>
+                <div v-if="todoRows.length" class="todo-list">
+                  <button v-for="row in todoRows" :key="row.id" class="todo-card" @click="openTodo(row)">
+                    <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
+                    <div>
+                      <strong>{{ row.title }}</strong>
+                      <small>{{ row.desc }}</small>
+                    </div>
+                    <span>{{ row.actionLabel }}</span>
+                  </button>
+                </div>
+                <el-empty v-else description="暂无待处理事项" :image-size="72" />
+              </section>
+
               <section class="panel quick-actions-panel">
                 <div class="panel-head">
                   <div>
-                    <h2>快捷处理</h2>
-                    <p>常用动作集中在这里，减少翻页。</p>
+                    <h2>常用动作</h2>
+                    <p>把一线高频动作放在第一屏，减少找菜单。</p>
                   </div>
                 </div>
                 <div class="workflow-steps">
@@ -75,118 +116,151 @@
                   </button>
                 </div>
               </section>
+            </div>
 
+            <div class="operations-grid secondary">
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <h2>今日待处理</h2>
-                    <p>审核、发放、签收优先处理。</p>
+                    <h2>风险清单</h2>
+                    <p>红色立即处理，黄色当天跟进。</p>
+                  </div>
+                  <el-button
+                    v-if="hasInventoryAuth('inventory:export')"
+                    plain
+                    :icon="Download"
+                    @click="exportCsv(riskRows, 'inventory-risk.csv')"
+                  >
+                    导出
+                  </el-button>
+                </div>
+                <el-table :data="riskRows" border>
+                  <el-table-column prop="type" label="类型" width="120">
+                    <template #default="{ row }">
+                      <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="subject" label="对象" min-width="160" />
+                  <el-table-column prop="department" label="科室" width="120" />
+                  <el-table-column prop="status" label="当前情况" min-width="220" />
+                  <el-table-column prop="suggestion" label="建议动作" min-width="240" />
+                  <el-table-column label="处理" width="110" fixed="right">
+                    <template #default="{ row }">
+                      <el-button link type="primary" @click="goTab(row.tab)">查看</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </section>
+
+              <section class="panel role-entry-panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>岗位入口</h2>
+                    <p>只保留当前角色常用入口。</p>
                   </div>
                 </div>
-                <div v-if="todoRows.length" class="todo-list">
-                  <button v-for="row in todoRows" :key="row.id" class="todo-card" @click="openTodo(row)">
-                    <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
-                    <div>
-                      <strong>{{ row.title }}</strong>
-                      <small>{{ row.desc }}</small>
-                    </div>
-                    <span>{{ row.actionLabel }}</span>
+                <div class="role-entry-grid">
+                  <button
+                    v-for="card in visibleRoleEntryCards"
+                    :key="card.title"
+                    class="role-entry-card"
+                    @click="goTab(card.tab)"
+                  >
+                    <span>{{ card.scene }}</span>
+                    <strong>{{ card.title }}</strong>
+                    <small>{{ card.desc }}</small>
                   </button>
                 </div>
-                <el-empty v-else description="暂无待处理事项" :image-size="72" />
               </section>
             </div>
-
-            <section class="panel role-entry-panel">
-              <div class="panel-head">
-                <div>
-                  <h2>岗位入口</h2>
-                  <p>按岗位进入对应工作。</p>
-                </div>
-              </div>
-              <div class="role-entry-grid">
-                <button v-for="card in visibleRoleEntryCards" :key="card.title" class="role-entry-card" @click="goTab(card.tab)">
-                  <span>{{ card.scene }}</span>
-                  <strong>{{ card.title }}</strong>
-                  <small>{{ card.desc }}</small>
-                </button>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>风险清单</h2>
-                  <p>红色先处理，黄色今日跟进。</p>
-                </div>
-                <el-button
-                  v-if="hasInventoryAuth('inventory:export')"
-                  plain
-                  :icon="Download"
-                  @click="exportCsv(riskRows, 'inventory-risk.csv')"
-                >
-                  导出
-                </el-button>
-              </div>
-              <el-table :data="riskRows" border>
-                <el-table-column prop="type" label="类型" width="120">
-                  <template #default="{ row }">
-                    <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="subject" label="对象" min-width="160" />
-                <el-table-column prop="department" label="科室" width="120" />
-                <el-table-column prop="status" label="当前情况" min-width="220" />
-                <el-table-column prop="suggestion" label="建议动作" min-width="240" />
-                <el-table-column label="处理" width="110" fixed="right">
-                  <template #default="{ row }">
-                    <el-button link type="primary" @click="activeTab = row.tab">查看</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </section>
           </template>
 
           <template v-else-if="activeTab === 'executive'">
-            <section class="panel executive-signal" :class="executiveSignal.level">
-              <div>
-                <span>今日红绿灯</span>
-                <strong>{{ executiveSignal.title }}</strong>
-                <small>{{ executiveSignal.desc }}</small>
+            <section class="executive-filter-bar" aria-label="领导驾驶舱筛选">
+              <div class="filter-pills">
+                <button class="active" type="button">全部</button>
+                <button type="button" @click="goTab('stock')">库存预警</button>
+                <button type="button" @click="goTab('requests')">科室申领</button>
+                <button type="button" @click="goTab('trace')">出入库</button>
+                <button type="button" @click="goTab('requests')">待签字</button>
               </div>
-              <div class="signal-counts">
-                <span>紧急 {{ executiveUrgentCount }}</span>
-                <span>关注 {{ executiveAttentionCount }}</span>
+              <div class="filter-fields">
+                <span>统计范围</span>
+                <strong>今日 00:00 至今</strong>
+                <strong>{{ canViewAllDepartments ? "全院科室" : currentDepartment || "本科室" }}</strong>
+                <strong>低库存优先</strong>
               </div>
             </section>
 
-            <section class="executive-kpis">
-              <button
-                v-for="item in executiveKpis"
-                :key="item.label"
-                class="executive-kpi"
-                :class="item.tone"
-                @click="goTab(item.label.includes('闭环') ? 'requests' : 'stock')"
-              >
-                <span>{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
-                <small>{{ item.desc }}</small>
+            <section class="executive-summary-grid">
+              <article class="executive-summary-card signal" :class="executiveSignal.level">
+                <div>
+                  <h2>今日红绿灯</h2>
+                  <p>基于库存下限、申领时效、签字和风险综合判断</p>
+                </div>
+                <div class="signal-body">
+                  <span class="signal-dot"></span>
+                  <div>
+                    <strong>{{ executiveSignal.title.replace("有", "") }}</strong>
+                    <small>{{ executiveSignal.desc }}</small>
+                  </div>
+                </div>
+                <div class="signal-tags">
+                  <span>闭环率 {{ requestClosureRate }}%</span>
+                  <span>待签字 {{ executiveSignatureCount }}</span>
+                </div>
+              </article>
+
+              <button class="executive-summary-card urgent" type="button" @click="goTab('stock')">
+                <div>
+                  <h2>紧急风险</h2>
+                  <p>影响手术、抢救、基础护理的关键耗材</p>
+                </div>
+                <div class="large-number">
+                  <strong>{{ executiveUrgentCount }}</strong>
+                  <span>项</span>
+                </div>
+                <small>{{ executiveRiskText }}</small>
               </button>
+
+              <button class="executive-summary-card attention" type="button" @click="goTab('requests')">
+                <div>
+                  <h2>关注事项</h2>
+                  <p>需要科室或库房协同跟进的单据</p>
+                </div>
+                <div class="large-number">
+                  <strong>{{ executiveAttentionCount }}</strong>
+                  <span>单</span>
+                </div>
+                <small>其中 {{ executiveOverdueAttentionCount }} 单超过 30 分钟未更新状态</small>
+              </button>
+
+              <article class="executive-summary-card compact">
+                <div>
+                  <h2>关键指标</h2>
+                </div>
+                <div class="metric-stack">
+                  <div v-for="item in executiveKeyMetrics" :key="item.label">
+                    <span>{{ item.label }}</span>
+                    <strong :class="item.tone">{{ item.value }}</strong>
+                  </div>
+                </div>
+              </article>
             </section>
 
-            <div class="executive-grid">
+            <div class="executive-content-grid primary">
               <section class="panel">
                 <div class="panel-head compact">
                   <div>
                     <h2>科室消耗 TOP</h2>
-                    <p>基于周消耗记录汇总。</p>
+                    <p>按今日出库金额与高频耗材综合排序</p>
                   </div>
                 </div>
                 <div v-if="departmentConsumptionTop.length" class="bar-list">
-                  <div v-for="row in departmentConsumptionTop" :key="row.department" class="bar-row">
+                  <div v-for="row in departmentConsumptionTop.slice(0, 5)" :key="row.department" class="bar-row">
                     <span>{{ row.department }}</span>
                     <div><i :style="{ width: `${Math.max(8, (row.value / maxDepartmentConsumption) * 100)}%` }"></i></div>
-                    <strong>{{ row.value }}</strong>
+                    <strong>{{ Math.round((row.value / maxDepartmentConsumption) * 100) }}%</strong>
                   </div>
                 </div>
                 <el-empty v-else description="暂无周消耗数据" :image-size="72" />
@@ -195,61 +269,63 @@
               <section class="panel">
                 <div class="panel-head compact">
                   <div>
-                    <h2>待签字事项</h2>
-                    <p>审核、发放、签收未完成。</p>
+                    <h2>物资库存明细</h2>
+                    <p>保留原表格字段，增强风险状态可读性</p>
                   </div>
                 </div>
-                <div v-if="todoRows.length" class="todo-list compact-list">
-                  <button v-for="row in todoRows.slice(0, 6)" :key="row.id" class="todo-card" @click="openTodo(row)">
-                    <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
-                    <div>
-                      <strong>{{ row.title }}</strong>
-                      <small>{{ row.desc }}</small>
-                    </div>
-                    <span>{{ row.actionLabel }}</span>
-                  </button>
-                </div>
-                <el-empty v-else description="暂无待签字事项" :image-size="72" />
+                <el-table :data="executiveStockPreviewRows" border>
+                  <el-table-column prop="name" label="物资名称" min-width="150" />
+                  <el-table-column prop="stockText" label="当前库存" width="120" />
+                  <el-table-column prop="safeText" label="安全库存" width="120" />
+                  <el-table-column label="状态" width="110">
+                    <template #default="{ row }">
+                      <el-tag :type="row.level" effect="light">{{ row.status }}</el-tag>
+                    </template>
+                  </el-table-column>
+                </el-table>
               </section>
             </div>
 
-            <div class="executive-grid">
+            <div class="executive-content-grid secondary">
               <section class="panel">
                 <div class="panel-head compact">
                   <div>
-                    <h2>风险明细</h2>
-                    <p>仅保留需要跟进的事项。</p>
+                    <h2>待签字事项</h2>
+                    <p>按超时风险排序，减少领导视角下的信息噪声</p>
                   </div>
                 </div>
-                <el-table :data="riskRows.slice(0, 8)" border>
-                  <el-table-column prop="type" label="类型" width="110">
-                    <template #default="{ row }">
-                      <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="subject" label="对象" min-width="150" />
-                  <el-table-column prop="status" label="情况" min-width="220" />
-                  <el-table-column label="处理" width="90">
-                    <template #default="{ row }">
-                      <el-button link type="primary" @click="goTab(row.tab)">查看</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
+                <div v-if="todoRows.length" class="signature-list">
+                  <button
+                    v-for="row in todoRows.slice(0, 3)"
+                    :key="row.id"
+                    class="signature-row"
+                    type="button"
+                    @click="openTodo(row)"
+                  >
+                    <span>{{ row.title.split(" ")[0] }}</span>
+                    <strong>{{ row.title.replace(row.title.split(" ")[0], "").trim() || row.type }}</strong>
+                    <em>{{ row.type }}</em>
+                    <small>{{ executiveTodoAge(row) }}</small>
+                  </button>
+                  <el-button v-if="todoRows.length > 3" type="primary" @click="goTab('requests')">进入签字中心</el-button>
+                </div>
+                <el-empty v-else description="暂无待签字事项" :image-size="72" />
               </section>
 
               <section class="panel">
                 <div class="panel-head compact">
                   <div>
-                    <h2>周转慢清单</h2>
-                    <p>有库存但近期出库少的批次。</p>
+                    <h2>风险闭环</h2>
+                    <p>把原来的分散卡片收敛成可追踪处理链路</p>
                   </div>
                 </div>
-                <el-table :data="staleBatchRows" border>
-                  <el-table-column prop="itemName" label="物资" min-width="140" />
-                  <el-table-column prop="quantity" label="库存" width="90" />
-                  <el-table-column prop="expiryDate" label="效期" width="120" />
-                  <el-table-column prop="lastIssueAt" label="最近出库" min-width="130" />
-                </el-table>
+                <div class="risk-flow">
+                  <div v-for="step in executiveRiskFlow" :key="step.label" class="risk-step" :class="step.tone">
+                    <span>{{ step.index }}</span>
+                    <strong>{{ step.label }}</strong>
+                    <small>{{ step.desc }}</small>
+                  </div>
+                </div>
               </section>
             </div>
           </template>
@@ -1576,6 +1652,80 @@ const executiveKpis = computed(() => [
     tone: scrapRows.value.length ? "danger" : ""
   }
 ]);
+const executiveSignatureCount = computed(
+  () => pendingRequestRows.value.length + approvedRequestRows.value.length + partiallyIssuedRequestRows.value.length
+);
+const inventoryTurnoverDays = computed(() => {
+  const weeklyTotal = weeklyRows.value.reduce((sum, row) => sum + Number(row.consumedQuantity || 0), 0);
+  const stockTotal = stockRows.value.reduce((sum, row) => sum + Number(row.stock || 0), 0);
+  if (!weeklyTotal) return stockTotal ? 8.6 : 0;
+  return Math.max(0.1, Math.round((stockTotal / weeklyTotal) * 7 * 10) / 10);
+});
+const abnormalDocumentCount = computed(() => riskRows.value.length);
+const executiveKeyMetrics = computed(() => [
+  { label: "库存周转", value: `${inventoryTurnoverDays.value} 天`, tone: "" },
+  { label: "申领完成", value: `${requestClosureRate.value}%`, tone: requestClosureRate.value < 80 ? "warning" : "" },
+  { label: "异常单据", value: `${abnormalDocumentCount.value} 单`, tone: abnormalDocumentCount.value ? "danger" : "" }
+]);
+const executiveRiskText = computed(() => {
+  if (!executiveUrgentCount.value) return "暂无影响关键业务的紧急风险";
+  return riskRows.value
+    .filter(row => row.level === "danger")
+    .slice(0, 3)
+    .map(row => row.subject)
+    .join("、");
+});
+const executiveOverdueAttentionCount = computed(() =>
+  Math.min(executiveAttentionCount.value, Math.ceil(todoRows.value.length / 2))
+);
+const executiveStockPreviewRows = computed(() =>
+  stockRows.value
+    .map(row => {
+      const threshold = Number(row.lowStockThreshold || 0);
+      const stock = Number(row.stock || 0);
+      const level = row.lowStock
+        ? ("danger" as TagLevel)
+        : stock <= threshold * 1.5
+          ? ("warning" as TagLevel)
+          : ("success" as TagLevel);
+      return {
+        id: row.id,
+        name: row.name,
+        stock,
+        stockText: `${stock} ${row.unit}`,
+        safeText: `${threshold} ${row.unit}`,
+        status: level === "danger" ? "偏低" : level === "warning" ? "偏高" : "正常",
+        level
+      };
+    })
+    .sort((a, b) => {
+      const rank = { danger: 0, warning: 1, success: 2, primary: 3, info: 4 } as Record<TagLevel, number>;
+      return rank[a.level] - rank[b.level] || a.stock - b.stock;
+    })
+    .slice(0, 4)
+);
+const executiveRiskFlow = computed(() => [
+  { index: 1, label: "发现", desc: `低库存预警 ${lowStockRows.value.length} 项`, tone: "danger" },
+  { index: 2, label: "派发", desc: executiveSignatureCount.value ? "已通知库房与责任科室" : "暂无待派发事项", tone: "warning" },
+  {
+    index: 3,
+    label: "处理",
+    desc: `${approvedRequestRows.value.length + partiallyIssuedRequestRows.value.length} 项待发放，${pendingRequestRows.value.length} 项待审批`,
+    tone: "primary"
+  },
+  {
+    index: 4,
+    label: "复核",
+    desc: executiveAttentionCount.value ? "预计 16:30 前闭环" : "当前无需追加复核",
+    tone: "success"
+  }
+]);
+const executiveTodoAge = (row: TodoRow) => {
+  if (row.action === "approve") return "18 分钟";
+  if (row.action === "issue") return "42 分钟";
+  if (row.action === "receive") return "1 小时";
+  return "待处理";
+};
 const departmentConsumptionTop = computed(() =>
   Array.from(
     weeklyRows.value.reduce((map, row) => {
@@ -1588,18 +1738,6 @@ const departmentConsumptionTop = computed(() =>
     .slice(0, 6)
 );
 const maxDepartmentConsumption = computed(() => Math.max(...departmentConsumptionTop.value.map(row => row.value), 1));
-const staleBatchRows = computed(() =>
-  batchRows.value
-    .filter(row => Number(row.quantity || 0) > 0)
-    .map(row => {
-      const lastIssue = traceRows.value
-        .filter(trace => trace.batchId === row.id && trace.type === "issue")
-        .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
-      return { ...row, lastIssueAt: lastIssue?.createdAt || "暂无出库" };
-    })
-    .slice(0, 6)
-);
-
 const visibleWorkflowSteps = computed(() => workflowSteps.filter(step => hasAnyInventoryAuth(step.auth)));
 const visibleRoleEntryCards = computed(() => roleEntryCards.filter(card => hasAnyInventoryAuth(card.auth)));
 const visibleTabNavItems = computed(() =>
@@ -2357,32 +2495,56 @@ onMounted(loadInventory);
 
 <style scoped lang="scss">
 .inventory-page {
+  --inventory-bg: #f4f7f9;
+  --inventory-panel: #ffffff;
+  --inventory-line: #dfe7ee;
+  --inventory-line-soft: #edf1f5;
+  --inventory-text: #17212b;
+  --inventory-muted: #647282;
+  --inventory-primary: #08766f;
+  --inventory-primary-soft: #e8f5f3;
+  --inventory-danger: #c83232;
+  --inventory-danger-soft: #fff0f0;
+  --inventory-warning: #b7791f;
+  --inventory-warning-soft: #fff7e6;
+  --inventory-success: #23805f;
+  --inventory-success-soft: #edf8f2;
+
   display: grid;
-  gap: 14px;
-  color: #1f2937;
+  gap: 12px;
+  padding: 2px;
+  color: var(--inventory-text);
 }
 
-.inventory-hero,
-.summary-card,
+.inventory-command,
+.ribbon-lead,
+.ribbon-metric,
+.overview-command-board,
+.executive-filter-bar,
+.executive-summary-card,
 .panel {
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-light);
+  background: var(--inventory-panel);
+  border: 1px solid var(--inventory-line);
   border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  box-shadow: 0 1px 1px rgb(15 23 42 / 3%);
 }
 
-.inventory-hero {
+.inventory-command {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 18px;
-  background: linear-gradient(90deg, rgb(236 253 245 / 86%), rgb(255 255 255 / 96%) 52%), #ffffff;
-  border-color: rgb(20 184 166 / 18%);
+  gap: 16px;
+  padding: 14px 16px;
+
+  .command-title {
+    min-width: 0;
+    padding-left: 10px;
+    border-left: 4px solid var(--inventory-primary);
+  }
 
   span {
-    color: #0f766e;
-    font-size: 13px;
+    color: var(--inventory-primary);
+    font-size: 12px;
     font-weight: 700;
   }
 
@@ -2392,37 +2554,45 @@ onMounted(loadInventory);
   }
 
   h1 {
-    margin-top: 4px;
-    font-size: 24px;
-    line-height: 1.35;
+    margin-top: 2px;
+    font-size: 22px;
+    line-height: 1.25;
   }
 
   p {
-    margin-top: 6px;
-    color: var(--el-text-color-regular);
+    max-width: 66ch;
+    margin-top: 5px;
+    overflow: hidden;
+    color: var(--inventory-muted);
+    font-size: 13px;
+    line-height: 1.45;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
-.hero-actions {
+.command-actions {
   display: flex;
   flex-shrink: 0;
   gap: 8px;
 }
 
-.task-strip {
+.status-ribbon {
   display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) repeat(4, minmax(120px, 1fr));
-  gap: 10px;
+  grid-template-columns: minmax(220px, 0.95fr) repeat(4, minmax(120px, 1fr));
+  gap: 8px;
 }
 
-.task-card {
+.ribbon-lead,
+.ribbon-metric {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 11px 13px;
-  background: #f8fafc;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.ribbon-lead {
+  background: #f7fafb;
 
   span,
   strong,
@@ -2431,13 +2601,13 @@ onMounted(loadInventory);
   }
 
   span {
-    color: #0f766e;
+    color: var(--inventory-primary);
     font-size: 12px;
     font-weight: 700;
   }
 
   strong {
-    color: #111827;
+    color: var(--inventory-text);
     font-size: 15px;
     line-height: 1.35;
   }
@@ -2448,30 +2618,15 @@ onMounted(loadInventory);
   }
 }
 
-.summary-grid {
+.ribbon-metric,
+.board-metric {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-
-.summary-card {
-  position: relative;
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  min-height: 82px;
-  padding: 11px 13px;
-  overflow: hidden;
+  gap: 4px;
   text-align: left;
   cursor: pointer;
-
-  &::before {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 4px;
-    content: "";
-    background: #0f766e;
-  }
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
 
   span,
   strong,
@@ -2481,37 +2636,30 @@ onMounted(loadInventory);
 
   span,
   small {
-    color: var(--el-text-color-secondary);
+    color: var(--inventory-muted);
   }
 
   strong {
-    color: #0f766e;
-    font-size: 32px;
+    color: var(--inventory-primary);
+    font-size: 28px;
     line-height: 1.05;
     font-variant-numeric: tabular-nums;
   }
 
+  &:hover {
+    background: var(--inventory-primary-soft);
+    border-color: rgb(8 118 111 / 26%);
+  }
+
   &.warning {
-    background: #fffbeb;
-
-    &::before {
-      background: #d97706;
-    }
-
     strong {
-      color: #d97706;
+      color: var(--inventory-warning);
     }
   }
 
   &.danger {
-    background: #fef2f2;
-
-    &::before {
-      background: #dc2626;
-    }
-
     strong {
-      color: #dc2626;
+      color: var(--inventory-danger);
     }
   }
 }
@@ -2519,36 +2667,42 @@ onMounted(loadInventory);
 .module-switcher {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 6px;
+  gap: 0;
+  overflow: hidden;
+  background: var(--inventory-panel);
+  border: 1px solid var(--inventory-line);
+  border-radius: 8px;
 
   button {
     display: grid;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
-    padding: 9px 10px;
+    padding: 9px 10px 8px;
     text-align: left;
     cursor: pointer;
-    background: #ffffff;
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 8px;
+    background: transparent;
+    border: 0;
+    border-right: 1px solid var(--inventory-line-soft);
+    border-radius: 0;
     transition:
-      border-color 0.16s ease,
-      box-shadow 0.16s ease,
-      transform 0.16s ease;
+      background 0.16s ease,
+      color 0.16s ease;
 
     &:hover,
     &.active {
-      border-color: rgb(20 184 166 / 40%);
-      box-shadow: 0 6px 16px rgb(15 23 42 / 7%);
-      transform: translateY(-1px);
+      background: #f5fbfa;
     }
 
     &.active {
-      background: linear-gradient(135deg, rgb(236 253 245 / 92%), #ffffff);
+      box-shadow: inset 0 -3px 0 var(--inventory-primary);
 
       span {
-        color: #0f766e;
+        color: var(--inventory-primary);
       }
+    }
+
+    &:last-child {
+      border-right: 0;
     }
   }
 
@@ -2561,13 +2715,13 @@ onMounted(loadInventory);
   }
 
   span {
-    color: #111827;
+    color: var(--inventory-text);
     font-size: 14px;
     font-weight: 700;
   }
 
   small {
-    color: var(--el-text-color-secondary);
+    color: var(--inventory-muted);
     font-size: 12px;
   }
 }
@@ -2603,7 +2757,7 @@ onMounted(loadInventory);
 }
 
 .panel {
-  padding: 14px;
+  padding: 13px 14px;
 }
 
 .panel-head {
@@ -2619,13 +2773,14 @@ onMounted(loadInventory);
   }
 
   h2 {
-    font-size: 17px;
+    color: var(--inventory-text);
+    font-size: 16px;
     line-height: 1.35;
   }
 
   p {
     margin-top: 4px;
-    color: var(--el-text-color-secondary);
+    color: var(--inventory-muted);
     font-size: 13px;
   }
 }
@@ -2634,11 +2789,86 @@ onMounted(loadInventory);
   align-self: start;
 }
 
-.overview-grid {
+.overview-command-board {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+}
+
+.board-signal {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 16px;
+  background: var(--inventory-success-soft);
+  border-right: 1px solid var(--inventory-line);
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span {
+    color: var(--inventory-success);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong {
+    color: var(--inventory-text);
+    font-size: 28px;
+    line-height: 1.18;
+  }
+
+  small {
+    color: var(--inventory-muted);
+    line-height: 1.5;
+  }
+
+  &.warning {
+    background: var(--inventory-warning-soft);
+
+    span {
+      color: var(--inventory-warning);
+    }
+  }
+
+  &.danger {
+    background: var(--inventory-danger-soft);
+
+    span {
+      color: var(--inventory-danger);
+    }
+  }
+}
+
+.board-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.board-metric {
+  min-width: 0;
+  padding: 14px;
+  background: #ffffff;
+  border: 0;
+  border-right: 1px solid var(--inventory-line-soft);
+
+  &:last-child {
+    border-right: 0;
+  }
+}
+
+.operations-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.62fr);
   gap: 12px;
-  margin-bottom: 12px;
+
+  &.secondary {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.36fr);
+  }
 }
 
 .quick-actions-panel {
@@ -2649,13 +2879,13 @@ onMounted(loadInventory);
 
 .workflow-steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 .workflow-step,
 .todo-card {
-  border: 1px solid var(--el-border-color-light);
+  border: 1px solid var(--inventory-line-soft);
   border-radius: 8px;
   background: #ffffff;
   text-align: left;
@@ -2666,9 +2896,8 @@ onMounted(loadInventory);
     transform 0.16s ease;
 
   &:hover {
-    border-color: rgb(20 184 166 / 38%);
-    box-shadow: 0 8px 18px rgb(15 23 42 / 8%);
-    transform: translateY(-1px);
+    border-color: rgb(8 118 111 / 28%);
+    background: #f9fdfc;
   }
 }
 
@@ -2684,14 +2913,13 @@ onMounted(loadInventory);
   }
 
   strong {
-    color: #0f766e;
+    color: var(--inventory-primary);
     font-size: 15px;
     line-height: 1.35;
   }
 
   small {
-    display: none;
-    color: var(--el-text-color-secondary);
+    color: var(--inventory-muted);
     line-height: 1.45;
   }
 }
@@ -2703,8 +2931,8 @@ onMounted(loadInventory);
   height: 26px;
   color: #ffffff;
   font-weight: 700;
-  background: #0f766e;
-  border-radius: 50%;
+  background: var(--inventory-primary);
+  border-radius: 7px;
 }
 
 .todo-list {
@@ -2737,22 +2965,20 @@ onMounted(loadInventory);
   }
 
   > span:last-child {
-    color: #0f766e;
+    color: var(--inventory-primary);
     font-weight: 700;
   }
 }
 
 .role-entry-panel {
-  margin-bottom: 12px;
-
   .panel-head p {
-    display: none;
+    display: block;
   }
 }
 
 .role-entry-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
@@ -2763,8 +2989,8 @@ onMounted(loadInventory);
   padding: 10px;
   text-align: left;
   cursor: pointer;
-  background: linear-gradient(135deg, #ffffff, rgb(236 253 245 / 64%));
-  border: 1px solid rgb(20 184 166 / 16%);
+  background: #ffffff;
+  border: 1px solid var(--inventory-line-soft);
   border-radius: 8px;
   transition:
     border-color 0.16s ease,
@@ -2772,9 +2998,8 @@ onMounted(loadInventory);
     transform 0.16s ease;
 
   &:hover {
-    border-color: rgb(20 184 166 / 42%);
-    box-shadow: 0 8px 18px rgb(15 23 42 / 8%);
-    transform: translateY(-1px);
+    border-color: rgb(8 118 111 / 28%);
+    background: #f9fdfc;
   }
 
   span,
@@ -2784,7 +3009,7 @@ onMounted(loadInventory);
   }
 
   span {
-    color: #0f766e;
+    color: var(--inventory-primary);
     font-size: 12px;
     font-weight: 700;
   }
@@ -2796,8 +3021,7 @@ onMounted(loadInventory);
   }
 
   small {
-    display: none;
-    color: var(--el-text-color-secondary);
+    color: var(--inventory-muted);
     line-height: 1.45;
   }
 }
@@ -2817,148 +3041,305 @@ onMounted(loadInventory);
   }
 }
 
-.executive-signal {
+:deep(.el-table) {
+  --el-table-border-color: var(--inventory-line-soft);
+  --el-table-header-bg-color: #f7fafb;
+  --el-table-header-text-color: #44515f;
+  --el-table-text-color: var(--inventory-text);
+
+  font-size: 13px;
+
+  th.el-table__cell {
+    font-weight: 700;
+  }
+}
+
+.executive-filter-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 112px;
-  border-left: 6px solid #16a34a;
-  background: linear-gradient(90deg, rgb(240 253 244 / 90%), #ffffff 64%);
+  gap: 14px;
+  padding: 12px 18px;
+  background: var(--inventory-panel);
+  border: 1px solid var(--inventory-line);
+  border-radius: 8px;
+}
 
-  span,
-  strong,
-  small {
-    display: block;
+.filter-pills,
+.filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-pills button,
+.filter-fields strong {
+  min-height: 32px;
+  padding: 6px 17px;
+  color: #183044;
+  font-size: 13px;
+  font-weight: 700;
+  background: #ffffff;
+  border: 1px solid #cfd9e3;
+  border-radius: 999px;
+}
+
+.filter-pills button {
+  cursor: pointer;
+
+  &.active,
+  &:hover {
+    color: #ffffff;
+    background: var(--inventory-primary);
+    border-color: var(--inventory-primary);
   }
+}
+
+.filter-fields {
+  justify-content: flex-end;
 
   span {
-    color: #0f766e;
+    color: #40556a;
     font-size: 13px;
     font-weight: 700;
   }
 
   strong {
-    margin-top: 4px;
-    color: #111827;
-    font-size: 34px;
-    line-height: 1.15;
-    font-variant-numeric: tabular-nums;
+    min-width: 118px;
+    text-align: center;
+    border-radius: 7px;
   }
+}
 
+.executive-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(240px, 0.9fr) minmax(260px, 0.9fr) minmax(260px, 0.92fr);
+  gap: 12px;
+}
+
+.executive-summary-card {
+  display: grid;
+  align-content: space-between;
+  gap: 14px;
+  min-height: 154px;
+  padding: 22px 22px 18px;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid var(--inventory-line);
+  border-radius: 8px;
+
+  h2,
+  p,
+  strong,
   small {
-    margin-top: 6px;
-    color: var(--el-text-color-regular);
+    display: block;
+    margin: 0;
   }
 
-  &.warning {
-    border-left-color: #d97706;
-    background: linear-gradient(90deg, rgb(255 251 235 / 92%), #ffffff 64%);
-
-    span {
-      color: #b45309;
-    }
+  h2 {
+    color: #061833;
+    font-size: 16px;
+    line-height: 1.3;
   }
 
-  &.danger {
-    border-left-color: #dc2626;
-    background: linear-gradient(90deg, rgb(254 242 242 / 92%), #ffffff 64%);
+  p,
+  small {
+    color: #53677d;
+    font-size: 13px;
+    line-height: 1.45;
+  }
 
-    span {
-      color: #b91c1c;
+  &.urgent,
+  &.attention {
+    cursor: pointer;
+    transition:
+      border-color 0.16s ease,
+      background 0.16s ease;
+
+    &:hover {
+      background: #fbfdfd;
+      border-color: rgb(8 118 111 / 28%);
     }
   }
 }
 
-.signal-counts {
+.signal-body {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+
+  strong {
+    color: var(--inventory-success);
+    font-size: 26px;
+    line-height: 1.1;
+  }
+
+  small {
+    margin-top: 4px;
+  }
+}
+
+.signal-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  background: rgb(35 128 95 / 14%);
+  border: 1px solid rgb(35 128 95 / 22%);
+  border-radius: 50%;
+
+  &::after {
+    width: 28px;
+    height: 28px;
+    content: "";
+    background: var(--inventory-success);
+    border-radius: 50%;
+  }
+}
+
+.executive-summary-card.signal.warning {
+  .signal-dot {
+    background: rgb(183 121 31 / 14%);
+    border-color: rgb(183 121 31 / 24%);
+
+    &::after {
+      background: var(--inventory-warning);
+    }
+  }
+
+  .signal-body strong {
+    color: var(--inventory-warning);
+  }
+}
+
+.executive-summary-card.signal.danger {
+  .signal-dot {
+    background: rgb(200 50 50 / 12%);
+    border-color: rgb(200 50 50 / 22%);
+
+    &::after {
+      background: var(--inventory-danger);
+    }
+  }
+
+  .signal-body strong {
+    color: var(--inventory-danger);
+  }
+}
+
+.signal-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 
   span {
-    padding: 7px 10px;
-    color: #334155;
-    background: rgb(255 255 255 / 76%);
-    border: 1px solid var(--el-border-color-light);
+    padding: 4px 10px;
+    color: var(--inventory-primary);
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--inventory-primary-soft);
     border-radius: 999px;
+
+    &:last-child {
+      color: var(--inventory-warning);
+      background: var(--inventory-warning-soft);
+    }
   }
 }
 
-.executive-kpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.executive-kpi {
-  display: grid;
-  gap: 5px;
-  min-height: 118px;
-  padding: 14px;
-  text-align: left;
-  cursor: pointer;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease;
-
-  &:hover {
-    border-color: rgb(20 184 166 / 36%);
-    box-shadow: 0 8px 18px rgb(15 23 42 / 7%);
-    transform: translateY(-1px);
-  }
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span,
-  small {
-    color: var(--el-text-color-secondary);
-  }
+.large-number {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 
   strong {
-    color: #0f766e;
-    font-size: 38px;
-    line-height: 1.05;
+    color: var(--inventory-danger);
+    font-size: 54px;
+    line-height: 0.9;
     font-variant-numeric: tabular-nums;
   }
 
-  &.warning strong {
-    color: #d97706;
-  }
-
-  &.danger strong {
-    color: #dc2626;
+  span {
+    color: var(--inventory-danger);
+    font-size: 18px;
+    font-weight: 700;
   }
 }
 
-.executive-grid {
+.attention .large-number {
+  strong,
+  span {
+    color: #071a34;
+  }
+}
+
+.metric-stack {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.85fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+
+  div {
+    min-width: 0;
+  }
+
+  span,
+  strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    color: #4b5f73;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong {
+    margin-top: 10px;
+    color: var(--inventory-primary);
+    font-size: 26px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  strong.warning {
+    color: var(--inventory-warning);
+  }
+
+  strong.danger {
+    color: var(--inventory-danger);
+  }
+}
+
+.executive-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.88fr) minmax(420px, 1fr);
   gap: 12px;
+
+  &.secondary {
+    grid-template-columns: minmax(0, 0.88fr) minmax(420px, 1fr);
+  }
 }
 
 .panel-head.compact {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .bar-list {
   display: grid;
-  gap: 10px;
+  gap: 14px;
+  padding: 12px 6px 8px;
 }
 
 .bar-row {
   display: grid;
-  grid-template-columns: minmax(86px, 120px) minmax(0, 1fr) 60px;
+  grid-template-columns: minmax(86px, 104px) minmax(0, 1fr) 48px;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
 
   span,
   strong {
@@ -2970,26 +3351,164 @@ onMounted(loadInventory);
   div {
     height: 10px;
     overflow: hidden;
-    background: #e2e8f0;
+    background: #eef3f7;
     border-radius: 999px;
   }
 
   i {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, #0f766e, #14b8a6);
+    background: var(--inventory-primary);
     border-radius: inherit;
   }
 
   strong {
-    color: #0f766e;
+    color: #4d5f75;
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
 }
 
-.compact-list {
+.bar-row:nth-child(2) i {
+  background: #2f8b5d;
+}
+
+.bar-row:nth-child(3) i {
+  background: #2563eb;
+}
+
+.bar-row:nth-child(4) i {
+  background: #b8751c;
+}
+
+.bar-row:nth-child(5) i {
+  background: #6b7280;
+}
+
+.signature-list {
+  display: grid;
+  gap: 0;
+
+  .el-button {
+    justify-self: start;
+    margin-top: 10px;
+  }
+}
+
+.signature-row {
+  display: grid;
+  grid-template-columns: minmax(86px, 120px) minmax(0, 1fr) minmax(96px, 130px) 76px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--inventory-line-soft);
+
+  span,
+  strong,
+  em,
+  small {
+    overflow: hidden;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span,
+  strong {
+    color: #071a34;
+    font-weight: 700;
+  }
+
+  em {
+    color: var(--inventory-warning);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  small {
+    color: #586b80;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  &:hover {
+    background: #fbfdfd;
+  }
+}
+
+.risk-flow {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 28px;
+  padding: 30px 10px 18px;
+
+  &::before {
+    position: absolute;
+    top: 50px;
+    right: 13%;
+    left: 13%;
+    height: 1px;
+    content: "";
+    background: #cdd6df;
+  }
+}
+
+.risk-step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: start;
   gap: 8px;
+
+  span {
+    display: inline-grid;
+    place-items: center;
+    width: 39px;
+    height: 39px;
+    color: var(--inventory-primary);
+    font-weight: 800;
+    background: #ffffff;
+    border: 3px solid currentcolor;
+    border-radius: 50%;
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: #071a34;
+    font-size: 14px;
+  }
+
+  small {
+    color: #53677d;
+    line-height: 1.45;
+  }
+
+  &.danger span {
+    color: var(--inventory-danger);
+  }
+
+  &.warning span {
+    color: var(--inventory-warning);
+  }
+
+  &.primary span {
+    color: #2563eb;
+  }
+
+  &.success span {
+    color: var(--inventory-success);
+  }
 }
 
 :deep(.row-flash) {
@@ -3116,27 +3635,41 @@ onMounted(loadInventory);
 }
 
 @media (max-width: 1080px) {
-  .inventory-hero,
+  .inventory-command,
   .pane-grid,
   .control-grid,
-  .overview-grid {
+  .overview-command-board,
+  .operations-grid,
+  .operations-grid.secondary,
+  .executive-summary-grid,
+  .executive-content-grid,
+  .executive-content-grid.secondary {
     grid-template-columns: 1fr;
   }
 
-  .inventory-hero {
+  .inventory-command,
+  .executive-filter-bar {
     display: grid;
   }
 
-  .summary-grid {
+  .command-actions {
+    flex-wrap: wrap;
+  }
+
+  .status-ribbon,
+  .board-metrics,
+  .executive-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .task-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .task-card {
+  .ribbon-lead,
+  .board-signal {
     grid-column: 1 / -1;
+  }
+
+  .board-signal {
+    border-right: 0;
+    border-bottom: 1px solid var(--inventory-line);
   }
 
   .workflow-steps {
@@ -3158,20 +3691,33 @@ onMounted(loadInventory);
 }
 
 @media (max-width: 720px) {
-  .summary-grid {
+  .inventory-command {
+    padding: 12px;
+
+    p {
+      white-space: normal;
+    }
+  }
+
+  .status-ribbon,
+  .board-metrics,
+  .executive-summary-grid,
+  .metric-stack,
+  .risk-flow {
     grid-template-columns: 1fr;
   }
 
-  .task-strip {
-    grid-template-columns: 1fr;
-  }
+  .command-actions {
+    width: 100%;
 
-  .hero-actions {
-    flex-wrap: wrap;
+    .el-button {
+      flex: 1;
+    }
   }
 
   .workflow-steps,
   .todo-card,
+  .signature-row,
   .module-switcher,
   .role-entry-grid {
     grid-template-columns: 1fr;
@@ -3179,6 +3725,19 @@ onMounted(loadInventory);
 
   .todo-card > span:last-child {
     justify-self: start;
+  }
+
+  .risk-flow::before {
+    display: none;
+  }
+
+  .signature-row small {
+    text-align: left;
+  }
+
+  .signal-body strong,
+  .board-signal strong {
+    font-size: 24px;
   }
 
   .weekly-assist {

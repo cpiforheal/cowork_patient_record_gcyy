@@ -27,12 +27,18 @@ import { LOGIN_URL } from "@/config";
 import { useRouter } from "vue-router";
 import { logoutApi } from "@/api/modules/login";
 import { useUserStore } from "@/stores/modules/user";
+import { useAuthStore } from "@/stores/modules/auth";
+import { useTabsStore } from "@/stores/modules/tabs";
+import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { ElMessageBox, ElMessage } from "element-plus";
 import InfoDialog from "./InfoDialog.vue";
 import PasswordDialog from "./PasswordDialog.vue";
 
 const router = useRouter();
 const userStore = useUserStore();
+const authStore = useAuthStore();
+const tabsStore = useTabsStore();
+const keepAliveStore = useKeepAliveStore();
 
 const logout = () => {
   ElMessageBox.confirm("确认退出当前账号？", "提示", {
@@ -40,11 +46,19 @@ const logout = () => {
     cancelButtonText: "取消",
     type: "warning"
   }).then(async () => {
-    await logoutApi();
-    userStore.setToken("");
-    userStore.setUserInfo({ name: "未登录", role: "frontdesk", department: "前台" });
-    router.replace(LOGIN_URL);
-    ElMessage.success("已退出登录");
+    try {
+      await logoutApi();
+    } catch {
+      ElMessage.warning("后端会话未确认清理，已先退出本机登录");
+    } finally {
+      userStore.setToken("");
+      userStore.setUserInfo({ name: "未登录", role: "frontdesk", department: "前台" });
+      await router.replace(LOGIN_URL);
+      authStore.$reset();
+      tabsStore.$reset();
+      keepAliveStore.$reset();
+      ElMessage.success("已退出登录");
+    }
   });
 };
 

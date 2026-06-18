@@ -4,7 +4,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
@@ -19,9 +21,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class AuthTokenFilter extends OncePerRequestFilter {
 
     private final AuthSessionService authSessionService;
+    private final ObjectMapper objectMapper;
 
-    public AuthTokenFilter(AuthSessionService authSessionService) {
+    public AuthTokenFilter(AuthSessionService authSessionService, ObjectMapper objectMapper) {
         this.authSessionService = authSessionService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -40,7 +44,11 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         if (sessionUser.isEmpty()) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"code\":401,\"msg\":\"登录已失效，请重新登录\",\"data\":null}");
+            var payload = new LinkedHashMap<String, Object>();
+            payload.put("code", 401);
+            payload.put("msg", "登录已失效，请重新登录");
+            payload.put("data", null);
+            objectMapper.writeValue(response.getWriter(), payload);
             return;
         }
 

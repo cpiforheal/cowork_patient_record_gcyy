@@ -2,6 +2,7 @@
 %USERPROFILE%/
 runtime/
 release/
+config/runtime.env
 
 **/node_modules/
 **/dist/

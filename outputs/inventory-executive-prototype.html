@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>领导驾驶舱原型</title>
+  <style>
+    :root {
+      --bg: #f6f8fa;
+      --surface: #ffffff;
+      --surface-soft: #f9fafb;
+      --line: #e5e7eb;
+      --line-strong: #d1d5db;
+      --text: #111827;
+      --muted: #667085;
+      --faint: #98a2b3;
+      --accent: #006d68;
+      --accent-weak: #e7f3f1;
+      --green: #2f855a;
+      --green-weak: #eaf6ef;
+      --orange: #b7791f;
+      --orange-weak: #fff7e6;
+      --red: #c92a2a;
+      --red-weak: #fff1f1;
+      --blue: #2563eb;
+      --radius: 8px;
+      --shadow: 0 1px 2px rgb(16 24 40 / 6%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+    }
+
+    .side {
+      background: #ffffff;
+      border-right: 1px solid var(--line);
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      padding: 12px 8px;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 10px;
+      display: grid;
+      place-items: center;
+      color: #ffffff;
+      font-weight: 800;
+      background: var(--accent);
+      border-radius: 10px;
+    }
+
+    .side-button {
+      width: 44px;
+      height: 40px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #667085;
+      font-size: 15px;
+      background: transparent;
+    }
+
+    .side-button.active {
+      color: var(--accent);
+      background: var(--accent-weak);
+      border-color: #bfdfdc;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 22px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .crumb {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .topnav {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .topnav span {
+      padding: 14px 12px 13px;
+      color: #475467;
+      font-size: 13px;
+      white-space: nowrap;
+      border-bottom: 2px solid transparent;
+    }
+
+    .topnav .active {
+      color: var(--accent);
+      font-weight: 700;
+      border-bottom-color: var(--accent);
+    }
+
+    .user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #344054;
+      white-space: nowrap;
+    }
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #edf2f7;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .page {
+      padding: 18px 22px 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .header {
+      min-height: 98px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 16px 18px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .title-block {
+      display: grid;
+      gap: 8px;
+    }
+
+    .path {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 23px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .btn {
+      height: 32px;
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: #ffffff;
+      color: #344054;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .btn.primary {
+      color: #ffffff;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .tab {
+      min-width: 0;
+      height: 52px;
+      padding: 8px 12px;
+      display: grid;
+      align-content: center;
+      gap: 2px;
+      border-right: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .tab:last-child {
+      border-right: 0;
+    }
+
+    .tab strong {
+      overflow: hidden;
+      color: #1f2937;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab small {
+      overflow: hidden;
+      color: var(--faint);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab.active {
+      background: var(--accent-weak);
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .tab.active strong {
+      color: var(--accent);
+    }
+
+    .summary-layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 1.25fr) minmax(0, 2.4fr) minmax(300px, 0.95fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .signal-panel {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+      border-left: 4px solid var(--green);
+    }
+
+    .signal-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgb(47 133 90 / 12%);
+    }
+
+    .signal-panel h2 {
+      margin-top: 8px;
+      font-size: 26px;
+      line-height: 1.2;
+    }
+
+    .signal-panel p {
+      margin-top: 8px;
+      color: var(--muted);
+    }
+
+    .timestamp {
+      color: var(--faint);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .signal-counts {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .count-box {
+      padding: 10px;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .count-box span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .count-box strong {
+      display: block;
+      margin-top: 2px;
+      color: #111827;
+      font-size: 22px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .kpi {
+      min-height: 108px;
+      padding: 13px;
+      display: grid;
+      align-content: space-between;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .kpi .label {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .badge {
+      height: 22px;
+      padding: 0 7px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .badge.green {
+      color: var(--green);
+      background: var(--green-weak);
+    }
+
+    .badge.orange {
+      color: var(--orange);
+      background: var(--orange-weak);
+    }
+
+    .badge.red {
+      color: var(--red);
+      background: var(--red-weak);
+    }
+
+    .kpi strong {
+      margin-top: 10px;
+      display: block;
+      color: var(--accent);
+      font-size: 32px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kpi strong.orange {
+      color: var(--orange);
+    }
+
+    .kpi small {
+      margin-top: 8px;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .todo-panel {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .panel-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .panel-title h2 {
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .panel-title a {
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .todo-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .todo-row {
+      padding: 10px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .todo-row strong,
+    .todo-row small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .todo-row strong {
+      font-size: 13px;
+    }
+
+    .todo-row small {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .link {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .panel-body {
+      padding: 14px;
+    }
+
+    .chart {
+      margin-top: 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr) 44px;
+      gap: 10px;
+      align-items: center;
+      color: #344054;
+      font-size: 13px;
+    }
+
+    .bar-track {
+      height: 8px;
+      overflow: hidden;
+      background: #eef2f6;
+      border-radius: 999px;
+    }
+
+    .bar {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+    }
+
+    .table-panel {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .table-head {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    th {
+      color: var(--muted);
+      background: #f9fafb;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    td {
+      color: #344054;
+      font-size: 13px;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .risk {
+      display: inline-flex;
+      height: 22px;
+      align-items: center;
+      padding: 0 7px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .risk.red {
+      color: var(--red);
+      background: var(--red-weak);
+    }
+
+    .risk.orange {
+      color: var(--orange);
+      background: var(--orange-weak);
+    }
+
+    .risk.green {
+      color: var(--green);
+      background: var(--green-weak);
+    }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
+      gap: 14px;
+    }
+
+    .empty {
+      min-height: 148px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty-icon {
+      width: 46px;
+      height: 46px;
+      margin: 0 auto 8px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(180deg, #ffffff, #f3f4f6);
+    }
+
+    .footer {
+      padding: 10px 0 0;
+      color: var(--faint);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 1360px) {
+      .summary-layout {
+        grid-template-columns: minmax(300px, 1fr) minmax(0, 1.6fr);
+      }
+
+      .todo-panel {
+        grid-column: 1 / -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="logo">医</div>
+      <div class="side-button">首</div>
+      <div class="side-button">患</div>
+      <div class="side-button active">库</div>
+      <div class="side-button">审</div>
+      <div class="side-button">系</div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb">固始中医肛肠医院门诊电子信息管理系统</div>
+        <nav class="topnav">
+          <span>系统日志</span>
+          <span>旧共享病历导入</span>
+          <span>物资申领台账</span>
+          <span>进销存主控台</span>
+          <span>科室申领审批</span>
+          <span>库存与批次</span>
+          <span>物资档案</span>
+          <span class="active">领导驾驶舱</span>
+        </nav>
+        <div class="user"><div class="avatar">管</div>管理员</div>
+      </header>
+
+      <section class="page">
+        <section class="header">
+          <div class="title-block">
+            <div class="path">进销存管理 / 领导驾驶舱</div>
+            <h1>今日物资运行安全概览</h1>
+            <p class="subtitle">用红绿灯、关键指标和科室消耗看清当前风险，优先处理未闭环事项。</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn">刷新</button>
+            <button class="btn primary">导出周报</button>
+            <button class="btn">导出风险</button>
+          </div>
+        </section>
+
+        <nav class="tabs" aria-label="进销存二级功能">
+          <div class="tab"><strong>主控台</strong><small>待办与风险</small></div>
+          <div class="tab active"><strong>领导驾驶舱</strong><small>红绿灯与指标</small></div>
+          <div class="tab"><strong>申领审批</strong><small>申请到签收</small></div>
+          <div class="tab"><strong>库存看板</strong><small>批次与效期</small></div>
+          <div class="tab"><strong>物资档案</strong><small>字典与规则</small></div>
+          <div class="tab"><strong>周消耗</strong><small>用量与预计</small></div>
+          <div class="tab"><strong>盘点处置</strong><small>退回与报废</small></div>
+          <div class="tab"><strong>追溯流水</strong><small>导出与复核</small></div>
+        </nav>
+
+        <section class="summary-layout">
+          <article class="panel signal-panel">
+            <div class="signal-head">
+              <div>
+                <div class="status-line"><span class="dot"></span>今日红绿灯</div>
+                <h2>运行正常</h2>
+                <p>暂无必须立即处理的库存风险，待签字事项按常规节奏跟进。</p>
+              </div>
+              <div class="timestamp">08:52 更新</div>
+            </div>
+            <div class="signal-counts">
+              <div class="count-box"><span>紧急风险</span><strong>0</strong></div>
+              <div class="count-box"><span>关注事项</span><strong>0</strong></div>
+            </div>
+          </article>
+
+          <section class="kpi-grid">
+            <article class="kpi">
+              <div class="label">申领闭环率 <span class="badge green">正常</span></div>
+              <strong>100%</strong>
+              <small>0/0 单已签收</small>
+            </article>
+            <article class="kpi">
+              <div class="label">低库存种类 <span class="badge green">清零</span></div>
+              <strong>0</strong>
+              <small>低于或等于预警线</small>
+            </article>
+            <article class="kpi">
+              <div class="label">临期/过期批次 <span class="badge orange">跟进</span></div>
+              <strong class="orange">0</strong>
+              <small>30 天内临期或已过期</small>
+            </article>
+            <article class="kpi">
+              <div class="label">本期报废记录 <span class="badge green">正常</span></div>
+              <strong>0</strong>
+              <small>需要原因和责任可追溯</small>
+            </article>
+          </section>
+
+          <aside class="panel todo-panel">
+            <div class="panel-title">
+              <h2>待签字事项</h2>
+              <a href="#">查看全部</a>
+            </div>
+            <div class="todo-list">
+              <div class="todo-row"><span class="risk green">签收</span><div><strong>暂无待签字事项</strong><small>审核、发放、签收均已完成</small></div><span class="link">进入</span></div>
+              <div class="todo-row"><span class="risk green">审批</span><div><strong>暂无待审核申领</strong><small>负责人无需立即处理</small></div><span class="link">查看</span></div>
+              <div class="todo-row"><span class="risk green">复核</span><div><strong>暂无盘点差异待复核</strong><small>账实状态稳定</small></div><span class="link">追溯</span></div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel panel-body">
+            <div class="panel-title">
+              <div>
+                <h2>科室消耗 TOP</h2>
+                <p class="subtitle">基于周消耗记录汇总，用于判断异常用量。</p>
+              </div>
+              <a href="#">导出</a>
+            </div>
+            <div class="chart">
+              <div class="bar-row"><span>肛肠一诊室</span><div class="bar-track"><div class="bar" style="width: 74%"></div></div><strong>148</strong></div>
+              <div class="bar-row"><span>换药室</span><div class="bar-track"><div class="bar" style="width: 58%"></div></div><strong>116</strong></div>
+              <div class="bar-row"><span>治疗室</span><div class="bar-track"><div class="bar" style="width: 41%"></div></div><strong>82</strong></div>
+              <div class="bar-row"><span>导诊台</span><div class="bar-track"><div class="bar" style="width: 22%"></div></div><strong>44</strong></div>
+            </div>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="table-head panel-title">
+              <div>
+                <h2>风险明细</h2>
+                <p class="subtitle">仅保留需要管理人员跟进的事项。</p>
+              </div>
+              <a href="#">风险清单</a>
+            </div>
+            <table>
+              <thead>
+                <tr><th style="width: 92px">类型</th><th>对象</th><th style="width: 116px">科室</th><th style="width: 180px">当前情况</th><th style="width: 72px">处理</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><span class="risk green">正常</span></td><td>医用纱布块</td><td>换药室</td><td>库存充足，批次有效</td><td><span class="link">查看</span></td></tr>
+                <tr><td><span class="risk green">正常</span></td><td>一次性手套</td><td>治疗室</td><td>无临期批次</td><td><span class="link">查看</span></td></tr>
+                <tr><td><span class="risk orange">关注</span></td><td>碘伏棉签</td><td>肛肠一诊室</td><td>本周用量偏高</td><td><span class="link">跟进</span></td></tr>
+                <tr><td><span class="risk green">正常</span></td><td>护理垫</td><td>导诊台</td><td>账实一致</td><td><span class="link">查看</span></td></tr>
+              </tbody>
+            </table>
+          </article>
+        </section>
+
+        <section class="bottom-grid">
+          <article class="panel table-panel">
+            <div class="table-head panel-title">
+              <div>
+                <h2>周转慢清单</h2>
+                <p class="subtitle">有库存但近期出库少的批次。</p>
+              </div>
+              <a href="#">批次看板</a>
+            </div>
+            <table>
+              <thead>
+                <tr><th>物资</th><th style="width: 100px">库存</th><th style="width: 128px">效期</th><th style="width: 150px">最近出库</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>一次性治疗巾</td><td>32</td><td>2026-11-20</td><td>2026-06-10</td></tr>
+                <tr><td>无菌敷贴</td><td>18</td><td>2026-10-18</td><td>2026-06-08</td></tr>
+                <tr><td>弹力绷带</td><td>26</td><td>2027-01-05</td><td>2026-06-06</td></tr>
+              </tbody>
+            </table>
+          </article>
+
+          <article class="panel panel-body">
+            <div class="panel-title">
+              <div>
+                <h2>追溯摘要</h2>
+                <p class="subtitle">导出与复核记录保持可追溯。</p>
+              </div>
+              <a href="#">追溯流水</a>
+            </div>
+            <div class="empty">
+              <div>
+                <div class="empty-icon"></div>
+                <strong>暂无异常追溯事项</strong>
+                <p>本期报废、退回和盘点差异均已闭环。</p>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <div class="footer">固始中医肛肠医院门诊电子信息管理系统</div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -5,6 +5,16 @@ import { authHeaders } from "./authToken";
 
 const AUTH_API_BASE_URL = import.meta.env.VITE_AUTH_API_BASE_URL || "/auth";
 
+const readJsonResult = async <T>(response: Response): Promise<ResultData<T>> => {
+  const text = await response.text();
+  if (!text) return { code: String(response.status), msg: "" } as ResultData<T>;
+  try {
+    return JSON.parse(text) as ResultData<T>;
+  } catch {
+    return { code: String(response.status), msg: response.statusText || "接口响应格式异常" } as ResultData<T>;
+  }
+};
+
 export interface LoginAccountOption {
   id: string;
   username: string;
@@ -24,7 +34,7 @@ export const loginApi = (params: Login.ReqLoginForm) => {
     body: JSON.stringify(params)
   })
     .then(async response => {
-      const payload = (await response.json()) as ResultData<Login.ResLogin>;
+      const payload = await readJsonResult<Login.ResLogin>(response);
       if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "登录失败");
       return payload;
     })
@@ -36,7 +46,7 @@ export const loginApi = (params: Login.ReqLoginForm) => {
 export const getLoginOptionsApi = () => {
   return fetch(`${AUTH_API_BASE_URL}/options`)
     .then(async response => {
-      const payload = (await response.json()) as ResultData<LoginOptions>;
+      const payload = await readJsonResult<LoginOptions>(response);
       if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "登录选项加载失败");
       return payload;
     })
@@ -48,7 +58,7 @@ export const getLoginOptionsApi = () => {
 export const getLoginAccountsApi = (department: string) => {
   return fetch(`${AUTH_API_BASE_URL}/options/accounts?department=${encodeURIComponent(department)}`)
     .then(async response => {
-      const payload = (await response.json()) as ResultData<{ accounts: LoginAccountOption[] }>;
+      const payload = await readJsonResult<{ accounts: LoginAccountOption[] }>(response);
       if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "账号列表加载失败");
       return payload;
     })
@@ -70,7 +80,7 @@ export const logoutApi = () => {
     method: "POST",
     headers: authHeaders()
   }).then(async response => {
-    const payload = (await response.json()) as ResultData<null>;
+    const payload = await readJsonResult<null>(response);
     if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "退出登录失败");
     return payload;
   });
