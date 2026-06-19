@@ -1,20 +1,55 @@
 <template>
   <div class="main-box patient-list-layout">
-    <TreeFilter
-      id="id"
-      label="label"
-      title="日期收录索引"
-      :data="dateTree"
-      :default-value="activeDateScope"
-      @change="changeDateScope"
-    >
-      <template #default="{ row }">
-        <span class="date-tree-node" :class="{ 'is-group': row.data.kind === 'group' }">
-          <span class="tree-label">{{ row.data.label }}</span>
-          <span v-if="row.data.count !== undefined" class="tree-count">{{ row.data.count }}</span>
-        </span>
-      </template>
-    </TreeFilter>
+    <aside class="date-scope-panel" aria-label="日期筛选">
+      <div class="date-panel-head">
+        <div>
+          <span>日期筛选</span>
+          <strong>{{ activeScopeShortTitle }}</strong>
+        </div>
+        <el-tag effect="plain">{{ currentTotal }} 人</el-tag>
+      </div>
+
+      <div class="quick-range-grid">
+        <button
+          v-for="scope in quickScopeNodes"
+          :key="scope.id || 'all'"
+          class="date-chip"
+          :class="{ active: activeDateScope === scope.id }"
+          type="button"
+          @click="changeDateScope(scope.id)"
+        >
+          <span>{{ scope.label }}</span>
+          <small>{{ scope.count || 0 }}</small>
+        </button>
+      </div>
+
+      <div class="date-picker-card">
+        <span class="date-panel-label">按天查看</span>
+        <el-date-picker
+          v-model="selectedDateValue"
+          type="date"
+          value-format="YYYY-MM-DD"
+          clearable
+          placeholder="选择日期"
+          @change="changeCalendarDate"
+        />
+      </div>
+
+      <div v-if="visibleRecordedDays.length" class="recorded-days">
+        <span class="date-panel-label">有收录的日期</span>
+        <button
+          v-for="scope in visibleRecordedDays"
+          :key="scope.id"
+          class="recorded-day"
+          :class="{ active: activeDateScope === scope.id }"
+          type="button"
+          @click="changeDateScope(scope.id)"
+        >
+          <span>{{ scope.label }}</span>
+          <small>{{ scope.count }} 人</small>
+        </button>
+      </div>
+    </aside>
 
     <section class="table-box patient-list-page">
       <div class="date-scope-card">
@@ -43,13 +78,16 @@
             <el-button v-auth="'patient:create'" type="primary" :icon="CirclePlus" @click="createDialogVisible = true">
               新建患者
             </el-button>
-            <span class="patient-table-hint">左侧按日期回看，表格继续保留姓名、门诊/住院号、状态和操作入口。</span>
+            <span class="patient-table-hint">按日期查看患者。</span>
           </div>
         </template>
 
         <template #name="{ row }">
-          <div class="patient-identity-cell">
-            <strong>{{ row.name }}</strong>
+          <div class="patient-identity-cell" :class="`risk-${patientRiskTone(row)}`">
+            <strong class="patient-name-line">
+              <i class="patient-signal" aria-hidden="true"></i>
+              {{ row.name }}
+            </strong>
             <span>{{ row.currentStage || "待分配阶段" }}</span>
           </div>
         </template>
@@ -70,9 +108,15 @@
 
         <template #status="{ row }">
           <div class="status-cell">
-            <el-tag :type="statusTagType(row.status)" effect="plain">
-              {{ row.status }}
-            </el-tag>
+            <div class="patient-status-top">
+              <el-tag :type="statusTagType(row.status)" effect="plain">
+                {{ row.status }}
+              </el-tag>
+              <span>{{ row.completedCount || 0 }}/{{ recordSections.length }}</span>
+            </div>
+            <div class="closed-loop-meter" :class="`risk-${patientRiskTone(row)}`">
+              <i :style="{ width: `${row.progressPercent || 0}%` }"></i>
+            </div>
             <span>{{ row.progressPercent }}%</span>
           </div>
         </template>
@@ -89,17 +133,8 @@
         </template>
 
         <template #operation="{ row }">
-          <el-button v-auth="'patient:read'" type="primary" link @click="router.push(`/patients/detail/${row.id}`)">
-            打开病历
-          </el-button>
-          <el-button
-            v-auth="'patient:update'"
-            type="primary"
-            link
-            @click="router.push({ path: '/workbench/upload', query: { keyword: row.visitNo } })"
-          >
-            上传资料
-          </el-button>
+          <el-button v-auth="'patient:read'" type="primary" link @click.stop="openPatientDetail(row.id)"> 打开病历 </el-button>
+          <el-button v-auth="'patient:update'" type="primary" link @click.stop="openPatientUpload(row)"> 上传资料 </el-button>
         </template>
       </ProTable>
 
@@ -125,13 +160,7 @@
             <el-input v-model="createForm.doctor" placeholder="请输入接诊医生" />
           </el-form-item>
           <el-form-item label="联系电话" prop="phone">
-            <el-input
-              v-model="createForm.phone"
-              maxlength="11"
-              show-word-limit
-              type="tel"
-              placeholder="可选，用于合并同一患者多次就诊"
-            />
+            <el-input v-model="createForm.phone" maxlength="11" show-word-limit type="tel" placeholder="同一患者可填写" />
           </el-form-item>
         </el-form>
         <template #footer>
@@ -148,12 +177,12 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import { CirclePlus, Refresh } from "@element-plus/icons-vue";
-import TreeFilter from "@/components/TreeFilter/index.vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { createPatientApi, getPatientListApi, type CreatePatientParams, type PatientRow } from "@/api/modules/clinic";
-import { roleLabel } from "@/config/fieldPermissions";
+import { recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
+import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 
 type DateScopeNode = {
   id: string;
@@ -161,20 +190,29 @@ type DateScopeNode = {
   count?: number;
   from?: string;
   to?: string;
-  kind?: "group" | "leaf";
-  children?: DateScopeNode[];
+  kind?: "leaf";
 };
 
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
+const { openPatientDetail } = usePatientNavigation();
 const proTable = ref<ProTableInstance>();
 const createFormRef = ref<FormInstance>();
 const createDialogVisible = ref(false);
 const creating = ref(false);
 const activeDateScope = ref("");
+const selectedDateValue = ref("");
 const allPatients = ref<PatientRow[]>([]);
 const currentTotal = ref(0);
+
+const patientRiskTone = (row: PatientRow) => {
+  const status = row.status || "";
+  if (row.riskType === "danger" || status.includes("退回") || status.includes("待质控")) return "danger";
+  if (row.riskType === "warning" || (row.progressPercent || 0) < 100) return "warning";
+  if (row.riskType === "success" || (row.progressPercent || 0) >= 100) return "success";
+  return "info";
+};
 
 const initParam = reactive<{
   visitDateFrom?: string;
@@ -279,35 +317,10 @@ const quickRangeNodes = computed<DateScopeNode[]>(() => {
   return ranges.map(item => ({ ...item, count: rangeCount(item.from, item.to), kind: "leaf" }));
 });
 
-const recentDayNodes = computed<DateScopeNode[]>(() => {
-  const today = new Date();
-  return Array.from({ length: 30 }, (_, index) => {
-    const date = toDateText(addDays(today, -index));
-    const count = countByDate.value.get(date) || 0;
-    return {
-      id: `date::${date}`,
-      label: count ? date : `${date} · 空档`,
-      count,
-      kind: "leaf" as const
-    };
-  });
-});
-
-const monthNodes = computed<DateScopeNode[]>(() => {
-  const monthMap = new Map<string, number>();
-  countByDate.value.forEach((count, date) => {
-    const month = date.slice(0, 7);
-    monthMap.set(month, (monthMap.get(month) || 0) + count);
-  });
-  return [...monthMap.entries()]
-    .sort((left, right) => right[0].localeCompare(left[0]))
-    .map(([month, count]) => ({
-      id: `month::${month}`,
-      label: month,
-      count,
-      kind: "leaf"
-    }));
-});
+const quickScopeNodes = computed<DateScopeNode[]>(() => [
+  { id: "", label: "全部", count: allPatients.value.length, kind: "leaf" },
+  ...quickRangeNodes.value
+]);
 
 const dayNodes = computed<DateScopeNode[]>(() =>
   [...countByDate.value.entries()]
@@ -320,20 +333,7 @@ const dayNodes = computed<DateScopeNode[]>(() =>
     }))
 );
 
-const groupNode = (id: string, label: string, children: DateScopeNode[]): DateScopeNode => ({
-  id: `group::${id}`,
-  label,
-  count: children.reduce((total, child) => total + (child.count || 0), 0),
-  kind: "group",
-  children
-});
-
-const dateTree = computed<DateScopeNode[]>(() => [
-  groupNode("quick", "快捷回看", quickRangeNodes.value),
-  groupNode("recent-day", "近 30 天日历", recentDayNodes.value),
-  groupNode("month", "按月份", monthNodes.value),
-  groupNode("day", "有收录日期归档", dayNodes.value)
-]);
+const visibleRecordedDays = computed(() => dayNodes.value.slice(0, 12));
 
 const activeScopeTitle = computed(() => {
   if (!activeDateScope.value) return "全部患者收录";
@@ -344,21 +344,21 @@ const activeScopeTitle = computed(() => {
   }
   if (type === "month") return `${value} 月收录`;
   if (type === "date") return `${value} 当日收录`;
-  const group = dateTree.value.find(item => item.id === activeDateScope.value);
-  return group?.label || "全部患者收录";
+  return "全部患者收录";
 });
 
+const activeScopeShortTitle = computed(() => activeScopeTitle.value.replace("患者收录", "").replace("收录", "") || "全部");
+
 const activeScopeDesc = computed(() => {
-  if (!activeDateScope.value)
-    return "展示所有患者，可从左侧选择某天、某月或近 7/30 天，快速回滚查看历史病历收录。近 30 天日历会保留空档日期，方便确认某天确实无人收录。";
+  if (!activeDateScope.value) return "选择日期查看患者。";
   const [type, value] = activeDateScope.value.split("::");
   if (type === "date") {
     const count = countByDate.value.get(value) || 0;
     return count ? `该日共收录 ${count} 位患者，可继续按姓名或门诊/住院号缩小范围。` : "该日暂无患者收录。";
   }
-  if (type === "month") return "当前按月份聚合，适合回看患者激增或空档时间段。";
-  if (type === "range") return "当前按常用时间窗口聚合，适合日常交接和近期补录核对。";
-  return "选择具体日期节点后，右侧表格会自动收束到对应就诊日期，空档日期会直接呈现 0 条结果。";
+  if (type === "month") return "当前月份的患者列表。";
+  if (type === "range") return "当前时间段的患者列表。";
+  return "当前日期的患者列表。";
 });
 
 const clearDateParam = () => {
@@ -371,7 +371,8 @@ const changeDateScope = (value: string) => {
   clearDateParam();
 
   const [type, scopeValue] = activeDateScope.value.split("::");
-  if (!scopeValue || type === "group") return;
+  selectedDateValue.value = type === "date" ? scopeValue || "" : "";
+  if (!scopeValue) return;
   if (type === "date") {
     initParam.visitDateFrom = scopeValue;
     initParam.visitDateTo = scopeValue;
@@ -386,6 +387,10 @@ const changeDateScope = (value: string) => {
     initParam.visitDateFrom = range?.from;
     initParam.visitDateTo = range?.to;
   }
+};
+
+const changeCalendarDate = (value: string | null) => {
+  changeDateScope(value ? `date::${value}` : "");
 };
 
 const statusTagType = (status: string) => {
@@ -418,6 +423,16 @@ const refreshPatients = async () => {
   proTable.value?.getTableList();
 };
 
+const openPatientUpload = (row: PatientRow) => {
+  router.push({
+    path: "/workbench/upload",
+    query: {
+      patientId: row.id,
+      keyword: row.visitNo || row.name
+    }
+  });
+};
+
 const readQueryValue = (value: unknown) => (Array.isArray(value) ? value[0] : typeof value === "string" ? value : "");
 const queryDateScope = () => {
   const date = readQueryValue(route.query.date);
@@ -440,7 +455,7 @@ const submitCreatePatient = () => {
       ElMessage.success(msg || "患者已创建");
       createDialogVisible.value = false;
       await refreshPatients();
-      router.push(`/patients/detail/${data.id}`);
+      openPatientDetail(data.id);
     } catch (error) {
       ElMessage.error((error as Error).message);
     } finally {
@@ -459,11 +474,157 @@ onMounted(loadDateTree);
 <style scoped lang="scss">
 .patient-list-layout {
   align-items: stretch;
+  gap: 14px;
+  overflow: visible;
 }
 
 .patient-list-page {
   gap: 12px;
   min-width: 0;
+  overflow: visible;
+  color: var(--hos-text-primary);
+}
+
+.date-scope-panel {
+  position: relative;
+  display: flex;
+  flex: 0 0 238px;
+  flex-direction: column;
+  gap: 12px;
+  height: fit-content;
+  padding: 14px;
+  overflow: visible;
+  color: var(--hos-text-primary);
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(18px) saturate(132%);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
+}
+
+.date-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+
+  span,
+  strong {
+    display: block;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+
+  strong {
+    margin-top: 4px;
+    color: var(--hos-text-primary);
+    font-size: 17px;
+  }
+}
+
+.quick-range-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.date-chip,
+.recorded-day {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  color: var(--hos-text-primary);
+  cursor: pointer;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+
+  small {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+
+  &:hover {
+    background: var(--hos-panel-hover);
+    border-color: var(--hos-border-interactive);
+    box-shadow: 0 10px 24px rgb(92 154 122 / 10%);
+    transform: translateY(-1px);
+  }
+
+  &.active {
+    color: var(--hos-primary-deep);
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-border-interactive);
+    box-shadow: 0 10px 26px rgb(92 154 122 / 14%);
+
+    small {
+      color: var(--hos-primary-deep);
+      font-weight: 700;
+    }
+  }
+}
+
+.date-chip {
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 58px;
+  padding: 10px;
+
+  span {
+    font-weight: 700;
+  }
+}
+
+.date-picker-card,
+.recorded-days {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: rgb(255 255 255 / 28%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
+}
+
+.date-picker-card {
+  :deep(.el-date-editor) {
+    width: 100%;
+  }
+}
+
+.date-panel-label {
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recorded-days {
+  max-height: 352px;
+  overflow: auto;
+}
+
+.recorded-day {
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+
+  span {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .date-scope-card {
@@ -472,13 +633,16 @@ onMounted(loadDateTree);
   justify-content: space-between;
   gap: 16px;
   padding: 14px 18px;
-  background: linear-gradient(135deg, rgb(236 253 245 / 72%), rgb(255 255 255 / 95%)), var(--el-bg-color);
-  border: 1px solid rgb(20 184 166 / 18%);
-  border-radius: 8px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
 
   h2 {
     margin: 3px 0 4px;
-    color: var(--el-text-color-primary);
+    color: var(--hos-text-primary);
     font-size: 18px;
     font-weight: 700;
   }
@@ -486,13 +650,13 @@ onMounted(loadDateTree);
   p {
     max-width: 760px;
     margin: 0;
-    color: var(--el-text-color-secondary);
+    color: var(--hos-text-secondary);
     line-height: 1.7;
   }
 }
 
 .scope-eyebrow {
-  color: #008f84;
+  color: var(--hos-primary-deep);
   font-size: 12px;
   font-weight: 700;
 }
@@ -515,39 +679,6 @@ onMounted(loadDateTree);
     color: var(--el-text-color-secondary);
     font-size: 13px;
   }
-}
-
-.date-tree-node {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 10px;
-
-  &.is-group .tree-label {
-    color: var(--el-text-color-primary);
-    font-weight: 700;
-  }
-}
-
-.tree-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tree-count {
-  flex: 0 0 auto;
-  min-width: 28px;
-  padding: 1px 7px;
-  color: #008f84;
-  font-size: 12px;
-  line-height: 18px;
-  text-align: center;
-  background: rgb(20 184 166 / 10%);
-  border-radius: 999px;
 }
 
 .patient-identity-cell,
@@ -579,12 +710,88 @@ onMounted(loadDateTree);
   font-size: 15px;
 }
 
+.patient-name-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.patient-signal {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  background: var(--hos-status-info);
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgb(100 116 139 / 10%);
+}
+
+.risk-success .patient-signal {
+  background: var(--hos-status-success);
+  box-shadow: 0 0 0 4px rgb(22 163 74 / 12%);
+}
+
+.risk-warning .patient-signal {
+  background: var(--hos-status-warning);
+  box-shadow: 0 0 0 4px rgb(217 119 6 / 12%);
+}
+
+.risk-danger .patient-signal {
+  background: var(--hos-status-danger);
+  box-shadow: 0 0 0 4px rgb(220 38 38 / 12%);
+}
+
 .visit-no-cell strong {
   font-family: Arial, "Microsoft YaHei", sans-serif;
 }
 
 .status-cell {
   align-items: flex-start;
+}
+
+.patient-status-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+  }
+}
+
+.closed-loop-meter {
+  position: relative;
+  width: min(128px, 100%);
+  height: 8px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 48%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+
+  i {
+    display: block;
+    height: 100%;
+    background: var(--hos-status-info);
+    border-radius: inherit;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 45%);
+    transition: width 220ms var(--liquid-ease, ease);
+  }
+
+  &.risk-success i {
+    background: var(--hos-status-success);
+  }
+
+  &.risk-warning i {
+    background: var(--hos-status-warning);
+  }
+
+  &.risk-danger i {
+    background: var(--hos-status-danger);
+  }
 }
 
 .visit-date-cell {
@@ -608,6 +815,20 @@ onMounted(loadDateTree);
     flex-direction: column;
   }
 
+  .date-scope-panel {
+    flex: none;
+    width: 100%;
+  }
+
+  .quick-range-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .recorded-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
+  }
+
   .date-scope-card,
   .patient-table-header {
     align-items: flex-start;
@@ -616,6 +837,13 @@ onMounted(loadDateTree);
 
   .scope-actions {
     flex-wrap: wrap;
+  }
+}
+
+@media (width <= 620px) {
+  .quick-range-grid,
+  .recorded-days {
+    grid-template-columns: 1fr;
   }
 }
 </style>

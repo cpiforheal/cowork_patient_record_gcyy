@@ -9,7 +9,15 @@
       :default-value="activeSectionKey"
       @change="changeSectionFilter"
     />
-    <div class="table-box">
+    <div class="table-box" v-loading="detailLoading" element-loading-text="正在打开病历...">
+      <section v-if="detailError" class="detail-error-panel screen-only">
+        <div>
+          <strong>病历暂时打不开</strong>
+          <small>{{ detailError }}</small>
+        </div>
+        <el-button type="primary" plain @click="retryLoadPatientDetail">重试</el-button>
+      </section>
+
       <section class="record-workbar screen-only">
         <div class="workbar-main">
           <div class="workbar-title">
@@ -24,7 +32,11 @@
             </div>
           </div>
 
-          <div class="workbar-progress" aria-label="病历完成度">
+          <div
+            class="workbar-progress"
+            :class="{ active: completionPercent > 0, complete: completionPercent >= 100 }"
+            aria-label="病历完成度"
+          >
             <div>
               <span>已填 {{ completionStats.completed }}/{{ completionStats.total }}</span>
               <strong>{{ completionPercent }}%</strong>
@@ -35,7 +47,10 @@
           <div class="archive-save-status">
             <Transition name="save-status-fade">
               <span v-if="autoSaveStatus === 'saving'" class="save-indicator saving">正在保存...</span>
-              <span v-else-if="autoSaveStatus === 'saved'" class="save-indicator saved">已自动保存</span>
+              <span v-else-if="autoSaveStatus === 'saved'" class="save-indicator saved">
+                <i class="save-check" aria-hidden="true"></i>
+                已自动保存
+              </span>
               <span v-else-if="autoSaveStatus === 'conflict'" class="save-indicator conflict">保存冲突，草稿已保留</span>
               <span v-else-if="autoSaveStatus === 'error'" class="save-indicator error" @click="saveActiveMode">
                 保存失败，点击重试
@@ -49,9 +64,9 @@
             <el-radio-button label="mine">我的字段</el-radio-button>
             <el-radio-button label="full">完整病历</el-radio-button>
           </el-radio-group>
-          <el-button :icon="Upload" @click="router.push('/workbench/upload')">补充图片</el-button>
+          <el-button :icon="Upload" @click="openSupplementUpload">补充图片</el-button>
           <el-button :icon="FolderOpened" @click="router.push('/workbench/legacy')">导入旧共享病历</el-button>
-          <el-button @click="router.push('/audit/review')">质控审核</el-button>
+          <el-button @click="openQualityReview">质控审核</el-button>
           <el-button :icon="Clock" @click="openAuditTimeline">操作轨迹</el-button>
           <el-button :icon="View" @click="previewVisible = true">预览</el-button>
           <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
@@ -66,7 +81,7 @@
           <strong>检测到其他终端已更新</strong>
           <small>当前填写已保存在本机草稿{{ conflictDraftSavedAt ? `（${conflictDraftSavedAt}）` : "" }}，先不要刷新页面。</small>
         </div>
-        <el-button plain @click="viewServerLatest">查看服务器最新</el-button>
+        <el-button plain @click="viewServerLatest">查看最新版本</el-button>
         <el-button type="primary" @click="restoreConflictDraft">恢复本机草稿</el-button>
       </section>
 
@@ -106,6 +121,7 @@
           <button
             v-for="(section, index) in recordSectionsByRule"
             :key="section.key"
+            type="button"
             class="rail-item"
             :class="{ active: activeSectionKey === section.key }"
             @click="activeSectionKey = section.key"
@@ -113,6 +129,9 @@
             <span>{{ index + 1 }}</span>
             <strong>{{ shortTitle(section.title) }}</strong>
             <small>{{ section.department }}</small>
+            <em v-if="sectionRequiredMissingCount(section)" class="rail-missing-badge">
+              {{ sectionRequiredMissingCount(section) }}
+            </em>
           </button>
         </aside>
 
@@ -120,7 +139,7 @@
           <section v-if="recordViewMode === 'mine'" class="my-fields-panel">
             <div class="my-fields-head">
               <div>
-                <h3>你需要填写 {{ myEditableFields.length }} 个字段</h3>
+                <h3>待填 {{ myEditableFields.length }} 项</h3>
                 <p>
                   {{ myRequiredMissingCount ? `还有 ${myRequiredMissingCount} 个必填项待补` : "本岗位内容已填齐，可检查后保存" }}
                 </p>
@@ -138,7 +157,7 @@
               <el-button text @click="focusIssue(myFieldIssues[0])">定位</el-button>
             </div>
 
-            <el-empty v-if="!myEditableFields.length" description="当前岗位暂无需要填写的字段">
+            <el-empty v-if="!myEditableFields.length" description="当前岗位暂无待填字段">
               <el-button type="primary" @click="recordViewMode = 'full'">查看完整病历</el-button>
             </el-empty>
 
@@ -152,7 +171,8 @@
                   wide: item.field.kind === 'textarea' || isLabMetricField(item.field),
                   complete: isFieldComplete(fieldValues[item.field.key] || ''),
                   missing: issueForField(item.field)?.level === 'missing',
-                  invalid: issueForField(item.field)?.level === 'invalid'
+                  invalid: issueForField(item.field)?.level === 'invalid',
+                  focused: highlightedFieldKey === item.field.key
                 }"
               >
                 <div class="my-field-label">
@@ -171,7 +191,7 @@
                   default-first-option
                   filterable
                   class="preset-select"
-                  :placeholder="item.field.placeholder || '选择常用内容，特殊情况可直接输入'"
+                  :placeholder="item.field.placeholder || '选择或输入'"
                 >
                   <el-option v-for="option in selectOptions(item.field)" :key="option" :label="option" :value="option" />
                 </el-select>
@@ -208,6 +228,7 @@
                   <button
                     v-for="attachment in matchedAttachments(item.field.key)"
                     :key="attachment.key"
+                    type="button"
                     @click="openAttachment(attachment.url)"
                   >
                     {{ attachment.title }}
@@ -234,10 +255,12 @@
                 done: isSectionComplete(section),
                 attention: sectionRequiredMissingCount(section) > 0
               }"
+              type="button"
               @click="scrollToSection(section.key)"
             >
               <span>{{ index + 1 }}</span>
               {{ shortTitle(section.title) }}
+              <em v-if="sectionRequiredMissingCount(section)">{{ sectionRequiredMissingCount(section) }}</em>
             </button>
           </div>
 
@@ -284,7 +307,7 @@
                 </span>
                 <span v-else class="is-complete">必填已齐</span>
                 <span v-if="sectionEvidenceCount(section)">附件 {{ sectionEvidenceCount(section) }} 份</span>
-                <span>{{ canEditRecordSection(section) ? "本岗位可处理" : "由其他岗位维护" }}</span>
+                <span>{{ canEditRecordSection(section) ? "可填写" : "其他岗位" }}</span>
               </div>
               <div v-if="sectionIssues(section).length" class="section-issue-line">
                 <span>待处理：{{ sectionIssues(section)[0].fieldLabel }} - {{ sectionIssues(section)[0].message }}</span>
@@ -301,7 +324,8 @@
                     locked: !isEditable(field),
                     complete: isFieldComplete(fieldValues[field.key] || ''),
                     missing: issueForField(field)?.level === 'missing',
-                    invalid: issueForField(field)?.level === 'invalid'
+                    invalid: issueForField(field)?.level === 'invalid',
+                    focused: highlightedFieldKey === field.key
                   }"
                 >
                   <div class="field-label">
@@ -312,7 +336,7 @@
                   <div class="field-input">
                     <div v-if="!isEditable(field)" class="locked-note">
                       <el-icon><Lock /></el-icon>
-                      <span>由 {{ editorLabels(field.editors) }} 填写，当前账号仅可查看</span>
+                      <span>{{ editorLabels(field.editors) }} 填写，当前只读</span>
                     </div>
                     <LabMetricEditor
                       v-if="isLabMetricField(field)"
@@ -329,7 +353,7 @@
                       filterable
                       class="preset-select"
                       :disabled="!isEditable(field)"
-                      :placeholder="field.placeholder || '选择常用内容，特殊情况可直接输入'"
+                      :placeholder="field.placeholder || '选择或输入'"
                     >
                       <el-option v-for="option in selectOptions(field)" :key="option" :label="option" :value="option" />
                     </el-select>
@@ -369,6 +393,7 @@
                       <button
                         v-for="attachment in matchedAttachments(field.key)"
                         :key="attachment.key"
+                        type="button"
                         @click="openAttachment(attachment.url)"
                       >
                         {{ attachment.title }}
@@ -413,7 +438,8 @@
               :class="{
                 locked: !isEditable(field),
                 missing: issueForField(field)?.level === 'missing',
-                invalid: issueForField(field)?.level === 'invalid'
+                invalid: issueForField(field)?.level === 'invalid',
+                focused: highlightedFieldKey === field.key
               }"
             >
               <div class="field-label">
@@ -437,7 +463,7 @@
                   filterable
                   class="preset-select"
                   :disabled="!isEditable(field)"
-                  :placeholder="field.placeholder || '选择常用内容，特殊情况可直接输入'"
+                  :placeholder="field.placeholder || '选择或输入'"
                 >
                   <el-option v-for="option in selectOptions(field)" :key="option" :label="option" :value="option" />
                 </el-select>
@@ -477,6 +503,7 @@
                   <button
                     v-for="attachment in matchedAttachments(field.key)"
                     :key="attachment.key"
+                    type="button"
                     @click="openAttachment(attachment.url)"
                   >
                     {{ attachment.title }}
@@ -502,7 +529,21 @@
           <div v-if="previewVisible" class="preview-overlay" @click.self="previewVisible = false">
             <div class="preview-overlay-inner">
               <div class="preview-overlay-toolbar">
-                <span>病历预览</span>
+                <div class="preview-toolbar-title">
+                  <span>病历预览</span>
+                  <small>{{ fieldValues.patientName || "当前患者" }} · {{ fieldValues.visitNo || patientId }}</small>
+                </div>
+                <div class="preview-page-pills" aria-label="预览页码">
+                  <button
+                    v-for="page in previewPageCount"
+                    :key="page"
+                    type="button"
+                    :class="{ active: previewActivePage === page }"
+                    @click="scrollPreviewPage(page)"
+                  >
+                    {{ page }}
+                  </button>
+                </div>
                 <div>
                   <el-button type="primary" :icon="Printer" @click="printRecord">打印/导出 PDF</el-button>
                   <el-button @click="previewVisible = false">关闭</el-button>
@@ -510,11 +551,44 @@
               </div>
               <div class="preview-overlay-scroll" id="record-print-area">
                 <div class="paper-stack">
-                  <article class="preview-paper record-page">
-                    <div class="paper-watermark">{{ archiveWatermark }}</div>
+                  <article class="preview-paper print-cover" data-preview-page="1">
+                    <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
+                    <div class="paper-page-mark">
+                      <span>归档封面</span>
+                      <span>第 1 页 / 共 {{ previewPageCount }} 页</span>
+                    </div>
+                    <div class="medical-record-head cover-head">
+                      <div class="medical-brand">
+                        <img v-if="logoVisible" class="medical-logo" :src="logoSrc" alt="医院标识" @error="fallbackLogo" />
+                        <div class="medical-title-block">
+                          <h1>{{ fieldValues.hospitalName }}</h1>
+                          <h2>{{ recordTitle }}</h2>
+                        </div>
+                      </div>
+                      <div class="medical-subtitle">{{ recordSubtitle }}</div>
+                    </div>
+                    <div class="cover-patient-card">
+                      <span v-for="item in paperMeta" :key="item.label">
+                        <b>{{ item.label }}</b>
+                        <em>{{ item.value || "____" }}</em>
+                      </span>
+                    </div>
+                    <div class="cover-archive-summary">
+                      <span>完整度 {{ completionPercent }}%</span>
+                      <span>附件 {{ currentAttachments.length }} 份</span>
+                      <span>校验码 {{ recordSignature }}</span>
+                    </div>
+                    <div class="paper-footer">
+                      <span>{{ fieldValues.hospitalName }} · {{ archiveVersion }}</span>
+                      <span>打印时间 {{ generatedAt }} · 操作人 {{ roleName }}</span>
+                    </div>
+                  </article>
+
+                  <article class="preview-paper record-page" data-preview-page="2">
+                    <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
                       <span>病历正文</span>
-                      <span>第 1 页 / 共 {{ currentAttachments.length + 2 }} 页</span>
+                      <span>第 2 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
                     <div class="medical-record-head">
                       <div class="medical-brand">
@@ -569,15 +643,15 @@
                     </div>
                     <div class="paper-footer">
                       <span>{{ fieldValues.hospitalName }} · {{ archiveVersion }}</span>
-                      <span>状态：{{ archiveStatusText }} · 录入内容以柔和底纹标识</span>
+                      <span>状态：{{ archiveStatusText }} · 追溯码 {{ recordSignature }}</span>
                     </div>
                   </article>
 
-                  <article class="preview-paper attachment-index">
-                    <div class="paper-watermark">{{ archiveWatermark }}</div>
+                  <article class="preview-paper attachment-index" data-preview-page="3">
+                    <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
                       <span>附件索引</span>
-                      <span>第 2 页 / 共 {{ currentAttachments.length + 2 }} 页</span>
+                      <span>第 3 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
                     <div class="medical-record-head compact">
                       <div class="medical-brand">
@@ -614,7 +688,7 @@
                     </table>
                     <div class="paper-footer">
                       <span>{{ fieldValues.patientName }} · {{ fieldValues.visitNo }} · {{ archiveVersion }}</span>
-                      <span>附件原图随病历归档保存 · 状态：{{ archiveStatusText }}</span>
+                      <span>附件原图随病历归档保存 · 追溯码 {{ recordSignature }}</span>
                     </div>
                   </article>
 
@@ -622,11 +696,12 @@
                     v-for="(attachment, index) in currentAttachments"
                     :key="attachment.key"
                     class="preview-paper attachment-page"
+                    :data-preview-page="index + 4"
                   >
-                    <div class="paper-watermark">{{ archiveWatermark }}</div>
+                    <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
                       <span>检查检验附件</span>
-                      <span>第 {{ index + 3 }} 页 / 共 {{ currentAttachments.length + 2 }} 页</span>
+                      <span>第 {{ index + 4 }} 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
                     <div class="attachment-head">
                       <div>
@@ -643,8 +718,8 @@
                       />
                       <div v-else class="attachment-file-placeholder">
                         <strong>{{ attachment.fileName }}</strong>
-                        <span v-if="canOpenAttachment(attachment)">非图片附件已入档，可打开原文件查看。</span>
-                        <span v-else>附件已建档，但原始文件地址无效，请重新上传或从旧共享目录补录。</span>
+                        <span v-if="canOpenAttachment(attachment)">可打开原文件。</span>
+                        <span v-else>文件打不开，请重新上传。</span>
                         <el-button
                           v-if="canOpenAttachment(attachment)"
                           class="screen-only"
@@ -658,7 +733,7 @@
                     </div>
                     <div class="paper-footer">
                       <span>{{ attachment.uploader }}</span>
-                      <span>关联字段：{{ attachment.fieldLabel }}</span>
+                      <span>关联字段：{{ attachment.fieldLabel }} · 追溯码 {{ recordSignature }}</span>
                     </div>
                   </article>
                 </div>
@@ -675,7 +750,7 @@
               <strong>{{ fieldValues.patientName || "当前患者" }}</strong>
               <span>{{ fieldValues.visitNo || patientId }}</span>
             </div>
-            <el-button :loading="auditLoading" @click="loadPatientAuditLogs">刷新</el-button>
+            <el-button :loading="auditLoading" @click="() => loadPatientAuditLogs()">刷新</el-button>
           </section>
 
           <el-empty v-if="!auditLoading && !patientAuditLogs.length" description="暂无操作轨迹" />
@@ -740,6 +815,22 @@
           </el-button>
         </template>
       </el-dialog>
+
+      <el-dialog v-model="printPreflightVisible" title="打印预检" width="520px" append-to-body destroy-on-close>
+        <div class="print-preflight-list">
+          <article v-for="item in printPreflightItems" :key="item.key" :class="`is-${item.level}`">
+            <span class="preflight-dot" aria-hidden="true"></span>
+            <div>
+              <strong>{{ item.label }}</strong>
+              <small>{{ item.value }}</small>
+            </div>
+          </article>
+        </div>
+        <template #footer>
+          <el-button @click="printPreflightVisible = false">返回补齐</el-button>
+          <el-button type="primary" :icon="Printer" @click="executePrint">继续打印</el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -794,8 +885,14 @@ const archiveSubmitted = ref(false);
 const archiveVersion = ref("V0.3-预归档");
 const generatedAt = ref("2026-06-11 09:30:00");
 const saving = ref(false);
+const detailLoading = ref(false);
+const detailError = ref("");
+const isHydratingRecord = ref(false);
 const savedSectionKey = ref("");
+const highlightedFieldKey = ref("");
 const previewVisible = ref(false);
+const previewActivePage = ref(1);
+const printPreflightVisible = ref(false);
 const auditTimelineVisible = ref(false);
 const auditLoading = ref(false);
 const voidDialogVisible = ref(false);
@@ -815,6 +912,7 @@ const logoCandidates = [medicalLogoUrl];
 const logoIndex = ref(0);
 const logoSrc = ref(logoCandidates[0]);
 const logoVisible = ref(true);
+let highlightClearTimer: number | undefined;
 type FieldIssue = {
   fieldKey: string;
   fieldLabel: string;
@@ -878,14 +976,15 @@ const isFirstSection = computed(() => activeIndex.value === 0);
 const isLastSection = computed(() => activeIndex.value === recordSectionsByRule.value.length - 1);
 const conflictDraftKey = computed(() => `clinic-record-draft:${patientId.value}`);
 
-const fieldValues = reactive(
+const createEmptyFieldValues = () =>
   recordSections.reduce<Record<string, string>>((values, section) => {
     section.fields.forEach(field => {
       values[field.key] = field.key === "hospitalName" ? field.value : "";
     });
     return values;
-  }, {})
-);
+  }, {});
+
+const fieldValues = reactive(createEmptyFieldValues());
 
 const fieldPresets: Record<string, string[]> = {
   hospitalName: ["固始中医肛肠医院"],
@@ -1098,6 +1197,39 @@ const completionStats = computed(() => {
 const completionPercent = computed(() =>
   completionStats.value.total ? Math.round((completionStats.value.completed / completionStats.value.total) * 100) : 0
 );
+const previewPageCount = computed(() => currentAttachments.value.length + 3);
+const printFileTitle = computed(() =>
+  [fieldValues.hospitalName, fieldValues.patientName, fieldValues.visitNo, new Date().toISOString().slice(0, 10)]
+    .filter(Boolean)
+    .join("_")
+);
+const printPreflightItems = computed(() => [
+  {
+    key: "required",
+    level: fieldIssues.value.length ? "warning" : "success",
+    label: "必填字段",
+    value: fieldIssues.value.length ? `仍有 ${fieldIssues.value.length} 项待补齐` : "已补齐"
+  },
+  {
+    key: "attachments",
+    level: invalidAttachmentCount.value ? "warning" : "success",
+    label: "附件状态",
+    value: invalidAttachmentCount.value ? `${invalidAttachmentCount.value} 份附件需重新确认` : "附件可打开"
+  },
+  {
+    key: "draft",
+    level: ["saving", "error", "conflict"].includes(autoSaveStatus.value) ? "warning" : "success",
+    label: "保存状态",
+    value:
+      autoSaveStatus.value === "conflict"
+        ? "存在冲突草稿"
+        : autoSaveStatus.value === "saving"
+          ? "正在自动保存"
+          : autoSaveStatus.value === "error"
+            ? "保存失败待重试"
+            : "已同步"
+  }
+]);
 
 const recordSignature = computed(() => {
   const seed = `${fieldValues.visitNo}-${completionStats.value.completed}-${currentAttachments.value.length}-${archiveVersion.value}`;
@@ -1219,7 +1351,7 @@ const fieldAssistText = (field: RecordField) => {
   if (field.inputType === "tel") return "11位手机号";
   if (field.pattern) return field.validationMessage || "按固定格式填写";
   const count = selectOptions(field).length;
-  return count ? `选择为主：${count} 个常用项` : "少量手填";
+  return count ? `${count} 个常用项` : "可手填";
 };
 const matchedAttachments = (fieldKey: string) => currentAttachments.value.filter(attachment => attachment.fieldKey === fieldKey);
 const sectionCompletedCount = (section: RecordSection) =>
@@ -1268,6 +1400,15 @@ const scrollToSection = (sectionKey: string) => {
   document.getElementById(`record-section-${sectionKey}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 };
 
+const scrollPreviewPage = async (page: number) => {
+  previewActivePage.value = page;
+  await nextTick();
+  document.querySelector<HTMLElement>(`[data-preview-page="${page}"]`)?.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+};
+
 const focusIssue = async (issue?: FieldIssue) => {
   if (!issue) return;
   activeSectionKey.value = issue.sectionKey;
@@ -1281,6 +1422,11 @@ const focusIssue = async (issue?: FieldIssue) => {
       : [`section-field-${issue.fieldKey}`, `active-field-${issue.fieldKey}`, `my-field-${issue.fieldKey}`];
   const target = targetIds.map(id => document.getElementById(id)).find(Boolean);
   target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  highlightedFieldKey.value = issue.fieldKey;
+  if (highlightClearTimer) window.clearTimeout(highlightClearTimer);
+  highlightClearTimer = window.setTimeout(() => {
+    if (highlightedFieldKey.value === issue.fieldKey) highlightedFieldKey.value = "";
+  }, 1800);
   const input = target?.querySelector<HTMLElement>("input, textarea, .el-select__wrapper");
   input?.focus();
 };
@@ -1346,18 +1492,19 @@ const copyRecord = async () => {
   ElMessage.success("病历文本已复制");
 };
 
-const loadPatientAuditLogs = async () => {
+const loadPatientAuditLogs = async (targetPatientId = patientId.value, targetPatientName = fieldValues.patientName) => {
   auditLoading.value = true;
   try {
-    const { data } = await getAuditLogListApi({ pageNum: 1, pageSize: 80, patientId: patientId.value });
-    const legacyLogs = fieldValues.patientName
-      ? await getAuditLogListApi({ pageNum: 1, pageSize: 80, patient: fieldValues.patientName })
+    const { data } = await getAuditLogListApi({ pageNum: 1, pageSize: 80, patientId: targetPatientId });
+    const legacyLogs = targetPatientName
+      ? await getAuditLogListApi({ pageNum: 1, pageSize: 80, patient: targetPatientName })
       : null;
+    if (targetPatientId !== patientId.value) return;
     const knownIds = new Set(data.list.map(log => log.id));
     const legacyOnly = (legacyLogs?.data.list || []).filter(log => !log.patientId && !knownIds.has(log.id));
     patientAuditLogs.value = [...data.list, ...legacyOnly].sort((left, right) => right.time.localeCompare(left.time));
   } finally {
-    auditLoading.value = false;
+    if (targetPatientId === patientId.value) auditLoading.value = false;
   }
 };
 
@@ -1366,11 +1513,75 @@ const openAuditTimeline = async () => {
   await loadPatientAuditLogs();
 };
 
+const openSupplementUpload = () => {
+  router.push({
+    path: "/workbench/upload",
+    query: {
+      patientId: patientInfo.value?.id || patientId.value,
+      keyword: fieldValues.visitNo || patientInfo.value?.visitNo || patientId.value
+    }
+  });
+};
+
+const openQualityReview = () => {
+  router.push({
+    path: "/audit/review",
+    query: {
+      patientId: patientInfo.value?.id || patientId.value,
+      keyword: fieldValues.visitNo || patientInfo.value?.visitNo || fieldValues.patientName || patientId.value
+    }
+  });
+};
+
+let patientDetailLoadSeq = 0;
+let autoSaveScheduleToken = 0;
+
+const revokeAttachmentBlobUrls = () => {
+  Object.values(attachmentBlobUrls.value).forEach(url => URL.revokeObjectURL(url));
+  attachmentBlobUrls.value = {};
+};
+
+const resetPatientDetailState = () => {
+  autoSaveScheduleToken += 1;
+  isHydratingRecord.value = true;
+  saving.value = false;
+  Object.assign(fieldValues, createEmptyFieldValues());
+  patientInfo.value = undefined;
+  currentAttachments.value = [];
+  patientAuditLogs.value = [];
+  archiveSubmitted.value = false;
+  archiveVersion.value = "V0.3-预归档";
+  generatedAt.value = "";
+  savedSectionKey.value = "";
+  highlightedFieldKey.value = "";
+  autoSaveStatus.value = "idle";
+  previewVisible.value = false;
+  previewActivePage.value = 1;
+  printPreflightVisible.value = false;
+  auditTimelineVisible.value = false;
+  voidDialogVisible.value = false;
+  voidTarget.value = undefined;
+  voidReason.value = "";
+  collapsedSectionKeys.value = [];
+  revokeAttachmentBlobUrls();
+  const routeSection = String(route.query.section || "");
+  activeSectionKey.value = routeSection || recordSectionsByRule.value[0]?.key || recordSections[0].key;
+};
+
 const loadPatientDetail = async () => {
+  const loadSeq = ++patientDetailLoadSeq;
+  const targetPatientId = patientId.value;
+  detailLoading.value = true;
+  detailError.value = "";
+  resetPatientDetailState();
   try {
-    const [{ data }, { data: rules }] = await Promise.all([getPatientDetailApi(patientId.value), getTemplateFieldRulesApi()]);
+    const [{ data }, { data: rules }] = await Promise.all([getPatientDetailApi(targetPatientId), getTemplateFieldRulesApi()]);
+    if (loadSeq !== patientDetailLoadSeq) return;
     templateRules.value = rules;
-    if (!recordSectionsByRule.value.some(section => section.key === activeSectionKey.value)) {
+    const targetSection = String(route.query.section || "");
+    if (targetSection && recordSectionsByRule.value.some(section => section.key === targetSection)) {
+      activeSectionKey.value = targetSection;
+    } else if (!recordSectionsByRule.value.some(section => section.key === activeSectionKey.value)) {
       activeSectionKey.value = recordSectionsByRule.value[0]?.key || recordSections[0].key;
     }
     patientInfo.value = data.patient;
@@ -1381,13 +1592,25 @@ const loadPatientDetail = async () => {
     archiveVersion.value = data.archiveVersion;
     generatedAt.value = data.generatedAt;
     hydrateCollapsedSections();
-    await loadPatientAuditLogs();
-    const targetSection = String(route.query.section || "");
+    await loadPatientAuditLogs(targetPatientId, data.fieldValues.patientName || data.patient.name);
+    if (loadSeq !== patientDetailLoadSeq) return;
     if (targetSection) window.setTimeout(() => scrollToSection(targetSection), 120);
   } catch (error) {
-    ElMessage.error((error as Error).message);
-    router.push("/patients/list");
+    if (loadSeq !== patientDetailLoadSeq) return;
+    detailError.value = (error as Error).message || "请检查网络后重试";
+    ElMessage.error(detailError.value);
+  } finally {
+    if (loadSeq === patientDetailLoadSeq) {
+      detailLoading.value = false;
+      window.setTimeout(() => {
+        if (loadSeq === patientDetailLoadSeq) isHydratingRecord.value = false;
+      }, 0);
+    }
   }
+};
+
+const retryLoadPatientDetail = () => {
+  loadPatientDetail();
 };
 
 const isConflictError = (error: unknown) => {
@@ -1437,7 +1660,7 @@ const restoreConflictDraft = () => {
     Object.assign(fieldValues, draft.values || {});
     conflictDraftSavedAt.value = draft.savedAt || conflictDraftSavedAt.value;
     autoSaveStatus.value = "error";
-    ElMessage.info("已恢复本机草稿，请检查后重新保存");
+    ElMessage.info("草稿已恢复，请重新保存");
   } catch {
     ElMessage.error("本机草稿读取失败");
   }
@@ -1493,7 +1716,7 @@ const myFieldValues = () =>
 
 const saveCurrentSection = async () => {
   if (!ensureNoInvalidIssues("section", "保存章节")) return false;
-  return saveRecordValues(currentSectionValues(), "当前章节已保存，字段校验通过");
+  return saveRecordValues(currentSectionValues(), "当前章节已保存");
 };
 
 const saveMyFields = async () => {
@@ -1568,7 +1791,7 @@ const confirmVoidDocument = async () => {
 const openAttachment = async (url: string) => {
   const normalizedUrl = normalizeAttachmentUrl(url);
   if (isInvalidAttachmentUrl(normalizedUrl)) {
-    ElMessage.warning("附件已建档，但原始文件地址无效，请重新上传或从旧共享目录补录");
+    ElMessage.warning("文件打不开，请重新上传");
     return;
   }
   try {
@@ -1597,31 +1820,48 @@ const logPrintAction = async () => {
   }
 };
 
-const printRecord = async () => {
+const executePrint = async () => {
+  printPreflightVisible.value = false;
   await logPrintAction();
   await nextTick();
-  window.setTimeout(() => window.print(), 120);
+  const originalTitle = document.title;
+  if (printFileTitle.value) document.title = printFileTitle.value;
+  window.setTimeout(() => {
+    window.print();
+    window.setTimeout(() => {
+      document.title = originalTitle;
+    }, 800);
+  }, 160);
 };
 
-const openPreviewThenPrint = async () => {
+const openPrintPreflight = async () => {
   previewVisible.value = true;
-  await logPrintAction();
+  printPreflightVisible.value = true;
   await nextTick();
-  window.setTimeout(() => window.print(), 300);
 };
 
-const debouncedAutoSave = useDebounceFn(async () => {
-  if (saving.value || archiveSubmitted.value) return;
+const printRecord = async () => openPrintPreflight();
+
+const openPreviewThenPrint = async () => openPrintPreflight();
+
+const debouncedAutoSave = useDebounceFn(async (scheduleToken: number, targetPatientId: string) => {
+  if (scheduleToken !== autoSaveScheduleToken || targetPatientId !== patientId.value) return;
+  if (saving.value || archiveSubmitted.value || isHydratingRecord.value || detailLoading.value || detailError.value) return;
   autoSaveStatus.value = "saving";
   const values = recordViewMode.value === "mine" ? myFieldValues() : currentSectionValues();
   try {
-    await savePatientRecordApi({ id: patientId.value, role: currentRole.value, operator: roleName.value, values });
+    if (scheduleToken !== autoSaveScheduleToken || targetPatientId !== patientId.value) return;
+    await savePatientRecordApi({ id: targetPatientId, role: currentRole.value, operator: roleName.value, values });
+    if (scheduleToken !== autoSaveScheduleToken || targetPatientId !== patientId.value) return;
     clearLocalDraft();
     autoSaveStatus.value = "saved";
     window.setTimeout(() => {
-      if (autoSaveStatus.value === "saved") autoSaveStatus.value = "idle";
+      if (scheduleToken === autoSaveScheduleToken && targetPatientId === patientId.value && autoSaveStatus.value === "saved") {
+        autoSaveStatus.value = "idle";
+      }
     }, 3000);
   } catch (error) {
+    if (scheduleToken !== autoSaveScheduleToken || targetPatientId !== patientId.value) return;
     if (isConflictError(error)) {
       persistLocalDraft(values);
       autoSaveStatus.value = "conflict";
@@ -1632,10 +1872,29 @@ const debouncedAutoSave = useDebounceFn(async () => {
 }, 2000);
 
 watch(fieldValues, () => {
+  if (isHydratingRecord.value || detailLoading.value || detailError.value) return;
   const hasEditableField =
     recordViewMode.value === "mine" ? myEditableFields.value.length > 0 : activeSection.value.fields.some(isEditable);
-  if (hasEditableField) debouncedAutoSave();
+  if (hasEditableField) debouncedAutoSave(autoSaveScheduleToken, patientId.value);
 });
+
+watch(
+  () => route.params.id,
+  (id, oldId) => {
+    if (String(id || "") === String(oldId || "")) return;
+    loadPatientDetail();
+  }
+);
+
+watch(
+  () => route.query.section,
+  section => {
+    const targetSection = String(section || "");
+    if (targetSection && recordSectionsByRule.value.some(item => item.key === targetSection)) {
+      window.setTimeout(() => scrollToSection(targetSection), 80);
+    }
+  }
+);
 
 const handleKeydown = (event: KeyboardEvent) => {
   const isCtrlOrMeta = event.ctrlKey || event.metaKey;
@@ -1673,31 +1932,63 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleKeydown);
-  Object.values(attachmentBlobUrls.value).forEach(url => URL.revokeObjectURL(url));
+  patientDetailLoadSeq += 1;
+  autoSaveScheduleToken += 1;
+  if (highlightClearTimer) window.clearTimeout(highlightClearTimer);
+  revokeAttachmentBlobUrls();
 });
 </script>
 
 <style scoped lang="scss">
 .record-workspace {
-  --record-accent: #166534;
-  --record-accent-soft: #ecfdf5;
-  --record-fixed: #475569;
-  --record-fixed-soft: #f8fafc;
-  --record-warning: #b45309;
-  --record-warning-soft: #fff7ed;
+  --record-accent: var(--hos-primary-deep);
+  --record-accent-soft: var(--hos-primary-soft);
+  --record-fixed: var(--hos-text-secondary);
+  --record-fixed-soft: var(--hos-accent-soft);
+  --record-warning: var(--hos-status-warning);
+  --record-warning-soft: var(--hos-status-warning-soft);
   --record-danger: #dc2626;
   display: block;
-  color: #1f2937;
+  color: var(--hos-text-primary);
 }
 
 .record-workspace > .table-box {
   width: 100%;
   min-width: 0;
   overflow: auto;
+  background: var(--hos-app-bg);
 }
 
 .record-workspace > .screen-only {
   display: none;
+}
+
+.detail-error-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+
+  div {
+    display: grid;
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 15px;
+  }
+
+  small {
+    color: var(--hos-text-secondary);
+    line-height: 1.5;
+  }
 }
 
 .record-workbar {
@@ -1705,10 +1996,12 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 14px 16px;
   margin-bottom: 10px;
-  background: linear-gradient(90deg, rgb(236 253 245 / 78%), rgb(255 255 255 / 98%) 52%), #ffffff;
-  border: 1px solid rgb(22 101 52 / 14%);
-  border-radius: 12px;
-  box-shadow: 0 10px 24px rgb(15 23 42 / 5%);
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
 }
 
 .workbar-main {
@@ -1723,7 +2016,7 @@ onBeforeUnmount(() => {
 
   h2 {
     margin: 0;
-    color: #111827;
+    color: var(--hos-text-primary);
     font-size: 20px;
     font-weight: 650;
     line-height: 1.35;
@@ -1735,7 +2028,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px 12px;
   margin-top: 6px;
-  color: #64748b;
+  color: var(--hos-text-secondary);
   font-size: 13px;
 
   span {
@@ -1748,7 +2041,7 @@ onBeforeUnmount(() => {
       width: 2px;
       height: 2px;
       content: "";
-      background: #cbd5e1;
+      background: var(--hos-border-interactive);
       border-radius: 999px;
       transform: translateY(-50%);
     }
@@ -1762,12 +2055,12 @@ onBeforeUnmount(() => {
   div {
     display: flex;
     justify-content: space-between;
-    color: #64748b;
+    color: var(--hos-text-secondary);
     font-size: 12px;
   }
 
   strong {
-    color: #166534;
+    color: var(--hos-primary-deep);
     font-variant-numeric: tabular-nums;
   }
 
@@ -1775,14 +2068,14 @@ onBeforeUnmount(() => {
     display: block;
     height: 7px;
     overflow: hidden;
-    background: #edf2f7;
+    background: var(--hos-primary-muted);
     border-radius: 999px;
   }
 
   em {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, #22c55e, #0ea5e9);
+    background: var(--hos-primary);
     border-radius: inherit;
     transition: width 0.28s ease;
   }
@@ -1801,10 +2094,12 @@ onBeforeUnmount(() => {
   max-width: 1080px;
   padding: 18px;
   margin: 0 auto;
-  background: #ffffff;
-  border: 1px solid #e8edf3;
-  border-radius: 12px;
-  box-shadow: 0 8px 22px rgb(15 23 42 / 5%);
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
 }
 
 .my-fields-head {
@@ -1813,7 +2108,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 14px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #edf2f7;
+  border-bottom: 1px solid var(--hos-border-light);
 
   h3,
   p {
@@ -1821,14 +2116,14 @@ onBeforeUnmount(() => {
   }
 
   h3 {
-    color: #111827;
+    color: var(--hos-text-primary);
     font-size: 18px;
     font-weight: 650;
   }
 
   p {
     margin-top: 5px;
-    color: #64748b;
+    color: var(--hos-text-secondary);
   }
 }
 
@@ -1866,18 +2161,18 @@ onBeforeUnmount(() => {
   gap: 7px;
   min-width: 0;
   padding: 12px;
-  background: #ffffff;
-  border: 1px solid #edf2f7;
-  border-radius: 8px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease,
     background 160ms ease;
 
   &:focus-within {
-    background: #f8fffd;
-    border-color: rgb(22 101 52 / 28%);
-    box-shadow: 0 8px 18px rgb(15 23 42 / 6%);
+    background: var(--hos-panel-hover);
+    border-color: var(--hos-border-interactive);
+    box-shadow: var(--hos-shadow-soft);
   }
 
   &.wide {
@@ -1896,8 +2191,8 @@ onBeforeUnmount(() => {
   }
 
   &.complete {
-    background: linear-gradient(180deg, #ffffff, #fbfffd);
-    border-color: rgb(34 197 94 / 24%);
+    background: var(--hos-panel-hover);
+    border-color: var(--hos-border-interactive);
 
     .my-field-label label::after {
       margin-left: 6px;
@@ -1912,15 +2207,15 @@ onBeforeUnmount(() => {
   :deep(.el-select__wrapper),
   :deep(.el-textarea__inner) {
     min-height: 42px;
-    background: #fbfdff;
+    background: var(--hos-field-editable-bg);
     border-radius: 8px;
-    box-shadow: 0 0 0 1px #dbe3ec inset;
+    box-shadow: 0 0 0 1px var(--hos-border) inset;
   }
 
   :deep(.el-input__wrapper:hover),
   :deep(.el-select__wrapper:hover),
   :deep(.el-textarea__inner:hover) {
-    box-shadow: 0 0 0 1px #a9c7f8 inset;
+    box-shadow: 0 0 0 1px var(--hos-border-interactive) inset;
   }
 }
 
@@ -1931,7 +2226,7 @@ onBeforeUnmount(() => {
   gap: 10px;
 
   label {
-    color: #334155;
+    color: var(--hos-text-primary);
     font-weight: 650;
   }
 
@@ -1941,7 +2236,7 @@ onBeforeUnmount(() => {
   }
 
   span {
-    color: #94a3b8;
+    color: var(--hos-text-muted);
     font-size: 12px;
   }
 }
@@ -1951,7 +2246,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid #edf2f7;
+  border-top: 1px solid var(--hos-border-light);
 }
 
 .record-toolbar,
@@ -1960,9 +2255,12 @@ onBeforeUnmount(() => {
 .section-rail,
 .form-panel,
 .preview-panel {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
 }
 
 .record-toolbar {
@@ -2001,7 +2299,7 @@ onBeforeUnmount(() => {
 
 .summary-cell {
   padding: 10px 14px;
-  border-right: 1px solid #edf0f3;
+  border-right: 1px solid var(--hos-border-light);
 
   &:last-child {
     border-right: 0;
@@ -2014,7 +2312,7 @@ onBeforeUnmount(() => {
 
   span {
     margin-bottom: 3px;
-    color: #6b7280;
+    color: var(--hos-text-secondary);
     font-size: 12px;
   }
 }
@@ -2034,11 +2332,11 @@ onBeforeUnmount(() => {
   gap: 8px 12px;
   align-items: center;
   min-width: 0;
-  color: #6b7280;
+  color: var(--hos-text-secondary);
   font-size: 13px;
 
   strong {
-    color: #111827;
+    color: var(--hos-text-primary);
   }
 }
 
@@ -2047,7 +2345,7 @@ onBeforeUnmount(() => {
 
   span {
     padding-left: 10px;
-    border-left: 1px solid #e5e7eb;
+    border-left: 1px solid var(--hos-border-light);
 
     &:first-child {
       padding-left: 0;
@@ -2196,10 +2494,10 @@ onBeforeUnmount(() => {
   min-width: 0;
   padding: 13px 14px;
   overflow: hidden;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
+  box-shadow: var(--hos-shadow-soft);
 
   &::before {
     position: absolute;
@@ -2216,7 +2514,7 @@ onBeforeUnmount(() => {
   }
 
   span {
-    color: #64748b;
+    color: var(--hos-text-secondary);
     font-size: 12px;
     font-weight: 700;
   }
@@ -2224,7 +2522,7 @@ onBeforeUnmount(() => {
   strong {
     margin-top: 4px;
     overflow: hidden;
-    color: #111827;
+    color: var(--hos-text-primary);
     font-size: 17px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2233,14 +2531,14 @@ onBeforeUnmount(() => {
   small {
     margin-top: 4px;
     overflow: hidden;
-    color: #64748b;
+    color: var(--hos-text-secondary);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   &.fixed {
-    background: linear-gradient(135deg, var(--record-fixed-soft), #ffffff);
-    border-color: #dbe3ea;
+    background: var(--hos-accent-soft);
+    border-color: var(--hos-border);
 
     &::before {
       background: var(--record-fixed);
@@ -2248,8 +2546,8 @@ onBeforeUnmount(() => {
   }
 
   &.editable {
-    background: linear-gradient(135deg, var(--record-accent-soft), #ffffff);
-    border-color: #bbf7d0;
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-border-interactive);
 
     &::before {
       background: var(--record-accent);
@@ -2257,12 +2555,12 @@ onBeforeUnmount(() => {
 
     span,
     strong {
-      color: #047857;
+      color: var(--hos-primary-deep);
     }
   }
 
   &.attachments {
-    background: linear-gradient(135deg, var(--record-warning-soft), #ffffff);
+    background: var(--record-warning-soft);
     border-color: #fed7aa;
 
     &::before {
@@ -2295,9 +2593,14 @@ onBeforeUnmount(() => {
   padding: 9px 8px;
   text-align: left;
   cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
+  background: var(--hos-glass);
+  border: 1px solid transparent;
+  border-radius: var(--hos-radius-lg);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 
   span {
     grid-row: span 2;
@@ -2305,27 +2608,33 @@ onBeforeUnmount(() => {
     place-items: center;
     width: 24px;
     height: 24px;
-    color: #64748b;
-    background: #f1f5f9;
+    color: var(--hos-primary-deep);
+    background: var(--hos-primary-soft);
+    border: 1px solid var(--hos-border-light);
     border-radius: 999px;
     font-size: 12px;
   }
 
   strong {
-    color: #111827;
+    color: var(--hos-text-primary);
     font-size: 14px;
   }
 
   small {
-    color: #6b7280;
+    color: var(--hos-text-secondary);
   }
 
   &.active {
-    background: #ecfdf5;
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-border-interactive);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 48%),
+      0 8px 18px rgb(var(--hos-primary-rgb) / 5%);
 
     span {
-      color: #ffffff;
-      background: var(--record-accent);
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-muted);
+      border-color: var(--hos-border-interactive);
     }
   }
 }
@@ -2337,44 +2646,49 @@ onBeforeUnmount(() => {
 .workspace-anchor {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   padding-bottom: 12px;
   margin-bottom: 16px;
-  border-bottom: 1px solid #edf0f3;
+  border-bottom: 1px solid var(--hos-border-light);
 
   button {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 10px;
-    color: #6b7280;
+    padding: 5px 10px;
+    color: var(--hos-text-secondary);
     cursor: pointer;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 4px;
+    background: var(--hos-glass);
+    border: 1px solid var(--hos-border-light);
+    border-radius: var(--hos-radius-md);
     font-size: 12px;
     transition:
       background 150ms,
-      border-color 150ms;
+      border-color 150ms,
+      box-shadow 150ms;
 
     span {
       display: inline-grid;
       place-items: center;
       width: 18px;
       height: 18px;
-      background: #f1f5f9;
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-soft);
+      border: 1px solid var(--hos-border-light);
       border-radius: 999px;
       font-size: 10px;
     }
 
     &.active {
-      color: #111827;
-      background: #ecfdf5;
-      border-color: #bbf7d0;
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-soft);
+      border-color: var(--hos-border-interactive);
+      box-shadow: 0 8px 18px rgb(var(--hos-primary-rgb) / 5%);
 
       span {
-        color: #ffffff;
-        background: var(--record-accent);
+        color: var(--hos-primary-deep);
+        background: var(--hos-primary-muted);
+        border-color: var(--hos-border-interactive);
       }
     }
   }
@@ -2387,23 +2701,24 @@ onBeforeUnmount(() => {
 
 .section-card {
   padding: 16px;
-  border: 1px solid #e5e7eb;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
   border-left: 3px solid transparent;
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
   transition:
     border-color 200ms,
     box-shadow 200ms;
 
   &.editable {
-    border-color: #cfe8dd;
-    border-left-color: #55b58a;
-    background: linear-gradient(180deg, #ffffff, #fbfffd);
-    box-shadow: 0 8px 18px rgb(22 101 52 / 5%);
+    background: var(--hos-panel-hover);
+    border-color: var(--hos-border-interactive);
+    border-left-color: var(--hos-primary);
+    box-shadow: var(--hos-shadow-card-hover);
   }
 
   &.readonly {
-    background: #f8fafc;
+    background: var(--hos-accent-soft);
   }
 
   &.saved {
@@ -2446,7 +2761,7 @@ onBeforeUnmount(() => {
 
   p {
     margin-top: 4px;
-    color: #6b7280;
+    color: var(--hos-text-secondary);
     font-size: 13px;
   }
 }
@@ -2472,7 +2787,7 @@ onBeforeUnmount(() => {
   grid-template-columns: 122px minmax(0, 1fr);
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--hos-border-light);
   transition: background 160ms ease;
 
   &:last-child {
@@ -2480,7 +2795,7 @@ onBeforeUnmount(() => {
   }
 
   &:focus-within {
-    background: #f8fffd;
+    background: var(--hos-primary-soft);
     border-radius: 6px;
   }
 
@@ -2497,7 +2812,7 @@ onBeforeUnmount(() => {
   }
 
   &.locked {
-    background: #f8fafc;
+    background: var(--hos-field-locked-bg);
     border-radius: 4px;
     padding: 10px 8px;
   }
@@ -2524,7 +2839,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #edf0f3;
+  border-bottom: 1px solid var(--hos-border-light);
 
   h3,
   p {
@@ -2537,7 +2852,7 @@ onBeforeUnmount(() => {
 
   p {
     margin-top: 5px;
-    color: #6b7280;
+    color: var(--hos-text-secondary);
   }
 }
 
@@ -2551,11 +2866,11 @@ onBeforeUnmount(() => {
   grid-template-columns: 122px minmax(0, 1fr);
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--hos-border-light);
   transition: background 160ms ease;
 
   &:focus-within {
-    background: #f8fffd;
+    background: var(--hos-primary-soft);
     border-radius: 6px;
   }
 
@@ -2573,7 +2888,7 @@ onBeforeUnmount(() => {
 
   &.locked {
     .field-label small {
-      color: #9ca3af;
+      color: var(--hos-text-muted);
     }
   }
 }
@@ -2585,7 +2900,7 @@ onBeforeUnmount(() => {
   }
 
   label {
-    color: #111827;
+    color: var(--hos-text-primary);
     font-weight: 600;
     line-height: 1.35;
   }
@@ -2606,14 +2921,14 @@ onBeforeUnmount(() => {
 
   :deep(.el-input__wrapper),
   :deep(.el-textarea__inner) {
-    background: #ffffff;
-    box-shadow: 0 0 0 1px #d7dde5 inset;
+    background: var(--hos-field-editable-bg);
+    box-shadow: 0 0 0 1px var(--hos-border) inset;
   }
 
   :deep(.is-disabled .el-input__wrapper),
   :deep(.el-textarea.is-disabled .el-textarea__inner) {
-    background: #f8fafc;
-    box-shadow: 0 0 0 1px #edf0f3 inset;
+    background: var(--hos-field-locked-bg);
+    box-shadow: 0 0 0 1px var(--hos-border-light) inset;
   }
 }
 
@@ -2627,8 +2942,8 @@ onBeforeUnmount(() => {
 .preset-select {
   :deep(.el-select__wrapper) {
     min-height: 38px;
-    background: #fbfdfc;
-    box-shadow: 0 0 0 1px #cbd5e1 inset;
+    background: var(--hos-field-editable-bg);
+    box-shadow: 0 0 0 1px var(--hos-border) inset;
   }
 
   :deep(.el-select__placeholder),
@@ -2665,7 +2980,7 @@ onBeforeUnmount(() => {
 
 .preview-panel {
   padding: 12px;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  background: var(--hos-glass-mist);
 }
 
 .preview-panel--overlay {
@@ -2680,8 +2995,9 @@ onBeforeUnmount(() => {
   z-index: 2500;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgb(var(--hos-primary-rgb) / 8%);
+  backdrop-filter: blur(14px) saturate(122%);
+  -webkit-backdrop-filter: blur(14px) saturate(122%);
 }
 
 .preview-overlay-inner {
@@ -2689,9 +3005,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   width: min(96vw, 1080px);
   height: 92vh;
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  background: rgb(250 252 247 / 90%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
   overflow: hidden;
 }
 
@@ -2701,12 +3018,12 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   flex-shrink: 0;
   padding: 12px 20px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--hos-border-light);
 
   span {
     font-size: 16px;
     font-weight: 600;
-    color: #111827;
+    color: var(--hos-text-primary);
   }
 
   div {
@@ -2719,7 +3036,7 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  background: var(--hos-glass-mist);
 }
 
 .preview-overlay-enter-active {
@@ -2773,13 +3090,14 @@ onBeforeUnmount(() => {
   min-height: 1120px;
   padding: 36px 44px 58px;
   overflow: hidden;
-  background: linear-gradient(180deg, rgb(255 255 255 / 99%), rgb(249 253 251 / 99%)),
-    radial-gradient(circle at 100% 0, rgb(39 174 96 / 8%), transparent 32%), #ffffff;
-  border: 1px solid #dcebe5;
+  background: rgb(250 253 249 / 94%);
+  border: 1px solid var(--hos-border-light);
   border-radius: 16px;
-  box-shadow: 0 22px 60px rgb(28 91 73 / 13%);
+  box-shadow:
+    0 14px 36px rgb(var(--hos-primary-rgb) / 4%),
+    0 4px 12px rgb(var(--hos-neutral-rgb) / 3%);
   font-family: Arial, "Microsoft YaHei", sans-serif;
-  color: #1b2f2a;
+  color: var(--hos-text-primary);
 }
 
 .preview-paper > :not(.paper-watermark) {
@@ -2792,7 +3110,7 @@ onBeforeUnmount(() => {
   top: 48%;
   left: 50%;
   z-index: 0;
-  color: rgb(15 23 42 / 5%);
+  color: rgb(var(--hos-primary-rgb) / 6%);
   font-family: Arial, "Microsoft YaHei", sans-serif;
   font-size: 64px;
   font-weight: 700;
@@ -2808,7 +3126,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  color: #64748b;
+  color: var(--hos-text-secondary);
   font-family: Arial, "Microsoft YaHei", sans-serif;
   font-size: 11px;
 }
@@ -3118,11 +3436,11 @@ onBeforeUnmount(() => {
   td {
     padding: 9px 8px;
     text-align: left;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--hos-border-light);
   }
 
   th {
-    background: #f8fafc;
+    background: var(--hos-accent-soft);
   }
 }
 
@@ -3132,7 +3450,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 18px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--hos-border-light);
 
   h2,
   p {
@@ -3145,14 +3463,14 @@ onBeforeUnmount(() => {
 
   p {
     margin-top: 8px;
-    color: #4b5563;
+    color: var(--hos-text-secondary);
     font-size: 13px;
   }
 
   span {
     flex-shrink: 0;
     padding: 4px 10px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--hos-border);
     border-radius: 999px;
     font-size: 12px;
   }
@@ -3168,7 +3486,7 @@ onBeforeUnmount(() => {
     max-width: 100%;
     max-height: 860px;
     object-fit: contain;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--hos-border);
   }
 }
 
@@ -3179,10 +3497,10 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 320px;
   padding: 28px;
-  color: #64748b;
+  color: var(--hos-text-secondary);
   text-align: center;
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
+  background: var(--hos-accent-soft);
+  border: 1px dashed var(--hos-border-interactive);
 
   strong,
   span {
@@ -3191,7 +3509,7 @@ onBeforeUnmount(() => {
 
   strong {
     margin-bottom: 8px;
-    color: #111827;
+    color: var(--hos-text-primary);
     font-size: 16px;
   }
 }
@@ -3222,9 +3540,12 @@ onBeforeUnmount(() => {
   padding: 10px;
   margin-bottom: 10px;
   overflow-x: auto;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
 
   button {
     display: inline-flex;
@@ -3233,11 +3554,11 @@ onBeforeUnmount(() => {
     gap: 6px;
     height: 32px;
     padding: 0 10px;
-    color: #4b5563;
+    color: var(--hos-text-secondary);
     cursor: pointer;
-    background: #ffffff;
-    border: 1px solid #dcdfe6;
-    border-radius: 6px;
+    background: var(--hos-glass);
+    border: 1px solid var(--hos-border-light);
+    border-radius: var(--hos-radius-md);
     position: relative;
     transition:
       color 0.18s ease,
@@ -3252,7 +3573,7 @@ onBeforeUnmount(() => {
       width: calc(100% - 20px);
       height: 2px;
       content: "";
-      background: var(--el-color-primary);
+      background: var(--hos-primary);
       border-radius: 999px;
       opacity: 0;
       transform: scaleX(0.45);
@@ -3271,16 +3592,16 @@ onBeforeUnmount(() => {
       place-items: center;
       width: 18px;
       height: 18px;
-      color: #64748b;
-      background: #f1f5f9;
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-soft);
       border-radius: 50%;
       font-size: 12px;
     }
 
     &.active {
-      color: var(--el-color-primary);
-      background: var(--el-color-primary-light-9);
-      border-color: var(--el-color-primary-light-5);
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-soft);
+      border-color: var(--hos-border-interactive);
 
       &::before {
         opacity: 1;
@@ -3288,8 +3609,8 @@ onBeforeUnmount(() => {
       }
 
       span {
-        color: #ffffff;
-        background: var(--el-color-primary);
+        color: var(--hos-text-primary);
+        background: var(--hos-primary-muted);
       }
     }
 
@@ -3315,26 +3636,29 @@ onBeforeUnmount(() => {
 .section-card {
   scroll-margin-top: 124px;
   padding: 16px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
     background-color 0.2s ease;
 
   &.saved {
-    background: #f0fdf4;
-    border-color: #86efac;
-    box-shadow: 0 0 0 3px rgb(34 197 94 / 12%);
+    background: var(--hos-panel-hover);
+    border-color: var(--hos-border-interactive);
+    box-shadow: var(--hos-shadow-card-hover);
   }
 
   &.editable {
-    border-left: 3px solid var(--el-color-primary-light-5);
+    border-left: 3px solid var(--hos-primary);
   }
 
   &.readonly {
-    border-left: 3px solid #cbd5e1;
+    border-left: 3px solid var(--hos-border-interactive);
   }
 
   &.attention {
@@ -3343,7 +3667,7 @@ onBeforeUnmount(() => {
   }
 
   &.collapsed {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    background: var(--hos-glass);
   }
 }
 
@@ -3367,7 +3691,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #edf0f3;
+  border-bottom: 1px solid var(--hos-border-light);
 
   h3,
   p {
@@ -3382,7 +3706,7 @@ onBeforeUnmount(() => {
 
   p {
     margin-top: 6px;
-    color: #6b7280;
+    color: var(--hos-text-secondary);
     line-height: 1.6;
   }
 }
@@ -3410,14 +3734,14 @@ onBeforeUnmount(() => {
   gap: 8px;
   align-items: center;
   padding: 10px 0 2px;
-  color: #64748b;
+  color: var(--hos-text-secondary);
   font-size: 12px;
 
   span {
     min-height: 24px;
     padding: 3px 8px;
-    background: #f8fafc;
-    border: 1px solid #e5e7eb;
+    background: var(--hos-glass);
+    border: 1px solid var(--hos-border-light);
     border-radius: 999px;
   }
 
@@ -3439,8 +3763,8 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 24px;
   height: 24px;
-  color: #ffffff;
-  background: var(--el-color-primary);
+  color: var(--hos-text-primary);
+  background: var(--hos-primary-muted);
   border-radius: 50%;
   font-size: 13px;
 }
@@ -3459,12 +3783,12 @@ onBeforeUnmount(() => {
   &.locked {
     padding: 14px 12px;
     margin: 0 -12px;
-    background: #f8fafc;
-    border-bottom-color: #e5e7eb;
-    border-radius: 6px;
+    background: var(--hos-glass);
+    border-bottom-color: var(--hos-border-light);
+    border-radius: var(--hos-radius-md);
 
     .field-label label {
-      color: #64748b;
+      color: var(--hos-text-secondary);
     }
   }
 
@@ -3482,10 +3806,10 @@ onBeforeUnmount(() => {
   min-height: 26px;
   padding: 0 8px;
   margin-bottom: 7px;
-  color: #64748b;
-  background: #ffffff;
-  border: 1px dashed #cbd5e1;
-  border-radius: 4px;
+  color: var(--hos-text-secondary);
+  background: var(--hos-glass);
+  border: 1px dashed var(--hos-border-interactive);
+  border-radius: var(--hos-radius-sm);
   font-size: 12px;
 }
 
@@ -3493,7 +3817,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   padding-top: 12px;
-  border-top: 1px solid #edf0f3;
+  border-top: 1px solid var(--hos-border-light);
 }
 
 .audit-timeline-drawer {
@@ -3507,9 +3831,9 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 14px;
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
 
   strong,
   span {
@@ -3517,13 +3841,13 @@ onBeforeUnmount(() => {
   }
 
   strong {
-    color: var(--el-text-color-primary);
+    color: var(--hos-text-primary);
     font-size: 17px;
   }
 
   span {
     margin-top: 4px;
-    color: var(--el-text-color-regular);
+    color: var(--hos-text-secondary);
   }
 }
 
@@ -3533,13 +3857,13 @@ onBeforeUnmount(() => {
 
 .timeline-event {
   padding: 12px;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
 
   p {
     margin: 8px 0;
-    color: var(--el-text-color-primary);
+    color: var(--hos-text-primary);
     line-height: 1.6;
   }
 }
@@ -3612,6 +3936,597 @@ onBeforeUnmount(() => {
       color: var(--el-text-color-primary);
       word-break: break-word;
     }
+  }
+}
+
+.record-workspace {
+  :deep(.el-drawer__body),
+  :deep(.el-dialog__body) {
+    background: var(--hos-app-bg);
+  }
+}
+
+.record-workspace .workspace-anchor {
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
+
+  button {
+    color: var(--hos-text-secondary);
+    background: var(--hos-glass);
+    border-color: var(--hos-border-light);
+    border-radius: var(--hos-radius-lg);
+
+    &::before {
+      background: var(--hos-primary);
+    }
+
+    span {
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-soft);
+      border: 1px solid var(--hos-border-light);
+    }
+
+    &.active {
+      color: var(--hos-primary-deep);
+      background: var(--hos-primary-soft);
+      border-color: var(--hos-border-interactive);
+      box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 48%),
+        0 8px 18px rgb(var(--hos-primary-rgb) / 5%);
+
+      span {
+        color: var(--hos-primary-deep);
+        background: var(--hos-primary-muted);
+        border-color: var(--hos-border-interactive);
+      }
+    }
+
+    &.done:not(.active) {
+      color: var(--hos-status-success);
+      background: var(--hos-status-success-soft);
+      border-color: rgb(22 163 74 / 14%);
+    }
+
+    &.attention:not(.active) {
+      color: var(--hos-status-warning);
+      background: var(--hos-status-warning-soft);
+      border-color: rgb(217 119 6 / 16%);
+    }
+  }
+}
+
+.record-workspace .section-card {
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
+
+  &.saved {
+    background: var(--hos-panel-hover);
+    border-color: var(--hos-border-interactive);
+    box-shadow: var(--hos-shadow-card-hover);
+  }
+
+  &.editable {
+    border-left-color: var(--hos-primary);
+  }
+
+  &.readonly {
+    background: var(--hos-accent-soft);
+    border-left-color: var(--hos-border-interactive);
+  }
+
+  &.collapsed {
+    background: var(--hos-glass);
+  }
+}
+
+.record-workspace .section-card-head,
+.record-workspace .section-card-actions {
+  border-color: var(--hos-border-light);
+}
+
+.record-workspace .section-card-head p,
+.record-workspace .section-summary-line,
+.record-workspace .timeline-meta {
+  color: var(--hos-text-secondary);
+}
+
+.record-workspace .section-summary-line span,
+.record-workspace .workbench-field-row.locked,
+.record-workspace .locked-note,
+.record-workspace .timeline-summary,
+.record-workspace .timeline-change div,
+.record-workspace .timeline-event {
+  background: var(--hos-glass);
+  border-color: var(--hos-border-light);
+}
+
+.record-workspace .section-index {
+  color: var(--hos-text-primary);
+  background: var(--hos-primary-muted);
+}
+
+.record-workspace .workbench-field-row.locked .field-label label,
+.record-workspace .locked-note {
+  color: var(--hos-text-secondary);
+}
+
+.record-workspace .timeline-summary,
+.record-workspace .timeline-event {
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
+}
+
+.record-workspace .preview-panel,
+.record-workspace .preview-overlay-inner {
+  background: rgb(250 252 247 / 90%);
+  border: 1px solid var(--hos-border-light);
+  box-shadow: var(--hos-shadow-soft);
+}
+
+.record-workspace .preview-overlay {
+  background: rgb(var(--hos-primary-rgb) / 8%);
+  backdrop-filter: blur(14px) saturate(122%);
+  -webkit-backdrop-filter: blur(14px) saturate(122%);
+}
+
+.record-workspace .preview-overlay-scroll {
+  background: var(--hos-glass-mist);
+}
+
+.record-workspace .preview-paper {
+  background: rgb(250 253 249 / 94%);
+  border-color: var(--hos-border-light);
+  box-shadow:
+    0 14px 36px rgb(var(--hos-primary-rgb) / 4%),
+    0 4px 12px rgb(var(--hos-neutral-rgb) / 3%);
+}
+
+.workbar-progress {
+  i {
+    position: relative;
+    background: rgb(var(--hos-primary-rgb) / 10%);
+  }
+
+  em {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(90deg, var(--hos-primary), var(--hos-primary-deep));
+
+    &::after {
+      position: absolute;
+      inset: 0;
+      content: "";
+      background: linear-gradient(90deg, transparent, rgb(255 255 255 / 55%), transparent);
+      transform: translateX(-120%);
+      animation: record-progress-sheen 1.6s var(--liquid-ease, ease) infinite;
+    }
+  }
+
+  &.complete {
+    strong {
+      color: var(--hos-status-success);
+    }
+
+    em {
+      background: linear-gradient(90deg, var(--hos-status-success), var(--hos-primary-deep));
+      animation: record-complete-pulse 1.8s ease-out infinite;
+    }
+  }
+}
+
+.save-check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  color: #ffffff;
+  vertical-align: -3px;
+  background: var(--hos-status-success);
+  border-radius: 999px;
+  animation: save-check-pop 180ms var(--liquid-ease, ease) both;
+
+  &::before {
+    content: "✓";
+    font-size: 11px;
+    font-style: normal;
+    line-height: 1;
+  }
+}
+
+.rail-item {
+  position: relative;
+}
+
+.rail-missing-badge,
+.workspace-anchor button em {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  color: #ffffff;
+  background: var(--hos-status-danger);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgb(220 38 38 / 10%);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.rail-missing-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.my-field-grid {
+  gap: var(--hos-spacing-lg, 18px);
+}
+
+.my-field-item,
+.field-row,
+.workbench-field-row {
+  scroll-margin-top: 156px;
+
+  &.focused {
+    position: relative;
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-primary-deep);
+    box-shadow:
+      0 0 0 3px rgb(var(--hos-primary-rgb) / 14%),
+      var(--hos-shadow-card-hover);
+    animation: field-focus-pulse 760ms var(--liquid-ease, ease) 2;
+  }
+}
+
+.my-field-item,
+.field-input {
+  :deep(.el-input__wrapper),
+  :deep(.el-select__wrapper) {
+    min-height: var(--hos-touch-target, 46px);
+    border-radius: var(--hos-radius-md);
+    font-size: 15px;
+  }
+
+  :deep(.el-textarea__inner) {
+    min-height: 92px;
+    border-radius: var(--hos-radius-md);
+    font-size: 15px;
+    line-height: 1.65;
+  }
+}
+
+.conflict-draft-banner {
+  background: rgb(255 251 235 / 94%);
+  border-color: rgb(217 119 6 / 24%);
+  border-left-color: var(--hos-status-warning);
+  border-radius: var(--hos-radius-card);
+  box-shadow: 0 16px 36px rgb(217 119 6 / 10%);
+
+  &::before {
+    display: inline-grid;
+    flex: 0 0 34px;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    color: #92400e;
+    content: "!";
+    background: rgb(217 119 6 / 12%);
+    border: 1px solid rgb(217 119 6 / 20%);
+    border-radius: 999px;
+    font-weight: 800;
+  }
+}
+
+.preview-overlay-inner {
+  position: relative;
+}
+
+.preview-overlay-toolbar {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  left: 18px;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgb(250 255 249 / 78%);
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: var(--hos-radius-card);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 78%),
+    0 18px 42px rgb(var(--hos-primary-rgb) / 10%);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+
+  > div {
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.preview-toolbar-title {
+  display: grid !important;
+  gap: 2px;
+  min-width: 0;
+
+  span,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+.preview-page-pills {
+  display: inline-flex;
+  max-width: 320px;
+  padding: 3px;
+  overflow-x: auto;
+  background: rgb(var(--hos-primary-rgb) / 8%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+
+  button {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    color: var(--hos-text-secondary);
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    font-weight: 700;
+
+    &.active {
+      color: #ffffff;
+      background: var(--hos-primary-deep);
+      box-shadow: 0 8px 18px rgb(var(--hos-primary-rgb) / 18%);
+    }
+  }
+}
+
+.preview-overlay-scroll {
+  padding-top: 92px;
+  scroll-behavior: smooth;
+}
+
+.paper-stack {
+  gap: 24px;
+  scroll-snap-type: y proximity;
+}
+
+.preview-paper {
+  isolation: isolate;
+  overflow: hidden;
+  scroll-margin-top: 104px;
+  scroll-snap-align: start;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 80%) inset,
+    0 20px 54px rgb(var(--hos-primary-rgb) / 9%),
+    0 8px 18px rgb(var(--hos-neutral-rgb) / 5%);
+
+  &::after {
+    position: absolute;
+    right: 22px;
+    bottom: -10px;
+    left: 22px;
+    z-index: -1;
+    height: 26px;
+    content: "";
+    background: rgb(var(--hos-primary-rgb) / 7%);
+    filter: blur(12px);
+    border-radius: 50%;
+  }
+}
+
+.paper-watermark {
+  inset: 0;
+  color: transparent;
+  font-size: 0;
+  transform: none;
+
+  &::before {
+    position: absolute;
+    inset: -80px;
+    content: "";
+    background-image: repeating-linear-gradient(-28deg, transparent 0 42px, rgb(22 101 52 / 4%) 42px 44px, transparent 44px 98px);
+  }
+
+  &::after {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: rgb(var(--hos-primary-rgb) / 6%);
+    content: attr(data-watermark) "  " attr(data-watermark) "  " attr(data-watermark);
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: 6px;
+    white-space: nowrap;
+    transform: rotate(-28deg);
+  }
+}
+
+.print-cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 26px;
+}
+
+.cover-head {
+  border-bottom: 0;
+}
+
+.cover-patient-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px;
+  background: rgb(var(--hos-primary-rgb) / 6%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 14px;
+
+  span,
+  b,
+  em {
+    display: block;
+  }
+
+  b {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+
+  em {
+    margin-top: 4px;
+    color: var(--hos-text-primary);
+    font-style: normal;
+    font-weight: 700;
+  }
+}
+
+.cover-archive-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+
+  span {
+    min-height: 30px;
+    padding: 6px 12px;
+    color: var(--hos-primary-deep);
+    background: var(--hos-primary-soft);
+    border: 1px solid var(--hos-border-light);
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+.print-preflight-list {
+  display: grid;
+  gap: 10px;
+
+  article {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 12px;
+    background: var(--hos-glass);
+    border: 1px solid var(--hos-border-light);
+    border-radius: var(--hos-radius-lg);
+
+    &.is-warning {
+      background: var(--hos-status-warning-soft);
+      border-color: rgb(217 119 6 / 20%);
+
+      .preflight-dot {
+        background: var(--hos-status-warning);
+        box-shadow: 0 0 0 5px rgb(217 119 6 / 10%);
+      }
+    }
+
+    &.is-success .preflight-dot {
+      background: var(--hos-status-success);
+      box-shadow: 0 0 0 5px rgb(22 163 74 / 10%);
+    }
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    margin-top: 4px;
+    color: var(--hos-text-secondary);
+  }
+}
+
+.preflight-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+}
+
+@keyframes record-progress-sheen {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes record-complete-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(22 163 74 / 0%);
+  }
+
+  45% {
+    box-shadow: 0 0 0 5px rgb(22 163 74 / 14%);
+  }
+}
+
+@keyframes save-check-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes field-focus-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgb(var(--hos-primary-rgb) / 0%),
+      var(--hos-shadow-soft);
+  }
+
+  45% {
+    box-shadow:
+      0 0 0 5px rgb(var(--hos-primary-rgb) / 18%),
+      var(--hos-shadow-card-hover);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbar-progress em,
+  .workbar-progress em::after,
+  .save-check,
+  .my-field-item.focused,
+  .field-row.focused,
+  .workbench-field-row.focused {
+    animation: none !important;
+    transition: none !important;
   }
 }
 

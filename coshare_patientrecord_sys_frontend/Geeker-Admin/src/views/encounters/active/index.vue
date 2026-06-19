@@ -3,7 +3,7 @@
     <section class="board-toolbar">
       <div>
         <h2>患者流程看板</h2>
-        <p>{{ roleName }} 可编辑 {{ editableSectionCount }} 个病历章节，优先处理停留时间较长的患者。</p>
+        <p>{{ roleName }} 可填写 {{ editableSectionCount }} 个章节。</p>
       </div>
       <div class="toolbar-actions">
         <el-radio-group v-model="viewMode" size="large">
@@ -24,6 +24,7 @@
           <button
             v-for="patient in column.patients"
             :key="patient.id"
+            type="button"
             class="patient-card"
             :class="{
               timeout: isTimeout(patient),
@@ -42,6 +43,10 @@
             <span>{{ patient.visitType }} · {{ patient.visitNo }}</span>
             <span v-if="(patient.encounterCount || 1) > 1" class="encounter-count">累计 {{ patient.encounterCount }} 次就诊</span>
             <small>{{ patient.currentStage }}</small>
+            <div class="closed-loop-progress" :class="`risk-${patient.riskType || 'info'}`">
+              <span><em :style="{ width: `${patient.progressPercent || 0}%` }"></em></span>
+              <small>{{ patient.completedCount || 0 }}/{{ recordSections.length }} 章</small>
+            </div>
             <div class="stay-line" :class="{ timeout: isTimeout(patient) }">
               <span>{{ stayDuration(patient.updatedAt) }}</span>
               <em>{{ patient.progressPercent }}%</em>
@@ -73,6 +78,10 @@
           <span>{{ row.completedCount }}/{{ recordSections.length }}</span>
           <strong>{{ row.currentStage }}</strong>
         </div>
+        <div class="closed-loop-progress table-progress" :class="`risk-${row.riskType || 'info'}`">
+          <span><em :style="{ width: `${row.progressPercent || 0}%` }"></em></span>
+          <small>{{ row.progressPercent || 0 }}%</small>
+        </div>
       </template>
 
       <template #status="{ row }">
@@ -80,7 +89,7 @@
       </template>
 
       <template #operation="{ row }">
-        <el-button type="primary" :icon="ArrowRight" link @click="openPatient(row.id)">进入详情</el-button>
+        <el-button type="primary" :icon="ArrowRight" link @click.stop="openPatient(row.id)">进入详情</el-button>
       </template>
     </ProTable>
   </div>
@@ -88,16 +97,16 @@
 
 <script setup lang="ts" name="encounterActive">
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
 import { ArrowRight, Refresh } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { getPatientListApi, type PatientRow } from "@/api/modules/clinic";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
+import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 
-const router = useRouter();
 const userStore = useUserStore();
+const { openPatientDetail } = usePatientNavigation();
 const proTable = ref<ProTableInstance>();
 const viewMode = ref<"kanban" | "list">("kanban");
 const patientRows = ref<PatientRow[]>([]);
@@ -196,7 +205,7 @@ const refreshBoard = () => {
 };
 
 const openPatient = (id: string) => {
-  router.push(`/patients/detail/${id}`);
+  openPatientDetail(id);
 };
 
 onMounted(loadBoard);
@@ -215,9 +224,12 @@ onMounted(loadBoard);
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(16px) saturate(132%);
+  -webkit-backdrop-filter: blur(16px) saturate(132%);
 
   h2,
   p {
@@ -251,9 +263,12 @@ onMounted(loadBoard);
 .kanban-column {
   min-height: 520px;
   padding: 12px;
-  background: #f8fafc;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+  backdrop-filter: blur(14px) saturate(128%);
+  -webkit-backdrop-filter: blur(14px) saturate(128%);
 
   header {
     display: flex;
@@ -277,9 +292,10 @@ onMounted(loadBoard);
   overflow: hidden;
   text-align: left;
   cursor: pointer;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-lg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 36%);
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
@@ -296,14 +312,16 @@ onMounted(loadBoard);
   }
 
   &:hover {
-    border-color: var(--el-color-primary-light-5);
-    box-shadow: 0 10px 24px rgb(15 23 42 / 8%);
+    border-color: var(--hos-border-interactive);
+    box-shadow: var(--hos-shadow-card-hover);
     transform: translateY(-2px);
   }
 
   &.current {
-    border-color: var(--el-color-primary-light-3);
-    box-shadow: 0 0 0 3px rgb(64 158 255 / 12%);
+    border-color: var(--hos-border-interactive);
+    box-shadow:
+      0 0 0 3px rgb(var(--hos-primary-rgb) / 10%),
+      var(--hos-shadow-soft);
   }
 
   &.timeout {
@@ -327,42 +345,95 @@ onMounted(loadBoard);
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    color: var(--el-text-color-primary);
+    color: var(--hos-text-primary);
     font-size: 16px;
   }
 
   span,
   small {
-    color: var(--el-text-color-secondary);
+    color: var(--hos-text-secondary);
   }
 }
 
 .encounter-count {
   width: fit-content;
   padding: 2px 8px;
-  color: #26745a !important;
-  background: #eef9f3;
+  color: var(--hos-primary-deep) !important;
+  background: var(--hos-primary-soft);
   border-radius: 999px;
   font-size: 12px;
 }
 
 .patient-status-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--el-color-primary);
+  width: 10px;
+  height: 10px;
+  background: var(--hos-primary);
+  border: 1px solid rgb(255 255 255 / 70%);
   border-radius: 999px;
+  box-shadow: 0 0 0 4px rgb(var(--hos-primary-rgb) / 10%);
 }
 
 .risk-success .patient-status-dot {
   background: var(--hos-status-success);
+  box-shadow: 0 0 0 4px rgb(22 163 74 / 12%);
 }
 
 .risk-warning .patient-status-dot {
   background: var(--hos-status-warning);
+  box-shadow: 0 0 0 4px rgb(217 119 6 / 12%);
 }
 
 .risk-danger .patient-status-dot {
   background: var(--hos-status-danger);
+  box-shadow: 0 0 0 4px rgb(220 38 38 / 12%);
+}
+
+.closed-loop-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+
+  > span {
+    height: 9px;
+    overflow: hidden;
+    background: rgb(255 255 255 / 46%);
+    border: 1px solid var(--hos-border-light);
+    border-radius: 999px;
+  }
+
+  em {
+    display: block;
+    height: 100%;
+    background: var(--hos-status-info);
+    border-radius: inherit;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 42%);
+    transition: width 220ms var(--liquid-ease, ease);
+  }
+
+  small {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+  }
+
+  &.risk-success em {
+    background: var(--hos-status-success);
+  }
+
+  &.risk-warning em {
+    background: var(--hos-status-warning);
+  }
+
+  &.risk-danger em {
+    background: var(--hos-status-danger);
+  }
+}
+
+.table-progress {
+  max-width: 240px;
+  margin-top: 7px;
 }
 
 @keyframes timeout-pulse {
@@ -386,10 +457,10 @@ onMounted(loadBoard);
 
 .stay-line {
   padding-top: 7px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid var(--hos-border-light);
 
   em {
-    color: var(--el-color-primary);
+    color: var(--hos-primary-deep);
     font-style: normal;
     font-weight: 600;
   }
@@ -410,22 +481,22 @@ onMounted(loadBoard);
   display: grid;
   place-items: center;
   min-height: 24px;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
+  color: var(--hos-text-secondary);
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
   border-radius: 4px;
   font-size: 12px;
 
   &.done {
-    color: #ffffff;
-    background: var(--el-color-success);
-    border-color: var(--el-color-success);
+    color: var(--hos-status-success);
+    background: var(--hos-status-success-soft);
+    border-color: rgb(22 163 74 / 18%);
   }
 
   &.active {
-    color: #ffffff;
-    background: var(--el-color-warning);
-    border-color: var(--el-color-warning);
+    color: var(--hos-status-warning);
+    background: var(--hos-status-warning-soft);
+    border-color: rgb(217 119 6 / 22%);
   }
 }
 
