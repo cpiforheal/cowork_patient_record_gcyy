@@ -85,6 +85,7 @@ export interface AccountRow {
   id: string;
   username: string;
   password?: string;
+  currentPassword?: string;
   name: string;
   department: string;
   role: UserRole;

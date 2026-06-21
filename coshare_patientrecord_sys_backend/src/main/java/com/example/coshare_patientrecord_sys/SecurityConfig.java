@@ -27,7 +27,7 @@ public class SecurityConfig {
                     "/auth/options",
                     "/auth/options/accounts"
                 ).permitAll()
-                .requestMatchers("/health/db", "/auth/logout", "/clinic-api/**", "/inventory-api/**").authenticated()
+                .requestMatchers("/health/db", "/auth/logout", "/auth/password", "/clinic-api/**", "/inventory-api/**").authenticated()
                 .anyRequest().authenticated()
             )
             .httpBasic(httpBasic -> httpBasic.disable())

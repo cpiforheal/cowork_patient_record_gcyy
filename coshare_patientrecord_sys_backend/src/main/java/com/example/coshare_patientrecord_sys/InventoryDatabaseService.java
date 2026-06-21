@@ -198,6 +198,7 @@ public class InventoryDatabaseService {
         db.set("requests", filterByDepartment(db.path("requests"), department));
         db.set("weeklyConsumptions", filterByDepartment(db.path("weeklyConsumptions"), department));
         db.set("movements", filterByDepartment(db.path("movements"), department));
+        db.set("batches", objectMapper.createArrayNode());
         db.set("counts", objectMapper.createArrayNode());
         db.set("auditLogs", objectMapper.createArrayNode());
         db.set("summary", buildSummary(db));
@@ -323,6 +324,9 @@ public class InventoryDatabaseService {
     public ObjectNode receiveRequest(JsonNode payload, AuthSessionService.SessionUser user) {
         ObjectNode request = loadRequest(text(payload, "id"));
         assertStatus(request, List.of("issued"), "只有已发放申领单可以签收");
+        if (!sameDepartment(user, request) && !isInventoryManager(user)) {
+            throw new IllegalArgumentException("只能签收本科室申领单");
+        }
         updateLineStatuses(request, "received");
         request.put("status", "received");
         request.put("receivedAt", now());
@@ -352,7 +356,7 @@ public class InventoryDatabaseService {
     public ObjectNode cancelRequest(JsonNode payload, AuthSessionService.SessionUser user) {
         ObjectNode request = loadRequest(text(payload, "id"));
         assertStatus(request, List.of("pending"), "只有待审核申领单可以撤销");
-        if (!user.department().equals(text(request, "department")) && !isInventoryManager(user)) {
+        if (!sameDepartment(user, request) && !isInventoryManager(user)) {
             throw new IllegalArgumentException("只能撤销本科室申领单");
         }
         String reason = text(payload, "reason", "申请人撤销");
@@ -924,6 +928,11 @@ public class InventoryDatabaseService {
 
     private boolean isInventoryManager(AuthSessionService.SessionUser user) {
         return "admin".equals(user.role()) || "quality".equals(user.role());
+    }
+
+    private boolean sameDepartment(AuthSessionService.SessionUser user, JsonNode row) {
+        String department = user.department();
+        return department != null && department.equals(text(row, "department"));
     }
 
     private void movement(String type, String itemId, String batchId, BigDecimal quantity, String department, String operator, String reason, String relatedId) {

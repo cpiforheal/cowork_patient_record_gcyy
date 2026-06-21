@@ -43,6 +43,12 @@ public class AuthApiController {
         return ApiResult.success(Map.of("ok", true));
     }
 
+    @PostMapping("/auth/password")
+    public ApiResult<Map<String, Boolean>> changePassword(@RequestBody AuthSessionService.PasswordChangeRequest request) {
+        authSessionService.changePassword(AuthPermission.currentUserOrThrow(), request);
+        return ApiResult.success(Map.of("ok", true));
+    }
+
     private String clientIp(HttpServletRequest request) {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {

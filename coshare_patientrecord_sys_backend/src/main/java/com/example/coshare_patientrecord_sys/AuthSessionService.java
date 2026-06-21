@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
@@ -111,6 +112,35 @@ public class AuthSessionService {
 
     public void logout(String token) {
         if (token != null && !token.isBlank()) sessions.remove(token);
+    }
+
+    @Transactional
+    public void changePassword(SessionUser user, PasswordChangeRequest request) {
+        if (user == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Login expired");
+        }
+        String currentPassword = request.currentPassword() == null ? "" : request.currentPassword();
+        String newPassword = request.newPassword() == null ? "" : request.newPassword().trim();
+        if (currentPassword.isBlank() || newPassword.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password and new password are required");
+        }
+        if (newPassword.length() < 6) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New password must be at least 6 characters");
+        }
+
+        JsonNode account = loadAccount(user.username())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found"));
+        String storedPassword = text(account, "passwordHash", text(account, "password"));
+        if (storedPassword.isBlank() || !isBcrypt(storedPassword) || !passwordEncoder.matches(currentPassword, storedPassword)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Current password is incorrect");
+        }
+
+        ObjectNode updated = ((ObjectNode) account).deepCopy();
+        updated.remove("password");
+        updated.put("passwordHash", passwordEncoder.encode(newPassword));
+        updated.put("currentPassword", newPassword);
+        updated.put("updatedAt", Instant.now().toString());
+        jdbcTemplate.update("UPDATE clinic_accounts SET raw_json = ? WHERE id = ?", toJson(updated), text(updated, "id"));
     }
 
     public LoginOptions loginOptions() {
@@ -238,6 +268,8 @@ public class AuthSessionService {
     public record LoginRequest(String username, String password) {}
 
     public record LoginResult(String access_token, Map<String, String> userInfo) {}
+
+    public record PasswordChangeRequest(String currentPassword, String newPassword) {}
 
     public record LoginOptions(List<String> departments, List<Map<String, String>> accounts) {}
 

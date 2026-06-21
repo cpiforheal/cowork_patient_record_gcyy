@@ -443,13 +443,14 @@ function Ensure-AdminAccount {
         createdAt = "2026-06-10 08:00:00";
         updatedAt = "2026-06-10 08:00:00";
         passwordHash = $adminPasswordHash;
+        currentPassword = $env:ADMIN_PASSWORD;
     }
     $json = ($account | ConvertTo-Json -Compress).Replace("'", "''")
     $sql = @"
 SET NAMES utf8mb4;
 INSERT INTO clinic_accounts (id, username, role, status, raw_json)
 VALUES ('admin', '$($env:ADMIN_USERNAME)', 'admin', '$enabled', CAST('$json' AS JSON))
-ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status = VALUES(status), raw_json = VALUES(raw_json);
+ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status = VALUES(status);
 "@
     Invoke-Mysql $env:MYSQL_USERNAME $env:MYSQL_PASSWORD $sql $env:MYSQL_DATABASE | Out-Null
     Write-Host "[mysql] admin account ready: $env:ADMIN_USERNAME / $env:ADMIN_PASSWORD"

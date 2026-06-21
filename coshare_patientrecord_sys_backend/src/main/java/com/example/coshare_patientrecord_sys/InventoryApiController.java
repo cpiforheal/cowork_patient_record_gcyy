@@ -26,13 +26,13 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/items")
     public ApiResult<Map<String, Object>> saveItem(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireStockKeeper();
         return ApiResult.of(200, "saved", databaseService.asMap(databaseService.saveItem(payload, user)));
     }
 
     @PostMapping("/inventory-api/inbounds")
     public ApiResult<Map<String, Object>> inbound(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireStockKeeper();
         return ApiResult.of(200, "inbound saved", databaseService.asMap(databaseService.inbound(payload, user)));
     }
 
@@ -44,13 +44,13 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/requests/approve")
     public ApiResult<Map<String, Object>> approveRequest(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireApprover();
         return ApiResult.of(200, "request approved", databaseService.asMap(databaseService.approveRequest(payload, user)));
     }
 
     @PostMapping("/inventory-api/requests/issue")
     public ApiResult<Map<String, Object>> issueRequest(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireStockKeeper();
         return ApiResult.of(200, "request issued", databaseService.asMap(databaseService.issueRequest(payload, user)));
     }
 
@@ -62,7 +62,7 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/requests/reject")
     public ApiResult<Map<String, Object>> rejectRequest(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireApprover();
         return ApiResult.of(200, "request rejected", databaseService.asMap(databaseService.rejectRequest(payload, user)));
     }
 
@@ -74,7 +74,7 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/requests/void")
     public ApiResult<Map<String, Object>> voidRequest(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireApprover();
         return ApiResult.of(200, "request voided", databaseService.asMap(databaseService.voidRequest(payload, user)));
     }
 
@@ -86,13 +86,15 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/movements/return-or-scrap")
     public ApiResult<Map<String, Object>> returnOrScrap(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = "return".equals(payload.path("type").asText(""))
+            ? InventoryPermission.requireStockKeeper()
+            : InventoryPermission.requireCounter();
         return ApiResult.of(200, "movement saved", databaseService.asMap(databaseService.returnOrScrap(payload, user)));
     }
 
     @PostMapping("/inventory-api/counts")
     public ApiResult<Map<String, Object>> inventoryCount(@RequestBody JsonNode payload) {
-        AuthSessionService.SessionUser user = InventoryPermission.requireManager();
+        AuthSessionService.SessionUser user = InventoryPermission.requireCounter();
         return ApiResult.of(200, "count saved", databaseService.asMap(databaseService.inventoryCount(payload, user)));
     }
 }

@@ -842,6 +842,7 @@ export const saveAccountApi = async (params: Partial<AccountRow> & SystemOperati
       id: String(Date.now()),
       username: params.username || `user${Date.now()}`,
       password: temporaryPassword,
+      currentPassword: temporaryPassword,
       name: params.name || "新账号",
       department: params.department || roleToDepartment[role],
       role,
@@ -899,13 +900,14 @@ export const setAccountStatusApi = async (id: string, status: AccountRow["status
   return response(null, status === "停用" ? "账号已停用" : "账号已启用");
 };
 
-export const resetAccountPasswordApi = async (id: string, context: SystemOperationContext = {}) => {
+export const resetAccountPasswordApi = async (id: string, context: SystemOperationContext & { password?: string } = {}) => {
   ensureSystemManager(context.operatorRole);
   const db = await readDb();
   const target = db.accounts?.find(item => item.id === id);
   if (!target) return Promise.reject(new Error("账号不存在"));
-  const temporaryPassword = createTemporaryPassword();
+  const temporaryPassword = context.password?.trim() || createTemporaryPassword();
   target.password = temporaryPassword;
+  target.currentPassword = temporaryPassword;
   target.updatedAt = now();
   appendAuditLog(db, {
     operator: context.operator || roleLabel(context.operatorRole || "admin"),

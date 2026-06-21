@@ -85,3 +85,18 @@ export const logoutApi = () => {
     return payload;
   });
 };
+
+export const changePasswordApi = (params: { currentPassword: string; newPassword: string }) => {
+  return fetch(`${AUTH_API_BASE_URL}/password`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(params)
+  }).then(async response => {
+    const payload = await readJsonResult<{ ok: boolean }>(response);
+    if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "密码修改失败");
+    return payload;
+  });
+};

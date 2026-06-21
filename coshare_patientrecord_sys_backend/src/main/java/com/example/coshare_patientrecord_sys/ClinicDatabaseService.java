@@ -229,7 +229,7 @@ public class ClinicDatabaseService {
         db.set("archive", objectMapper.createObjectNode());
         db.set("documents", documents);
         db.set("patients", filterPatients(db.path("patients"), records, documents));
-        db.set("accounts", currentAccountOnly(db.path("accounts"), user));
+        db.set("accounts", hideVisibleAccountPasswords(currentAccountOnly(db.path("accounts"), user)));
         db.set("auditLogs", objectMapper.createArrayNode());
         return db;
     }
@@ -614,6 +614,7 @@ public class ClinicDatabaseService {
         }
         if (!incomingPassword.isBlank()) {
             account.put("passwordHash", passwordEncoder.encode(incomingPassword));
+            account.put("currentPassword", incomingPassword);
             return account;
         }
         String existingPasswordHash = existingAccountPasswordHash(id);
@@ -1167,6 +1168,17 @@ public class ClinicDatabaseService {
             if (user.id().equals(text(account, "id")) || user.username().equalsIgnoreCase(text(account, "username"))) {
                 filtered.add(account);
             }
+        }
+        return filtered;
+    }
+
+    private ArrayNode hideVisibleAccountPasswords(JsonNode accounts) {
+        ArrayNode filtered = objectMapper.createArrayNode();
+        if (accounts == null || !accounts.isArray()) return filtered;
+        for (JsonNode account : accounts) {
+            ObjectNode visible = account != null && account.isObject() ? (ObjectNode) account.deepCopy() : objectMapper.createObjectNode();
+            visible.remove(List.of("password", "passwordHash", "currentPassword"));
+            filtered.add(visible);
         }
         return filtered;
     }

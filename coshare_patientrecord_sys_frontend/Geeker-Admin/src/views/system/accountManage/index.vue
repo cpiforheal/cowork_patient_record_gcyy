@@ -96,6 +96,7 @@
             <el-descriptions :column="1" border>
               <el-descriptions-item label="角色">{{ currentRoleLabel }}</el-descriptions-item>
               <el-descriptions-item label="科室">{{ accountForm.department || "未设置" }}</el-descriptions-item>
+              <el-descriptions-item label="当前密码">{{ accountForm.currentPassword || "未记录，请重置" }}</el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ accountForm.createdAt || "保存后生成" }}</el-descriptions-item>
               <el-descriptions-item label="更新时间">{{ accountForm.updatedAt || "保存后生成" }}</el-descriptions-item>
             </el-descriptions>
@@ -125,7 +126,7 @@
 
 <script setup lang="ts" name="accountManage">
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { CirclePlus, Refresh } from "@element-plus/icons-vue";
 import TreeFilter from "@/components/TreeFilter/index.vue";
 import ProTable from "@/components/ProTable/index.vue";
@@ -169,6 +170,7 @@ const roleEnum = roles.map(item => ({ label: item.label, value: item.value }));
 const columns = reactive<ColumnProps<AccountRow>[]>([
   { type: "index", label: "#", width: 70 },
   { prop: "username", label: "账号", width: 130, search: { el: "input" } },
+  { prop: "currentPassword", label: "当前密码", width: 150 },
   { prop: "name", label: "姓名", width: 120, search: { el: "input" } },
   { prop: "department", label: "科室", width: 140 },
   { prop: "roleLabel", label: "角色", width: 130 },
@@ -251,21 +253,31 @@ const toggleStatusFromDrawer = async () => {
   refresh();
 };
 
-const resetPassword = async (row: AccountRow) => {
+const resetPasswordWithPrompt = async (row: Pick<AccountRow, "id" | "name">) => {
+  const result = await ElMessageBox.prompt("填写新密码后重置；留空则自动生成临时密码。", `重置密码 - ${row.name || row.id}`, {
+    confirmButtonText: "重置",
+    cancelButtonText: "取消",
+    inputPlaceholder: "留空自动生成",
+    inputType: "text"
+  }).catch(() => null);
+  if (!result) return;
   const { data } = await resetAccountPasswordApi(row.id, {
     operator: operatorName.value,
-    operatorRole: operatorRole.value
+    operatorRole: operatorRole.value,
+    password: result.value?.trim() || undefined
   });
-  ElMessage.success(`密码已重置，临时密码：${data.temporaryPassword}`);
+  if (accountForm.id === row.id) accountForm.currentPassword = data.temporaryPassword;
+  ElMessage.success(`密码已重置，当前密码：${data.temporaryPassword}`);
+  refresh();
+};
+
+const resetPassword = async (row: AccountRow) => {
+  await resetPasswordWithPrompt(row);
 };
 
 const resetPasswordFromDrawer = async () => {
   if (!accountForm.id) return;
-  const { data } = await resetAccountPasswordApi(accountForm.id, {
-    operator: operatorName.value,
-    operatorRole: operatorRole.value
-  });
-  ElMessage.success(`密码已重置，临时密码：${data.temporaryPassword}`);
+  await resetPasswordWithPrompt({ id: accountForm.id, name: accountForm.name || accountForm.username || "" });
 };
 </script>
 

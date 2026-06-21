@@ -33,6 +33,7 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return !path.equals("/health/db")
             && !path.equals("/auth/logout")
+            && !path.equals("/auth/password")
             && !path.startsWith("/clinic-api/")
             && !path.startsWith("/inventory-api/");
     }

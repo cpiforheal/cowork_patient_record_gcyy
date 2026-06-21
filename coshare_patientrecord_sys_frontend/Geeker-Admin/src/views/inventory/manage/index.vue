@@ -1745,6 +1745,7 @@ const visibleTabNavItems = computed(() =>
     item => userStore.userInfo.role === "admin" || hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || [])
   )
 );
+const canAccessTab = (tab: string) => visibleTabNavItems.value.some(item => item.tab === tab);
 const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item => hasInventoryAuth(item.auth)));
 const canSubmitReturnOrScrap = computed(() =>
   returnForm.type === "return" ? hasInventoryAuth("inventory:receive") : hasInventoryAuth("inventory:count")
@@ -1836,58 +1837,60 @@ const todoRows = computed<TodoRow[]>(() =>
   })
 );
 
-const riskRows = computed(() => [
-  ...lowStockRows.value.map(row => ({
-    id: `low-${row.id}`,
-    type: "低库存",
-    level: "danger" as TagLevel,
-    subject: row.name,
-    department: "-",
-    status: `当前 ${row.stock}${row.unit}，预警线 ${row.lowStockThreshold}${row.unit}`,
-    suggestion: "优先核对库存，必要时补充入库或限制非必要领用",
-    tab: "stock"
-  })),
-  ...expiredRows.value.map(row => ({
-    id: `expired-${row.id}`,
-    type: "已过期",
-    level: "danger" as TagLevel,
-    subject: row.itemName,
-    department: "-",
-    status: `批号 ${row.batchNo || "无批号"}，效期 ${row.expiryDate || "未填"}`,
-    suggestion: "暂停发放，按制度做报废或隔离处理",
-    tab: "stock"
-  })),
-  ...expirySoonRows.value.map(row => ({
-    id: `expiry-${row.id}`,
-    type: "临期",
-    level: "warning" as TagLevel,
-    subject: row.itemName,
-    department: "-",
-    status: `批号 ${row.batchNo || "无批号"}，效期 ${row.expiryDate || "未填"}`,
-    suggestion: "优先消耗，无法消耗时提前准备退换或报废说明",
-    tab: "stock"
-  })),
-  ...countDiffRows.value.slice(0, 20).map(row => ({
-    id: `count-${row.id}`,
-    type: "盘点差异",
-    level: "warning" as TagLevel,
-    subject: row.itemName,
-    department: "-",
-    status: `账面 ${row.bookQuantity}，实盘 ${row.actualQuantity}，差异 ${row.differenceQuantity}`,
-    suggestion: row.reason || "补充差异原因，并由负责人复核",
-    tab: "controls"
-  })),
-  ...scrapRows.value.slice(0, 20).map(row => ({
-    id: `scrap-${row.id}`,
-    type: "报废",
-    level: "danger" as TagLevel,
-    subject: row.itemName,
-    department: row.department || "-",
-    status: `${row.quantity}${itemUnit(row.itemId)}，${row.createdAt || "未记录时间"}`,
-    suggestion: row.reason || "补充报废原因和责任确认",
-    tab: "trace"
-  }))
-]);
+const riskRows = computed(() =>
+  [
+    ...lowStockRows.value.map(row => ({
+      id: `low-${row.id}`,
+      type: "低库存",
+      level: "danger" as TagLevel,
+      subject: row.name,
+      department: "-",
+      status: `当前 ${row.stock}${row.unit}，预警线 ${row.lowStockThreshold}${row.unit}`,
+      suggestion: "优先核对库存，必要时补充入库或限制非必要领用",
+      tab: "stock"
+    })),
+    ...expiredRows.value.map(row => ({
+      id: `expired-${row.id}`,
+      type: "已过期",
+      level: "danger" as TagLevel,
+      subject: row.itemName,
+      department: "-",
+      status: `批号 ${row.batchNo || "无批号"}，效期 ${row.expiryDate || "未填"}`,
+      suggestion: "暂停发放，按制度做报废或隔离处理",
+      tab: "stock"
+    })),
+    ...expirySoonRows.value.map(row => ({
+      id: `expiry-${row.id}`,
+      type: "临期",
+      level: "warning" as TagLevel,
+      subject: row.itemName,
+      department: "-",
+      status: `批号 ${row.batchNo || "无批号"}，效期 ${row.expiryDate || "未填"}`,
+      suggestion: "优先消耗，无法消耗时提前准备退换或报废说明",
+      tab: "stock"
+    })),
+    ...countDiffRows.value.slice(0, 20).map(row => ({
+      id: `count-${row.id}`,
+      type: "盘点差异",
+      level: "warning" as TagLevel,
+      subject: row.itemName,
+      department: "-",
+      status: `账面 ${row.bookQuantity}，实盘 ${row.actualQuantity}，差异 ${row.differenceQuantity}`,
+      suggestion: row.reason || "补充差异原因，并由负责人复核",
+      tab: "controls"
+    })),
+    ...scrapRows.value.slice(0, 20).map(row => ({
+      id: `scrap-${row.id}`,
+      type: "报废",
+      level: "danger" as TagLevel,
+      subject: row.itemName,
+      department: row.department || "-",
+      status: `${row.quantity}${itemUnit(row.itemId)}，${row.createdAt || "未记录时间"}`,
+      suggestion: row.reason || "补充报废原因和责任确认",
+      tab: "trace"
+    }))
+  ].filter(row => canAccessTab(row.tab))
+);
 const currentTabStats = computed<TabStat[]>(() => {
   const statsByTab: Record<string, TabStat[]> = {
     overview: [
@@ -1899,7 +1902,17 @@ const currentTabStats = computed<TabStat[]>(() => {
         tone: "warning",
         tab: "requests"
       },
-      { label: "低库存物资", value: lowStockRows.value.length, desc: "低于或等于预警线", tone: "danger", tab: "stock" },
+      ...(canAccessTab("stock")
+        ? [
+            {
+              label: "低库存物资",
+              value: lowStockRows.value.length,
+              desc: "低于或等于预警线",
+              tone: "danger" as const,
+              tab: "stock"
+            }
+          ]
+        : []),
       { label: "异常提醒", value: riskRows.value.length, desc: "低库存、临期和差异", tone: "danger", tab: "overview" }
     ],
     executive: [
@@ -1997,13 +2010,19 @@ const requestStepActive = (status: string) => {
   return stepMap[status] ?? 0;
 };
 
-const goTab = (tab: string) => (activeTab.value = tab);
+const goTab = (tab: string) => {
+  if (canAccessTab(tab)) {
+    activeTab.value = tab;
+    return;
+  }
+  activeTab.value = visibleTabNavItems.value[0]?.tab || "overview";
+};
 
 watch(
   () => route.path,
   path => {
     const routeTab = routeTabMap[path];
-    if (routeTab && activeTab.value !== routeTab) activeTab.value = routeTab;
+    if (routeTab && activeTab.value !== routeTab) goTab(routeTab);
   },
   { immediate: true }
 );

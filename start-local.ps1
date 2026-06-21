@@ -263,13 +263,14 @@ function Ensure-AdminAccount($MysqlExe) {
     createdAt = "2026-06-10 08:00:00";
     updatedAt = "2026-06-10 08:00:00";
     passwordHash = $AdminPasswordHash;
+    currentPassword = $AdminPassword;
   }
   $json = ($account | ConvertTo-Json -Compress).Replace("'", "''")
   $seedSql = @"
 SET NAMES utf8mb4;
 INSERT INTO clinic_accounts (id, username, role, status, raw_json)
 VALUES ('admin', '$AdminUsername', 'admin', '$textEnabled', CAST('$json' AS JSON))
-ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status = VALUES(status), raw_json = VALUES(raw_json);
+ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status = VALUES(status);
 "@
   Invoke-Mysql $MysqlExe $DbUser $DbPassword $seedSql $DbName | Out-Null
   Write-Host "[mysql] admin account ready: $AdminUsername / $AdminPassword"
