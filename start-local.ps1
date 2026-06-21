@@ -32,6 +32,10 @@ function New-Directory($Path) {
   }
 }
 
+function Write-Utf8NoBomFile($Path, $Content) {
+  [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+}
+
 function Convert-ToMysqlPath($Path) {
   return (Resolve-Path -LiteralPath $Path).Path.Replace("\", "/")
 }
@@ -116,7 +120,7 @@ function Start-LocalMysql($MysqldExe) {
   $mysqlLogPath = (Join-Path $LogDir "mysql.err.log").Replace("\", "/")
   $mysqlPidPath = (Join-Path $RuntimeRoot "mysql.pid").Replace("\", "/")
 
-  @"
+  $mysqlConfigContent = @"
 [mysqld]
 basedir=$mysqlBasePath
 datadir=$mysqlDataPath
@@ -127,7 +131,8 @@ collation-server=utf8mb4_unicode_ci
 mysqlx=0
 log-error=$mysqlLogPath
 pid-file=$mysqlPidPath
-"@ | Set-Content -LiteralPath $MysqlConfig -Encoding UTF8
+"@
+  Write-Utf8NoBomFile $MysqlConfig $mysqlConfigContent
 
   if (-not (Test-Path -LiteralPath (Join-Path $MysqlDataDir "auto.cnf"))) {
     Write-Host "[mysql] initializing local data directory..."
