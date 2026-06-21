@@ -185,17 +185,49 @@
           </div>
 
           <div class="maintenance-card">
-            <div>
+            <div class="maintenance-summary">
               <span>附件存储</span>
               <strong>{{ storageSummary }}</strong>
               <small>{{ maintenanceStatus?.storage.attachmentDir || "等待后端巡检" }}</small>
             </div>
-            <div>
+            <div class="maintenance-summary">
               <span>数据快照</span>
               <strong>{{ snapshotSummary }}</strong>
               <small>{{ maintenanceStatus?.latestSnapshotAt || "尚未生成快照" }}</small>
             </div>
             <el-button type="primary" plain :loading="maintenanceLoading" @click="createSnapshot">生成快照</el-button>
+          </div>
+
+          <div v-if="currentRole === 'admin'" class="backup-card">
+            <div class="backup-head">
+              <div>
+                <span>物理备份</span>
+                <strong>{{ latestBackupSummary }}</strong>
+                <small>{{ backupStatus?.schedule || "每天 02:00" }}，保留 7 天 / 4 周 / 12 月</small>
+              </div>
+              <el-switch
+                v-model="backupEnabled"
+                active-text="自动"
+                inactive-text="停用"
+                :disabled="backupLoading || backupStatus?.running"
+              />
+            </div>
+            <el-input
+              v-model="backupPath"
+              clearable
+              :disabled="backupLoading || backupStatus?.running"
+              placeholder="例如：\\192.168.1.10\clinic-backup 或 D:\clinic-backup"
+            />
+            <div class="backup-meta">
+              <span>{{ backupStorageSummary }}</span>
+              <small>{{ backupStatus?.backupDir || "尚未设置备份路径" }}</small>
+            </div>
+            <div class="backup-actions">
+              <el-button :loading="backupLoading" :disabled="backupStatus?.running" @click="saveBackupConfig">保存路径</el-button>
+              <el-button type="primary" :loading="backupLoading || backupStatus?.running" @click="runBackupNow">
+                立即备份
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -210,10 +242,14 @@ import { ElMessage } from "element-plus";
 import { ArrowLeft, ArrowRight, Refresh } from "@element-plus/icons-vue";
 import {
   createMaintenanceSnapshotApi,
+  getBackupStatusApi,
   getMaintenanceStatusApi,
   getOperationStatsApi,
   getPatientListApi,
   getWorkRemindersApi,
+  runBackupNowApi,
+  saveBackupConfigApi,
+  type BackupStatus,
   type MaintenanceStatus,
   type OperationStats,
   type PatientRow,
@@ -248,6 +284,10 @@ const patientRows = ref<PatientRow[]>([]);
 const workReminders = ref<WorkReminder[]>([]);
 const maintenanceStatus = ref<MaintenanceStatus>();
 const maintenanceLoading = ref(false);
+const backupStatus = ref<BackupStatus>();
+const backupPath = ref("");
+const backupEnabled = ref(true);
+const backupLoading = ref(false);
 const stats = ref<OperationStats>({
   totalPatients: 0,
   pendingPatients: 0,
@@ -339,6 +379,22 @@ const storageSummary = computed(() => {
 const snapshotSummary = computed(() => {
   if (!maintenanceStatus.value) return "等待巡检";
   return `${maintenanceStatus.value.snapshotCount} 个快照`;
+});
+
+const latestBackupSummary = computed(() => {
+  if (backupStatus.value?.running) return "备份进行中";
+  const latestRun = backupStatus.value?.latestRun;
+  if (!latestRun) return "尚未备份";
+  if (latestRun.status === "failed") return "上次失败";
+  if (latestRun.status === "running") return "备份进行中";
+  return `${formatBytes(latestRun.sizeBytes)} / ${latestRun.finishedAt || latestRun.startedAt}`;
+});
+
+const backupStorageSummary = computed(() => {
+  if (!backupStatus.value) return "等待备份巡检";
+  return `${backupStatus.value.backupFileCount} 个备份 / ${formatBytes(backupStatus.value.backupTotalBytes)}，可用 ${formatBytes(
+    backupStatus.value.usableSpaceBytes
+  )}`;
 });
 
 const pendingRows = computed(() => patientRows.value.filter(item => item.status !== "旧资料已归档" && item.status !== "待归档"));
@@ -447,10 +503,58 @@ const loadTasks = async () => {
     const [{ data: reminders }, { data: status }] = await Promise.all([getWorkRemindersApi(), getMaintenanceStatusApi()]);
     workReminders.value = reminders;
     maintenanceStatus.value = status;
+    if (currentRole.value === "admin") {
+      const { data: backup } = await getBackupStatusApi();
+      backupStatus.value = backup;
+      backupPath.value = backup.backupDir;
+      backupEnabled.value = backup.enabled;
+    }
   } catch (error) {
     ElMessage.warning(`生产巡检暂不可用：${(error as Error).message}`);
   } finally {
     maintenanceLoading.value = false;
+  }
+};
+
+const saveBackupConfig = async () => {
+  const path = backupPath.value.trim();
+  if (!path) {
+    ElMessage.warning("请先填写备份路径");
+    return false;
+  }
+  backupLoading.value = true;
+  try {
+    const { data } = await saveBackupConfigApi({ backupDir: path, enabled: backupEnabled.value });
+    backupStatus.value = data;
+    backupPath.value = data.backupDir;
+    backupEnabled.value = data.enabled;
+    ElMessage.success("备份路径已保存");
+    return true;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+    return false;
+  } finally {
+    backupLoading.value = false;
+  }
+};
+
+const runBackupNow = async () => {
+  if (backupPath.value.trim() && backupPath.value.trim() !== backupStatus.value?.backupDir) {
+    const saved = await saveBackupConfig();
+    if (!saved) return;
+  }
+  backupLoading.value = true;
+  try {
+    const { data } = await runBackupNowApi();
+    ElMessage.success(`备份已完成：${formatBytes(data.sizeBytes)}`);
+    const { data: status } = await getBackupStatusApi();
+    backupStatus.value = status;
+    backupPath.value = status.backupDir;
+    backupEnabled.value = status.enabled;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    backupLoading.value = false;
   }
 };
 
@@ -1116,6 +1220,64 @@ onMounted(loadTasks);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+.backup-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span,
+  small {
+    color: var(--el-text-color-secondary);
+  }
+
+  strong {
+    margin-top: 2px;
+    color: var(--el-text-color-primary);
+    line-height: 1.35;
+  }
+
+  small {
+    margin-top: 2px;
+    line-height: 1.45;
+  }
+}
+
+.backup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.backup-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+
+  span,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.backup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 @media (max-width: 1080px) {

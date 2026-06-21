@@ -15,6 +15,9 @@ import { authHeaders } from "./authToken";
 import type {
   AccountRow,
   AuditLogRow,
+  BackupConfigPayload,
+  BackupRunResult,
+  BackupStatus,
   ClinicDb,
   CreatePatientParams,
   DepartmentRow,
@@ -48,6 +51,9 @@ import type {
 export type {
   AccountRow,
   AuditLogRow,
+  BackupConfigPayload,
+  BackupRunResult,
+  BackupStatus,
   CreatePatientParams,
   DepartmentRow,
   DocumentRestoreParams,
@@ -1659,6 +1665,31 @@ export const createMaintenanceSnapshotApi = async () => {
   const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/snapshot`, { method: "POST", headers: authHeaders() });
   const data = await parseClinicApiResponse<{ savedAt: string; snapshotCount: number; revision: string }>(result);
   return response(data, "系统快照已生成");
+};
+
+export const getBackupStatusApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/backup/status`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<BackupStatus>(result);
+  return response(data);
+};
+
+export const saveBackupConfigApi = async (payload: BackupConfigPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/backup/config`, {
+    method: "PUT",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<BackupStatus>(result);
+  return response(data, "备份配置已保存");
+};
+
+export const runBackupNowApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/backup/run`, { method: "POST", headers: authHeaders() });
+  const data = await parseClinicApiResponse<BackupRunResult>(result);
+  return response(data, "备份已完成");
 };
 
 export const getDuplicatePatientGroupsApi = async () => {

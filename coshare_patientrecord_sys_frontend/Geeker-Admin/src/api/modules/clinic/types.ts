@@ -326,6 +326,49 @@ export interface MaintenanceStatus {
   };
 }
 
+export interface BackupRunSummary {
+  status: "running" | "success" | "failed";
+  backupFile: string;
+  startedAt: string;
+  finishedAt: string;
+  sizeBytes: number;
+  message: string;
+}
+
+export interface BackupStatus {
+  backupDir: string;
+  enabled: boolean;
+  retentionPolicy: string;
+  schedule: string;
+  running: boolean;
+  checkedAt: string;
+  backupFileCount: number;
+  backupTotalBytes: number;
+  usableSpaceBytes: number;
+  latestRun?: BackupRunSummary;
+}
+
+export interface BackupConfigPayload {
+  backupDir: string;
+  enabled: boolean;
+}
+
+export interface BackupRunResult {
+  status: "success";
+  backupFile: string;
+  sizeBytes: number;
+  manifest: {
+    backupVersion: number;
+    createdAt: string;
+    hostName: string;
+    revision: string;
+    patientCount: number;
+    documentCount: number;
+    attachmentDir: string;
+    database: string;
+  };
+}
+
 export interface DuplicatePatientGroup {
   key: string;
   reason: "same_name_phone" | "same_visit_no";

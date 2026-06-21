@@ -423,7 +423,7 @@ public class ClinicDatabaseService {
         for (JsonNode incomingPatient : incomingPatients) {
             String patientId = text(incomingPatient, "id");
             JsonNode patient = findArrayItemById(mergedPatients, "id", patientId);
-            if (patient == null) continue;
+            if (patient == null) patient = incomingPatient;
             jdbcTemplate.update("DELETE FROM clinic_patient_encounters WHERE patient_id = ?", patientId);
             jdbcTemplate.update("""
                 INSERT INTO clinic_patients (
@@ -539,7 +539,7 @@ public class ClinicDatabaseService {
         for (JsonNode incomingRow : incomingRows) {
             String id = text(incomingRow, idKey);
             JsonNode row = findArrayItemById(mergedRows, idKey, id);
-            if (row == null) continue;
+            if (row == null) row = incomingRow;
             switch (table) {
                 case "clinic_accounts" -> {
                     ObjectNode account = secureAccountRow(row);

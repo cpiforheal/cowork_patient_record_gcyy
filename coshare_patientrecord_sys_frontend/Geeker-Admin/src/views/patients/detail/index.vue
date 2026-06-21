@@ -836,7 +836,7 @@
 </template>
 
 <script setup lang="ts" name="patientDetail">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import { ElMessage } from "element-plus";
 import { useRoute, useRouter } from "vue-router";
@@ -878,7 +878,7 @@ const userRoles: UserRole[] = ["admin", "frontdesk", "lab", "ecg", "ultrasound",
 const normalizeUserRole = (role?: string): UserRole => (userRoles.includes(role as UserRole) ? (role as UserRole) : "frontdesk");
 const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 const roleName = computed(() => roleLabel(currentRole.value));
-const patientId = computed(() => String(route.params.id || "1"));
+const patientId = computed(() => String(route.params.id || "").trim());
 const recordViewMode = ref<"mine" | "full">("mine");
 const activeSectionKey = ref(recordSections[0].key);
 const archiveSubmitted = ref(false);
@@ -912,6 +912,11 @@ const logoCandidates = [medicalLogoUrl];
 const logoIndex = ref(0);
 const logoSrc = ref(logoCandidates[0]);
 const logoVisible = ref(true);
+const DETAIL_ERROR_COOLDOWN_MS = 5000;
+type PatientDetailErrorWindow = Window & { __patientDetailErrorCooldowns?: Map<string, number> };
+const detailErrorWindow = window as PatientDetailErrorWindow;
+const detailErrorCooldowns = detailErrorWindow.__patientDetailErrorCooldowns || new Map<string, number>();
+detailErrorWindow.__patientDetailErrorCooldowns = detailErrorCooldowns;
 let highlightClearTimer: number | undefined;
 type FieldIssue = {
   fieldKey: string;
@@ -1535,6 +1540,28 @@ const openQualityReview = () => {
 
 let patientDetailLoadSeq = 0;
 let autoSaveScheduleToken = 0;
+let lastDetailErrorKey = "";
+let keydownListenerActive = false;
+
+const cancelPendingPatientDetailWork = () => {
+  patientDetailLoadSeq += 1;
+  autoSaveScheduleToken += 1;
+};
+
+const notifyLoadPatientError = (targetPatientId: string, message: string) => {
+  const errorKey = `${targetPatientId || "missing"}:${message}`;
+  const now = Date.now();
+  const lastGlobalErrorAt = detailErrorCooldowns.get(errorKey) || 0;
+  if (lastDetailErrorKey === errorKey || now - lastGlobalErrorAt < DETAIL_ERROR_COOLDOWN_MS) return;
+  lastDetailErrorKey = errorKey;
+  detailErrorCooldowns.set(errorKey, now);
+  ElMessage.error(message);
+};
+
+const resetLoadPatientErrorNotification = () => {
+  if (detailError.value) detailErrorCooldowns.delete(`${patientId.value || "missing"}:${detailError.value}`);
+  lastDetailErrorKey = "";
+};
 
 const revokeAttachmentBlobUrls = () => {
   Object.values(attachmentBlobUrls.value).forEach(url => URL.revokeObjectURL(url));
@@ -1574,9 +1601,16 @@ const loadPatientDetail = async () => {
   detailLoading.value = true;
   detailError.value = "";
   resetPatientDetailState();
+  if (!targetPatientId) {
+    detailError.value = "缺少患者ID，请从患者列表或今日患者重新打开病历";
+    detailLoading.value = false;
+    isHydratingRecord.value = false;
+    return;
+  }
   try {
     const [{ data }, { data: rules }] = await Promise.all([getPatientDetailApi(targetPatientId), getTemplateFieldRulesApi()]);
     if (loadSeq !== patientDetailLoadSeq) return;
+    lastDetailErrorKey = "";
     templateRules.value = rules;
     const targetSection = String(route.query.section || "");
     if (targetSection && recordSectionsByRule.value.some(section => section.key === targetSection)) {
@@ -1598,7 +1632,7 @@ const loadPatientDetail = async () => {
   } catch (error) {
     if (loadSeq !== patientDetailLoadSeq) return;
     detailError.value = (error as Error).message || "请检查网络后重试";
-    ElMessage.error(detailError.value);
+    notifyLoadPatientError(targetPatientId, detailError.value);
   } finally {
     if (loadSeq === patientDetailLoadSeq) {
       detailLoading.value = false;
@@ -1610,6 +1644,7 @@ const loadPatientDetail = async () => {
 };
 
 const retryLoadPatientDetail = () => {
+  resetLoadPatientErrorNotification();
   loadPatientDetail();
 };
 
@@ -1727,7 +1762,10 @@ const saveMyFields = async () => {
 const saveMyFieldsAndBack = async () => {
   if (!ensureNoBlockingIssues("mine", "返回看板")) return;
   const saved = await saveMyFields();
-  if (saved) router.push("/encounters/active");
+  if (saved) {
+    cancelPendingPatientDetailWork();
+    router.push("/encounters/active");
+  }
 };
 
 const saveActiveMode = () => (recordViewMode.value === "mine" ? saveMyFields() : saveCurrentSection());
@@ -1925,15 +1963,35 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
+const addKeydownListener = () => {
+  if (keydownListenerActive) return;
+  document.addEventListener("keydown", handleKeydown);
+  keydownListenerActive = true;
+};
+
+const removeKeydownListener = () => {
+  if (!keydownListenerActive) return;
+  document.removeEventListener("keydown", handleKeydown);
+  keydownListenerActive = false;
+};
+
 onMounted(() => {
   loadPatientDetail();
-  document.addEventListener("keydown", handleKeydown);
+  addKeydownListener();
+});
+
+onActivated(() => {
+  addKeydownListener();
+});
+
+onDeactivated(() => {
+  removeKeydownListener();
+  cancelPendingPatientDetailWork();
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("keydown", handleKeydown);
-  patientDetailLoadSeq += 1;
-  autoSaveScheduleToken += 1;
+  removeKeydownListener();
+  cancelPendingPatientDetailWork();
   if (highlightClearTimer) window.clearTimeout(highlightClearTimer);
   revokeAttachmentBlobUrls();
 });

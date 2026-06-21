@@ -37,11 +37,18 @@ public class ClinicApiController {
 
     private final ClinicDatabaseService databaseService;
     private final ClinicFileService fileService;
+    private final ClinicBackupService backupService;
     private final ObjectMapper objectMapper;
 
-    public ClinicApiController(ClinicDatabaseService databaseService, ClinicFileService fileService, ObjectMapper objectMapper) {
+    public ClinicApiController(
+        ClinicDatabaseService databaseService,
+        ClinicFileService fileService,
+        ClinicBackupService backupService,
+        ObjectMapper objectMapper
+    ) {
         this.databaseService = databaseService;
         this.fileService = fileService;
+        this.backupService = backupService;
         this.objectMapper = objectMapper;
     }
 
@@ -97,6 +104,32 @@ public class ClinicApiController {
         ObjectNode result = databaseService.createSnapshot();
         Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
         return ApiResult.of(200, "snapshot saved", data);
+    }
+
+    @GetMapping("/clinic-api/maintenance/backup/status")
+    public ApiResult<Map<String, Object>> backupStatus() {
+        requireClinicAdmin();
+        ObjectNode result = backupService.status();
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.success(data);
+    }
+
+    @PutMapping("/clinic-api/maintenance/backup/config")
+    public ApiResult<Map<String, Object>> updateBackupConfig(@RequestBody Map<String, Object> payload) {
+        requireClinicAdmin();
+        String backupDir = String.valueOf(payload.getOrDefault("backupDir", ""));
+        boolean enabled = Boolean.parseBoolean(String.valueOf(payload.getOrDefault("enabled", "true")));
+        ObjectNode result = backupService.updateConfig(backupDir, enabled);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "backup config saved", data);
+    }
+
+    @PostMapping("/clinic-api/maintenance/backup/run")
+    public ApiResult<Map<String, Object>> runBackup() {
+        requireClinicAdmin();
+        ObjectNode result = backupService.runManualBackup();
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "backup finished", data);
     }
 
     @GetMapping("/clinic-api/patients/duplicates")

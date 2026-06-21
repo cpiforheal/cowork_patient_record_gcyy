@@ -123,6 +123,10 @@ public class ClinicFileService {
         return status;
     }
 
+    public Path attachmentDir() {
+        return attachmentDir;
+    }
+
     private DataUrl parseDataUrl(String contentDataUrl) {
         if (contentDataUrl == null || contentDataUrl.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentDataUrl is required");
