@@ -1,80 +1,171 @@
 <template>
   <component
-    :is="column.search?.render ?? `el-${column.search?.el}`"
-    v-bind="{ ...handleSearchProps, ...placeholder, searchParam: _searchParam, clearable }"
-    v-model.trim="_searchParam[column.search?.key ?? handleProp(column.prop!)]"
-    :data="column.search?.el === 'tree-select' ? columnEnum : []"
-    :options="['cascader', 'select-v2'].includes(column.search?.el!) ? columnEnum : []"
+    :is="column.search?.render"
+    v-if="column.search?.render"
+    v-bind="renderScope"
+    v-model.trim="searchValue"
+    @keyup.enter="emitSearch"
+  />
+  <el-input
+    v-else-if="searchEl === 'input'"
+    v-model.trim="searchValue"
+    v-bind="baseSearchProps"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
+  <el-input-number
+    v-else-if="searchEl === 'input-number'"
+    v-model="searchValue"
+    v-bind="baseSearchProps"
+    :placeholder="placeholder.placeholder"
+    @keyup.enter="emitSearch"
+  />
+  <el-select
+    v-else-if="searchEl === 'select'"
+    v-model="searchValue"
+    v-bind="baseSearchProps"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
   >
-    <template v-if="column.search?.el === 'cascader'" #default="{ data }">
+    <el-option
+      v-for="(col, index) in columnEnum"
+      :key="`${optionValue(col)}-${index}`"
+      :label="optionLabel(col)"
+      :value="optionValue(col)"
+    />
+  </el-select>
+  <el-select-v2
+    v-else-if="searchEl === 'select-v2'"
+    v-model="searchValue"
+    v-bind="baseSearchProps"
+    :options="selectV2Options"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
+  <el-tree-select
+    v-else-if="searchEl === 'tree-select'"
+    v-model="searchValue"
+    v-bind="treeSelectProps"
+    :data="columnEnum"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
+  <el-cascader
+    v-else-if="searchEl === 'cascader'"
+    v-model="searchValue"
+    v-bind="cascaderProps"
+    :options="columnEnum"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  >
+    <template #default="{ data }">
       <span>{{ data[fieldNames.label] }}</span>
     </template>
-    <template v-if="column.search?.el === 'select'">
-      <component
-        :is="`el-option`"
-        v-for="(col, index) in columnEnum"
-        :key="index"
-        :label="col[fieldNames.label]"
-        :value="col[fieldNames.value]"
-      ></component>
-    </template>
-    <slot v-else></slot>
-  </component>
+  </el-cascader>
+  <el-date-picker
+    v-else-if="searchEl === 'date-picker'"
+    v-model="searchValue"
+    v-bind="{ ...baseSearchProps, ...placeholder }"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
+  <el-time-picker
+    v-else-if="searchEl === 'time-picker'"
+    v-model="searchValue"
+    v-bind="baseSearchProps"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
+  <el-time-select
+    v-else-if="searchEl === 'time-select'"
+    v-model="searchValue"
+    v-bind="baseSearchProps"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
+  <el-switch v-else-if="searchEl === 'switch'" v-model="searchValue" v-bind="baseSearchProps" />
+  <el-slider v-else-if="searchEl === 'slider'" v-model="searchValue" v-bind="baseSearchProps" />
+  <el-input
+    v-else
+    v-model.trim="searchValue"
+    v-bind="baseSearchProps"
+    :placeholder="placeholder.placeholder"
+    :clearable="clearable"
+    @keyup.enter="emitSearch"
+  />
 </template>
 
 <script setup lang="ts" name="SearchFormItem">
 import { computed, inject, ref } from "vue";
 import { handleProp } from "@/utils";
-import { ColumnProps } from "@/components/ProTable/interface";
+import { ColumnProps, type EnumProps, type SearchType } from "@/components/ProTable/interface";
 
-interface SearchFormItem {
+interface SearchFormItemProps {
   column: ColumnProps;
   searchParam: { [key: string]: any };
 }
-const props = defineProps<SearchFormItem>();
 
-// Re receive SearchParam
-const _searchParam = computed(() => props.searchParam);
+const props = defineProps<SearchFormItemProps>();
+const emit = defineEmits<{
+  search: [];
+  change: [key: string, value: any];
+}>();
 
-// 判断 fieldNames 设置 label && value && children 的 key 值
-const fieldNames = computed(() => {
+const enumMap = inject("enumMap", ref(new Map<string, EnumProps[]>()));
+const searchEl = computed<SearchType>(() => props.column.search?.el ?? "input");
+const searchKey = computed(() => props.column.search?.key ?? handleProp(props.column.prop!));
+const searchValue = computed({
+  get: () => props.searchParam[searchKey.value],
+  set: value => {
+    emit("change", searchKey.value, value);
+  }
+});
+
+const fieldNames = computed(() => ({
+  label: props.column.fieldNames?.label ?? "label",
+  value: props.column.fieldNames?.value ?? "value",
+  children: props.column.fieldNames?.children ?? "children"
+}));
+
+const columnEnum = computed<EnumProps[]>(() => enumMap.value.get(props.column.prop!) ?? []);
+const baseSearchProps = computed(() => props.column.search?.props ?? {});
+
+const selectV2Options = computed(() =>
+  columnEnum.value.map(item => ({
+    ...item,
+    label: optionLabel(item),
+    value: optionValue(item)
+  }))
+);
+
+const treeSelectProps = computed(() => {
+  const label = fieldNames.value.label;
+  const children = fieldNames.value.children;
+  const value = fieldNames.value.value;
   return {
-    label: props.column.fieldNames?.label ?? "label",
-    value: props.column.fieldNames?.value ?? "value",
-    children: props.column.fieldNames?.children ?? "children"
+    ...baseSearchProps.value,
+    props: { ...baseSearchProps.value.props, label, children },
+    nodeKey: value
   };
 });
 
-// 接收 enumMap (el 为 select-v2 需单独处理 enumData)
-const enumMap = inject("enumMap", ref(new Map()));
-const columnEnum = computed(() => {
-  let enumData = enumMap.value.get(props.column.prop);
-  if (!enumData) return [];
-  if (props.column.search?.el === "select-v2" && props.column.fieldNames) {
-    enumData = enumData.map((item: { [key: string]: any }) => {
-      return { ...item, label: item[fieldNames.value.label], value: item[fieldNames.value.value] };
-    });
-  }
-  return enumData;
-});
-
-// 处理透传的 searchProps (el 为 tree-select、cascader 的时候需要给下默认 label && value && children)
-const handleSearchProps = computed(() => {
+const cascaderProps = computed(() => {
   const label = fieldNames.value.label;
   const value = fieldNames.value.value;
   const children = fieldNames.value.children;
-  const searchEl = props.column.search?.el;
-  let searchProps = props.column.search?.props ?? {};
-  if (searchEl === "tree-select") {
-    searchProps = { ...searchProps, props: { ...searchProps, label, children }, nodeKey: value };
-  }
-  if (searchEl === "cascader") {
-    searchProps = { ...searchProps, props: { ...searchProps, label, value, children } };
-  }
-  return searchProps;
+  return {
+    ...baseSearchProps.value,
+    props: { ...baseSearchProps.value.props, label, value, children }
+  };
 });
 
-// 处理默认 placeholder
 const placeholder = computed(() => {
   const search = props.column.search;
   if (["datetimerange", "daterange", "monthrange"].includes(search?.props?.type) || search?.props?.isRange) {
@@ -84,13 +175,33 @@ const placeholder = computed(() => {
       endPlaceholder: search?.props?.endPlaceholder ?? "结束时间"
     };
   }
-  const placeholder = search?.props?.placeholder ?? (search?.el?.includes("input") ? "请输入" : "请选择");
-  return { placeholder };
+  return {
+    placeholder: search?.props?.placeholder ?? (searchEl.value.includes("input") ? "请输入" : "请选择")
+  };
 });
 
-// 是否有清除按钮 (当搜索项有默认值时，清除按钮不显示)
 const clearable = computed(() => {
   const search = props.column.search;
-  return search?.props?.clearable ?? (search?.defaultValue == null || search?.defaultValue == undefined);
+  return search?.props?.clearable ?? (search?.defaultValue === null || search?.defaultValue === undefined);
 });
+
+const renderScope = computed(() => ({
+  searchParam: props.searchParam,
+  placeholder: placeholder.value.placeholder ?? "",
+  clearable: clearable.value,
+  options: columnEnum.value,
+  data: columnEnum.value
+}));
+
+function optionLabel(item: EnumProps) {
+  return item[fieldNames.value.label];
+}
+
+function optionValue(item: EnumProps) {
+  return item[fieldNames.value.value];
+}
+
+function emitSearch() {
+  emit("search");
+}
 </script>

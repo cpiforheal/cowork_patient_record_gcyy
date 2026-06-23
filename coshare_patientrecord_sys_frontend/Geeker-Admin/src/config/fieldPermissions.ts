@@ -1,4 +1,15 @@
-export type UserRole = "admin" | "frontdesk" | "lab" | "ecg" | "ultrasound" | "doctor" | "nurse" | "quality";
+export type UserRole =
+  | "admin"
+  | "frontdesk"
+  | "reception"
+  | "lab"
+  | "ecg"
+  | "ultrasound"
+  | "inspection"
+  | "doctor"
+  | "nurse"
+  | "nursing"
+  | "quality";
 
 export type FieldKind = "input" | "textarea" | "select";
 
@@ -63,11 +74,14 @@ export interface RecordAttachment {
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: "管理员",
   frontdesk: "前台",
+  reception: "接诊",
   lab: "化验室",
   ecg: "心电室",
   ultrasound: "B超/放射",
+  inspection: "检查室",
   doctor: "医生",
   nurse: "护士/治疗室",
+  nursing: "护理部",
   quality: "质控"
 };
 
@@ -90,24 +104,62 @@ export const recordAttachments: RecordAttachment[] = [];
 
 const doctor: UserRole[] = ["admin", "doctor"];
 const frontdesk: UserRole[] = ["admin", "frontdesk"];
+const reception: UserRole[] = ["admin", "frontdesk", "reception"];
 const nurse: UserRole[] = ["admin", "nurse"];
+const nursing: UserRole[] = ["admin", "nurse", "nursing"];
 const lab: UserRole[] = ["admin", "lab"];
 const ecg: UserRole[] = ["admin", "ecg"];
 const ultrasound: UserRole[] = ["admin", "ultrasound"];
 const quality: UserRole[] = ["admin", "quality"];
+export const healthArchiveCollaborators: UserRole[] = [
+  "admin",
+  "frontdesk",
+  "reception",
+  "doctor",
+  "nurse",
+  "nursing",
+  "lab",
+  "ecg",
+  "ultrasound",
+  "inspection",
+  "quality"
+];
+export const serviceCollaborators: UserRole[] = ["admin", "frontdesk", "reception", "doctor", "nurse", "nursing", "quality"];
+export const screeningCollaborators: UserRole[] = [
+  "admin",
+  "lab",
+  "ecg",
+  "ultrasound",
+  "inspection",
+  "doctor",
+  "nurse",
+  "nursing",
+  "quality"
+];
+export const isCollaborativeField = (field: RecordField) =>
+  healthArchiveCollaborators.length === field.editors.length &&
+  healthArchiveCollaborators.every(role => field.editors.includes(role));
 
 export const recordSections: RecordSection[] = [
   {
     key: "basic",
-    title: "一、基础信息",
+    title: "一、基础诊疗信息",
     stage: "登记",
     owner: "前台",
     department: "前台/收费处",
     status: "done",
-    description: "对应模板中的医院名称、入出院信息、联系方式、医保与离院方式。",
+    description: "保留原病历填写所需的基础诊疗信息，作为健康管理档案的医学基础资料。",
     fields: [
       { key: "hospitalName", label: "医院名称", value: "固始中医肛肠医院", kind: "input", editors: frontdesk, required: true },
       { key: "patientName", label: "患者姓名", value: "", kind: "input", editors: frontdesk, required: true },
+      {
+        key: "gender",
+        label: "性别",
+        value: "",
+        kind: "select",
+        options: ["男", "女", "未说明"],
+        editors: frontdesk
+      },
       {
         key: "age",
         label: "年龄",
@@ -120,7 +172,24 @@ export const recordSections: RecordSection[] = [
         unit: "岁",
         placeholder: "请输入年龄"
       },
+      {
+        key: "address",
+        label: "户籍地/现住址",
+        value: "",
+        kind: "textarea",
+        editors: frontdesk,
+        placeholder: "填写户籍地、现住址或常住区域"
+      },
       { key: "visitNo", label: "门诊/住院号", value: "", kind: "input", editors: frontdesk, required: true },
+      { key: "archiveCreatedAt", label: "建档（首诊）日期", value: "", kind: "input", inputType: "date", editors: frontdesk },
+      {
+        key: "departmentName",
+        label: "就诊科室",
+        value: "肛肠科",
+        kind: "input",
+        editors: frontdesk,
+        placeholder: "例如：肛肠科、胃肠镜室"
+      },
       {
         key: "admissionCount",
         label: "第几次入院",
@@ -172,6 +241,38 @@ export const recordSections: RecordSection[] = [
         validationMessage: "请输入正确的11位联系人手机号"
       },
       {
+        key: "historyProvider",
+        label: "病史陈述者",
+        value: "患者本人",
+        kind: "input",
+        editors: reception,
+        placeholder: "例如：患者本人、配偶、子女、陪同家属"
+      },
+      {
+        key: "historyReliable",
+        label: "陈述内容是否可靠",
+        value: "是",
+        kind: "select",
+        options: ["是", "基本可靠", "需家属补充", "不确定"],
+        editors: reception
+      },
+      {
+        key: "admissionAssessment",
+        label: "护理部入院评估",
+        value: "",
+        kind: "textarea",
+        editors: nursing,
+        placeholder: "护理部记录入院状态、生命体征、配合度、护理风险和重点观察事项"
+      },
+      {
+        key: "nursingObservation",
+        label: "护理观察记录",
+        value: "",
+        kind: "textarea",
+        editors: nursing,
+        placeholder: "记录术前/术后护理观察、疼痛、排便、换药和异常反馈"
+      },
+      {
         key: "admissionWay",
         label: "入院方式",
         value: "门诊",
@@ -196,6 +297,47 @@ export const recordSections: RecordSection[] = [
         editors: frontdesk
       },
       {
+        key: "initialRechargeAmount",
+        label: "本次建档充值",
+        value: "",
+        kind: "input",
+        inputType: "number",
+        editors: frontdesk,
+        min: 0,
+        unit: "元",
+        placeholder: "如无可留空"
+      },
+      {
+        key: "healthManager",
+        label: "健康管理专员",
+        value: "",
+        kind: "input",
+        editors: ["admin", "frontdesk", "nurse"],
+        placeholder: "负责跟进建档、复诊提醒和闭环"
+      },
+      {
+        key: "attendingDoctor",
+        label: "主诊医师",
+        value: "",
+        kind: "input",
+        editors: ["admin", "frontdesk", "doctor"]
+      },
+      {
+        key: "responsibleNurse",
+        label: "责任护士",
+        value: "",
+        kind: "input",
+        editors: ["admin", "frontdesk", "nurse"]
+      },
+      {
+        key: "overallRiskLevel",
+        label: "整体病情风险评级",
+        value: "",
+        kind: "select",
+        options: ["低风险", "中风险", "高风险", "需重点跟进", "待评估"],
+        editors: ["admin", "frontdesk", "doctor", "nurse", "quality"]
+      },
+      {
         key: "dischargeWay",
         label: "离院方式",
         value: "医嘱离院",
@@ -206,8 +348,225 @@ export const recordSections: RecordSection[] = [
     ]
   },
   {
+    key: "arrivalSource",
+    title: "二、来院与来源",
+    stage: "前台登记",
+    owner: "前台",
+    department: "前台/客服",
+    status: "active",
+    description: "记录患者从首次接触到到院的来源、路径、动机和治疗意向。",
+    fields: [
+      {
+        key: "arrivalPath",
+        label: "来院途径",
+        value: "",
+        kind: "select",
+        options: ["朋友介绍", "老患者推荐", "线上咨询", "医生转诊", "自然到院", "合作渠道", "其他"],
+        editors: frontdesk
+      },
+      {
+        key: "sourceChannel",
+        label: "来源渠道",
+        value: "",
+        kind: "input",
+        editors: frontdesk,
+        placeholder: "例如：公众号、电话咨询、转诊医生、活动渠道"
+      },
+      {
+        key: "referralRecord",
+        label: "转介绍记录",
+        value: "",
+        kind: "textarea",
+        editors: reception,
+        placeholder: "记录转介绍人、关系、来源说明、回访或维护备注"
+      },
+      { key: "firstContactAt", label: "首次接触时间", value: "", kind: "input", inputType: "date", editors: frontdesk },
+      { key: "firstContactPerson", label: "首次接触人", value: "", kind: "input", editors: frontdesk },
+      {
+        key: "visitMotivation",
+        label: "到院动机",
+        value: "",
+        kind: "textarea",
+        editors: frontdesk,
+        placeholder: "患者为什么来院，最想解决什么问题"
+      },
+      {
+        key: "treatmentIntent",
+        label: "治疗意向",
+        value: "",
+        kind: "select",
+        options: ["明确治疗", "倾向治疗", "先咨询", "价格观望", "需家属决策", "暂不确定"],
+        editors: frontdesk
+      }
+    ]
+  },
+  {
+    key: "specialNeeds",
+    title: "三、特殊诉求",
+    stage: "需求评估",
+    owner: "前台/医生",
+    department: "前台/门诊医生",
+    status: "active",
+    description: "记录患者治疗目标、顾虑、隐私、沟通偏好和期望管理事项。",
+    fields: [
+      {
+        key: "specialRequirements",
+        label: "特殊要求",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor"],
+        placeholder: "例如：尽量少请假、关注疼痛、希望女医生沟通、隐私保护等"
+      },
+      {
+        key: "treatmentExpectation",
+        label: "治疗目标",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor"],
+        placeholder: "患者期望达到的效果，以及需要提前管理的预期"
+      },
+      {
+        key: "primaryConcern",
+        label: "重点顾虑",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor"],
+        placeholder: "费用、时间、疼痛、复发、恢复速度、术后影响等"
+      },
+      {
+        key: "communicationPreference",
+        label: "沟通偏好",
+        value: "",
+        kind: "select",
+        options: ["电话", "微信", "现场沟通", "家属代沟通", "仅本人沟通", "其他"],
+        editors: frontdesk
+      },
+      {
+        key: "privacyRequirement",
+        label: "隐私要求",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor"],
+        placeholder: "是否避免家属知情、是否限制联系时段等"
+      }
+    ]
+  },
+  {
+    key: "familyRelationship",
+    title: "四、家属与关系",
+    stage: "关系维护",
+    owner: "前台/护士",
+    department: "前台/治疗室",
+    status: "waiting",
+    description: "记录陪同、探望、决策人、家属态度和潜在分歧。",
+    fields: [
+      {
+        key: "familyVisited",
+        label: "是否有家人陪同/探望",
+        value: "",
+        kind: "select",
+        options: ["无", "有陪同", "有探望", "电话参与", "未知"],
+        editors: ["admin", "frontdesk", "nurse"]
+      },
+      {
+        key: "familyDecisionMaker",
+        label: "主要决策人",
+        value: "",
+        kind: "input",
+        editors: ["admin", "frontdesk", "nurse"],
+        placeholder: "本人/配偶/子女/父母/其他"
+      },
+      {
+        key: "familyContact",
+        label: "家属联系方式",
+        value: "",
+        kind: "input",
+        inputType: "tel",
+        editors: ["admin", "frontdesk", "nurse"],
+        maxLength: 11,
+        pattern: "^1[3-9]\\d{9}$",
+        validationMessage: "请输入正确的11位家属手机号"
+      },
+      {
+        key: "familyAttitude",
+        label: "家属态度",
+        value: "",
+        kind: "select",
+        options: ["支持", "观望", "担心费用", "担心风险", "意见不一致", "未参与"],
+        editors: ["admin", "frontdesk", "nurse"]
+      },
+      {
+        key: "familyConflict",
+        label: "家庭意见分歧",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "nurse"],
+        placeholder: "如无分歧可填写无"
+      }
+    ]
+  },
+  {
+    key: "trustCooperation",
+    title: "五、信任与配合",
+    stage: "关系维护",
+    owner: "前台/医生/护士",
+    department: "前台/门诊/治疗室",
+    status: "waiting",
+    description: "记录患者对医院和医生的信任度、配合度、情绪状态和维护重点。",
+    fields: [
+      {
+        key: "hospitalTrustLevel",
+        label: "对医院信任度",
+        value: "",
+        kind: "select",
+        options: ["高", "中", "低", "需重点维护"],
+        editors: ["admin", "frontdesk", "doctor", "nurse"]
+      },
+      {
+        key: "doctorTrustLevel",
+        label: "对医生信任度",
+        value: "",
+        kind: "select",
+        options: ["高", "中", "低", "需再次沟通"],
+        editors: ["admin", "frontdesk", "doctor", "nurse"]
+      },
+      {
+        key: "treatmentCooperation",
+        label: "治疗配合度",
+        value: "",
+        kind: "select",
+        options: ["积极配合", "基本配合", "偶有抵触", "明显抵触", "待观察"],
+        editors: ["admin", "doctor", "nurse"]
+      },
+      {
+        key: "emotionStatus",
+        label: "情绪状态",
+        value: "",
+        kind: "select",
+        options: ["稳定", "紧张", "焦虑", "抗拒", "不满", "低落"],
+        editors: ["admin", "frontdesk", "doctor", "nurse"]
+      },
+      {
+        key: "relationshipRisk",
+        label: "不满点/风险点",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor", "nurse"],
+        placeholder: "记录投诉、不满、犹豫点或需要重点维护的事项"
+      },
+      {
+        key: "relationshipMaintenance",
+        label: "维护措施",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor", "nurse"],
+        placeholder: "下一步由谁跟进、怎么沟通、何时回访"
+      }
+    ]
+  },
+  {
     key: "chiefComplaint",
-    title: "二、主诉",
+    title: "六、主诉",
     stage: "初诊",
     owner: "医生",
     department: "门诊医生",
@@ -227,7 +586,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "presentIllness",
-    title: "三、现病史",
+    title: "七、现病史",
     stage: "初诊",
     owner: "医生",
     department: "门诊医生",
@@ -267,7 +626,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "history",
-    title: "四、既往史",
+    title: "八、既往史",
     stage: "初诊",
     owner: "医生",
     department: "门诊医生",
@@ -308,7 +667,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "tcmInspection",
-    title: "五、中医四诊",
+    title: "九、中医四诊",
     stage: "辨证",
     owner: "医生",
     department: "门诊医生",
@@ -348,7 +707,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "specialExam",
-    title: "六、专科检查",
+    title: "十、专科检查",
     stage: "专科查体",
     owner: "医生/护士",
     department: "门诊医生/治疗室",
@@ -387,7 +746,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "auxiliary",
-    title: "七、辅助检查",
+    title: "十一、辅助检查",
     stage: "检查",
     owner: "检查科室",
     department: "化验室/心电室/B超放射",
@@ -465,8 +824,153 @@ export const recordSections: RecordSection[] = [
     ]
   },
   {
+    key: "preOpScreening",
+    title: "十二、术前检验筛查汇总",
+    stage: "手术准入评估",
+    owner: "检查科室/医生",
+    department: "化验室/心电室/B超放射/门诊医生",
+    status: "active",
+    description: "按领导模板汇总术前准入检查状态，记录未查、已查、异常及补查说明。",
+    fields: [
+      {
+        key: "bloodRoutineStatus",
+        label: "血常规状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "血常规报告"
+      },
+      {
+        key: "coagulationStatus",
+        label: "凝血四项状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "凝血四项报告"
+      },
+      {
+        key: "preOpEightStatus",
+        label: "术前八项状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "术前八项报告"
+      },
+      {
+        key: "ecgStatus",
+        label: "心电图状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "ecg", "doctor", "nurse"],
+        evidence: "心电图报告"
+      },
+      {
+        key: "liverFunctionStatus",
+        label: "肝功能状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "生化报告"
+      },
+      {
+        key: "renalFunctionStatus",
+        label: "肾功能状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "生化报告"
+      },
+      {
+        key: "fastingGlucoseStatus",
+        label: "空腹血糖状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "生化报告"
+      },
+      {
+        key: "bloodLipidStatus",
+        label: "血脂四项状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "生化报告"
+      },
+      {
+        key: "urineRoutineStatus",
+        label: "尿常规状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "尿常规报告"
+      },
+      {
+        key: "crpStatus",
+        label: "C反应蛋白状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "CRP报告"
+      },
+      {
+        key: "hpTestStatus",
+        label: "幽门螺杆菌检测状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "幽门螺杆菌检测报告"
+      },
+      {
+        key: "gastroscopyStatus",
+        label: "电子胃镜状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "ultrasound", "doctor", "nurse"],
+        evidence: "电子胃镜报告"
+      },
+      {
+        key: "colonoscopyStatus",
+        label: "电子肠镜状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "ultrasound", "doctor", "nurse"],
+        evidence: "电子肠镜报告"
+      },
+      {
+        key: "drChestStatus",
+        label: "DR胸片状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "ultrasound", "doctor", "nurse"],
+        evidence: "DR胸片报告"
+      },
+      {
+        key: "uncheckedItemsNote",
+        label: "未查项目说明",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse", "quality"],
+        placeholder: "例如：术后按需择期补查，或因患者原因暂缓检查"
+      }
+    ]
+  },
+  {
     key: "mainDiagnosis",
-    title: "八、中西医主诊断",
+    title: "十三、中西医主诊断",
     stage: "诊断",
     owner: "医生",
     department: "门诊医生",
@@ -486,7 +990,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "secondaryDiagnosis",
-    title: "九、次诊断",
+    title: "十三、次诊断",
     stage: "诊断",
     owner: "医生",
     department: "门诊医生",
@@ -504,7 +1008,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "comorbidityTcm",
-    title: "十、合并病中医病名及证型",
+    title: "十四、合并病中医病名及证型",
     stage: "合并病",
     owner: "医生",
     department: "门诊医生",
@@ -529,7 +1033,7 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "operation",
-    title: "十一、手术",
+    title: "十五、治疗与手术",
     stage: "手术方案",
     owner: "医生/护士",
     department: "门诊医生/手术室",
@@ -594,8 +1098,238 @@ export const recordSections: RecordSection[] = [
     ]
   },
   {
+    key: "treatmentPlanManagement",
+    title: "十六、术前医患沟通与治疗方案管理",
+    stage: "治疗方案",
+    owner: "医生/护士/前台",
+    department: "门诊医生/治疗室/前台",
+    status: "active",
+    description: "对齐健康管理登记表中的手术可行性评估、核心诉求、术中特殊交代和当日处置。",
+    fields: [
+      {
+        key: "surgeryFeasibility",
+        label: "手术可行性评估",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "结合检查结果、基础病、麻醉风险和患者意愿记录"
+      },
+      {
+        key: "intraoperativeNotice",
+        label: "术中特殊交代",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "记录术中可能追加处理、特殊体位、沟通禁忌或患者特别要求"
+      },
+      {
+        key: "sameDayTreatment",
+        label: "当日处置",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse", "frontdesk"],
+        placeholder: "记录当日检查、治疗、缴费、宣教、预约等处置"
+      }
+    ]
+  },
+  {
+    key: "followup",
+    title: "十七、术后分级复诊健康管理台账",
+    stage: "复查随访",
+    owner: "护士/医生",
+    department: "治疗室/门诊医生",
+    status: "active",
+    description: "按时间记录每次复查、恢复情况、异常处理和下次随访安排。",
+    fields: [
+      {
+        key: "followupRecordsJson",
+        label: "复查随访记录",
+        value: "[]",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        printable: true
+      },
+      {
+        key: "recoverySummary",
+        label: "恢复情况总览",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "概括术后恢复趋势、异常情况和处理结果"
+      },
+      {
+        key: "nextFollowupAt",
+        label: "下次复查时间",
+        value: "",
+        kind: "input",
+        inputType: "date",
+        editors: ["admin", "doctor", "nurse"]
+      },
+      {
+        key: "followupCompliance",
+        label: "复查依从性",
+        value: "",
+        kind: "select",
+        options: ["按时复查", "延迟复查", "未复查", "电话随访", "需再次提醒"],
+        editors: ["admin", "doctor", "nurse"]
+      }
+    ]
+  },
+  {
+    key: "patientFeedback",
+    title: "十七、患者主观反馈",
+    stage: "患者反馈",
+    owner: "前台/护士/医生",
+    department: "前台/治疗室/门诊医生",
+    status: "waiting",
+    description: "记录患者对疼痛、恢复、服务和治疗结果的主观感受。",
+    fields: [
+      {
+        key: "patientPainLevel",
+        label: "疼痛程度",
+        value: "",
+        kind: "select",
+        options: ["无痛", "轻度", "中度", "重度", "无法判断"],
+        editors: ["admin", "frontdesk", "doctor", "nurse"]
+      },
+      {
+        key: "patientSatisfaction",
+        label: "恢复满意度",
+        value: "",
+        kind: "select",
+        options: ["满意", "基本满意", "一般", "不满意", "待观察"],
+        editors: ["admin", "frontdesk", "doctor", "nurse"]
+      },
+      {
+        key: "psychologicalFeeling",
+        label: "心理感受",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor", "nurse"],
+        placeholder: "患者焦虑、担心、安心程度等主观表达"
+      },
+      {
+        key: "patientConcerns",
+        label: "当前担忧",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor", "nurse"],
+        placeholder: "患者现在最担心的问题"
+      },
+      {
+        key: "serviceFeedback",
+        label: "服务评价",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "nurse"],
+        placeholder: "对接待、治疗、沟通、复查提醒等评价"
+      },
+      {
+        key: "nextPatientRequest",
+        label: "下一步诉求",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor", "nurse"]
+      }
+    ]
+  },
+  {
+    key: "tcmHealthManagement",
+    title: "十八、中医特色健康管理专栏",
+    stage: "中医健康管理",
+    owner: "医生/护士",
+    department: "门诊医生/治疗室",
+    status: "active",
+    description: "对齐二级中医肛肠标配模块，记录中药坐浴、内服调理、饮食宣教、提肛训练和慢病干预。",
+    fields: [
+      {
+        key: "tcmSitzBathPlan",
+        label: "术后中药坐浴方案",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "填写已开具/待开具、方药和使用频次"
+      },
+      {
+        key: "tcmOralRegulation",
+        label: "中医内服调理",
+        value: "",
+        kind: "select",
+        options: ["益气通便", "清热燥湿", "活血化瘀", "润肠生肌", "暂不需要", "其他"],
+        editors: ["admin", "doctor", "nurse"]
+      },
+      {
+        key: "dietEducation",
+        label: "饮食禁忌宣教",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "辛辣、饮酒、久坐、饮水、膳食纤维等宣教记录"
+      },
+      {
+        key: "analFunctionExercise",
+        label: "肛门功能锻炼指导",
+        value: "",
+        kind: "select",
+        options: ["已宣教", "待宣教", "不适用", "需复查时强化"],
+        editors: ["admin", "doctor", "nurse"]
+      },
+      {
+        key: "chronicDiseaseIntervention",
+        label: "慢病预防干预",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "便秘、糖尿病、高血压、胃肠慢病等干预建议"
+      },
+      {
+        key: "archiveClosedSignature",
+        label: "档案闭环签字",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse", "quality"],
+        placeholder: "健康管理师、医师签字和归档日期"
+      }
+    ]
+  },
+  {
+    key: "supplementNotes",
+    title: "十九、备注与补充记录",
+    stage: "补充记录",
+    owner: "医生/护士/前台",
+    department: "门诊医生/治疗室/前台",
+    status: "waiting",
+    description: "用于后续补充并发症、用药记录、患者依从性记录和其他特殊情况。",
+    fields: [
+      {
+        key: "complicationRecord",
+        label: "并发症记录",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "如无可填写无"
+      },
+      {
+        key: "medicationRecord",
+        label: "用药记录",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "doctor", "nurse"],
+        placeholder: "记录院内用药、出院带药或患者自述用药"
+      },
+      {
+        key: "patientComplianceRecord",
+        label: "患者依从性记录",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "frontdesk", "doctor", "nurse"],
+        placeholder: "复诊、换药、饮食、坐浴、运动等执行情况"
+      }
+    ]
+  },
+  {
     key: "dip",
-    title: "十二、DIP",
+    title: "二十、DIP",
     stage: "分组",
     owner: "质控",
     department: "质控/病案",
@@ -640,16 +1374,16 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "roundSchedule",
-    title: "十三、查房时序",
+    title: "十九、治疗记录时序",
     stage: "病程",
     owner: "质控/医生",
     department: "质控/门诊医生",
     status: "waiting",
-    description: "按 5/7/10 天质控标准生成病程记录时序。",
+    description: "保留治疗过程和病程记录时序，便于院内档案审核与后续追踪。",
     fields: [
       {
         key: "courseSchedule",
-        label: "病程记录时序",
+        label: "治疗/病程记录时序",
         value:
           "入院第 1 天：首次病程；第 2 天：主治医师查房；第 2-3 天：术前讨论、手术医师查房、术前小结；手术日：术后首次病程；术后第 1 天手术医师查房；第 3 天副主任医师查房；第 5 天主治查房；拟定次日出院或出院。",
         kind: "textarea",
@@ -659,24 +1393,24 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "documentScope",
-    title: "十四、自动生成文书范围",
-    stage: "文书",
-    owner: "质控",
+    title: "二十、档案输出范围",
+    stage: "档案审核",
+    owner: "档案审核",
     department: "质控/病案",
     status: "waiting",
-    description: "用于明确最终生成哪些病历文书。",
+    description: "用于明确本系统输出哪些院内健康管理档案内容，不替代 HIS 官方病历。",
     fields: [
       {
         key: "generatedDocuments",
-        label: "生成范围",
-        value: "入院记录、首次病程、术前讨论、术前小结、手术记录、术后每日病程、出院小结。",
+        label: "档案输出范围",
+        value: "基础诊疗信息、来院来源、特殊诉求、治疗记录、复查随访、患者反馈、附件索引。",
         kind: "textarea",
         editors: quality
       },
       {
         key: "documentStandard",
         label: "格式标准",
-        value: "格式、结构、质控标准与院内标准病历一致。",
+        value: "作为院内患者健康管理档案使用，不替代 HIS 官方病历和病历质控文书。",
         kind: "textarea",
         editors: quality
       }
@@ -684,25 +1418,25 @@ export const recordSections: RecordSection[] = [
   },
   {
     key: "qualityCheck",
-    title: "十五、质控校验",
-    stage: "归档",
-    owner: "质控",
+    title: "二十一、档案审核",
+    stage: "档案审核",
+    owner: "档案审核",
     department: "质控/病案",
     status: "locked",
-    description: "归档前校验诊断、治法、三级查房、手术与分组是否一致。",
+    description: "归档前校验档案完整性、复查闭环、附件和关键风险事项。",
     fields: [
       {
         key: "qualityItems",
-        label: "质控项目",
+        label: "档案审核项目",
         value:
-          "中西医诊断一一对应；治法匹配；三级查房顺序规范；手术与诊断一致；分组合理、不高套；中医特色治疗齐全；合并病记录完整；肠镜按需选择、符合临床逻辑。",
+          "基础诊疗信息完整；来源与诉求清楚；治疗记录与附件匹配；复查随访有闭环；患者反馈和风险事项已记录；不作为 HIS 官方病历替代。",
         kind: "textarea",
         editors: quality
       },
       {
         key: "qualityReview",
-        label: "质控意见",
-        value: "待质控复核。",
+        label: "档案审核意见",
+        value: "待档案审核。",
         kind: "textarea",
         editors: quality
       }

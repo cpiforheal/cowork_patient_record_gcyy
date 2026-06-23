@@ -124,7 +124,7 @@ const compactSections = computed(() =>
 );
 
 const kanbanColumns = computed(() => {
-  const base = ["前台登记", "病历生成", "医生复核", "质控审核", "归档"].map(title => ({
+  const base = ["前台登记", "基础诊疗", "治疗记录", "复查随访", "档案审核", "已归档"].map(title => ({
     key: title,
     title,
     patients: [] as PatientRow[]
@@ -132,13 +132,17 @@ const kanbanColumns = computed(() => {
   patientRows.value.forEach(patient => {
     const index = patient.currentStage.includes("登记")
       ? 0
-      : patient.currentStage.includes("复核")
-        ? 2
-        : patient.currentStage.includes("质控")
-          ? 3
-          : patient.currentStage.includes("归档")
-            ? 4
-            : 1;
+      : patient.currentStage.includes("基础") || patient.currentStage.includes("初诊") || patient.currentStage.includes("复核")
+        ? 1
+        : patient.currentStage.includes("治疗") || patient.currentStage.includes("手术")
+          ? 2
+          : patient.currentStage.includes("复查") || patient.currentStage.includes("随访")
+            ? 3
+            : patient.currentStage.includes("质控") || patient.currentStage.includes("档案审核")
+              ? 4
+              : patient.currentStage.includes("归档")
+                ? 5
+                : 1;
     base[index].patients.push(patient);
   });
   return base;
@@ -165,7 +169,7 @@ const columns = reactive<ColumnProps[]>([
   { prop: "encounterCount", label: "就诊次数", width: 110 },
   { prop: "doctor", label: "接诊医生", width: 120 },
   { prop: "currentStage", label: "当前节点", width: 130 },
-  { prop: "stageProgress", label: "病历流程", minWidth: 360 },
+  { prop: "stageProgress", label: "档案流程", minWidth: 360 },
   { prop: "status", label: "状态", width: 130 },
   { prop: "operation", label: "操作", fixed: "right", width: 120 }
 ]);
@@ -189,9 +193,9 @@ const isCurrentRoleFocus = (patient: PatientRow) => {
   const stage = patient.currentStage;
   if (currentRole.value === "admin") return isTimeout(patient);
   if (currentRole.value === "frontdesk") return stage.includes("登记");
-  if (currentRole.value === "doctor") return stage.includes("病历") || stage.includes("复核");
-  if (currentRole.value === "quality") return stage.includes("质控") || stage.includes("归档");
-  return patient.status.includes("待") || stage.includes("病历生成");
+  if (currentRole.value === "doctor") return stage.includes("诊疗") || stage.includes("治疗") || stage.includes("复核");
+  if (currentRole.value === "quality") return stage.includes("质控") || stage.includes("档案审核") || stage.includes("归档");
+  return patient.status.includes("待") || stage.includes("档案生成") || stage.includes("病历生成");
 };
 
 const loadBoard = async () => {

@@ -2,6 +2,7 @@ import { ResultData } from "@/api/interface";
 import {
   allRecordFields,
   canEditField,
+  serviceCollaborators,
   recordSections,
   roleLabel,
   type UserRole,
@@ -14,8 +15,13 @@ import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./clinic/storage"
 import { authHeaders } from "./authToken";
 import type {
   AccountRow,
+  AiRuntimeConfig,
+  AiRuntimeConfigPayload,
+  AiRecordSummary,
+  AiRecordSummaryParams,
   AuditLogRow,
   BackupConfigPayload,
+  BackupDirectorySelection,
   BackupRunResult,
   BackupStatus,
   ClinicDb,
@@ -25,11 +31,19 @@ import type {
   DocumentVoidParams,
   DictRow,
   DuplicatePatientGroup,
+  LegacyAttachmentMapping,
+  LegacyFieldMapping,
   MaintenanceStatus,
+  GeneratedMedicalRecord,
+  MedicalRecordGenerateResult,
+  MedicalRecordPrecheckResult,
+  MedicalRecordTemplateStatus,
+  MedicalRecordWorkspaceSaveResult,
   OperationStats,
   PatientDetail,
   PatientListParams,
   PatientRow,
+  PatientTimelineEvent,
   QualityIssue,
   QualityReviewActionParams,
   QualityReviewDetail,
@@ -37,8 +51,12 @@ import type {
   RecycleDocumentRow,
   RoleRow,
   SaveRecordParams,
+  SharedCaseCommitParams,
+  SharedCaseFileItem,
   SharedCaseImportParams,
   SharedCaseImportResult,
+  SharedCasePreviewParams,
+  SharedCasePreviewResult,
   SystemOperationContext,
   TemplateFieldRule,
   TemplateFieldRuleParams,
@@ -50,8 +68,13 @@ import type {
 
 export type {
   AccountRow,
+  AiRuntimeConfig,
+  AiRuntimeConfigPayload,
+  AiRecordSummary,
+  AiRecordSummaryParams,
   AuditLogRow,
   BackupConfigPayload,
+  BackupDirectorySelection,
   BackupRunResult,
   BackupStatus,
   CreatePatientParams,
@@ -61,11 +84,17 @@ export type {
   DictRow,
   DuplicatePatientGroup,
   MaintenanceStatus,
+  GeneratedMedicalRecord,
+  MedicalRecordGenerateResult,
+  MedicalRecordPrecheckResult,
+  MedicalRecordTemplateStatus,
+  MedicalRecordWorkspaceSaveResult,
   OperationStats,
   OperationContext,
   PatientDetail,
   PatientListParams,
   PatientRow,
+  PatientTimelineEvent,
   QualityIssue,
   QualityReviewActionParams,
   QualityReviewDetail,
@@ -73,9 +102,12 @@ export type {
   RecycleDocumentRow,
   RoleRow,
   SaveRecordParams,
+  SharedCaseCommitParams,
   SharedCaseFileItem,
   SharedCaseImportParams,
   SharedCaseImportResult,
+  SharedCasePreviewParams,
+  SharedCasePreviewResult,
   SystemOperationContext,
   TemplateFieldRule,
   TemplateFieldRuleParams,
@@ -235,6 +267,12 @@ const canEditByRule = (role: string | undefined, field: RecordField, rules: Temp
   return rule.enabled && rule.editors.includes(role as UserRole);
 };
 
+const isServiceCollaborativeRule = (field: RecordField, rules: TemplateFieldRule[] = []) => {
+  const rule = templateRuleMap(rules)[field.key];
+  const editors = rule?.editors || field.editors;
+  return serviceCollaborators.length === editors.length && serviceCollaborators.every(role => editors.includes(role));
+};
+
 const activeDocuments = (documents: RecordAttachment[] = []) => documents.filter(document => document.status !== "voided");
 
 const persistDocumentFile = async (document: {
@@ -364,7 +402,7 @@ const buildQualityIssues = (
         key: `required-${field.key}`,
         level: "critical",
         levelLabel: "严重",
-        section: section?.title || "病历字段",
+        section: section?.title || "档案字段",
         field: fieldLabel,
         owner: section?.owner || "责任岗位",
         message: "必填字段仍为空、保留占位符或待回报。",
@@ -437,7 +475,7 @@ const buildQualityReviewDetail = (db: ClinicDb, patient: PatientRow): QualityRev
 
 const ensureQualityManager = (role?: string) => {
   if (!["admin", "quality"].includes(role || "")) {
-    throw new Error(`${roleLabel(role)}无权执行质控审核`);
+    throw new Error(`${roleLabel(role)}无权执行档案审核`);
   }
 };
 
@@ -656,7 +694,7 @@ export const savePatientRecordApi = async (params: SaveRecordParams) => {
       patient: patient.name,
       patientId: patient.id,
       module: "record",
-      action: "拒绝修改病历字段",
+      action: "拒绝修改档案字段",
       actionCode: "record.field.denied",
       targetType: "field",
       targetLabel: deniedLabels.join("、"),
@@ -692,29 +730,32 @@ export const savePatientRecordApi = async (params: SaveRecordParams) => {
   });
   patient.completedCount = Math.max(1, completedSections);
   patient.progressPercent = Math.round((patient.completedCount / recordSections.length) * 100);
-  patient.currentStage = issues.length ? "病历补全" : "质控待审";
-  patient.status = issues.length ? "待补充资料" : "可提交质控";
+  patient.currentStage = issues.length ? "档案补全" : "档案审核待审";
+  patient.status = issues.length ? "待补充资料" : "可提交档案审核";
   patient.riskType = issues.length ? "warning" : "success";
   patient.updatedAt = now();
   db.records[params.id] = record;
   fieldChanges.forEach(change => {
     const rule = templateRuleMap(templateRules)[change.field.key];
+    const isCollaborative = isServiceCollaborativeRule(change.field, templateRules);
+    const isCreated = !String(change.beforeValue || "").trim() && Boolean(String(change.afterValue || "").trim());
+    const fieldLabel = rule?.fieldLabel || change.field.label;
     appendAuditLog(db, {
       operator: params.operator || roleLabel(params.role),
       role: roleLabel(params.role),
       patient: patient.name,
       patientId: patient.id,
-      module: "record",
-      action: "修改病历字段",
-      actionCode: "record.field.update",
+      module: isCollaborative ? "collaboration" : "record",
+      action: isCollaborative ? (isCreated ? "协作补充档案字段" : "协作更新档案字段") : "修改档案字段",
+      actionCode: isCollaborative ? "record.field.collaborative.update" : "record.field.update",
       targetType: "field",
       targetKey: change.field.key,
-      targetLabel: rule?.fieldLabel || change.field.label,
+      targetLabel: fieldLabel,
       beforeValue: valuePreview(change.beforeValue),
       afterValue: valuePreview(change.afterValue),
-      detail: `${rule?.fieldLabel || change.field.label}：${valuePreview(change.beforeValue) || "空"} -> ${
-        valuePreview(change.afterValue) || "空"
-      }`
+      detail: `${roleLabel(params.role)}${isCreated ? "补充" : "更新"}「${fieldLabel}」：${
+        valuePreview(change.beforeValue) || "空"
+      } -> ${valuePreview(change.afterValue) || "空"}`
     });
   });
   appendAuditLog(db, {
@@ -727,16 +768,16 @@ export const savePatientRecordApi = async (params: SaveRecordParams) => {
     targetType: "record",
     targetKey: params.id,
     targetLabel: patient.visitNo,
-    action: "保存病历字段",
+    action: "保存档案字段",
     detail: `保存 ${Object.keys(params.values).length} 个字段，当前状态：${patient.status}`
   });
   await writeDb(db);
-  return response({ patient, issues }, "病历字段已保存");
+  return response({ patient, issues }, "档案字段已保存");
 };
 
 export const submitArchiveApi = async (params: { id: string; role: string; operator?: string }) => {
   if (!["admin", "doctor", "quality"].includes(params.role)) {
-    return Promise.reject(new Error(`${roleLabel(params.role)}无权提交质控`));
+    return Promise.reject(new Error(`${roleLabel(params.role)}无权提交档案审核`));
   }
 
   const db = await readDb();
@@ -744,15 +785,15 @@ export const submitArchiveApi = async (params: { id: string; role: string; opera
   const record = db.records[params.id] ?? initialFieldValues();
   const issues = validatePatientRecord(record, db.templateFieldRules ?? seedTemplateFieldRules());
   if (issues.some(item => item.level === "error")) {
-    return Promise.reject(new Error(`仍有 ${issues.length} 个必填字段未完成，不能提交质控`));
+    return Promise.reject(new Error(`仍有 ${issues.length} 个必填字段未完成，不能提交档案审核`));
   }
 
   const generatedAt = now();
-  db.archive[params.id] = { submitted: true, version: "V1.0-待质控", generatedAt };
-  patient.currentStage = "质控审核";
+  db.archive[params.id] = { submitted: true, version: "V1.0-待档案审核", generatedAt };
+  patient.currentStage = "档案审核";
   patient.completedCount = Math.max(patient.completedCount, 14);
   patient.progressPercent = Math.round((patient.completedCount / recordSections.length) * 100);
-  patient.status = "待质控审核";
+  patient.status = "待档案审核";
   patient.riskType = "info";
   patient.updatedAt = generatedAt;
   appendAuditLog(db, {
@@ -766,11 +807,11 @@ export const submitArchiveApi = async (params: { id: string; role: string; opera
     targetKey: params.id,
     targetLabel: db.archive[params.id].version,
     afterValue: db.archive[params.id].version,
-    action: "提交质控",
-    detail: `提交病历质控，版本：${db.archive[params.id].version}`
+    action: "提交档案审核",
+    detail: `提交患者健康管理档案审核，版本：${db.archive[params.id].version}`
   });
   await writeDb(db);
-  return response({ patient, archive: db.archive[params.id] }, "已提交质控");
+  return response({ patient, archive: db.archive[params.id] }, "已提交档案审核");
 };
 
 export const revokeArchiveApi = async (params: { id: string; role: string; operator?: string }) => {
@@ -782,8 +823,8 @@ export const revokeArchiveApi = async (params: { id: string; role: string; opera
   const patient = getPatientOrThrow(db, params.id);
   const generatedAt = now();
   db.archive[params.id] = { submitted: false, version: "V0.9-已撤回", generatedAt };
-  patient.currentStage = "病历生成";
-  patient.status = "病历生成中";
+  patient.currentStage = "档案生成";
+  patient.status = "档案生成中";
   patient.riskType = "warning";
   patient.updatedAt = generatedAt;
   appendAuditLog(db, {
@@ -798,7 +839,7 @@ export const revokeArchiveApi = async (params: { id: string; role: string; opera
     targetLabel: db.archive[params.id].version,
     afterValue: db.archive[params.id].version,
     action: "撤回草稿",
-    detail: `撤回质控提交，版本：${db.archive[params.id].version}`
+    detail: `撤回档案审核提交，版本：${db.archive[params.id].version}`
   });
   await writeDb(db);
   return response({ patient, archive: db.archive[params.id] }, "已撤回草稿");
@@ -1121,7 +1162,7 @@ const inferDocumentType = (fileName: string) => {
   if (/凝血/.test(fileName)) return { fieldKey: "coagulation", fieldLabel: "凝血功能", department: "化验室" };
   if (/心电/.test(fileName)) return { fieldKey: "ecgResult", fieldLabel: "心电图", department: "心电室" };
   if (/B超|彩超|超声/.test(fileName)) return { fieldKey: "colonoscopy", fieldLabel: "影像/肠镜", department: "B超/放射" };
-  if (/照片|复查/.test(fileName)) return { fieldKey: "patientName", fieldLabel: "复查照片", department: "前台" };
+  if (/照片|复查/.test(fileName)) return { fieldKey: "followupRecordsJson", fieldLabel: "复查照片", department: "前台" };
   return null;
 };
 
@@ -1132,7 +1173,7 @@ const documentTypeMeta = (type: string, typeLabel: string, role: string) => {
     coagulation: { fieldKey: "coagulation", fieldLabel: typeLabel, department: roleToDepartment.lab },
     ecg: { fieldKey: "ecgResult", fieldLabel: typeLabel, department: roleToDepartment.ecg },
     ultrasound: { fieldKey: "colonoscopy", fieldLabel: typeLabel, department: roleToDepartment.ultrasound },
-    followup: { fieldKey: "patientName", fieldLabel: typeLabel, department: roleToDepartment.frontdesk }
+    followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk }
   };
   const meta = map[type] || {
     fieldKey: "documentScope",
@@ -1140,6 +1181,289 @@ const documentTypeMeta = (type: string, typeLabel: string, role: string) => {
     department: fallbackDepartment
   };
   return { ...meta, department: meta.department || fallbackDepartment };
+};
+
+const stripHtml = (value: string) =>
+  value
+    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
+    .replace(/<[^>]+>/g, "\n")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\u0000/g, "");
+
+const decodeLegacyContent = (contentDataUrl?: string) => {
+  const raw = String(contentDataUrl || "");
+  if (!raw.startsWith("data:")) return "";
+  const commaIndex = raw.indexOf(",");
+  if (commaIndex < 0) return "";
+  const meta = raw.slice(0, commaIndex);
+  const body = raw.slice(commaIndex + 1);
+  try {
+    if (meta.includes(";base64")) {
+      const binary = atob(body);
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      return stripHtml(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+    }
+    return stripHtml(decodeURIComponent(body));
+  } catch {
+    return "";
+  }
+};
+
+const normalizeLegacyText = (value: string) =>
+  value
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+
+const pickLegacySection = (text: string, headings: string[], stopHeadings: string[]) => {
+  const normalized = normalizeLegacyText(text);
+  if (!normalized) return "";
+  for (const heading of headings) {
+    const pattern = new RegExp(`${heading}[：:：\\s]*([\\s\\S]{1,1200}?)(?=\\n?(?:${stopHeadings.join("|")})[：:：\\s]|$)`, "i");
+    const matched = normalized.match(pattern)?.[1]?.trim();
+    if (matched) return matched.replace(/\n+/g, "；").slice(0, 800);
+  }
+  return "";
+};
+
+const legacyStopHeadings = [
+  "主诉",
+  "现病史",
+  "既往史",
+  "过敏史",
+  "手术史",
+  "专科检查",
+  "专科查体",
+  "查体",
+  "诊断",
+  "西医诊断",
+  "中医诊断",
+  "中医辨证",
+  "治疗",
+  "处置",
+  "医嘱",
+  "复查",
+  "建议",
+  "备注"
+];
+
+const fieldMetaByKey = () => {
+  const result = new Map<string, { field: RecordField; sectionTitle: string }>();
+  recordSections.forEach(section =>
+    section.fields.forEach(field => result.set(field.key, { field, sectionTitle: section.title }))
+  );
+  return result;
+};
+
+const appendFieldMapping = (
+  rows: LegacyFieldMapping[],
+  params: {
+    fieldKey: string;
+    importValue: string;
+    sourceFile: string;
+    currentRecord: Record<string, string>;
+    confidence: LegacyFieldMapping["confidence"];
+    reason: string;
+  }
+) => {
+  const value = params.importValue.trim();
+  if (!value) return;
+  const meta = fieldMetaByKey().get(params.fieldKey);
+  if (!meta) return;
+  const currentValue = String(params.currentRecord[params.fieldKey] || "").trim();
+  rows.push({
+    id: `field-${params.fieldKey}-${rows.length}`,
+    fieldKey: params.fieldKey,
+    fieldLabel: meta.field.label,
+    sectionTitle: meta.sectionTitle,
+    currentValue,
+    importValue: value,
+    sourceFile: params.sourceFile,
+    confidence: params.confidence,
+    reason: params.reason,
+    conflict: Boolean(currentValue),
+    selected: !currentValue
+  });
+};
+
+const buildLegacyTextMappings = (files: Array<string | SharedCaseFileItem>, currentRecord: Record<string, string>) => {
+  const mappings: LegacyFieldMapping[] = [];
+  files.forEach(fileItem => {
+    if (typeof fileItem === "string") return;
+    if (!/\.(docx?|html?)$/i.test(fileItem.fileName)) return;
+    const text = decodeLegacyContent(fileItem.contentDataUrl);
+    if (!text) return;
+    appendFieldMapping(mappings, {
+      fieldKey: "chiefComplaintText",
+      importValue: pickLegacySection(text, ["主诉"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "中",
+      reason: "从旧门诊病历“主诉”段落识别"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "presentIllnessText",
+      importValue: pickLegacySection(text, ["现病史"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "中",
+      reason: "从旧门诊病历“现病史”段落识别"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "operationHistory",
+      importValue: pickLegacySection(text, ["既往史", "手术史"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "低",
+      reason: "从旧病历既往/手术相关段落识别，需人工确认"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "allergyHistory",
+      importValue: pickLegacySection(text, ["过敏史"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "中",
+      reason: "从旧病历过敏史段落识别"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "lithotomyExam",
+      importValue: pickLegacySection(text, ["专科检查", "专科查体", "查体"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "低",
+      reason: "从旧病历专科检查段落识别，可能需要拆分到肛门视诊/指诊/肛门镜"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "westernDiagnosis",
+      importValue: pickLegacySection(text, ["西医诊断", "诊断"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "低",
+      reason: "从诊断段落识别，需确认是否为西医诊断"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "tcmDiagnosis",
+      importValue: pickLegacySection(text, ["中医诊断"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "中",
+      reason: "从旧病历中医诊断段落识别"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "tcmSyndrome",
+      importValue: pickLegacySection(text, ["中医辨证", "辨证"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "中",
+      reason: "从旧病历中医辨证段落识别"
+    });
+    appendFieldMapping(mappings, {
+      fieldKey: "sameDayTreatment",
+      importValue: pickLegacySection(text, ["治疗", "处置", "医嘱"], legacyStopHeadings),
+      sourceFile: fileItem.fileName,
+      currentRecord,
+      confidence: "低",
+      reason: "从治疗/处置/医嘱段落识别，需人工确认"
+    });
+  });
+  return mappings;
+};
+
+const buildLegacyAttachmentMappings = (params: SharedCasePreviewParams) => {
+  const mappings: LegacyAttachmentMapping[] = [];
+  const unassigned: string[] = [];
+  params.files.forEach((fileItem, index) => {
+    const fileName = typeof fileItem === "string" ? fileItem : fileItem.fileName;
+    const inferred =
+      typeof fileItem === "string" || !fileItem.type
+        ? inferDocumentType(fileName)
+        : documentTypeMeta(fileItem.type, fileItem.typeLabel || fileItem.type, params.ownerDepartment);
+    if (!inferred) {
+      unassigned.push(fileName);
+      return;
+    }
+    const source =
+      /复查|照片/.test(fileName) || inferred.fieldKey === "followupRecordsJson"
+        ? "followup"
+        : /\.(docx?|html?)$/i.test(fileName)
+          ? "document"
+          : "report";
+    mappings.push({
+      id: `attachment-${index}`,
+      fileName,
+      type: typeof fileItem === "string" ? "" : fileItem.type || "",
+      typeLabel: inferred.fieldLabel,
+      fieldKey: inferred.fieldKey,
+      fieldLabel: inferred.fieldLabel,
+      department: inferred.department,
+      source,
+      selected: true
+    });
+  });
+  return { mappings, unassigned };
+};
+
+const ensureLegacyPatient = (db: ClinicDb, params: SharedCasePreviewParams) => {
+  let patient = findPatientByVisitNo(db, params.visitNo);
+  const createdAt = now();
+  if (!patient) {
+    patient = findPatientByIdentity(db, params.patientName, undefined, true);
+    if (patient) {
+      appendPatientEncounter(patient, {
+        visitNo: params.visitNo,
+        visitDate: params.visitDate,
+        visitType: params.visitType,
+        doctor: "待分配",
+        createdAt
+      });
+    } else {
+      patient = {
+        id: String(Date.now()),
+        name: params.patientName,
+        visitNo: params.visitNo,
+        visitDate: params.visitDate,
+        visitType: params.visitType,
+        doctor: "待分配",
+        encounterCount: 1,
+        encounterHistory: [
+          {
+            id: `enc-${Date.now()}-initial`,
+            visitNo: params.visitNo,
+            visitDate: params.visitDate,
+            visitType: params.visitType,
+            doctor: "待分配",
+            createdAt
+          }
+        ],
+        currentStage: "旧资料预检",
+        completedCount: 2,
+        progressPercent: Math.round((2 / recordSections.length) * 100),
+        status: "已识别待确认",
+        riskType: "warning",
+        createdAt,
+        updatedAt: createdAt
+      };
+      db.patients.unshift(patient);
+    }
+  }
+  db.records[patient.id] = {
+    ...(db.records[patient.id] ?? initialFieldValues()),
+    patientName: params.patientName,
+    visitNo: params.visitNo,
+    admissionDate: params.visitDate,
+    admissionWay: params.visitType
+  };
+  db.archive[patient.id] = db.archive[patient.id] ?? { submitted: false, version: "V0.1-旧资料导入", generatedAt: createdAt };
+  patient.currentStage = "旧资料预检";
+  patient.status = "已识别待确认";
+  patient.riskType = "warning";
+  patient.updatedAt = createdAt;
+  return patient;
 };
 
 export const uploadDocumentsApi = async (params: UploadDocumentsParams) => {
@@ -1197,87 +1521,58 @@ export const uploadDocumentsApi = async (params: UploadDocumentsParams) => {
   return response<UploadDocumentsResult>({ patient, documents: uploaded }, "资料已上传并入档");
 };
 
-export const importSharedCaseApi = async (params: SharedCaseImportParams) => {
+export const previewSharedCaseImportApi = async (params: SharedCasePreviewParams) => {
   const db = await readDb();
-  let patient = findPatientByVisitNo(db, params.visitNo);
-  if (!patient) {
-    const createdAt = now();
-    patient = findPatientByIdentity(db, params.patientName, undefined, true);
-    if (patient) {
-      appendPatientEncounter(patient, {
-        visitNo: params.visitNo,
-        visitDate: params.visitDate,
-        visitType: params.visitType,
-        doctor: "待分配",
-        createdAt
-      });
-      patient.currentStage = "旧资料导入";
-      patient.completedCount = Math.max(patient.completedCount, 2);
-      patient.progressPercent = Math.round((patient.completedCount / recordSections.length) * 100);
-      patient.status = "待人工分拣";
-      patient.riskType = "warning";
-      patient.updatedAt = createdAt;
-      db.records[patient.id] = {
-        ...(db.records[patient.id] ?? initialFieldValues()),
-        patientName: params.patientName,
-        visitNo: params.visitNo,
-        admissionDate: params.visitDate,
-        admissionWay: params.visitType
-      };
-      db.archive[patient.id] = {
-        submitted: false,
-        version: `V0.${patient.encounterCount || 1}-旧资料导入`,
-        generatedAt: createdAt
-      };
-    } else {
-      patient = {
-        id: String(Date.now()),
-        name: params.patientName,
-        visitNo: params.visitNo,
-        visitDate: params.visitDate,
-        visitType: params.visitType,
-        doctor: "待分配",
-        encounterCount: 1,
-        encounterHistory: [
-          {
-            id: `enc-${Date.now()}-initial`,
-            visitNo: params.visitNo,
-            visitDate: params.visitDate,
-            visitType: params.visitType,
-            doctor: "待分配",
-            createdAt
-          }
-        ],
-        currentStage: "旧资料导入",
-        completedCount: 2,
-        progressPercent: Math.round((2 / recordSections.length) * 100),
-        status: "待人工分拣",
-        riskType: "warning",
-        createdAt,
-        updatedAt: createdAt
-      };
-      db.patients.unshift(patient);
-      db.records[patient.id] = {
-        ...initialFieldValues(),
-        patientName: params.patientName,
-        visitNo: params.visitNo,
-        admissionDate: params.visitDate,
-        admissionWay: params.visitType
-      };
-      db.archive[patient.id] = { submitted: false, version: "V0.1-旧资料导入", generatedAt: createdAt };
+  const patientByVisitNo = findPatientByVisitNo(db, params.visitNo);
+  const patientByName = patientByVisitNo ? undefined : findPatientByIdentity(db, params.patientName, undefined, true);
+  const patient = patientByVisitNo || patientByName;
+  const currentRecord = patient ? (db.records[patient.id] ?? initialFieldValues()) : initialFieldValues();
+  const fieldMappings = buildLegacyTextMappings(params.files, currentRecord);
+  const { mappings: attachmentMappings, unassigned } = buildLegacyAttachmentMappings(params);
+  const preview: SharedCasePreviewResult = {
+    previewId: `legacy-preview-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    patientMatch: patientByVisitNo ? "matchedByVisitNo" : patientByName ? "matchedByName" : "newPatient",
+    patient,
+    patientName: params.patientName,
+    visitNo: params.visitNo,
+    visitDate: params.visitDate,
+    visitType: params.visitType,
+    fieldMappings,
+    attachmentMappings,
+    unassigned,
+    status: unassigned.length ? "部分待分拣" : "已识别待确认"
+  };
+  return response<SharedCasePreviewResult>(preview, "旧共享病历已完成预检，请确认采纳项");
+};
+
+export const commitSharedCaseImportApi = async (params: SharedCaseCommitParams) => {
+  const db = await readDb();
+  const patient = ensureLegacyPatient(db, params);
+  const record = db.records[patient.id] ?? initialFieldValues();
+  const acceptedFieldIds = new Set(params.acceptedFieldMappingIds);
+  const acceptedAttachmentIds = new Set(params.acceptedAttachmentMappingIds);
+  const appliedFields: LegacyFieldMapping[] = [];
+  const skippedFields: LegacyFieldMapping[] = [];
+  params.preview.fieldMappings.forEach(mapping => {
+    if (!acceptedFieldIds.has(mapping.id)) {
+      skippedFields.push(mapping);
+      return;
     }
-  }
+    const currentValue = String(record[mapping.fieldKey] || "").trim();
+    if (currentValue && !params.overwriteConflicts) {
+      skippedFields.push(mapping);
+      return;
+    }
+    record[mapping.fieldKey] = mapping.importValue;
+    appliedFields.push(mapping);
+  });
 
   const imported: RecordAttachment[] = [];
-  const unassigned: string[] = [];
+  const unassigned = [...params.preview.unassigned];
   for (const [index, fileItem] of params.files.entries()) {
     const fileName = typeof fileItem === "string" ? fileItem : fileItem.fileName;
-    const inferred =
-      typeof fileItem === "string" || !fileItem.type
-        ? inferDocumentType(fileName)
-        : documentTypeMeta(fileItem.type, fileItem.typeLabel || fileItem.type, params.ownerDepartment);
-    if (!inferred) {
-      unassigned.push(fileName);
+    const mapping = params.preview.attachmentMappings.find(item => item.fileName === fileName);
+    if (!mapping || !acceptedAttachmentIds.has(mapping.id)) {
       continue;
     }
     const storedFile =
@@ -1286,16 +1581,16 @@ export const importSharedCaseApi = async (params: SharedCaseImportParams) => {
         : await persistDocumentFile({
             ...fileItem,
             patientId: patient!.id,
-            department: inferred.department,
+            department: mapping.department,
             operator: params.operator,
             operatorRole: params.role || params.ownerDepartment
           });
     imported.push({
       key: `legacy-${patient!.id}-${Date.now()}-${index}`,
-      title: `旧共享病历-${inferred.fieldLabel}`,
-      department: inferred.department,
-      fieldKey: inferred.fieldKey,
-      fieldLabel: inferred.fieldLabel,
+      title: `旧共享资料-${mapping.fieldLabel}`,
+      department: mapping.department,
+      fieldKey: mapping.fieldKey,
+      fieldLabel: mapping.fieldLabel,
       fileName,
       url: storedFile.url,
       storagePath: storedFile.storagePath,
@@ -1307,25 +1602,70 @@ export const importSharedCaseApi = async (params: SharedCaseImportParams) => {
 
   db.documents ??= {};
   db.documents[patient.id] = [...(db.documents[patient.id] ?? []), ...imported];
-  patient.status = unassigned.length ? "旧资料待分拣" : "旧资料已归档";
-  patient.currentStage = unassigned.length ? "资料分拣" : "病历生成";
+  const followupAttachments = imported.filter(document => document.fieldKey === "followupRecordsJson");
+  if (followupAttachments.length) {
+    const previousFollowups = parseFollowupTimelineRecords(record.followupRecordsJson);
+    const createdFollowups = followupAttachments.map((document, index) => ({
+      id: `legacy-followup-${Date.now()}-${index}`,
+      type: "远期复查",
+      date: params.visitDate,
+      recovery: "旧共享资料导入，需人工补充恢复情况",
+      abnormal: "待确认",
+      advice: "请结合附件照片回查并补充随访结论",
+      nextDate: "",
+      onTime: "旧资料补录",
+      sourceFile: document.fileName
+    }));
+    record.followupRecordsJson = JSON.stringify([...previousFollowups, ...createdFollowups]);
+  }
+  if (imported.some(document => document.fieldKey === "bloodRoutine")) {
+    record.bloodRoutineStatus = record.bloodRoutineStatus || "已查";
+  }
+  if (imported.some(document => document.fieldKey === "ecgResult")) record.ecgStatus = record.ecgStatus || "已查";
+  db.records[patient.id] = record;
+
+  patient.completedCount = Math.max(patient.completedCount || 1, 3);
+  patient.progressPercent = Math.round((patient.completedCount / recordSections.length) * 100);
+  patient.status = unassigned.length ? "部分待分拣" : "已采纳入档";
+  patient.currentStage = unassigned.length ? "资料分拣" : "档案生成";
   patient.updatedAt = now();
   appendAuditLog(db, {
-    operator: params.ownerDepartment,
-    role: params.ownerDepartment,
+    operator: params.operator || params.ownerDepartment,
+    role: roleLabel(params.role) || params.ownerDepartment,
     patient: patient.name,
     patientId: patient.id,
     module: "legacy",
-    actionCode: "legacy.import",
+    actionCode: "legacy.import.commit",
     targetType: "document",
     targetKey: patient.id,
     targetLabel: params.folderName,
-    afterValue: `imported:${imported.length};unassigned:${unassigned.length}`,
-    action: "导入旧共享病历",
-    detail: `导入 ${imported.length} 个已归属文件，${unassigned.length} 个待分拣文件`
+    afterValue: `fields:${appliedFields.length};documents:${imported.length};unassigned:${unassigned.length}`,
+    action: "采纳旧共享病历预检",
+    detail: `采纳字段 ${appliedFields.length} 项，导入附件 ${imported.length} 个，${unassigned.length} 个待分拣文件`
   });
   await writeDb(db);
-  return response<SharedCaseImportResult>({ patient, documents: imported, unassigned }, "旧共享病历已导入");
+  return response<SharedCaseImportResult>(
+    {
+      patient,
+      documents: imported,
+      unassigned,
+      appliedFields,
+      skippedFields,
+      preview: { ...params.preview, status: unassigned.length ? "部分待分拣" : "已采纳入档" }
+    },
+    "旧共享病历已采纳入档"
+  );
+};
+
+export const importSharedCaseApi = async (params: SharedCaseImportParams) => {
+  const { data: preview } = await previewSharedCaseImportApi(params);
+  return commitSharedCaseImportApi({
+    ...params,
+    preview,
+    acceptedFieldMappingIds: preview.fieldMappings.filter(item => item.selected).map(item => item.id),
+    acceptedAttachmentMappingIds: preview.attachmentMappings.filter(item => item.selected).map(item => item.id),
+    overwriteConflicts: false
+  });
 };
 
 export const voidDocumentApi = async (params: DocumentVoidParams) => {
@@ -1387,8 +1727,8 @@ export const restoreDocumentApi = async (params: DocumentRestoreParams) => {
   target.restoredAt = operatedAt;
   target.restoredBy = params.operator || roleLabel(params.role);
   const remainingIssues = buildQualityIssues(db.records[patient.id] ?? initialFieldValues(), documents, db.templateFieldRules);
-  patient.status = remainingIssues.some(item => item.level === "critical") ? "待补充资料" : "可提交质控";
-  patient.currentStage = remainingIssues.some(item => item.level === "critical") ? "病历补全" : "质控待审";
+  patient.status = remainingIssues.some(item => item.level === "critical") ? "待补充资料" : "可提交档案审核";
+  patient.currentStage = remainingIssues.some(item => item.level === "critical") ? "档案补全" : "档案审核待审";
   patient.riskType = remainingIssues.some(item => item.level === "critical") ? "warning" : "success";
   patient.updatedAt = operatedAt;
   appendAuditLog(db, {
@@ -1448,7 +1788,7 @@ export const getQualityReviewListApi = async (params: {
   status?: string;
 }) => {
   const db = await readDb();
-  const reviewStatuses = ["待质控审核", "退回整改", "可提交质控", "资料待核对"];
+  const reviewStatuses = ["待档案审核", "退回整改", "可提交档案审核", "资料待核对"];
   const filtered = db.patients
     .filter(patient => (params.status ? patient.status === params.status : reviewStatuses.includes(patient.status)))
     .map(patient => {
@@ -1486,7 +1826,7 @@ export const rejectQualityReviewApi = async (params: QualityReviewActionParams) 
   const patient = getPatientOrThrow(db, params.id);
   const detail = buildQualityReviewDetail(db, patient);
   const operatedAt = now();
-  const comment = params.comment?.trim() || "质控退回，请按问题清单补正后重新提交。";
+  const comment = params.comment?.trim() || "档案审核退回，请按问题清单补正后重新提交。";
   db.archive[patient.id] = { submitted: false, version: "V0.9-退回整改", generatedAt: operatedAt };
   patient.currentStage = "退回整改";
   patient.status = "退回整改";
@@ -1504,7 +1844,7 @@ export const rejectQualityReviewApi = async (params: QualityReviewActionParams) 
     targetLabel: patient.visitNo,
     beforeValue: `${detail.criticalCount} 个严重问题`,
     afterValue: comment,
-    action: "质控退回",
+    action: "档案审核退回",
     detail: `${comment}；问题数：${detail.issues.length}`
   });
   await writeDb(db);
@@ -1521,7 +1861,7 @@ export const approveQualityReviewApi = async (params: QualityReviewActionParams)
   }
 
   const operatedAt = now();
-  const comment = params.comment?.trim() || "质控通过，正式归档。";
+  const comment = params.comment?.trim() || "档案审核通过，正式归档。";
   db.archive[patient.id] = { submitted: true, version: "V1.0-已归档", generatedAt: operatedAt };
   patient.currentStage = "归档";
   patient.completedCount = recordSections.length;
@@ -1541,11 +1881,11 @@ export const approveQualityReviewApi = async (params: QualityReviewActionParams)
     targetLabel: patient.visitNo,
     beforeValue: detail.archiveVersion,
     afterValue: db.archive[patient.id].version,
-    action: "质控通过",
+    action: "档案审核通过",
     detail: comment
   });
   await writeDb(db);
-  return response({ patient, archive: db.archive[patient.id] }, "质控已通过并归档");
+  return response({ patient, archive: db.archive[patient.id] }, "档案审核已通过并归档");
 };
 
 export const getOperationStatsApi = async () => {
@@ -1604,7 +1944,7 @@ export const getOperationStatsApi = async () => {
   return response<OperationStats>({
     totalPatients: db.patients.length,
     pendingPatients: db.patients.filter(patient => !["已归档", "旧资料已归档"].includes(patient.status)).length,
-    reviewPatients: db.patients.filter(patient => patient.status === "待质控审核").length,
+    reviewPatients: db.patients.filter(patient => patient.status === "待档案审核" || patient.status === "待质控审核").length,
     returnedPatients: returned.length,
     archivedPatients: archived.length,
     overduePatients: overdue.length,
@@ -1638,6 +1978,142 @@ export const getAuditLogListApi = async (params: {
     return operatorMatched && patientMatched && patientIdMatched && actionMatched && moduleMatched && resultMatched;
   });
   return response(paginate(filtered, params.pageNum, params.pageSize));
+};
+
+const normalizeTimelineTime = (value?: string) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "0000-00-00 00:00:00";
+  return normalized.length === 10 ? `${normalized} 00:00:00` : normalized;
+};
+
+const parseFollowupTimelineRecords = (value?: string) => {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const buildLocalPatientTimeline = (db: ClinicDb, patientId: string): PatientTimelineEvent[] => {
+  const patient = getPatientOrThrow(db, patientId);
+  const archive = db.archive[patientId];
+  const record = db.records[patientId] ?? {};
+  const attachments = activeDocuments(db.documents?.[patientId] ?? []);
+  const logs = (db.auditLogs ?? []).filter(log => log.patientId === patientId);
+  const events: PatientTimelineEvent[] = [];
+
+  events.push({
+    id: `patient-created-${patient.id}`,
+    time: normalizeTimelineTime(patient.createdAt),
+    source: "patient",
+    module: "patient",
+    sourceId: patient.id,
+    title: "创建患者档案",
+    detail: "登记患者基础就诊信息",
+    level: "success",
+    operator: patient.doctor,
+    targetLabel: patient.visitNo
+  });
+
+  (patient.encounterHistory || []).forEach(encounter => {
+    events.push({
+      id: `encounter-${encounter.id}`,
+      time: normalizeTimelineTime(encounter.createdAt || encounter.visitDate),
+      source: "encounter",
+      module: "patient",
+      sourceId: encounter.id,
+      title: "就诊记录",
+      detail: `${encounter.visitType}：${encounter.visitNo}`,
+      level: "primary",
+      operator: encounter.doctor,
+      targetLabel: encounter.visitDate
+    });
+  });
+
+  if (archive?.version) {
+    events.push({
+      id: `archive-${patientId}-${archive.version}`,
+      time: normalizeTimelineTime(archive.generatedAt),
+      source: "archive",
+      module: "archive",
+      sourceId: patientId,
+      title: archive.submitted ? "提交档案审核" : "档案版本记录",
+      detail: `版本：${archive.version}`,
+      level: archive.submitted ? "warning" : "info",
+      targetLabel: archive.version
+    });
+  }
+
+  parseFollowupTimelineRecords(record.followupRecordsJson).forEach((followup, index) => {
+    events.push({
+      id: `followup-${followup.id || index}`,
+      time: normalizeTimelineTime(followup.date || followup.nextDate),
+      source: "followup",
+      module: "field",
+      sourceId: "followupRecordsJson",
+      title: followup.type || "复查随访",
+      detail: `恢复：${followup.recovery || "待记录"}；异常：${followup.abnormal || "无"}；建议：${followup.advice || "待记录"}`,
+      level: "success",
+      targetLabel: followup.onTime || ""
+    });
+  });
+
+  attachments.forEach(attachment => {
+    events.push({
+      id: `document-upload-${attachment.key}`,
+      time: normalizeTimelineTime(attachment.uploadedAt),
+      source: "document",
+      module: "document",
+      sourceId: attachment.key,
+      title: "新增检查检验附件",
+      detail: `${attachment.fileName}，关联：${attachment.fieldLabel}，科室：${attachment.department}`,
+      level: "primary",
+      operator: attachment.uploader,
+      targetLabel: attachment.fieldLabel
+    });
+  });
+
+  logs.forEach(log => {
+    const isCollaborative = log.actionCode === "record.field.collaborative.update" || log.module === "collaboration";
+    events.push({
+      id: log.id,
+      time: normalizeTimelineTime(log.time),
+      source: isCollaborative ? "collaboration" : "audit",
+      module: log.module || (isCollaborative ? "collaboration" : "audit"),
+      sourceId: log.targetKey || "",
+      title: isCollaborative ? log.action || "协作补充档案字段" : log.action || "操作记录",
+      detail: isCollaborative
+        ? `${log.role || "未知岗位"} ${log.operator || "未知人员"}：${log.detail || log.targetLabel || "更新档案字段"}`
+        : log.detail,
+      level: log.result === "denied" ? "danger" : isCollaborative ? "success" : "info",
+      operator: log.operator,
+      targetLabel: log.targetLabel
+    });
+  });
+
+  const seen = new Set<string>();
+  return events
+    .filter(event => {
+      const key = `${event.source}:${event.id}:${event.time}:${event.title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => right.time.localeCompare(left.time));
+};
+
+export const getPatientTimelineApi = async (patientId: string) => {
+  try {
+    const result = await fetch(`${getClinicApiBaseUrl()}/patients/timeline?patientId=${encodeURIComponent(patientId)}`, {
+      headers: authHeaders()
+    });
+    const data = await parseClinicApiResponse<PatientTimelineEvent[]>(result);
+    return response(data);
+  } catch {
+    const db = await readDb();
+    return response(buildLocalPatientTimeline(db, patientId));
+  }
 };
 
 const parseClinicApiResponse = async <T>(result: Response): Promise<T> => {
@@ -1688,6 +2164,19 @@ export const saveBackupConfigApi = async (payload: BackupConfigPayload) => {
   return response(data, "备份配置已保存");
 };
 
+export const chooseBackupDirectoryApi = async (initialDir = "") => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/backup/choose-dir`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ initialDir })
+  });
+  const data = await parseClinicApiResponse<BackupDirectorySelection>(result);
+  return response(data, "备份目录已选择");
+};
+
 export const runBackupNowApi = async () => {
   const result = await fetch(`${getClinicApiBaseUrl()}/maintenance/backup/run`, { method: "POST", headers: authHeaders() });
   const data = await parseClinicApiResponse<BackupRunResult>(result);
@@ -1700,6 +2189,116 @@ export const getDuplicatePatientGroupsApi = async () => {
   return response(data);
 };
 
+export const generateRecordAiSummaryApi = async (params: AiRecordSummaryParams) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/record-summary`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(params)
+  });
+  const data = await parseClinicApiResponse<AiRecordSummary>(result);
+  return response(data, "AI总结已生成");
+};
+
+export const getMedicalRecordTemplateApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/templates`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<MedicalRecordTemplateStatus>(result);
+  return response(data);
+};
+
+export const getGeneratedMedicalRecordVersionsApi = async (patientId: string) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/versions?patientId=${encodeURIComponent(patientId)}`, {
+    headers: authHeaders()
+  });
+  const data = await parseClinicApiResponse<{ versions: GeneratedMedicalRecord[] }>(result);
+  return response(data.versions ?? []);
+};
+
+export const precheckMedicalRecordApi = async (patientId: string) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/precheck`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ patientId, mode: "target" })
+  });
+  const data = await parseClinicApiResponse<MedicalRecordPrecheckResult>(result);
+  return response(data);
+};
+
+export const saveMedicalRecordWorkspaceApi = async (patientId: string, values: Record<string, string>) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/workspace`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ patientId, values })
+  });
+  const data = await parseClinicApiResponse<MedicalRecordWorkspaceSaveResult>(result);
+  return response(data, "目标病历填写已保存");
+};
+
+export const generateMedicalRecordApi = async (patientId: string) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ patientId, mode: "target" })
+  });
+  const data = await parseClinicApiResponse<MedicalRecordGenerateResult>(result);
+  return response(data, "目标病历已生成");
+};
+
+export const finalizeMedicalRecordApi = async (id: string) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/finalize`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ id })
+  });
+  const data = await parseClinicApiResponse<{ record: GeneratedMedicalRecord }>(result);
+  return response(data.record, "目标病历已定稿");
+};
+
+export const voidMedicalRecordApi = async (id: string, reason: string) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/void`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ id, reason })
+  });
+  const data = await parseClinicApiResponse<{ record: GeneratedMedicalRecord }>(result);
+  return response(data.record, "目标病历版本已作废");
+};
+
+export const downloadMedicalRecordApi = async (record: GeneratedMedicalRecord) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/medical-record/download?id=${encodeURIComponent(record.id)}`, {
+    headers: authHeaders()
+  });
+  if (!result.ok) {
+    await parseClinicApiResponse(result);
+    return response(null);
+  }
+  const blob = await result.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = record.fileName || `医生目标病历-V${record.version}.docx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 500);
+  return response(null, "目标病历 docx 已下载");
+};
+
+export const getAiRuntimeConfigApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/config`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
+  return response(data);
+};
+
+export const saveAiRuntimeConfigApi = async (payload: AiRuntimeConfigPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/config`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
+  return response(data, "AI接口配置已保存");
+};
+
 export const getWorkRemindersApi = async () => {
   const [{ data: stats }, { data: duplicates }, { data: status }] = await Promise.all([
     getOperationStatsApi(),
@@ -1710,16 +2309,16 @@ export const getWorkRemindersApi = async () => {
     {
       id: "returned",
       level: stats.returnedPatients ? "danger" : "success",
-      title: "质控退回",
-      desc: stats.returnedPatients ? "优先补齐退回病历，避免患者资料长时间悬空" : "暂无退回整改",
+      title: "审核退回",
+      desc: stats.returnedPatients ? "优先补齐退回档案，避免患者资料长时间悬空" : "暂无退回整改",
       path: "/audit/review",
       count: stats.returnedPatients
     },
     {
       id: "review",
       level: stats.reviewPatients ? "warning" : "success",
-      title: "待质控",
-      desc: stats.reviewPatients ? "已有病历提交质控，建议当日完成复核" : "暂无待质控病历",
+      title: "待档案审核",
+      desc: stats.reviewPatients ? "已有健康档案提交审核，建议当日完成复核" : "暂无待审核档案",
       path: "/audit/review",
       count: stats.reviewPatients
     },
@@ -1773,9 +2372,9 @@ export const logPatientExportApi = async (params: {
         targetType: "record",
         targetKey: patient.id,
         targetLabel: patient.visitNo,
-        action: params.action === "print" ? "打印病历" : "导出病历",
+        action: params.action === "print" ? "打印健康档案" : "导出健康档案",
         result: "success",
-        detail: `${roleLabel(params.role)}${params.action === "print" ? "打印" : "导出"}病历：${patient.name}/${patient.visitNo}`
+        detail: `${roleLabel(params.role)}${params.action === "print" ? "打印" : "导出"}健康档案：${patient.name}/${patient.visitNo}`
       }
     ]
   });

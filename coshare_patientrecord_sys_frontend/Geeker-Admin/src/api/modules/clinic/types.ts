@@ -74,6 +74,119 @@ export interface SaveRecordParams {
   values: Record<string, string>;
 }
 
+export interface AiRecordSummary {
+  summary: string;
+  patientPortrait?: string;
+  clinicalSummary: string;
+  managementSummary: string;
+  followupSummary: string;
+  priorityFocus?: string[];
+  overlookedInsights?: string[];
+  missingItems: string[];
+  riskHints: string[];
+  communicationTips?: string[];
+  nextFollowupSuggestions?: string[];
+  doctorTips: string[];
+  disclaimer: string;
+  generatedAt: string;
+  model: string;
+}
+
+export interface AiRecordSummaryParams {
+  patientId: string;
+  mode?: "summary";
+}
+
+export interface AiRuntimeConfig {
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+  apiKeyConfigured: boolean;
+  apiKeyMasked: string;
+  usingRuntimeConfig: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface AiRuntimeConfigPayload {
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+  apiKey?: string;
+  keepExistingApiKey?: boolean;
+}
+
+export interface GeneratedMedicalRecord {
+  id: string;
+  patientId: string;
+  version: number;
+  status: "draft" | "finalized" | "voided";
+  content?: string;
+  contentHash: string;
+  model: string;
+  templateName?: string;
+  templateVersion?: string;
+  fileName?: string;
+  downloadUrl?: string;
+  operator: string;
+  operatorRole: string;
+  generatedAt: string;
+  finalizedAt: string;
+  voidedAt: string;
+  voidReason: string;
+  sourceFieldSnapshot?: Record<string, unknown>;
+}
+
+export interface MedicalRecordTemplateField {
+  key: string;
+  label: string;
+  section: string;
+  kind: "input" | "textarea" | "select" | "date" | string;
+  required: boolean;
+  aiPolishable: boolean;
+  placeholder: string;
+  sources?: string[];
+}
+
+export interface MedicalRecordTemplateSection {
+  section: string;
+  fields: MedicalRecordTemplateField[];
+}
+
+export interface MedicalRecordTemplateStatus {
+  name: string;
+  templateVersion?: string;
+  configured: boolean;
+  promptConfigurable: boolean;
+  templateSource: string;
+  commandSource: string;
+  disclaimer: string;
+  sections: string[];
+  requiredFields?: { key: string; label: string; section?: string }[];
+  fieldMatrix?: MedicalRecordTemplateSection[];
+  unboundFields?: string[];
+}
+
+export interface MedicalRecordGenerateResult {
+  record: GeneratedMedicalRecord;
+  missingItems: string[];
+  disclaimer: string;
+}
+
+export interface MedicalRecordPrecheckResult {
+  ready: boolean;
+  missingItems: string[];
+  unboundFields?: string[];
+  fieldMatrix?: MedicalRecordTemplateSection[];
+  disclaimer: string;
+}
+
+export interface MedicalRecordWorkspaceSaveResult {
+  values: Record<string, string>;
+  missingItems: string[];
+  disclaimer: string;
+}
+
 export interface ValidationIssue {
   fieldKey: string;
   fieldLabel: string;
@@ -161,6 +274,8 @@ export interface SharedCaseImportParams extends OperationContext {
   files: Array<string | SharedCaseFileItem>;
 }
 
+export interface SharedCasePreviewParams extends SharedCaseImportParams {}
+
 export interface SharedCaseFileItem {
   fileName: string;
   type?: string;
@@ -170,10 +285,67 @@ export interface SharedCaseFileItem {
   storagePath?: string;
 }
 
+export interface LegacyFieldMapping {
+  id: string;
+  fieldKey: string;
+  fieldLabel: string;
+  sectionTitle: string;
+  currentValue: string;
+  importValue: string;
+  sourceFile: string;
+  confidence: "高" | "中" | "低";
+  reason: string;
+  conflict: boolean;
+  selected: boolean;
+}
+
+export interface LegacyAttachmentMapping {
+  id: string;
+  fileName: string;
+  type: string;
+  typeLabel: string;
+  fieldKey: string;
+  fieldLabel: string;
+  department: string;
+  source: "document" | "report" | "followup" | "unassigned";
+  selected: boolean;
+}
+
+export interface SharedCasePreviewResult {
+  previewId: string;
+  patientMatch: "matchedByVisitNo" | "matchedByName" | "newPatient";
+  patient?: PatientRow;
+  patientName: string;
+  visitNo: string;
+  visitDate: string;
+  visitType: string;
+  fieldMappings: LegacyFieldMapping[];
+  attachmentMappings: LegacyAttachmentMapping[];
+  unassigned: string[];
+  status: "待预检" | "已识别待确认" | "已采纳入档" | "部分待分拣";
+}
+
+export interface SharedCaseCommitParams extends OperationContext {
+  preview: SharedCasePreviewResult;
+  folderName: string;
+  patientName: string;
+  visitNo: string;
+  visitDate: string;
+  visitType: string;
+  ownerDepartment: string;
+  files: Array<string | SharedCaseFileItem>;
+  acceptedFieldMappingIds: string[];
+  acceptedAttachmentMappingIds: string[];
+  overwriteConflicts?: boolean;
+}
+
 export interface SharedCaseImportResult {
   patient: PatientRow;
   documents: RecordAttachment[];
   unassigned: string[];
+  appliedFields?: LegacyFieldMapping[];
+  skippedFields?: LegacyFieldMapping[];
+  preview?: SharedCasePreviewResult;
 }
 
 export interface UploadDocumentItem {
@@ -214,6 +386,19 @@ export interface AuditLogRow {
   afterValue?: string;
   result?: "success" | "denied";
   detail: string;
+}
+
+export interface PatientTimelineEvent {
+  id: string;
+  time: string;
+  source: "patient" | "encounter" | "record" | "followup" | "document" | "collaboration" | "archive" | "audit" | "system";
+  module: string;
+  sourceId: string;
+  title: string;
+  detail: string;
+  level: "primary" | "success" | "warning" | "danger" | "info";
+  operator?: string;
+  targetLabel?: string;
 }
 
 export interface QualityIssue {
@@ -352,6 +537,10 @@ export interface BackupStatus {
 export interface BackupConfigPayload {
   backupDir: string;
   enabled: boolean;
+}
+
+export interface BackupDirectorySelection {
+  backupDir: string;
 }
 
 export interface BackupRunResult {

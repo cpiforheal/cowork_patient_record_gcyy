@@ -81,9 +81,10 @@ router.beforeEach(async (to, from, next) => {
  * */
 export const resetRouter = () => {
   const authStore = useAuthStore();
+  const staticRouteNames = new Set(["login", "layout", "home", "403", "404", "500"]);
   authStore.flatMenuListGet.forEach(route => {
     const { name } = route;
-    if (name && router.hasRoute(name)) router.removeRoute(name);
+    if (name && !staticRouteNames.has(String(name)) && router.hasRoute(name)) router.removeRoute(name);
   });
 };
 

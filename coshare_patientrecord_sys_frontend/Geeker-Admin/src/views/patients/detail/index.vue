@@ -3,16 +3,16 @@
     <TreeFilter
       id="key"
       label="title"
-      title="病历章节"
+      title="档案章节"
       class="screen-only"
       :data="recordSectionsByRule"
       :default-value="activeSectionKey"
       @change="changeSectionFilter"
     />
-    <div class="table-box" v-loading="detailLoading" element-loading-text="正在打开病历...">
+    <div class="table-box" v-loading="detailLoading" element-loading-text="正在打开健康档案...">
       <section v-if="detailError" class="detail-error-panel screen-only">
         <div>
-          <strong>病历暂时打不开</strong>
+          <strong>健康档案暂时打不开</strong>
           <small>{{ detailError }}</small>
         </div>
         <el-button type="primary" plain @click="retryLoadPatientDetail">重试</el-button>
@@ -35,7 +35,7 @@
           <div
             class="workbar-progress"
             :class="{ active: completionPercent > 0, complete: completionPercent >= 100 }"
-            aria-label="病历完成度"
+            aria-label="档案完整度"
           >
             <div>
               <span>已填 {{ completionStats.completed }}/{{ completionStats.total }}</span>
@@ -61,16 +61,18 @@
 
         <div class="workbar-actions">
           <el-radio-group v-model="recordViewMode">
-            <el-radio-button label="mine">我的字段</el-radio-button>
-            <el-radio-button label="full">完整病历</el-radio-button>
+            <el-radio-button label="mine">核心工作台</el-radio-button>
+            <el-radio-button label="full">{{ canViewFullArchive ? "完整档案" : "岗位范围" }}</el-radio-button>
           </el-radio-group>
           <el-button :icon="Upload" @click="openSupplementUpload">补充图片</el-button>
-          <el-button :icon="FolderOpened" @click="router.push('/workbench/legacy')">导入旧共享病历</el-button>
-          <el-button @click="openQualityReview">质控审核</el-button>
+          <el-button :icon="FolderOpened" @click="router.push('/workbench/legacy')">导入旧共享资料</el-button>
+          <el-button @click="openQualityReview">档案审核</el-button>
           <el-button :icon="Clock" @click="openAuditTimeline">操作轨迹</el-button>
+          <el-button :loading="aiSummaryLoading" @click="openAiSummary">AI总结</el-button>
+          <el-button :loading="medicalRecordLoading" @click="openMedicalRecord">医生目标病历填写</el-button>
           <el-button :icon="View" @click="previewVisible = true">预览</el-button>
           <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
-          <el-button v-else type="primary" @click="submitArchive">提交质控</el-button>
+          <el-button v-else type="primary" @click="submitArchive">提交档案审核</el-button>
           <el-button :icon="DocumentCopy" @click="copyRecord">复制</el-button>
           <el-button type="primary" :icon="Printer" @click="openPreviewThenPrint">打印/PDF</el-button>
         </div>
@@ -97,13 +99,36 @@
         </article>
         <article class="context-card editable">
           <span>可填写区</span>
-          <strong>{{ myEditableFields.length }} 项可处理</strong>
-          <small>必填待补 {{ myRequiredMissingCount }} 项 · 完整度 {{ completionPercent }}%</small>
+          <strong>{{ layeredEditableFields.length }}/{{ myEditableFields.length }} 项显示</strong>
+          <small>当前层 {{ fieldLayerLabel }} · 必填待补 {{ myRequiredMissingCount }} 项</small>
         </article>
         <article class="context-card attachments">
           <span>附件区</span>
           <strong>{{ currentAttachments.length }} 份证据</strong>
           <small>{{ validAttachmentCount }} 份可打开 · {{ invalidAttachmentCount }} 份待补源文件</small>
+        </article>
+      </section>
+
+      <section class="health-archive-summary screen-only">
+        <article>
+          <span>当前阶段</span>
+          <strong>{{ patientInfo?.currentStage || "待补充档案" }}</strong>
+          <small>{{ patientInfo?.status || archiveStatusText }}</small>
+        </article>
+        <article>
+          <span>下次随访</span>
+          <strong>{{ fieldValues.nextFollowupAt || "待安排" }}</strong>
+          <small>{{ followupRecords.length }} 条复查记录</small>
+        </article>
+        <article>
+          <span>当前关注</span>
+          <strong>{{ archiveFocusSummary }}</strong>
+          <small>{{ fieldValues.relationshipRisk || fieldValues.patientConcerns || "暂无风险提示" }}</small>
+        </article>
+        <article>
+          <span>主观反馈</span>
+          <strong>{{ fieldValues.patientSatisfaction || "待反馈" }}</strong>
+          <small>{{ fieldValues.patientPainLevel || "疼痛程度待记录" }}</small>
         </article>
       </section>
 
@@ -139,14 +164,26 @@
           <section v-if="recordViewMode === 'mine'" class="my-fields-panel">
             <div class="my-fields-head">
               <div>
-                <h3>待填 {{ myEditableFields.length }} 项</h3>
+                <h3>{{ fieldLayerTitle }} · {{ layeredEditableFields.length }} 项</h3>
                 <p>
-                  {{ myRequiredMissingCount ? `还有 ${myRequiredMissingCount} 个必填项待补` : "本岗位内容已填齐，可检查后保存" }}
+                  {{ fieldLayerDescription }}
                 </p>
               </div>
               <el-tag :type="myRequiredMissingCount ? 'warning' : 'success'" effect="plain">
                 {{ myRequiredMissingCount ? "待处理" : "已就绪" }}
               </el-tag>
+            </div>
+
+            <div class="field-layer-switch">
+              <el-radio-group v-model="fieldLayerMode">
+                <el-radio-button label="core">核心</el-radio-button>
+                <el-radio-button label="recommended">推荐</el-radio-button>
+                <el-radio-button label="optional">按需</el-radio-button>
+                <el-radio-button label="all">全部</el-radio-button>
+              </el-radio-group>
+              <span>
+                核心 {{ fieldLayerStats.core }} · 推荐 {{ fieldLayerStats.recommended }} · 按需 {{ fieldLayerStats.optional }}
+              </span>
             </div>
 
             <div v-if="myFieldIssues.length" class="field-issue-banner">
@@ -157,13 +194,13 @@
               <el-button text @click="focusIssue(myFieldIssues[0])">定位</el-button>
             </div>
 
-            <el-empty v-if="!myEditableFields.length" description="当前岗位暂无待填字段">
-              <el-button type="primary" @click="recordViewMode = 'full'">查看完整病历</el-button>
+            <el-empty v-if="!layeredEditableFields.length" description="当前层暂无待填字段">
+              <el-button type="primary" @click="recordViewMode = 'full'">查看完整档案</el-button>
             </el-empty>
 
             <div v-else class="my-field-grid">
               <div
-                v-for="item in myEditableFields"
+                v-for="item in layeredEditableFields"
                 :key="item.field.key"
                 class="my-field-item"
                 :id="`my-field-${item.field.key}`"
@@ -182,7 +219,18 @@
                   </label>
                   <span>{{ shortTitle(item.section.title) }}</span>
                 </div>
-                <LabMetricEditor v-if="isLabMetricField(item.field)" v-model="fieldValues[item.field.key]" :field="item.field" />
+                <FollowupRecordsEditor
+                  v-if="item.field.key === 'followupRecordsJson'"
+                  :records="followupRecords"
+                  :disabled="!isEditable(item.field)"
+                  @add="addFollowupRecord"
+                  @remove="removeFollowupRecord"
+                />
+                <LabMetricEditor
+                  v-else-if="isLabMetricField(item.field)"
+                  v-model="fieldValues[item.field.key]"
+                  :field="item.field"
+                />
                 <el-select
                   v-else-if="selectOptions(item.field).length"
                   v-model="fieldValues[item.field.key]"
@@ -240,8 +288,8 @@
               </div>
             </div>
 
-            <div v-if="myEditableFields.length" class="my-fields-footer">
-              <el-button :loading="saving" @click="saveMyFields">保存本岗位内容</el-button>
+            <div v-if="layeredEditableFields.length" class="my-fields-footer">
+              <el-button :loading="saving" @click="saveMyFields">保存当前层内容</el-button>
               <el-button type="primary" :loading="saving" @click="saveMyFieldsAndBack">保存并返回看板</el-button>
             </div>
           </section>
@@ -338,8 +386,15 @@
                       <el-icon><Lock /></el-icon>
                       <span>{{ editorLabels(field.editors) }} 填写，当前只读</span>
                     </div>
+                    <FollowupRecordsEditor
+                      v-if="field.key === 'followupRecordsJson'"
+                      :records="followupRecords"
+                      :disabled="!isEditable(field)"
+                      @add="addFollowupRecord"
+                      @remove="removeFollowupRecord"
+                    />
                     <LabMetricEditor
-                      v-if="isLabMetricField(field)"
+                      v-else-if="isLabMetricField(field)"
                       v-model="fieldValues[field.key]"
                       :field="field"
                       :disabled="!isEditable(field)"
@@ -448,8 +503,15 @@
               </div>
 
               <div class="field-input">
+                <FollowupRecordsEditor
+                  v-if="field.key === 'followupRecordsJson'"
+                  :records="followupRecords"
+                  :disabled="!isEditable(field)"
+                  @add="addFollowupRecord"
+                  @remove="removeFollowupRecord"
+                />
                 <LabMetricEditor
-                  v-if="isLabMetricField(field)"
+                  v-else-if="isLabMetricField(field)"
                   v-model="fieldValues[field.key]"
                   :field="field"
                   :disabled="!isEditable(field)"
@@ -530,18 +592,18 @@
             <div class="preview-overlay-inner">
               <div class="preview-overlay-toolbar">
                 <div class="preview-toolbar-title">
-                  <span>病历预览</span>
+                  <span>健康档案预览</span>
                   <small>{{ fieldValues.patientName || "当前患者" }} · {{ fieldValues.visitNo || patientId }}</small>
                 </div>
                 <div class="preview-page-pills" aria-label="预览页码">
                   <button
-                    v-for="page in previewPageCount"
-                    :key="page"
+                    v-for="item in previewNavigation"
+                    :key="item.key"
                     type="button"
-                    :class="{ active: previewActivePage === page }"
-                    @click="scrollPreviewPage(page)"
+                    :class="{ active: previewActivePage === item.page }"
+                    @click="scrollPreviewPage(item.page)"
                   >
-                    {{ page }}
+                    {{ item.label }}
                   </button>
                 </div>
                 <div>
@@ -551,11 +613,11 @@
               </div>
               <div class="preview-overlay-scroll" id="record-print-area">
                 <div class="paper-stack">
-                  <article class="preview-paper print-cover" data-preview-page="1">
+                  <article class="preview-paper print-cover" :data-preview-page="coverPreviewPage.page">
                     <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
-                      <span>归档封面</span>
-                      <span>第 1 页 / 共 {{ previewPageCount }} 页</span>
+                      <span>档案封面</span>
+                      <span>第 {{ coverPreviewPage.page }} 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
                     <div class="medical-record-head cover-head">
                       <div class="medical-brand">
@@ -566,6 +628,9 @@
                         </div>
                       </div>
                       <div class="medical-subtitle">{{ recordSubtitle }}</div>
+                      <p class="archive-scope-note">
+                        本档案用于院内患者健康管理、治疗跟踪和复查随访，不替代 HIS 官方病历或官方病历质控文书。
+                      </p>
                     </div>
                     <div class="cover-patient-card">
                       <span v-for="item in paperMeta" :key="item.label">
@@ -584,18 +649,158 @@
                     </div>
                   </article>
 
-                  <article class="preview-paper record-page" data-preview-page="2">
+                  <article class="preview-paper registration-record-page" :data-preview-page="registrationPreviewPage.page">
                     <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
-                      <span>病历正文</span>
-                      <span>第 2 页 / 共 {{ previewPageCount }} 页</span>
+                      <span>健康管理登记表</span>
+                      <span>第 {{ registrationPreviewPage.page }} 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
-                    <div class="medical-record-head">
+                    <div class="medical-record-head registration-head">
+                      <div class="medical-brand">
+                        <img v-if="logoVisible" class="medical-logo" :src="logoSrc" alt="医院标识" @error="fallbackLogo" />
+                        <div class="medical-title-block">
+                          <h1>{{ fieldValues.hospitalName }}</h1>
+                          <h2>健康管理登记表</h2>
+                        </div>
+                      </div>
+                      <div class="medical-subtitle">建档信息 · 术前筛查 · 治疗方案 · 分级复诊 · 中医管理闭环</div>
+                    </div>
+
+                    <section class="registration-section">
+                      <h3>一、基础建档信息</h3>
+                      <table class="registration-table">
+                        <tbody>
+                          <tr v-for="(row, index) in registrationBasicRows" :key="index">
+                            <th>{{ row[0] }}</th>
+                            <td>{{ row[1] }}</td>
+                            <th>{{ row[2] }}</th>
+                            <td>{{ row[3] }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </section>
+
+                    <section class="registration-section">
+                      <h3>二、病情建档</h3>
+                      <table class="registration-table single">
+                        <tbody>
+                          <tr v-for="row in registrationConditionRows" :key="row[0]">
+                            <th>{{ row[0] }}</th>
+                            <td>{{ row[1] }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </section>
+
+                    <section class="registration-section">
+                      <h3>三、术前检验筛查汇总</h3>
+                      <table class="registration-table screening-table">
+                        <thead>
+                          <tr>
+                            <th>检验大类</th>
+                            <th>结果汇总</th>
+                            <th>检查状态</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="row in screeningRows" :key="row[0]">
+                            <td>{{ row[0] }}</td>
+                            <td>{{ row[1] }}</td>
+                            <td>
+                              <span class="screening-status" :class="screeningStatusClass(displayFieldValue(row[2], '未查'))">
+                                {{ displayFieldValue(row[2], "未查") }}
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <p class="registration-note">
+                        未查项目说明：{{ displayFieldValue("uncheckedItemsNote", "术后按需择期补查") }}
+                      </p>
+                    </section>
+
+                    <section class="registration-section compact-grid">
+                      <div>
+                        <h3>四、术前医患沟通与治疗方案管理</h3>
+                        <table class="registration-table single">
+                          <tbody>
+                            <tr v-for="row in treatmentManagementRows" :key="row[0]">
+                              <th>{{ row[0] }}</th>
+                              <td>{{ row[1] }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div>
+                        <h3>六、中医特色健康管理专栏</h3>
+                        <table class="registration-table single">
+                          <tbody>
+                            <tr v-for="row in tcmManagementRows" :key="row[0]">
+                              <th>{{ row[0] }}</th>
+                              <td>{{ row[1] }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+
+                    <section class="registration-section">
+                      <h3>五、术后分级复诊健康管理台账</h3>
+                      <table class="registration-table followup-ledger-table">
+                        <thead>
+                          <tr>
+                            <th>复诊层级</th>
+                            <th>预约时间</th>
+                            <th>复查项目</th>
+                            <th>健康管理内容</th>
+                            <th>影像归档要求</th>
+                            <th>完成状态</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="record in followupRecords" :key="record.id">
+                            <td>{{ record.node || record.type }}</td>
+                            <td>{{ record.date || "待预约" }}</td>
+                            <td>{{ record.project || "待补充" }}</td>
+                            <td>{{ record.management || record.recovery || "待补充" }}</td>
+                            <td>{{ record.imagingRequirement || "按需归档" }}</td>
+                            <td>{{ record.completed || "未完成" }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </section>
+
+                    <section class="registration-section">
+                      <h3>七、备注预留栏</h3>
+                      <div class="registration-remarks">
+                        <span>并发症：{{ displayFieldValue("complicationRecord") }}</span>
+                        <span>用药记录：{{ displayFieldValue("medicationRecord") }}</span>
+                        <span>依从性：{{ displayFieldValue("patientComplianceRecord") }}</span>
+                      </div>
+                    </section>
+
+                    <div class="paper-footer">
+                      <span>{{ fieldValues.patientName }} · {{ fieldValues.visitNo }} · {{ archiveVersion }}</span>
+                      <span>院内健康管理登记 · 追溯码 {{ recordSignature }}</span>
+                    </div>
+                  </article>
+
+                  <article
+                    v-if="clinicalPreviewPage"
+                    class="preview-paper record-page clinical-record-page"
+                    :data-preview-page="clinicalPreviewPage.page"
+                  >
+                    <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
+                    <div class="paper-page-mark">
+                      <span>诊疗检查与治疗记录</span>
+                      <span>第 {{ clinicalPreviewPage.page }} 页 / 共 {{ previewPageCount }} 页</span>
+                    </div>
+                    <div class="medical-record-head module-record-head">
                       <div class="medical-brand">
                         <img class="medical-logo" src="@/assets/images/logo.jpg" alt="医院标识" />
                         <div class="medical-title-block">
                           <h1>{{ fieldValues.hospitalName }}</h1>
-                          <h2>{{ recordTitle }}</h2>
+                          <h2>诊疗检查与治疗记录</h2>
                         </div>
                       </div>
                       <div class="medical-subtitle">{{ recordSubtitle }}</div>
@@ -611,18 +816,18 @@
                       <span class="legend-filled">表单生成内容</span>
                     </div>
 
-                    <div class="paper-archive-card">
-                      <span v-for="item in archiveMeta" :key="item.label">
+                    <div class="paper-archive-card clinical-summary-card">
+                      <span v-for="item in clinicalArchiveSummary" :key="item.label">
                         <b>{{ item.label }}：</b>{{ item.value }}
                       </span>
                     </div>
 
-                    <section v-for="section in printableRecordSections" :key="section.key" class="paper-section">
+                    <section v-for="section in clinicalArchiveSections" :key="section.key" class="paper-section clinical-section">
                       <h3>{{ section.title }}</h3>
                       <div v-if="section.key === 'basic'" class="paper-grid">
                         <div v-for="field in section.fields" :key="field.key">
                           <strong>{{ field.printLabel || field.label }}</strong>
-                          <span class="paper-value">{{ fieldValues[field.key] || "____" }}</span>
+                          <span class="paper-value">{{ printableFieldValue(field) }}</span>
                         </div>
                       </div>
                       <div v-else class="paper-field-list">
@@ -631,14 +836,14 @@
                             {{ field.printLabel || field.label }}
                             <small v-if="matchedAttachments(field.key).length">有附件</small>
                           </strong>
-                          <span class="paper-value inline">{{ fieldValues[field.key] || "____" }}</span>
+                          <span class="paper-value inline">{{ printableFieldValue(field) }}</span>
                         </div>
                       </div>
                     </section>
 
                     <div class="paper-sign">
                       <span>医师签名：________</span>
-                      <span>质控签名：________</span>
+                      <span>档案审核：________</span>
                       <span>生成时间：{{ generatedAt }}</span>
                     </div>
                     <div class="paper-footer">
@@ -647,11 +852,121 @@
                     </div>
                   </article>
 
-                  <article class="preview-paper attachment-index" data-preview-page="3">
+                  <article
+                    v-if="managementPreviewPage"
+                    class="preview-paper record-page management-record-page"
+                    :data-preview-page="managementPreviewPage.page"
+                  >
+                    <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
+                    <div class="paper-page-mark">
+                      <span>患者管理与随访档案</span>
+                      <span>第 {{ managementPreviewPage.page }} 页 / 共 {{ previewPageCount }} 页</span>
+                    </div>
+                    <div class="medical-record-head module-record-head management-head">
+                      <div class="medical-brand">
+                        <img v-if="logoVisible" class="medical-logo" :src="logoSrc" alt="医院标识" @error="fallbackLogo" />
+                        <div class="medical-title-block">
+                          <h1>{{ fieldValues.hospitalName }}</h1>
+                          <h2>患者管理与随访档案</h2>
+                        </div>
+                      </div>
+                      <div class="medical-subtitle">来院来源 · 特殊诉求 · 家属关系 · 复查随访 · 主观反馈</div>
+                      <div class="paper-meta medical-meta-table">
+                        <span v-for="item in paperMeta" :key="item.label">
+                          <b>{{ item.label }}：</b><em class="paper-value">{{ item.value }}</em>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="paper-archive-card management-summary-card">
+                      <span v-for="item in managementArchiveSummary" :key="item.label">
+                        <b>{{ item.label }}：</b>{{ item.value }}
+                      </span>
+                    </div>
+
+                    <section
+                      v-for="section in managementArchiveSections"
+                      :key="section.key"
+                      class="paper-section management-section"
+                    >
+                      <h3>{{ section.title }}</h3>
+                      <div class="paper-field-list">
+                        <div
+                          v-for="field in section.fields"
+                          :key="field.key"
+                          class="paper-field-line"
+                          :class="{ 'followup-line': field.key === 'followupRecordsJson' }"
+                        >
+                          <strong>
+                            {{ field.printLabel || field.label }}
+                            <small v-if="matchedAttachments(field.key).length">有附件</small>
+                          </strong>
+                          <div v-if="field.key === 'followupRecordsJson'" class="paper-followup-timeline">
+                            <article v-for="(record, index) in followupRecords" :key="record.id" class="paper-followup-item">
+                              <b>第 {{ index + 1 }} 次 · {{ record.date || "日期待补" }}</b>
+                              <span>{{ record.type || "复查" }} / {{ record.onTime || "复查状态待记录" }}</span>
+                              <p>恢复：{{ record.recovery || "待记录" }}</p>
+                              <p>异常：{{ record.abnormal || "无" }}</p>
+                              <p>建议：{{ record.advice || "待记录" }}</p>
+                              <em>下次：{{ record.nextDate || "待安排" }}</em>
+                            </article>
+                            <span v-if="!followupRecords.length" class="paper-followup-empty">暂无复查随访记录</span>
+                          </div>
+                          <span v-else class="paper-value inline">{{ printableFieldValue(field) }}</span>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section v-if="auditArchiveSections.length" class="paper-section audit-summary-section">
+                      <h3>档案审核与归档信息</h3>
+                      <div class="audit-summary-grid">
+                        <div v-for="section in auditArchiveSections" :key="section.key">
+                          <strong>{{ section.title }}</strong>
+                          <p v-for="field in section.fields" :key="field.key">
+                            <b>{{ field.printLabel || field.label }}：</b>{{ printableFieldValue(field) }}
+                          </p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section v-if="previewTimelineEvents.length" class="paper-section archive-timeline-section">
+                      <h3>档案时间轴</h3>
+                      <div class="paper-archive-timeline">
+                        <article v-for="event in previewTimelineEvents" :key="event.id" class="paper-archive-timeline-item">
+                          <span>{{ timelineDisplayTime(event.time) }}</span>
+                          <div>
+                            <strong>{{ event.title }}</strong>
+                            <p>{{ event.detail || "暂无详情" }}</p>
+                            <small>
+                              来源：{{ timelineSourceLabel(event.source) }}
+                              <template v-if="event.operator"> · 操作人：{{ event.operator }}</template>
+                              <template v-if="event.targetLabel"> · {{ event.targetLabel }}</template>
+                            </small>
+                          </div>
+                        </article>
+                      </div>
+                    </section>
+
+                    <div class="paper-sign">
+                      <span>随访负责人：________</span>
+                      <span>档案审核：________</span>
+                      <span>生成时间：{{ generatedAt }}</span>
+                    </div>
+                    <div class="paper-footer">
+                      <span>{{ fieldValues.hospitalName }} · {{ archiveVersion }}</span>
+                      <span>状态：{{ archiveStatusText }} · 追溯码 {{ recordSignature }}</span>
+                    </div>
+                  </article>
+
+                  <article
+                    v-if="attachmentIndexPreviewPage"
+                    class="preview-paper attachment-index"
+                    :data-preview-page="attachmentIndexPreviewPage.page"
+                  >
                     <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
                       <span>附件索引</span>
-                      <span>第 3 页 / 共 {{ previewPageCount }} 页</span>
+                      <span>第 {{ attachmentIndexPreviewPage.page }} 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
                     <div class="medical-record-head compact">
                       <div class="medical-brand">
@@ -688,7 +1003,7 @@
                     </table>
                     <div class="paper-footer">
                       <span>{{ fieldValues.patientName }} · {{ fieldValues.visitNo }} · {{ archiveVersion }}</span>
-                      <span>附件原图随病历归档保存 · 追溯码 {{ recordSignature }}</span>
+                      <span>附件原图随健康档案保存 · 追溯码 {{ recordSignature }}</span>
                     </div>
                   </article>
 
@@ -696,12 +1011,12 @@
                     v-for="(attachment, index) in currentAttachments"
                     :key="attachment.key"
                     class="preview-paper attachment-page"
-                    :data-preview-page="index + 4"
+                    :data-preview-page="attachmentPreviewStartPage + index"
                   >
                     <div class="paper-watermark" :data-watermark="archiveWatermark"></div>
                     <div class="paper-page-mark">
                       <span>检查检验附件</span>
-                      <span>第 {{ index + 4 }} 页 / 共 {{ previewPageCount }} 页</span>
+                      <span>第 {{ attachmentPreviewStartPage + index }} 页 / 共 {{ previewPageCount }} 页</span>
                     </div>
                     <div class="attachment-head">
                       <div>
@@ -743,14 +1058,47 @@
         </Transition>
       </Teleport>
 
-      <el-drawer v-model="auditTimelineVisible" title="患者操作轨迹" size="620px" destroy-on-close>
+      <el-drawer v-model="auditTimelineVisible" title="档案时间轴与操作轨迹" size="680px" destroy-on-close>
         <div class="audit-timeline-drawer">
           <section class="timeline-summary">
             <div>
               <strong>{{ fieldValues.patientName || "当前患者" }}</strong>
               <span>{{ fieldValues.visitNo || patientId }}</span>
             </div>
-            <el-button :loading="auditLoading" @click="() => loadPatientAuditLogs()">刷新</el-button>
+            <el-button :loading="auditLoading" @click="refreshAuditTimeline">刷新</el-button>
+          </section>
+
+          <section class="archive-timeline-review">
+            <div class="archive-timeline-review-head">
+              <strong>健康档案时间轴</strong>
+              <span>来自就诊、复查、附件、归档和操作日志，可用于确认资料补充顺序。</span>
+            </div>
+            <el-empty v-if="!patientTimelineEvents.length" description="暂无档案时间轴" />
+            <el-timeline v-else class="patient-audit-timeline">
+              <el-timeline-item
+                v-for="event in patientTimelineEvents"
+                :key="event.id"
+                :timestamp="timelineDisplayTime(event.time)"
+                placement="top"
+                :type="timelineTagType(event)"
+              >
+                <article class="timeline-event archive-event">
+                  <div class="timeline-event-head">
+                    <strong>{{ event.title }}</strong>
+                    <el-tag :type="timelineTagType(event)" effect="plain" size="small">
+                      {{ timelineSourceLabel(event.source) }}
+                    </el-tag>
+                  </div>
+                  <p>{{ event.detail || "暂无详情" }}</p>
+                  <div class="timeline-meta">
+                    <span>{{ event.module }}</span>
+                    <span v-if="event.operator">{{ event.operator }}</span>
+                    <span v-if="event.targetLabel">{{ event.targetLabel }}</span>
+                    <span v-if="event.sourceId">定位：{{ event.sourceId }}</span>
+                  </div>
+                </article>
+              </el-timeline-item>
+            </el-timeline>
           </section>
 
           <el-empty v-if="!auditLoading && !patientAuditLogs.length" description="暂无操作轨迹" />
@@ -816,7 +1164,15 @@
         </template>
       </el-dialog>
 
-      <el-dialog v-model="printPreflightVisible" title="打印预检" width="520px" append-to-body destroy-on-close>
+      <el-dialog
+        v-model="printPreflightVisible"
+        title="打印预检"
+        width="520px"
+        append-to-body
+        destroy-on-close
+        class="print-preflight-dialog"
+        :z-index="3200"
+      >
         <div class="print-preflight-list">
           <article v-for="item in printPreflightItems" :key="item.key" :class="`is-${item.level}`">
             <span class="preflight-dot" aria-hidden="true"></span>
@@ -831,28 +1187,298 @@
           <el-button type="primary" :icon="Printer" @click="executePrint">继续打印</el-button>
         </template>
       </el-dialog>
+
+      <el-dialog v-model="aiSummaryVisible" title="AI健康档案总结" width="760px" append-to-body destroy-on-close>
+        <div v-loading="aiSummaryLoading" class="ai-summary-dialog" element-loading-text="正在生成AI总结...">
+          <el-alert
+            title="AI输出仅供院内辅助阅读，不替代医生判断和 HIS 官方病历质控。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <el-empty v-if="!aiSummary && !aiSummaryLoading" description="暂无AI总结">
+            <el-button type="primary" @click="generateAiSummary">生成总结</el-button>
+          </el-empty>
+          <template v-if="aiSummary">
+            <section class="ai-summary-head">
+              <div>
+                <strong>{{ fieldValues.patientName || "当前患者" }}</strong>
+                <span>{{ fieldValues.visitNo || patientId }} · {{ aiSummary.generatedAt }}</span>
+              </div>
+              <el-tag effect="plain">{{ aiSummary.model }}</el-tag>
+            </section>
+            <section class="ai-summary-block">
+              <h4>患者概况</h4>
+              <p>{{ aiSummary.summary }}</p>
+            </section>
+            <section v-if="aiSummary.patientPortrait" class="ai-summary-block portrait">
+              <h4>一句话患者画像</h4>
+              <p>{{ aiSummary.patientPortrait }}</p>
+            </section>
+            <section class="ai-summary-grid">
+              <article>
+                <h4>诊疗摘要</h4>
+                <p>{{ aiSummary.clinicalSummary }}</p>
+              </article>
+              <article>
+                <h4>管理随访摘要</h4>
+                <p>{{ aiSummary.managementSummary }}</p>
+              </article>
+              <article>
+                <h4>复查随访</h4>
+                <p>{{ aiSummary.followupSummary }}</p>
+              </article>
+            </section>
+            <section class="ai-summary-lists">
+              <article v-if="aiSummary.priorityFocus?.length">
+                <h4>优先关注</h4>
+                <ul>
+                  <li v-for="item in aiSummary.priorityFocus" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+              <article v-if="aiSummary.overlookedInsights?.length">
+                <h4>容易忽略</h4>
+                <ul>
+                  <li v-for="item in aiSummary.overlookedInsights" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+              <article>
+                <h4>缺失/待补充</h4>
+                <ul>
+                  <li v-for="item in aiSummary.missingItems" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+              <article>
+                <h4>风险提醒</h4>
+                <ul>
+                  <li v-for="item in aiSummary.riskHints" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+              <article v-if="aiSummary.communicationTips?.length">
+                <h4>沟通建议</h4>
+                <ul>
+                  <li v-for="item in aiSummary.communicationTips" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+              <article v-if="aiSummary.nextFollowupSuggestions?.length">
+                <h4>下一步随访</h4>
+                <ul>
+                  <li v-for="item in aiSummary.nextFollowupSuggestions" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+              <article>
+                <h4>医生提醒</h4>
+                <ul>
+                  <li v-for="item in aiSummary.doctorTips" :key="item">{{ item }}</li>
+                </ul>
+              </article>
+            </section>
+            <p class="ai-summary-disclaimer">{{ aiSummary.disclaimer }}</p>
+          </template>
+        </div>
+        <template #footer>
+          <el-button @click="aiSummaryVisible = false">关闭</el-button>
+          <el-button :disabled="!aiSummary" @click="copyAiSummary">复制总结</el-button>
+          <el-button type="primary" :loading="aiSummaryLoading" @click="generateAiSummary">重新生成</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="medicalRecordVisible" title="医生目标病历填写与生成" width="1040px" append-to-body destroy-on-close>
+        <div v-loading="medicalRecordLoading" class="medical-record-generator" element-loading-text="正在处理目标病历...">
+          <el-alert
+            title="先完整填写模板动态内容，再按固定 docx 母版生成；缺少必填项时不会生成半成品。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <section class="medical-record-template-strip">
+            <div>
+              <strong>{{ medicalRecordTemplate?.name || "目标病历模板" }}</strong>
+              <span>{{ medicalRecordTemplate?.templateSource || "周xx病历模版.docx" }}</span>
+            </div>
+            <el-tag effect="plain">{{ medicalRecordTemplate?.configured ? "模板已启用" : "模板待配置" }}</el-tag>
+          </section>
+          <section v-if="medicalRecordTemplate?.requiredFields?.length" class="medical-record-required">
+            <strong>模板关键字段</strong>
+            <el-tag v-for="field in medicalRecordTemplate.requiredFields" :key="field.key" effect="plain">
+              {{ field.label }}
+            </el-tag>
+          </section>
+          <section v-if="medicalRecordMissingItems.length" class="medical-record-missing">
+            <strong>生成前建议补齐</strong>
+            <el-tag v-for="item in medicalRecordMissingItems" :key="item" type="warning" effect="plain">{{ item }}</el-tag>
+          </section>
+          <section v-if="medicalRecordUnboundFields.length" class="medical-record-missing">
+            <strong>模板占位未完成</strong>
+            <el-tag v-for="item in medicalRecordUnboundFields" :key="item" type="danger" effect="plain">{{ item }}</el-tag>
+          </section>
+          <section v-if="medicalRecordFieldSections.length" class="medical-record-workspace">
+            <div class="medical-record-workspace-head">
+              <div>
+                <strong>医生目标病历填写</strong>
+                <span>
+                  已填 {{ medicalRecordCompletedCount }}/{{ medicalRecordTotalCount }} 项 · 必填缺失
+                  {{ medicalRecordMissingItems.length }} 项
+                </span>
+              </div>
+              <div>
+                <el-button plain :loading="medicalRecordLoading" @click="precheckMedicalRecord">生成预检</el-button>
+                <el-button type="primary" plain :loading="medicalRecordLoading" @click="saveMedicalRecordWorkspace">
+                  保存填写
+                </el-button>
+              </div>
+            </div>
+            <el-collapse v-model="medicalRecordActiveSections" class="medical-record-sections">
+              <el-collapse-item
+                v-for="section in medicalRecordFieldSections"
+                :key="section.section"
+                :title="section.section"
+                :name="section.section"
+              >
+                <div class="medical-record-field-grid">
+                  <label
+                    v-for="field in section.fields"
+                    :key="field.key"
+                    class="medical-record-field"
+                    :class="{ wide: field.kind === 'textarea', missing: isMedicalRecordFieldMissing(field) }"
+                  >
+                    <span>
+                      {{ field.label }}
+                      <sup v-if="field.required">*</sup>
+                      <em v-if="field.aiPolishable">可后续AI润色</em>
+                    </span>
+                    <el-date-picker
+                      v-if="field.kind === 'date'"
+                      v-model="fieldValues[field.key]"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      :placeholder="field.placeholder || '选择日期'"
+                    />
+                    <el-input
+                      v-else
+                      v-model="fieldValues[field.key]"
+                      :type="field.kind === 'textarea' ? 'textarea' : 'text'"
+                      :rows="field.kind === 'textarea' ? 4 : undefined"
+                      :placeholder="field.placeholder || '请填写'"
+                    />
+                  </label>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </section>
+          <section v-if="currentMedicalRecord" class="medical-record-current">
+            <div class="medical-record-current-head">
+              <div>
+                <strong>V{{ currentMedicalRecord.version }} · {{ medicalRecordStatusLabel(currentMedicalRecord.status) }}</strong>
+                <span>
+                  {{ currentMedicalRecord.generatedAt }} · {{ currentMedicalRecord.operator }} · {{ currentMedicalRecord.model }}
+                </span>
+              </div>
+              <el-tag :type="medicalRecordStatusType(currentMedicalRecord.status)" effect="plain">
+                {{ currentMedicalRecord.contentHash ? `Hash ${currentMedicalRecord.contentHash.slice(0, 10)}` : "待校验" }}
+              </el-tag>
+            </div>
+            <div class="medical-record-file-card">
+              <div>
+                <strong>{{ currentMedicalRecord.fileName || `医生目标病历-V${currentMedicalRecord.version}.docx` }}</strong>
+                <span>
+                  {{ currentMedicalRecord.templateVersion || medicalRecordTemplate?.templateVersion || "固定模板版本" }}
+                </span>
+              </div>
+              <el-button type="primary" plain @click="downloadMedicalRecord">下载 docx</el-button>
+            </div>
+          </section>
+          <el-empty v-else description="暂无医生目标病历">
+            <el-button type="primary" @click="generateMedicalRecord">生成目标病历</el-button>
+          </el-empty>
+          <section v-if="medicalRecordVersions.length" class="medical-record-history">
+            <strong>历史版本</strong>
+            <button
+              v-for="record in medicalRecordVersions"
+              :key="record.id"
+              type="button"
+              :class="{ active: currentMedicalRecord?.id === record.id }"
+              @click="currentMedicalRecord = record"
+            >
+              <span>V{{ record.version }} · {{ medicalRecordStatusLabel(record.status) }}</span>
+              <small>{{ record.generatedAt }}</small>
+            </button>
+          </section>
+        </div>
+        <template #footer>
+          <el-button @click="medicalRecordVisible = false">关闭</el-button>
+          <el-button :loading="medicalRecordLoading" @click="precheckMedicalRecord">生成预检</el-button>
+          <el-button :loading="medicalRecordLoading" @click="saveMedicalRecordWorkspace">保存填写</el-button>
+          <el-button :disabled="!currentMedicalRecord" @click="downloadMedicalRecord">下载 docx</el-button>
+          <el-button
+            v-if="currentMedicalRecord && currentMedicalRecord.status !== 'voided'"
+            type="danger"
+            plain
+            @click="voidMedicalRecord"
+          >
+            作废版本
+          </el-button>
+          <el-button
+            v-if="currentMedicalRecord?.status === 'draft'"
+            type="success"
+            :loading="medicalRecordLoading"
+            @click="finalizeMedicalRecord"
+          >
+            确认定稿
+          </el-button>
+          <el-button type="primary" :loading="medicalRecordLoading" @click="generateMedicalRecord">生成 docx 新版本</el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
 
 <script setup lang="ts" name="patientDetail">
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  defineComponent,
+  h,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+  type PropType
+} from "vue";
 import { useDebounceFn } from "@vueuse/core";
-import { ElMessage } from "element-plus";
+import { ElButton, ElInput, ElMessage } from "element-plus";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowDown, Clock, DocumentCopy, FolderOpened, Lock, Printer, Upload, View } from "@element-plus/icons-vue";
 import TreeFilter from "@/components/TreeFilter/index.vue";
 import {
+  downloadMedicalRecordApi,
   getAuditLogListApi,
+  finalizeMedicalRecordApi,
+  generateRecordAiSummaryApi,
+  generateMedicalRecordApi,
+  getGeneratedMedicalRecordVersionsApi,
+  getMedicalRecordTemplateApi,
   getPatientDetailApi,
+  getPatientTimelineApi,
   getTemplateFieldRulesApi,
   logPatientExportApi,
+  precheckMedicalRecordApi,
   revokeArchiveApi,
+  saveMedicalRecordWorkspaceApi,
   savePatientRecordApi,
   submitArchiveApi,
+  voidMedicalRecordApi,
   voidDocumentApi,
   type AuditLogRow,
+  type AiRecordSummary,
+  type GeneratedMedicalRecord,
+  type MedicalRecordTemplateField,
+  type MedicalRecordTemplateStatus,
   type PatientRow,
+  type PatientTimelineEvent,
   type TemplateFieldRule
 } from "@/api/modules/clinic";
 import {
@@ -860,6 +1486,7 @@ import {
   recordAttachments as defaultRecordAttachments,
   recordSections,
   roleLabel,
+  serviceCollaborators,
   type RecordAttachment,
   type RecordField,
   type RecordSection,
@@ -880,6 +1507,8 @@ const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInf
 const roleName = computed(() => roleLabel(currentRole.value));
 const patientId = computed(() => String(route.params.id || "").trim());
 const recordViewMode = ref<"mine" | "full">("mine");
+type FieldLayerMode = "core" | "recommended" | "optional" | "all";
+const fieldLayerMode = ref<FieldLayerMode>("core");
 const activeSectionKey = ref(recordSections[0].key);
 const archiveSubmitted = ref(false);
 const archiveVersion = ref("V0.3-预归档");
@@ -893,6 +1522,17 @@ const highlightedFieldKey = ref("");
 const previewVisible = ref(false);
 const previewActivePage = ref(1);
 const printPreflightVisible = ref(false);
+const aiSummaryVisible = ref(false);
+const aiSummaryLoading = ref(false);
+const aiSummary = ref<AiRecordSummary>();
+const medicalRecordVisible = ref(false);
+const medicalRecordLoading = ref(false);
+const medicalRecordTemplate = ref<MedicalRecordTemplateStatus>();
+const medicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
+const currentMedicalRecord = ref<GeneratedMedicalRecord>();
+const medicalRecordMissingItems = ref<string[]>([]);
+const medicalRecordUnboundFields = ref<string[]>([]);
+const medicalRecordActiveSections = ref<string[]>([]);
 const auditTimelineVisible = ref(false);
 const auditLoading = ref(false);
 const voidDialogVisible = ref(false);
@@ -905,6 +1545,7 @@ const autoSaveStatus = ref<AutoSaveStatus>("idle");
 const conflictDraftSavedAt = ref("");
 const currentAttachments = ref<RecordAttachment[]>(defaultRecordAttachments);
 const patientAuditLogs = ref<AuditLogRow[]>([]);
+const patientTimelineEvents = ref<PatientTimelineEvent[]>([]);
 const templateRules = ref<TemplateFieldRule[]>([]);
 const collapsedSectionKeys = ref<string[]>([]);
 const patientInfo = ref<PatientRow>();
@@ -932,6 +1573,110 @@ type WorkflowHint = {
   title: string;
   desc: string;
 };
+type FollowupRecord = {
+  id: string;
+  date: string;
+  type: string;
+  node: string;
+  project: string;
+  management: string;
+  imagingRequirement: string;
+  completed: string;
+  recovery: string;
+  abnormal: string;
+  advice: string;
+  nextDate: string;
+  onTime: string;
+};
+const createFollowupRecord = (): FollowupRecord => ({
+  id: `followup-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  date: new Date().toISOString().slice(0, 10),
+  type: "术后复查",
+  node: "自定义复查",
+  project: "",
+  management: "",
+  imagingRequirement: "",
+  completed: "未完成",
+  recovery: "",
+  abnormal: "",
+  advice: "",
+  nextDate: "",
+  onTime: "按时复查"
+});
+const standardFollowupNodes = [
+  "首次复诊（术后第7天）",
+  "二次复诊（术后14天）",
+  "三次复诊（术后30天）",
+  "远期随访（3/6/12月）",
+  "痊愈归档"
+];
+const FollowupRecordsEditor = defineComponent({
+  name: "FollowupRecordsEditor",
+  props: {
+    records: { type: Array as PropType<FollowupRecord[]>, required: true },
+    disabled: { type: Boolean, default: false }
+  },
+  emits: ["add", "remove"],
+  setup(props, { emit }) {
+    const input = (record: FollowupRecord, key: keyof FollowupRecord, placeholder = "", type = "text") =>
+      h(ElInput, {
+        modelValue: record[key],
+        "onUpdate:modelValue": (value: string) => {
+          record[key] = value;
+        },
+        disabled: props.disabled,
+        placeholder,
+        type,
+        rows: type === "textarea" ? 2 : undefined
+      });
+    return () =>
+      h("div", { class: "followup-editor" }, [
+        h("div", { class: "followup-editor-head" }, [
+          h("strong", "术后分级复诊健康管理台账"),
+          h("span", "默认覆盖术后7天、14天、30天、3/6/12月和痊愈归档节点"),
+          h(ElButton, { type: "primary", plain: true, disabled: props.disabled, onClick: () => emit("add") }, () => "新增复查")
+        ]),
+        props.records.length
+          ? h(
+              "div",
+              { class: "followup-record-list" },
+              props.records.map((record, index) =>
+                h("article", { class: "followup-record-item", key: record.id }, [
+                  h("div", { class: "followup-record-top" }, [
+                    h("span", record.node || `第 ${index + 1} 次`),
+                    h(
+                      ElButton,
+                      { type: "danger", link: true, disabled: props.disabled, onClick: () => emit("remove", record.id) },
+                      () => "删除"
+                    )
+                  ]),
+                  h("div", { class: "followup-record-grid" }, [
+                    h("label", [h("span", "复诊层级"), input(record, "node", "术后第7天/14天/30天/远期/痊愈")]),
+                    h("label", [h("span", "复查日期"), input(record, "date", "YYYY-MM-DD")]),
+                    h("label", [h("span", "复查项目"), input(record, "project", "换药/创面/肛门功能/肠镜等")]),
+                    h("label", [h("span", "完成状态"), input(record, "completed", "未完成/已完成")])
+                  ]),
+                  h("div", { class: "followup-record-grid wide" }, [
+                    h("label", [
+                      h("span", "健康管理内容"),
+                      input(record, "management", "宣教、换药、疼痛管理、饮食管理", "textarea")
+                    ]),
+                    h("label", [
+                      h("span", "影像归档要求"),
+                      input(record, "imagingRequirement", "创面照片/报告/无需归档", "textarea")
+                    ]),
+                    h("label", [h("span", "恢复情况"), input(record, "recovery", "每次检查的恢复情况", "textarea")]),
+                    h("label", [h("span", "异常情况"), input(record, "abnormal", "无异常可填无", "textarea")]),
+                    h("label", [h("span", "医生建议"), input(record, "advice", "用药、清洁、饮食、复查安排", "textarea")]),
+                    h("label", [h("span", "下次复查"), input(record, "nextDate", "YYYY-MM-DD")])
+                  ])
+                ])
+              )
+            )
+          : h("div", { class: "followup-empty" }, "暂无复查记录")
+      ]);
+  }
+});
 const emptyWorkflowHint: WorkflowHint = {
   visible: false,
   level: "info",
@@ -944,6 +1689,75 @@ const ruleMap = computed(() =>
     return map;
   }, {})
 );
+const fullArchiveRoles = new Set<UserRole>(["admin", "doctor", "quality"]);
+const roleVisibleSections: Partial<Record<UserRole, Set<string>>> = {
+  frontdesk: new Set([
+    "basic",
+    "arrivalSource",
+    "specialNeeds",
+    "familyRelationship",
+    "trustCooperation",
+    "followup",
+    "patientFeedback"
+  ]),
+  nurse: new Set([
+    "basic",
+    "specialExam",
+    "auxiliary",
+    "preOpScreening",
+    "operation",
+    "followup",
+    "patientFeedback",
+    "tcmHealthManagement",
+    "supplementNotes"
+  ]),
+  lab: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"]),
+  ecg: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"]),
+  ultrasound: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"])
+};
+const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
+  lab: new Set([
+    "patientName",
+    "visitNo",
+    "bloodRoutine",
+    "coagulation",
+    "preOpEight",
+    "urineRoutine",
+    "biochemistry",
+    "bloodRoutineStatus",
+    "coagulationStatus",
+    "preOpEightStatus",
+    "liverFunctionStatus",
+    "renalFunctionStatus",
+    "fastingGlucoseStatus",
+    "bloodLipidStatus",
+    "urineRoutineStatus",
+    "crpStatus",
+    "hpTestStatus",
+    "uncheckedItemsNote",
+    "documentScope"
+  ]),
+  ecg: new Set(["patientName", "visitNo", "ecgResult", "ecgStatus", "uncheckedItemsNote", "documentScope"]),
+  ultrasound: new Set([
+    "patientName",
+    "visitNo",
+    "colonoscopy",
+    "gastroscopyStatus",
+    "colonoscopyStatus",
+    "drChestStatus",
+    "uncheckedItemsNote",
+    "documentScope"
+  ])
+};
+const canViewFullArchive = computed(() => fullArchiveRoles.has(currentRole.value));
+const isVisibleForRole = (section: RecordSection, field: RecordField) => {
+  if (canViewFullArchive.value) return true;
+  const visibleSections = roleVisibleSections[currentRole.value];
+  if (visibleSections && !visibleSections.has(section.key)) return false;
+  const visibleFields = roleVisibleFieldKeys[currentRole.value];
+  if (visibleFields && !visibleFields.has(field.key)) return false;
+  return isEditable(field) || Boolean(field.required) || Boolean(field.evidence);
+};
 const applyRuleToField = (field: RecordField): RecordField | null => {
   const rule = ruleMap.value[field.key];
   if (rule && !rule.enabled) return null;
@@ -959,10 +1773,13 @@ const applyRuleToField = (field: RecordField): RecordField | null => {
 };
 const recordSectionsByRule = computed<RecordSection[]>(() =>
   recordSections
-    .map(section => ({
-      ...section,
-      fields: section.fields.map(applyRuleToField).filter(Boolean) as RecordField[]
-    }))
+    .map(section => {
+      const fields = section.fields.map(applyRuleToField).filter(Boolean) as RecordField[];
+      return {
+        ...section,
+        fields: fields.filter(field => isVisibleForRole(section, field))
+      };
+    })
     .filter(section => section.fields.length)
 );
 const printableRecordSections = computed<RecordSection[]>(() =>
@@ -972,6 +1789,43 @@ const printableRecordSections = computed<RecordSection[]>(() =>
       fields: section.fields.filter(field => field.printable !== false)
     }))
     .filter(section => section.fields.length)
+);
+const clinicalSectionKeys = new Set([
+  "basic",
+  "chiefComplaint",
+  "presentIllness",
+  "history",
+  "tcmInspection",
+  "specialExam",
+  "auxiliary",
+  "preOpScreening",
+  "mainDiagnosis",
+  "secondaryDiagnosis",
+  "comorbidityTcm",
+  "operation",
+  "treatmentPlanManagement",
+  "dip",
+  "roundSchedule"
+]);
+const managementSectionKeys = new Set([
+  "arrivalSource",
+  "specialNeeds",
+  "familyRelationship",
+  "trustCooperation",
+  "followup",
+  "patientFeedback",
+  "tcmHealthManagement",
+  "supplementNotes"
+]);
+const auditSectionKeys = new Set(["documentScope", "qualityCheck"]);
+const clinicalArchiveSections = computed<RecordSection[]>(() =>
+  printableRecordSections.value.filter(section => clinicalSectionKeys.has(section.key))
+);
+const managementArchiveSections = computed<RecordSection[]>(() =>
+  printableRecordSections.value.filter(section => managementSectionKeys.has(section.key))
+);
+const auditArchiveSections = computed<RecordSection[]>(() =>
+  printableRecordSections.value.filter(section => auditSectionKeys.has(section.key))
 );
 const activeIndex = computed(() => recordSectionsByRule.value.findIndex(section => section.key === activeSectionKey.value));
 const activeSection = computed(
@@ -990,6 +1844,82 @@ const createEmptyFieldValues = () =>
   }, {});
 
 const fieldValues = reactive(createEmptyFieldValues());
+const followupRecords = ref<FollowupRecord[]>([]);
+let syncingFollowupJson = false;
+
+const normalizeFollowupRecord = (record: Partial<FollowupRecord>): FollowupRecord => ({
+  ...createFollowupRecord(),
+  ...record,
+  node: record.node || record.type || "自定义复查",
+  project: record.project || "",
+  management: record.management || "",
+  imagingRequirement: record.imagingRequirement || "",
+  completed: record.completed || (record.date || record.recovery || record.advice ? "已完成" : "未完成"),
+  id: record.id || `followup-${Date.now()}-${Math.random().toString(16).slice(2)}`
+});
+
+const parseFollowupRecords = (value?: string): FollowupRecord[] => {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(item => normalizeFollowupRecord(item || {})) : [];
+  } catch {
+    return [];
+  }
+};
+
+const syncFollowupRecordsFromField = () => {
+  syncingFollowupJson = true;
+  const parsedRecords = parseFollowupRecords(fieldValues.followupRecordsJson);
+  const recordsByNode = new Map(parsedRecords.map(record => [record.node, record]));
+  const defaults = standardFollowupNodes.map(
+    node =>
+      recordsByNode.get(node) ||
+      normalizeFollowupRecord({
+        id: `followup-node-${node}`,
+        node,
+        type: node,
+        completed: "未完成"
+      })
+  );
+  const customRecords = parsedRecords.filter(record => !standardFollowupNodes.includes(record.node));
+  followupRecords.value = [...defaults, ...customRecords];
+  nextTick(() => {
+    syncingFollowupJson = false;
+  });
+};
+
+const formatFollowupRecord = (record: FollowupRecord, index: number) =>
+  `${record.node || `第 ${index + 1} 次`}：${record.date || "日期待补"}；项目：${record.project || "待记录"}；管理：${
+    record.management || "待记录"
+  }；恢复：${record.recovery || "待记录"}；异常：${record.abnormal || "无"}；建议：${
+    record.advice || "待记录"
+  }；状态：${record.completed || record.onTime || "待记录"}`;
+
+const printableFieldValue = (field: RecordField) => {
+  if (field.key === "followupRecordsJson") {
+    return followupRecords.value.length ? followupRecords.value.map(formatFollowupRecord).join("\n") : "暂无复查随访记录";
+  }
+  return fieldValues[field.key] || "____";
+};
+
+const addFollowupRecord = () => {
+  followupRecords.value = [...followupRecords.value, createFollowupRecord()];
+};
+
+const removeFollowupRecord = (id: string) => {
+  followupRecords.value = followupRecords.value.filter(record => record.id !== id);
+};
+
+watch(
+  followupRecords,
+  records => {
+    if (syncingFollowupJson) return;
+    fieldValues.followupRecordsJson = JSON.stringify(records);
+  },
+  { deep: true }
+);
 
 const fieldPresets: Record<string, string[]> = {
   hospitalName: ["固始中医肛肠医院"],
@@ -1094,14 +2024,18 @@ const fieldPresets: Record<string, string[]> = {
   generatedDocuments: [
     "入院记录、首次病程、术前讨论、术前小结、手术记录、术后每日病程、出院小结。",
     "入院记录、首次病程、手术记录、出院小结。",
-    "按质控要求生成完整住院病历。"
+    "按院内健康管理要求生成完整患者档案。"
   ],
-  documentStandard: ["格式、结构、质控标准与院内标准病历一致。", "按医院现行病历书写规范执行。", "待病案室最终复核。"],
+  documentStandard: [
+    "作为院内患者健康管理档案使用，不替代 HIS 官方病历和病历质控文书。",
+    "按院内健康档案展示规范执行。",
+    "待病案室最终复核。"
+  ],
   qualityItems: [
     "中西医诊断一一对应；治法匹配；三级查房顺序规范；手术与诊断一致；分组合理、不高套；中医特色治疗齐全；合并病记录完整；肠镜按需选择、符合临床逻辑。",
     "诊断、手术、DIP、附件、时序待逐项复核。"
   ],
-  qualityReview: ["待质控复核。", "资料完整，可提交归档。", "需补充检查附件后再归档。", "需医生补充诊断依据。"]
+  qualityReview: ["待档案审核。", "资料完整，可提交归档。", "需补充检查附件后再归档。", "需医生补充诊断依据。"]
 };
 
 const normalizeAttachmentUrl = (url?: string) => String(url || "").trim();
@@ -1114,6 +2048,10 @@ const canOpenAttachment = (attachmentOrUrl?: RecordAttachment | string) => {
   const url = typeof attachmentOrUrl === "string" ? attachmentOrUrl : attachmentOrUrl?.url;
   return !isInvalidAttachmentUrl(url);
 };
+function sectionEvidenceCountForSections(sections: RecordSection[]) {
+  const fieldKeys = new Set(sections.flatMap(section => section.fields.map(field => field.key)));
+  return currentAttachments.value.filter(attachment => fieldKeys.has(attachment.fieldKey)).length;
+}
 const imageAttachmentPattern = /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i;
 const isImageAttachment = (attachment: RecordAttachment) => {
   const url = normalizeAttachmentUrl(attachment.url);
@@ -1141,13 +2079,33 @@ const preloadAttachmentPreviews = () => {
 
 const currentVisitType = computed(() => patientInfo.value?.visitType || fieldValues.admissionWay || "门诊");
 const isInpatientRecord = computed(() => currentVisitType.value.includes("住院"));
-const recordTitle = computed(() => (isInpatientRecord.value ? "住院病历" : "门诊病历"));
-const recordSubtitle = computed(() => `${currentVisitType.value} · ${recordTitle.value}生成表`);
+const recordTitle = computed(() => "患者健康管理档案");
+const recordSubtitle = computed(() => `${currentVisitType.value} · 院内全周期管理记录`);
 const visitNoLabel = computed(() => (isInpatientRecord.value ? "住院号" : "门诊号"));
 const visitDateLabel = computed(() => (isInpatientRecord.value ? "入院日期" : "就诊日期"));
 const encounterCountLabel = computed(() => `累计 ${patientInfo.value?.encounterCount || 1} 次就诊`);
 const validAttachmentCount = computed(() => currentAttachments.value.filter(canOpenAttachment).length);
 const invalidAttachmentCount = computed(() => currentAttachments.value.length - validAttachmentCount.value);
+const latestFollowupRecord = computed(() =>
+  [...followupRecords.value].reverse().find(record => record.date || record.recovery || record.advice)
+);
+const archiveFocusSummary = computed(
+  () =>
+    fieldValues.primaryConcern ||
+    fieldValues.specialRequirements ||
+    fieldValues.visitMotivation ||
+    fieldValues.recoverySummary ||
+    "待补充关注点"
+);
+
+const completedCountForSections = (sections: RecordSection[]) =>
+  sections.reduce((count, section) => count + sectionCompletedCount(section), 0);
+const fieldCountForSections = (sections: RecordSection[]) =>
+  sections.reduce((count, section) => count + section.fields.length, 0);
+const formatSectionProgress = (sections: RecordSection[]) => {
+  const total = fieldCountForSections(sections);
+  return total ? `${completedCountForSections(sections)}/${total}` : "0/0";
+};
 
 const paperMeta = computed(() => [
   { label: "患者", value: fieldValues.patientName },
@@ -1156,10 +2114,82 @@ const paperMeta = computed(() => [
   { label: "就诊类型", value: currentVisitType.value },
   { label: "治疗类别", value: fieldValues.treatmentType }
 ]);
+const displayFieldValue = (key: string, fallback = "待补充") => {
+  const value = String(fieldValues[key] || "").trim();
+  return value && value !== "____" && value !== "________" ? value : fallback;
+};
+const screeningStatusClass = (status: string) =>
+  status === "异常" ? "is-abnormal" : status === "已查" ? "is-checked" : "is-unchecked";
+const registrationBasicRows = computed(() => [
+  ["姓名", displayFieldValue("patientName"), "联系电话", displayFieldValue("phone")],
+  [
+    "性别/年龄",
+    `${displayFieldValue("gender", "未说明")} / ${displayFieldValue("age")}`,
+    "户籍地/现住址",
+    displayFieldValue("address")
+  ],
+  [
+    "建档（首诊）日期",
+    displayFieldValue("archiveCreatedAt", displayFieldValue("admissionDate")),
+    "就诊类型/科室",
+    `${currentVisitType.value} / ${displayFieldValue("departmentName")}`
+  ],
+  [
+    "来诊渠道/医保类型",
+    `${displayFieldValue("arrivalPath")} / ${displayFieldValue("insuranceType")}`,
+    "本次建档充值",
+    displayFieldValue("initialRechargeAmount")
+  ],
+  ["基础生命体征", displayFieldValue("vitalSigns"), "整体病情风险评级", displayFieldValue("overallRiskLevel")],
+  [
+    "健康管理专员",
+    displayFieldValue("healthManager"),
+    "主诊医师/责任护士",
+    `${displayFieldValue("attendingDoctor")} / ${displayFieldValue("responsibleNurse")}`
+  ]
+]);
+const registrationConditionRows = computed(() => [
+  ["主诉", displayFieldValue("chiefComplaintText")],
+  ["既往史/过敏史", `${displayFieldValue("operationHistory")} ${displayFieldValue("allergyHistory")}`],
+  ["专科查体", displayFieldValue("lithotomyExam")],
+  ["西医诊断", displayFieldValue("westernDiagnosis")],
+  ["中医辨证", `${displayFieldValue("tcmDiagnosis")} / ${displayFieldValue("tcmSyndrome")}`],
+  ["影像归档", currentAttachments.value.length ? `已归档 ${currentAttachments.value.length} 份附件` : "待补充附件"]
+]);
+const screeningRows = computed(() => [
+  ["血常规", displayFieldValue("bloodRoutine"), "bloodRoutineStatus"],
+  ["凝血四项", displayFieldValue("coagulation"), "coagulationStatus"],
+  ["术前八项（传染病）", displayFieldValue("preOpEight"), "preOpEightStatus"],
+  ["心电图", displayFieldValue("ecgResult"), "ecgStatus"],
+  ["肝功能", displayFieldValue("biochemistry"), "liverFunctionStatus"],
+  ["肾功能", displayFieldValue("biochemistry"), "renalFunctionStatus"],
+  ["空腹血糖", displayFieldValue("biochemistry"), "fastingGlucoseStatus"],
+  ["血脂四项", displayFieldValue("biochemistry"), "bloodLipidStatus"],
+  ["尿常规", displayFieldValue("urineRoutine"), "urineRoutineStatus"],
+  ["C反应蛋白（CRP）", "按报告或医嘱填写", "crpStatus"],
+  ["幽门螺杆菌检测", "按报告或医嘱填写", "hpTestStatus"],
+  ["电子胃镜检查", "按报告或医嘱填写", "gastroscopyStatus"],
+  ["电子肠镜检查", displayFieldValue("colonoscopy"), "colonoscopyStatus"],
+  ["DR胸片检查", "按报告或医嘱填写", "drChestStatus"]
+]);
+const treatmentManagementRows = computed(() => [
+  ["手术可行性评估", displayFieldValue("surgeryFeasibility")],
+  ["患者核心诉求", displayFieldValue("primaryConcern", displayFieldValue("specialRequirements"))],
+  ["术中特殊交代", displayFieldValue("intraoperativeNotice")],
+  ["当日处置", displayFieldValue("sameDayTreatment")]
+]);
+const tcmManagementRows = computed(() => [
+  ["术后中药坐浴方案", displayFieldValue("tcmSitzBathPlan")],
+  ["中医内服调理", displayFieldValue("tcmOralRegulation")],
+  ["饮食禁忌宣教", displayFieldValue("dietEducation")],
+  ["肛门功能锻炼指导", displayFieldValue("analFunctionExercise")],
+  ["慢病预防干预", displayFieldValue("chronicDiseaseIntervention")],
+  ["档案闭环签字", displayFieldValue("archiveClosedSignature")]
+]);
 
 const allFields = computed(() => recordSectionsByRule.value.flatMap(section => section.fields));
-const archiveStatusText = computed(() => (archiveSubmitted.value ? "待质控审核" : "草稿预览"));
-const archiveWatermark = computed(() => (archiveSubmitted.value ? "待质控审核" : "草稿预览"));
+const archiveStatusText = computed(() => (archiveSubmitted.value ? "待档案审核" : "档案草稿"));
+const archiveWatermark = computed(() => (archiveSubmitted.value ? "待档案审核" : "档案草稿"));
 
 const isFieldComplete = (value: string) => {
   const normalized = value.trim();
@@ -1202,7 +2232,73 @@ const completionStats = computed(() => {
 const completionPercent = computed(() =>
   completionStats.value.total ? Math.round((completionStats.value.completed / completionStats.value.total) * 100) : 0
 );
-const previewPageCount = computed(() => currentAttachments.value.length + 3);
+
+const medicalRecordFieldSections = computed(() => medicalRecordTemplate.value?.fieldMatrix || []);
+const medicalRecordFields = computed<MedicalRecordTemplateField[]>(() =>
+  medicalRecordFieldSections.value.flatMap(section => section.fields)
+);
+const isMedicalRecordFieldMissing = (field: MedicalRecordTemplateField) => {
+  if (!field.required) return false;
+  const value = String(fieldValues[field.key] || "").trim();
+  return !value || value === "待补充" || value === "未见记录" || value.includes("____") || value.includes("________");
+};
+const isMedicalRecordFieldFilled = (field: MedicalRecordTemplateField) => {
+  const value = String(fieldValues[field.key] || "").trim();
+  return Boolean(value) && value !== "待补充" && value !== "未见记录" && !value.includes("____") && !value.includes("________");
+};
+const medicalRecordTotalCount = computed(() => medicalRecordFields.value.length);
+const medicalRecordCompletedCount = computed(() => medicalRecordFields.value.filter(isMedicalRecordFieldFilled).length);
+const medicalRecordWorkspaceValues = () =>
+  medicalRecordFields.value.reduce<Record<string, string>>((payload, field) => {
+    payload[field.key] = String(fieldValues[field.key] || "");
+    return payload;
+  }, {});
+
+type PreviewPageNav = {
+  key: string;
+  label: string;
+  page: number;
+};
+
+const isMeaningfulPreviewValue = (value?: string) => {
+  const normalized = String(value || "").trim();
+  return Boolean(normalized) && normalized !== "____" && normalized !== "________" && !/^[_\s年月日-]+$/.test(normalized);
+};
+
+const sectionHasPreviewContent = (section: RecordSection) =>
+  section.fields.some(field => {
+    if (field.key === "followupRecordsJson") return followupRecords.value.length > 0;
+    return isMeaningfulPreviewValue(fieldValues[field.key]) || matchedAttachments(field.key).length > 0;
+  });
+
+const clinicalPreviewHasContent = computed(() => clinicalArchiveSections.value.some(sectionHasPreviewContent));
+const managementPreviewHasContent = computed(
+  () =>
+    managementArchiveSections.value.some(sectionHasPreviewContent) ||
+    auditArchiveSections.value.some(sectionHasPreviewContent) ||
+    followupRecords.value.length > 0
+);
+
+const previewNavigation = computed<PreviewPageNav[]>(() => {
+  const pages: PreviewPageNav[] = [{ key: "cover", label: "封面", page: 1 }];
+  pages.push({ key: "registration", label: "登记表", page: pages.length + 1 });
+  if (clinicalPreviewHasContent.value) pages.push({ key: "clinical", label: "诊疗检查", page: pages.length + 1 });
+  if (managementPreviewHasContent.value) pages.push({ key: "management", label: "管理随访", page: pages.length + 1 });
+  if (currentAttachments.value.length) pages.push({ key: "attachments", label: "附件", page: pages.length + 1 });
+  return pages;
+});
+const previewPageByKey = (key: string) => previewNavigation.value.find(page => page.key === key);
+const coverPreviewPage = computed(() => previewPageByKey("cover") || { key: "cover", label: "封面", page: 1 });
+const registrationPreviewPage = computed(
+  () => previewPageByKey("registration") || { key: "registration", label: "登记表", page: 2 }
+);
+const clinicalPreviewPage = computed(() => previewPageByKey("clinical"));
+const managementPreviewPage = computed(() => previewPageByKey("management"));
+const attachmentIndexPreviewPage = computed(() => previewPageByKey("attachments"));
+const attachmentPreviewStartPage = computed(() =>
+  attachmentIndexPreviewPage.value ? attachmentIndexPreviewPage.value.page + 1 : previewNavigation.value.length + 1
+);
+const previewPageCount = computed(() => previewNavigation.value.length + currentAttachments.value.length);
 const printFileTitle = computed(() =>
   [fieldValues.hospitalName, fieldValues.patientName, fieldValues.visitNo, new Date().toISOString().slice(0, 10)]
     .filter(Boolean)
@@ -1244,19 +2340,28 @@ const recordSignature = computed(() => {
     .toUpperCase();
 });
 
-const archiveMeta = computed(() => [
-  { label: "文书状态", value: archiveStatusText.value },
-  { label: "预归档版本", value: archiveVersion.value },
-  { label: "生成时间", value: generatedAt.value },
-  { label: "生成账号", value: roleName.value },
-  { label: "完整度", value: `${completionStats.value.completed}/${completionStats.value.total}` },
-  { label: "校验码", value: recordSignature.value }
+const clinicalArchiveSummary = computed(() => [
+  { label: "诊疗字段", value: formatSectionProgress(clinicalArchiveSections.value) },
+  { label: "主要诊断", value: fieldValues.westernDiagnosis || fieldValues.tcmDiagnosis || "待补充" },
+  { label: "治疗方案", value: fieldValues.operationName || fieldValues.treatmentType || "待补充" },
+  { label: "检查附件", value: `${sectionEvidenceCountForSections(clinicalArchiveSections.value)} 份` },
+  { label: "治疗时序", value: fieldValues.courseSchedule ? "已记录" : "待补充" },
+  { label: "生成时间", value: generatedAt.value }
+]);
+const managementArchiveSummary = computed(() => [
+  { label: "管理字段", value: formatSectionProgress(managementArchiveSections.value) },
+  { label: "来院来源", value: fieldValues.arrivalPath || fieldValues.sourceChannel || "待补充" },
+  { label: "当前关注", value: archiveFocusSummary.value },
+  { label: "最近复查", value: latestFollowupRecord.value?.date || "待记录" },
+  { label: "下次随访", value: fieldValues.nextFollowupAt || latestFollowupRecord.value?.nextDate || "待安排" },
+  { label: "风险提示", value: fieldValues.relationshipRisk || fieldValues.patientConcerns || "暂无" }
 ]);
 
 const auditModuleOptions: Record<string, string> = {
   patient: "患者",
-  record: "病历",
+  record: "档案",
   document: "附件",
+  collaboration: "协作补充",
   archive: "归档",
   template: "模板",
   system: "系统"
@@ -1264,6 +2369,25 @@ const auditModuleOptions: Record<string, string> = {
 const auditModuleLabel = (module?: string) => auditModuleOptions[module || ""] || module || "旧日志";
 const auditTimelineType = (log: AuditLogRow) =>
   log.result === "denied" ? "danger" : log.module === "archive" ? "warning" : "primary";
+const timelineSourceOptions: Record<string, string> = {
+  patient: "患者",
+  encounter: "就诊",
+  record: "字段",
+  followup: "复查",
+  document: "附件",
+  archive: "归档",
+  audit: "日志",
+  system: "系统"
+};
+const timelineSourceLabel = (source?: string) => timelineSourceOptions[source || ""] || source || "记录";
+const timelineDisplayTime = (time?: string) => (time && !time.startsWith("0000-00-00") ? time : "时间待补");
+const timelineTagType = (event: PatientTimelineEvent) =>
+  event.level === "danger" ? "danger" : event.level === "warning" ? "warning" : event.level === "success" ? "success" : "info";
+const previewTimelineEvents = computed(() => {
+  const importantSources = new Set(["patient", "encounter", "followup", "document", "collaboration", "archive"]);
+  const important = patientTimelineEvents.value.filter(event => importantSources.has(event.source));
+  return (important.length ? important : patientTimelineEvents.value).slice(0, 8);
+});
 const shortTitle = (title: string) => title.replace(/^.*?、/, "");
 const isEditable = (field: RecordField) =>
   field.enabled !== false && (currentRole.value === "admin" || field.editors.includes(currentRole.value));
@@ -1271,8 +2395,116 @@ const canEditRecordSection = (section: RecordSection) => section.fields.some(isE
 const myEditableFields = computed(() =>
   recordSectionsByRule.value.flatMap(section => section.fields.filter(isEditable).map(field => ({ section, field })))
 );
+const coreFieldKeys = new Set([
+  "patientName",
+  "gender",
+  "age",
+  "phone",
+  "visitNo",
+  "archiveCreatedAt",
+  "admissionDate",
+  "departmentName",
+  "healthManager",
+  "attendingDoctor",
+  "responsibleNurse",
+  "overallRiskLevel",
+  "arrivalPath",
+  "sourceChannel",
+  "visitMotivation",
+  "chiefComplaintText",
+  "presentIllnessText",
+  "westernDiagnosis",
+  "tcmDiagnosis",
+  "tcmSyndrome",
+  "operationName",
+  "surgeryFeasibility",
+  "sameDayTreatment",
+  "bloodRoutineStatus",
+  "coagulationStatus",
+  "preOpEightStatus",
+  "ecgStatus",
+  "uncheckedItemsNote",
+  "followupRecordsJson",
+  "recoverySummary",
+  "nextFollowupAt",
+  "relationshipRisk",
+  "patientConcerns",
+  "patientPainLevel",
+  "patientSatisfaction"
+]);
+const recommendedSectionKeys = new Set([
+  "arrivalSource",
+  "specialNeeds",
+  "familyRelationship",
+  "trustCooperation",
+  "patientFeedback",
+  "tcmHealthManagement",
+  "supplementNotes",
+  "treatmentPlanManagement"
+]);
+const optionalHeavySectionKeys = new Set([
+  "history",
+  "tcmInspection",
+  "secondaryDiagnosis",
+  "comorbidityTcm",
+  "dip",
+  "qualityCheck"
+]);
+type FieldLayer = "core" | "recommended" | "optional";
+const fieldLayerOf = (section: RecordSection, field: RecordField): FieldLayer => {
+  if (field.required || coreFieldKeys.has(field.key) || field.key.endsWith("Status")) return "core";
+  if (optionalHeavySectionKeys.has(section.key)) return "optional";
+  if (recommendedSectionKeys.has(section.key)) return "recommended";
+  if (field.kind === "textarea" && !field.evidence) return "optional";
+  return "recommended";
+};
+const fieldLayerOptions: Record<FieldLayerMode, { label: string; title: string; desc: string }> = {
+  core: {
+    label: "核心",
+    title: "核心工作台",
+    desc: "只显示建档、诊疗结论、检查状态、风险和随访闭环等关键字段，先把主线跑通。"
+  },
+  recommended: {
+    label: "推荐",
+    title: "推荐补充",
+    desc: "显示核心字段加上患者关系、诉求、反馈和中医管理等高价值补充信息。"
+  },
+  optional: {
+    label: "按需",
+    title: "按需展开",
+    desc: "显示低频、长文本、归档参考类字段，需要精细补录时再处理。"
+  },
+  all: {
+    label: "全部",
+    title: "全部可填字段",
+    desc: "显示当前岗位可编辑的全部字段，用于集中补录或管理员核对。"
+  }
+};
+const fieldLayerLabel = computed(() => fieldLayerOptions[fieldLayerMode.value].label);
+const fieldLayerTitle = computed(() => fieldLayerOptions[fieldLayerMode.value].title);
+const fieldLayerDescription = computed(() => fieldLayerOptions[fieldLayerMode.value].desc);
+const fieldLayerStats = computed(() =>
+  myEditableFields.value.reduce(
+    (stats, item) => {
+      stats[fieldLayerOf(item.section, item.field)] += 1;
+      return stats;
+    },
+    { core: 0, recommended: 0, optional: 0 }
+  )
+);
+const layeredEditableFields = computed(() => {
+  if (fieldLayerMode.value === "all") return myEditableFields.value;
+  if (fieldLayerMode.value === "recommended") {
+    return myEditableFields.value.filter(item => {
+      const layer = fieldLayerOf(item.section, item.field);
+      return layer === "core" || layer === "recommended";
+    });
+  }
+  return myEditableFields.value.filter(item => fieldLayerOf(item.section, item.field) === fieldLayerMode.value);
+});
 const myRequiredMissingCount = computed(
-  () => myEditableFields.value.filter(item => item.field.required && !isFieldComplete(fieldValues[item.field.key] || "")).length
+  () =>
+    layeredEditableFields.value.filter(item => item.field.required && !isFieldComplete(fieldValues[item.field.key] || "")).length
 );
 const fieldIssues = computed<FieldIssue[]>(() =>
   recordSectionsByRule.value.flatMap(section =>
@@ -1309,7 +2541,7 @@ const fieldIssues = computed<FieldIssue[]>(() =>
 const issueForField = (field: RecordField) => fieldIssues.value.find(issue => issue.fieldKey === field.key);
 const sectionIssues = (section: RecordSection) => fieldIssues.value.filter(issue => issue.sectionKey === section.key);
 const myFieldIssues = computed(() => {
-  const editableKeys = new Set(myEditableFields.value.map(item => item.field.key));
+  const editableKeys = new Set(layeredEditableFields.value.map(item => item.field.key));
   return fieldIssues.value.filter(issue => editableKeys.has(issue.fieldKey));
 });
 const firstWorkflowIssue = computed(() => myFieldIssues.value[0] || fieldIssues.value[0]);
@@ -1334,8 +2566,8 @@ const workflowHint = computed<WorkflowHint>(() => {
   return {
     visible: true,
     level: "success",
-    title: "病历字段已齐，可提交质控",
-    desc: "保存后可预览、打印或提交质控审核。"
+    title: "档案字段已齐，可提交档案审核",
+    desc: "保存后可预览、打印或提交院内档案完整性审核。"
   };
 });
 const isLabMetricField = (field: RecordField) => Boolean(field.labPanel);
@@ -1346,7 +2578,11 @@ const selectOptions = (field: RecordField) => {
   return field.options?.length ? field.options : fieldPresets[field.key] || [];
 };
 const fieldAssistText = (field: RecordField) => {
-  if (!isEditable(field)) return `锁定：${editorLabels(field.editors)}`;
+  if (!isEditable(field)) {
+    const isServiceCollaborative =
+      serviceCollaborators.length === field.editors.length && serviceCollaborators.every(role => field.editors.includes(role));
+    return isServiceCollaborative ? "协作字段：服务相关岗位可补充" : `锁定：${editorLabels(field.editors)}`;
+  }
   if (isLabMetricField(field)) return "指标面板自动生成文本";
   if (field.inputType === "date") return "YYYY-MM-DD";
   if (field.inputType === "number") {
@@ -1481,20 +2717,229 @@ const attachmentLine = (attachment: RecordAttachment, index: number) => {
   return `${index + 1}. ${attachment.fileName}，关联${attachment.fieldLabel}，${attachment.department}上传于${attachment.uploadedAt}`;
 };
 
-const buildRecordText = () => {
-  const sections = printableRecordSections.value
+const formatTextSections = (sections: RecordSection[]) =>
+  sections
     .map(section => {
-      const lines = section.fields.map(field => `${field.printLabel || field.label}：${fieldValues[field.key] || "____"}`);
+      const lines = section.fields.map(field => `${field.printLabel || field.label}：${printableFieldValue(field)}`);
       return `${section.title}\n${lines.join("\n")}`;
     })
     .join("\n\n");
+
+const buildRecordText = () => {
+  const registrationText = [
+    "健康管理登记表",
+    ...registrationBasicRows.value.map(row => `${row[0]}：${row[1]}；${row[2]}：${row[3]}`),
+    "",
+    "病情建档",
+    ...registrationConditionRows.value.map(row => `${row[0]}：${row[1]}`),
+    "",
+    "术前检验筛查汇总",
+    ...screeningRows.value.map(row => `${row[0]}：${displayFieldValue(row[2], "未查")}；${row[1]}`),
+    `未查项目说明：${displayFieldValue("uncheckedItemsNote", "术后按需择期补查")}`,
+    "",
+    "术后分级复诊台账",
+    ...followupRecords.value.map(
+      record =>
+        `${record.node || record.type}：${record.date || "待预约"}；${record.project || "待补充"}；${record.management || "待补充"}；${
+          record.completed || "未完成"
+        }`
+    )
+  ].join("\n");
+  const clinicalSections = formatTextSections(clinicalArchiveSections.value);
+  const managementSections = formatTextSections(managementArchiveSections.value);
+  const auditSections = formatTextSections(auditArchiveSections.value);
   const attachments = currentAttachments.value.map(attachmentLine).join("\n");
-  return `${fieldValues.hospitalName}\n${recordTitle.value}自动生成表\n状态：${archiveStatusText.value}  版本：${archiveVersion.value}  生成时间：${generatedAt.value}\n患者：${fieldValues.patientName}  ${visitNoLabel.value}：${fieldValues.visitNo}  校验码：${recordSignature.value}\n\n${sections}\n\n附件索引\n${attachments}`;
+  return `${fieldValues.hospitalName}\n${recordTitle.value}\n本档案用于院内患者健康管理、治疗跟踪和复查随访，不替代 HIS 官方病历。\n状态：${archiveStatusText.value}  版本：${archiveVersion.value}  生成时间：${generatedAt.value}\n患者：${fieldValues.patientName}  ${visitNoLabel.value}：${fieldValues.visitNo}  校验码：${recordSignature.value}\n\n${registrationText}\n\n诊疗检查与治疗记录\n${clinicalSections}\n\n患者管理与随访档案\n${managementSections}\n\n档案审核与归档信息\n${auditSections}\n\n附件索引\n${attachments}`;
 };
 
 const copyRecord = async () => {
   await navigator.clipboard.writeText(buildRecordText());
-  ElMessage.success("病历文本已复制");
+  ElMessage.success("健康档案文本已复制");
+};
+
+const formatAiSummaryText = () => {
+  if (!aiSummary.value) return "";
+  const numbered = (items: string[] | undefined) =>
+    items?.length ? items.map((item, index) => `${index + 1}. ${item}`).join("\n") : "暂无";
+  return [
+    `AI健康档案总结（${fieldValues.patientName || "当前患者"} / ${fieldValues.visitNo || patientId.value}）`,
+    `生成时间：${aiSummary.value.generatedAt}`,
+    `模型：${aiSummary.value.model}`,
+    "",
+    `患者概况：${aiSummary.value.summary}`,
+    aiSummary.value.patientPortrait ? `患者画像：${aiSummary.value.patientPortrait}` : "",
+    `诊疗摘要：${aiSummary.value.clinicalSummary}`,
+    `管理随访摘要：${aiSummary.value.managementSummary}`,
+    `复查随访：${aiSummary.value.followupSummary}`,
+    "",
+    `优先关注：\n${numbered(aiSummary.value.priorityFocus)}`,
+    "",
+    `容易忽略：\n${numbered(aiSummary.value.overlookedInsights)}`,
+    "",
+    `缺失/待补充：\n${numbered(aiSummary.value.missingItems)}`,
+    "",
+    `风险提醒：\n${numbered(aiSummary.value.riskHints)}`,
+    "",
+    `沟通建议：\n${numbered(aiSummary.value.communicationTips)}`,
+    "",
+    `下一步随访：\n${numbered(aiSummary.value.nextFollowupSuggestions)}`,
+    "",
+    `医生提醒：\n${numbered(aiSummary.value.doctorTips)}`,
+    "",
+    aiSummary.value.disclaimer
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+const generateAiSummary = async () => {
+  aiSummaryLoading.value = true;
+  try {
+    const { data } = await generateRecordAiSummaryApi({ patientId: patientId.value, mode: "summary" });
+    aiSummary.value = data;
+    ElMessage.success("AI总结已生成");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "AI总结生成失败");
+  } finally {
+    aiSummaryLoading.value = false;
+  }
+};
+
+const openAiSummary = () => {
+  aiSummaryVisible.value = true;
+  if (!aiSummary.value) void generateAiSummary();
+};
+
+const copyAiSummary = async () => {
+  if (!aiSummary.value) return;
+  await navigator.clipboard.writeText(formatAiSummaryText());
+  ElMessage.success("AI总结已复制");
+};
+
+const medicalRecordStatusLabel = (status: GeneratedMedicalRecord["status"]) => {
+  const labels: Record<GeneratedMedicalRecord["status"], string> = {
+    draft: "草稿",
+    finalized: "已定稿",
+    voided: "已作废"
+  };
+  return labels[status] || status;
+};
+
+const medicalRecordStatusType = (status: GeneratedMedicalRecord["status"]) => {
+  if (status === "finalized") return "success";
+  if (status === "voided") return "danger";
+  return "warning";
+};
+
+const refreshMedicalRecordVersions = async () => {
+  const { data } = await getGeneratedMedicalRecordVersionsApi(patientId.value);
+  medicalRecordVersions.value = data;
+  if (!currentMedicalRecord.value || !data.some(record => record.id === currentMedicalRecord.value?.id)) {
+    currentMedicalRecord.value = data[0];
+  } else {
+    currentMedicalRecord.value = data.find(record => record.id === currentMedicalRecord.value?.id);
+  }
+};
+
+const openMedicalRecord = async () => {
+  medicalRecordVisible.value = true;
+  medicalRecordLoading.value = true;
+  try {
+    const [{ data: template }] = await Promise.all([getMedicalRecordTemplateApi(), refreshMedicalRecordVersions()]);
+    medicalRecordTemplate.value = template;
+    medicalRecordUnboundFields.value = template.unboundFields || [];
+    medicalRecordActiveSections.value = (template.fieldMatrix || []).slice(0, 3).map(section => section.section);
+    await precheckMedicalRecord(false);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "目标病历加载失败");
+  } finally {
+    medicalRecordLoading.value = false;
+  }
+};
+
+const precheckMedicalRecord = async (showMessage = true) => {
+  if (!patientId.value) return false;
+  const { data } = await precheckMedicalRecordApi(patientId.value);
+  medicalRecordMissingItems.value = data.missingItems || [];
+  medicalRecordUnboundFields.value = data.unboundFields || [];
+  if (showMessage) {
+    if (data.ready) ElMessage.success("目标病历动态字段已满足生成条件");
+    else if (medicalRecordUnboundFields.value.length) {
+      ElMessage.error(`模板还有 ${medicalRecordUnboundFields.value.length} 个动态字段未绑定占位符`);
+    } else ElMessage.warning(`仍有 ${data.missingItems.length} 个必填项待补齐`);
+  }
+  return data.ready;
+};
+
+const saveMedicalRecordWorkspace = async (showMessage = true) => {
+  if (!patientId.value || !medicalRecordFields.value.length) return false;
+  const { data } = await saveMedicalRecordWorkspaceApi(patientId.value, medicalRecordWorkspaceValues());
+  medicalRecordMissingItems.value = data.missingItems || [];
+  if (showMessage) ElMessage.success("医生目标病历填写已保存");
+  return true;
+};
+
+const generateMedicalRecord = async () => {
+  if (!patientId.value) return;
+  medicalRecordLoading.value = true;
+  try {
+    await saveMedicalRecordWorkspace(false);
+    const ready = await precheckMedicalRecord(false);
+    if (!ready) {
+      if (medicalRecordUnboundFields.value.length) {
+        ElMessage.error(`模板还有 ${medicalRecordUnboundFields.value.length} 个动态字段未绑定占位符，暂不生成 docx`);
+        return;
+      }
+      ElMessage.warning(`目标病历还有 ${medicalRecordMissingItems.value.length} 个必填项未补齐，暂不生成 docx`);
+      return;
+    }
+    const { data } = await generateMedicalRecordApi(patientId.value);
+    medicalRecordMissingItems.value = data.missingItems || [];
+    currentMedicalRecord.value = data.record;
+    await refreshMedicalRecordVersions();
+    currentMedicalRecord.value = data.record;
+    ElMessage.success("目标病历 docx 已生成，请医生确认后定稿");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "目标病历生成失败");
+  } finally {
+    medicalRecordLoading.value = false;
+  }
+};
+
+const finalizeMedicalRecord = async () => {
+  if (!currentMedicalRecord.value) return;
+  medicalRecordLoading.value = true;
+  try {
+    const { data } = await finalizeMedicalRecordApi(currentMedicalRecord.value.id);
+    currentMedicalRecord.value = data;
+    await refreshMedicalRecordVersions();
+    ElMessage.success("目标病历已定稿并锁定");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "目标病历定稿失败");
+  } finally {
+    medicalRecordLoading.value = false;
+  }
+};
+
+const voidMedicalRecord = async () => {
+  if (!currentMedicalRecord.value) return;
+  medicalRecordLoading.value = true;
+  try {
+    const { data } = await voidMedicalRecordApi(currentMedicalRecord.value.id, "医生端确认作废");
+    currentMedicalRecord.value = data;
+    await refreshMedicalRecordVersions();
+    ElMessage.success("目标病历版本已作废");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "目标病历作废失败");
+  } finally {
+    medicalRecordLoading.value = false;
+  }
+};
+
+const downloadMedicalRecord = async () => {
+  if (!currentMedicalRecord.value) return;
+  const { msg } = await downloadMedicalRecordApi(currentMedicalRecord.value);
+  if (msg) ElMessage.success(msg);
 };
 
 const loadPatientAuditLogs = async (targetPatientId = patientId.value, targetPatientName = fieldValues.patientName) => {
@@ -1513,9 +2958,27 @@ const loadPatientAuditLogs = async (targetPatientId = patientId.value, targetPat
   }
 };
 
+const loadPatientTimeline = async (targetPatientId = patientId.value) => {
+  if (!targetPatientId) {
+    patientTimelineEvents.value = [];
+    return;
+  }
+  try {
+    const { data } = await getPatientTimelineApi(targetPatientId);
+    if (targetPatientId !== patientId.value) return;
+    patientTimelineEvents.value = data;
+  } catch {
+    if (targetPatientId === patientId.value) patientTimelineEvents.value = [];
+  }
+};
+
 const openAuditTimeline = async () => {
   auditTimelineVisible.value = true;
-  await loadPatientAuditLogs();
+  await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
+};
+
+const refreshAuditTimeline = () => {
+  void Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
 };
 
 const openSupplementUpload = () => {
@@ -1573,9 +3036,11 @@ const resetPatientDetailState = () => {
   isHydratingRecord.value = true;
   saving.value = false;
   Object.assign(fieldValues, createEmptyFieldValues());
+  syncFollowupRecordsFromField();
   patientInfo.value = undefined;
   currentAttachments.value = [];
   patientAuditLogs.value = [];
+  patientTimelineEvents.value = [];
   archiveSubmitted.value = false;
   archiveVersion.value = "V0.3-预归档";
   generatedAt.value = "";
@@ -1602,7 +3067,7 @@ const loadPatientDetail = async () => {
   detailError.value = "";
   resetPatientDetailState();
   if (!targetPatientId) {
-    detailError.value = "缺少患者ID，请从患者列表或今日患者重新打开病历";
+    detailError.value = "缺少患者ID，请从患者列表或今日患者重新打开健康档案";
     detailLoading.value = false;
     isHydratingRecord.value = false;
     return;
@@ -1620,13 +3085,17 @@ const loadPatientDetail = async () => {
     }
     patientInfo.value = data.patient;
     Object.assign(fieldValues, data.fieldValues);
+    syncFollowupRecordsFromField();
     currentAttachments.value = data.attachments;
     preloadAttachmentPreviews();
     archiveSubmitted.value = data.archiveSubmitted;
     archiveVersion.value = data.archiveVersion;
     generatedAt.value = data.generatedAt;
     hydrateCollapsedSections();
-    await loadPatientAuditLogs(targetPatientId, data.fieldValues.patientName || data.patient.name);
+    await Promise.all([
+      loadPatientAuditLogs(targetPatientId, data.fieldValues.patientName || data.patient.name),
+      loadPatientTimeline(targetPatientId)
+    ]);
     if (loadSeq !== patientDetailLoadSeq) return;
     if (targetSection) window.setTimeout(() => scrollToSection(targetSection), 120);
   } catch (error) {
@@ -1693,6 +3162,7 @@ const restoreConflictDraft = () => {
       activeSectionKey.value = draft.sectionKey;
     }
     Object.assign(fieldValues, draft.values || {});
+    syncFollowupRecordsFromField();
     conflictDraftSavedAt.value = draft.savedAt || conflictDraftSavedAt.value;
     autoSaveStatus.value = "error";
     ElMessage.info("草稿已恢复，请重新保存");
@@ -1717,7 +3187,7 @@ const saveRecordValues = async (values: Record<string, string>, successText: str
       operator: roleName.value,
       values
     });
-    await loadPatientAuditLogs();
+    await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
     clearLocalDraft();
     autoSaveStatus.value = "saved";
     const issueCount = data.issues.length;
@@ -1744,7 +3214,7 @@ const currentSectionValues = () =>
   }, {});
 
 const myFieldValues = () =>
-  myEditableFields.value.reduce<Record<string, string>>((payload, item) => {
+  layeredEditableFields.value.reduce<Record<string, string>>((payload, item) => {
     payload[item.field.key] = fieldValues[item.field.key];
     return payload;
   }, {});
@@ -1755,8 +3225,8 @@ const saveCurrentSection = async () => {
 };
 
 const saveMyFields = async () => {
-  if (!ensureNoInvalidIssues("mine", "保存本岗位内容")) return false;
-  return saveRecordValues(myFieldValues(), "本岗位内容已保存");
+  if (!ensureNoInvalidIssues("mine", "保存当前层内容")) return false;
+  return saveRecordValues(myFieldValues(), "当前层内容已保存");
 };
 
 const saveMyFieldsAndBack = async () => {
@@ -1771,7 +3241,7 @@ const saveMyFieldsAndBack = async () => {
 const saveActiveMode = () => (recordViewMode.value === "mine" ? saveMyFields() : saveCurrentSection());
 
 const submitArchive = async () => {
-  if (!ensureNoBlockingIssues("all", "提交质控")) return;
+  if (!ensureNoBlockingIssues("all", "提交档案审核")) return;
   const saved = await saveActiveMode();
   if (!saved) return;
   try {
@@ -1779,8 +3249,8 @@ const submitArchive = async () => {
     archiveSubmitted.value = data.archive.submitted;
     archiveVersion.value = data.archive.version;
     generatedAt.value = data.archive.generatedAt;
-    await loadPatientAuditLogs();
-    ElMessage.success("已提交质控，流程状态已更新");
+    await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
+    ElMessage.success("已提交档案审核，流程状态已更新");
   } catch (error) {
     ElMessage.error((error as Error).message);
   }
@@ -1792,7 +3262,7 @@ const revokeArchive = async () => {
     archiveSubmitted.value = data.archive.submitted;
     archiveVersion.value = data.archive.version;
     generatedAt.value = data.archive.generatedAt;
-    await loadPatientAuditLogs();
+    await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
     ElMessage.info("已撤回草稿，可继续修改本岗位内容");
   } catch (error) {
     ElMessage.error((error as Error).message);
@@ -1819,6 +3289,7 @@ const confirmVoidDocument = async () => {
     voidDialogVisible.value = false;
     ElMessage.success("附件已作废，已移入资料回收站");
     await loadPatientDetail();
+    await loadPatientTimeline();
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
@@ -1852,7 +3323,7 @@ const fallbackLogo = () => {
 const logPrintAction = async () => {
   try {
     await logPatientExportApi({ id: patientId.value, role: currentRole.value, operator: roleName.value, action: "print" });
-    await loadPatientAuditLogs();
+    await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
   } catch (error) {
     ElMessage.warning(`打印留痕失败，已继续打印：${(error as Error).message}`);
   }
@@ -2208,6 +3679,24 @@ onBeforeUnmount(() => {
   }
 }
 
+.field-layer-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #f7fbfa;
+  border: 1px solid #d8ebe5;
+  border-radius: 8px;
+
+  span {
+    color: var(--el-text-color-secondary);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}
+
 .my-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2493,6 +3982,52 @@ onBeforeUnmount(() => {
   margin-bottom: 12px;
 }
 
+.health-archive-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+
+  article {
+    min-width: 0;
+    padding: 13px 14px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+  }
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong {
+    margin-top: 4px;
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    margin-top: 4px;
+    display: -webkit-box;
+    overflow: hidden;
+    color: #475569;
+    line-height: 1.4;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
 .workflow-hint {
   display: flex;
   align-items: center;
@@ -2630,6 +4165,81 @@ onBeforeUnmount(() => {
       color: #b45309;
     }
   }
+}
+
+.followup-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.followup-editor-head,
+.followup-record-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.followup-editor-head strong,
+.followup-record-top span {
+  color: var(--hos-text-primary);
+  font-weight: 700;
+}
+
+.followup-record-list {
+  display: grid;
+  gap: 10px;
+}
+
+.followup-record-item {
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.followup-record-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+
+  &.wide {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 5px;
+  }
+
+  span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+.followup-empty {
+  padding: 18px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
+.archive-scope-note {
+  max-width: 680px;
+  margin: 12px auto 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
 }
 
 .record-layout {
@@ -3215,6 +4825,57 @@ onBeforeUnmount(() => {
   }
 }
 
+.clinical-record-page {
+  background: #fbfcfe;
+
+  .paper-watermark {
+    color: rgb(49 70 96 / 5%);
+  }
+}
+
+.management-record-page {
+  background: #fbfefc;
+
+  .paper-watermark {
+    color: rgb(39 114 88 / 5%);
+  }
+}
+
+.registration-record-page {
+  background: #fffefb;
+
+  .paper-watermark {
+    color: rgb(72 97 83 / 5%);
+  }
+}
+
+.module-record-head {
+  border-bottom-color: #7d91ad;
+
+  .medical-subtitle {
+    color: #344b69;
+    background: #eef4fb;
+  }
+}
+
+.management-head {
+  border-bottom-color: #58ad91;
+
+  .medical-subtitle {
+    color: #25745c;
+    background: #edf8f4;
+  }
+}
+
+.registration-head {
+  border-bottom-color: #8aa78f;
+
+  .medical-subtitle {
+    color: #536f5b;
+    background: #f1f7ef;
+  }
+}
+
 .medical-brand {
   display: flex;
   align-items: center;
@@ -3348,6 +5009,26 @@ onBeforeUnmount(() => {
   }
 }
 
+.clinical-summary-card {
+  span {
+    color: #31465f;
+    background: linear-gradient(180deg, #f8fbff, #eef4fb);
+    border-left-color: #8fa7c4;
+  }
+
+  b {
+    color: #20334d;
+  }
+}
+
+.management-summary-card {
+  span {
+    color: #31564b;
+    background: linear-gradient(180deg, #f8fdfb, #edf8f4);
+    border-left-color: #79bea4;
+  }
+}
+
 .paper-section {
   padding-top: 16px;
 
@@ -3368,6 +5049,379 @@ onBeforeUnmount(() => {
       background: #55b58a;
       border-radius: 999px;
     }
+  }
+}
+
+.registration-section {
+  padding-top: 12px;
+
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    color: #263f31;
+    font-size: 13px;
+
+    &::before {
+      width: 4px;
+      height: 14px;
+      content: "";
+      background: #8aa78f;
+      border-radius: 999px;
+    }
+  }
+
+  &.compact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+.registration-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #ffffff;
+  border: 1px solid #c9d8cd;
+  font-size: 10px;
+
+  th,
+  td {
+    min-height: 26px;
+    padding: 6px 7px;
+    color: #263f31;
+    border: 1px solid #c9d8cd;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+
+  th {
+    width: 112px;
+    color: #375743;
+    background: #eff6f0;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  td {
+    background: #fffefb;
+  }
+
+  &.single {
+    th {
+      width: 128px;
+    }
+  }
+}
+
+.screening-table {
+  th,
+  td {
+    font-size: 9.5px;
+  }
+
+  th:first-child,
+  td:first-child {
+    width: 132px;
+  }
+
+  th:last-child,
+  td:last-child {
+    width: 72px;
+    text-align: center;
+  }
+}
+
+.screening-status {
+  display: inline-grid;
+  place-items: center;
+  min-width: 46px;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid #d6d3d1;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+
+  &.is-checked {
+    color: #166534;
+    background: #ecfdf5;
+    border-color: #bbf7d0;
+  }
+
+  &.is-abnormal {
+    color: #991b1b;
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+
+  &.is-unchecked {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #fde68a;
+  }
+}
+
+.registration-note {
+  margin: 6px 0 0;
+  color: #5f7267;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.followup-ledger-table {
+  th,
+  td {
+    font-size: 9.5px;
+  }
+}
+
+.registration-remarks {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  color: #31483a;
+  background: #ffffff;
+  border: 1px solid #c9d8cd;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.clinical-section {
+  h3 {
+    color: #223a55;
+    border-bottom-color: #d2deeb;
+
+    &::before {
+      background: #7d91ad;
+    }
+  }
+
+  .paper-field-line {
+    border-bottom-color: #d8e2ee;
+
+    strong {
+      color: #52697f;
+    }
+
+    .paper-value {
+      background:
+        linear-gradient(0deg, rgb(125 145 173 / 20%) 0 1px, transparent 1px) bottom / 100% 1.85em repeat-y,
+        #f6f9fd;
+    }
+  }
+}
+
+.management-section {
+  padding: 14px 16px 16px;
+  margin-top: 14px;
+  background: rgb(246 252 249 / 82%);
+  border: 1px solid #d9eee5;
+  border-radius: 8px;
+
+  h3 {
+    color: #1f5f4d;
+    border-bottom-color: #c9e8dc;
+
+    &::before {
+      background: #58ad91;
+    }
+  }
+
+  .paper-field-line {
+    grid-template-columns: 136px minmax(0, 1fr);
+    border-bottom-color: #d6eadf;
+
+    strong {
+      color: #436e61;
+    }
+
+    .paper-value {
+      background:
+        linear-gradient(0deg, rgb(88 173 145 / 18%) 0 1px, transparent 1px) bottom / 100% 1.85em repeat-y,
+        #f7fcfa;
+    }
+  }
+}
+
+.archive-timeline-section {
+  padding: 14px 16px 16px;
+  margin-top: 14px;
+  background: #fbfdfc;
+  border: 1px solid #d9eee5;
+  border-radius: 8px;
+}
+
+.paper-archive-timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.paper-archive-timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0 10px 16px;
+  border-left: 2px solid #9ed8c1;
+
+  &::before {
+    position: absolute;
+    top: 16px;
+    left: -5px;
+    width: 8px;
+    height: 8px;
+    content: "";
+    background: #3b9b7a;
+    border: 2px solid #ffffff;
+    border-radius: 999px;
+    box-shadow: 0 0 0 2px #ccebdd;
+  }
+
+  > span {
+    color: #497668;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  strong,
+  p,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: #183f35;
+    font-size: 12px;
+  }
+
+  p {
+    margin: 4px 0;
+    color: #31564b;
+    font-size: 11px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+
+  small {
+    color: #6b8d83;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+}
+
+.followup-line {
+  align-items: stretch;
+}
+
+.paper-followup-timeline {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: #f7fcfa;
+  border-radius: 8px 8px 0 0;
+}
+
+.paper-followup-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  min-width: 0;
+  padding: 8px 10px 8px 14px;
+  background: #ffffff;
+  border: 1px solid #d8eee5;
+  border-left: 3px solid #58ad91;
+  border-radius: 8px;
+
+  b,
+  span,
+  p,
+  em {
+    min-width: 0;
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  b {
+    color: #1f5f4d;
+    font-size: 12px;
+  }
+
+  span {
+    color: #5f776f;
+    text-align: right;
+  }
+
+  p {
+    grid-column: 1 / -1;
+    color: #29483f;
+  }
+
+  em {
+    grid-column: 1 / -1;
+    color: #25745c;
+    font-style: normal;
+    font-weight: 700;
+  }
+}
+
+.paper-followup-empty {
+  display: block;
+  padding: 8px 0;
+  color: #6b837b;
+  font-size: 12px;
+}
+
+.audit-summary-section {
+  margin-top: 16px;
+
+  h3 {
+    color: #4b5563;
+    border-bottom-color: #e5e7eb;
+
+    &::before {
+      background: #9ca3af;
+    }
+  }
+}
+
+.audit-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+
+  > div {
+    min-width: 0;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+  }
+
+  strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #374151;
+    font-size: 12px;
+  }
+
+  p {
+    margin: 5px 0 0;
+    color: #4b5563;
+    font-size: 11px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+
+  b {
+    color: #111827;
   }
 }
 
@@ -3913,6 +5967,31 @@ onBeforeUnmount(() => {
   padding: 4px 4px 4px 0;
 }
 
+.archive-timeline-review {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: #f8fdfb;
+  border: 1px solid #d9eee5;
+  border-radius: var(--hos-radius-lg);
+}
+
+.archive-timeline-review-head {
+  display: grid;
+  gap: 4px;
+
+  strong {
+    color: #1f5f4d;
+    font-size: 15px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
+
 .timeline-event {
   padding: 12px;
   background: var(--hos-glass);
@@ -3924,6 +6003,11 @@ onBeforeUnmount(() => {
     color: var(--hos-text-primary);
     line-height: 1.6;
   }
+}
+
+.timeline-event.archive-event {
+  background: #ffffff;
+  border-color: #cfe9de;
 }
 
 .timeline-event-head,
@@ -3995,6 +6079,316 @@ onBeforeUnmount(() => {
       word-break: break-word;
     }
   }
+}
+
+.ai-summary-dialog {
+  display: grid;
+  gap: 14px;
+  min-height: 220px;
+}
+
+.medical-record-generator {
+  display: grid;
+  gap: 14px;
+  min-height: 260px;
+}
+
+.medical-record-template-strip,
+.medical-record-current-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.medical-record-template-strip {
+  padding: 12px 14px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  div {
+    display: grid;
+    gap: 4px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+.medical-record-required,
+.medical-record-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.medical-record-required {
+  background: #f7fbfa;
+  border: 1px solid #d8ebe5;
+
+  strong {
+    color: var(--hos-text-primary);
+  }
+}
+
+.medical-record-missing {
+  background: #fff8e6;
+  border: 1px solid #f3d19e;
+}
+
+.medical-record-workspace {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+}
+
+.medical-record-workspace-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+
+  > div:first-child {
+    display: grid;
+    gap: 4px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+
+  > div:last-child {
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.medical-record-sections {
+  border-top: 1px solid var(--hos-border-light);
+}
+
+.medical-record-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.medical-record-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  &.wide {
+    grid-column: 1 / -1;
+  }
+
+  &.missing {
+    background: #fff8e6;
+    border-color: #f3d19e;
+  }
+
+  > span {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    color: var(--hos-text-primary);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  sup {
+    color: var(--el-color-danger);
+  }
+
+  em {
+    padding: 1px 6px;
+    color: #047857;
+    background: #ecfdf5;
+    border-radius: 999px;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 600;
+  }
+}
+
+.medical-record-current {
+  display: grid;
+  gap: 10px;
+}
+
+.medical-record-current-head {
+  strong {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+.medical-record-file-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  strong {
+    overflow: hidden;
+    color: var(--hos-text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+.medical-record-history {
+  display: grid;
+  gap: 8px;
+
+  > strong {
+    font-size: 14px;
+  }
+
+  button {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    background: #ffffff;
+    border: 1px solid var(--hos-border-light);
+    border-radius: 8px;
+
+    &.active {
+      color: var(--el-color-primary);
+      background: #f5f8ff;
+      border-color: var(--el-color-primary);
+    }
+
+    small {
+      color: var(--hos-text-secondary);
+    }
+  }
+}
+
+.ai-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 16px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+.ai-summary-block,
+.ai-summary-grid article,
+.ai-summary-lists article {
+  min-width: 0;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  h4 {
+    margin: 0 0 8px;
+    color: var(--hos-text-primary);
+    font-size: 14px;
+  }
+
+  p {
+    margin: 0;
+    color: var(--hos-text-regular);
+    font-size: 13px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+  }
+}
+
+.ai-summary-block.portrait {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.ai-summary-grid,
+.ai-summary-lists {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-summary-lists {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+
+  ul {
+    display: grid;
+    gap: 6px;
+    padding-left: 18px;
+    margin: 0;
+    color: var(--hos-text-regular);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  li {
+    overflow-wrap: anywhere;
+  }
+}
+
+.ai-summary-disclaimer {
+  margin: 0;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .record-workspace {
@@ -4145,6 +6539,14 @@ onBeforeUnmount(() => {
   box-shadow:
     0 14px 36px rgb(var(--hos-primary-rgb) / 4%),
     0 4px 12px rgb(var(--hos-neutral-rgb) / 3%);
+}
+
+.record-workspace .clinical-record-page {
+  background: #fbfcfe;
+}
+
+.record-workspace .management-record-page {
+  background: #fbfefc;
 }
 
 .workbar-progress {
@@ -4336,25 +6738,28 @@ onBeforeUnmount(() => {
 
 .preview-page-pills {
   display: inline-flex;
-  max-width: 320px;
+  max-width: min(480px, 46vw);
   padding: 3px;
   overflow-x: auto;
   background: rgb(var(--hos-primary-rgb) / 8%);
   border: 1px solid var(--hos-border-light);
-  border-radius: 999px;
+  border-radius: 8px;
 
   button {
     display: inline-grid;
     flex: 0 0 auto;
     place-items: center;
-    width: 28px;
+    min-width: 64px;
     height: 28px;
+    padding: 0 10px;
     color: var(--hos-text-secondary);
     cursor: pointer;
     background: transparent;
     border: 0;
-    border-radius: 999px;
+    border-radius: 6px;
+    font-size: 12px;
     font-weight: 700;
+    white-space: nowrap;
 
     &.active {
       color: #ffffff;
@@ -4616,16 +7021,71 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
   }
 
+  .field-layer-switch {
+    align-items: flex-start;
+    flex-direction: column;
+
+    span {
+      white-space: normal;
+    }
+  }
+
   .patient-strip,
   .archive-strip,
   .record-context-strip,
+  .health-archive-summary,
   .record-layout,
+  .medical-record-field-grid,
   .field-row,
   .paper-field-line,
   .paper-meta,
   .paper-grid,
-  .paper-archive-card {
+  .paper-archive-card,
+  .audit-summary-grid,
+  .ai-summary-grid,
+  .ai-summary-lists,
+  .followup-record-grid,
+  .followup-record-grid.wide,
+  .registration-section.compact-grid {
     grid-template-columns: 1fr;
+  }
+
+  .registration-table {
+    th,
+    td {
+      display: block;
+      width: 100% !important;
+    }
+
+    tr {
+      display: block;
+      margin-bottom: 8px;
+      border: 1px solid #c9d8cd;
+    }
+  }
+
+  .preview-page-pills {
+    order: 3;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .preview-page-pills button {
+    flex: 1 0 auto;
+  }
+
+  .management-section {
+    padding: 12px;
+  }
+
+  .management-section .paper-field-line,
+  .paper-followup-item,
+  .paper-archive-timeline-item {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-followup-item span {
+    text-align: left;
   }
 
   .archive-metrics {

@@ -7,18 +7,21 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -38,17 +41,26 @@ public class ClinicApiController {
     private final ClinicDatabaseService databaseService;
     private final ClinicFileService fileService;
     private final ClinicBackupService backupService;
+    private final ClinicAiSummaryService aiSummaryService;
+    private final ClinicAiConfigService aiConfigService;
+    private final ClinicMedicalRecordService medicalRecordService;
     private final ObjectMapper objectMapper;
 
     public ClinicApiController(
         ClinicDatabaseService databaseService,
         ClinicFileService fileService,
         ClinicBackupService backupService,
+        ClinicAiSummaryService aiSummaryService,
+        ClinicAiConfigService aiConfigService,
+        ClinicMedicalRecordService medicalRecordService,
         ObjectMapper objectMapper
     ) {
         this.databaseService = databaseService;
         this.fileService = fileService;
         this.backupService = backupService;
+        this.aiSummaryService = aiSummaryService;
+        this.aiConfigService = aiConfigService;
+        this.medicalRecordService = medicalRecordService;
         this.objectMapper = objectMapper;
     }
 
@@ -124,6 +136,15 @@ public class ClinicApiController {
         return ApiResult.of(200, "backup config saved", data);
     }
 
+    @PostMapping("/clinic-api/maintenance/backup/choose-dir")
+    public ApiResult<Map<String, Object>> chooseBackupDirectory(@RequestBody(required = false) Map<String, Object> payload) {
+        requireClinicAdmin();
+        String initialDir = payload == null ? "" : String.valueOf(payload.getOrDefault("initialDir", ""));
+        ObjectNode result = backupService.chooseBackupDirectory(initialDir);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "backup directory selected", data);
+    }
+
     @PostMapping("/clinic-api/maintenance/backup/run")
     public ApiResult<Map<String, Object>> runBackup() {
         requireClinicAdmin();
@@ -132,12 +153,93 @@ public class ClinicApiController {
         return ApiResult.of(200, "backup finished", data);
     }
 
+    @GetMapping("/clinic-api/ai/config")
+    public ApiResult<Map<String, Object>> aiConfigStatus() {
+        requireClinicAdmin();
+        Map<String, Object> data = objectMapper.convertValue(aiConfigService.status(), new TypeReference<Map<String, Object>>() {});
+        return ApiResult.success(data);
+    }
+
+    @PutMapping("/clinic-api/ai/config")
+    public ApiResult<Map<String, Object>> updateAiConfig(@RequestBody Map<String, Object> payload) {
+        AuthSessionService.SessionUser user = AuthPermission.currentUserOrThrow();
+        requireClinicAdmin();
+        ObjectNode result = aiConfigService.updateConfig(payload, user);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "AI接口配置已保存", data);
+    }
+
     @GetMapping("/clinic-api/patients/duplicates")
     public ApiResult<Object> duplicatePatients() {
         requireClinicAdmin();
         ArrayNode duplicates = databaseService.findDuplicatePatients();
         Object data = objectMapper.convertValue(duplicates, Object.class);
         return ApiResult.success(data);
+    }
+
+    @GetMapping("/clinic-api/patients/timeline")
+    public ApiResult<Object> patientTimeline(@org.springframework.web.bind.annotation.RequestParam String patientId) {
+        ArrayNode timeline = databaseService.patientTimeline(patientId, AuthPermission.currentUserOrThrow());
+        Object data = objectMapper.convertValue(timeline, Object.class);
+        return ApiResult.success(data);
+    }
+
+    @PostMapping("/clinic-api/ai/record-summary")
+    public ApiResult<Map<String, Object>> generateRecordAiSummary(@RequestBody ClinicAiSummaryService.AiSummaryRequest request) {
+        Map<String, Object> data = aiSummaryService.generateRecordSummary(request, AuthPermission.currentUserOrThrow());
+        return ApiResult.of(200, "AI总结已生成", data);
+    }
+
+    @GetMapping("/clinic-api/medical-record/templates")
+    public ApiResult<Map<String, Object>> medicalRecordTemplates() {
+        return ApiResult.success(medicalRecordService.templateStatus(AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/clinic-api/medical-record/versions")
+    public ApiResult<Map<String, Object>> medicalRecordVersions(@RequestParam String patientId) {
+        return ApiResult.success(medicalRecordService.versions(patientId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/precheck")
+    public ApiResult<Map<String, Object>> precheckMedicalRecord(@RequestBody ClinicMedicalRecordService.GenerateRequest request) {
+        return ApiResult.success(medicalRecordService.precheck(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/workspace")
+    public ApiResult<Map<String, Object>> saveMedicalRecordWorkspace(@RequestBody ClinicMedicalRecordService.WorkspaceSaveRequest request) {
+        return ApiResult.of(200, "目标病历填写已保存", medicalRecordService.saveWorkspace(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/generate")
+    public ApiResult<Map<String, Object>> generateMedicalRecord(@RequestBody ClinicMedicalRecordService.GenerateRequest request) {
+        return ApiResult.of(200, "目标病历已生成", medicalRecordService.generate(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/finalize")
+    public ApiResult<Map<String, Object>> finalizeMedicalRecord(@RequestBody ClinicMedicalRecordService.FinalizeRequest request) {
+        return ApiResult.of(200, "目标病历已定稿", medicalRecordService.finalizeRecord(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/void")
+    public ApiResult<Map<String, Object>> voidMedicalRecord(@RequestBody ClinicMedicalRecordService.VoidRequest request) {
+        return ApiResult.of(200, "目标病历版本已作废", medicalRecordService.voidRecord(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/clinic-api/medical-record/download")
+    public ResponseEntity<FileSystemResource> downloadMedicalRecord(@RequestParam String id) {
+        ClinicMedicalRecordService.DownloadFile download = medicalRecordService.download(id, AuthPermission.currentUserOrThrow());
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+            .cacheControl(CacheControl.noStore().cachePrivate())
+            .header(HttpHeaders.PRAGMA, "no-cache")
+            .header(
+                HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment()
+                    .filename(download.fileName(), StandardCharsets.UTF_8)
+                    .build()
+                    .toString()
+            )
+            .body(download.resource());
     }
 
     @PostMapping("/clinic-api/files")
@@ -206,11 +308,14 @@ public class ClinicApiController {
             "admin",
             "quality",
             "frontdesk",
+            "reception",
             "doctor",
             "nurse",
+            "nursing",
             "lab",
             "ecg",
-            "ultrasound"
+            "ultrasound",
+            "inspection"
         );
     }
 }

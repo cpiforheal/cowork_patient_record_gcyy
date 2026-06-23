@@ -1,5 +1,8 @@
 package com.example.coshare_patientrecord_sys;
 
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -12,6 +15,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiResult<Void>> handleResponseStatus(ResponseStatusException error) {
@@ -33,15 +38,19 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<ApiResult<Void>> handleDatabaseError(Exception error) {
+        String requestId = UUID.randomUUID().toString();
+        log.error("API database error, requestId={}", requestId, error);
         return ResponseEntity
             .status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(ApiResult.of(500, "数据库操作失败，请联系管理员检查服务日志", null));
+            .body(ApiResult.of(500, "数据库操作失败，请联系管理员检查服务日志：" + requestId, null));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResult<Void>> handleUnexpected(Exception error) {
+        String requestId = UUID.randomUUID().toString();
+        log.error("API unexpected error, requestId={}", requestId, error);
         return ResponseEntity
             .status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(ApiResult.of(500, "系统处理失败，请联系管理员检查服务日志", null));
+            .body(ApiResult.of(500, "系统处理失败，请联系管理员检查服务日志：" + requestId, null));
     }
 }

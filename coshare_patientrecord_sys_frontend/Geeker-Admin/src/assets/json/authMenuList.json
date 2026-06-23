@@ -451,6 +451,20 @@
           }
         },
         {
+          "path": "/system/aiConfig",
+          "name": "aiConfig",
+          "component": "/system/aiConfig/index",
+          "meta": {
+            "icon": "Setting",
+            "title": "AI接口配置",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
           "path": "/system/systemLog",
           "name": "systemLog",
           "component": "/system/systemLog/index",

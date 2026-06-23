@@ -91,7 +91,7 @@
         <el-tab-pane label="旧共享病历导入" name="legacy">
           <el-alert
             class="mb15"
-            title="导入后不会覆盖既有病历字段，只会把旧共享文件作为附件证据进入患者档案；无法自动归属的文件会进入待分拣清单。"
+            title="先进行旧共享病历智能预检，确认字段建议和附件归属后再采纳入档；已有字段默认不覆盖。"
             type="info"
             show-icon
             :closable="false"
@@ -150,9 +150,9 @@
                 :on-remove="syncLegacyFiles"
               >
                 <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-                <div class="el-upload__text">拖入旧共享病历中的图片 / 报告文件，或点击批量选择</div>
+                <div class="el-upload__text">拖入旧共享病历中的 .doc/.docx、图片报告、复查照片，或点击批量选择</div>
                 <template #tip>
-                  <div class="el-upload__tip">系统会先按文件名自动归类，无法识别的文件可在下方手工分拣。</div>
+                  <div class="el-upload__tip">系统会先识别字段建议和附件归属，图片报告暂不做 OCR，异常结论需人工确认。</div>
                 </template>
               </el-upload>
             </el-form-item>
@@ -202,21 +202,88 @@
             </el-form-item>
 
             <el-form-item>
-              <el-button type="primary" :icon="Upload" :loading="importing" @click="submitLegacyImport">导入旧共享病历</el-button>
+              <el-button type="primary" :icon="Search" :loading="previewingLegacy" @click="previewLegacyImport">
+                智能预检
+              </el-button>
+              <el-button
+                type="success"
+                :icon="Upload"
+                :disabled="!legacyPreview"
+                :loading="importing"
+                @click="commitLegacyImport"
+              >
+                采纳入档
+              </el-button>
               <el-button @click="clearLegacyForm">清空</el-button>
             </el-form-item>
           </el-form>
 
+          <section v-if="legacyPreview" class="legacy-preview-panel">
+            <div class="legacy-panel-head">
+              <div>
+                <strong>导入预检结果</strong>
+                <span>
+                  {{ patientMatchLabel[legacyPreview.patientMatch] }}，建议字段
+                  {{ legacyPreview.fieldMappings.length }} 项，附件归属 {{ legacyPreview.attachmentMappings.length }} 项
+                </span>
+              </div>
+              <el-tag :type="legacyPreview.unassigned.length ? 'warning' : 'success'" effect="plain">
+                {{ legacyPreview.status }}
+              </el-tag>
+            </div>
+
+            <el-table v-if="legacyPreview.fieldMappings.length" :data="legacyPreview.fieldMappings" border class="mt15">
+              <el-table-column width="54">
+                <template #default="{ row }">
+                  <el-checkbox v-model="row.selected" :disabled="row.conflict && !allowOverwriteLegacyConflicts" />
+                </template>
+              </el-table-column>
+              <el-table-column prop="fieldLabel" label="建议字段" width="160" />
+              <el-table-column prop="sectionTitle" label="所属模块" width="180" />
+              <el-table-column prop="importValue" label="识别内容" min-width="240" show-overflow-tooltip />
+              <el-table-column prop="currentValue" label="当前值" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.currentValue || "空" }}</template>
+              </el-table-column>
+              <el-table-column prop="sourceFile" label="来源文件" width="180" show-overflow-tooltip />
+              <el-table-column prop="confidence" label="置信度" width="90" />
+              <el-table-column label="冲突" width="92">
+                <template #default="{ row }">
+                  <el-tag v-if="row.conflict" type="warning" effect="plain">需确认</el-tag>
+                  <el-tag v-else type="success" effect="plain">空字段</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-else description="暂未从旧病历正文识别到可填充字段，可先导入附件后人工补充。" />
+
+            <div class="legacy-overwrite-line">
+              <el-checkbox v-model="allowOverwriteLegacyConflicts">允许采纳时覆盖已有字段</el-checkbox>
+            </div>
+
+            <el-table v-if="legacyPreview.attachmentMappings.length" :data="legacyPreview.attachmentMappings" border class="mt15">
+              <el-table-column width="54">
+                <template #default="{ row }">
+                  <el-checkbox v-model="row.selected" />
+                </template>
+              </el-table-column>
+              <el-table-column prop="fileName" label="文件" min-width="240" show-overflow-tooltip />
+              <el-table-column prop="fieldLabel" label="关联字段" width="150" />
+              <el-table-column prop="department" label="归属科室" width="130" />
+              <el-table-column prop="source" label="来源类型" width="120">
+                <template #default="{ row }">{{ legacySourceLabel[row.source] || row.source }}</template>
+              </el-table-column>
+            </el-table>
+          </section>
+
           <el-result
             v-if="importResult"
             icon="success"
-            title="旧共享病历已导入"
-            sub-title="资料已进入患者附件索引，可在病历预览中统一查看。"
+            title="旧共享病历已采纳入档"
+            sub-title="采纳字段、复查记录和附件索引已同步到患者健康管理档案。"
           >
             <template #extra>
               <el-space wrap>
                 <el-button type="primary" @click="router.push(`/patients/detail/${importResult.patient.id}`)">
-                  查看患者病历
+                  查看患者档案
                 </el-button>
                 <el-button @click="importResult = null">继续导入</el-button>
               </el-space>
@@ -227,6 +294,9 @@
             <el-descriptions-item label="患者">{{ importResult.patient.name }}</el-descriptions-item>
             <el-descriptions-item label="门诊/住院号">{{ importResult.patient.visitNo }}</el-descriptions-item>
             <el-descriptions-item label="状态">{{ importResult.patient.status }}</el-descriptions-item>
+            <el-descriptions-item label="采纳字段">{{ importResult.appliedFields?.length || 0 }} 项</el-descriptions-item>
+            <el-descriptions-item label="跳过字段">{{ importResult.skippedFields?.length || 0 }} 项</el-descriptions-item>
+            <el-descriptions-item label="导入附件">{{ importResult.documents.length }} 份</el-descriptions-item>
           </el-descriptions>
 
           <el-table v-if="importResult" :data="importResult.documents" border class="mt15">
@@ -258,12 +328,14 @@ import type { UploadFile, UploadUserFile } from "element-plus";
 import { useRoute, useRouter } from "vue-router";
 import { Camera, CirclePlus, Search, Upload, UploadFilled } from "@element-plus/icons-vue";
 import {
+  commitSharedCaseImportApi,
   getPatientListApi,
-  importSharedCaseApi,
+  previewSharedCaseImportApi,
   uploadDocumentsApi,
   type UploadDocumentItem,
   type PatientRow,
-  type SharedCaseImportResult
+  type SharedCaseImportResult,
+  type SharedCasePreviewResult
 } from "@/api/modules/clinic";
 import { roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
@@ -311,8 +383,11 @@ const uploadItems = ref<UploadItem[]>([{ id: "upload-1", type: "", files: [] }])
 const legacyFileList = ref<UploadUserFile[]>([]);
 const legacyFileText = ref("");
 const legacyCandidates = ref<LegacyFileCandidate[]>([]);
+const previewingLegacy = ref(false);
 const importing = ref(false);
 const importResult = ref<SharedCaseImportResult | null>(null);
+const legacyPreview = ref<SharedCasePreviewResult | null>(null);
+const allowOverwriteLegacyConflicts = ref(false);
 
 const legacyForm = reactive({
   folderName: "",
@@ -326,6 +401,17 @@ const legacyForm = reactive({
 const unassignedRows = computed(() => importResult.value?.unassigned.map(fileName => ({ fileName })) ?? []);
 const classifiedLegacyCount = computed(() => legacyCandidates.value.filter(item => item.type).length);
 const pendingLegacyCount = computed(() => legacyCandidates.value.length - classifiedLegacyCount.value);
+const patientMatchLabel: Record<SharedCasePreviewResult["patientMatch"], string> = {
+  matchedByVisitNo: "已按门诊/住院号匹配患者",
+  matchedByName: "已按姓名匹配患者",
+  newPatient: "将新建患者档案"
+};
+const legacySourceLabel: Record<string, string> = {
+  document: "病历正文",
+  report: "检查报告",
+  followup: "复查随访",
+  unassigned: "待分拣"
+};
 
 const readQueryString = (value: unknown) => (Array.isArray(value) ? value[0] : typeof value === "string" ? value : "");
 
@@ -485,6 +571,8 @@ const legacyTypeLabel = (type: string) => documentTypes.find(item => item.value 
 const syncLegacyFiles = async (_uploadFile?: UploadFile, uploadFiles?: UploadFile[]) => {
   if (!uploadFiles) return;
   legacyFileList.value = uploadFiles;
+  legacyPreview.value = null;
+  importResult.value = null;
   legacyCandidates.value = await Promise.all(
     uploadFiles.map(async (file, index) => {
       const contentDataUrl = await fileToDataUrl(file.raw);
@@ -536,24 +624,58 @@ const validateLegacyForm = () => {
   return "";
 };
 
-const submitLegacyImport = async () => {
+const legacyImportPayload = async () => ({
+  ...legacyForm,
+  folderName: legacyForm.folderName || `${legacyForm.patientName}-${legacyForm.visitNo}`,
+  operator: roleName.value,
+  role: currentRole.value,
+  files: legacyFiles()
+});
+
+const previewLegacyImport = async () => {
   const message = validateLegacyForm();
   if (message) {
     ElMessage.warning(message);
     return;
   }
 
+  previewingLegacy.value = true;
+  importResult.value = null;
+  try {
+    const { data } = await previewSharedCaseImportApi(await legacyImportPayload());
+    legacyPreview.value = data;
+    ElMessage.success("旧共享病历预检完成，请确认采纳项");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    previewingLegacy.value = false;
+  }
+};
+
+const commitLegacyImport = async () => {
+  const message = validateLegacyForm();
+  if (message) {
+    ElMessage.warning(message);
+    return;
+  }
+  if (!legacyPreview.value) {
+    ElMessage.warning("请先完成智能预检");
+    return;
+  }
+
   importing.value = true;
   try {
-    const { data } = await importSharedCaseApi({
-      ...legacyForm,
-      folderName: legacyForm.folderName || `${legacyForm.patientName}-${legacyForm.visitNo}`,
-      operator: roleName.value,
-      role: currentRole.value,
-      files: legacyFiles()
+    const preview = legacyPreview.value;
+    const { data } = await commitSharedCaseImportApi({
+      ...(await legacyImportPayload()),
+      preview,
+      acceptedFieldMappingIds: preview.fieldMappings.filter(item => item.selected).map(item => item.id),
+      acceptedAttachmentMappingIds: preview.attachmentMappings.filter(item => item.selected).map(item => item.id),
+      overwriteConflicts: allowOverwriteLegacyConflicts.value
     });
     importResult.value = data;
-    ElMessage.success("旧共享病历已导入患者档案");
+    legacyPreview.value = data.preview || null;
+    ElMessage.success("旧共享病历已采纳入档");
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
@@ -574,6 +696,8 @@ const clearLegacyForm = () => {
   legacyFileText.value = "";
   legacyCandidates.value = [];
   importResult.value = null;
+  legacyPreview.value = null;
+  allowOverwriteLegacyConflicts.value = false;
 };
 
 watch(() => route.fullPath, syncRouteState);
@@ -758,6 +882,20 @@ onMounted(syncRouteState);
   background: #f8fafc;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
+}
+
+.legacy-preview-panel {
+  padding: 16px;
+  margin: 12px 0 18px;
+  background: #ffffff;
+  border: 1px solid #cfe7df;
+  border-radius: 8px;
+}
+
+.legacy-overwrite-line {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
 .legacy-panel-head {

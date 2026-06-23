@@ -7,7 +7,7 @@
     :search="_search"
     :reset="_reset"
     :columns="searchColumns"
-    :search-param="searchParam"
+    v-model:search-param="searchParam"
     :search-col="searchCol"
   />
 

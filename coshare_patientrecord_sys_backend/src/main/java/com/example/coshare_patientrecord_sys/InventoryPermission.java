@@ -9,7 +9,7 @@ public final class InventoryPermission {
     private static final Set<String> APPROVER_ROLES = Set.of("admin", "quality");
     private static final Set<String> COUNTER_ROLES = Set.of("admin", "quality");
     private static final Set<String> STAFF_ROLES = Set.of(
-        "admin", "quality", "nurse", "doctor", "frontdesk", "lab", "ecg", "ultrasound"
+        "admin", "quality", "nurse", "nursing", "doctor", "frontdesk", "reception", "lab", "ecg", "ultrasound", "inspection"
     );
 
     private InventoryPermission() {}

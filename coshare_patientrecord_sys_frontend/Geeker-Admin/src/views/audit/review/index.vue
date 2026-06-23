@@ -2,8 +2,8 @@
   <div class="table-box quality-page">
     <section class="card mb10 quality-head">
       <div>
-        <h2>质控审核</h2>
-        <p>按患者提交状态读取待审队列，退回会进入整改，严重问题清零后可通过归档。</p>
+        <h2>档案审核</h2>
+        <p>按患者健康管理档案提交状态读取待审队列，退回会进入整改，严重问题清零后可通过归档。</p>
       </div>
       <div class="head-actions">
         <el-input v-model="keyword" clearable placeholder="搜索患者、门诊号或医生" @keyup.enter="loadReviewList" />
@@ -76,11 +76,11 @@
               :rows="3"
               maxlength="160"
               show-word-limit
-              placeholder="填写质控意见。退回时会作为整改说明，通过时会写入归档日志。"
+              placeholder="填写档案审核意见。退回时会作为整改说明，通过时会写入归档日志。"
             />
             <div class="action-buttons">
               <el-button type="primary" plain @click="router.push(`/patients/detail/${activeDetail.patient.id}`)">
-                查看病历
+                查看档案
               </el-button>
               <el-button v-auth="'quality:reject'" type="warning" :loading="actionLoading === 'reject'" @click="rejectReview">
                 退回整改
@@ -115,7 +115,7 @@
                 <el-tag :type="row.level === 'critical' ? 'danger' : 'warning'" effect="plain">{{ row.levelLabel }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="section" label="病历段落" width="150" />
+            <el-table-column prop="section" label="档案章节" width="150" />
             <el-table-column prop="field" label="字段" width="140" />
             <el-table-column prop="owner" label="责任岗位" width="120" />
             <el-table-column prop="message" label="问题说明" min-width="240" />
@@ -163,9 +163,9 @@ const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
 const currentOperator = computed(() => userStore.userInfo.name || roleLabel(currentRole.value));
 
 const statusOptions = [
-  { label: "待质控审核", value: "待质控审核" },
+  { label: "待档案审核", value: "待档案审核" },
   { label: "退回整改", value: "退回整改" },
-  { label: "可提交质控", value: "可提交质控" },
+  { label: "可提交档案审核", value: "可提交档案审核" },
   { label: "资料待核对", value: "资料待核对" }
 ];
 
@@ -177,7 +177,7 @@ const issueFilterOptions = [
 
 const qualitySummary = computed(() => {
   if (!activeDetail.value) return "";
-  if (!activeDetail.value.archiveSubmitted) return "尚未提交质控，建议先确认提交状态";
+  if (!activeDetail.value.archiveSubmitted) return "尚未提交档案审核，建议先确认提交状态";
   return activeDetail.value.criticalCount ? "建议退回补正后归档" : "可通过归档";
 });
 
@@ -186,7 +186,7 @@ const canApprove = computed(() => Boolean(activeDetail.value?.archiveSubmitted &
 const archiveChecks = computed(() => {
   if (!activeDetail.value) return [];
   return [
-    { label: "已提交质控", ok: activeDetail.value.archiveSubmitted },
+    { label: "已提交档案审核", ok: activeDetail.value.archiveSubmitted },
     { label: "严重问题清零", ok: activeDetail.value.criticalCount === 0 },
     { label: "附件索引可追溯", ok: activeDetail.value.attachments.length > 0 },
     { label: "可进入正式归档", ok: canApprove.value }

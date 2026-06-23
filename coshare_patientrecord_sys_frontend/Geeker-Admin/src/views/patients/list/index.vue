@@ -133,7 +133,7 @@
         </template>
 
         <template #operation="{ row }">
-          <el-button v-auth="'patient:read'" type="primary" link @click.stop="openPatientDetail(row.id)"> 打开病历 </el-button>
+          <el-button v-auth="'patient:read'" type="primary" link @click.stop="openPatientDetail(row.id)"> 打开档案 </el-button>
           <el-button v-auth="'patient:update'" type="primary" link @click.stop="openPatientUpload(row)"> 上传资料 </el-button>
         </template>
       </ProTable>
@@ -208,7 +208,9 @@ const currentTotal = ref(0);
 
 const patientRiskTone = (row: PatientRow) => {
   const status = row.status || "";
-  if (row.riskType === "danger" || status.includes("退回") || status.includes("待质控")) return "danger";
+  if (row.riskType === "danger" || status.includes("退回") || status.includes("待质控") || status.includes("待档案审核")) {
+    return "danger";
+  }
   if (row.riskType === "warning" || (row.progressPercent || 0) < 100) return "warning";
   if (row.riskType === "success" || (row.progressPercent || 0) >= 100) return "success";
   return "info";
@@ -257,9 +259,29 @@ const createRules = reactive<FormRules<CreatePatientParams>>({
 
 const columns = reactive<ColumnProps<PatientRow>[]>([
   { type: "index", label: "#", width: 70 },
-  { prop: "name", label: "患者姓名", minWidth: 150, search: { el: "input" } },
-  { prop: "visitNo", label: "最近门诊/住院号", minWidth: 185, search: { el: "input" } },
-  { prop: "visitType", label: "最近类型", width: 110 },
+  {
+    prop: "name",
+    label: "患者姓名",
+    minWidth: 150,
+    search: { el: "input", props: { placeholder: "输入姓名关键词" } }
+  },
+  {
+    prop: "visitNo",
+    label: "最近门诊/住院号",
+    minWidth: 185,
+    search: { el: "input", props: { placeholder: "输入门诊/住院号" } }
+  },
+  {
+    prop: "visitType",
+    label: "最近类型",
+    width: 110,
+    enum: [
+      { label: "门诊", value: "门诊" },
+      { label: "门诊医保", value: "门诊医保" },
+      { label: "住院", value: "住院" }
+    ],
+    search: { el: "select", props: { placeholder: "选择就诊类型" } }
+  },
   { prop: "visitDate", label: "就诊日期", width: 150 },
   { prop: "encounterCount", label: "就诊次数", width: 110 },
   { prop: "doctor", label: "接诊医生", width: 120 },
@@ -268,12 +290,17 @@ const columns = reactive<ColumnProps<PatientRow>[]>([
     label: "资料状态",
     width: 150,
     enum: [
-      { label: "待上传", value: "待上传" },
+      { label: "待补充资料", value: "待补充资料" },
+      { label: "新增就诊待补充", value: "新增就诊待补充" },
       { label: "资料已上传", value: "资料已上传" },
+      { label: "可提交档案审核", value: "可提交档案审核" },
+      { label: "待档案审核", value: "待档案审核" },
+      { label: "退回整改", value: "退回整改" },
+      { label: "已归档", value: "已归档" },
       { label: "旧资料已归档", value: "旧资料已归档" },
       { label: "有作废记录", value: "有作废记录" }
     ],
-    search: { el: "select" }
+    search: { el: "select", props: { placeholder: "选择档案状态" } }
   },
   { prop: "operation", label: "操作", fixed: "right", width: 180 }
 ]);

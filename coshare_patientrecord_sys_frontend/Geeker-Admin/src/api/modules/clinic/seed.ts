@@ -1,14 +1,25 @@
-import { recordSections, roleLabel, type RecordField, type UserRole } from "@/config/fieldPermissions";
+import {
+  recordSections,
+  roleLabel,
+  screeningCollaborators,
+  serviceCollaborators,
+  type RecordField,
+  type RecordSection,
+  type UserRole
+} from "@/config/fieldPermissions";
 import type { AccountRow, AuditLogRow, ClinicDb, DepartmentRow, DictRow, RoleRow, TemplateFieldRule } from "./types";
 
 export const roleToDepartment: Record<UserRole, string> = {
   admin: "信息/院办",
   frontdesk: "前台",
+  reception: "接诊",
   lab: "化验室",
   ecg: "心电室",
   ultrasound: "B超/放射",
+  inspection: "检查室",
   doctor: "门诊",
   nurse: "治疗室",
+  nursing: "护理部",
   quality: "质控/病案"
 };
 
@@ -20,6 +31,13 @@ const seedDepartments = (): DepartmentRow[] => [
     scope: "当天门诊患者基础资料",
     defaultRole: "frontdesk"
   },
+  {
+    id: "reception",
+    name: "接诊",
+    uploadTypes: "初诊接待、转介绍记录、来院沟通资料",
+    scope: "接诊沟通、来源确认与病史陈述信息",
+    defaultRole: "reception"
+  },
   { id: "lab", name: "化验室", uploadTypes: "血常规、尿常规、凝血、生化、术前八项", scope: "本科室检查资料", defaultRole: "lab" },
   { id: "ecg", name: "心电室", uploadTypes: "心电图", scope: "本科室检查资料", defaultRole: "ecg" },
   {
@@ -28,6 +46,13 @@ const seedDepartments = (): DepartmentRow[] => [
     uploadTypes: "B超、放射影像、肠镜附件",
     scope: "本科室检查资料",
     defaultRole: "ultrasound"
+  },
+  {
+    id: "inspection",
+    name: "检查室",
+    uploadTypes: "B超、心电图、影像、肠镜及检查报告附件",
+    scope: "检查状态、检查附件与报告完成情况",
+    defaultRole: "inspection"
   },
   {
     id: "doctor",
@@ -43,6 +68,13 @@ const seedDepartments = (): DepartmentRow[] => [
     scope: "治疗室与护理相关字段维护",
     defaultRole: "nurse"
   },
+  {
+    id: "nursing",
+    name: "护理部",
+    uploadTypes: "入院评估、护理观察、术后恢复和随访执行记录",
+    scope: "护理评估、护理风险、术后观察与随访执行",
+    defaultRole: "nursing"
+  },
   { id: "quality", name: "质控/病案", uploadTypes: "DIP、归档、质控意见", scope: "质控审核与归档复核", defaultRole: "quality" }
 ];
 
@@ -52,9 +84,18 @@ const seedRoles = (): RoleRow[] => [
     name: "前台",
     role: "frontdesk",
     members: 0,
-    desc: "创建患者、维护基础信息、上传前台采集资料。",
+    desc: "创建患者、维护基础信息、来源诉求、家属关系和服务反馈。",
     permissions: ["patient:create", "patient:read", "patient:update", "document:upload"],
-    editableSections: ["basic"]
+    editableSections: ["basic", "arrivalSource", "specialNeeds", "familyRelationship", "trustCooperation", "patientFeedback"]
+  },
+  {
+    id: "reception",
+    name: "接诊",
+    role: "reception",
+    members: 0,
+    desc: "维护接诊沟通、转介绍记录、病史陈述者和来院动机。",
+    permissions: ["patient:create", "patient:read", "patient:update", "document:upload", "field:edit"],
+    editableSections: ["basic", "arrivalSource", "specialNeeds", "familyRelationship", "trustCooperation"]
   },
   {
     id: "lab",
@@ -84,29 +125,66 @@ const seedRoles = (): RoleRow[] => [
     editableSections: ["auxiliary"]
   },
   {
+    id: "inspection",
+    name: "检查室",
+    role: "inspection",
+    members: 0,
+    desc: "维护检查状态、检查附件和报告完成情况。",
+    permissions: ["patient:read", "document:upload", "field:edit"],
+    editableSections: ["auxiliary", "preOpScreening", "documentScope"]
+  },
+  {
     id: "doctor",
     name: "医生",
     role: "doctor",
     members: 0,
-    desc: "补充病史、诊断、专科检查和手术方案。",
+    desc: "补充诊疗信息、治疗方案、特殊诉求评估和复查恢复情况。",
     permissions: ["patient:read", "field:edit", "document:download"],
-    editableSections: ["chiefComplaint", "presentIllness", "history", "specialExam", "mainDiagnosis", "operation"]
+    editableSections: [
+      "specialNeeds",
+      "trustCooperation",
+      "chiefComplaint",
+      "presentIllness",
+      "history",
+      "specialExam",
+      "mainDiagnosis",
+      "operation",
+      "followup",
+      "patientFeedback"
+    ]
   },
   {
     id: "nurse",
     name: "护士/治疗室",
     role: "nurse",
     members: 0,
-    desc: "维护生命体征、治疗室配合记录和护理相关字段。",
+    desc: "维护生命体征、治疗室配合、家属关系、复查随访和患者反馈。",
     permissions: ["patient:read", "document:upload", "field:edit"],
-    editableSections: ["specialExam", "auxiliary", "operation"]
+    editableSections: [
+      "familyRelationship",
+      "trustCooperation",
+      "specialExam",
+      "auxiliary",
+      "operation",
+      "followup",
+      "patientFeedback"
+    ]
+  },
+  {
+    id: "nursing",
+    name: "护理部",
+    role: "nursing",
+    members: 0,
+    desc: "维护入院评估、护理观察、术后恢复和随访执行记录。",
+    permissions: ["patient:read", "document:upload", "field:edit"],
+    editableSections: ["basic", "operation", "followup", "patientFeedback", "supplementNotes"]
   },
   {
     id: "quality",
     name: "质控",
     role: "quality",
     members: 0,
-    desc: "质控审核、DIP分组、归档复核。",
+    desc: "档案审核、DIP分组、归档复核。",
     permissions: ["patient:read", "audit:read", "document:restore", "role:grant"],
     editableSections: ["dip", "documentScope", "qualityCheck"]
   },
@@ -147,25 +225,80 @@ const seedDictionaries = (): DictRow[] => [
 
 export const seedTemplateFieldRules = (): TemplateFieldRule[] =>
   recordSections.flatMap((section, sectionIndex) =>
-    section.fields.map((field: RecordField, fieldIndex) => ({
-      id: `${section.key}-${field.key}`,
-      sectionKey: section.key,
-      sectionTitle: section.title,
-      stage: section.stage,
-      department: section.department,
-      fieldKey: field.key,
-      fieldLabel: field.label,
-      editors: field.editors,
-      editorLabels: field.editors.map(editor => roleLabel(editor)),
-      required: Boolean(field.required),
-      evidence: field.evidence || "",
-      enabled: true,
-      printable: true,
-      qualityCheck: Boolean(field.required || field.evidence),
-      sortNo: sectionIndex * 100 + fieldIndex + 1,
-      updatedAt: "2026-06-10 08:00:00"
-    }))
+    section.fields.map((field: RecordField, fieldIndex) => {
+      const editors = collaborativeEditorsFor(section, field);
+      return {
+        id: `${section.key}-${field.key}`,
+        sectionKey: section.key,
+        sectionTitle: section.title,
+        stage: section.stage,
+        department: section.department,
+        fieldKey: field.key,
+        fieldLabel: field.label,
+        editors,
+        editorLabels: editors.map(editor => roleLabel(editor)),
+        required: Boolean(field.required),
+        evidence: field.evidence || "",
+        enabled: true,
+        printable: true,
+        qualityCheck: Boolean(field.required || field.evidence),
+        sortNo: sectionIndex * 100 + fieldIndex + 1,
+        updatedAt: "2026-06-10 08:00:00"
+      };
+    })
   );
+
+const collaborativeSectionKeys = new Set([
+  "basic",
+  "arrivalSource",
+  "specialNeeds",
+  "familyRelationship",
+  "trustCooperation",
+  "preOpScreening",
+  "followup",
+  "patientFeedback",
+  "tcmHealthManagement",
+  "supplementNotes"
+]);
+
+const strictFieldKeys = new Set([
+  "tcmDiagnosis",
+  "westernDiagnosis",
+  "otherMainDiagnosis",
+  "tcmSyndrome",
+  "surgeryFeasibility",
+  "operationName",
+  "operationProcess",
+  "anesthesiaMethod",
+  "dipGroup",
+  "dipWeight",
+  "qualityScore",
+  "qualityIssues",
+  "qualityConclusion",
+  "archiveClosedSignature"
+]);
+
+const collaborativeEditorsFor = (section: RecordSection, field: RecordField) => {
+  if (strictFieldKeys.has(field.key)) return field.editors;
+  if (section.key === "preOpScreening") return screeningCollaborators;
+  if (collaborativeSectionKeys.has(section.key)) return serviceCollaborators;
+  return field.editors;
+};
+
+const applyCollaborativeRuleDefaults = (rules: TemplateFieldRule[] = []) => {
+  const defaultRules = seedTemplateFieldRules();
+  const defaultByField = new Map(defaultRules.map(rule => [rule.fieldKey, rule]));
+  return rules.map(rule => {
+    const defaultRule = defaultByField.get(rule.fieldKey);
+    if (!defaultRule) return rule;
+    const editors = defaultRule.editors.length > rule.editors.length ? defaultRule.editors : rule.editors;
+    return {
+      ...rule,
+      editors,
+      editorLabels: editors.map(editor => roleLabel(editor))
+    };
+  });
+};
 
 const seedAuditLogs = (): AuditLogRow[] => [];
 
@@ -217,7 +350,9 @@ export const hydrateDb = (db: ClinicDb) => {
   }
   if (!db.departments?.length) db.departments = seedDepartments();
   if (!db.dictionaries?.length) db.dictionaries = seedDictionaries();
-  if (!db.templateFieldRules?.length) db.templateFieldRules = seedTemplateFieldRules();
+  db.templateFieldRules = applyCollaborativeRuleDefaults(
+    db.templateFieldRules?.length ? db.templateFieldRules : seedTemplateFieldRules()
+  );
   db.auditLogs ??= seedAuditLogs();
 
   db.patients = db.patients.filter(patient => {

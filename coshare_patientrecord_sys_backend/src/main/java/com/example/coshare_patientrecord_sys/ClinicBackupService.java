@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
+import java.awt.GraphicsEnvironment;
 import java.io.IOException;
+import java.io.File;
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import javax.swing.JFileChooser;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
@@ -166,6 +169,25 @@ public class ClinicBackupService {
 
     public ObjectNode runManualBackup() {
         return runBackup("manual");
+    }
+
+    public ObjectNode chooseBackupDirectory(String initialDir) {
+        if (GraphicsEnvironment.isHeadless()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前后端运行环境无法打开本机目录选择器，请手动填写备份路径");
+        }
+        JFileChooser chooser = new JFileChooser(resolveInitialDirectory(initialDir));
+        chooser.setDialogTitle("选择物理备份目录");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        chooser.setAcceptAllFileFilterUsed(false);
+
+        int selectionResult = chooser.showOpenDialog(null);
+        if (selectionResult != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "已取消选择备份目录");
+        }
+        Path backupDir = validateBackupDir(chooser.getSelectedFile().toPath().toString());
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("backupDir", backupDir.toString());
+        return result;
     }
 
     @Scheduled(cron = "${clinic.backup.cron:0 0 2 * * *}", zone = "${clinic.backup.zone:Asia/Shanghai}")
@@ -349,6 +371,15 @@ public class ClinicBackupService {
         } catch (IOException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "备份路径不可写：" + error.getMessage(), error);
         }
+    }
+
+    private String resolveInitialDirectory(String initialDir) {
+        if (initialDir != null && !initialDir.isBlank()) {
+            Path path = Path.of(initialDir.trim()).toAbsolutePath().normalize();
+            Path candidate = Files.isDirectory(path) ? path : path.getParent();
+            if (candidate != null) return candidate.toString();
+        }
+        return new File(System.getProperty("user.home", ".")).getAbsolutePath();
     }
 
     private BackupConfig readConfig() {

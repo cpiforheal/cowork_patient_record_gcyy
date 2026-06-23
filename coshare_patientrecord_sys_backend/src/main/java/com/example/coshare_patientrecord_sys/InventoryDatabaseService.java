@@ -991,9 +991,12 @@ public class InventoryDatabaseService {
 
     private JsonNode readJson(ResultSet resultSet, String column) throws SQLException {
         try {
-            return objectMapper.readTree(resultSet.getString(column));
+            String rawJson = resultSet.getString(column);
+            if (rawJson == null || rawJson.isBlank()) return objectMapper.createObjectNode();
+            JsonNode node = objectMapper.readTree(rawJson);
+            return node == null || node.isNull() ? objectMapper.createObjectNode() : node;
         } catch (Exception error) {
-            throw new SQLException("Failed to parse JSON column " + column, error);
+            return objectMapper.createObjectNode();
         }
     }
 

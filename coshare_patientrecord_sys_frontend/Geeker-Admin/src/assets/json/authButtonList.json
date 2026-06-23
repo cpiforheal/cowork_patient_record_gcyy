@@ -38,6 +38,7 @@
     "departmentManage": ["department:create", "department:update"],
     "dictManage": ["dict:create", "dict:update"],
     "menuMange": ["menu:update"],
+    "aiConfig": ["ai:config:read", "ai:config:update"],
     "systemLog": ["audit:read"]
   },
   "msg": "成功"

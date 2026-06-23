@@ -32,10 +32,10 @@
       <button
         class="exception-card"
         :class="{ danger: stats.reviewPatients > 0, 'is-zero': stats.reviewPatients === 0 }"
-        :aria-label="`待质控 ${stats.reviewPatients} 人`"
+        :aria-label="`待档案审核 ${stats.reviewPatients} 人`"
         @click="router.push('/audit/review')"
       >
-        <span>待质控</span>
+        <span>待档案审核</span>
         <strong>{{ stats.reviewPatients }}</strong>
         <small>需要复核</small>
       </button>
@@ -77,7 +77,7 @@
           <div class="panel-head">
             <div>
               <h2>我的待办</h2>
-              <p>按当前岗位可编辑章节筛选，点击直接进入患者病历。</p>
+              <p>按当前岗位可编辑章节筛选，点击直接进入患者健康管理档案。</p>
             </div>
             <el-button :icon="Refresh" link @click="loadTasks">刷新</el-button>
           </div>
@@ -215,9 +215,19 @@
             <el-input
               v-model="backupPath"
               clearable
-              :disabled="backupLoading || backupStatus?.running"
+              :disabled="backupLoading || choosingBackupDir || backupStatus?.running"
               placeholder="例如：\\192.168.1.10\clinic-backup 或 D:\clinic-backup"
-            />
+            >
+              <template #append>
+                <el-button
+                  :loading="choosingBackupDir"
+                  :disabled="backupLoading || backupStatus?.running"
+                  @click="chooseBackupDirectory"
+                >
+                  选择目录
+                </el-button>
+              </template>
+            </el-input>
             <div class="backup-meta">
               <span>{{ backupStorageSummary }}</span>
               <small>{{ backupStatus?.backupDir || "尚未设置备份路径" }}</small>
@@ -241,6 +251,7 @@ import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { ArrowLeft, ArrowRight, Refresh } from "@element-plus/icons-vue";
 import {
+  chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
   getBackupStatusApi,
   getMaintenanceStatusApi,
@@ -288,6 +299,7 @@ const backupStatus = ref<BackupStatus>();
 const backupPath = ref("");
 const backupEnabled = ref(true);
 const backupLoading = ref(false);
+const choosingBackupDir = ref(false);
 const stats = ref<OperationStats>({
   totalPatients: 0,
   pendingPatients: 0,
@@ -328,9 +340,9 @@ const allQuickEntries = [
   { title: "患者流程看板", desc: "查看今日患者卡片", icon: "Connection", path: "/encounters/active" },
   { title: "今日患者", desc: "按姓名和门诊号查询", icon: "UserFilled", path: "/patients/list" },
   { title: "上传资料", desc: "门诊号识别后一键上传", icon: "UploadFilled", path: "/workbench/upload" },
-  { title: "旧病历导入", desc: "迁移共享文件夹资料", icon: "FolderOpened", path: "/workbench/legacy" },
+  { title: "旧资料导入", desc: "迁移共享文件夹资料", icon: "FolderOpened", path: "/workbench/legacy" },
   { title: "字段权限", desc: "查看字段归属", icon: "DocumentCopy", path: "/templates/record" },
-  { title: "质控审核", desc: "退回整改或通过归档", icon: "Tickets", path: "/audit/review" },
+  { title: "档案审核", desc: "退回整改或通过归档", icon: "Tickets", path: "/audit/review" },
   { title: "操作日志", desc: "追踪资料改动", icon: "DocumentChecked", path: "/audit/log" }
 ];
 
@@ -535,6 +547,20 @@ const saveBackupConfig = async () => {
     return false;
   } finally {
     backupLoading.value = false;
+  }
+};
+
+const chooseBackupDirectory = async () => {
+  choosingBackupDir.value = true;
+  try {
+    const { data } = await chooseBackupDirectoryApi(backupPath.value.trim() || backupStatus.value?.backupDir || "");
+    backupPath.value = data.backupDir;
+    ElMessage.success("已选择备份目录，请确认后保存路径");
+  } catch (error) {
+    const message = (error as Error).message;
+    if (!message.includes("取消")) ElMessage.warning(message);
+  } finally {
+    choosingBackupDir.value = false;
   }
 };
 
