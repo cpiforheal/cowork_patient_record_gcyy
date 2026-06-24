@@ -1499,6 +1499,7 @@ import {
   recordSections,
   roleLabel,
   serviceCollaborators,
+  USER_ROLES,
   type RecordAttachment,
   type RecordField,
   type RecordSection,
@@ -1513,20 +1514,7 @@ const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 
-const userRoles: UserRole[] = [
-  "admin",
-  "frontdesk",
-  "reception",
-  "lab",
-  "ecg",
-  "ultrasound",
-  "inspection",
-  "doctor",
-  "nurse",
-  "nursing",
-  "quality"
-];
-const normalizeUserRole = (role?: string): UserRole => (userRoles.includes(role as UserRole) ? (role as UserRole) : "frontdesk");
+const normalizeUserRole = (role?: string): UserRole => (USER_ROLES.includes(role as UserRole) ? (role as UserRole) : "frontdesk");
 const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 const roleName = computed(() => roleLabel(currentRole.value));
 const patientId = computed(() => String(route.params.id || "").trim());

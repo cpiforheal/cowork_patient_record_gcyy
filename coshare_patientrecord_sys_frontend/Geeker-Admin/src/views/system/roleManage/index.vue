@@ -62,23 +62,14 @@ import { CirclePlus } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { getRoleListApi, saveRoleApi, type RoleRow } from "@/api/modules/clinic";
-import { recordSections, type UserRole } from "@/config/fieldPermissions";
+import { USER_ROLE_OPTIONS, recordSections } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 
 const userStore = useUserStore();
 const proTable = ref<ProTableInstance>();
 const dialogVisible = ref(false);
 const roleForm = reactive<Partial<RoleRow>>({});
-const roleOptions: { label: string; value: UserRole }[] = [
-  { label: "管理员", value: "admin" },
-  { label: "前台", value: "frontdesk" },
-  { label: "化验室", value: "lab" },
-  { label: "心电室", value: "ecg" },
-  { label: "B超/放射", value: "ultrasound" },
-  { label: "医生", value: "doctor" },
-  { label: "护士/治疗室", value: "nurse" },
-  { label: "质控", value: "quality" }
-];
+const roleOptions = USER_ROLE_OPTIONS;
 const permissionOptions = [
   "patient:create",
   "patient:read",

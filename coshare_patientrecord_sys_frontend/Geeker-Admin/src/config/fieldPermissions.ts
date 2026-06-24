@@ -97,6 +97,25 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   quality: "质控"
 };
 
+export const USER_ROLES: UserRole[] = [
+  "admin",
+  "frontdesk",
+  "reception",
+  "inspection",
+  "lab",
+  "ecg",
+  "ultrasound",
+  "doctor",
+  "nurse",
+  "nursing",
+  "quality"
+];
+
+export const USER_ROLE_OPTIONS: { label: string; value: UserRole }[] = USER_ROLES.map(value => ({
+  label: ROLE_LABELS[value],
+  value
+}));
+
 export const roleLabel = (role?: string) => ROLE_LABELS[(role as UserRole) || "frontdesk"] ?? "前台";
 
 export const canEditField = (role: string | undefined, field: RecordField) => {

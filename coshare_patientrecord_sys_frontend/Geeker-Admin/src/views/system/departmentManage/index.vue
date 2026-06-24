@@ -46,7 +46,7 @@ import { CirclePlus } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { getDepartmentListApi, saveDepartmentApi, type DepartmentRow } from "@/api/modules/clinic";
-import { roleLabel, type UserRole } from "@/config/fieldPermissions";
+import { USER_ROLE_OPTIONS, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 
 const userStore = useUserStore();
@@ -54,16 +54,7 @@ const proTable = ref<ProTableInstance>();
 const dialogVisible = ref(false);
 const departmentForm = reactive<Partial<DepartmentRow>>({});
 
-const roleOptions: { label: string; value: UserRole }[] = [
-  { label: "前台", value: "frontdesk" },
-  { label: "化验室", value: "lab" },
-  { label: "心电室", value: "ecg" },
-  { label: "B超/放射", value: "ultrasound" },
-  { label: "医生", value: "doctor" },
-  { label: "护士/治疗室", value: "nurse" },
-  { label: "质控", value: "quality" },
-  { label: "管理员", value: "admin" }
-];
+const roleOptions = USER_ROLE_OPTIONS;
 const operatorRole = computed(() => userStore.userInfo.role || "frontdesk");
 const operatorName = computed(() => roleLabel(operatorRole.value));
 

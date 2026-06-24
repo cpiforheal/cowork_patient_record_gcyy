@@ -181,7 +181,7 @@ import { ElMessage } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 import TreeFilter from "@/components/TreeFilter/index.vue";
 import { getTemplateFieldRulesApi, saveTemplateFieldRuleApi, type TemplateFieldRule } from "@/api/modules/clinic";
-import { recordSections, roleLabel, type UserRole } from "@/config/fieldPermissions";
+import { USER_ROLE_OPTIONS, recordSections, roleLabel, type UserRole } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 
 interface SectionTreeNode {
@@ -207,16 +207,7 @@ const roleName = computed(() => roleLabel(currentRole.value));
 const totalRuleCount = computed(() => ruleRows.value.length);
 
 const departments = ["前台", "门诊", "化验室", "心电室", "B超/放射", "治疗室", "质控/病案", "信息/院办"];
-const roles: { label: string; value: UserRole }[] = [
-  { label: "管理员", value: "admin" },
-  { label: "前台", value: "frontdesk" },
-  { label: "化验室", value: "lab" },
-  { label: "心电室", value: "ecg" },
-  { label: "B超/放射", value: "ultrasound" },
-  { label: "医生", value: "doctor" },
-  { label: "护士/治疗室", value: "nurse" },
-  { label: "质控", value: "quality" }
-];
+const roles = USER_ROLE_OPTIONS;
 
 const ruleForm = reactive<Partial<TemplateFieldRule>>({});
 

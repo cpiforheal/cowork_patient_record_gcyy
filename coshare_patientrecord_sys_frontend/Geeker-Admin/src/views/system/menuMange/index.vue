@@ -61,7 +61,7 @@ import { ElMessage } from "element-plus";
 import { EditPen } from "@element-plus/icons-vue";
 import authMenuList from "@/assets/json/authMenuList.json";
 import ProTable from "@/components/ProTable/index.vue";
-import { roleLabel, type UserRole } from "@/config/fieldPermissions";
+import { USER_ROLE_OPTIONS, roleLabel, type UserRole } from "@/config/fieldPermissions";
 
 type MenuRow = (typeof authMenuList.data)[number] & {
   children?: MenuRow[];
@@ -72,22 +72,15 @@ const menuData = ref<MenuRow[]>(authMenuList.data as MenuRow[]);
 const roleDialogVisible = ref(false);
 const activeMenu = ref<MenuRow>();
 const roleForm = reactive<{ roles: UserRole[] }>({ roles: [] });
-const roleOptions: { label: string; value: UserRole }[] = [
-  { label: "前台", value: "frontdesk" },
-  { label: "检验", value: "lab" },
-  { label: "心电", value: "ecg" },
-  { label: "B超", value: "ultrasound" },
-  { label: "医生", value: "doctor" },
-  { label: "护士", value: "nurse" },
-  { label: "档案审核", value: "quality" },
-  { label: "管理员", value: "admin" }
-];
+const roleOptions = USER_ROLE_OPTIONS;
 const menuRoleMap = reactive<Record<string, UserRole[]>>({});
 
 const defaultVisibleRoles = (row: MenuRow): UserRole[] => {
   if (row.path.startsWith("/system")) return ["admin"];
   if (row.path.startsWith("/audit")) return ["admin", "quality"];
-  if (row.path.startsWith("/workbench")) return ["admin", "frontdesk", "lab", "ecg", "ultrasound", "nurse"];
+  if (row.path.startsWith("/workbench")) {
+    return ["admin", "frontdesk", "reception", "inspection", "lab", "ecg", "ultrasound", "nurse", "nursing"];
+  }
   if (row.path.startsWith("/templates")) return ["admin", "quality"];
   return ["admin", "frontdesk", "doctor", "nurse", "quality"];
 };

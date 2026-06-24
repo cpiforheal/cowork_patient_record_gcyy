@@ -1670,7 +1670,8 @@ export const importSharedCaseApi = async (params: SharedCaseImportParams) => {
 };
 
 export const voidDocumentApi = async (params: DocumentVoidParams) => {
-  if (!["admin", "quality", "frontdesk", "lab", "ecg", "ultrasound", "nurse"].includes(params.role)) {
+  const documentVoidRoles: UserRole[] = ["lab", "ecg", "ultrasound", "inspection", ...serviceCollaborators];
+  if (!documentVoidRoles.includes(params.role as UserRole)) {
     return Promise.reject(new Error(`${roleLabel(params.role)}无权作废附件`));
   }
   const reason = params.reason.trim();
