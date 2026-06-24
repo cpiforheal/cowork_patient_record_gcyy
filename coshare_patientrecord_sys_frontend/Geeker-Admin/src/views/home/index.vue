@@ -9,11 +9,17 @@
 
       <div class="today-summary">
         <p>今天要处理什么</p>
-        <h1>{{ firstTask ? firstTask.title : "暂无待处理任务" }}</h1>
-        <span>{{ firstTask ? firstTask.desc : "可以从患者流程看板查看全院门诊进度。" }}</span>
+        <h1>{{ firstActionTask ? firstActionTask.title : "暂无待处理任务" }}</h1>
+        <span>{{ firstActionTask ? firstActionTask.desc : "可以从患者流程看板查看全院门诊进度。" }}</span>
       </div>
 
-      <el-button type="primary" size="large" :icon="ArrowRight" :disabled="!firstTask" @click="openTask(firstTask)">
+      <el-button
+        type="primary"
+        size="large"
+        :icon="ArrowRight"
+        :disabled="!firstActionTask"
+        @click="openActionTask(firstActionTask)"
+      >
         进入第一项待办
       </el-button>
     </section>
@@ -77,13 +83,29 @@
           <div class="panel-head">
             <div>
               <h2>我的待办</h2>
-              <p>按当前岗位可编辑章节筛选，点击直接进入患者健康管理档案。</p>
+              <p>{{ roleName }}登录后只看最该处理的动作，点击直接进入对应患者、章节或审核页。</p>
             </div>
             <el-button :icon="Refresh" link @click="loadTasks">刷新</el-button>
           </div>
 
+          <div class="action-task-list">
+            <button
+              v-for="task in actionTasks"
+              :key="task.id"
+              class="action-task-card"
+              :class="`is-${task.level}`"
+              @click="openActionTask(task)"
+            >
+              <span>{{ task.roleLabel }}</span>
+              <strong>{{ task.count }}</strong>
+              <em>{{ task.title }}</em>
+              <small>{{ task.desc }}</small>
+              <b>{{ task.actionText }}</b>
+            </button>
+          </div>
+
           <el-empty v-if="!taskCards.length" description="当前岗位暂无待处理患者" />
-          <div v-else class="task-list">
+          <div v-else class="task-list patient-task-list">
             <button v-for="task in taskCards" :key="task.id" class="task-card" @click="openTask(task)">
               <div>
                 <strong>{{ task.patient.name }}</strong>
@@ -232,6 +254,13 @@
               <span>{{ backupStorageSummary }}</span>
               <small>{{ backupStatus?.backupDir || "尚未设置备份路径" }}</small>
             </div>
+            <div class="backup-health-grid">
+              <article v-for="item in backupHealthItems" :key="item.key" :class="`is-${item.level}`">
+                <i aria-hidden="true"></i>
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </article>
+            </div>
             <div class="backup-actions">
               <el-button :loading="backupLoading" :disabled="backupStatus?.running" @click="saveBackupConfig">保存路径</el-button>
               <el-button type="primary" :loading="backupLoading || backupStatus?.running" @click="runBackupNow">
@@ -275,6 +304,18 @@ interface HomeTask {
   desc: string;
   sectionKey: string;
   patient: PatientRow;
+}
+
+interface ActionTask {
+  id: string;
+  roleLabel: string;
+  title: string;
+  desc: string;
+  count: number | string;
+  level: "success" | "warning" | "danger" | "info";
+  actionText: string;
+  path: string;
+  query?: Record<string, string>;
 }
 
 type CalendarDayCell = {
@@ -409,7 +450,231 @@ const backupStorageSummary = computed(() => {
   )}`;
 });
 
+const backupHealthItems = computed(() => {
+  const latestRun = backupStatus.value?.latestRun;
+  const hasPath = Boolean(backupStatus.value?.backupDir);
+  const latestOk = latestRun?.status === "success";
+  const hasBackupFiles = (backupStatus.value?.backupFileCount || 0) > 0;
+  const hasSpace = (backupStatus.value?.usableSpaceBytes || 0) > 1024 * 1024 * 1024;
+  return [
+    {
+      key: "latest",
+      label: "最近结果",
+      value: backupStatus.value?.running ? "备份中" : latestRun ? latestRun.message || latestRun.status : "未执行",
+      level: backupStatus.value?.running ? "info" : latestOk ? "success" : "warning"
+    },
+    {
+      key: "database",
+      label: "数据库",
+      value: hasBackupFiles || latestOk ? "已纳入备份" : "等待首次备份",
+      level: hasBackupFiles || latestOk ? "success" : "warning"
+    },
+    {
+      key: "attachments",
+      label: "附件目录",
+      value: maintenanceStatus.value?.storage.attachmentDir ? "已巡检" : "待巡检",
+      level: maintenanceStatus.value?.storage.attachmentDir ? "success" : "warning"
+    },
+    {
+      key: "path",
+      label: "备份路径",
+      value: hasPath ? (hasSpace ? "可写空间充足" : "空间需关注") : "未配置",
+      level: hasPath ? (hasSpace ? "success" : "warning") : "danger"
+    }
+  ] as const;
+});
+
 const pendingRows = computed(() => patientRows.value.filter(item => item.status !== "旧资料已归档" && item.status !== "待归档"));
+const returnedRows = computed(() => patientRows.value.filter(item => item.status.includes("退回") || item.riskType === "danger"));
+const reviewRows = computed(() => patientRows.value.filter(item => item.status.includes("审核") || item.status === "待归档"));
+const attachmentTodoRows = computed(() =>
+  patientRows.value.filter(
+    item => item.currentStage.includes("检查") || item.currentStage.includes("附件") || item.currentStage.includes("影像")
+  )
+);
+const registrationTodoRows = computed(() =>
+  patientRows.value.filter(
+    item => item.currentStage.includes("前台") || item.currentStage.includes("建档") || item.progressPercent < 25
+  )
+);
+const rolePendingRows = computed(() =>
+  pendingRows.value.filter(patient => {
+    const stage = patient.currentStage || "";
+    if (["lab", "ecg", "ultrasound", "inspection"].includes(currentRole.value)) {
+      return /检查|检验|影像|心电|B超|筛查|附件/.test(stage);
+    }
+    if (currentRole.value === "doctor") return /医师|诊断|治疗|方案|手术|中医/.test(stage) || patient.riskType === "warning";
+    if (["nurse", "nursing"].includes(currentRole.value)) return /护理|宣教|住院|出院|随访/.test(stage);
+    if (currentRole.value === "quality") return reviewRows.value.some(row => row.id === patient.id);
+    if (currentRole.value === "frontdesk") return registrationTodoRows.value.some(row => row.id === patient.id);
+    return true;
+  })
+);
+
+const roleActionConfig = computed(() => {
+  const role = currentRole.value;
+  if (role === "frontdesk") {
+    return [
+      {
+        id: "frontdesk-create",
+        title: "新建/登记患者",
+        desc: "录入基础信息、来院来源和分诊入口",
+        count: "建档",
+        level: "info",
+        actionText: "去患者列表",
+        path: "/patients/list"
+      },
+      {
+        id: "frontdesk-basic",
+        title: "基础信息待补",
+        desc: "优先处理建档不完整或今日未闭环患者",
+        count: registrationTodoRows.value.length,
+        level: registrationTodoRows.value.length ? "warning" : "success",
+        actionText: "查看看板",
+        path: "/encounters/active"
+      },
+      {
+        id: "frontdesk-legacy",
+        title: "旧资料待迁移",
+        desc: "共享文件夹资料先预检再采纳入档",
+        count: stats.value.documentCount,
+        level: "info",
+        actionText: "导入资料",
+        path: "/workbench/legacy"
+      }
+    ];
+  }
+  if (["lab", "ecg", "ultrasound", "inspection"].includes(role)) {
+    return [
+      {
+        id: "inspection-upload",
+        title: "待上传检查证据",
+        desc: "检查室以图片/附件证据为主，可选补充简短备注",
+        count: attachmentTodoRows.value.length,
+        level: attachmentTodoRows.value.length ? "warning" : "success",
+        actionText: "上传资料",
+        path: "/workbench/upload"
+      },
+      {
+        id: "inspection-fields",
+        title: "本科室待填字段",
+        desc: "只处理当前岗位可编辑的检查/筛查字段",
+        count: rolePendingRows.value.length,
+        level: rolePendingRows.value.length ? "warning" : "success",
+        actionText: "进入看板",
+        path: "/encounters/active"
+      },
+      {
+        id: "inspection-returned",
+        title: "退回整改",
+        desc: "质控退回后优先补齐原始证据",
+        count: returnedRows.value.length,
+        level: returnedRows.value.length ? "danger" : "success",
+        actionText: "查看退回",
+        path: "/audit/review"
+      }
+    ];
+  }
+  if (role === "quality") {
+    return [
+      {
+        id: "quality-review",
+        title: "待审核档案",
+        desc: "通过、退回或标记资料异常",
+        count: stats.value.reviewPatients,
+        level: stats.value.reviewPatients ? "warning" : "success",
+        actionText: "开始审核",
+        path: "/audit/review"
+      },
+      {
+        id: "quality-returned",
+        title: "退回未整改",
+        desc: "跟踪仍未闭环的退回档案",
+        count: stats.value.returnedPatients,
+        level: stats.value.returnedPatients ? "danger" : "success",
+        actionText: "查看整改",
+        path: "/audit/review"
+      },
+      {
+        id: "quality-log",
+        title: "关键操作留痕",
+        desc: "查看提交、作废、打印、导入等操作轨迹",
+        count: stats.value.voidedDocumentCount,
+        level: stats.value.voidedDocumentCount ? "warning" : "info",
+        actionText: "看日志",
+        path: "/audit/log"
+      }
+    ];
+  }
+  if (["admin", "manager"].includes(role)) {
+    return [
+      {
+        id: "admin-backup",
+        title: "备份健康巡检",
+        desc: latestBackupSummary.value,
+        count: backupStatus.value?.running ? "运行中" : backupStatus.value?.backupFileCount || 0,
+        level: backupStatus.value?.latestRun?.status === "failed" ? "danger" : "info",
+        actionText: "查看面板",
+        path: "/"
+      },
+      {
+        id: "admin-overdue",
+        title: "今日未闭环",
+        desc: "关注超过规则时限仍未闭环的患者",
+        count: stats.value.pendingPatients,
+        level: stats.value.pendingPatients ? "warning" : "success",
+        actionText: "看流程",
+        path: "/encounters/active"
+      },
+      {
+        id: "admin-review",
+        title: "审核与归档",
+        desc: "跟进质控审核、退回整改和资料异常",
+        count: stats.value.reviewPatients + stats.value.returnedPatients,
+        level: stats.value.returnedPatients ? "danger" : stats.value.reviewPatients ? "warning" : "success",
+        actionText: "去审核",
+        path: "/audit/review"
+      }
+    ];
+  }
+  return [
+    {
+      id: "clinical-fields",
+      title: "我负责的待填字段",
+      desc: `${roleName.value}只处理当前岗位可编辑的档案节点`,
+      count: rolePendingRows.value.length,
+      level: rolePendingRows.value.length ? "warning" : "success",
+      actionText: "进入工作台",
+      path: "/encounters/active"
+    },
+    {
+      id: "clinical-submit",
+      title: "待提交档案",
+      desc: "保存后提交质控，减少事后退回",
+      count: pendingRows.value.length,
+      level: pendingRows.value.length ? "info" : "success",
+      actionText: "查看患者",
+      path: "/patients/list"
+    },
+    {
+      id: "clinical-returned",
+      title: "被退回整改",
+      desc: "按退回原因定位到字段或章节补齐",
+      count: returnedRows.value.length,
+      level: returnedRows.value.length ? "danger" : "success",
+      actionText: "处理退回",
+      path: "/audit/review"
+    }
+  ];
+});
+
+const actionTasks = computed<ActionTask[]>(() =>
+  roleActionConfig.value.slice(0, 5).map(item => ({
+    roleLabel: roleName.value,
+    ...item,
+    level: item.level as ActionTask["level"]
+  }))
+);
 
 const patientEncounterDates = (patient: PatientRow) => {
   const history = patient.encounterHistory?.length
@@ -496,7 +761,7 @@ const taskCards = computed<HomeTask[]>(() =>
   }))
 );
 
-const firstTask = computed(() => taskCards.value[0]);
+const firstActionTask = computed(() => actionTasks.value.find(task => task.level !== "success") || actionTasks.value[0]);
 
 const loadTasks = async () => {
   try {
@@ -621,6 +886,12 @@ const selectCalendarDate = (day: CalendarDayCell) => {
 const openTask = (task?: HomeTask) => {
   if (!task) return;
   router.push({ path: `/patients/detail/${task.patient.id}`, query: { section: task.sectionKey } });
+};
+
+const openActionTask = (task?: ActionTask) => {
+  if (!task) return;
+  if (task.path === "/") return;
+  router.push({ path: task.path, query: task.query });
 };
 
 onMounted(loadTasks);
@@ -1045,6 +1316,124 @@ onMounted(loadTasks);
   gap: 8px;
 }
 
+.action-task-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.action-task-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 13px 14px 36px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  background: linear-gradient(135deg, rgb(236 253 245 / 62%), #ffffff);
+  border: 1px solid rgb(15 118 110 / 14%);
+  border-radius: 8px;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+
+  &::after {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    color: var(--clinic-info);
+    font-size: 12px;
+    font-weight: 700;
+    content: attr(data-action);
+  }
+
+  &:hover {
+    border-color: rgb(15 118 110 / 26%);
+    box-shadow: 0 12px 24px rgb(15 118 110 / 10%);
+    transform: translateY(-2px);
+  }
+
+  span,
+  strong,
+  em,
+  small,
+  b {
+    display: block;
+  }
+
+  span {
+    color: var(--clinic-info);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong {
+    color: var(--hos-primary-deep, #3d6b54);
+    font-size: 34px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  em {
+    color: var(--el-text-color-primary);
+    font-style: normal;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  small {
+    min-height: 34px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.45;
+  }
+
+  b {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    color: var(--clinic-info);
+    font-size: 12px;
+  }
+
+  &.is-warning {
+    background: var(--clinic-warning-soft);
+    border-color: rgb(245 158 11 / 26%);
+
+    strong,
+    b {
+      color: var(--clinic-warning);
+    }
+  }
+
+  &.is-danger {
+    background: var(--clinic-danger-soft);
+    border-color: rgb(239 68 68 / 22%);
+
+    strong,
+    b {
+      color: var(--clinic-danger);
+    }
+  }
+
+  &.is-success {
+    background: var(--clinic-success-soft);
+    border-color: rgb(22 163 74 / 18%);
+
+    strong,
+    b {
+      color: var(--clinic-success);
+    }
+  }
+}
+
+.patient-task-list {
+  padding-top: 10px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
 .task-card {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr) auto;
@@ -1306,6 +1695,65 @@ onMounted(loadTasks);
   gap: 8px;
 }
 
+.backup-health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  article {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr);
+    gap: 2px 8px;
+    align-items: center;
+    padding: 9px 10px;
+    background: #f8fafc;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 6px;
+
+    i {
+      width: 8px;
+      height: 8px;
+      background: var(--clinic-info);
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px rgb(15 118 110 / 10%);
+    }
+
+    span,
+    strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    span {
+      color: var(--el-text-color-secondary);
+      font-size: 12px;
+    }
+
+    strong {
+      grid-column: 2;
+      color: var(--el-text-color-primary);
+      font-size: 13px;
+    }
+
+    &.is-success i {
+      background: var(--clinic-success);
+      box-shadow: 0 0 0 4px rgb(22 163 74 / 10%);
+    }
+
+    &.is-warning i {
+      background: var(--clinic-warning);
+      box-shadow: 0 0 0 4px rgb(217 119 6 / 12%);
+    }
+
+    &.is-danger i {
+      background: var(--clinic-danger);
+      box-shadow: 0 0 0 4px rgb(220 38 38 / 10%);
+    }
+  }
+}
+
 @media (max-width: 1080px) {
   .today-panel,
   .workbench-grid {
@@ -1326,7 +1774,9 @@ onMounted(loadTasks);
   }
 
   .exception-strip,
-  .task-card {
+  .task-card,
+  .action-task-list,
+  .backup-health-grid {
     grid-template-columns: 1fr;
   }
 

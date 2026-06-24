@@ -67,7 +67,7 @@
 
             <div class="upload-actions">
               <el-button :icon="CirclePlus" @click="addUploadItem">继续添加资料</el-button>
-              <el-button type="primary" size="large" :icon="Upload" :loading="uploading" @click="submitQuickUpload">
+              <el-button type="primary" size="large" :icon="Upload" :loading="uploading" @click="() => submitQuickUpload()">
                 一键提交
               </el-button>
             </div>
@@ -78,6 +78,34 @@
               :percentage="uploadProgress"
               :status="uploadSuccess ? 'success' : undefined"
             />
+            <div v-if="failedUploads.length || staleFailedUploadSummaries.length" class="upload-failure-panel">
+              <div class="failure-panel-head">
+                <strong>待重试上传</strong>
+                <span>上传失败不会清空患者和资料上下文，本页内可直接恢复后重试。</span>
+              </div>
+              <article v-for="failure in failedUploads" :key="failure.id" class="failure-card">
+                <div>
+                  <strong>{{ failure.patient.name }} · {{ failure.patient.visitNo }}</strong>
+                  <small>{{ failure.failedAt }} · {{ failure.message }}</small>
+                  <em>{{ failure.fileNames.join("、") }}</em>
+                </div>
+                <div class="failure-actions">
+                  <el-button size="small" @click="restoreFailedUpload(failure)">恢复编辑</el-button>
+                  <el-button size="small" type="primary" :loading="uploading" @click="retryFailedUpload(failure)">
+                    一键重试
+                  </el-button>
+                  <el-button size="small" text type="danger" @click="dismissFailedUpload(failure.id)">移除</el-button>
+                </div>
+              </article>
+              <article v-for="summary in staleFailedUploadSummaries" :key="summary.id" class="failure-card is-stale">
+                <div>
+                  <strong>{{ summary.patientName }} · {{ summary.visitNo }}</strong>
+                  <small>{{ summary.failedAt }} · 页面已刷新，请重新选择文件后提交</small>
+                  <em>{{ summary.fileNames.join("、") }}</em>
+                </div>
+                <el-button size="small" text type="danger" @click="dismissStaleFailure(summary.id)">移除记录</el-button>
+              </article>
+            </div>
             <el-result
               v-if="uploadSuccess"
               class="upload-result"
@@ -346,6 +374,22 @@ interface UploadItem {
   files: UploadUserFile[];
 }
 
+interface FailedUploadSummary {
+  id: string;
+  patientId: string;
+  patientName: string;
+  visitNo: string;
+  failedAt: string;
+  message: string;
+  fileNames: string[];
+}
+
+interface FailedUpload extends Omit<FailedUploadSummary, "patientId" | "patientName" | "visitNo"> {
+  patient: PatientRow;
+  keyword: string;
+  items: UploadItem[];
+}
+
 interface LegacyFileCandidate {
   id: string;
   fileName: string;
@@ -379,6 +423,9 @@ const uploadKeywordInput = ref<{ focus: () => void }>();
 const matchedPatients = ref<PatientRow[]>([]);
 const selectedPatient = ref<PatientRow>();
 const uploadItems = ref<UploadItem[]>([{ id: "upload-1", type: "", files: [] }]);
+const failedUploads = ref<FailedUpload[]>([]);
+const staleFailedUploadSummaries = ref<FailedUploadSummary[]>([]);
+const UPLOAD_FAILURE_SUMMARY_KEY = "clinic-upload-failure-summaries";
 
 const legacyFileList = ref<UploadUserFile[]>([]);
 const legacyFileText = ref("");
@@ -448,6 +495,77 @@ const removeUploadItem = (index: number) => {
   uploadItems.value.splice(index, 1);
 };
 
+const cloneUploadItems = (items: UploadItem[]) =>
+  items.map(item => ({
+    id: `${item.id}-${Date.now()}`,
+    type: item.type,
+    files: item.files.map(file => ({ ...file }))
+  }));
+
+const collectUploadFileNames = (items: UploadItem[]) => items.flatMap(item => item.files.map(file => file.name));
+
+const loadFailedUploadSummaries = () => {
+  try {
+    const raw = sessionStorage.getItem(UPLOAD_FAILURE_SUMMARY_KEY);
+    staleFailedUploadSummaries.value = raw ? (JSON.parse(raw) as FailedUploadSummary[]) : [];
+  } catch {
+    staleFailedUploadSummaries.value = [];
+  }
+};
+
+const persistFailedUploadSummaries = () => {
+  const summaries: FailedUploadSummary[] = failedUploads.value.map(failure => ({
+    id: failure.id,
+    patientId: failure.patient.id,
+    patientName: failure.patient.name,
+    visitNo: failure.patient.visitNo,
+    failedAt: failure.failedAt,
+    message: failure.message,
+    fileNames: failure.fileNames
+  }));
+  sessionStorage.setItem(UPLOAD_FAILURE_SUMMARY_KEY, JSON.stringify([...summaries, ...staleFailedUploadSummaries.value]));
+};
+
+const rememberFailedUpload = (error: unknown) => {
+  if (!selectedPatient.value) return;
+  const failure: FailedUpload = {
+    id: `failure-${Date.now()}`,
+    patient: selectedPatient.value,
+    keyword: uploadKeyword.value,
+    items: cloneUploadItems(uploadItems.value),
+    failedAt: new Date().toLocaleString("zh-CN", { hour12: false }),
+    message: (error as Error)?.message || "上传失败，请稍后重试",
+    fileNames: collectUploadFileNames(uploadItems.value)
+  };
+  failedUploads.value = [failure, ...failedUploads.value].slice(0, 5);
+  persistFailedUploadSummaries();
+};
+
+const restoreFailedUpload = (failure: FailedUpload) => {
+  uploadKeyword.value = failure.keyword || failure.patient.visitNo || failure.patient.name;
+  matchedPatients.value = [failure.patient];
+  selectedPatient.value = failure.patient;
+  uploadItems.value = cloneUploadItems(failure.items);
+  uploadSuccess.value = false;
+  uploadProgress.value = 0;
+};
+
+const dismissFailedUpload = (id: string) => {
+  failedUploads.value = failedUploads.value.filter(item => item.id !== id);
+  persistFailedUploadSummaries();
+};
+
+const dismissStaleFailure = (id: string) => {
+  staleFailedUploadSummaries.value = staleFailedUploadSummaries.value.filter(item => item.id !== id);
+  persistFailedUploadSummaries();
+};
+
+const retryFailedUpload = async (failure: FailedUpload) => {
+  restoreFailedUpload(failure);
+  await nextTick();
+  await submitQuickUpload(failure.id);
+};
+
 const timestampName = () => {
   const date = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -512,17 +630,7 @@ const quickUploadDocuments = async () => {
   return documents;
 };
 
-const resetQuickUploadForNextPatient = async () => {
-  uploadKeyword.value = "";
-  matchedPatients.value = [];
-  selectedPatient.value = undefined;
-  uploadSuccess.value = false;
-  uploadProgress.value = 0;
-  await nextTick();
-  uploadKeywordInput.value?.focus();
-};
-
-const submitQuickUpload = async () => {
+const submitQuickUpload = async (retryFailureId?: string) => {
   if (!selectedPatient.value) {
     ElMessage.warning("请先识别并选择患者");
     return;
@@ -547,10 +655,11 @@ const submitQuickUpload = async () => {
     uploadSuccess.value = true;
     selectedPatient.value = data.patient;
     uploadItems.value = [{ id: `upload-${Date.now()}`, type: "", files: [] }];
+    if (retryFailureId) dismissFailedUpload(retryFailureId);
     ElMessage.success("上传登记已完成");
-    window.setTimeout(resetQuickUploadForNextPatient, 1500);
   } catch (error) {
     uploadProgress.value = 0;
+    rememberFailedUpload(error);
     ElMessage.error((error as Error).message);
   } finally {
     uploading.value = false;
@@ -701,7 +810,10 @@ const clearLegacyForm = () => {
 };
 
 watch(() => route.fullPath, syncRouteState);
-onMounted(syncRouteState);
+onMounted(() => {
+  loadFailedUploadSummaries();
+  syncRouteState();
+});
 </script>
 
 <style scoped lang="scss">
@@ -864,6 +976,76 @@ onMounted(syncRouteState);
   animation: upload-result-pop 0.22s ease-out;
 }
 
+.upload-failure-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin-top: 14px;
+  background: var(--hos-status-warning-soft);
+  border: 1px solid rgb(217 119 6 / 22%);
+  border-radius: 8px;
+}
+
+.failure-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  span {
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+  }
+}
+
+.failure-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid rgb(217 119 6 / 18%);
+  border-radius: 8px;
+
+  &.is-stale {
+    background: rgb(255 255 255 / 56%);
+  }
+
+  strong,
+  small,
+  em {
+    display: block;
+  }
+
+  small {
+    margin-top: 3px;
+    color: var(--el-text-color-regular);
+  }
+
+  em {
+    margin-top: 5px;
+    overflow: hidden;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 @keyframes upload-result-pop {
   from {
     opacity: 0;
@@ -989,7 +1171,8 @@ onMounted(syncRouteState);
 
   .scan-row,
   .patient-results button,
-  .upload-item {
+  .upload-item,
+  .failure-card {
     grid-template-columns: 1fr;
   }
 
@@ -998,6 +1181,12 @@ onMounted(syncRouteState);
   }
 
   .upload-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .failure-panel-head,
+  .failure-actions {
     align-items: stretch;
     flex-direction: column;
   }

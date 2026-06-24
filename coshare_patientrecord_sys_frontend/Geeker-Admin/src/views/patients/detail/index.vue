@@ -49,13 +49,14 @@
               <span v-if="autoSaveStatus === 'saving'" class="save-indicator saving">正在保存...</span>
               <span v-else-if="autoSaveStatus === 'saved'" class="save-indicator saved">
                 <i class="save-check" aria-hidden="true"></i>
-                已自动保存
+                {{ lastSavedAt ? `已保存 ${lastSavedAt}` : "已自动保存" }}
               </span>
               <span v-else-if="autoSaveStatus === 'conflict'" class="save-indicator conflict">保存冲突，草稿已保留</span>
               <span v-else-if="autoSaveStatus === 'error'" class="save-indicator error" @click="saveActiveMode">
-                保存失败，点击重试
+                {{ lastSaveError || "保存失败，点击重试" }}
               </span>
             </Transition>
+            <small v-if="autoSaveStatus !== 'saved' && lastSavedAt" class="last-save-note">上次保存 {{ lastSavedAt }}</small>
           </div>
         </div>
 
@@ -1198,6 +1199,33 @@
         </template>
       </el-dialog>
 
+      <el-dialog
+        v-model="archivePrecheckVisible"
+        title="提交质控前预检"
+        width="600px"
+        append-to-body
+        destroy-on-close
+        class="archive-precheck-dialog"
+      >
+        <el-alert
+          title="系统正在保护当前档案：以下问题处理后再提交，可减少质控退回。"
+          type="warning"
+          show-icon
+          :closable="false"
+        />
+        <div class="archive-precheck-list">
+          <button v-for="issue in archivePrecheckIssues" :key="issue.fieldKey" type="button" @click="focusPrecheckIssue(issue)">
+            <span>{{ issue.level === "invalid" ? "格式异常" : "必填待补" }}</span>
+            <strong>{{ issue.sectionTitle }} · {{ issue.fieldLabel }}</strong>
+            <small>{{ issue.message }}</small>
+          </button>
+        </div>
+        <template #footer>
+          <el-button @click="archivePrecheckVisible = false">稍后处理</el-button>
+          <el-button type="primary" @click="focusPrecheckIssue(archivePrecheckIssues[0])">定位第一项</el-button>
+        </template>
+      </el-dialog>
+
       <el-dialog v-model="aiSummaryVisible" title="AI健康档案总结" width="760px" append-to-body destroy-on-close>
         <div v-loading="aiSummaryLoading" class="ai-summary-dialog" element-loading-text="正在生成AI总结...">
           <el-alert
@@ -1554,6 +1582,9 @@ const voidReason = ref("");
 const attachmentBlobUrls = ref<Record<string, string>>({});
 type AutoSaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 const autoSaveStatus = ref<AutoSaveStatus>("idle");
+const lastSavedAt = ref("");
+const lastSaveError = ref("");
+const archivePrecheckVisible = ref(false);
 const conflictDraftSavedAt = ref("");
 const currentAttachments = ref<RecordAttachment[]>(defaultRecordAttachments);
 const patientAuditLogs = ref<AuditLogRow[]>([]);
@@ -2375,6 +2406,7 @@ const printPreflightItems = computed(() => [
             : "已同步"
   }
 ]);
+const archivePrecheckIssues = computed(() => fieldIssues.value.slice(0, 12));
 
 const recordSignature = computed(() => {
   const seed = `${fieldValues.visitNo}-${completionStats.value.completed}-${currentAttachments.value.length}-${archiveVersion.value}`;
@@ -2804,6 +2836,25 @@ const focusIssue = async (issue?: FieldIssue) => {
   input?.focus();
 };
 
+const focusPrecheckIssue = async (issue?: FieldIssue) => {
+  archivePrecheckVisible.value = false;
+  recordViewMode.value = "full";
+  await focusIssue(issue);
+};
+
+const formatLastSavedAt = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+
+const markRecordSaved = () => {
+  lastSavedAt.value = formatLastSavedAt();
+  lastSaveError.value = "";
+  autoSaveStatus.value = "saved";
+};
+
+const markRecordSaveError = (error: unknown, fallback = "保存失败，请重试") => {
+  lastSaveError.value = (error as Error)?.message || fallback;
+  autoSaveStatus.value = "error";
+};
+
 const ensureNoBlockingIssues = (scope: "mine" | "all", actionText: string) => {
   const issues = scope === "mine" ? myFieldIssues.value : fieldIssues.value;
   if (!issues.length) return true;
@@ -3179,9 +3230,12 @@ const resetPatientDetailState = () => {
   savedSectionKey.value = "";
   highlightedFieldKey.value = "";
   autoSaveStatus.value = "idle";
+  lastSavedAt.value = "";
+  lastSaveError.value = "";
   previewVisible.value = false;
   previewActivePage.value = 1;
   printPreflightVisible.value = false;
+  archivePrecheckVisible.value = false;
   auditTimelineVisible.value = false;
   voidDialogVisible.value = false;
   voidTarget.value = undefined;
@@ -3323,7 +3377,7 @@ const saveRecordValues = async (values: Record<string, string>, successText: str
     });
     await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
     clearLocalDraft();
-    autoSaveStatus.value = "saved";
+    markRecordSaved();
     const issueCount = data.issues.length;
     ElMessage.success(issueCount ? `已保存，仍有 ${issueCount} 个必填字段待补` : successText);
     return true;
@@ -3331,9 +3385,11 @@ const saveRecordValues = async (values: Record<string, string>, successText: str
     if (isConflictError(error)) {
       persistLocalDraft(values);
       autoSaveStatus.value = "conflict";
+      lastSaveError.value = "数据已被其他终端更新，请查看最新版本后再保存";
       ElMessage.warning("检测到其他终端已更新，当前填写已保存到本机草稿");
       return false;
     }
+    markRecordSaveError(error);
     ElMessage.error((error as Error).message);
     return false;
   } finally {
@@ -3375,7 +3431,11 @@ const saveMyFieldsAndBack = async () => {
 const saveActiveMode = () => (recordViewMode.value === "mine" ? saveMyFields() : saveCurrentSection());
 
 const submitArchive = async () => {
-  if (!ensureNoBlockingIssues("all", "提交档案审核")) return;
+  if (fieldIssues.value.length) {
+    recordViewMode.value = "full";
+    archivePrecheckVisible.value = true;
+    return;
+  }
   const saved = await saveActiveMode();
   if (!saved) return;
   try {
@@ -3497,7 +3557,7 @@ const debouncedAutoSave = useDebounceFn(async (scheduleToken: number, targetPati
     await savePatientRecordApi({ id: targetPatientId, role: currentRole.value, operator: roleName.value, values });
     if (scheduleToken !== autoSaveScheduleToken || targetPatientId !== patientId.value) return;
     clearLocalDraft();
-    autoSaveStatus.value = "saved";
+    markRecordSaved();
     window.setTimeout(() => {
       if (scheduleToken === autoSaveScheduleToken && targetPatientId === patientId.value && autoSaveStatus.value === "saved") {
         autoSaveStatus.value = "idle";
@@ -3508,9 +3568,10 @@ const debouncedAutoSave = useDebounceFn(async (scheduleToken: number, targetPati
     if (isConflictError(error)) {
       persistLocalDraft(values);
       autoSaveStatus.value = "conflict";
+      lastSaveError.value = "数据已被其他终端更新，请查看最新版本后再保存";
       return;
     }
-    autoSaveStatus.value = "error";
+    markRecordSaveError(error);
   }
 }, 2000);
 
@@ -7094,6 +7155,64 @@ onBeforeUnmount(() => {
 
   small {
     margin-top: 4px;
+    color: var(--hos-text-secondary);
+  }
+}
+
+.last-save-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+}
+
+.archive-precheck-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+
+  button {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    padding: 12px 14px;
+    text-align: left;
+    background: var(--hos-status-warning-soft);
+    border: 1px solid rgb(217 119 6 / 22%);
+    border-radius: var(--hos-radius-lg);
+    cursor: pointer;
+    transition:
+      transform var(--hos-duration-fast) var(--liquid-ease),
+      border-color var(--hos-duration-fast) var(--liquid-ease),
+      box-shadow var(--hos-duration-fast) var(--liquid-ease);
+
+    &:hover {
+      transform: translateY(-1px);
+      border-color: rgb(217 119 6 / 36%);
+      box-shadow: 0 12px 28px rgb(217 119 6 / 12%);
+    }
+  }
+
+  span {
+    width: fit-content;
+    padding: 2px 8px;
+    color: var(--hos-status-warning);
+    background: rgb(255 255 255 / 70%);
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+  }
+
+  small {
     color: var(--hos-text-secondary);
   }
 }
