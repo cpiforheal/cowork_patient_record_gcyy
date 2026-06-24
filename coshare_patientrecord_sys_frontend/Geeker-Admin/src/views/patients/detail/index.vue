@@ -56,6 +56,16 @@
                 {{ lastSaveError || "保存失败，点击重试" }}
               </span>
             </Transition>
+            <el-button
+              v-if="lastSaveError"
+              class="save-error-copy"
+              text
+              size="small"
+              :icon="DocumentCopy"
+              @click.stop="copySaveError"
+            >
+              复制错误
+            </el-button>
             <small v-if="autoSaveStatus !== 'saved' && lastSavedAt" class="last-save-note">上次保存 {{ lastSavedAt }}</small>
           </div>
         </div>
@@ -365,6 +375,9 @@
                 <span v-else class="is-complete">必填已齐</span>
                 <span v-if="sectionEvidenceCount(section)">附件 {{ sectionEvidenceCount(section) }} 份</span>
                 <span>{{ canEditRecordSection(section) ? "可填写" : "其他岗位" }}</span>
+                <span v-if="sectionSaveTimes[section.key]" class="section-save-time">
+                  最后保存 {{ sectionSaveTimes[section.key] }}
+                </span>
               </div>
               <div v-if="sectionIssues(section).length" class="section-issue-line">
                 <span>待处理：{{ sectionIssues(section)[0].fieldLabel }} - {{ sectionIssues(section)[0].message }}</span>
@@ -1584,6 +1597,7 @@ type AutoSaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 const autoSaveStatus = ref<AutoSaveStatus>("idle");
 const lastSavedAt = ref("");
 const lastSaveError = ref("");
+const sectionSaveTimes = reactive<Record<string, string>>({});
 const archivePrecheckVisible = ref(false);
 const conflictDraftSavedAt = ref("");
 const currentAttachments = ref<RecordAttachment[]>(defaultRecordAttachments);
@@ -2844,15 +2858,36 @@ const focusPrecheckIssue = async (issue?: FieldIssue) => {
 
 const formatLastSavedAt = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
 
-const markRecordSaved = () => {
-  lastSavedAt.value = formatLastSavedAt();
+const sectionKeysForValues = (values: Record<string, string>) => {
+  const valueKeys = new Set(Object.keys(values));
+  return recordSectionsByRule.value
+    .filter(section => section.fields.some(field => valueKeys.has(field.key)))
+    .map(section => section.key);
+};
+
+const markRecordSaved = (values: Record<string, string> = {}) => {
+  const savedAt = formatLastSavedAt();
+  lastSavedAt.value = savedAt;
   lastSaveError.value = "";
   autoSaveStatus.value = "saved";
+  sectionKeysForValues(values).forEach(sectionKey => {
+    sectionSaveTimes[sectionKey] = savedAt;
+  });
 };
 
 const markRecordSaveError = (error: unknown, fallback = "保存失败，请重试") => {
   lastSaveError.value = (error as Error)?.message || fallback;
   autoSaveStatus.value = "error";
+};
+
+const copySaveError = async () => {
+  if (!lastSaveError.value) return;
+  try {
+    await navigator.clipboard.writeText(lastSaveError.value);
+    ElMessage.success("错误信息已复制");
+  } catch {
+    ElMessage.warning("复制失败，请手动选择错误信息");
+  }
 };
 
 const ensureNoBlockingIssues = (scope: "mine" | "all", actionText: string) => {
@@ -3232,6 +3267,7 @@ const resetPatientDetailState = () => {
   autoSaveStatus.value = "idle";
   lastSavedAt.value = "";
   lastSaveError.value = "";
+  Object.keys(sectionSaveTimes).forEach(sectionKey => delete sectionSaveTimes[sectionKey]);
   previewVisible.value = false;
   previewActivePage.value = 1;
   printPreflightVisible.value = false;
@@ -3377,7 +3413,7 @@ const saveRecordValues = async (values: Record<string, string>, successText: str
     });
     await Promise.all([loadPatientAuditLogs(), loadPatientTimeline()]);
     clearLocalDraft();
-    markRecordSaved();
+    markRecordSaved(values);
     const issueCount = data.issues.length;
     ElMessage.success(issueCount ? `已保存，仍有 ${issueCount} 个必填字段待补` : successText);
     return true;
@@ -3557,7 +3593,7 @@ const debouncedAutoSave = useDebounceFn(async (scheduleToken: number, targetPati
     await savePatientRecordApi({ id: targetPatientId, role: currentRole.value, operator: roleName.value, values });
     if (scheduleToken !== autoSaveScheduleToken || targetPatientId !== patientId.value) return;
     clearLocalDraft();
-    markRecordSaved();
+    markRecordSaved(values);
     window.setTimeout(() => {
       if (scheduleToken === autoSaveScheduleToken && targetPatientId === patientId.value && autoSaveStatus.value === "saved") {
         autoSaveStatus.value = "idle";
@@ -6096,6 +6132,12 @@ onBeforeUnmount(() => {
     color: #166534;
     background: #ecfdf5;
     border-color: #bbf7d0;
+  }
+
+  .section-save-time {
+    color: var(--hos-primary-deep);
+    background: rgba(111, 167, 137, 0.12);
+    border-color: rgba(111, 167, 137, 0.24);
   }
 }
 
