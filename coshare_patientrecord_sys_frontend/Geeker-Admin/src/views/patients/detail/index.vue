@@ -111,9 +111,11 @@
 
       <section class="health-archive-summary screen-only">
         <article>
-          <span>当前阶段</span>
-          <strong>{{ patientInfo?.currentStage || "待补充档案" }}</strong>
-          <small>{{ patientInfo?.status || archiveStatusText }}</small>
+          <span>当前流转</span>
+          <strong>{{ activeLifecycleStage.title }}</strong>
+          <small>
+            {{ activeLifecycleStage.department }} · 生命周期 {{ lifecycleProgress.completed }}/{{ lifecycleProgress.total }} 环
+          </small>
         </article>
         <article>
           <span>下次随访</span>
@@ -143,6 +145,11 @@
 
       <div class="record-layout" :class="`mode-${recordViewMode}`">
         <aside v-if="recordViewMode === 'full'" class="section-rail screen-only">
+          <div class="lifecycle-rail-summary">
+            <span>当前流转</span>
+            <strong>{{ activeLifecycleStage.title }}</strong>
+            <small>{{ lifecycleRailSummary }}</small>
+          </div>
           <button
             v-for="(section, index) in recordSectionsByRule"
             :key="section.key"
@@ -153,7 +160,7 @@
           >
             <span>{{ index + 1 }}</span>
             <strong>{{ shortTitle(section.title) }}</strong>
-            <small>{{ section.department }}</small>
+            <small>{{ lifecycleStageForSection(section)?.shortTitle || section.department }} · {{ section.department }}</small>
             <em v-if="sectionRequiredMissingCount(section)" class="rail-missing-badge">
               {{ sectionRequiredMissingCount(section) }}
             </em>
@@ -228,8 +235,9 @@
                 />
                 <LabMetricEditor
                   v-else-if="isLabMetricField(item.field)"
-                  v-model="fieldValues[item.field.key]"
                   :field="item.field"
+                  :model-value="fieldValues[item.field.key]"
+                  @update:model-value="value => updateLabMetricField(item.field, value)"
                 />
                 <el-select
                   v-else-if="selectOptions(item.field).length"
@@ -395,9 +403,10 @@
                     />
                     <LabMetricEditor
                       v-else-if="isLabMetricField(field)"
-                      v-model="fieldValues[field.key]"
                       :field="field"
                       :disabled="!isEditable(field)"
+                      :model-value="fieldValues[field.key]"
+                      @update:model-value="value => updateLabMetricField(field, value)"
                     />
                     <el-select
                       v-else-if="selectOptions(field).length"
@@ -512,9 +521,10 @@
                 />
                 <LabMetricEditor
                   v-else-if="isLabMetricField(field)"
-                  v-model="fieldValues[field.key]"
                   :field="field"
                   :disabled="!isEditable(field)"
+                  :model-value="fieldValues[field.key]"
+                  @update:model-value="value => updateLabMetricField(field, value)"
                 />
                 <el-select
                   v-else-if="selectOptions(field).length"
@@ -1322,8 +1332,8 @@
                 </span>
               </div>
               <div>
-                <el-button plain :loading="medicalRecordLoading" @click="precheckMedicalRecord">生成预检</el-button>
-                <el-button type="primary" plain :loading="medicalRecordLoading" @click="saveMedicalRecordWorkspace">
+                <el-button plain :loading="medicalRecordLoading" @click="() => precheckMedicalRecord()">生成预检</el-button>
+                <el-button type="primary" plain :loading="medicalRecordLoading" @click="() => saveMedicalRecordWorkspace()">
                   保存填写
                 </el-button>
               </div>
@@ -1407,8 +1417,8 @@
         </div>
         <template #footer>
           <el-button @click="medicalRecordVisible = false">关闭</el-button>
-          <el-button :loading="medicalRecordLoading" @click="precheckMedicalRecord">生成预检</el-button>
-          <el-button :loading="medicalRecordLoading" @click="saveMedicalRecordWorkspace">保存填写</el-button>
+          <el-button :loading="medicalRecordLoading" @click="() => precheckMedicalRecord()">生成预检</el-button>
+          <el-button :loading="medicalRecordLoading" @click="() => saveMedicalRecordWorkspace()">保存填写</el-button>
           <el-button :disabled="!currentMedicalRecord" @click="downloadMedicalRecord">下载 docx</el-button>
           <el-button
             v-if="currentMedicalRecord && currentMedicalRecord.status !== 'voided'"
@@ -1483,6 +1493,8 @@ import {
 } from "@/api/modules/clinic";
 import {
   editorLabels,
+  isLifecycleStageSkipped,
+  patientLifecycleStages,
   recordAttachments as defaultRecordAttachments,
   recordSections,
   roleLabel,
@@ -1501,7 +1513,19 @@ const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 
-const userRoles: UserRole[] = ["admin", "frontdesk", "lab", "ecg", "ultrasound", "doctor", "nurse", "quality"];
+const userRoles: UserRole[] = [
+  "admin",
+  "frontdesk",
+  "reception",
+  "lab",
+  "ecg",
+  "ultrasound",
+  "inspection",
+  "doctor",
+  "nurse",
+  "nursing",
+  "quality"
+];
 const normalizeUserRole = (role?: string): UserRole => (userRoles.includes(role as UserRole) ? (role as UserRole) : "frontdesk");
 const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 const roleName = computed(() => roleLabel(currentRole.value));
@@ -1700,6 +1724,16 @@ const roleVisibleSections: Partial<Record<UserRole, Set<string>>> = {
     "followup",
     "patientFeedback"
   ]),
+  reception: new Set([
+    "basic",
+    "arrivalSource",
+    "specialNeeds",
+    "chiefComplaint",
+    "presentIllness",
+    "history",
+    "patientFeedback"
+  ]),
+  inspection: new Set(["basic", "specialExam", "preOpScreening", "documentScope"]),
   nurse: new Set([
     "basic",
     "specialExam",
@@ -1711,11 +1745,33 @@ const roleVisibleSections: Partial<Record<UserRole, Set<string>>> = {
     "tcmHealthManagement",
     "supplementNotes"
   ]),
+  nursing: new Set([
+    "basic",
+    "treatmentPlanManagement",
+    "operation",
+    "followup",
+    "patientFeedback",
+    "tcmHealthManagement",
+    "supplementNotes",
+    "documentScope"
+  ]),
   lab: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"]),
   ecg: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"]),
   ultrasound: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"])
 };
 const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
+  inspection: new Set([
+    "patientName",
+    "visitNo",
+    "inspectionImages",
+    "inspectionBriefNote",
+    "lithotomyExam",
+    "analTension",
+    "digitalExam",
+    "anoscope",
+    "uncheckedItemsNote",
+    "documentScope"
+  ]),
   lab: new Set([
     "patientName",
     "visitNo",
@@ -2547,30 +2603,56 @@ const myFieldIssues = computed(() => {
 const firstWorkflowIssue = computed(() => myFieldIssues.value[0] || fieldIssues.value[0]);
 const workflowHint = computed<WorkflowHint>(() => {
   if (!recordSectionsByRule.value.length) return emptyWorkflowHint;
+  const stage = activeLifecycleStage.value;
+  const nextStage = nextLifecycleStage.value;
   if (myFieldIssues.value.length) {
+    const issue = myFieldIssues.value[0];
     return {
       visible: true,
       level: myFieldIssues.value.some(issue => issue.level === "invalid") ? "danger" : "warning",
-      title: `${roleName.value}还有 ${myFieldIssues.value.length} 项需要处理`,
-      desc: `${myFieldIssues.value[0].sectionTitle}：${myFieldIssues.value[0].fieldLabel} - ${myFieldIssues.value[0].message}`
+      title: `${roleName.value}需处理：${stage.title}`,
+      desc: `当前环节：${stage.department}，下一责任：${nextStage.owner}。${issue.sectionTitle}：${issue.fieldLabel} - ${issue.message}`
     };
   }
   if (fieldIssues.value.length) {
+    const issue = fieldIssues.value[0];
     return {
       visible: true,
       level: "info",
-      title: "本岗位已处理，等待其他岗位补齐",
-      desc: `${fieldIssues.value[0].sectionTitle}：${fieldIssues.value[0].fieldLabel} - ${fieldIssues.value[0].message}`
+      title: `当前流转：${stage.title}`,
+      desc: `本岗位已处理，等待${stage.owner}补齐。${issue.sectionTitle}：${issue.fieldLabel} - ${issue.message}`
     };
   }
   return {
     visible: true,
     level: "success",
-    title: "档案字段已齐，可提交档案审核",
-    desc: "保存后可预览、打印或提交院内档案完整性审核。"
+    title: "生命周期已闭环，可提交档案审核",
+    desc: `已完成 ${lifecycleProgress.value.completed}/${lifecycleProgress.value.total} 个院内环节，保存后可预览、打印或提交质控归档。`
   };
 });
 const isLabMetricField = (field: RecordField) => Boolean(field.labPanel);
+const labMetricStatusFields: Record<string, string[]> = {
+  bloodRoutine: ["bloodRoutineStatus"],
+  coagulation: ["coagulationStatus"],
+  preOpEight: ["preOpEightStatus"],
+  urineRoutine: ["urineRoutineStatus"],
+  biochemistry: ["liverFunctionStatus", "renalFunctionStatus", "fastingGlucoseStatus", "bloodLipidStatus"],
+  ecgResult: ["ecgStatus"],
+  colonoscopy: ["colonoscopyStatus"]
+};
+const uncheckedStatusValues = new Set(["", "未查", "鏈煡"]);
+const pendingLabResultHints = ["待回报", "待补", "未查", "寰呭洖鎶", "寰呰ˉ", "鏈煡"];
+const checkedStatusValue = "已查";
+const updateLabMetricField = (field: RecordField, value: string) => {
+  fieldValues[field.key] = value;
+  const normalized = String(value || "").trim();
+  if (!isFieldComplete(normalized) || pendingLabResultHints.some(hint => normalized.includes(hint))) return;
+  const statusFields = labMetricStatusFields[field.key] || (field.labPanel ? labMetricStatusFields[field.labPanel] : []);
+  statusFields?.forEach(statusField => {
+    const currentStatus = String(fieldValues[statusField] || "").trim();
+    if (uncheckedStatusValues.has(currentStatus)) fieldValues[statusField] = checkedStatusValue;
+  });
+};
 const selectOptions = (field: RecordField) => {
   if (isLabMetricField(field)) return [];
   if (field.kind === "select") return field.options || [];
@@ -2603,6 +2685,68 @@ const sectionEvidenceCount = (section: RecordSection) =>
   section.fields.reduce((count, field) => count + matchedAttachments(field.key).length, 0);
 const isSectionComplete = (section: RecordSection) =>
   section.fields.length > 0 && sectionCompletedCount(section) === section.fields.length;
+const visitTypeForLifecycle = computed(() => currentVisitType.value || patientInfo.value?.visitType || fieldValues.admissionWay);
+const activeLifecycleStages = computed(() =>
+  patientLifecycleStages.filter(stage => !isLifecycleStageSkipped(stage, visitTypeForLifecycle.value))
+);
+const lifecycleStageForSection = (section: RecordSection) =>
+  patientLifecycleStages.find(stage => stage.sectionKeys.includes(section.key));
+const isSectionMeaningful = (section: RecordSection) =>
+  section.fields.some(field => isFieldComplete(fieldValues[field.key] || "") || matchedAttachments(field.key).length > 0);
+const incompleteLifecycleIndex = computed(() =>
+  activeLifecycleStages.value.findIndex(stage => {
+    const sections = recordSectionsByRule.value.filter(section => stage.sectionKeys.includes(section.key));
+    if (!sections.length) return false;
+    return sections.some(section => sectionRequiredMissingCount(section) > 0 || !isSectionMeaningful(section));
+  })
+);
+const firstIncompleteLifecycleIndex = computed(() =>
+  incompleteLifecycleIndex.value >= 0 ? incompleteLifecycleIndex.value : activeLifecycleStages.value.length - 1
+);
+const activeLifecycleStage = computed(
+  () =>
+    activeLifecycleStages.value[firstIncompleteLifecycleIndex.value] ||
+    activeLifecycleStages.value[0] ||
+    patientLifecycleStages[0]
+);
+const nextLifecycleStage = computed(
+  () => activeLifecycleStages.value[firstIncompleteLifecycleIndex.value + 1] || activeLifecycleStage.value
+);
+const lifecycleProgress = computed(() => {
+  const total = activeLifecycleStages.value.length || patientLifecycleStages.length;
+  const isComplete = completionPercent.value >= 100 || patientInfo.value?.currentStage?.includes("归档");
+  const completed =
+    incompleteLifecycleIndex.value < 0 ? total : Math.min(firstIncompleteLifecycleIndex.value + (isComplete ? 1 : 0), total);
+  return {
+    completed,
+    total,
+    percent: total ? Math.round((completed / total) * 100) : 0
+  };
+});
+const lifecycleRailSummary = computed(
+  () => `${activeLifecycleStage.value.department} · ${lifecycleProgress.value.completed}/${lifecycleProgress.value.total} 环`
+);
+const rolePreferredSectionKeys: Partial<Record<UserRole, string[]>> = {
+  frontdesk: ["basic", "arrivalSource"],
+  reception: ["chiefComplaint", "presentIllness", "history", "specialNeeds"],
+  inspection: ["specialExam", "preOpScreening", "documentScope"],
+  lab: ["preOpScreening", "auxiliary"],
+  ecg: ["preOpScreening", "auxiliary"],
+  ultrasound: ["preOpScreening", "auxiliary"],
+  doctor: ["mainDiagnosis", "treatmentPlanManagement", "specialExam"],
+  nurse: ["operation", "followup", "specialExam"],
+  nursing: ["treatmentPlanManagement", "followup", "patientFeedback"],
+  quality: ["qualityCheck", "documentScope", "dip"]
+};
+const defaultSectionKeyForRole = () => {
+  const preferredKeys = rolePreferredSectionKeys[currentRole.value] || [];
+  return (
+    preferredKeys.find(key => recordSectionsByRule.value.some(section => section.key === key)) ||
+    recordSectionsByRule.value.find(section => activeLifecycleStage.value.sectionKeys.includes(section.key))?.key ||
+    recordSectionsByRule.value[0]?.key ||
+    recordSections[0].key
+  );
+};
 const canExpandFullSection = (section: RecordSection) =>
   currentRole.value === "admin" || currentRole.value === "quality" || canEditRecordSection(section);
 const isSectionCollapsed = (section: RecordSection) => collapsedSectionKeys.value.includes(section.key);
@@ -3057,7 +3201,7 @@ const resetPatientDetailState = () => {
   collapsedSectionKeys.value = [];
   revokeAttachmentBlobUrls();
   const routeSection = String(route.query.section || "");
-  activeSectionKey.value = routeSection || recordSectionsByRule.value[0]?.key || recordSections[0].key;
+  activeSectionKey.value = routeSection || defaultSectionKeyForRole();
 };
 
 const loadPatientDetail = async () => {
@@ -3078,13 +3222,15 @@ const loadPatientDetail = async () => {
     lastDetailErrorKey = "";
     templateRules.value = rules;
     const targetSection = String(route.query.section || "");
+    patientInfo.value = data.patient;
+    Object.assign(fieldValues, data.fieldValues);
     if (targetSection && recordSectionsByRule.value.some(section => section.key === targetSection)) {
       activeSectionKey.value = targetSection;
     } else if (!recordSectionsByRule.value.some(section => section.key === activeSectionKey.value)) {
-      activeSectionKey.value = recordSectionsByRule.value[0]?.key || recordSections[0].key;
+      activeSectionKey.value = defaultSectionKeyForRole();
+    } else if (!targetSection) {
+      activeSectionKey.value = defaultSectionKeyForRole();
     }
-    patientInfo.value = data.patient;
-    Object.assign(fieldValues, data.fieldValues);
     syncFollowupRecordsFromField();
     currentAttachments.value = data.attachments;
     preloadAttachmentPreviews();
@@ -4251,6 +4397,40 @@ onBeforeUnmount(() => {
 
 .section-rail {
   display: none;
+}
+
+.lifecycle-rail-summary {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, rgb(var(--hos-primary-rgb) / 12%), rgb(255 255 255 / 48%)), var(--hos-glass);
+  border: 1px solid var(--hos-border-interactive);
+  border-radius: var(--hos-radius-lg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 56%);
+
+  span,
+  strong,
+  small {
+    display: block;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong {
+    color: var(--hos-primary-deep);
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  small {
+    color: var(--hos-text-secondary);
+    line-height: 1.45;
+  }
 }
 
 .rail-item {

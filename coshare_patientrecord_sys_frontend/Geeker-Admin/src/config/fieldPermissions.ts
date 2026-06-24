@@ -52,6 +52,18 @@ export interface RecordSection {
   fields: RecordField[];
 }
 
+export interface PatientLifecycleStage {
+  key: string;
+  title: string;
+  shortTitle: string;
+  owner: string;
+  department: string;
+  roles: UserRole[];
+  sectionKeys: string[];
+  stageKeywords: string[];
+  skipForVisitTypes?: string[];
+}
+
 export interface RecordAttachment {
   key: string;
   title: string;
@@ -107,6 +119,7 @@ const frontdesk: UserRole[] = ["admin", "frontdesk"];
 const reception: UserRole[] = ["admin", "frontdesk", "reception"];
 const nurse: UserRole[] = ["admin", "nurse"];
 const nursing: UserRole[] = ["admin", "nurse", "nursing"];
+const inspection: UserRole[] = ["admin", "inspection"];
 const lab: UserRole[] = ["admin", "lab"];
 const ecg: UserRole[] = ["admin", "ecg"];
 const ultrasound: UserRole[] = ["admin", "ultrasound"];
@@ -139,6 +152,113 @@ export const screeningCollaborators: UserRole[] = [
 export const isCollaborativeField = (field: RecordField) =>
   healthArchiveCollaborators.length === field.editors.length &&
   healthArchiveCollaborators.every(role => field.editors.includes(role));
+
+export const patientLifecycleStages: PatientLifecycleStage[] = [
+  {
+    key: "registration",
+    title: "前台建档与分诊",
+    shortTitle: "建档",
+    owner: "前台",
+    department: "前台/收费处",
+    roles: ["admin", "frontdesk"],
+    sectionKeys: ["basic", "arrivalSource"],
+    stageKeywords: ["登记", "建档", "前台", "资料上传", "旧资料预检"]
+  },
+  {
+    key: "reception",
+    title: "接诊问诊与症状采集",
+    shortTitle: "接诊",
+    owner: "接诊室",
+    department: "接诊室/门诊",
+    roles: ["admin", "reception", "doctor"],
+    sectionKeys: ["specialNeeds", "chiefComplaint", "presentIllness", "history"],
+    stageKeywords: ["接诊", "初诊", "问诊", "症状", "基础诊疗"]
+  },
+  {
+    key: "inspection",
+    title: "检查室初检与影像采集",
+    shortTitle: "初检",
+    owner: "检查室",
+    department: "检查室",
+    roles: ["admin", "inspection", "doctor", "nurse"],
+    sectionKeys: ["specialExam"],
+    stageKeywords: ["检查室", "专科查体", "专科检查", "影像", "肛门镜", "指检", "初检"]
+  },
+  {
+    key: "decision",
+    title: "医师诊断与去向决策",
+    shortTitle: "诊断",
+    owner: "医生",
+    department: "门诊医生",
+    roles: ["admin", "doctor"],
+    sectionKeys: ["tcmInspection", "mainDiagnosis", "secondaryDiagnosis", "comorbidityTcm", "treatmentPlanManagement"],
+    stageKeywords: ["诊断", "辨证", "合并病", "去向", "分流", "治疗方案"]
+  },
+  {
+    key: "screening",
+    title: "辅助/术前检查完善",
+    shortTitle: "筛查",
+    owner: "检查科室",
+    department: "化验室/心电室/B超放射",
+    roles: ["admin", "lab", "ecg", "ultrasound", "inspection", "doctor", "nurse"],
+    sectionKeys: ["auxiliary", "preOpScreening"],
+    stageKeywords: ["辅助检查", "术前", "检查", "准入", "筛查"]
+  },
+  {
+    key: "outpatientTreatment",
+    title: "门诊治疗或中医方案",
+    shortTitle: "门诊",
+    owner: "医生/治疗室",
+    department: "门诊医生/治疗室",
+    roles: ["admin", "doctor", "nurse"],
+    sectionKeys: ["tcmHealthManagement", "supplementNotes"],
+    stageKeywords: ["门诊", "中医健康管理", "补充记录", "治疗", "中医方案"]
+  },
+  {
+    key: "nursingPrep",
+    title: "住院护理准备与宣教",
+    shortTitle: "护理",
+    owner: "护理部",
+    department: "护理部",
+    roles: ["admin", "nurse", "nursing"],
+    sectionKeys: ["basic", "treatmentPlanManagement"],
+    stageKeywords: ["护理", "宣教", "院前", "入院", "术前准备"],
+    skipForVisitTypes: ["门诊", "门诊医保"]
+  },
+  {
+    key: "operationRecord",
+    title: "手术/治疗执行记录",
+    shortTitle: "执行",
+    owner: "医生/手术室",
+    department: "门诊医生/手术室",
+    roles: ["admin", "doctor", "nurse"],
+    sectionKeys: ["operation", "roundSchedule"],
+    stageKeywords: ["手术", "病程", "治疗记录", "执行"]
+  },
+  {
+    key: "followupClosure",
+    title: "出院复查与健康管理",
+    shortTitle: "随访",
+    owner: "治疗室/医生",
+    department: "治疗室/门诊医生",
+    roles: ["admin", "doctor", "nurse", "nursing", "frontdesk"],
+    sectionKeys: ["followup", "patientFeedback", "familyRelationship", "trustCooperation"],
+    stageKeywords: ["出院", "复查", "随访", "患者反馈", "健康管理", "关系维护"]
+  },
+  {
+    key: "qualityArchive",
+    title: "质控审核与归档",
+    shortTitle: "归档",
+    owner: "质控",
+    department: "质控/病案",
+    roles: ["admin", "quality"],
+    sectionKeys: ["dip", "documentScope", "qualityCheck"],
+    stageKeywords: ["质控", "档案审核", "归档", "档案生成", "档案补全", "退回整改"]
+  }
+];
+
+export const isLifecycleStageSkipped = (stage: PatientLifecycleStage, visitType?: string) =>
+  Boolean(visitType && stage.skipForVisitTypes?.some(item => visitType.includes(item)));
 
 export const recordSections: RecordSection[] = [
   {
@@ -708,39 +828,57 @@ export const recordSections: RecordSection[] = [
   {
     key: "specialExam",
     title: "十、专科检查",
-    stage: "专科查体",
-    owner: "医生/护士",
-    department: "门诊医生/治疗室",
+    stage: "检查室初检",
+    owner: "检查室/医生",
+    department: "检查室/门诊医生/治疗室",
     status: "waiting",
-    description: "模板中的截石位、肛指检查、肛门镜内容拆为结构化段落。",
+    description: "检查室先完成影像、指检、肛门镜等证据采集和简短备注，医生再补充诊断性描述。",
     fields: [
+      {
+        key: "inspectionImages",
+        label: "检查室图片/视频证据",
+        value: "",
+        kind: "textarea",
+        editors: inspection,
+        evidence: "检查室图片/视频",
+        placeholder: "检查室可只上传摄像头、肛门镜、指检相关图片或视频；无需填写大段文字。"
+      },
+      {
+        key: "inspectionBriefNote",
+        label: "检查室简短备注",
+        value: "",
+        kind: "textarea",
+        editors: ["admin", "inspection", "doctor"],
+        placeholder: "可选：一句话记录体位、疼痛、出血、图片编号或需医生重点查看的位置。"
+      },
       {
         key: "lithotomyExam",
         label: "截石位所见",
         value: "截石位 3、7、11 点位肛缘可见皮赘样隆起，屏气用腹压可见其缓慢增大，可自行还纳。",
         kind: "textarea",
-        editors: ["admin", "doctor", "nurse"]
+        editors: ["admin", "doctor", "nurse", "inspection"]
       },
       {
         key: "analTension",
         label: "肛门括约肌张力",
         value: "肛门括约肌张力可，肛门赘皮轻度疼痛，入指约 7cm。",
         kind: "textarea",
-        editors: doctor
+        editors: ["admin", "doctor", "inspection"]
       },
       {
         key: "digitalExam",
         label: "肛指检查",
         value: "直肠腔内未触及硬性结节，齿线上方可触及柔软隆起，无明显压痛，指套少量染血。",
         kind: "textarea",
-        editors: doctor
+        editors: ["admin", "doctor", "inspection"]
       },
       {
         key: "anoscope",
         label: "肛门镜",
         value: "齿线上黏膜隆起、充血，部分糜烂，可见出血点，未见溃疡及占位。",
         kind: "textarea",
-        editors: doctor
+        editors: ["admin", "doctor", "inspection"],
+        evidence: "肛门镜图片"
       }
     ]
   },

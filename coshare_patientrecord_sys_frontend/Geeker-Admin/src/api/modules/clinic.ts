@@ -87,6 +87,7 @@ export type {
   GeneratedMedicalRecord,
   MedicalRecordGenerateResult,
   MedicalRecordPrecheckResult,
+  MedicalRecordTemplateField,
   MedicalRecordTemplateStatus,
   MedicalRecordWorkspaceSaveResult,
   OperationStats,

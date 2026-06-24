@@ -19,6 +19,7 @@
         <header>
           <span>{{ column.title }}</span>
           <el-tag effect="plain">{{ column.patients.length }}</el-tag>
+          <small>{{ column.department }}</small>
         </header>
         <div class="kanban-list">
           <button
@@ -42,14 +43,15 @@
             </div>
             <span>{{ patient.visitType }} · {{ patient.visitNo }}</span>
             <span v-if="(patient.encounterCount || 1) > 1" class="encounter-count">累计 {{ patient.encounterCount }} 次就诊</span>
-            <small>{{ patient.currentStage }}</small>
+            <small>{{ lifecycleInfo(patient).stage.title }} · {{ lifecycleInfo(patient).stage.owner }}</small>
+            <span class="next-owner">下一责任：{{ lifecycleInfo(patient).nextOwner }}</span>
             <div class="closed-loop-progress" :class="`risk-${patient.riskType || 'info'}`">
-              <span><em :style="{ width: `${patient.progressPercent || 0}%` }"></em></span>
-              <small>{{ patient.completedCount || 0 }}/{{ recordSections.length }} 章</small>
+              <span><em :style="{ width: `${lifecycleInfo(patient).progressPercent}%` }"></em></span>
+              <small>{{ lifecycleInfo(patient).completed }}/{{ lifecycleInfo(patient).total }} 环</small>
             </div>
             <div class="stay-line" :class="{ timeout: isTimeout(patient) }">
               <span>{{ stayDuration(patient.updatedAt) }}</span>
-              <em>{{ patient.progressPercent }}%</em>
+              <em>{{ lifecycleInfo(patient).progressPercent }}%</em>
             </div>
           </button>
           <el-empty v-if="!column.patients.length" :image-size="70" description="暂无患者" />
@@ -67,20 +69,21 @@
       :search-col="{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3 }"
     >
       <template #stageProgress="{ row }">
-        <div class="step-indicator">
-          <el-tooltip v-for="(section, index) in compactSections" :key="section.key" :content="section.title" placement="top">
-            <span class="step-segment" :class="sectionFlowStatus(row, index)">
-              {{ section.short }}
+        <div class="step-indicator lifecycle-indicator">
+          <el-tooltip v-for="stage in lifecycleInfo(row).steps" :key="stage.key" :content="stage.title" placement="top">
+            <span class="step-segment" :class="stage.status">
+              {{ stage.shortTitle }}
             </span>
           </el-tooltip>
         </div>
         <div class="progress-meta">
-          <span>{{ row.completedCount }}/{{ recordSections.length }}</span>
-          <strong>{{ row.currentStage }}</strong>
+          <span>{{ lifecycleInfo(row).completed }}/{{ lifecycleInfo(row).total }}</span>
+          <strong>{{ lifecycleInfo(row).stage.title }}</strong>
+          <em>{{ lifecycleInfo(row).nextOwner }}</em>
         </div>
         <div class="closed-loop-progress table-progress" :class="`risk-${row.riskType || 'info'}`">
-          <span><em :style="{ width: `${row.progressPercent || 0}%` }"></em></span>
-          <small>{{ row.progressPercent || 0 }}%</small>
+          <span><em :style="{ width: `${lifecycleInfo(row).progressPercent}%` }"></em></span>
+          <small>{{ lifecycleInfo(row).progressPercent }}%</small>
         </div>
       </template>
 
@@ -101,7 +104,14 @@ import { ArrowRight, Refresh } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { getPatientListApi, type PatientRow } from "@/api/modules/clinic";
-import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
+import {
+  canEditSection,
+  isLifecycleStageSkipped,
+  patientLifecycleStages,
+  recordSections,
+  roleLabel,
+  type PatientLifecycleStage
+} from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 
@@ -116,34 +126,17 @@ const roleName = computed(() => roleLabel(currentRole.value));
 const editableSectionCount = computed(() => recordSections.filter(section => canEditSection(currentRole.value, section)).length);
 const initParam = reactive({ sectionKey: "" });
 
-const compactSections = computed(() =>
-  recordSections.map((section, index) => ({
-    ...section,
-    short: shortTitle(section.title).slice(0, 2) || String(index + 1)
-  }))
-);
-
 const kanbanColumns = computed(() => {
-  const base = ["前台登记", "基础诊疗", "治疗记录", "复查随访", "档案审核", "已归档"].map(title => ({
-    key: title,
-    title,
+  const base = patientLifecycleStages.map(stage => ({
+    key: stage.key,
+    title: stage.title,
+    department: stage.department,
     patients: [] as PatientRow[]
   }));
   patientRows.value.forEach(patient => {
-    const index = patient.currentStage.includes("登记")
-      ? 0
-      : patient.currentStage.includes("基础") || patient.currentStage.includes("初诊") || patient.currentStage.includes("复核")
-        ? 1
-        : patient.currentStage.includes("治疗") || patient.currentStage.includes("手术")
-          ? 2
-          : patient.currentStage.includes("复查") || patient.currentStage.includes("随访")
-            ? 3
-            : patient.currentStage.includes("质控") || patient.currentStage.includes("档案审核")
-              ? 4
-              : patient.currentStage.includes("归档")
-                ? 5
-                : 1;
-    base[index].patients.push(patient);
+    const info = lifecycleInfo(patient);
+    const column = base.find(item => item.key === info.stage.key) || base[0];
+    column.patients.push(patient);
   });
   return base;
 });
@@ -174,12 +167,56 @@ const columns = reactive<ColumnProps[]>([
   { prop: "operation", label: "操作", fixed: "right", width: 120 }
 ]);
 
-const shortTitle = (title: string) => title.replace(/^.*?、/, "");
+type LifecycleStepView = PatientLifecycleStage & { status: "done" | "active" | "waiting" | "skipped" };
 
-const sectionFlowStatus = (row: PatientRow, index: number) => {
-  if (index < row.completedCount) return "done";
-  if (index === row.completedCount) return "active";
-  return "waiting";
+const availableLifecycleStages = (patient: PatientRow) =>
+  patientLifecycleStages.filter(stage => !isLifecycleStageSkipped(stage, patient.visitType));
+
+const stageFirstSectionIndex = (stage: PatientLifecycleStage) => {
+  const indexes = stage.sectionKeys
+    .map(key => recordSections.findIndex(section => section.key === key))
+    .filter(index => index >= 0);
+  return indexes.length ? Math.min(...indexes) + 1 : recordSections.length + 1;
+};
+
+const stageByCompletedCount = (patient: PatientRow, stages: PatientLifecycleStage[]) => {
+  const completedCount = patient.completedCount || 1;
+  return [...stages].reverse().find(stage => completedCount >= stageFirstSectionIndex(stage)) || stages[0];
+};
+
+const stageByCurrentText = (patient: PatientRow, stages: PatientLifecycleStage[]) => {
+  const text = `${patient.currentStage || ""} ${patient.status || ""}`;
+  return stages.find(stage => stage.stageKeywords.some(keyword => text.includes(keyword)));
+};
+
+const lifecycleInfo = (patient: PatientRow) => {
+  const stages = availableLifecycleStages(patient);
+  const stage = stageByCurrentText(patient, stages) || stageByCompletedCount(patient, stages) || stages[0];
+  const activeIndex = Math.max(
+    0,
+    stages.findIndex(item => item.key === stage.key)
+  );
+  const isClosed = patient.progressPercent >= 100 || String(patient.currentStage || "").includes("归档");
+  const completed = Math.min(activeIndex + (isClosed ? 1 : 0), stages.length);
+  const total = stages.length;
+  const progressPercent = total ? Math.round((completed / total) * 100) : 0;
+  const steps: LifecycleStepView[] = patientLifecycleStages.map(item => {
+    if (isLifecycleStageSkipped(item, patient.visitType)) return { ...item, status: "skipped" };
+    const index = stages.findIndex(stageItem => stageItem.key === item.key);
+    return {
+      ...item,
+      status: index < activeIndex || (isClosed && index === activeIndex) ? "done" : index === activeIndex ? "active" : "waiting"
+    };
+  });
+  const nextStage = stages[activeIndex + 1] || stage;
+  return {
+    stage,
+    completed,
+    total,
+    progressPercent,
+    nextOwner: activeIndex >= stages.length - 1 ? "已进入闭环" : nextStage.owner,
+    steps
+  };
 };
 
 const stayDuration = (updatedAt: string) => {
@@ -190,12 +227,9 @@ const stayDuration = (updatedAt: string) => {
 
 const isTimeout = (patient: PatientRow) => Date.now() - new Date(patient.updatedAt.replace(/-/g, "/")).getTime() > 24 * 36e5;
 const isCurrentRoleFocus = (patient: PatientRow) => {
-  const stage = patient.currentStage;
+  const info = lifecycleInfo(patient);
   if (currentRole.value === "admin") return isTimeout(patient);
-  if (currentRole.value === "frontdesk") return stage.includes("登记");
-  if (currentRole.value === "doctor") return stage.includes("诊疗") || stage.includes("治疗") || stage.includes("复核");
-  if (currentRole.value === "quality") return stage.includes("质控") || stage.includes("档案审核") || stage.includes("归档");
-  return patient.status.includes("待") || stage.includes("档案生成") || stage.includes("病历生成");
+  return info.stage.roles.includes(currentRole.value as PatientLifecycleStage["roles"][number]);
 };
 
 const loadBoard = async () => {
@@ -275,11 +309,19 @@ onMounted(loadBoard);
   -webkit-backdrop-filter: blur(14px) saturate(128%);
 
   header {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
+    gap: 4px 8px;
     margin-bottom: 10px;
     font-weight: 600;
+
+    small {
+      grid-column: 1 / -1;
+      color: var(--hos-text-secondary);
+      font-size: 12px;
+      font-weight: 400;
+    }
   }
 }
 
@@ -364,6 +406,16 @@ onMounted(loadBoard);
   padding: 2px 8px;
   color: var(--hos-primary-deep) !important;
   background: var(--hos-primary-soft);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.next-owner {
+  width: fit-content;
+  padding: 2px 8px;
+  color: var(--hos-text-secondary) !important;
+  background: rgb(255 255 255 / 42%);
+  border: 1px solid var(--hos-border-light);
   border-radius: 999px;
   font-size: 12px;
 }
@@ -477,7 +529,7 @@ onMounted(loadBoard);
 
 .step-indicator {
   display: grid;
-  grid-template-columns: repeat(15, minmax(18px, 1fr));
+  grid-template-columns: repeat(10, minmax(42px, 1fr));
   gap: 3px;
 }
 
@@ -502,10 +554,18 @@ onMounted(loadBoard);
     background: var(--hos-status-warning-soft);
     border-color: rgb(217 119 6 / 22%);
   }
+
+  &.skipped {
+    color: var(--hos-text-muted);
+    background: rgb(255 255 255 / 30%);
+    border-style: dashed;
+    opacity: 0.64;
+  }
 }
 
 .progress-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
   color: var(--el-text-color-regular);
@@ -513,6 +573,11 @@ onMounted(loadBoard);
 
   strong {
     font-weight: 600;
+  }
+
+  em {
+    color: var(--hos-text-secondary);
+    font-style: normal;
   }
 }
 
