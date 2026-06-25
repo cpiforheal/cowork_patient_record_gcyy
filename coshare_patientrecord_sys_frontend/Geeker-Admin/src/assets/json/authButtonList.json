@@ -39,6 +39,7 @@
     "dictManage": ["dict:create", "dict:update"],
     "menuMange": ["menu:update"],
     "aiConfig": ["ai:config:read", "ai:config:update"],
+    "aiAssistantAnalysis": ["ai:usage:read", "ai:template:candidate"],
     "systemLog": ["audit:read"]
   },
   "msg": "成功"

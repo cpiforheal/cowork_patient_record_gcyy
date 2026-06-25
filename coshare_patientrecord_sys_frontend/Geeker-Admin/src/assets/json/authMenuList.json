@@ -465,6 +465,20 @@
           }
         },
         {
+          "path": "/system/aiAssistantAnalysis",
+          "name": "aiAssistantAnalysis",
+          "component": "/system/aiAssistantAnalysis/index",
+          "meta": {
+            "icon": "DataAnalysis",
+            "title": "AI 使用分析",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
           "path": "/system/systemLog",
           "name": "systemLog",
           "component": "/system/systemLog/index",

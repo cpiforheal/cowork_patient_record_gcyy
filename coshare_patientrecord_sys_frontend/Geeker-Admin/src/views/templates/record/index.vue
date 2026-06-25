@@ -75,7 +75,7 @@
           <el-table-column label="可写岗位" min-width="180">
             <template #default="{ row }">
               <el-space wrap>
-                <el-tag v-for="editor in editorTags(row)" :key="editor" effect="plain">{{ editor }}</el-tag>
+                <el-tag v-for="editor in editorTags(asTemplateRule(row))" :key="editor" effect="plain">{{ editor }}</el-tag>
               </el-space>
             </template>
           </el-table-column>
@@ -113,7 +113,7 @@
           </el-table-column>
           <el-table-column label="操作" fixed="right" width="90">
             <template #default="{ row }">
-              <el-button type="primary" link @click="openRuleDrawer(row)">配置</el-button>
+              <el-button type="primary" link @click="openRuleDrawer(asTemplateRule(row))">配置</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -210,6 +210,7 @@ const departments = ["前台", "门诊", "化验室", "心电室", "B超/放射"
 const roles = USER_ROLE_OPTIONS;
 
 const ruleForm = reactive<Partial<TemplateFieldRule>>({});
+const asTemplateRule = (row: unknown) => row as TemplateFieldRule;
 
 const sectionTree = computed<SectionTreeNode[]>(() =>
   recordSections.map(section => ({

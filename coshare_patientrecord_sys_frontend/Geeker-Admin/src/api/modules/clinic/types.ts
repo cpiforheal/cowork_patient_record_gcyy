@@ -116,6 +116,170 @@ export interface AiRuntimeConfigPayload {
   keepExistingApiKey?: boolean;
 }
 
+export interface AiModelOption {
+  id: string;
+  name?: string;
+  ownedBy?: string;
+}
+
+export interface AiModelDetectionPayload {
+  baseUrl: string;
+  apiKey?: string;
+  keepExistingApiKey?: boolean;
+}
+
+export interface AiModelDetectionResult {
+  models: AiModelOption[];
+  checkedAt: string;
+  warning?: string;
+}
+
+export type AiAssistantType = "public" | "patient" | "quality" | "leader";
+
+export interface AiAssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AiAssistantAttachment {
+  name: string;
+  type: string;
+  size: number;
+  dataUrl?: string;
+  source?: "upload" | "patient_attachment" | "context";
+}
+
+export interface AiAssistantRequest {
+  assistantType: AiAssistantType;
+  prompt: string;
+  messages?: AiAssistantMessage[];
+  patientId?: string;
+  context?: Record<string, unknown>;
+  attachmentIds?: string[];
+  attachments?: AiAssistantAttachment[];
+}
+
+export interface AiAssistantResponse {
+  answer: string;
+  assistantType: AiAssistantType;
+  model: string;
+  generatedAt: string;
+  disclaimer: string;
+  knowledgeSources?: string[];
+}
+
+export type AiAssistantLogStatus = "success" | "failed";
+
+export interface AiAssistantLog {
+  id: string;
+  createdAt: string;
+  assistantType: AiAssistantType;
+  status: AiAssistantLogStatus;
+  operatorId?: string;
+  operatorName?: string;
+  operatorRole?: string;
+  operatorDepartment?: string;
+  pageSource?: string;
+  pagePath?: string;
+  pageTitle?: string;
+  model?: string;
+  latencyMs?: number;
+  intentCategory?: string;
+  prompt?: string;
+  promptPreview?: string;
+  answer?: string;
+  answerPreview?: string;
+  systemPromptSummary?: string;
+  contextSummary?: string;
+  patientContextIncluded?: boolean;
+  patientId?: string;
+  attachmentCount?: number;
+  imageCount?: number;
+  errorMessage?: string;
+  sensitive?: boolean;
+  templateCandidate?: boolean;
+  knowledgeSources?: string[];
+}
+
+export interface AiAssistantLogListParams {
+  pageNum?: number;
+  pageSize?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  assistantType?: AiAssistantType | "";
+  status?: AiAssistantLogStatus | "";
+  role?: string;
+  department?: string;
+  intentCategory?: string;
+  keyword?: string;
+}
+
+export interface AiAssistantLogListResult {
+  list: AiAssistantLog[];
+  total: number;
+}
+
+export interface AiAssistantAnalyticsBucket {
+  label: string;
+  count: number;
+}
+
+export interface AiAssistantFrequentPrompt {
+  prompt: string;
+  assistantType: AiAssistantType;
+  count: number;
+  sourceLogId?: string;
+}
+
+export interface AiAssistantKnowledgeMiss {
+  id: string;
+  createdAt: string;
+  prompt: string;
+  assistantType: AiAssistantType;
+}
+
+export interface AiAssistantAnalytics {
+  totalCalls: number;
+  todayCalls: number;
+  failedCalls: number;
+  failureRate: number;
+  averageLatencyMs: number;
+  assistantTypeBuckets?: AiAssistantAnalyticsBucket[];
+  roleBuckets?: AiAssistantAnalyticsBucket[];
+  departmentBuckets?: AiAssistantAnalyticsBucket[];
+  intentBuckets?: AiAssistantAnalyticsBucket[];
+  pageBuckets?: AiAssistantAnalyticsBucket[];
+  modelErrorBuckets?: AiAssistantAnalyticsBucket[];
+  frequentPrompts?: AiAssistantFrequentPrompt[];
+  knowledgeMisses?: AiAssistantKnowledgeMiss[];
+}
+
+export interface AiPromptTemplateCandidate {
+  id: string;
+  sourceLogId?: string;
+  createdAt?: string;
+  createdBy?: string;
+  assistantType: AiAssistantType;
+  title: string;
+  roleScope?: string;
+  recommendedPrompt: string;
+  contextNote?: string;
+  status?: "candidate" | "active" | string;
+}
+
+export interface AiPromptTemplatePayload {
+  assistantType: AiAssistantType;
+  title: string;
+  roleScope?: string;
+  recommendedPrompt: string;
+  contextNote?: string;
+}
+
+export interface AiPromptTemplateListResult {
+  list: AiPromptTemplateCandidate[];
+  total: number;
+}
+
 export interface GeneratedMedicalRecord {
   id: string;
   patientId: string;

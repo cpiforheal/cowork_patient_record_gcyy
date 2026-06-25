@@ -1,8 +1,7 @@
-import { VNode, ComponentPublicInstance, Ref } from "vue";
+import { VNode, Ref } from "vue";
 import { BreakPoint, Responsive } from "@/components/Grid/interface";
 import { TableColumnCtx } from "element-plus/es/components/table/src/table-column/defaults";
-import { ProTableProps } from "@/components/ProTable/index.vue";
-import ProTable from "@/components/ProTable/index.vue";
+import type { DefaultRow } from "element-plus/es/components/table/src/table/defaults";
 
 export interface EnumProps {
   label?: string; // 选项框显示的文字
@@ -29,6 +28,9 @@ export type SearchType =
   | "slider";
 
 export type SearchRenderScope = {
+  modelValue?: any;
+  "onUpdate:modelValue"?: (value: any) => void;
+  modelModifiers?: Record<string, boolean>;
   searchParam: { [key: string]: any };
   placeholder: string;
   clearable: boolean;
@@ -55,20 +57,20 @@ export type FieldNamesProps = {
   children?: string;
 };
 
-export type RenderScope<T> = {
+export type RenderScope<T extends DefaultRow = DefaultRow> = {
   row: T;
   $index: number;
   column: TableColumnCtx<T>;
   [key: string]: any;
 };
 
-export type HeaderRenderScope<T> = {
+export type HeaderRenderScope<T extends DefaultRow = DefaultRow> = {
   $index: number;
   column: TableColumnCtx<T>;
   [key: string]: any;
 };
 
-export interface ColumnProps<T = any> extends Partial<
+export interface ColumnProps<T extends DefaultRow = DefaultRow> extends Partial<
   Omit<TableColumnCtx<T>, "type" | "children" | "renderCell" | "renderHeader">
 > {
   type?: TypeProps; // 列类型
@@ -84,4 +86,27 @@ export interface ColumnProps<T = any> extends Partial<
   _children?: ColumnProps<T>[]; // 多级表头
 }
 
-export type ProTableInstance = Omit<InstanceType<typeof ProTable>, keyof ComponentPublicInstance | keyof ProTableProps>;
+type PageableState = {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+};
+
+export type ProTableInstance = {
+  element?: unknown;
+  tableData?: unknown;
+  radio?: unknown;
+  pageable: PageableState;
+  searchParam?: Record<string, any>;
+  searchInitParam?: Record<string, any>;
+  isSelected?: boolean;
+  selectedList?: unknown[];
+  selectedListIds?: unknown[];
+  getTableList: () => void;
+  search: () => void;
+  reset: () => void;
+  handleSizeChange: (size: number) => void;
+  handleCurrentChange: (page: number) => void;
+  clearSelection: () => void;
+  enumMap?: unknown;
+};

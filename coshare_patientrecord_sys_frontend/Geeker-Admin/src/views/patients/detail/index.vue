@@ -80,6 +80,7 @@
           <el-button @click="openQualityReview">档案审核</el-button>
           <el-button :icon="Clock" @click="openAuditTimeline">操作轨迹</el-button>
           <el-button :loading="aiSummaryLoading" @click="openAiSummary">AI总结</el-button>
+          <el-button :icon="ChatDotRound" @click="patientAssistantVisible = true">患者助手</el-button>
           <el-button :loading="medicalRecordLoading" @click="openMedicalRecord">医生目标病历填写</el-button>
           <el-button :icon="View" @click="previewVisible = true">预览</el-button>
           <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
@@ -1480,6 +1481,15 @@
           <el-button type="primary" :loading="medicalRecordLoading" @click="generateMedicalRecord">生成 docx 新版本</el-button>
         </template>
       </el-dialog>
+      <AiAssistantPanel
+        v-model="patientAssistantVisible"
+        assistant-type="patient"
+        title="患者助手"
+        :patient-id="patientId"
+        :default-prompt="patientAssistantPrompt"
+        :context="patientAssistantContext"
+        :attachment-ids="patientAssistantAttachmentIds"
+      />
     </div>
   </div>
 </template>
@@ -1502,7 +1512,8 @@ import {
 import { useDebounceFn } from "@vueuse/core";
 import { ElButton, ElInput, ElMessage } from "element-plus";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Clock, DocumentCopy, FolderOpened, Lock, Printer, Upload, View } from "@element-plus/icons-vue";
+import { ArrowDown, ChatDotRound, Clock, DocumentCopy, FolderOpened, Lock, Printer, Upload, View } from "@element-plus/icons-vue";
+import AiAssistantPanel from "@/components/AiAssistantPanel/index.vue";
 import TreeFilter from "@/components/TreeFilter/index.vue";
 import {
   downloadMedicalRecordApi,
@@ -1575,6 +1586,7 @@ const highlightedFieldKey = ref("");
 const previewVisible = ref(false);
 const previewActivePage = ref(1);
 const printPreflightVisible = ref(false);
+const patientAssistantVisible = ref(false);
 const aiSummaryVisible = ref(false);
 const aiSummaryLoading = ref(false);
 const aiSummary = ref<AiRecordSummary>();
@@ -2757,6 +2769,59 @@ const lifecycleProgress = computed(() => {
     percent: total ? Math.round((completed / total) * 100) : 0
   };
 });
+const patientAssistantPrompt = computed(
+  () => "请根据当前患者档案，帮我总结重点、缺失项、附件证据和下一步处理建议。请只给院内辅助建议，不要替代诊断。"
+);
+const patientAssistantAttachmentIds = computed(() =>
+  currentAttachments.value
+    .filter(attachment => attachment.status !== "voided")
+    .map(attachment => attachment.key || attachment.storagePath || attachment.fileName)
+    .filter(Boolean)
+);
+const patientAssistantContext = computed<Record<string, unknown>>(() => ({
+  role: currentRole.value,
+  roleName: roleName.value,
+  patientId: patientId.value,
+  patientName: fieldValues.patientName || patientInfo.value?.name || "",
+  visitNo: fieldValues.visitNo || patientInfo.value?.visitNo || patientId.value,
+  visitType: currentVisitType.value,
+  currentStage: patientInfo.value?.currentStage || activeLifecycleStage.value.title,
+  activeLifecycleStage: {
+    title: activeLifecycleStage.value.title,
+    owner: activeLifecycleStage.value.owner,
+    department: activeLifecycleStage.value.department,
+    nextOwner: nextLifecycleStage.value.owner
+  },
+  completion: {
+    percent: completionPercent.value,
+    completed: completionStats.value.completed,
+    total: completionStats.value.total,
+    lifecycleCompleted: lifecycleProgress.value.completed,
+    lifecycleTotal: lifecycleProgress.value.total
+  },
+  workflowHint: workflowHint.value,
+  missingOrInvalidItems: fieldIssues.value.slice(0, 30).map(issue => ({
+    section: issue.sectionTitle,
+    field: issue.fieldLabel,
+    level: issue.level,
+    message: issue.message
+  })),
+  attachments: currentAttachments.value.slice(0, 30).map(attachment => ({
+    key: attachment.key,
+    title: attachment.title,
+    field: attachment.fieldLabel,
+    department: attachment.department,
+    fileName: attachment.fileName,
+    status: attachment.status || "active",
+    uploadedAt: attachment.uploadedAt
+  })),
+  archive: {
+    submitted: archiveSubmitted.value,
+    version: archiveVersion.value,
+    lastSavedAt: lastSavedAt.value,
+    autoSaveStatus: autoSaveStatus.value
+  }
+}));
 const lifecycleRailSummary = computed(
   () => `${activeLifecycleStage.value.department} · ${lifecycleProgress.value.completed}/${lifecycleProgress.value.total} 环`
 );

@@ -18,6 +18,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -42,6 +43,8 @@ public class ClinicApiController {
     private final ClinicFileService fileService;
     private final ClinicBackupService backupService;
     private final ClinicAiSummaryService aiSummaryService;
+    private final ClinicAiAssistantService aiAssistantService;
+    private final ClinicAiAssistantLogService aiAssistantLogService;
     private final ClinicAiConfigService aiConfigService;
     private final ClinicMedicalRecordService medicalRecordService;
     private final ObjectMapper objectMapper;
@@ -51,6 +54,8 @@ public class ClinicApiController {
         ClinicFileService fileService,
         ClinicBackupService backupService,
         ClinicAiSummaryService aiSummaryService,
+        ClinicAiAssistantService aiAssistantService,
+        ClinicAiAssistantLogService aiAssistantLogService,
         ClinicAiConfigService aiConfigService,
         ClinicMedicalRecordService medicalRecordService,
         ObjectMapper objectMapper
@@ -59,6 +64,8 @@ public class ClinicApiController {
         this.fileService = fileService;
         this.backupService = backupService;
         this.aiSummaryService = aiSummaryService;
+        this.aiAssistantService = aiAssistantService;
+        this.aiAssistantLogService = aiAssistantLogService;
         this.aiConfigService = aiConfigService;
         this.medicalRecordService = medicalRecordService;
         this.objectMapper = objectMapper;
@@ -166,7 +173,31 @@ public class ClinicApiController {
         requireClinicAdmin();
         ObjectNode result = aiConfigService.updateConfig(payload, user);
         Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
-        return ApiResult.of(200, "AI接口配置已保存", data);
+        return ApiResult.of(200, "AI config saved", data);
+    }
+
+    @GetMapping("/clinic-api/ai/doubao/config")
+    public ApiResult<Map<String, Object>> doubaoAiConfigStatus() {
+        requireClinicAdmin();
+        Map<String, Object> data = objectMapper.convertValue(aiConfigService.doubaoStatus(), new TypeReference<Map<String, Object>>() {});
+        return ApiResult.success(data);
+    }
+
+    @PutMapping("/clinic-api/ai/doubao/config")
+    public ApiResult<Map<String, Object>> updateDoubaoAiConfig(@RequestBody Map<String, Object> payload) {
+        AuthSessionService.SessionUser user = AuthPermission.currentUserOrThrow();
+        requireClinicAdmin();
+        ObjectNode result = aiConfigService.updateDoubaoConfig(payload, user);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "doubao assistant config saved", data);
+    }
+
+    @PostMapping("/clinic-api/ai/doubao/models")
+    public ApiResult<Map<String, Object>> detectDoubaoAiModels(@RequestBody Map<String, Object> payload) {
+        requireClinicAdmin();
+        ObjectNode result = aiConfigService.detectDoubaoModels(payload);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "doubao models detected", data);
     }
 
     @GetMapping("/clinic-api/patients/duplicates")
@@ -187,7 +218,37 @@ public class ClinicApiController {
     @PostMapping("/clinic-api/ai/record-summary")
     public ApiResult<Map<String, Object>> generateRecordAiSummary(@RequestBody ClinicAiSummaryService.AiSummaryRequest request) {
         Map<String, Object> data = aiSummaryService.generateRecordSummary(request, AuthPermission.currentUserOrThrow());
-        return ApiResult.of(200, "AI总结已生成", data);
+        return ApiResult.of(200, "AI summary generated", data);
+    }
+
+    @PostMapping("/clinic-api/ai/assistant")
+    public ApiResult<Map<String, Object>> askAiAssistant(@RequestBody ClinicAiAssistantService.AiAssistantRequest request) {
+        Map<String, Object> data = aiAssistantService.ask(request, AuthPermission.currentUserOrThrow());
+        return ApiResult.of(200, "doubao assistant generated", data);
+    }
+
+    @GetMapping("/clinic-api/ai/assistant/logs")
+    public ApiResult<Map<String, Object>> aiAssistantLogs(@RequestParam Map<String, String> params) {
+        return ApiResult.success(aiAssistantLogService.logs(params));
+    }
+
+    @GetMapping("/clinic-api/ai/assistant/analytics")
+    public ApiResult<Map<String, Object>> aiAssistantAnalytics(@RequestParam Map<String, String> params) {
+        return ApiResult.success(aiAssistantLogService.analytics(params));
+    }
+
+    @GetMapping("/clinic-api/ai/assistant/templates")
+    public ApiResult<Map<String, Object>> aiAssistantTemplates() {
+        return ApiResult.success(aiAssistantLogService.templates());
+    }
+
+    @PostMapping("/clinic-api/ai/assistant/logs/{id}/template-candidate")
+    public ApiResult<Map<String, Object>> markAiAssistantTemplateCandidate(
+        @PathVariable String id,
+        @RequestBody Map<String, Object> payload
+    ) {
+        Map<String, Object> data = aiAssistantLogService.markTemplateCandidate(id, payload, AuthPermission.currentUserOrThrow());
+        return ApiResult.of(200, "AI template candidate saved", data);
     }
 
     @GetMapping("/clinic-api/medical-record/templates")
@@ -207,22 +268,22 @@ public class ClinicApiController {
 
     @PostMapping("/clinic-api/medical-record/workspace")
     public ApiResult<Map<String, Object>> saveMedicalRecordWorkspace(@RequestBody ClinicMedicalRecordService.WorkspaceSaveRequest request) {
-        return ApiResult.of(200, "目标病历填写已保存", medicalRecordService.saveWorkspace(request, AuthPermission.currentUserOrThrow()));
+        return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u586b\u5199\u5df2\u4fdd\u5b58", medicalRecordService.saveWorkspace(request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/clinic-api/medical-record/generate")
     public ApiResult<Map<String, Object>> generateMedicalRecord(@RequestBody ClinicMedicalRecordService.GenerateRequest request) {
-        return ApiResult.of(200, "目标病历已生成", medicalRecordService.generate(request, AuthPermission.currentUserOrThrow()));
+        return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u5df2\u751f\u6210", medicalRecordService.generate(request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/clinic-api/medical-record/finalize")
     public ApiResult<Map<String, Object>> finalizeMedicalRecord(@RequestBody ClinicMedicalRecordService.FinalizeRequest request) {
-        return ApiResult.of(200, "目标病历已定稿", medicalRecordService.finalizeRecord(request, AuthPermission.currentUserOrThrow()));
+        return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u5df2\u5b9a\u7a3f", medicalRecordService.finalizeRecord(request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/clinic-api/medical-record/void")
     public ApiResult<Map<String, Object>> voidMedicalRecord(@RequestBody ClinicMedicalRecordService.VoidRequest request) {
-        return ApiResult.of(200, "目标病历版本已作废", medicalRecordService.voidRecord(request, AuthPermission.currentUserOrThrow()));
+        return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u7248\u672c\u5df2\u4f5c\u5e9f", medicalRecordService.voidRecord(request, AuthPermission.currentUserOrThrow()));
     }
 
     @GetMapping("/clinic-api/medical-record/download")
@@ -299,12 +360,12 @@ public class ClinicApiController {
     }
 
     private void requireClinicAdmin() {
-        AuthPermission.requireAnyRole("当前账号无病历系统管理权限", "admin", "quality");
+        AuthPermission.requireAnyRole("\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u7cfb\u7edf\u7ba1\u7406\u6743\u9650", "admin", "quality");
     }
 
     private void requireClinicContributor() {
         AuthPermission.requireAnyRole(
-            "当前账号无病历写入权限",
+            "\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u5199\u5165\u6743\u9650",
             "admin",
             "quality",
             "frontdesk",

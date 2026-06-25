@@ -15,6 +15,16 @@ import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./clinic/storage"
 import { authHeaders } from "./authToken";
 import type {
   AccountRow,
+  AiModelDetectionPayload,
+  AiModelDetectionResult,
+  AiAssistantRequest,
+  AiAssistantResponse,
+  AiAssistantAnalytics,
+  AiAssistantLogListParams,
+  AiAssistantLogListResult,
+  AiPromptTemplateCandidate,
+  AiPromptTemplateListResult,
+  AiPromptTemplatePayload,
   AiRuntimeConfig,
   AiRuntimeConfigPayload,
   AiRecordSummary,
@@ -68,6 +78,25 @@ import type {
 
 export type {
   AccountRow,
+  AiModelDetectionPayload,
+  AiModelDetectionResult,
+  AiModelOption,
+  AiAssistantAttachment,
+  AiAssistantMessage,
+  AiAssistantRequest,
+  AiAssistantResponse,
+  AiAssistantType,
+  AiAssistantAnalytics,
+  AiAssistantAnalyticsBucket,
+  AiAssistantFrequentPrompt,
+  AiAssistantKnowledgeMiss,
+  AiAssistantLog,
+  AiAssistantLogListParams,
+  AiAssistantLogListResult,
+  AiAssistantLogStatus,
+  AiPromptTemplateCandidate,
+  AiPromptTemplateListResult,
+  AiPromptTemplatePayload,
   AiRuntimeConfig,
   AiRuntimeConfigPayload,
   AiRecordSummary,
@@ -2299,6 +2328,80 @@ export const saveAiRuntimeConfigApi = async (payload: AiRuntimeConfigPayload) =>
   });
   const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
   return response(data, "AI接口配置已保存");
+};
+
+export const getDoubaoAiRuntimeConfigApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/config`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
+  return response(data);
+};
+
+export const saveDoubaoAiRuntimeConfigApi = async (payload: AiRuntimeConfigPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/config`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
+  return response(data, "豆包助手配置已保存");
+};
+
+export const detectDoubaoAiModelsApi = async (payload: AiModelDetectionPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/models`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiModelDetectionResult>(result);
+  return response(data, "豆包模型检测完成");
+};
+
+export const askAiAssistantApi = async (payload: AiAssistantRequest) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/assistant`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiAssistantResponse>(result);
+  return response(data, "豆包助手已生成回答");
+};
+
+export const getAiAssistantLogsApi = async (params: AiAssistantLogListParams = {}) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/assistant/logs${suffix}`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiAssistantLogListResult>(result);
+  return response(data);
+};
+
+export const getAiAssistantAnalyticsApi = async (params: AiAssistantLogListParams = {}) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/assistant/analytics${suffix}`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiAssistantAnalytics>(result);
+  return response(data);
+};
+
+export const getAiAssistantTemplatesApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/assistant/templates`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiPromptTemplateListResult>(result);
+  return response(data);
+};
+
+export const markAiAssistantTemplateCandidateApi = async (id: string, payload: AiPromptTemplatePayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/assistant/logs/${id}/template-candidate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiPromptTemplateCandidate>(result);
+  return response(data, "模板候选已保存");
 };
 
 export const getWorkRemindersApi = async () => {

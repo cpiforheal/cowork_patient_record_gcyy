@@ -104,7 +104,6 @@
 
 <script setup lang="ts" name="ProTable">
 import { ref, watch, provide, onMounted, unref, computed, reactive } from "vue";
-import { ElTable } from "element-plus";
 import { useTable } from "@/hooks/useTable";
 import { useSelection } from "@/hooks/useSelection";
 import { BreakPoint } from "@/components/Grid/interface";
@@ -118,7 +117,7 @@ import TableColumn from "./components/TableColumn.vue";
 import Sortable from "sortablejs";
 
 export interface ProTableProps {
-  columns: ColumnProps[]; // 列配置项  ==> 必传
+  columns: ColumnProps<any>[]; // 列配置项  ==> 必传
   data?: any[]; // 静态 table data 数据，若存在则不会使用 requestApi 返回的 data ==> 非必传
   requestApi?: (params: any) => Promise<any>; // 请求表格数据的 api ==> 非必传
   requestAuto?: boolean; // 是否自动执行请求 api ==> 非必传（默认为true）
@@ -146,7 +145,7 @@ const props = withDefaults(defineProps<ProTableProps>(), {
 });
 
 // table 实例
-const tableRef = ref<InstanceType<typeof ElTable>>();
+const tableRef = ref<any>();
 
 // 生成组件唯一id
 const uuid = ref("id-" + generateUUID());
@@ -196,10 +195,10 @@ const processTableData = computed(() => {
 watch(() => props.initParam, getTableList, { deep: true });
 
 // 接收 columns 并设置为响应式
-const tableColumns = reactive<ColumnProps[]>(props.columns);
+const tableColumns = reactive<ColumnProps<any>[]>(props.columns);
 
 // 扁平化 columns
-const flatColumns = computed(() => flatColumnsFunc(tableColumns));
+const flatColumns = computed<ColumnProps<any>[]>(() => flatColumnsFunc(tableColumns as ColumnProps<any>[]));
 
 // 定义 enumMap 存储 enum 值（避免异步请求无法格式化单元格内容 || 无法填充搜索下拉选择）
 const enumMap = ref(new Map<string, { [key: string]: any }[]>());
@@ -216,7 +215,8 @@ const setEnumMap = async ({ prop, enum: enumValue }: ColumnProps) => {
   enumMap.value.set(prop!, []);
 
   // 当前 enum 为后台数据需要请求数据，则调用该请求接口，并存储到 enumMap
-  const { data } = await enumValue();
+  const enumLoader = enumValue as (params?: any) => Promise<{ data: any[] }>;
+  const { data } = await enumLoader();
   enumMap.value.set(prop!, data);
 };
 
@@ -224,7 +224,7 @@ const setEnumMap = async ({ prop, enum: enumValue }: ColumnProps) => {
 provide("enumMap", enumMap);
 
 // 扁平化 columns 的方法
-const flatColumnsFunc = (columns: ColumnProps[], flatArr: ColumnProps[] = []) => {
+const flatColumnsFunc = (columns: ColumnProps<any>[], flatArr: ColumnProps<any>[] = []) => {
   columns.forEach(async col => {
     if (col._children?.length) flatArr.push(...flatColumnsFunc(col._children));
     flatArr.push(col);
@@ -260,7 +260,7 @@ searchColumns.value?.forEach((column, index) => {
 
 // 列设置 ==> 需要过滤掉不需要设置的列
 const colRef = ref();
-const colSetting = tableColumns!.filter(item => {
+const colSetting: ColumnProps<any>[] = (tableColumns as ColumnProps<any>[]).filter(item => {
   const { type, prop, isSetting } = item;
   return !columnTypes.includes(type!) && prop !== "operation" && isSetting;
 });

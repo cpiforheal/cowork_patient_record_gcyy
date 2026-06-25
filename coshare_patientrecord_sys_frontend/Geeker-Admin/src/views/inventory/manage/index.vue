@@ -382,11 +382,15 @@
                         v-if="hasInventoryAuth('inventory:issue')"
                         link
                         type="primary"
-                        @click="openInboundDialog(row.item)"
+                        @click="openInboundDialog(asInventoryItem(row.item))"
                       >
                         入库
                       </el-button>
-                      <el-button v-if="hasInventoryAuth('inventory:issue')" link @click="openItemDialog(row.item)">
+                      <el-button
+                        v-if="hasInventoryAuth('inventory:issue')"
+                        link
+                        @click="openItemDialog(asInventoryItem(row.item))"
+                      >
                         编辑
                       </el-button>
                     </template>
@@ -452,7 +456,12 @@
                 <el-table-column prop="location" label="默认位置" width="140" />
                 <el-table-column label="操作" width="90" fixed="right">
                   <template #default="{ row }">
-                    <el-button v-if="hasInventoryAuth('inventory:issue')" link type="primary" @click="openItemDialog(row)">
+                    <el-button
+                      v-if="hasInventoryAuth('inventory:issue')"
+                      link
+                      type="primary"
+                      @click="openItemDialog(asInventoryItem(row))"
+                    >
                       编辑
                     </el-button>
                   </template>
@@ -539,7 +548,7 @@
                       v-if="row.status === 'pending' && hasInventoryAuth('inventory:approve')"
                       link
                       type="primary"
-                      @click="approveRequest(row)"
+                      @click="approveRequest(asInventoryRequest(row))"
                     >
                       审核
                     </el-button>
@@ -547,7 +556,7 @@
                       v-if="row.status === 'approved' && hasInventoryAuth('inventory:issue')"
                       link
                       type="primary"
-                      @click="openIssueDialog(row)"
+                      @click="openIssueDialog(asInventoryRequest(row))"
                     >
                       发放
                     </el-button>
@@ -555,7 +564,7 @@
                       v-if="row.status === 'partially_issued' && hasInventoryAuth('inventory:issue')"
                       link
                       type="warning"
-                      @click="openIssueDialog(row)"
+                      @click="openIssueDialog(asInventoryRequest(row))"
                     >
                       继续发
                     </el-button>
@@ -563,7 +572,7 @@
                       v-if="row.status === 'issued' && hasInventoryAuth('inventory:receive')"
                       link
                       type="success"
-                      @click="receiveRequest(row)"
+                      @click="receiveRequest(asInventoryRequest(row))"
                     >
                       签收
                     </el-button>
@@ -571,7 +580,7 @@
                       v-if="row.status === 'pending' && hasInventoryAuth('inventory:approve')"
                       link
                       type="warning"
-                      @click="rejectRequest(row)"
+                      @click="rejectRequest(asInventoryRequest(row))"
                     >
                       驳回
                     </el-button>
@@ -579,7 +588,7 @@
                       v-if="row.status === 'pending' && hasInventoryAuth('inventory:request')"
                       link
                       type="info"
-                      @click="cancelRequest(row)"
+                      @click="cancelRequest(asInventoryRequest(row))"
                     >
                       撤销
                     </el-button>
@@ -587,7 +596,7 @@
                       v-if="['pending', 'approved'].includes(row.status) && hasInventoryAuth('inventory:approve')"
                       link
                       type="danger"
-                      @click="voidRequest(row)"
+                      @click="voidRequest(asInventoryRequest(row))"
                     >
                       作废
                     </el-button>
@@ -1019,6 +1028,9 @@ const userStore = useUserStore();
 const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+
+const asInventoryItem = (row: unknown) => row as InventoryItem;
+const asInventoryRequest = (row: unknown) => row as InventoryRequest;
 const db = ref<InventoryDb>(emptyDb());
 const loading = ref(false);
 const saving = ref(false);
