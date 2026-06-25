@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.context.annotation.Profile;
@@ -224,6 +225,24 @@ public class ClinicApiController {
     @PostMapping("/clinic-api/ai/assistant")
     public ApiResult<Map<String, Object>> askAiAssistant(@RequestBody ClinicAiAssistantService.AiAssistantRequest request) {
         Map<String, Object> data = aiAssistantService.ask(request, AuthPermission.currentUserOrThrow());
+        return ApiResult.of(200, "doubao assistant generated", data);
+    }
+
+    @PostMapping("/clinic-api/ai/assistant/{assistantType}")
+    public ApiResult<Map<String, Object>> askAiAssistantByType(
+        @PathVariable String assistantType,
+        @RequestBody(required = false) ClinicAiAssistantService.AiAssistantRequest request
+    ) {
+        ClinicAiAssistantService.AiAssistantRequest normalized = new ClinicAiAssistantService.AiAssistantRequest(
+            assistantType,
+            request == null ? "" : request.prompt(),
+            request == null || request.messages() == null ? List.of() : request.messages(),
+            request == null ? "" : request.patientId(),
+            request == null || request.context() == null ? Map.of() : request.context(),
+            request == null || request.attachmentIds() == null ? List.of() : request.attachmentIds(),
+            request == null || request.attachments() == null ? List.of() : request.attachments()
+        );
+        Map<String, Object> data = aiAssistantService.ask(normalized, AuthPermission.currentUserOrThrow());
         return ApiResult.of(200, "doubao assistant generated", data);
     }
 

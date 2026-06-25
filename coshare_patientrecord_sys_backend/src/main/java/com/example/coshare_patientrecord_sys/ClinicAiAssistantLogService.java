@@ -41,7 +41,7 @@ public class ClinicAiAssistantLogService {
 
     @PostConstruct
     public void initializeSchema() {
-        ensureSchema();
+        tryEnsureSchema();
     }
 
     private synchronized void ensureSchema() {
@@ -100,13 +100,24 @@ public class ClinicAiAssistantLogService {
         ensureColumn("clinic_ai_assistant_logs", "error_message", "VARCHAR(512)");
         ensureColumn("clinic_ai_assistant_logs", "template_candidate", "BOOLEAN DEFAULT FALSE");
         ensureColumn("clinic_ai_assistant_logs", "raw_json", "LONGTEXT");
+        alterColumn("clinic_ai_assistant_logs", "raw_json", "LONGTEXT");
         ensureColumn("clinic_ai_prompt_templates", "created_at", "VARCHAR(32)");
         ensureColumn("clinic_ai_prompt_templates", "assistant_type", "VARCHAR(32)");
         ensureColumn("clinic_ai_prompt_templates", "title", "VARCHAR(160)");
         ensureColumn("clinic_ai_prompt_templates", "role_scope", "VARCHAR(64)");
         ensureColumn("clinic_ai_prompt_templates", "source_log_id", "VARCHAR(128)");
         ensureColumn("clinic_ai_prompt_templates", "raw_json", "LONGTEXT");
+        alterColumn("clinic_ai_prompt_templates", "raw_json", "LONGTEXT");
         schemaReady = true;
+    }
+
+    private boolean tryEnsureSchema() {
+        try {
+            ensureSchema();
+            return true;
+        } catch (DataAccessException error) {
+            return false;
+        }
     }
 
     private void ensureColumn(String table, String column, String definition) {
@@ -117,9 +128,17 @@ public class ClinicAiAssistantLogService {
         }
     }
 
+    private void alterColumn(String table, String column, String definition) {
+        try {
+            jdbcTemplate.execute("ALTER TABLE " + table + " MODIFY COLUMN " + column + " " + definition);
+        } catch (DataAccessException ignored) {
+            // Schema compatibility is best-effort; querying has a fallback path below.
+        }
+    }
+
     public void record(AssistantLogDraft draft) {
         try {
-            ensureSchema();
+            if (!tryEnsureSchema()) return;
             ObjectNode log = objectMapper.createObjectNode();
             String id = "ai-log-" + UUID.randomUUID();
             String now = LocalDateTime.now().format(TIME_FORMATTER);
@@ -204,7 +223,7 @@ public class ClinicAiAssistantLogService {
         int to = Math.min(filtered.size(), from + pageSize);
         List<ObjectNode> page = from >= filtered.size() ? List.of() : filtered.subList(from, to);
         return Map.of("list", toPlainList(page), "total", filtered.size());
-        } catch (DataAccessException error) {
+        } catch (Exception error) {
             return Map.of("list", List.of(), "total", 0, "warning", "AI assistant logs are temporarily unavailable");
         }
     }
@@ -233,7 +252,7 @@ public class ClinicAiAssistantLogService {
         result.put("frequentPrompts", toPlainList(frequentPrompts(logs)));
         result.put("knowledgeMisses", toPlainList(knowledgeMisses(logs)));
         return result;
-        } catch (DataAccessException error) {
+        } catch (Exception error) {
             Map<String, Object> result = emptyAnalytics();
             result.put("warning", "AI assistant analytics are temporarily unavailable");
             return result;
@@ -243,13 +262,15 @@ public class ClinicAiAssistantLogService {
     public Map<String, Object> templates() {
         AuthPermission.currentUserOrThrow();
         try {
-        ensureSchema();
+        if (!tryEnsureSchema()) {
+            return Map.of("list", List.of(), "total", 0, "warning", "AI prompt templates are temporarily unavailable");
+        }
         List<ObjectNode> rows = jdbcTemplate.query(
             "SELECT raw_json FROM clinic_ai_prompt_templates ORDER BY created_at DESC, id DESC LIMIT 200",
             (resultSet, rowNum) -> readJson(resultSet.getString("raw_json"))
         ).stream().filter(node -> !node.isEmpty()).toList();
         return Map.of("list", toPlainList(rows), "total", rows.size());
-        } catch (DataAccessException error) {
+        } catch (Exception error) {
             return Map.of("list", List.of(), "total", 0, "warning", "AI prompt templates are temporarily unavailable");
         }
     }
@@ -295,7 +316,7 @@ public class ClinicAiAssistantLogService {
     }
 
     private List<ObjectNode> queryLogs() {
-        ensureSchema();
+        if (!tryEnsureSchema()) return List.of();
         return jdbcTemplate.query(
             "SELECT raw_json FROM clinic_ai_assistant_logs ORDER BY created_at DESC, id DESC LIMIT ?",
             (resultSet, rowNum) -> readJson(resultSet.getString("raw_json")),
