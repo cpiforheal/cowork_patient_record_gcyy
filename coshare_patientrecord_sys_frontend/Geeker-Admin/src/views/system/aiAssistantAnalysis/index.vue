@@ -331,27 +331,59 @@ const assistantLabel = (type?: AiAssistantType | string) =>
 const bucketPercent = (count: number, totalCount: number) =>
   totalCount ? Math.min(100, Math.round((count / totalCount) * 100)) : 0;
 
+const readWarning = (data: unknown) => {
+  const warning = (data as { warning?: unknown })?.warning;
+  return typeof warning === "string" ? warning : "";
+};
+
 const loadLogs = async () => {
   loading.value = true;
   try {
     const { data } = await getAiAssistantLogsApi(queryParams.value);
     logs.value = data.list || [];
     total.value = data.total || 0;
+    const warning = readWarning(data);
+    if (warning) ElMessage.warning(warning);
+  } catch (error) {
+    logs.value = [];
+    total.value = 0;
+    ElMessage.warning("AI 使用日志暂不可用，已显示空列表");
   } finally {
     loading.value = false;
   }
 };
 
 const loadAnalytics = async () => {
-  const { data } = await getAiAssistantAnalyticsApi(queryParams.value);
-  analytics.value = {
-    ...data,
-    totalCalls: data.totalCalls || 0,
-    todayCalls: data.todayCalls || 0,
-    failedCalls: data.failedCalls || 0,
-    failureRate: data.failureRate || 0,
-    averageLatencyMs: data.averageLatencyMs || 0
-  };
+  try {
+    const { data } = await getAiAssistantAnalyticsApi(queryParams.value);
+    analytics.value = {
+      ...data,
+      totalCalls: data.totalCalls || 0,
+      todayCalls: data.todayCalls || 0,
+      failedCalls: data.failedCalls || 0,
+      failureRate: data.failureRate || 0,
+      averageLatencyMs: data.averageLatencyMs || 0
+    };
+    const warning = readWarning(data);
+    if (warning) ElMessage.warning(warning);
+  } catch (error) {
+    analytics.value = {
+      totalCalls: 0,
+      todayCalls: 0,
+      failedCalls: 0,
+      failureRate: 0,
+      averageLatencyMs: 0,
+      assistantTypeBuckets: [],
+      roleBuckets: [],
+      departmentBuckets: [],
+      intentBuckets: [],
+      pageBuckets: [],
+      modelErrorBuckets: [],
+      frequentPrompts: [],
+      knowledgeMisses: []
+    };
+    ElMessage.warning("AI 使用统计暂不可用，已显示空面板");
+  }
 };
 
 const loadAll = async () => {

@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class ClinicAiAssistantLogService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private volatile boolean schemaReady = false;
 
     public ClinicAiAssistantLogService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
@@ -39,6 +41,11 @@ public class ClinicAiAssistantLogService {
 
     @PostConstruct
     public void initializeSchema() {
+        ensureSchema();
+    }
+
+    private synchronized void ensureSchema() {
+        if (schemaReady) return;
         jdbcTemplate.execute("""
             CREATE TABLE IF NOT EXISTS clinic_ai_assistant_logs (
               id VARCHAR(128) PRIMARY KEY,
@@ -57,7 +64,7 @@ public class ClinicAiAssistantLogService {
               prompt_preview VARCHAR(512),
               error_message VARCHAR(512),
               template_candidate BOOLEAN DEFAULT FALSE,
-              raw_json JSON NOT NULL,
+              raw_json LONGTEXT,
               INDEX idx_clinic_ai_logs_created (created_at),
               INDEX idx_clinic_ai_logs_type (assistant_type),
               INDEX idx_clinic_ai_logs_status (status),
@@ -72,15 +79,47 @@ public class ClinicAiAssistantLogService {
               title VARCHAR(160),
               role_scope VARCHAR(64),
               source_log_id VARCHAR(128),
-              raw_json JSON NOT NULL,
+              raw_json LONGTEXT,
               INDEX idx_clinic_ai_templates_type (assistant_type),
               INDEX idx_clinic_ai_templates_created (created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """);
+        ensureColumn("clinic_ai_assistant_logs", "created_at", "VARCHAR(32)");
+        ensureColumn("clinic_ai_assistant_logs", "assistant_type", "VARCHAR(32)");
+        ensureColumn("clinic_ai_assistant_logs", "status", "VARCHAR(32)");
+        ensureColumn("clinic_ai_assistant_logs", "operator_id", "VARCHAR(64)");
+        ensureColumn("clinic_ai_assistant_logs", "operator_name", "VARCHAR(100)");
+        ensureColumn("clinic_ai_assistant_logs", "operator_role", "VARCHAR(64)");
+        ensureColumn("clinic_ai_assistant_logs", "operator_department", "VARCHAR(100)");
+        ensureColumn("clinic_ai_assistant_logs", "page_source", "VARCHAR(100)");
+        ensureColumn("clinic_ai_assistant_logs", "page_path", "VARCHAR(255)");
+        ensureColumn("clinic_ai_assistant_logs", "model", "VARCHAR(128)");
+        ensureColumn("clinic_ai_assistant_logs", "latency_ms", "BIGINT DEFAULT 0");
+        ensureColumn("clinic_ai_assistant_logs", "intent_category", "VARCHAR(64)");
+        ensureColumn("clinic_ai_assistant_logs", "prompt_preview", "VARCHAR(512)");
+        ensureColumn("clinic_ai_assistant_logs", "error_message", "VARCHAR(512)");
+        ensureColumn("clinic_ai_assistant_logs", "template_candidate", "BOOLEAN DEFAULT FALSE");
+        ensureColumn("clinic_ai_assistant_logs", "raw_json", "LONGTEXT");
+        ensureColumn("clinic_ai_prompt_templates", "created_at", "VARCHAR(32)");
+        ensureColumn("clinic_ai_prompt_templates", "assistant_type", "VARCHAR(32)");
+        ensureColumn("clinic_ai_prompt_templates", "title", "VARCHAR(160)");
+        ensureColumn("clinic_ai_prompt_templates", "role_scope", "VARCHAR(64)");
+        ensureColumn("clinic_ai_prompt_templates", "source_log_id", "VARCHAR(128)");
+        ensureColumn("clinic_ai_prompt_templates", "raw_json", "LONGTEXT");
+        schemaReady = true;
+    }
+
+    private void ensureColumn(String table, String column, String definition) {
+        try {
+            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        } catch (DataAccessException ignored) {
+            // Existing pilot databases may already have this column.
+        }
     }
 
     public void record(AssistantLogDraft draft) {
         try {
+            ensureSchema();
             ObjectNode log = objectMapper.createObjectNode();
             String id = "ai-log-" + UUID.randomUUID();
             String now = LocalDateTime.now().format(TIME_FORMATTER);
@@ -156,6 +195,7 @@ public class ClinicAiAssistantLogService {
 
     public Map<String, Object> logs(Map<String, String> params) {
         AuthPermission.requireAnyRole("当前账号无 AI 使用分析权限", "admin");
+        try {
         Map<String, String> query = params == null ? Map.of() : params;
         List<ObjectNode> filtered = filterLogs(queryLogs(), query);
         int pageNum = parseInt(query.get("pageNum"), 1);
@@ -164,10 +204,14 @@ public class ClinicAiAssistantLogService {
         int to = Math.min(filtered.size(), from + pageSize);
         List<ObjectNode> page = from >= filtered.size() ? List.of() : filtered.subList(from, to);
         return Map.of("list", toPlainList(page), "total", filtered.size());
+        } catch (DataAccessException error) {
+            return Map.of("list", List.of(), "total", 0, "warning", "AI assistant logs are temporarily unavailable");
+        }
     }
 
     public Map<String, Object> analytics(Map<String, String> params) {
         AuthPermission.requireAnyRole("当前账号无 AI 使用分析权限", "admin");
+        try {
         List<ObjectNode> logs = filterLogs(queryLogs(), params == null ? Map.of() : params);
         LocalDate today = LocalDate.now();
         long todayCalls = logs.stream().filter(log -> safe(log.path("createdAt").asText()).startsWith(today.toString())).count();
@@ -189,15 +233,25 @@ public class ClinicAiAssistantLogService {
         result.put("frequentPrompts", toPlainList(frequentPrompts(logs)));
         result.put("knowledgeMisses", toPlainList(knowledgeMisses(logs)));
         return result;
+        } catch (DataAccessException error) {
+            Map<String, Object> result = emptyAnalytics();
+            result.put("warning", "AI assistant analytics are temporarily unavailable");
+            return result;
+        }
     }
 
     public Map<String, Object> templates() {
         AuthPermission.currentUserOrThrow();
+        try {
+        ensureSchema();
         List<ObjectNode> rows = jdbcTemplate.query(
             "SELECT raw_json FROM clinic_ai_prompt_templates ORDER BY created_at DESC, id DESC LIMIT 200",
             (resultSet, rowNum) -> readJson(resultSet.getString("raw_json"))
         ).stream().filter(node -> !node.isEmpty()).toList();
         return Map.of("list", toPlainList(rows), "total", rows.size());
+        } catch (DataAccessException error) {
+            return Map.of("list", List.of(), "total", 0, "warning", "AI prompt templates are temporarily unavailable");
+        }
     }
 
     public Map<String, Object> markTemplateCandidate(String logId, Map<String, Object> payload, AuthSessionService.SessionUser user) {
@@ -241,6 +295,7 @@ public class ClinicAiAssistantLogService {
     }
 
     private List<ObjectNode> queryLogs() {
+        ensureSchema();
         return jdbcTemplate.query(
             "SELECT raw_json FROM clinic_ai_assistant_logs ORDER BY created_at DESC, id DESC LIMIT ?",
             (resultSet, rowNum) -> readJson(resultSet.getString("raw_json")),
@@ -249,6 +304,7 @@ public class ClinicAiAssistantLogService {
     }
 
     private ObjectNode findLog(String id) {
+        ensureSchema();
         List<ObjectNode> rows = jdbcTemplate.query(
             "SELECT raw_json FROM clinic_ai_assistant_logs WHERE id = ? LIMIT 1",
             (resultSet, rowNum) -> readJson(resultSet.getString("raw_json")),
@@ -354,6 +410,24 @@ public class ClinicAiAssistantLogService {
                 item.put("prompt", log.path("promptPreview").asText(""));
                 item.put("assistantType", log.path("assistantType").asText(""));
             });
+        return result;
+    }
+
+    private Map<String, Object> emptyAnalytics() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalCalls", 0);
+        result.put("todayCalls", 0);
+        result.put("failedCalls", 0);
+        result.put("failureRate", 0);
+        result.put("averageLatencyMs", 0);
+        result.put("assistantTypeBuckets", List.of());
+        result.put("roleBuckets", List.of());
+        result.put("departmentBuckets", List.of());
+        result.put("intentBuckets", List.of());
+        result.put("pageBuckets", List.of());
+        result.put("modelErrorBuckets", List.of());
+        result.put("frequentPrompts", List.of());
+        result.put("knowledgeMisses", List.of());
         return result;
     }
 
