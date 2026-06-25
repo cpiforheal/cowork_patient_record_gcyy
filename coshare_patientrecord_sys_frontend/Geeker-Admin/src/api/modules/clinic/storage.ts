@@ -1,5 +1,5 @@
 import type { ResultData } from "@/api/interface";
-import { authHeaders } from "../authToken";
+import { authHeaders, handleUnauthorizedResponse } from "../authToken";
 import { createSeedDb, hydrateDb } from "./seed";
 import type { ClinicDb } from "./types";
 
@@ -115,6 +115,9 @@ const needsBaselineMigration = (db: ClinicDb) =>
   !db.auditLogs;
 
 const parseClinicDbResponse = async (result: Response) => {
+  if (result.status === 401) {
+    handleUnauthorizedResponse();
+  }
   const text = await result.text();
   if (!text.trim()) throw new Error(API_UNAVAILABLE_MESSAGE);
   if (text.trim().startsWith("<")) {
@@ -128,6 +131,9 @@ const parseClinicDbResponse = async (result: Response) => {
 };
 
 const throwClinicApiError = async (result: Response) => {
+  if (result.status === 401) {
+    handleUnauthorizedResponse();
+  }
   const text = await result.text();
   try {
     const payload = JSON.parse(text) as ResultData<unknown>;

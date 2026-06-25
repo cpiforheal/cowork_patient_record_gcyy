@@ -12,7 +12,7 @@ import {
 import { initialFieldValues, roleToDepartment, seedTemplateFieldRules } from "./clinic/seed";
 import { storeClinicFileApi } from "./clinic/files";
 import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./clinic/storage";
-import { authHeaders } from "./authToken";
+import { authHeaders, handleUnauthorizedResponse, isUnauthorizedApiResponse } from "./authToken";
 import type {
   AccountRow,
   AiModelDetectionPayload,
@@ -2148,6 +2148,9 @@ export const getPatientTimelineApi = async (patientId: string) => {
 };
 
 const parseClinicApiResponse = async <T>(result: Response): Promise<T> => {
+  if (result.status === 401) {
+    handleUnauthorizedResponse();
+  }
   const text = await result.text();
   if (text.trim().startsWith("<")) {
     throw new Error("业务接口未连通，请确认后端已启动，并检查 /clinic-api 代理或部署转发配置");
@@ -2157,6 +2160,9 @@ const parseClinicApiResponse = async <T>(result: Response): Promise<T> => {
     payload = JSON.parse(text) as ResultData<T>;
   } catch {
     throw new Error("业务接口返回格式异常，请检查后端服务状态");
+  }
+  if (isUnauthorizedApiResponse(result, payload)) {
+    handleUnauthorizedResponse(payload.msg || "\u767b\u5f55\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55");
   }
   if (!result.ok || String(payload.code) !== "200") {
     throw new Error(payload.msg || `clinic api failed: ${result.status}`);

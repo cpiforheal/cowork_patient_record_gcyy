@@ -1,5 +1,5 @@
 import type { ResultData } from "@/api/interface";
-import { authHeaders } from "../authToken";
+import { authHeaders, handleUnauthorizedResponse } from "../authToken";
 
 export interface ClinicStoredFile {
   fileName: string;
@@ -25,6 +25,9 @@ const CLINIC_API_FILES_URL = import.meta.env.VITE_CLINIC_API_FILES_URL || "/clin
 const API_UNAVAILABLE_MESSAGE = "本地病历文件服务未连接，请确认后端服务正在运行";
 
 const parseClinicFileResponse = async (result: Response) => {
+  if (result.status === 401) {
+    handleUnauthorizedResponse();
+  }
   const text = await result.text();
   if (!text.trim()) {
     throw new Error(result.ok ? "本地病历文件服务返回为空" : `${API_UNAVAILABLE_MESSAGE}（HTTP ${result.status}）`);
@@ -59,6 +62,9 @@ export const fetchClinicFileBlobUrl = async (url: string) => {
     result = await fetch(url, { headers: authHeaders() });
   } catch {
     throw new Error(API_UNAVAILABLE_MESSAGE);
+  }
+  if (result.status === 401) {
+    handleUnauthorizedResponse();
   }
   if (!result.ok) {
     throw new Error(`附件读取失败（HTTP ${result.status}）`);

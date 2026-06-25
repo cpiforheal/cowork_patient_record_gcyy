@@ -1,5 +1,5 @@
 import type { ResultData } from "@/api/interface";
-import { authHeaders } from "./authToken";
+import { authHeaders, handleUnauthorizedResponse } from "./authToken";
 
 const INVENTORY_API_BASE_URL = import.meta.env.VITE_INVENTORY_API_BASE_URL || "/inventory-api";
 
@@ -206,6 +206,9 @@ export interface InventoryCountParams {
 }
 
 const parseInventoryJson = async (result: Response) => {
+  if (result.status === 401) {
+    handleUnauthorizedResponse();
+  }
   const text = await result.text();
   if (text.trim().startsWith("<")) {
     throw new Error("进销存接口未连通，请确认后端已启动，并检查 /inventory-api 代理或部署转发配置");
