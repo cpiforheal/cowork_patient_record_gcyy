@@ -3,6 +3,8 @@
 runtime/
 release/
 config/runtime.env
+config/ai-secrets.local.env
+**/ai-secrets.local.env
 
 **/node_modules/
 **/dist/

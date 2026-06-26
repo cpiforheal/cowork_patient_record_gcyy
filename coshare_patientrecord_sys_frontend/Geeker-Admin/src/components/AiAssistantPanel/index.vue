@@ -5,6 +5,7 @@
     size="min(1120px, 94vw)"
     class="ai-assistant-workbench-drawer"
     @update:model-value="value => emit('update:modelValue', value)"
+    @closed="stopSpeech"
   >
     <div class="assistant-workbench">
       <aside class="assistant-sidebar">
@@ -140,6 +141,9 @@
               </div>
               <div v-if="message.role === 'assistant' && !message.error" class="message-actions">
                 <el-button link type="primary" @click="copyMessage(message.content)">复制回答</el-button>
+                <el-button link type="primary" :loading="speakingMessageId === message.id" @click="toggleSpeech(message)">
+                  {{ speakingMessageId === message.id ? "停止朗读" : "朗读回答" }}
+                </el-button>
                 <el-button link :disabled="loading" @click="retry">重新生成</el-button>
               </div>
             </div>
@@ -233,7 +237,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   ChatDotRound,
@@ -251,6 +255,7 @@ import {
 import {
   askAiAssistantApi,
   getAiAssistantTemplatesApi,
+  speakAiSummaryApi,
   type AiAssistantAttachment,
   type AiAssistantMessage,
   type AiAssistantType,
@@ -370,10 +375,14 @@ const sessions = reactive<Record<AiAssistantType, ChatSession>>({
 
 const activeType = ref<AiAssistantType>(props.assistantType);
 const loading = ref(false);
+const speakingMessageId = ref("");
 const includeContext = ref(true);
 const templates = ref<AiPromptTemplateCandidate[]>([]);
 const fileInputRef = ref<HTMLInputElement>();
 const messageListRef = ref<HTMLElement>();
+let speechAudio: HTMLAudioElement | undefined;
+let speechAudioUrl = "";
+let speechStoppedManually = false;
 
 const currentSession = computed(() => sessions[activeType.value]);
 const activeMode = computed(() => assistantModes.find(item => item.value === activeType.value) || assistantModes[0]);
@@ -450,6 +459,8 @@ watch(
     if (value) {
       seedDefaultPrompt();
       scrollToBottom();
+    } else {
+      stopSpeech();
     }
   }
 );
@@ -583,6 +594,71 @@ const copyMessage = async (content: string) => {
   }
 };
 
+const base64ToBlob = (base64: string, mimeType: string) => {
+  const binary = window.atob(base64);
+  const chunks: Uint8Array[] = [];
+  for (let offset = 0; offset < binary.length; offset += 1024) {
+    const slice = binary.slice(offset, offset + 1024);
+    const bytes = new Uint8Array(slice.length);
+    for (let index = 0; index < slice.length; index += 1) {
+      bytes[index] = slice.charCodeAt(index);
+    }
+    chunks.push(bytes);
+  }
+  return new Blob(chunks, { type: mimeType || "audio/mpeg" });
+};
+
+const releaseSpeechAudio = () => {
+  if (speechAudioUrl) {
+    URL.revokeObjectURL(speechAudioUrl);
+    speechAudioUrl = "";
+  }
+  speechAudio = undefined;
+  speakingMessageId.value = "";
+};
+
+const stopSpeech = () => {
+  speechStoppedManually = true;
+  if (speechAudio) {
+    speechAudio.onended = null;
+    speechAudio.onerror = null;
+    speechAudio.pause();
+  }
+  releaseSpeechAudio();
+};
+
+const toggleSpeech = async (message: ChatMessage) => {
+  if (speakingMessageId.value === message.id) {
+    stopSpeech();
+    return;
+  }
+  const text = message.content.trim().slice(0, 1800);
+  if (!text) {
+    ElMessage.warning("暂无可朗读的回答内容");
+    return;
+  }
+  stopSpeech();
+  speechStoppedManually = false;
+  speakingMessageId.value = message.id;
+  try {
+    const { data } = await speakAiSummaryApi({ text });
+    const blob = base64ToBlob(data.audioBase64, data.mimeType);
+    speechAudioUrl = URL.createObjectURL(blob);
+    speechAudio = new Audio(speechAudioUrl);
+    speechAudio.onended = releaseSpeechAudio;
+    speechAudio.onerror = () => {
+      releaseSpeechAudio();
+      if (!speechStoppedManually) {
+        ElMessage.error("语音播放失败，请检查浏览器音频权限或 TTS 配置");
+      }
+    };
+    await speechAudio.play();
+  } catch (error) {
+    stopSpeech();
+    ElMessage.error(error instanceof Error ? error.message : "豆包语音朗读失败");
+  }
+};
+
 const toggleContext = () => {
   if (!hasContext.value) return;
   includeContext.value = !includeContext.value;
@@ -659,6 +735,8 @@ const loadTemplates = async () => {
 };
 
 onMounted(loadTemplates);
+
+onBeforeUnmount(stopSpeech);
 </script>
 
 <style scoped lang="scss">

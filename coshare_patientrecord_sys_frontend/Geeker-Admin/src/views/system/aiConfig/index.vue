@@ -130,6 +130,67 @@
           <el-button type="primary" :icon="Check" :loading="doubaoSaving" @click="saveDoubaoConfig">保存豆包助手</el-button>
         </div>
       </article>
+
+      <article class="ai-form-panel tts-panel">
+        <div class="panel-head">
+          <div>
+            <span class="section-label">豆包语音朗读</span>
+            <h3>用于 AI 总结、随访建议和医生提醒的文本朗读</h3>
+          </div>
+          <el-button :icon="Refresh" :loading="ttsLoading" @click="loadTtsConfig">刷新</el-button>
+        </div>
+        <el-alert
+          title="语音朗读使用独立配置，不会覆盖病历 AI 或豆包助手。Base URL 建议填写豆包 TTS 的完整调用地址。"
+          description="朗读只处理当前弹窗中已生成的摘要文本，不重新调用总结模型，也不会把音频保存到病历字段。"
+          type="info"
+          show-icon
+          :closable="false"
+        />
+        <el-form :model="ttsForm" label-width="112px" class="ai-config-form">
+          <el-form-item label="启用朗读">
+            <el-switch v-model="ttsForm.enabled" active-text="启用" inactive-text="停用" />
+          </el-form-item>
+          <el-form-item label="Base URL">
+            <el-input v-model="ttsForm.baseUrl" placeholder="例如豆包语音合成 TTS 的完整接口地址" clearable />
+          </el-form-item>
+          <el-form-item label="Model">
+            <el-input v-model="ttsForm.model" placeholder="例如 doubao-tts / seed-tts 资源模型" clearable />
+          </el-form-item>
+          <el-form-item label="Resource ID">
+            <el-input v-model="ttsForm.resourceId" placeholder="可选：语音合成资源 ID / App ID / 接入点 ID" clearable />
+          </el-form-item>
+          <el-form-item label="Voice Type">
+            <el-input v-model="ttsForm.voiceType" placeholder="可选：音色编码，例如 zh_female_xxx" clearable />
+          </el-form-item>
+          <el-form-item label="语速">
+            <el-input-number
+              v-model="ttsForm.speedRatio"
+              :min="0.5"
+              :max="2"
+              :step="0.1"
+              :precision="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input
+              v-model="ttsForm.apiKey"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              placeholder="留空并勾选保留现有 Key，则不会替换"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-checkbox v-model="ttsForm.keepExistingApiKey" :disabled="!ttsHasExistingKey">保留现有 API Key</el-checkbox>
+          </el-form-item>
+        </el-form>
+        <div class="form-actions">
+          <el-button :icon="Refresh" @click="resetTtsForm">还原</el-button>
+          <el-button :icon="Search" :loading="ttsDetecting" @click="detectTtsConfig">检测并试听</el-button>
+          <el-button type="primary" :icon="Check" :loading="ttsSaving" @click="saveTtsConfig">保存语音朗读</el-button>
+        </div>
+      </article>
     </section>
   </div>
 </template>
@@ -142,8 +203,11 @@ import {
   detectDoubaoAiModelsApi,
   getAiRuntimeConfigApi,
   getDoubaoAiRuntimeConfigApi,
+  getDoubaoTtsConfigApi,
   saveAiRuntimeConfigApi,
   saveDoubaoAiRuntimeConfigApi,
+  saveDoubaoTtsConfigApi,
+  testDoubaoTtsConfigApi,
   type AiModelOption,
   type AiRuntimeConfig,
   type AiRuntimeConfigPayload
@@ -165,25 +229,40 @@ const emptyDoubaoConfig: AiRuntimeConfig = {
   model: "doubao-seed-1-6"
 };
 
-const createForm = (model: string): AiRuntimeConfigPayload => ({
+const emptyTtsConfig: AiRuntimeConfig = {
+  ...emptyMedicalConfig,
+  model: "doubao-tts",
+  resourceId: "",
+  voiceType: "",
+  speedRatio: 1
+};
+
+const createForm = (model: string, extra: Partial<AiRuntimeConfigPayload> = {}): AiRuntimeConfigPayload => ({
   baseUrl: "",
   model,
   enabled: true,
   apiKey: "",
-  keepExistingApiKey: true
+  keepExistingApiKey: true,
+  ...extra
 });
 
 const medicalConfig = ref<AiRuntimeConfig>({ ...emptyMedicalConfig });
 const doubaoConfig = ref<AiRuntimeConfig>({ ...emptyDoubaoConfig });
+const ttsConfig = ref<AiRuntimeConfig>({ ...emptyTtsConfig });
 const medicalForm = reactive<AiRuntimeConfigPayload>(createForm("gpt-5.5"));
 const doubaoForm = reactive<AiRuntimeConfigPayload>(createForm("doubao-seed-1-6"));
+const ttsForm = reactive<AiRuntimeConfigPayload>(createForm("doubao-tts", { resourceId: "", voiceType: "", speedRatio: 1 }));
 const medicalLoading = ref(false);
 const doubaoLoading = ref(false);
+const ttsLoading = ref(false);
 const medicalSaving = ref(false);
 const doubaoSaving = ref(false);
+const ttsSaving = ref(false);
+const ttsDetecting = ref(false);
 const doubaoModelDetecting = ref(false);
 const doubaoModelOptions = ref<AiModelOption[]>([]);
 const doubaoModelCheckedAt = ref("");
+const ttsHasExistingKey = computed(() => ttsConfig.value.apiKeyConfigured);
 
 const statusOf = (config: AiRuntimeConfig) => {
   if (!config.enabled) return { tagType: "info" as TagProps["type"], tagText: "已停用" };
@@ -210,12 +289,24 @@ const statusCards = computed(() => [
     sourceText: doubaoConfig.value.usingRuntimeConfig ? "后台运行时配置" : "环境变量默认值",
     updatedAt: doubaoConfig.value.updatedAt,
     ...statusOf(doubaoConfig.value)
+  },
+  {
+    key: "doubao-tts",
+    title: "豆包语音朗读",
+    model: ttsConfig.value.model,
+    apiKeyText: ttsConfig.value.apiKeyConfigured ? ttsConfig.value.apiKeyMasked || "已配置" : "未配置",
+    sourceText: ttsConfig.value.usingRuntimeConfig ? "后台运行时配置" : "环境变量默认值",
+    updatedAt: ttsConfig.value.updatedAt,
+    ...statusOf(ttsConfig.value)
   }
 ]);
 
 const syncForm = (form: AiRuntimeConfigPayload, config: AiRuntimeConfig, fallbackModel: string) => {
   form.baseUrl = config.baseUrl || "";
   form.model = config.model || fallbackModel;
+  form.resourceId = config.resourceId || "";
+  form.voiceType = config.voiceType || "";
+  form.speedRatio = config.speedRatio || 1;
   form.enabled = config.enabled;
   form.apiKey = "";
   form.keepExistingApiKey = config.apiKeyConfigured;
@@ -246,6 +337,17 @@ const loadDoubaoConfig = async () => {
   }
 };
 
+const loadTtsConfig = async () => {
+  ttsLoading.value = true;
+  try {
+    const { data } = await getDoubaoTtsConfigApi();
+    ttsConfig.value = data;
+    syncForm(ttsForm, data, "doubao-tts");
+  } finally {
+    ttsLoading.value = false;
+  }
+};
+
 const validateForm = (form: AiRuntimeConfigPayload, hasExistingKey: boolean) => {
   if (!form.baseUrl.trim()) {
     ElMessage.warning("请填写 Base URL");
@@ -265,6 +367,9 @@ const validateForm = (form: AiRuntimeConfigPayload, hasExistingKey: boolean) => 
 const savePayload = (form: AiRuntimeConfigPayload) => ({
   baseUrl: form.baseUrl.trim(),
   model: form.model.trim(),
+  resourceId: form.resourceId?.trim() || "",
+  voiceType: form.voiceType?.trim() || "",
+  speedRatio: form.speedRatio || 1,
   enabled: form.enabled,
   apiKey: form.apiKey?.trim(),
   keepExistingApiKey: form.keepExistingApiKey
@@ -278,6 +383,32 @@ const resetMedicalForm = () => {
 const resetDoubaoForm = () => {
   syncForm(doubaoForm, doubaoConfig.value, "doubao-seed-1-6");
   ElMessage.info("已还原豆包助手当前配置");
+};
+
+const resetTtsForm = () => {
+  syncForm(ttsForm, ttsConfig.value, "doubao-tts");
+  ElMessage.info("已还原豆包语音朗读当前配置");
+};
+
+const playTtsAudio = async (audioBase64: string, mimeType: string) => {
+  const binary = window.atob(audioBase64);
+  const chunks: Uint8Array[] = [];
+  for (let offset = 0; offset < binary.length; offset += 1024) {
+    const slice = binary.slice(offset, offset + 1024);
+    const bytes = new Uint8Array(slice.length);
+    for (let index = 0; index < slice.length; index += 1) {
+      bytes[index] = slice.charCodeAt(index);
+    }
+    chunks.push(bytes);
+  }
+  const url = URL.createObjectURL(new Blob(chunks, { type: mimeType || "audio/mpeg" }));
+  const audio = new Audio(url);
+  audio.onended = () => URL.revokeObjectURL(url);
+  audio.onerror = () => {
+    URL.revokeObjectURL(url);
+    ElMessage.error("检测音频已生成，但浏览器播放失败");
+  };
+  await audio.play();
 };
 
 const detectDoubaoModels = async () => {
@@ -313,6 +444,21 @@ const detectDoubaoModels = async () => {
   }
 };
 
+const detectTtsConfig = async () => {
+  if (!validateForm(ttsForm, ttsConfig.value.apiKeyConfigured)) return;
+  ttsDetecting.value = true;
+  try {
+    const { data } = await testDoubaoTtsConfigApi({
+      ...savePayload(ttsForm),
+      text: "豆包语音朗读配置检测成功。"
+    });
+    await playTtsAudio(data.audioBase64, data.mimeType);
+    ElMessage.success("豆包语音朗读配置可用，已播放测试音频");
+  } finally {
+    ttsDetecting.value = false;
+  }
+};
+
 const saveMedicalConfig = async () => {
   if (!validateForm(medicalForm, medicalConfig.value.apiKeyConfigured)) return;
   medicalSaving.value = true;
@@ -339,9 +485,23 @@ const saveDoubaoConfig = async () => {
   }
 };
 
+const saveTtsConfig = async () => {
+  if (!validateForm(ttsForm, ttsConfig.value.apiKeyConfigured)) return;
+  ttsSaving.value = true;
+  try {
+    const { data } = await saveDoubaoTtsConfigApi(savePayload(ttsForm));
+    ttsConfig.value = data;
+    syncForm(ttsForm, data, "doubao-tts");
+    ElMessage.success("豆包语音朗读配置已保存");
+  } finally {
+    ttsSaving.value = false;
+  }
+};
+
 onMounted(() => {
   loadMedicalConfig();
   loadDoubaoConfig();
+  loadTtsConfig();
 });
 </script>
 

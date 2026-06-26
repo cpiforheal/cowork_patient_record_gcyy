@@ -21,6 +21,7 @@ $DbPassword = "Cowork_2026!"
 $AdminUsername = "admin"
 $AdminPassword = "Init@Coshare2026!"
 $AdminPasswordHash = '$2a$10$YkQ1vqK4O8t/MhybAJoCiO4ZNF4ySvh0WiZ3IGCu5GNT2LDnJd9hy'
+$AiSecretsPath = Join-Path $ProjectRoot "config\ai-secrets.local.env"
 
 function New-UnicodeText([int[]]$CodePoints) {
   return -join ($CodePoints | ForEach-Object { [char]$_ })
@@ -34,6 +35,18 @@ function New-Directory($Path) {
 
 function Write-Utf8NoBomFile($Path, $Content) {
   [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Read-EnvFile($Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#")) { return }
+    $parts = $line.Split("=", 2)
+    if ($parts.Count -eq 2) {
+      [Environment]::SetEnvironmentVariable($parts[0].Trim(), $parts[1].Trim(), "Process")
+    }
+  }
 }
 
 function Convert-ToMysqlPath($Path) {
@@ -314,6 +327,7 @@ $mysql = Find-Executable "mysql.exe" @(
   "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe"
 )
 
+Read-EnvFile $AiSecretsPath
 Start-LocalMysql $mysqld
 Ensure-Database $mysql
 Start-Backend

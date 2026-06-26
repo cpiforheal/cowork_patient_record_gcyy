@@ -100,6 +100,9 @@ export interface AiRecordSummaryParams {
 export interface AiRuntimeConfig {
   baseUrl: string;
   model: string;
+  resourceId?: string;
+  voiceType?: string;
+  speedRatio?: number;
   enabled: boolean;
   apiKeyConfigured: boolean;
   apiKeyMasked: string;
@@ -111,9 +114,31 @@ export interface AiRuntimeConfig {
 export interface AiRuntimeConfigPayload {
   baseUrl: string;
   model: string;
+  resourceId?: string;
+  voiceType?: string;
+  speedRatio?: number;
   enabled: boolean;
   apiKey?: string;
   keepExistingApiKey?: boolean;
+}
+
+export interface DoubaoTtsSpeakParams {
+  text: string;
+  voiceType?: string;
+  speedRatio?: number;
+}
+
+export interface DoubaoTtsConfigTestPayload extends AiRuntimeConfigPayload {
+  text?: string;
+}
+
+export interface DoubaoTtsSpeakResult {
+  audioBase64: string;
+  mimeType: string;
+  generatedAt: string;
+  voiceType: string;
+  model: string;
+  textLength: number;
 }
 
 export interface AiModelOption {

@@ -1240,7 +1240,14 @@
         </template>
       </el-dialog>
 
-      <el-dialog v-model="aiSummaryVisible" title="AI健康档案总结" width="760px" append-to-body destroy-on-close>
+      <el-dialog
+        v-model="aiSummaryVisible"
+        title="AI健康档案总结"
+        width="760px"
+        append-to-body
+        destroy-on-close
+        @closed="stopAiSummarySpeech"
+      >
         <div v-loading="aiSummaryLoading" class="ai-summary-dialog" element-loading-text="正在生成AI总结...">
           <el-alert
             title="AI输出仅供院内辅助阅读，不替代医生判断和 HIS 官方病历质控。"
@@ -1329,7 +1336,10 @@
           </template>
         </div>
         <template #footer>
-          <el-button @click="aiSummaryVisible = false">关闭</el-button>
+          <el-button @click="closeAiSummaryDialog">关闭</el-button>
+          <el-button :disabled="!aiSummary || aiSummaryLoading" :loading="aiSummarySpeaking" @click="toggleAiSummarySpeech">
+            {{ aiSummarySpeaking ? "停止朗读" : "朗读总结" }}
+          </el-button>
           <el-button :disabled="!aiSummary" @click="copyAiSummary">复制总结</el-button>
           <el-button type="primary" :loading="aiSummaryLoading" @click="generateAiSummary">重新生成</el-button>
         </template>
@@ -1531,6 +1541,7 @@ import {
   revokeArchiveApi,
   saveMedicalRecordWorkspaceApi,
   savePatientRecordApi,
+  speakAiSummaryApi,
   submitArchiveApi,
   voidMedicalRecordApi,
   voidDocumentApi,
@@ -1589,6 +1600,7 @@ const printPreflightVisible = ref(false);
 const patientAssistantVisible = ref(false);
 const aiSummaryVisible = ref(false);
 const aiSummaryLoading = ref(false);
+const aiSummarySpeaking = ref(false);
 const aiSummary = ref<AiRecordSummary>();
 const medicalRecordVisible = ref(false);
 const medicalRecordLoading = ref(false);
@@ -1628,6 +1640,9 @@ const detailErrorWindow = window as PatientDetailErrorWindow;
 const detailErrorCooldowns = detailErrorWindow.__patientDetailErrorCooldowns || new Map<string, number>();
 detailErrorWindow.__patientDetailErrorCooldowns = detailErrorCooldowns;
 let highlightClearTimer: number | undefined;
+let aiSummaryAudio: HTMLAudioElement | undefined;
+let aiSummaryAudioUrl = "";
+let aiSummarySpeechStoppedManually = false;
 type FieldIssue = {
   fieldKey: string;
   fieldLabel: string;
@@ -3075,7 +3090,92 @@ const formatAiSummaryText = () => {
     .join("\n");
 };
 
+const formatAiSummarySpeechText = () => {
+  if (!aiSummary.value) return "";
+  const numbered = (title: string, items: string[] | undefined) =>
+    items?.length ? `${title}。${items.map((item, index) => `${index + 1}、${item}`).join("。")}` : "";
+  return [
+    `患者${fieldValues.patientName || "当前患者"}的AI健康档案总结。`,
+    aiSummary.value.patientPortrait ? `患者画像：${aiSummary.value.patientPortrait}` : "",
+    `患者概况：${aiSummary.value.summary}`,
+    aiSummary.value.priorityFocus?.length ? numbered("优先关注", aiSummary.value.priorityFocus) : "",
+    aiSummary.value.riskHints?.length ? numbered("风险提醒", aiSummary.value.riskHints) : "",
+    aiSummary.value.communicationTips?.length ? numbered("沟通建议", aiSummary.value.communicationTips) : "",
+    aiSummary.value.nextFollowupSuggestions?.length ? numbered("下一步随访建议", aiSummary.value.nextFollowupSuggestions) : "",
+    aiSummary.value.doctorTips?.length ? numbered("医生提醒", aiSummary.value.doctorTips) : ""
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1800);
+};
+
+const base64ToBlob = (base64: string, mimeType: string) => {
+  const binary = window.atob(base64);
+  const chunks: Uint8Array[] = [];
+  for (let offset = 0; offset < binary.length; offset += 1024) {
+    const slice = binary.slice(offset, offset + 1024);
+    const bytes = new Uint8Array(slice.length);
+    for (let index = 0; index < slice.length; index += 1) {
+      bytes[index] = slice.charCodeAt(index);
+    }
+    chunks.push(bytes);
+  }
+  return new Blob(chunks, { type: mimeType || "audio/mpeg" });
+};
+
+const releaseAiSummarySpeech = () => {
+  if (aiSummaryAudioUrl) {
+    URL.revokeObjectURL(aiSummaryAudioUrl);
+    aiSummaryAudioUrl = "";
+  }
+  aiSummaryAudio = undefined;
+  aiSummarySpeaking.value = false;
+};
+
+const stopAiSummarySpeech = () => {
+  aiSummarySpeechStoppedManually = true;
+  if (aiSummaryAudio) {
+    aiSummaryAudio.onended = null;
+    aiSummaryAudio.onerror = null;
+    aiSummaryAudio.pause();
+  }
+  releaseAiSummarySpeech();
+};
+
+const toggleAiSummarySpeech = async () => {
+  if (aiSummarySpeaking.value) {
+    stopAiSummarySpeech();
+    return;
+  }
+  if (!aiSummary.value) return;
+  const text = formatAiSummarySpeechText();
+  if (!text.trim()) {
+    ElMessage.warning("暂无可朗读的 AI 总结内容");
+    return;
+  }
+  aiSummarySpeaking.value = true;
+  aiSummarySpeechStoppedManually = false;
+  try {
+    const { data } = await speakAiSummaryApi({ text });
+    const blob = base64ToBlob(data.audioBase64, data.mimeType);
+    aiSummaryAudioUrl = URL.createObjectURL(blob);
+    aiSummaryAudio = new Audio(aiSummaryAudioUrl);
+    aiSummaryAudio.onended = releaseAiSummarySpeech;
+    aiSummaryAudio.onerror = () => {
+      releaseAiSummarySpeech();
+      if (!aiSummarySpeechStoppedManually) {
+        ElMessage.error("语音播放失败，请检查浏览器音频权限或 TTS 配置");
+      }
+    };
+    await aiSummaryAudio.play();
+  } catch (error) {
+    stopAiSummarySpeech();
+    ElMessage.error(error instanceof Error ? error.message : "豆包语音朗读失败");
+  }
+};
+
 const generateAiSummary = async () => {
+  stopAiSummarySpeech();
   aiSummaryLoading.value = true;
   try {
     const { data } = await generateRecordAiSummaryApi({ patientId: patientId.value, mode: "summary" });
@@ -3091,6 +3191,11 @@ const generateAiSummary = async () => {
 const openAiSummary = () => {
   aiSummaryVisible.value = true;
   if (!aiSummary.value) void generateAiSummary();
+};
+
+const closeAiSummaryDialog = () => {
+  stopAiSummarySpeech();
+  aiSummaryVisible.value = false;
 };
 
 const copyAiSummary = async () => {
@@ -3760,6 +3865,7 @@ onBeforeUnmount(() => {
   removeKeydownListener();
   cancelPendingPatientDetailWork();
   if (highlightClearTimer) window.clearTimeout(highlightClearTimer);
+  stopAiSummarySpeech();
   revokeAttachmentBlobUrls();
 });
 </script>

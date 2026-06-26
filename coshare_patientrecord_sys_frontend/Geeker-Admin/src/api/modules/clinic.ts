@@ -29,6 +29,9 @@ import type {
   AiRuntimeConfigPayload,
   AiRecordSummary,
   AiRecordSummaryParams,
+  DoubaoTtsConfigTestPayload,
+  DoubaoTtsSpeakParams,
+  DoubaoTtsSpeakResult,
   AuditLogRow,
   BackupConfigPayload,
   BackupDirectorySelection,
@@ -101,6 +104,9 @@ export type {
   AiRuntimeConfigPayload,
   AiRecordSummary,
   AiRecordSummaryParams,
+  DoubaoTtsConfigTestPayload,
+  DoubaoTtsSpeakParams,
+  DoubaoTtsSpeakResult,
   AuditLogRow,
   BackupConfigPayload,
   BackupDirectorySelection,
@@ -884,15 +890,38 @@ export const getAccountListApi = async (params: {
   status?: string;
 }) => {
   const db = await readDb();
-  const roleFilter = Array.isArray(params.role) ? params.role : [params.role || ""];
+  const normalizeListFilter = (value?: string) => {
+    const normalized = String(value ?? "").trim();
+    return ["", "all", "ALL", "__all", "全部"].includes(normalized) ? "" : normalized;
+  };
+  const keyword = String(params.name ?? "").trim();
+  const departmentFilter = normalizeListFilter(params.department);
+  const statusFilter = normalizeListFilter(params.status);
+  const roleFilter = (Array.isArray(params.role) ? params.role : [params.role])
+    .map(item => normalizeListFilter(item))
+    .filter(Boolean);
   const filtered = (db.accounts ?? []).filter(item => {
-    const nameMatched = !params.name || item.name.includes(params.name) || item.username.includes(params.name);
-    const departmentMatched = !params.department || item.department === params.department;
-    const roleMatched = roleFilter.includes("") || roleFilter.includes(item.roleLabel) || roleFilter.includes(item.role);
-    const statusMatched = !params.status || item.status === params.status;
+    const nameMatched = !keyword || item.name.includes(keyword) || item.username.includes(keyword);
+    const departmentMatched = !departmentFilter || item.department === departmentFilter;
+    const roleMatched = roleFilter.length === 0 || roleFilter.includes(item.roleLabel) || roleFilter.includes(item.role);
+    const statusMatched = !statusFilter || item.status === statusFilter;
     return nameMatched && departmentMatched && roleMatched && statusMatched;
   });
   return response(paginate(filtered, params.pageNum, params.pageSize));
+};
+
+export const getAccountDepartmentOptionsApi = async () => {
+  const db = await readDb();
+  const departmentNames = new Set<string>();
+  (db.departments ?? []).forEach(item => {
+    const name = String(item.name || "").trim();
+    if (name) departmentNames.add(name);
+  });
+  (db.accounts ?? []).forEach(item => {
+    const name = String(item.department || "").trim();
+    if (name) departmentNames.add(name);
+  });
+  return response(Array.from(departmentNames).sort((left, right) => left.localeCompare(right, "zh-Hans-CN")));
 };
 
 export const saveAccountApi = async (params: Partial<AccountRow> & SystemOperationContext) => {
@@ -2350,6 +2379,42 @@ export const saveDoubaoAiRuntimeConfigApi = async (payload: AiRuntimeConfigPaylo
   });
   const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
   return response(data, "豆包助手配置已保存");
+};
+
+export const getDoubaoTtsConfigApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/tts/config`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
+  return response(data);
+};
+
+export const saveDoubaoTtsConfigApi = async (payload: AiRuntimeConfigPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/tts/config`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiRuntimeConfig>(result);
+  return response(data, "豆包语音朗读配置已保存");
+};
+
+export const speakAiSummaryApi = async (payload: DoubaoTtsSpeakParams) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/tts/speak`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<DoubaoTtsSpeakResult>(result);
+  return response(data, "豆包语音朗读已生成");
+};
+
+export const testDoubaoTtsConfigApi = async (payload: DoubaoTtsConfigTestPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai/doubao/tts/test`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<DoubaoTtsSpeakResult>(result);
+  return response(data, "豆包语音朗读检测成功");
 };
 
 export const detectDoubaoAiModelsApi = async (payload: AiModelDetectionPayload) => {

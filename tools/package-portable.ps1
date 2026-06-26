@@ -185,10 +185,30 @@ CLINIC_BACKUP_CRON=0 0 2 * * *
 '@
 Write-Utf8File -Path (Join-Path $configDir "runtime.env") -Content $runtimeEnv
 
+$aiSecretsExample = @'
+# AI runtime config template.
+# Copy this file to ai-secrets.local.env and fill private API keys on the deployment machine.
+# Keep real API keys out of git and release archives shared outside the hospital.
+AI_BASE_URL=
+AI_API_KEY=
+AI_MODEL=gpt-5.5
+CLINIC_AI_DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+CLINIC_AI_DOUBAO_API_KEY=
+CLINIC_AI_DOUBAO_MODEL=doubao-seed-2.0-mini
+CLINIC_AI_DOUBAO_TTS_BASE_URL=https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse
+CLINIC_AI_DOUBAO_TTS_API_KEY=
+CLINIC_AI_DOUBAO_TTS_MODEL=seed-tts-2.0-standard
+CLINIC_AI_DOUBAO_TTS_RESOURCE_ID=seed-tts-2.0
+CLINIC_AI_DOUBAO_TTS_VOICE_TYPE=zh_male_tiancaitongsheng_mars_bigtts
+CLINIC_AI_DOUBAO_TTS_SPEED_RATIO=1.0
+'@
+Write-Utf8File -Path (Join-Path $configDir "ai-secrets.local.env.example") -Content $aiSecretsExample
+
 $startPs1 = @'
 $ErrorActionPreference = "Stop"
 $packageRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $configPath = Join-Path $packageRoot "config\runtime.env"
+$aiSecretsPath = Join-Path $packageRoot "config\ai-secrets.local.env"
 $runtimeDir = Join-Path $packageRoot "runtime"
 $dataDir = Join-Path $packageRoot "data"
 $logsDir = Join-Path $packageRoot "logs"
@@ -203,8 +223,11 @@ $mysqlSubstPath = Join-Path $dataDir "mysql-subst-drive.txt"
 $mysqlPackageRoot = $packageRoot.Path
 $adminPasswordHash = '$2a$10$8KJFlcFrqcIzXgrVGOzvzesgS1ehE.DQhr4YC9e8Xl4b21MX6qCfu'
 
-function Read-RuntimeEnv {
-    Get-Content -LiteralPath $configPath -Encoding UTF8 | ForEach-Object {
+function Read-EnvFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
         $line = $_.Trim()
         if (-not $line -or $line.StartsWith("#")) { return }
         $parts = $line.Split("=", 2)
@@ -456,7 +479,8 @@ ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status
     Write-Host "[mysql] admin account ready: $env:ADMIN_USERNAME / $env:ADMIN_PASSWORD"
 }
 
-Read-RuntimeEnv
+Read-EnvFile $configPath
+Read-EnvFile $aiSecretsPath
 Set-MysqlPaths
 New-Item -ItemType Directory -Force -Path $mysqlDataDir, $env:CLINIC_ATTACHMENT_DIR, $logsDir | Out-Null
 Start-Mysql

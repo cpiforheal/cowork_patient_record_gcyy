@@ -35,6 +35,7 @@ public class ClinicAiConfigService {
 
     private static final String CONFIG_ID = "default";
     private static final String DOUBAO_CONFIG_ID = "doubao_assistant";
+    private static final String DOUBAO_TTS_CONFIG_ID = "doubao_tts";
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int GCM_TAG_BITS = 128;
     private static final int GCM_IV_BYTES = 12;
@@ -48,6 +49,12 @@ public class ClinicAiConfigService {
     private final String doubaoDefaultBaseUrl;
     private final String doubaoDefaultApiKey;
     private final String doubaoDefaultModel;
+    private final String doubaoTtsDefaultBaseUrl;
+    private final String doubaoTtsDefaultApiKey;
+    private final String doubaoTtsDefaultModel;
+    private final String doubaoTtsDefaultResourceId;
+    private final String doubaoTtsDefaultVoiceType;
+    private final double doubaoTtsDefaultSpeedRatio;
     private final byte[] encryptionKey;
 
     public ClinicAiConfigService(
@@ -59,6 +66,12 @@ public class ClinicAiConfigService {
         @Value("${clinic.ai.doubao.base-url:}") String doubaoDefaultBaseUrl,
         @Value("${clinic.ai.doubao.api-key:}") String doubaoDefaultApiKey,
         @Value("${clinic.ai.doubao.model:}") String doubaoDefaultModel,
+        @Value("${clinic.ai.doubao.tts.base-url:}") String doubaoTtsDefaultBaseUrl,
+        @Value("${clinic.ai.doubao.tts.api-key:}") String doubaoTtsDefaultApiKey,
+        @Value("${clinic.ai.doubao.tts.model:}") String doubaoTtsDefaultModel,
+        @Value("${clinic.ai.doubao.tts.resource-id:}") String doubaoTtsDefaultResourceId,
+        @Value("${clinic.ai.doubao.tts.voice-type:}") String doubaoTtsDefaultVoiceType,
+        @Value("${clinic.ai.doubao.tts.speed-ratio:1.0}") double doubaoTtsDefaultSpeedRatio,
         @Value("${clinic.ai.config-secret:}") String configSecret
     ) {
         this.jdbcTemplate = jdbcTemplate;
@@ -66,9 +79,15 @@ public class ClinicAiConfigService {
         this.defaultBaseUrl = normalizeBaseUrl(defaultBaseUrl);
         this.defaultApiKey = normalizeApiKey(defaultApiKey);
         this.defaultModel = safe(defaultModel).isBlank() ? "gpt-5.5" : safe(defaultModel);
-        this.doubaoDefaultBaseUrl = normalizeBaseUrl(doubaoDefaultBaseUrl);
-        this.doubaoDefaultApiKey = normalizeApiKey(doubaoDefaultApiKey);
-        this.doubaoDefaultModel = safe(doubaoDefaultModel);
+        this.doubaoDefaultBaseUrl = normalizeBaseUrl(firstNonBlank(doubaoDefaultBaseUrl, System.getenv("CLINIC_AI_DOUBAO_BASE_URL")));
+        this.doubaoDefaultApiKey = normalizeApiKey(firstNonBlank(doubaoDefaultApiKey, System.getenv("CLINIC_AI_DOUBAO_API_KEY")));
+        this.doubaoDefaultModel = safe(firstNonBlank(doubaoDefaultModel, System.getenv("CLINIC_AI_DOUBAO_MODEL")));
+        this.doubaoTtsDefaultBaseUrl = normalizeBaseUrl(firstNonBlank(doubaoTtsDefaultBaseUrl, System.getenv("CLINIC_AI_DOUBAO_TTS_BASE_URL")));
+        this.doubaoTtsDefaultApiKey = normalizeApiKey(firstNonBlank(doubaoTtsDefaultApiKey, System.getenv("CLINIC_AI_DOUBAO_TTS_API_KEY")));
+        this.doubaoTtsDefaultModel = safe(firstNonBlank(doubaoTtsDefaultModel, System.getenv("CLINIC_AI_DOUBAO_TTS_MODEL")));
+        this.doubaoTtsDefaultResourceId = safe(firstNonBlank(doubaoTtsDefaultResourceId, System.getenv("CLINIC_AI_DOUBAO_TTS_RESOURCE_ID")));
+        this.doubaoTtsDefaultVoiceType = safe(firstNonBlank(doubaoTtsDefaultVoiceType, System.getenv("CLINIC_AI_DOUBAO_TTS_VOICE_TYPE")));
+        this.doubaoTtsDefaultSpeedRatio = normalizeSpeedRatio(doubaoTtsDefaultSpeedRatio);
         this.encryptionKey = deriveEncryptionKey(configSecret);
     }
 
@@ -80,11 +99,17 @@ public class ClinicAiConfigService {
               base_url VARCHAR(1024),
               api_key_cipher TEXT,
               model VARCHAR(128),
+              resource_id VARCHAR(256),
+              voice_type VARCHAR(128),
+              speed_ratio DECIMAL(4,2),
               enabled BOOLEAN NOT NULL DEFAULT TRUE,
               updated_at VARCHAR(32),
               updated_by VARCHAR(100)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """);
+        ensureColumn("resource_id", "VARCHAR(256)");
+        ensureColumn("voice_type", "VARCHAR(128)");
+        ensureColumn("speed_ratio", "DECIMAL(4,2)");
     }
 
     public ObjectNode status() {
@@ -95,6 +120,10 @@ public class ClinicAiConfigService {
         return statusFor(DOUBAO_CONFIG_ID);
     }
 
+    public ObjectNode doubaoTtsStatus() {
+        return statusFor(DOUBAO_TTS_CONFIG_ID);
+    }
+
     public ObjectNode statusFor(String configId) {
         AiDefaults defaults = defaultsFor(configId);
         StoredAiConfig stored = readStoredConfig(configId, defaults.model());
@@ -102,6 +131,9 @@ public class ClinicAiConfigService {
         ObjectNode status = objectMapper.createObjectNode();
         status.put("baseUrl", stored == null ? defaults.baseUrl() : stored.baseUrl());
         status.put("model", stored == null ? defaults.model() : stored.model());
+        status.put("resourceId", stored == null ? defaults.resourceId() : stored.resourceId());
+        status.put("voiceType", stored == null ? defaults.voiceType() : stored.voiceType());
+        status.put("speedRatio", stored == null ? defaults.speedRatio() : stored.speedRatio());
         status.put("enabled", stored == null || stored.enabled());
         status.put("apiKeyConfigured", !effective.apiKey().isBlank());
         status.put("apiKeyMasked", maskKey(effective.apiKey()));
@@ -117,6 +149,10 @@ public class ClinicAiConfigService {
 
     public ObjectNode updateDoubaoConfig(Map<String, Object> payload, AuthSessionService.SessionUser user) {
         return updateConfigFor(DOUBAO_CONFIG_ID, payload, user);
+    }
+
+    public ObjectNode updateDoubaoTtsConfig(Map<String, Object> payload, AuthSessionService.SessionUser user) {
+        return updateConfigFor(DOUBAO_TTS_CONFIG_ID, payload, user);
     }
 
     public ObjectNode detectDoubaoModels(Map<String, Object> payload) {
@@ -202,6 +238,9 @@ public class ClinicAiConfigService {
         StoredAiConfig current = readStoredConfig(configId, defaults.model());
         String baseUrl = normalizeBaseUrl(payload.get("baseUrl"));
         String model = safe(payload.get("model")).isBlank() ? defaults.model() : safe(payload.get("model"));
+        String resourceId = safe(payload.get("resourceId")).isBlank() ? defaults.resourceId() : safe(payload.get("resourceId"));
+        String voiceType = safe(payload.get("voiceType")).isBlank() ? defaults.voiceType() : safe(payload.get("voiceType"));
+        double speedRatio = normalizeSpeedRatio(payload.containsKey("speedRatio") ? payload.get("speedRatio") : defaults.speedRatio());
         boolean enabled = !payload.containsKey("enabled") || Boolean.parseBoolean(String.valueOf(payload.get("enabled")));
         String apiKey = normalizeApiKey(payload.get("apiKey"));
         boolean keepExisting = payload.containsKey("keepExistingApiKey")
@@ -234,6 +273,13 @@ public class ClinicAiConfigService {
               updated_at = VALUES(updated_at),
               updated_by = VALUES(updated_by)
             """, configId, baseUrl, cipher, model, enabled, updatedAt, updatedBy);
+        jdbcTemplate.update(
+            "UPDATE clinic_ai_config SET resource_id = ?, voice_type = ?, speed_ratio = ? WHERE config_id = ?",
+            resourceId,
+            voiceType,
+            speedRatio,
+            configId
+        );
         return statusFor(configId);
     }
 
@@ -243,6 +289,45 @@ public class ClinicAiConfigService {
 
     public EffectiveAiConfig resolveDoubaoConfig() {
         return resolveEffectiveConfig(DOUBAO_CONFIG_ID);
+    }
+
+    public EffectiveTtsConfig resolveDoubaoTtsConfig() {
+        AiDefaults defaults = defaultsFor(DOUBAO_TTS_CONFIG_ID);
+        StoredAiConfig stored = readStoredConfig(DOUBAO_TTS_CONFIG_ID, defaults.model());
+        if (stored == null) {
+            return new EffectiveTtsConfig(
+                defaults.baseUrl(),
+                defaults.apiKey(),
+                defaults.model(),
+                defaults.resourceId(),
+                defaults.voiceType(),
+                defaults.speedRatio(),
+                false,
+                true
+            );
+        }
+        if (!stored.enabled()) {
+            return new EffectiveTtsConfig(
+                stored.baseUrl(),
+                "",
+                stored.model(),
+                stored.resourceId(),
+                stored.voiceType(),
+                stored.speedRatio(),
+                true,
+                false
+            );
+        }
+        return new EffectiveTtsConfig(
+            stored.baseUrl(),
+            normalizeApiKey(decrypt(stored.apiKeyCipher())),
+            stored.model(),
+            stored.resourceId(),
+            stored.voiceType(),
+            stored.speedRatio(),
+            true,
+            true
+        );
     }
 
     public EffectiveAiConfig resolveEffectiveConfig(String configId) {
@@ -259,11 +344,14 @@ public class ClinicAiConfigService {
 
     private StoredAiConfig readStoredConfig(String configId, String fallbackModel) {
         List<StoredAiConfig> rows = jdbcTemplate.query(
-            "SELECT base_url, api_key_cipher, model, enabled, updated_at, updated_by FROM clinic_ai_config WHERE config_id = ? LIMIT 1",
+            "SELECT base_url, api_key_cipher, model, resource_id, voice_type, speed_ratio, enabled, updated_at, updated_by FROM clinic_ai_config WHERE config_id = ? LIMIT 1",
             (rs, rowNum) -> new StoredAiConfig(
                 safe(rs.getString("base_url")),
                 safe(rs.getString("api_key_cipher")),
                 safe(rs.getString("model")).isBlank() ? fallbackModel : safe(rs.getString("model")),
+                safe(rs.getString("resource_id")),
+                safe(rs.getString("voice_type")),
+                normalizeSpeedRatio(rs.getObject("speed_ratio")),
                 rs.getBoolean("enabled"),
                 safe(rs.getString("updated_at")),
                 safe(rs.getString("updated_by"))
@@ -276,9 +364,20 @@ public class ClinicAiConfigService {
     private AiDefaults defaultsFor(String configId) {
         if (DOUBAO_CONFIG_ID.equals(configId)) {
             String model = doubaoDefaultModel.isBlank() ? "doubao-seed-1-6" : doubaoDefaultModel;
-            return new AiDefaults(doubaoDefaultBaseUrl, doubaoDefaultApiKey, model);
+            return new AiDefaults(doubaoDefaultBaseUrl, doubaoDefaultApiKey, model, "", "", 1.0);
         }
-        return new AiDefaults(defaultBaseUrl, defaultApiKey, defaultModel);
+        if (DOUBAO_TTS_CONFIG_ID.equals(configId)) {
+            String model = doubaoTtsDefaultModel.isBlank() ? "doubao-tts" : doubaoTtsDefaultModel;
+            return new AiDefaults(
+                doubaoTtsDefaultBaseUrl,
+                doubaoTtsDefaultApiKey,
+                model,
+                doubaoTtsDefaultResourceId,
+                doubaoTtsDefaultVoiceType,
+                doubaoTtsDefaultSpeedRatio
+            );
+        }
+        return new AiDefaults(defaultBaseUrl, defaultApiKey, defaultModel, "", "", 1.0);
     }
 
     private String resolveDoubaoApiKeyForDetection() {
@@ -302,6 +401,23 @@ public class ClinicAiConfigService {
             return MessageDigest.getInstance("SHA-256").digest(secret.getBytes(StandardCharsets.UTF_8));
         } catch (Exception error) {
             throw new IllegalStateException("Failed to initialize AI config secret", error);
+        }
+    }
+
+    private void ensureColumn(String columnName, String definition) {
+        Integer count = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'clinic_ai_config'
+              AND COLUMN_NAME = ?
+            """,
+            Integer.class,
+            columnName
+        );
+        if (count == null || count == 0) {
+            jdbcTemplate.execute("ALTER TABLE clinic_ai_config ADD COLUMN " + columnName + " " + definition);
         }
     }
 
@@ -398,9 +514,45 @@ public class ClinicAiConfigService {
         return String.valueOf(value == null ? "" : value).trim();
     }
 
-    private record StoredAiConfig(String baseUrl, String apiKeyCipher, String model, boolean enabled, String updatedAt, String updatedBy) {}
+    private static String firstNonBlank(Object first, Object fallback) {
+        String firstValue = safe(first);
+        return firstValue.isBlank() ? safe(fallback) : firstValue;
+    }
 
-    private record AiDefaults(String baseUrl, String apiKey, String model) {}
+    private static double normalizeSpeedRatio(Object value) {
+        try {
+            double number = value instanceof Number ? ((Number) value).doubleValue() : Double.parseDouble(safe(value));
+            if (Double.isNaN(number) || Double.isInfinite(number)) return 1.0;
+            return Math.max(0.5, Math.min(2.0, number));
+        } catch (Exception error) {
+            return 1.0;
+        }
+    }
+
+    private record StoredAiConfig(
+        String baseUrl,
+        String apiKeyCipher,
+        String model,
+        String resourceId,
+        String voiceType,
+        double speedRatio,
+        boolean enabled,
+        String updatedAt,
+        String updatedBy
+    ) {}
+
+    private record AiDefaults(String baseUrl, String apiKey, String model, String resourceId, String voiceType, double speedRatio) {}
 
     public record EffectiveAiConfig(String baseUrl, String apiKey, String model, boolean runtimeConfig, boolean enabled) {}
+
+    public record EffectiveTtsConfig(
+        String baseUrl,
+        String apiKey,
+        String model,
+        String resourceId,
+        String voiceType,
+        double speedRatio,
+        boolean runtimeConfig,
+        boolean enabled
+    ) {}
 }

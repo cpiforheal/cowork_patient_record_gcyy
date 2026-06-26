@@ -47,6 +47,7 @@ public class ClinicApiController {
     private final ClinicAiAssistantService aiAssistantService;
     private final ClinicAiAssistantLogService aiAssistantLogService;
     private final ClinicAiConfigService aiConfigService;
+    private final ClinicDoubaoTtsService doubaoTtsService;
     private final ClinicMedicalRecordService medicalRecordService;
     private final ObjectMapper objectMapper;
 
@@ -58,6 +59,7 @@ public class ClinicApiController {
         ClinicAiAssistantService aiAssistantService,
         ClinicAiAssistantLogService aiAssistantLogService,
         ClinicAiConfigService aiConfigService,
+        ClinicDoubaoTtsService doubaoTtsService,
         ClinicMedicalRecordService medicalRecordService,
         ObjectMapper objectMapper
     ) {
@@ -68,6 +70,7 @@ public class ClinicApiController {
         this.aiAssistantService = aiAssistantService;
         this.aiAssistantLogService = aiAssistantLogService;
         this.aiConfigService = aiConfigService;
+        this.doubaoTtsService = doubaoTtsService;
         this.medicalRecordService = medicalRecordService;
         this.objectMapper = objectMapper;
     }
@@ -199,6 +202,35 @@ public class ClinicApiController {
         ObjectNode result = aiConfigService.detectDoubaoModels(payload);
         Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
         return ApiResult.of(200, "doubao models detected", data);
+    }
+
+    @GetMapping("/clinic-api/ai/doubao/tts/config")
+    public ApiResult<Map<String, Object>> doubaoTtsConfigStatus() {
+        requireClinicAdmin();
+        Map<String, Object> data = objectMapper.convertValue(aiConfigService.doubaoTtsStatus(), new TypeReference<Map<String, Object>>() {});
+        return ApiResult.success(data);
+    }
+
+    @PutMapping("/clinic-api/ai/doubao/tts/config")
+    public ApiResult<Map<String, Object>> updateDoubaoTtsConfig(@RequestBody Map<String, Object> payload) {
+        AuthSessionService.SessionUser user = AuthPermission.currentUserOrThrow();
+        requireClinicAdmin();
+        ObjectNode result = aiConfigService.updateDoubaoTtsConfig(payload, user);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "doubao tts config saved", data);
+    }
+
+    @PostMapping("/clinic-api/ai/doubao/tts/speak")
+    public ApiResult<Map<String, Object>> speakDoubaoTts(@RequestBody ClinicDoubaoTtsService.TtsSpeakRequest request) {
+        Map<String, Object> data = doubaoTtsService.speak(request, AuthPermission.currentUserOrThrow());
+        return ApiResult.of(200, "doubao tts generated", data);
+    }
+
+    @PostMapping("/clinic-api/ai/doubao/tts/test")
+    public ApiResult<Map<String, Object>> testDoubaoTts(@RequestBody ClinicDoubaoTtsService.TtsConfigTestRequest request) {
+        requireClinicAdmin();
+        Map<String, Object> data = doubaoTtsService.test(request);
+        return ApiResult.of(200, "doubao tts tested", data);
     }
 
     @GetMapping("/clinic-api/patients/duplicates")

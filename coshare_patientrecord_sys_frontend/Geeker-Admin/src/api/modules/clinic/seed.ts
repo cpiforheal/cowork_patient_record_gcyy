@@ -367,8 +367,9 @@ export const hydrateDb = (db: ClinicDb) => {
   });
 
   const seedAdmin = seedAccounts()[0];
-  const storedAdmin = existingAccounts.find(account => account.username === "admin" || account.role === "admin");
-  const storedBusinessAccounts = existingAccounts.filter(account => account.username !== "admin" && account.role !== "admin");
+  const isBuiltinAdminAccount = (account: AccountRow) => account.id === "admin" || account.username === "admin";
+  const storedAdmin = existingAccounts.find(isBuiltinAdminAccount);
+  const storedBusinessAccounts = existingAccounts.filter(account => !isBuiltinAdminAccount(account));
   const adminAccount: AccountRow = {
     ...seedAdmin,
     ...storedAdmin,

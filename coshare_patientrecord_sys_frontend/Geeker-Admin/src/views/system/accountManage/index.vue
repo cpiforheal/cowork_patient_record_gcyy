@@ -71,7 +71,7 @@
                 <el-input v-model="accountForm.name" placeholder="请输入姓名" />
               </el-form-item>
               <el-form-item label="所属科室">
-                <el-select v-model="accountForm.department" filterable placeholder="请选择科室">
+                <el-select v-model="accountForm.department" filterable allow-create default-first-option placeholder="请选择科室">
                   <el-option v-for="item in departments" :key="item" :label="item" :value="item" />
                 </el-select>
               </el-form-item>
@@ -125,13 +125,14 @@
 </template>
 
 <script setup lang="ts" name="accountManage">
-import { computed, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { CirclePlus, Refresh } from "@element-plus/icons-vue";
 import TreeFilter from "@/components/TreeFilter/index.vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import {
+  getAccountDepartmentOptionsApi,
   getAccountListApi,
   resetAccountPasswordApi,
   saveAccountApi,
@@ -146,8 +147,21 @@ const proTable = ref<ProTableInstance>();
 const drawerVisible = ref(false);
 const activeDrawerTab = ref("profile");
 
-const departments = ["前台", "门诊", "化验室", "心电室", "B超/放射", "治疗室", "质控/病案", "信息/院办"];
-const departmentTree = departments.map(name => ({ name }));
+const defaultDepartments = [
+  "前台",
+  "门诊",
+  "接诊室",
+  "检查室",
+  "化验室",
+  "心电室",
+  "B超/放射",
+  "治疗室",
+  "护理部",
+  "质控/病案",
+  "信息/院办"
+];
+const departments = ref<string[]>([...defaultDepartments]);
+const departmentTree = computed(() => departments.value.map(name => ({ name })));
 const roles = USER_ROLE_OPTIONS;
 
 const initParam = reactive({
@@ -195,6 +209,12 @@ const dataCallback = (data: { list: AccountRow[]; total: number }) => data;
 
 const refresh = () => proTable.value?.getTableList();
 
+const loadDepartments = async () => {
+  const { data } = await getAccountDepartmentOptionsApi();
+  const merged = new Set([...defaultDepartments, ...(data || [])].map(item => String(item || "").trim()).filter(Boolean));
+  departments.value = Array.from(merged).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
+};
+
 const changeDepartment = (department: string) => {
   initParam.department = department || "";
   if (proTable.value) proTable.value.pageable.pageNum = 1;
@@ -219,10 +239,15 @@ const openAccountDrawer = (row?: AccountRow) => {
   drawerVisible.value = true;
 };
 
+onMounted(() => {
+  loadDepartments();
+});
+
 const saveAccount = async () => {
   const { data } = await saveAccountApi({ ...accountForm, operator: operatorName.value, operatorRole: operatorRole.value });
   ElMessage.success(data?.temporaryPassword ? `账号已保存，临时密码：${data.temporaryPassword}` : "账号已保存");
   drawerVisible.value = false;
+  await loadDepartments();
   refresh();
 };
 
