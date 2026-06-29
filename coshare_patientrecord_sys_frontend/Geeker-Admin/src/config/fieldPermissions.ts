@@ -12,7 +12,7 @@ export type UserRole =
   | "manager"
   | "quality";
 
-export type FieldKind = "input" | "textarea" | "select";
+export type FieldKind = "input" | "textarea" | "select" | "attachment";
 
 export type FieldInputType = "text" | "date" | "number" | "tel";
 
@@ -871,7 +871,7 @@ export const recordSections: RecordSection[] = [
         key: "inspectionImages",
         label: "检查室图片/视频证据",
         value: "",
-        kind: "textarea",
+        kind: "attachment",
         editors: inspection,
         evidence: "检查室图片/视频",
         placeholder: "检查室可只上传摄像头、肛门镜、指检相关图片或视频；无需填写大段文字。"

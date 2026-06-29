@@ -641,7 +641,7 @@
                     :class="{
                       wide: item.field.kind === 'textarea' || isLabMetricField(item.field),
 
-                      complete: isFieldComplete(fieldValues[item.field.key] || ''),
+                      complete: isRecordFieldComplete(item.field),
 
                       missing: issueForField(item.field)?.level === 'missing',
 
@@ -673,6 +673,14 @@
                       :field="item.field"
                       :model-value="fieldValues[item.field.key]"
                       @update:model-value="value => updateLabMetricField(item.field, value)"
+                    />
+
+                    <FieldAttachmentUploader
+                      v-else-if="item.field.kind === 'attachment'"
+                      :field="item.field"
+                      :attachments="matchedAttachments(item.field.key)"
+                      :disabled="!isEditable(item.field)"
+                      @upload="uploadFieldAttachments"
                     />
 
                     <el-select
@@ -720,7 +728,10 @@
                       :type="item.field.kind === 'textarea' ? 'textarea' : item.field.inputType === 'tel' ? 'tel' : 'text'"
                     />
 
-                    <FieldAttachmentEvidence :attachments="matchedAttachments(item.field.key)" />
+                    <FieldAttachmentEvidence
+                      v-if="item.field.kind !== 'attachment'"
+                      :attachments="matchedAttachments(item.field.key)"
+                    />
 
                     <p v-if="issueForField(item.field)" class="field-inline-issue">
                       {{ issueForField(item.field)?.message }}
@@ -835,7 +846,7 @@
                       :class="{
                         locked: !isEditable(field),
 
-                        complete: isFieldComplete(fieldValues[field.key] || ''),
+                        complete: isRecordFieldComplete(field),
 
                         missing: issueForField(field)?.level === 'missing',
 
@@ -871,6 +882,14 @@
                           :disabled="!isEditable(field)"
                           :model-value="fieldValues[field.key]"
                           @update:model-value="value => updateLabMetricField(field, value)"
+                        />
+
+                        <FieldAttachmentUploader
+                          v-else-if="field.kind === 'attachment'"
+                          :field="field"
+                          :attachments="matchedAttachments(field.key)"
+                          :disabled="!isEditable(field)"
+                          @upload="uploadFieldAttachments"
                         />
 
                         <el-select
@@ -922,7 +941,10 @@
                           :type="field.kind === 'textarea' ? 'textarea' : field.inputType === 'tel' ? 'tel' : 'text'"
                         />
 
-                        <FieldAttachmentEvidence :attachments="matchedAttachments(field.key)" />
+                        <FieldAttachmentEvidence
+                          v-if="field.kind !== 'attachment'"
+                          :attachments="matchedAttachments(field.key)"
+                        />
 
                         <p v-if="issueForField(field)" class="field-inline-issue">
                           {{ issueForField(field)?.message }}
@@ -995,6 +1017,14 @@
                       @update:model-value="value => updateLabMetricField(field, value)"
                     />
 
+                    <FieldAttachmentUploader
+                      v-else-if="field.kind === 'attachment'"
+                      :field="field"
+                      :attachments="matchedAttachments(field.key)"
+                      :disabled="!isEditable(field)"
+                      @upload="uploadFieldAttachments"
+                    />
+
                     <el-select
                       v-else-if="selectOptions(field).length"
                       v-model="fieldValues[field.key]"
@@ -1044,7 +1074,7 @@
                       :type="field.kind === 'textarea' ? 'textarea' : field.inputType === 'tel' ? 'tel' : 'text'"
                     />
 
-                    <FieldAttachmentEvidence :attachments="matchedAttachments(field.key)" />
+                    <FieldAttachmentEvidence v-if="field.kind !== 'attachment'" :attachments="matchedAttachments(field.key)" />
 
                     <p v-if="issueForField(field)" class="field-inline-issue">
                       {{ issueForField(field)?.message }}
@@ -2263,6 +2293,7 @@ import {
   savePatientRecordApi,
   speakAiSummaryApi,
   submitArchiveApi,
+  uploadDocumentsApi,
   voidMedicalRecordApi,
   voidDocumentApi,
   type AuditLogRow,
@@ -2605,6 +2636,63 @@ const FieldAttachmentEvidence = defineComponent({
         })
       );
     };
+  }
+});
+
+const FieldAttachmentUploader = defineComponent({
+  name: "FieldAttachmentUploader",
+
+  props: {
+    field: { type: Object as PropType<RecordField>, required: true },
+    attachments: { type: Array as PropType<RecordAttachment[]>, default: () => [] },
+    disabled: { type: Boolean, default: false }
+  },
+
+  emits: ["upload"],
+
+  setup(props, { emit }) {
+    const remark = ref("");
+    const inputRef = ref<HTMLInputElement>();
+
+    const handleFiles = (event: Event) => {
+      const input = event.target as HTMLInputElement;
+      const files = Array.from(input.files || []);
+      if (files.length) emit("upload", props.field, files, remark.value);
+      if (inputRef.value) inputRef.value.value = "";
+    };
+
+    return () =>
+      h("div", { class: "field-attachment-uploader" }, [
+        h("div", { class: "field-attachment-actions" }, [
+          h(
+            "label",
+            {
+              class: ["field-attachment-button", { disabled: props.disabled }]
+            },
+            [
+              h("span", props.attachments.length ? "继续上传图片/视频" : "上传图片/视频"),
+              h("input", {
+                ref: inputRef,
+                type: "file",
+                accept: "image/*,video/*",
+                multiple: true,
+                disabled: props.disabled,
+                onChange: handleFiles
+              })
+            ]
+          ),
+          h(ElInput, {
+            modelValue: remark.value,
+            "onUpdate:modelValue": (value: string) => (remark.value = value),
+            placeholder: "可选备注：体位、点位、图片编号或需医生重点查看的位置",
+            disabled: props.disabled,
+            clearable: true,
+            class: "field-attachment-remark"
+          })
+        ]),
+        h(FieldAttachmentEvidence, { attachments: props.attachments }),
+        h("small", { class: "field-attachment-hint" }, props.field.placeholder || "该字段以图片/视频证据为主，无需填写大段文字。")
+      ]);
   }
 });
 
@@ -3681,6 +3769,11 @@ const isFieldComplete = (value: string) => {
   return Boolean(normalized) && !normalized.includes("____") && !normalized.includes("________");
 };
 
+const isRecordFieldComplete = (field: RecordField) => {
+  if (field.kind === "attachment") return matchedAttachments(field.key).length > 0;
+  return isFieldComplete(fieldValues[field.key] || "");
+};
+
 const validateFieldValue = (field: RecordField, value?: string): string => {
   const normalized = String(value || "").trim();
 
@@ -3708,11 +3801,9 @@ const validateFieldValue = (field: RecordField, value?: string): string => {
 };
 
 const completionStats = computed(() => {
-  const completed = allFields.value.filter(field => isFieldComplete(fieldValues[field.key] || "")).length;
+  const completed = allFields.value.filter(isRecordFieldComplete).length;
 
-  const requiredMissing = allFields.value.filter(
-    field => field.required && !isFieldComplete(fieldValues[field.key] || "")
-  ).length;
+  const requiredMissing = allFields.value.filter(field => field.required && !isRecordFieldComplete(field)).length;
 
   return {
     completed,
@@ -4194,8 +4285,7 @@ const layeredEditableFields = computed(() => {
 });
 
 const myRequiredMissingCount = computed(
-  () =>
-    layeredEditableFields.value.filter(item => item.field.required && !isFieldComplete(fieldValues[item.field.key] || "")).length
+  () => layeredEditableFields.value.filter(item => item.field.required && !isRecordFieldComplete(item.field)).length
 );
 
 const fieldIssues = computed<FieldIssue[]>(() =>
@@ -4203,7 +4293,7 @@ const fieldIssues = computed<FieldIssue[]>(() =>
     section.fields.flatMap((field): FieldIssue[] => {
       const value = fieldValues[field.key] || "";
 
-      if (field.required && !isFieldComplete(value)) {
+      if (field.required && !isRecordFieldComplete(field)) {
         return [
           {
             fieldKey: field.key,
@@ -4304,6 +4394,52 @@ const workflowHint = computed<WorkflowHint>(() => {
 
 const isLabMetricField = (field: RecordField) => Boolean(field.labPanel);
 
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsDataURL(file);
+  });
+
+const uploadFieldAttachments = async (field: RecordField, files: File[], remark = "") => {
+  const validFiles = files.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/"));
+  if (!validFiles.length) {
+    ElMessage.warning("请选择图片或视频文件");
+    return;
+  }
+
+  try {
+    const documents = await Promise.all(
+      validFiles.map(async file => ({
+        type: field.key === "inspectionImages" ? "inspectionImage" : field.key,
+        typeLabel: field.label,
+        fileName: file.name,
+        contentDataUrl: await fileToDataUrl(file),
+        remark
+      }))
+    );
+
+    const { data } = await uploadDocumentsApi({
+      patientId: patientId.value,
+      role: currentRole.value,
+      operator: roleName.value,
+      sourceRole: field.key === "inspectionImages" ? "inspection" : currentRole.value,
+      batchId: `${field.key}-${patientId.value}-${Date.now()}`,
+      batchName: `${field.label}-${new Date().toLocaleString()}`,
+      autoClassify: false,
+      remark,
+      documents
+    });
+
+    currentAttachments.value = [...data.documents, ...currentAttachments.value];
+    if (!fieldValues[field.key]) fieldValues[field.key] = `${field.label}已上传 ${validFiles.length} 份`;
+    ElMessage.success(`已上传 ${validFiles.length} 份${field.label}`);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "上传失败，请稍后重试");
+  }
+};
+
 const labMetricStatusFields: Record<string, string[]> = {
   bloodRoutine: ["bloodRoutineStatus"],
 
@@ -4383,11 +4519,10 @@ const fieldAssistText = (field: RecordField) => {
 
 const matchedAttachments = (fieldKey: string) => visibleAttachments.value.filter(attachment => attachment.fieldKey === fieldKey);
 
-const sectionCompletedCount = (section: RecordSection) =>
-  section.fields.filter(field => isFieldComplete(fieldValues[field.key] || "")).length;
+const sectionCompletedCount = (section: RecordSection) => section.fields.filter(isRecordFieldComplete).length;
 
 const sectionRequiredMissingCount = (section: RecordSection) =>
-  section.fields.filter(field => field.required && !isFieldComplete(fieldValues[field.key] || "")).length;
+  section.fields.filter(field => field.required && !isRecordFieldComplete(field)).length;
 
 const sectionEvidenceCount = (section: RecordSection) =>
   section.fields.reduce((count, field) => count + matchedAttachments(field.key).length, 0);
@@ -8067,6 +8202,47 @@ onBeforeUnmount(() => {
   gap: 8px;
 
   margin-top: 8px;
+}
+
+.field-attachment-uploader {
+  display: grid;
+  gap: 8px;
+}
+
+.field-attachment-actions {
+  display: grid;
+  grid-template-columns: 156px minmax(180px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.field-attachment-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  color: #fff;
+  cursor: pointer;
+  background: var(--el-color-primary);
+  border-radius: 6px;
+
+  input {
+    display: none;
+  }
+
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+}
+
+.field-attachment-remark {
+  width: 100%;
+}
+
+.field-attachment-hint {
+  color: var(--el-text-color-secondary);
 }
 
 .field-evidence-card {

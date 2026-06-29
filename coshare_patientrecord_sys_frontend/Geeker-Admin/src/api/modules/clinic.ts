@@ -1,4 +1,4 @@
-import { ResultData } from "@/api/interface";
+﻿import { ResultData } from "@/api/interface";
 import {
   allRecordFields,
   canEditField,
@@ -1239,7 +1239,7 @@ const inferDocumentType = (fileName: string) => {
 
 const inspectionKeywordMeta = (fileName: string) => {
   if (/肛门镜|肛镜|镜检|专科检查|截石|指诊|肛缘|痔核/i.test(fileName)) {
-    return { fieldKey: "specialExamFullText", fieldLabel: "检查室专科图片", department: roleToDepartment.inspection };
+    return { fieldKey: "inspectionImages", fieldLabel: "检查室专科图片", department: roleToDepartment.inspection };
   }
   if (/B超|彩超|超声/i.test(fileName))
     return { fieldKey: "colonoscopy", fieldLabel: "B超/影像", department: roleToDepartment.ultrasound };
@@ -1262,7 +1262,7 @@ const documentTypeMeta = (type: string, typeLabel: string, role: string, fileNam
     ultrasound: { fieldKey: "colonoscopy", fieldLabel: typeLabel, department: roleToDepartment.ultrasound },
     followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk },
     inspectionImage: {
-      fieldKey: "specialExamFullText",
+      fieldKey: "inspectionImages",
       fieldLabel: typeLabel || "检查室图片",
       department: roleToDepartment.inspection
     },
