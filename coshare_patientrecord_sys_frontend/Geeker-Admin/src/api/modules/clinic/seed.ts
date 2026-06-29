@@ -20,6 +20,7 @@ export const roleToDepartment: Record<UserRole, string> = {
   doctor: "门诊",
   nurse: "治疗室",
   nursing: "护理部",
+  manager: "信息/院办",
   quality: "质控/病案"
 };
 
@@ -74,6 +75,13 @@ const seedDepartments = (): DepartmentRow[] => [
     uploadTypes: "入院评估、护理观察、术后恢复和随访执行记录",
     scope: "护理评估、护理风险、术后观察与随访执行",
     defaultRole: "nursing"
+  },
+  {
+    id: "manager",
+    name: "信息/院办",
+    uploadTypes: "院内文稿、会议纪要、管理汇报",
+    scope: "院办管理、公共助手和文稿生成",
+    defaultRole: "manager"
   },
   { id: "quality", name: "质控/病案", uploadTypes: "DIP、归档、质控意见", scope: "质控审核与归档复核", defaultRole: "quality" }
 ];
@@ -178,6 +186,15 @@ const seedRoles = (): RoleRow[] => [
     desc: "维护入院评估、护理观察、术后恢复和随访执行记录。",
     permissions: ["patient:read", "document:upload", "field:edit"],
     editableSections: ["basic", "operation", "followup", "patientFeedback", "supplementNotes"]
+  },
+  {
+    id: "manager",
+    name: "院办/管理",
+    role: "manager",
+    members: 0,
+    desc: "院办文稿、会议纪要、管理汇报和公共助手使用。",
+    permissions: ["ai:document", "ai:assistant", "inventory:read"],
+    editableSections: []
   },
   {
     id: "quality",

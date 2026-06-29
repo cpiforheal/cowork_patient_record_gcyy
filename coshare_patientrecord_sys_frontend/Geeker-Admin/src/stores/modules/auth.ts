@@ -16,6 +16,8 @@ const INVENTORY_QUALITY_MENU_PATHS = [
   "/inventory/trace"
 ];
 
+const AI_DOCUMENT_MENU_PATHS = ["/templates", "/templates/ai-document"];
+
 const ROLE_MENU_PATHS: Record<string, string[]> = {
   admin: ["*"],
   frontdesk: [
@@ -28,6 +30,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
   lab: [
@@ -40,6 +43,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
   ecg: [
@@ -52,6 +56,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
   ultrasound: [
@@ -64,6 +69,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
   doctor: [
@@ -75,6 +81,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
   nurse: [
@@ -87,6 +94,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
   quality: [
@@ -98,13 +106,28 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
+    "/templates/ai-document",
     "/documents",
     "/documents/recycle",
     ...INVENTORY_QUALITY_MENU_PATHS,
     "/audit",
     "/audit/review",
     "/audit/log"
-  ]
+  ],
+  nursing: [
+    "/home/index",
+    "/workbench/upload",
+    "/patients",
+    "/patients/list",
+    "/patients/detail/:id",
+    "/encounters",
+    "/encounters/active",
+    "/templates",
+    "/templates/record",
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
+  ],
+  manager: ["/home/index", ...AI_DOCUMENT_MENU_PATHS, "/inventory", "/inventory/overview", "/inventory/executive"]
 };
 
 const INVENTORY_STAFF_BUTTONS = {

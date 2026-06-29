@@ -49,6 +49,7 @@ public class ClinicApiController {
     private final ClinicAiConfigService aiConfigService;
     private final ClinicDoubaoTtsService doubaoTtsService;
     private final ClinicMedicalRecordService medicalRecordService;
+    private final ClinicAiDocumentService aiDocumentService;
     private final ObjectMapper objectMapper;
 
     public ClinicApiController(
@@ -61,6 +62,7 @@ public class ClinicApiController {
         ClinicAiConfigService aiConfigService,
         ClinicDoubaoTtsService doubaoTtsService,
         ClinicMedicalRecordService medicalRecordService,
+        ClinicAiDocumentService aiDocumentService,
         ObjectMapper objectMapper
     ) {
         this.databaseService = databaseService;
@@ -72,6 +74,7 @@ public class ClinicApiController {
         this.aiConfigService = aiConfigService;
         this.doubaoTtsService = doubaoTtsService;
         this.medicalRecordService = medicalRecordService;
+        this.aiDocumentService = aiDocumentService;
         this.objectMapper = objectMapper;
     }
 
@@ -300,6 +303,38 @@ public class ClinicApiController {
     ) {
         Map<String, Object> data = aiAssistantLogService.markTemplateCandidate(id, payload, AuthPermission.currentUserOrThrow());
         return ApiResult.of(200, "AI template candidate saved", data);
+    }
+
+    @GetMapping("/clinic-api/ai-document/templates")
+    public ApiResult<Map<String, Object>> aiDocumentTemplates() {
+        return ApiResult.success(aiDocumentService.templates(AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/ai-document/preview")
+    public ApiResult<Map<String, Object>> previewAiDocument(@RequestBody ClinicAiDocumentService.AiDocumentRequest request) {
+        return ApiResult.success(aiDocumentService.preview(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/ai-document/generate")
+    public ApiResult<Map<String, Object>> generateAiDocument(@RequestBody ClinicAiDocumentService.AiDocumentRequest request) {
+        return ApiResult.of(200, "AI文稿 docx 已生成", aiDocumentService.generate(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/clinic-api/ai-document/download")
+    public ResponseEntity<FileSystemResource> downloadAiDocument(@RequestParam String id) {
+        ClinicAiDocumentService.DownloadFile download = aiDocumentService.download(id, AuthPermission.currentUserOrThrow());
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+            .cacheControl(CacheControl.noStore().cachePrivate())
+            .header(HttpHeaders.PRAGMA, "no-cache")
+            .header(
+                HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment()
+                    .filename(download.fileName(), StandardCharsets.UTF_8)
+                    .build()
+                    .toString()
+            )
+            .body(download.resource());
     }
 
     @GetMapping("/clinic-api/medical-record/templates")

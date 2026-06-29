@@ -492,7 +492,7 @@ public class ClinicAiAssistantLogService {
         if (!path.isBlank()) parts.add("路径：" + path);
         if (!safe(patientId).isBlank()) parts.add("包含患者上下文");
         if (attachmentCount > 0) parts.add("上传材料：" + attachmentCount + " 个");
-        return parts.isEmpty() ? "仅系统知识库" : String.join("；", parts);
+        return parts.isEmpty() ? "知识库优先" : String.join("；", parts);
     }
 
     private String desensitize(String value) {

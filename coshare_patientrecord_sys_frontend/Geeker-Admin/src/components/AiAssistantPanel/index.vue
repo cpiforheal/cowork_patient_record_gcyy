@@ -53,7 +53,7 @@
             <strong>已带入资料</strong>
             <span>{{ materialCount }} 项</span>
           </div>
-          <div class="status-chip active">系统知识库默认开启</div>
+          <div class="status-chip active">知识库优先，通用问题可回答</div>
           <div class="status-chip" :class="{ active: includeContext && hasContext }">
             {{ includeContext && hasContext ? "当前页面上下文已带入" : "未带入页面上下文" }}
           </div>
@@ -72,7 +72,7 @@
             <p>{{ description || activeMode.description }}</p>
           </div>
           <div class="topbar-actions">
-            <el-tag effect="plain">{{ includeContext && hasContext ? "页面上下文开启" : "仅系统知识库" }}</el-tag>
+            <el-tag effect="plain">{{ includeContext && hasContext ? "页面上下文开启" : "知识库优先" }}</el-tag>
             <el-button circle text aria-label="关闭豆包助手" @click="emit('update:modelValue', false)">
               <el-icon><Close /></el-icon>
             </el-button>
@@ -106,7 +106,9 @@
               <img :src="doubaoAvatar" alt="豆包助手" />
             </div>
             <h3>{{ activeMode.emptyTitle }}</h3>
-            <p>我会优先依据系统知识库、当前角色和页面上下文回答；不确定时会说明知识库未覆盖，不替代诊断、处方或质控结论。</p>
+            <p>
+              我会优先依据系统知识库、当前角色和页面上下文回答；通用问题可直接回答，实时检索类问题会说明边界，不替代诊断、处方或质控结论。
+            </p>
             <div class="prompt-suggestions">
               <button v-for="question in recommendedPrompts" :key="question" type="button" @click="usePrompt(question)">
                 {{ question }}
@@ -129,7 +131,8 @@
                 <span>{{ message.role === "user" ? "我" : activeMode.label }}</span>
                 <small>{{ message.time }}</small>
               </div>
-              <p>{{ message.content }}</p>
+              <div v-if="message.role === 'assistant'" class="message-markdown" v-html="renderMarkdown(message.content)"></div>
+              <p v-else>{{ message.content }}</p>
               <div v-if="message.attachments?.length" class="message-attachments">
                 <div v-for="file in message.attachments" :key="file.id" class="attachment-chip">
                   <img v-if="file.dataUrl" :src="file.dataUrl" :alt="file.name" />
@@ -594,16 +597,80 @@ const copyMessage = async (content: string) => {
   }
 };
 
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+const renderInlineMarkdown = (value: string) =>
+  escapeHtml(value)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+const renderMarkdown = (content: string) => {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const html: string[] = [];
+  let inList = false;
+  const closeList = () => {
+    if (inList) {
+      html.push("</ul>");
+      inList = false;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      closeList();
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const level = Math.min(heading[1].length + 3, 6);
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const listItem = line.match(/^[-*]\s+(.+)$/) || line.match(/^\d+\.\s+(.+)$/);
+    if (listItem) {
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(listItem[1])}</li>`);
+      continue;
+    }
+    closeList();
+    html.push(`<p>${renderInlineMarkdown(line)}</p>`);
+  }
+  closeList();
+  return html.join("");
+};
+
+const stripMarkdownForSpeech = (content: string) =>
+  content
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/[*_~>#|]/g, "")
+    .replace(/\r?\n+/g, "。")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const base64ToBlob = (base64: string, mimeType: string) => {
   const binary = window.atob(base64);
-  const chunks: Uint8Array[] = [];
+  const chunks: ArrayBuffer[] = [];
   for (let offset = 0; offset < binary.length; offset += 1024) {
     const slice = binary.slice(offset, offset + 1024);
     const bytes = new Uint8Array(slice.length);
     for (let index = 0; index < slice.length; index += 1) {
       bytes[index] = slice.charCodeAt(index);
     }
-    chunks.push(bytes);
+    chunks.push(bytes.buffer);
   }
   return new Blob(chunks, { type: mimeType || "audio/mpeg" });
 };
@@ -632,7 +699,7 @@ const toggleSpeech = async (message: ChatMessage) => {
     stopSpeech();
     return;
   }
-  const text = message.content.trim().slice(0, 1800);
+  const text = stripMarkdownForSpeech(message.content).slice(0, 1800);
   if (!text) {
     ElMessage.warning("暂无可朗读的回答内容");
     return;
@@ -1103,6 +1170,52 @@ onBeforeUnmount(stopSpeech);
     color: var(--el-text-color-regular);
     line-height: 1.75;
     white-space: pre-wrap;
+  }
+}
+
+.message-markdown {
+  margin-top: 8px;
+  color: var(--el-text-color-regular);
+  line-height: 1.75;
+  word-break: break-word;
+
+  :deep(p) {
+    margin: 0 0 8px;
+  }
+
+  :deep(p:last-child),
+  :deep(ul:last-child) {
+    margin-bottom: 0;
+  }
+
+  :deep(h4),
+  :deep(h5),
+  :deep(h6) {
+    margin: 10px 0 6px;
+    color: var(--hos-text-main, #203529);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  :deep(ul) {
+    margin: 4px 0 10px;
+    padding-left: 18px;
+  }
+
+  :deep(li) {
+    margin: 3px 0;
+  }
+
+  :deep(strong) {
+    color: var(--hos-text-main, #203529);
+    font-weight: 800;
+  }
+
+  :deep(code) {
+    padding: 1px 5px;
+    color: #285b45;
+    background: rgb(77 123 99 / 0.1);
+    border-radius: 4px;
   }
 }
 

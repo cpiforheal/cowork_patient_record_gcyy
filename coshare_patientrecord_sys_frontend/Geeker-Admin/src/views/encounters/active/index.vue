@@ -229,7 +229,9 @@ const isTimeout = (patient: PatientRow) => Date.now() - new Date(patient.updated
 const isCurrentRoleFocus = (patient: PatientRow) => {
   const info = lifecycleInfo(patient);
   if (currentRole.value === "admin") return isTimeout(patient);
-  return info.stage.roles.includes(currentRole.value as PatientLifecycleStage["roles"][number]);
+  return (
+    Array.isArray(info.stage.roles) && info.stage.roles.includes(currentRole.value as PatientLifecycleStage["roles"][number])
+  );
 };
 
 const loadBoard = async () => {

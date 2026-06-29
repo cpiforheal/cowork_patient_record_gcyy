@@ -122,29 +122,11 @@ export interface AiRuntimeConfigPayload {
   keepExistingApiKey?: boolean;
 }
 
-export interface DoubaoTtsSpeakParams {
-  text: string;
-  voiceType?: string;
-  speedRatio?: number;
-}
-
-export interface DoubaoTtsConfigTestPayload extends AiRuntimeConfigPayload {
-  text?: string;
-}
-
-export interface DoubaoTtsSpeakResult {
-  audioBase64: string;
-  mimeType: string;
-  generatedAt: string;
-  voiceType: string;
-  model: string;
-  textLength: number;
-}
-
 export interface AiModelOption {
   id: string;
   name?: string;
   ownedBy?: string;
+  created?: number | string;
 }
 
 export interface AiModelDetectionPayload {
@@ -159,19 +141,37 @@ export interface AiModelDetectionResult {
   warning?: string;
 }
 
+export interface DoubaoTtsSpeakParams {
+  text: string;
+  voiceType?: string;
+  speedRatio?: number;
+}
+
+export interface DoubaoTtsConfigTestPayload extends AiRuntimeConfigPayload {
+  text?: string;
+}
+
+export interface DoubaoTtsSpeakResult {
+  audioBase64: string;
+  mimeType: string;
+  durationMs?: number;
+  model?: string;
+  generatedAt?: string;
+}
+
 export type AiAssistantType = "public" | "patient" | "quality" | "leader";
 
 export interface AiAssistantMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
 export interface AiAssistantAttachment {
   name: string;
-  type: string;
-  size: number;
+  type?: string;
+  size?: number;
   dataUrl?: string;
-  source?: "upload" | "patient_attachment" | "context";
+  source?: string;
 }
 
 export interface AiAssistantRequest {
@@ -186,66 +186,61 @@ export interface AiAssistantRequest {
 
 export interface AiAssistantResponse {
   answer: string;
-  assistantType: AiAssistantType;
   model: string;
   generatedAt: string;
-  disclaimer: string;
   knowledgeSources?: string[];
+  warning?: string;
 }
 
 export type AiAssistantLogStatus = "success" | "failed";
 
 export interface AiAssistantLog {
   id: string;
-  createdAt: string;
   assistantType: AiAssistantType;
+  prompt: string;
+  promptPreview: string;
+  answerPreview?: string;
+  answer?: string;
   status: AiAssistantLogStatus;
-  operatorId?: string;
-  operatorName?: string;
+  operator?: string;
   operatorRole?: string;
-  operatorDepartment?: string;
-  pageSource?: string;
-  pagePath?: string;
-  pageTitle?: string;
+  department?: string;
   model?: string;
   latencyMs?: number;
-  intentCategory?: string;
-  prompt?: string;
-  promptPreview?: string;
-  answer?: string;
-  answerPreview?: string;
-  systemPromptSummary?: string;
-  contextSummary?: string;
-  patientContextIncluded?: boolean;
-  patientId?: string;
-  attachmentCount?: number;
-  imageCount?: number;
   errorMessage?: string;
-  sensitive?: boolean;
-  templateCandidate?: boolean;
+  contextSummary?: string;
+  systemPromptSummary?: string;
+  pageTitle?: string;
+  pagePath?: string;
   knowledgeSources?: string[];
+  templateCandidate?: boolean;
+  sensitive?: boolean;
+  createdAt: string;
 }
 
 export interface AiAssistantLogListParams {
   pageNum?: number;
   pageSize?: number;
-  dateFrom?: string;
-  dateTo?: string;
   assistantType?: AiAssistantType | "";
   status?: AiAssistantLogStatus | "";
   role?: string;
   department?: string;
-  intentCategory?: string;
   keyword?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export interface AiAssistantLogListResult {
   list: AiAssistantLog[];
   total: number;
+  pageNum: number;
+  pageSize: number;
+  warning?: string;
 }
 
 export interface AiAssistantAnalyticsBucket {
-  label: string;
+  key: string;
+  label?: string;
   count: number;
 }
 
@@ -257,10 +252,13 @@ export interface AiAssistantFrequentPrompt {
 }
 
 export interface AiAssistantKnowledgeMiss {
-  id: string;
-  createdAt: string;
-  prompt: string;
-  assistantType: AiAssistantType;
+  id?: string;
+  keyword: string;
+  prompt?: string;
+  assistantType?: AiAssistantType;
+  count: number;
+  latestAt?: string;
+  createdAt?: string;
 }
 
 export interface AiAssistantAnalytics {
@@ -277,19 +275,22 @@ export interface AiAssistantAnalytics {
   modelErrorBuckets?: AiAssistantAnalyticsBucket[];
   frequentPrompts?: AiAssistantFrequentPrompt[];
   knowledgeMisses?: AiAssistantKnowledgeMiss[];
+  warning?: string;
 }
 
 export interface AiPromptTemplateCandidate {
   id: string;
-  sourceLogId?: string;
-  createdAt?: string;
-  createdBy?: string;
   assistantType: AiAssistantType;
   title: string;
   roleScope?: string;
   recommendedPrompt: string;
   contextNote?: string;
-  status?: "candidate" | "active" | string;
+  createdAt?: string;
+}
+
+export interface AiPromptTemplateListResult {
+  list: AiPromptTemplateCandidate[];
+  warning?: string;
 }
 
 export interface AiPromptTemplatePayload {
@@ -300,9 +301,68 @@ export interface AiPromptTemplatePayload {
   contextNote?: string;
 }
 
-export interface AiPromptTemplateListResult {
-  list: AiPromptTemplateCandidate[];
-  total: number;
+export interface AiDocumentTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  documentType?: string;
+  enabled?: boolean;
+}
+
+export interface AiDocumentTemplateResult {
+  templates: AiDocumentTemplate[];
+  defaultTemplateId?: string;
+}
+
+export interface AiDocumentRequestPayload {
+  title: string;
+  documentType?: string;
+  docType?: string;
+  content: string;
+  templateId?: string;
+}
+
+export interface AiDocumentBlock {
+  type: "heading" | "paragraph" | "list" | "table" | string;
+  text?: string;
+  level?: number;
+  items?: string[];
+  rows?: string[][];
+}
+
+export interface AiDocumentPreview {
+  title: string;
+  documentType?: string;
+  docType?: string;
+  templateName?: string;
+  aiRequired?: boolean;
+  paragraphCount?: number;
+  headingCount?: number;
+  listCount?: number;
+  tableCount?: number;
+  content?: string;
+  blocks: AiDocumentBlock[];
+  warning?: string;
+}
+
+export interface GeneratedAiDocument {
+  id: string;
+  title: string;
+  documentType?: string;
+  docType?: string;
+  templateName?: string;
+  fileName: string;
+  downloadUrl?: string;
+  content?: string;
+  preview?: AiDocumentBlock[];
+  hash?: string;
+  generatedAt: string;
+  operator?: string;
+}
+
+export interface AiDocumentGenerateResult {
+  document: GeneratedAiDocument;
+  preview?: AiDocumentPreview;
 }
 
 export interface GeneratedMedicalRecord {
@@ -334,6 +394,10 @@ export interface MedicalRecordTemplateField {
   required: boolean;
   aiPolishable: boolean;
   placeholder: string;
+  options?: string[];
+  defaultValue?: string;
+  inputType?: string;
+  targetUse?: "dynamic" | "formOnly" | string;
   sources?: string[];
 }
 
@@ -544,12 +608,18 @@ export interface UploadDocumentItem {
   url?: string;
   contentDataUrl?: string;
   storagePath?: string;
+  remark?: string;
 }
 
 export interface UploadDocumentsParams {
   patientId: string;
   role: string;
   operator?: string;
+  sourceRole?: string;
+  batchId?: string;
+  batchName?: string;
+  autoClassify?: boolean;
+  remark?: string;
   documents: UploadDocumentItem[];
 }
 

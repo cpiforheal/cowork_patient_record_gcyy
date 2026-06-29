@@ -392,14 +392,14 @@ const resetTtsForm = () => {
 
 const playTtsAudio = async (audioBase64: string, mimeType: string) => {
   const binary = window.atob(audioBase64);
-  const chunks: Uint8Array[] = [];
+  const chunks: ArrayBuffer[] = [];
   for (let offset = 0; offset < binary.length; offset += 1024) {
     const slice = binary.slice(offset, offset + 1024);
     const bytes = new Uint8Array(slice.length);
     for (let index = 0; index < slice.length; index += 1) {
       bytes[index] = slice.charCodeAt(index);
     }
-    chunks.push(bytes);
+    chunks.push(bytes.buffer);
   }
   const url = URL.createObjectURL(new Blob(chunks, { type: mimeType || "audio/mpeg" }));
   const audio = new Audio(url);

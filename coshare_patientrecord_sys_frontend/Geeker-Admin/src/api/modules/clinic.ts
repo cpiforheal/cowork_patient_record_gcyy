@@ -15,6 +15,10 @@ import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./clinic/storage"
 import { authHeaders, handleUnauthorizedResponse, isUnauthorizedApiResponse } from "./authToken";
 import type {
   AccountRow,
+  AiDocumentGenerateResult,
+  AiDocumentPreview,
+  AiDocumentRequestPayload,
+  AiDocumentTemplateResult,
   AiModelDetectionPayload,
   AiModelDetectionResult,
   AiAssistantRequest,
@@ -47,6 +51,7 @@ import type {
   LegacyAttachmentMapping,
   LegacyFieldMapping,
   MaintenanceStatus,
+  GeneratedAiDocument,
   GeneratedMedicalRecord,
   MedicalRecordGenerateResult,
   MedicalRecordPrecheckResult,
@@ -81,6 +86,12 @@ import type {
 
 export type {
   AccountRow,
+  AiDocumentBlock,
+  AiDocumentGenerateResult,
+  AiDocumentPreview,
+  AiDocumentRequestPayload,
+  AiDocumentTemplate,
+  AiDocumentTemplateResult,
   AiModelDetectionPayload,
   AiModelDetectionResult,
   AiModelOption,
@@ -119,6 +130,7 @@ export type {
   DictRow,
   DuplicatePatientGroup,
   MaintenanceStatus,
+  GeneratedAiDocument,
   GeneratedMedicalRecord,
   MedicalRecordGenerateResult,
   MedicalRecordPrecheckResult,
@@ -300,12 +312,12 @@ const canEditByRule = (role: string | undefined, field: RecordField, rules: Temp
   if (role === "admin") return true;
   const rule = templateRuleMap(rules)[field.key];
   if (!rule) return canEditField(role, field);
-  return rule.enabled && rule.editors.includes(role as UserRole);
+  return rule.enabled && Array.isArray(rule.editors) && rule.editors.includes(role as UserRole);
 };
 
 const isServiceCollaborativeRule = (field: RecordField, rules: TemplateFieldRule[] = []) => {
   const rule = templateRuleMap(rules)[field.key];
-  const editors = rule?.editors || field.editors;
+  const editors = Array.isArray(rule?.editors) ? rule.editors : Array.isArray(field.editors) ? field.editors : [];
   return serviceCollaborators.length === editors.length && serviceCollaborators.every(role => editors.includes(role));
 };
 
@@ -1225,21 +1237,56 @@ const inferDocumentType = (fileName: string) => {
   return null;
 };
 
-const documentTypeMeta = (type: string, typeLabel: string, role: string) => {
+const inspectionKeywordMeta = (fileName: string) => {
+  if (/肛门镜|肛镜|镜检|专科检查|截石|指诊|肛缘|痔核/i.test(fileName)) {
+    return { fieldKey: "specialExamFullText", fieldLabel: "检查室专科图片", department: roleToDepartment.inspection };
+  }
+  if (/B超|彩超|超声/i.test(fileName))
+    return { fieldKey: "colonoscopy", fieldLabel: "B超/影像", department: roleToDepartment.ultrasound };
+  if (/心电|ecg/i.test(fileName)) return { fieldKey: "ecgResult", fieldLabel: "心电图", department: roleToDepartment.ecg };
+  if (/血常规/i.test(fileName)) return { fieldKey: "bloodRoutine", fieldLabel: "血常规", department: roleToDepartment.lab };
+  if (/凝血/i.test(fileName)) return { fieldKey: "coagulation", fieldLabel: "凝血功能", department: roleToDepartment.lab };
+  return null;
+};
+
+const documentTypeMeta = (type: string, typeLabel: string, role: string, fileName = "", autoClassify = false) => {
   const fallbackDepartment = roleToDepartment[(role as UserRole) || "frontdesk"] || roleLabel(role);
+  if (role === "inspection" && autoClassify) {
+    const inferred = inspectionKeywordMeta(`${fileName} ${typeLabel} ${type}`);
+    if (inferred) return { ...inferred, classifyStatus: "matched" as const };
+  }
   const map: Record<string, { fieldKey: string; fieldLabel: string; department?: string }> = {
     bloodRoutine: { fieldKey: "bloodRoutine", fieldLabel: typeLabel, department: roleToDepartment.lab },
     coagulation: { fieldKey: "coagulation", fieldLabel: typeLabel, department: roleToDepartment.lab },
     ecg: { fieldKey: "ecgResult", fieldLabel: typeLabel, department: roleToDepartment.ecg },
     ultrasound: { fieldKey: "colonoscopy", fieldLabel: typeLabel, department: roleToDepartment.ultrasound },
-    followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk }
+    followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk },
+    inspectionImage: {
+      fieldKey: "specialExamFullText",
+      fieldLabel: typeLabel || "检查室图片",
+      department: roleToDepartment.inspection
+    },
+    inspectionPending: {
+      fieldKey: "inspectionPending",
+      fieldLabel: typeLabel || "检查室待分拣",
+      department: roleToDepartment.inspection
+    }
   };
-  const meta = map[type] || {
-    fieldKey: "documentScope",
-    fieldLabel: typeLabel || type || "资料",
-    department: fallbackDepartment
-  };
-  return { ...meta, department: meta.department || fallbackDepartment };
+  const meta =
+    map[type] ||
+    (role === "inspection"
+      ? {
+          fieldKey: "inspectionPending",
+          fieldLabel: typeLabel || type || "检查室待分拣",
+          department: roleToDepartment.inspection
+        }
+      : {
+          fieldKey: "documentScope",
+          fieldLabel: typeLabel || type || "资料",
+          department: fallbackDepartment
+        });
+  const classifyStatus = meta.fieldKey === "inspectionPending" ? "pending" : "manual";
+  return { ...meta, department: meta.department || fallbackDepartment, classifyStatus: classifyStatus as "pending" | "manual" };
 };
 
 const stripHtml = (value: string) =>
@@ -1532,8 +1579,10 @@ export const uploadDocumentsApi = async (params: UploadDocumentsParams) => {
   const patient = getPatientOrThrow(db, params.patientId);
   const uploadedAt = now();
   const uploaded: RecordAttachment[] = [];
+  const sourceRole = params.sourceRole || params.role;
+  const batchId = params.batchId || `batch-${patient.id}-${Date.now()}`;
   for (const [index, document] of params.documents.entries()) {
-    const meta = documentTypeMeta(document.type, document.typeLabel, params.role);
+    const meta = documentTypeMeta(document.type, document.typeLabel, sourceRole, document.fileName, params.autoClassify);
     const storedFile = await persistDocumentFile({
       ...document,
       patientId: patient.id,
@@ -1552,6 +1601,12 @@ export const uploadDocumentsApi = async (params: UploadDocumentsParams) => {
       storagePath: storedFile.storagePath,
       uploadedAt,
       uploader: roleLabel(params.role),
+      uploaderRole: params.role,
+      sourceRole,
+      batchId,
+      batchName: params.batchName,
+      classifyStatus: meta.classifyStatus,
+      remark: document.remark || params.remark,
       status: "active"
     });
   }
@@ -2347,6 +2402,52 @@ export const downloadMedicalRecordApi = async (record: GeneratedMedicalRecord) =
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 500);
   return response(null, "目标病历 docx 已下载");
+};
+
+export const getAiDocumentTemplatesApi = async () => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai-document/templates`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<AiDocumentTemplateResult>(result);
+  return response(data);
+};
+
+export const previewAiDocumentApi = async (payload: AiDocumentRequestPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai-document/preview`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiDocumentPreview>(result);
+  return response(data, "文稿预览已生成");
+};
+
+export const generateAiDocumentApi = async (payload: AiDocumentRequestPayload) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai-document/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  const data = await parseClinicApiResponse<AiDocumentGenerateResult>(result);
+  return response(data, "DOCX 文稿已生成");
+};
+
+export const downloadAiDocumentApi = async (generatedDocument: GeneratedAiDocument) => {
+  const result = await fetch(`${getClinicApiBaseUrl()}/ai-document/download?id=${encodeURIComponent(generatedDocument.id)}`, {
+    headers: authHeaders()
+  });
+  if (!result.ok) {
+    await parseClinicApiResponse(result);
+    return response(null);
+  }
+  const blob = await result.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = generatedDocument.fileName || `${generatedDocument.title || "AI文稿"}.docx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 500);
+  return response(null, "DOCX 文稿已下载");
 };
 
 export const getAiRuntimeConfigApi = async () => {

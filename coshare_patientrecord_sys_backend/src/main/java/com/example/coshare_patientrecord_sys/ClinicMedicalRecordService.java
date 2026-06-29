@@ -660,9 +660,45 @@ public class ClinicMedicalRecordService {
         row.put("required", field.required());
         row.put("aiPolishable", field.aiPolishable());
         row.put("placeholder", field.placeholder());
+        row.set("options", targetFieldOptions(field));
         ArrayNode sources = row.putArray("sources");
         field.sources().forEach(sources::add);
         return row;
+    }
+
+    private ArrayNode targetFieldOptions(TargetField field) {
+        ArrayNode options = objectMapper.createArrayNode();
+        switch (field.key()) {
+            case "gender" -> addOptionValues(options, List.of("男", "女", "未说明"));
+            case "maritalStatus" -> addOptionValues(options, List.of("未婚", "已婚", "离异", "丧偶", "未说明"));
+            case "nation" -> addOptionValues(options, List.of("汉族", "回族", "蒙古族", "满族", "其他"));
+            case "historyProvider" -> addOptionValues(options, List.of("患者本人", "患者家属", "陪同人员", "病历资料"));
+            case "contactRelation" -> addOptionValues(options, List.of("配偶", "父母", "子女", "兄弟姐妹", "其他"));
+            case "historyReliable" -> addOptionValues(options, List.of("是", "基本可靠", "需家属补充", "不确定"));
+            case "anesthesiaMethod" -> addOptionValues(options, List.of("骶管内麻醉", "硬膜外麻醉", "静脉麻醉", "局部麻醉", "其他"));
+            default -> {
+            }
+        }
+        if ("textarea".equals(field.kind()) || field.aiPolishable()) {
+            addOptionValues(options, field.anchors());
+        }
+        return options;
+    }
+
+    private void addOptionValues(ArrayNode options, List<String> values) {
+        if (values == null) return;
+        for (String value : values) {
+            String normalized = safe(value);
+            if (normalized.isBlank()) continue;
+            boolean exists = false;
+            for (JsonNode option : options) {
+                if (normalized.equals(option.asText())) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) options.add(normalized);
+        }
     }
 
     private List<String> targetSectionNames() {

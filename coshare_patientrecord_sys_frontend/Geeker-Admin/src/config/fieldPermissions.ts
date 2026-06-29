@@ -9,6 +9,7 @@ export type UserRole =
   | "doctor"
   | "nurse"
   | "nursing"
+  | "manager"
   | "quality";
 
 export type FieldKind = "input" | "textarea" | "select";
@@ -75,6 +76,12 @@ export interface RecordAttachment {
   storagePath?: string;
   uploadedAt: string;
   uploader: string;
+  uploaderRole?: string;
+  sourceRole?: string;
+  batchId?: string;
+  batchName?: string;
+  classifyStatus?: "matched" | "pending" | "manual";
+  remark?: string;
   status?: "active" | "voided";
   voidReason?: string;
   voidedAt?: string;
@@ -94,6 +101,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   doctor: "医生",
   nurse: "护士/治疗室",
   nursing: "护理部",
+  manager: "院办/管理",
   quality: "质控"
 };
 
@@ -108,6 +116,7 @@ export const USER_ROLES: UserRole[] = [
   "doctor",
   "nurse",
   "nursing",
+  "manager",
   "quality"
 ];
 
@@ -120,14 +129,18 @@ export const roleLabel = (role?: string) => ROLE_LABELS[(role as UserRole) || "f
 
 export const canEditField = (role: string | undefined, field: RecordField) => {
   if (role === "admin") return true;
-  return field.editors.includes(role as UserRole);
+  return Array.isArray(field.editors) && field.editors.includes(role as UserRole);
 };
 
 export const canEditSection = (role: string | undefined, section: RecordSection) => {
   return section.fields.some(field => canEditField(role, field));
 };
 
-export const editorLabels = (editors: UserRole[]) => editors.map(item => ROLE_LABELS[item]).join("、");
+export const editorLabels = (editors: UserRole[] = []) =>
+  editors
+    .map(item => ROLE_LABELS[item])
+    .filter(Boolean)
+    .join("、");
 
 export const allRecordFields = () => recordSections.flatMap(section => section.fields);
 
@@ -169,6 +182,7 @@ export const screeningCollaborators: UserRole[] = [
   "quality"
 ];
 export const isCollaborativeField = (field: RecordField) =>
+  Array.isArray(field.editors) &&
   healthArchiveCollaborators.length === field.editors.length &&
   healthArchiveCollaborators.every(role => field.editors.includes(role));
 

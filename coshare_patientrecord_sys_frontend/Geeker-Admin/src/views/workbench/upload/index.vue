@@ -9,7 +9,104 @@
         <el-tag size="large" effect="plain">{{ roleName }}模式</el-tag>
       </div>
 
-      <el-tabs v-model="activeTab">
+      <section v-if="isInspectionMode" class="inspection-uploader">
+        <div class="scan-row">
+          <el-input
+            ref="uploadKeywordInput"
+            v-model="uploadKeyword"
+            size="large"
+            clearable
+            placeholder="扫码或输入 门诊号 / 姓名 / 手机号后四位"
+            @keyup.enter="searchPatients"
+          />
+          <el-button type="primary" size="large" :icon="Search" :loading="searching" @click="searchPatients">识别患者</el-button>
+        </div>
+
+        <div v-if="matchedPatients.length" class="patient-results">
+          <button
+            v-for="patient in matchedPatients"
+            :key="patient.id"
+            :class="{ active: selectedPatient?.id === patient.id }"
+            @click="selectedPatient = patient"
+          >
+            <strong>{{ patient.name }}</strong>
+            <span>{{ patient.visitNo }} · {{ patient.visitType }}</span>
+            <el-tag :type="patient.riskType || 'info'" effect="plain">{{ patient.status }}</el-tag>
+          </button>
+        </div>
+
+        <el-alert
+          v-if="selectedPatient"
+          class="mt12"
+          type="success"
+          show-icon
+          :closable="false"
+          :title="`已选择：${selectedPatient.name}，${selectedPatient.visitNo}`"
+        />
+
+        <section class="inspection-upload-panel">
+          <div class="inspection-upload-head">
+            <div>
+              <strong>检查室图片目录上传</strong>
+              <span>选择一个图片目录后批量入档，系统按文件名自动归类；无法识别的图片进入检查室待分拣。</span>
+            </div>
+            <el-tag effect="plain">{{ inspectionFiles.length }} 张图片</el-tag>
+          </div>
+
+          <div class="inspection-controls">
+            <el-select v-model="inspectionType" size="large" placeholder="检查类型">
+              <el-option label="自动识别" value="inspectionPending" />
+              <el-option label="专科检查/肛门镜图片" value="inspectionImage" />
+              <el-option label="B超/影像" value="ultrasound" />
+              <el-option label="心电图" value="ecg" />
+              <el-option label="复查照片" value="followup" />
+            </el-select>
+            <el-date-picker v-model="inspectionDate" size="large" type="date" value-format="YYYY-MM-DD" placeholder="检查日期" />
+            <el-input v-model="inspectionRemark" size="large" clearable placeholder="备注，可不填" />
+            <label class="directory-picker">
+              <el-icon><UploadFilled /></el-icon>
+              <span>选择图片目录</span>
+              <input
+                ref="inspectionDirectoryInput"
+                type="file"
+                accept="image/*"
+                multiple
+                webkitdirectory
+                @change="handleInspectionDirectory"
+              />
+            </label>
+          </div>
+
+          <div v-if="inspectionFiles.length" class="inspection-preview-grid">
+            <article v-for="item in inspectionFiles" :key="item.id">
+              <el-image :src="item.previewUrl" fit="cover" :preview-src-list="inspectionPreviewUrls" preview-teleported />
+              <div>
+                <strong :title="item.fileName">{{ item.fileName }}</strong>
+                <span>{{ item.sizeLabel }}</span>
+              </div>
+              <el-button link type="danger" @click="removeInspectionFile(item.id)">移除</el-button>
+            </article>
+          </div>
+
+          <el-empty v-else description="还没有选择图片目录" />
+
+          <div class="upload-actions">
+            <el-button @click="clearInspectionFiles">清空</el-button>
+            <el-button type="primary" size="large" :icon="Upload" :loading="uploading" @click="submitInspectionUpload">
+              上传检查室图片
+            </el-button>
+          </div>
+
+          <el-progress
+            v-if="uploading || uploadSuccess"
+            class="mt12"
+            :percentage="uploadProgress"
+            :status="uploadSuccess ? 'success' : undefined"
+          />
+        </section>
+      </section>
+
+      <el-tabs v-else v-model="activeTab">
         <el-tab-pane label="快捷上传" name="upload">
           <div class="quick-form">
             <div class="scan-row">
@@ -399,11 +496,21 @@ interface LegacyFileCandidate {
   source: "file" | "text";
 }
 
+interface InspectionFileItem {
+  id: string;
+  fileName: string;
+  file: File;
+  previewUrl: string;
+  contentDataUrl: string;
+  sizeLabel: string;
+}
+
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
 const roleName = computed(() => roleLabel(currentRole.value));
+const isInspectionMode = computed(() => currentRole.value === "inspection");
 const departments = ["前台", "门诊", "化验室", "心电室", "B超/放射", "治疗室", "质控/病案", "信息/院办"];
 const documentTypes = [
   { label: "血常规", value: "bloodRoutine" },
@@ -423,6 +530,12 @@ const uploadKeywordInput = ref<{ focus: () => void }>();
 const matchedPatients = ref<PatientRow[]>([]);
 const selectedPatient = ref<PatientRow>();
 const uploadItems = ref<UploadItem[]>([{ id: "upload-1", type: "", files: [] }]);
+const inspectionType = ref("inspectionPending");
+const inspectionDate = ref("");
+const inspectionRemark = ref("");
+const inspectionFiles = ref<InspectionFileItem[]>([]);
+const inspectionDirectoryInput = ref<HTMLInputElement>();
+const inspectionPreviewUrls = computed(() => inspectionFiles.value.map(item => item.previewUrl));
 const failedUploads = ref<FailedUpload[]>([]);
 const staleFailedUploadSummaries = ref<FailedUploadSummary[]>([]);
 const UPLOAD_FAILURE_SUMMARY_KEY = "clinic-upload-failure-summaries";
@@ -478,7 +591,10 @@ const searchPatients = async () => {
     const keyword = uploadKeyword.value.trim();
     const { data } = await getPatientListApi({ pageNum: 1, pageSize: 100 });
     matchedPatients.value = data.list.filter(
-      patient => patient.name.includes(keyword) || patient.visitNo.includes(keyword) || patient.doctor.includes(keyword)
+      patient =>
+        String(patient.name || "").includes(keyword) ||
+        String(patient.visitNo || "").includes(keyword) ||
+        String(patient.doctor || "").includes(keyword)
     );
     selectedPatient.value = matchedPatients.value[0];
     if (!matchedPatients.value.length) ElMessage.warning("未找到匹配患者");
@@ -613,6 +729,99 @@ const fileToDataUrl = (file?: UploadUserFile["raw"]) =>
     reader.onerror = () => resolve("");
     reader.readAsDataURL(file);
   });
+
+const imageOnly = (file: File) => file.type.startsWith("image/") || imageFilePattern.test(file.name);
+
+const formatFileSize = (size: number) => {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+};
+
+const handleInspectionDirectory = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []).filter(imageOnly);
+  if (!files.length) {
+    ElMessage.warning("请选择包含图片的目录");
+    input.value = "";
+    return;
+  }
+  inspectionFiles.value.forEach(item => URL.revokeObjectURL(item.previewUrl));
+  inspectionFiles.value = await Promise.all(
+    files.map(async (file, index) => ({
+      id: `inspection-${Date.now()}-${index}-${file.name}`,
+      fileName: file.name,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      contentDataUrl: await fileToDataUrl(file as UploadUserFile["raw"]),
+      sizeLabel: formatFileSize(file.size)
+    }))
+  );
+  uploadSuccess.value = false;
+  input.value = "";
+};
+
+const removeInspectionFile = (id: string) => {
+  const target = inspectionFiles.value.find(item => item.id === id);
+  if (target) URL.revokeObjectURL(target.previewUrl);
+  inspectionFiles.value = inspectionFiles.value.filter(item => item.id !== id);
+};
+
+const clearInspectionFiles = () => {
+  inspectionFiles.value.forEach(item => URL.revokeObjectURL(item.previewUrl));
+  inspectionFiles.value = [];
+  uploadProgress.value = 0;
+  uploadSuccess.value = false;
+  if (inspectionDirectoryInput.value) inspectionDirectoryInput.value.value = "";
+};
+
+const submitInspectionUpload = async () => {
+  if (!selectedPatient.value) {
+    ElMessage.warning("请先识别并选择患者");
+    return;
+  }
+  if (!inspectionFiles.value.length) {
+    ElMessage.warning("请先选择检查图片目录");
+    return;
+  }
+  uploading.value = true;
+  uploadSuccess.value = false;
+  uploadProgress.value = 15;
+  window.setTimeout(() => (uploadProgress.value = 55), 160);
+  try {
+    const batchName = `检查室图片-${inspectionDate.value || timestampName()}`;
+    const typeLabel =
+      documentTypes.find(type => type.value === inspectionType.value)?.label ||
+      (inspectionType.value === "inspectionPending" ? "检查室待分拣" : "检查室图片");
+    const { data } = await uploadDocumentsApi({
+      patientId: selectedPatient.value.id,
+      role: currentRole.value,
+      operator: roleName.value,
+      sourceRole: "inspection",
+      batchId: `inspection-${selectedPatient.value.id}-${Date.now()}`,
+      batchName,
+      autoClassify: inspectionType.value === "inspectionPending",
+      remark: inspectionRemark.value,
+      documents: inspectionFiles.value.map(item => ({
+        type: inspectionType.value,
+        typeLabel,
+        fileName: item.fileName,
+        contentDataUrl: item.contentDataUrl,
+        remark: inspectionRemark.value
+      }))
+    });
+    uploadProgress.value = 100;
+    uploadSuccess.value = true;
+    selectedPatient.value = data.patient;
+    clearInspectionFiles();
+    ElMessage.success(`已上传 ${data.documents.length} 张检查室图片`);
+  } catch (error) {
+    uploadProgress.value = 0;
+    ElMessage.error((error as Error).message || "检查室图片上传失败");
+  } finally {
+    uploading.value = false;
+  }
+};
 
 const quickUploadDocuments = async () => {
   const documents: UploadDocumentItem[] = [];
@@ -976,6 +1185,114 @@ onMounted(() => {
   animation: upload-result-pop 0.22s ease-out;
 }
 
+.inspection-uploader {
+  display: grid;
+  gap: 14px;
+}
+
+.inspection-upload-panel {
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.inspection-upload-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+    font-size: 16px;
+  }
+
+  span {
+    margin-top: 4px;
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+  }
+}
+
+.inspection-controls {
+  display: grid;
+  grid-template-columns: 180px 180px minmax(220px, 1fr) 156px;
+  gap: 10px;
+  align-items: center;
+}
+
+.directory-picker {
+  position: relative;
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--el-color-primary);
+  border-radius: 6px;
+
+  input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.inspection-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+
+  article {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px;
+    background: #ffffff;
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 8px;
+  }
+
+  :deep(.el-image) {
+    width: 100%;
+    height: 118px;
+    overflow: hidden;
+    background: var(--el-fill-color-light);
+    border-radius: 6px;
+  }
+
+  strong,
+  span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+    font-size: 13px;
+  }
+
+  span {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
+
 .upload-failure-panel {
   display: grid;
   gap: 10px;
@@ -1170,6 +1487,7 @@ onMounted(() => {
   }
 
   .scan-row,
+  .inspection-controls,
   .patient-results button,
   .upload-item,
   .failure-card {
