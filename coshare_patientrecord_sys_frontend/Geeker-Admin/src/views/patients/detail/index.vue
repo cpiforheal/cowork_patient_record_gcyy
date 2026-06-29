@@ -120,6 +120,8 @@
 
           <el-button :loading="medicalRecordLoading" @click="openMedicalRecord">医生目标病历</el-button>
 
+          <el-button v-if="canUseRoleViewFilter" @click="openRoleView('inspection')">检查室视图</el-button>
+
           <el-button :icon="View" @click="previewVisible = true">预览</el-button>
 
           <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
@@ -5293,6 +5295,12 @@ const switchDetailWorkspace = async (mode: DetailWorkspaceMode) => {
   } else if (mode === "timeline") {
     await refreshAuditTimeline();
   }
+};
+
+const openRoleView = async (view: RoleViewKey) => {
+  activeRoleView.value = view;
+  recordViewMode.value = "full";
+  await switchDetailWorkspace("archive");
 };
 
 const loadPatientAuditLogs = async (targetPatientId = patientId.value, targetPatientName = fieldValues.patientName) => {

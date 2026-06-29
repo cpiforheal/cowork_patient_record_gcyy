@@ -6,7 +6,13 @@
           <h2>上传资料</h2>
           <p>输入门诊号或姓名，确认患者后连续上传本科室资料。</p>
         </div>
-        <el-tag size="large" effect="plain">{{ roleName }}模式</el-tag>
+        <div class="upload-mode-tools">
+          <el-tag size="large" effect="plain">{{ isInspectionMode ? "检查室目录上传" : `${roleName}模式` }}</el-tag>
+          <el-radio-group v-if="canSwitchInspectionMode" v-model="uploadMode" size="small">
+            <el-radio-button label="normal">常规上传</el-radio-button>
+            <el-radio-button label="inspection">检查室目录</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
 
       <section v-if="isInspectionMode" class="inspection-uploader">
@@ -510,7 +516,9 @@ const route = useRoute();
 const userStore = useUserStore();
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
 const roleName = computed(() => roleLabel(currentRole.value));
-const isInspectionMode = computed(() => currentRole.value === "inspection");
+const uploadMode = ref(currentRole.value === "inspection" || route.query.mode === "inspection" ? "inspection" : "normal");
+const canSwitchInspectionMode = computed(() => ["admin", "doctor"].includes(currentRole.value));
+const isInspectionMode = computed(() => currentRole.value === "inspection" || uploadMode.value === "inspection");
 const departments = ["前台", "门诊", "化验室", "心电室", "B超/放射", "治疗室", "质控/病案", "信息/院办"];
 const documentTypes = [
   { label: "血常规", value: "bloodRoutine" },
@@ -1065,6 +1073,14 @@ onMounted(() => {
     margin-top: 8px;
     color: var(--el-text-color-regular);
   }
+}
+
+.upload-mode-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .quick-form,
