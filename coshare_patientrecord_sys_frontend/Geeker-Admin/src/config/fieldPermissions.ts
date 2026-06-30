@@ -941,6 +941,16 @@ export const recordSections: RecordSection[] = [
         labPanel: "biochemistry"
       },
       {
+        key: "postprandialGlucose",
+        label: "餐后血糖值",
+        value: "",
+        kind: "input",
+        inputType: "number",
+        editors: lab,
+        unit: "mmol/L",
+        labPanel: "biochemistry"
+      },
+      {
         key: "coagulation",
         label: "凝血功能",
         value: "PT、APTT、TT、FIB、INR：余无异常。",
@@ -1072,6 +1082,15 @@ export const recordSections: RecordSection[] = [
         options: ["未查", "已查", "异常"],
         editors: ["admin", "lab", "doctor", "nurse"],
         evidence: "生化报告"
+      },
+      {
+        key: "postprandialGlucoseStatus",
+        label: "餐后血糖状态",
+        value: "",
+        kind: "select",
+        options: ["未查", "已查", "异常"],
+        editors: ["admin", "lab", "doctor", "nurse"],
+        evidence: "餐后血糖报告"
       },
       {
         key: "bloodLipidStatus",

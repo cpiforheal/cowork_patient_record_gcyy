@@ -1,4 +1,13 @@
-export type LabTemplateId = "bloodRoutine" | "biochemistry" | "hbvFive" | "infectious" | "crpSaa" | "urineRoutine" | "hba1c" | "ecgImage";
+export type LabTemplateId =
+  | "bloodRoutine"
+  | "biochemistry"
+  | "hbvFive"
+  | "infectious"
+  | "crpSaa"
+  | "urineRoutine"
+  | "hba1c"
+  | "postprandialGlucose"
+  | "ecgImage";
 
 export type LabMetricInput = "number" | "text" | "select";
 
@@ -179,6 +188,26 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     documentTypeLabel: "糖化血红蛋白模板报告",
     description: "按参考单记录 HbA1c。",
     metrics: [{ key: "hba1c", name: "糖化血红蛋白", shortName: "HbA1c", unit: "%", input: "number", reference: "4.0-6.0" }]
+  },
+  {
+    id: "postprandialGlucose",
+    name: "餐后血糖",
+    subtitle: "餐后2小时血糖值",
+    fieldKey: "postprandialGlucose",
+    statusKeys: ["postprandialGlucoseStatus"],
+    documentType: "labPostprandialGlucose",
+    documentTypeLabel: "餐后血糖模板报告",
+    description: "用于记录餐后血糖值，保存后医生端化验报告视图可直接查看。",
+    metrics: [
+      {
+        key: "postprandialGlucose",
+        name: "餐后2小时血糖",
+        shortName: "2hPG",
+        unit: "mmol/L",
+        input: "number",
+        reference: "<7.8"
+      }
+    ]
   },
   {
     id: "ecgImage",

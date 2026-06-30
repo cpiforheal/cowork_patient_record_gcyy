@@ -2563,6 +2563,8 @@ const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
 
     "biochemistry",
 
+    "postprandialGlucose",
+
     "bloodRoutineStatus",
 
     "coagulationStatus",
@@ -2574,6 +2576,8 @@ const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
     "renalFunctionStatus",
 
     "fastingGlucoseStatus",
+
+    "postprandialGlucoseStatus",
 
     "bloodLipidStatus",
 
@@ -2674,6 +2678,7 @@ const roleViewFieldKeys: Partial<Record<RoleViewKey, Set<string>>> = {
     "bloodHgb",
     "bloodPlt",
     "biochemistry",
+    "postprandialGlucose",
     "urineRoutine",
     "preOpEight",
     "ecgResult",
@@ -3363,6 +3368,8 @@ const screeningRows = computed(() => [
 
   ["空腹血糖", displayFieldValue("biochemistry"), "fastingGlucoseStatus"],
 
+  ["餐后血糖", displayFieldValue("postprandialGlucose"), "postprandialGlucoseStatus"],
+
   ["血脂四项", displayFieldValue("biochemistry"), "bloodLipidStatus"],
 
   ["尿常规", displayFieldValue("urineRoutine"), "urineRoutineStatus"],
@@ -3411,6 +3418,13 @@ const labReportOverviewCards = computed(() => [
       { label: "血糖", value: fieldValues.fastingGlucoseStatus || "", unit: "" },
       { label: "血脂", value: fieldValues.bloodLipidStatus || "", unit: "" }
     ]
+  },
+  {
+    key: "postprandialGlucose",
+    title: "餐后血糖",
+    status: fieldValues.postprandialGlucoseStatus || "",
+    summary: displayFieldValue("postprandialGlucose", ""),
+    metrics: [{ label: "餐后2h", value: labMetricValue("postprandialGlucose"), unit: "mmol/L" }]
   },
   {
     key: "urineRoutine",
