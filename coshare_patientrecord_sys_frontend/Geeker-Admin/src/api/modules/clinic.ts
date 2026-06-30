@@ -1258,6 +1258,12 @@ const documentTypeMeta = (type: string, typeLabel: string, role: string, fileNam
   const map: Record<string, { fieldKey: string; fieldLabel: string; department?: string }> = {
     bloodRoutine: { fieldKey: "bloodRoutine", fieldLabel: typeLabel, department: roleToDepartment.lab },
     coagulation: { fieldKey: "coagulation", fieldLabel: typeLabel, department: roleToDepartment.lab },
+    labBiochemistry: { fieldKey: "biochemistry", fieldLabel: typeLabel || "生化肝肾功模板报告", department: roleToDepartment.lab },
+    labHbvFive: { fieldKey: "preOpEight", fieldLabel: typeLabel || "乙肝五项模板报告", department: roleToDepartment.lab },
+    labInfectious: { fieldKey: "preOpEight", fieldLabel: typeLabel || "术前感染筛查模板报告", department: roleToDepartment.lab },
+    labCrpSaa: { fieldKey: "crpStatus", fieldLabel: typeLabel || "CRP/SAA模板报告", department: roleToDepartment.lab },
+    labUrineRoutine: { fieldKey: "urineRoutine", fieldLabel: typeLabel || "尿常规模板报告", department: roleToDepartment.lab },
+    labHba1c: { fieldKey: "biochemistry", fieldLabel: typeLabel || "糖化血红蛋白模板报告", department: roleToDepartment.lab },
     ecg: { fieldKey: "ecgResult", fieldLabel: typeLabel, department: roleToDepartment.ecg },
     ultrasound: { fieldKey: "colonoscopy", fieldLabel: typeLabel, department: roleToDepartment.ultrasound },
     followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk },

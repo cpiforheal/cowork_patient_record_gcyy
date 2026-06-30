@@ -122,6 +122,8 @@
 
           <el-button v-if="canUseRoleViewFilter" @click="openRoleView('inspection')">检查室视图</el-button>
 
+          <el-button v-if="canUseRoleViewFilter" type="primary" plain @click="openRoleView('lab')">化验报告视图</el-button>
+
           <el-button :icon="View" @click="previewVisible = true">预览</el-button>
 
           <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
@@ -510,7 +512,7 @@
           />
 
           <div v-if="detailWorkspaceMode === 'archive'" class="record-layout" :class="`mode-${recordViewMode}`">
-            <aside v-if="recordViewMode === 'full'" class="section-rail screen-only">
+            <aside v-if="recordViewMode === 'full' && !showLabReportOverview" class="section-rail screen-only">
               <div class="lifecycle-rail-summary">
                 <span>当前流转</span>
 
@@ -542,6 +544,40 @@
             </aside>
 
             <main class="form-panel screen-only">
+              <section v-if="showLabReportOverview" class="lab-report-overview">
+                <div class="lab-report-overview-head">
+                  <div>
+                    <strong>化验报告模板视图</strong>
+                    <span>医生端优先查看结构化报告摘要，原始附件仍保留在附件索引中。</span>
+                  </div>
+                  <el-button plain @click="router.push('/workbench/lab-report')">打开检验模板填写</el-button>
+                </div>
+
+                <div class="lab-report-card-grid">
+                  <article v-for="report in labReportOverviewCards" :key="report.key" class="lab-report-card">
+                    <div class="lab-report-card-head">
+                      <strong>{{ report.title }}</strong>
+                      <el-tag :type="report.status === '已查' ? 'success' : report.status === '异常' ? 'danger' : 'info'" effect="plain">
+                        {{ report.status || "待补充" }}
+                      </el-tag>
+                    </div>
+                    <div class="lab-report-metrics">
+                      <span v-for="metric in report.metrics" :key="metric.label">
+                        <em>{{ metric.label }}</em>
+                        <strong>{{ metric.value || "待补充" }}</strong>
+                        <small>{{ metric.unit }}</small>
+                      </span>
+                    </div>
+                    <p>{{ report.summary || "暂无结构化摘要，保存检验报告模板后自动同步。" }}</p>
+                  </article>
+                </div>
+
+                <div class="lab-report-overview-foot">
+                  <span>原始图片/报告附件仍保留在“检查与附件”和对应字段证据中。</span>
+                  <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
+                </div>
+              </section>
+
               <section v-if="recordViewMode === 'mine'" class="my-fields-panel">
                 <div class="my-fields-head">
                   <div>
@@ -706,7 +742,7 @@
                 </div>
               </section>
 
-              <div v-if="recordViewMode === 'full'" class="workspace-anchor">
+              <div v-if="recordViewMode === 'full' && !showLabReportOverview" class="workspace-anchor">
                 <button
                   v-for="(section, index) in recordSectionsByRule"
                   :key="section.key"
@@ -728,7 +764,7 @@
                 </button>
               </div>
 
-              <div v-if="recordViewMode === 'full'" class="all-section-form">
+              <div v-if="recordViewMode === 'full' && !showLabReportOverview" class="all-section-form">
                 <section
                   v-for="(section, sectionIndex) in recordSectionsByRule"
                   :id="`record-section-${section.key}`"
@@ -2505,6 +2541,20 @@ const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
 
     "bloodRoutine",
 
+    "bloodWbc",
+
+    "bloodNeuPercent",
+
+    "bloodLymPercent",
+
+    "bloodMonPercent",
+
+    "bloodRbc",
+
+    "bloodHgb",
+
+    "bloodPlt",
+
     "coagulation",
 
     "preOpEight",
@@ -2613,9 +2663,23 @@ const roleViewSections: Record<Exclude<RoleViewKey, "all">, Set<string>> = {
 const roleViewFieldKeys: Partial<Record<RoleViewKey, Set<string>>> = {
   inspection: new Set([...Array.from(roleVisibleFieldKeys.inspection || []), "inspectionPending"]),
   lab: new Set([
-    ...Array.from(roleVisibleFieldKeys.lab || []),
-    ...Array.from(roleVisibleFieldKeys.ecg || []),
-    ...Array.from(roleVisibleFieldKeys.ultrasound || [])
+    "patientName",
+    "visitNo",
+    "bloodRoutine",
+    "bloodWbc",
+    "bloodNeuPercent",
+    "bloodLymPercent",
+    "bloodMonPercent",
+    "bloodRbc",
+    "bloodHgb",
+    "bloodPlt",
+    "biochemistry",
+    "urineRoutine",
+    "preOpEight",
+    "ecgResult",
+    "colonoscopy",
+    "uncheckedItemsNote",
+    "documentScope"
   ])
 };
 
@@ -3312,6 +3376,63 @@ const screeningRows = computed(() => [
   ["电子肠镜检查", displayFieldValue("colonoscopy"), "colonoscopyStatus"],
 
   ["DR胸片检查", "按报告或医嘱填写", "drChestStatus"]
+]);
+
+const showLabReportOverview = computed(
+  () => detailWorkspaceMode.value === "archive" && canUseRoleViewFilter.value && activeRoleView.value === "lab"
+);
+
+const labMetricValue = (key: string) => displayFieldValue(key, "");
+
+const labReportOverviewCards = computed(() => [
+  {
+    key: "bloodRoutine",
+    title: "血常规五分类",
+    status: fieldValues.bloodRoutineStatus || "",
+    summary: displayFieldValue("bloodRoutine", ""),
+    metrics: [
+      { label: "WBC", value: labMetricValue("bloodWbc"), unit: "10^9/L" },
+      { label: "NeU%", value: labMetricValue("bloodNeuPercent"), unit: "%" },
+      { label: "Lym%", value: labMetricValue("bloodLymPercent"), unit: "%" },
+      { label: "Mon%", value: labMetricValue("bloodMonPercent"), unit: "%" },
+      { label: "RBC", value: labMetricValue("bloodRbc"), unit: "10^12/L" },
+      { label: "HGB", value: labMetricValue("bloodHgb"), unit: "g/L" },
+      { label: "PLT", value: labMetricValue("bloodPlt"), unit: "10^9/L" }
+    ]
+  },
+  {
+    key: "biochemistry",
+    title: "生化肝肾功",
+    status: fieldValues.liverFunctionStatus || fieldValues.renalFunctionStatus || "",
+    summary: displayFieldValue("biochemistry", ""),
+    metrics: [
+      { label: "肝功能", value: fieldValues.liverFunctionStatus || "", unit: "" },
+      { label: "肾功能", value: fieldValues.renalFunctionStatus || "", unit: "" },
+      { label: "血糖", value: fieldValues.fastingGlucoseStatus || "", unit: "" },
+      { label: "血脂", value: fieldValues.bloodLipidStatus || "", unit: "" }
+    ]
+  },
+  {
+    key: "urineRoutine",
+    title: "尿常规",
+    status: fieldValues.urineRoutineStatus || "",
+    summary: displayFieldValue("urineRoutine", ""),
+    metrics: [{ label: "状态", value: fieldValues.urineRoutineStatus || "", unit: "" }]
+  },
+  {
+    key: "preOpEight",
+    title: "术前感染筛查",
+    status: fieldValues.preOpEightStatus || "",
+    summary: displayFieldValue("preOpEight", ""),
+    metrics: [{ label: "状态", value: fieldValues.preOpEightStatus || "", unit: "" }]
+  },
+  {
+    key: "ecg",
+    title: "心电图",
+    status: fieldValues.ecgStatus || "",
+    summary: displayFieldValue("ecgResult", ""),
+    metrics: [{ label: "状态", value: fieldValues.ecgStatus || "", unit: "" }]
+  }
 ]);
 
 const treatmentManagementRows = computed(() => [
@@ -7334,6 +7455,174 @@ onBeforeUnmount(() => {
 
 .form-panel {
   padding: 16px;
+}
+
+.lab-report-overview {
+  display: grid;
+
+  gap: 14px;
+
+  padding: 16px;
+
+  margin-bottom: 16px;
+
+  background: linear-gradient(180deg, rgb(255 255 255 / 96%), rgb(248 252 250 / 94%));
+
+  border: 1px solid var(--hos-border);
+
+  border-radius: var(--hos-radius-card);
+
+  box-shadow: var(--hos-shadow-soft);
+}
+
+.lab-report-overview-head {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 14px;
+
+  div {
+    display: grid;
+
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+
+    font-size: 17px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+
+    font-size: 13px;
+  }
+}
+
+.lab-report-card-grid {
+  display: grid;
+
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+
+  gap: 12px;
+}
+
+.lab-report-card {
+  display: grid;
+
+  gap: 12px;
+
+  min-width: 0;
+
+  padding: 14px;
+
+  background: #ffffff;
+
+  border: 1px solid var(--hos-border-light);
+
+  border-radius: var(--hos-radius-md);
+}
+
+.lab-report-card-head {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 8px;
+
+  strong {
+    color: var(--hos-text-primary);
+
+    font-size: 15px;
+  }
+}
+
+.lab-report-metrics {
+  display: grid;
+
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+
+  gap: 8px;
+
+  span {
+    display: grid;
+
+    gap: 3px;
+
+    min-height: 72px;
+
+    padding: 9px;
+
+    background: var(--hos-accent-soft);
+
+    border: 1px solid var(--hos-border-light);
+
+    border-radius: 6px;
+  }
+
+  em {
+    color: var(--hos-text-secondary);
+
+    font-style: normal;
+
+    font-size: 12px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+
+    font-size: 17px;
+
+    line-height: 1.2;
+  }
+
+  small {
+    min-height: 16px;
+
+    color: var(--hos-text-muted);
+
+    font-size: 11px;
+  }
+}
+
+.lab-report-card p {
+  min-height: 34px;
+
+  margin: 0;
+
+  color: var(--hos-text-secondary);
+
+  font-size: 13px;
+
+  line-height: 1.6;
+}
+
+.lab-report-overview-foot {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 12px;
+
+  padding: 8px 12px;
+
+  color: var(--hos-text-secondary);
+
+  background: var(--hos-glass);
+
+  border: 1px dashed var(--hos-border-light);
+
+  border-radius: 6px;
+
+  font-size: 13px;
 }
 
 .workspace-anchor {

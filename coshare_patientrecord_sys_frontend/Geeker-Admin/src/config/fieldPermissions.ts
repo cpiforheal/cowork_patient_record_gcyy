@@ -967,6 +967,13 @@ export const recordSections: RecordSection[] = [
         evidence: "血常规报告",
         labPanel: "bloodRoutine"
       },
+      { key: "bloodWbc", label: "WBC 白细胞数目", value: "", kind: "input", inputType: "number", editors: lab, unit: "10^9/L", labPanel: "bloodRoutine" },
+      { key: "bloodNeuPercent", label: "NeU% 中性粒细胞百分比", value: "", kind: "input", inputType: "number", editors: lab, unit: "%", labPanel: "bloodRoutine" },
+      { key: "bloodLymPercent", label: "Lym% 淋巴细胞百分比", value: "", kind: "input", inputType: "number", editors: lab, unit: "%", labPanel: "bloodRoutine" },
+      { key: "bloodMonPercent", label: "Mon% 单核细胞百分比", value: "", kind: "input", inputType: "number", editors: lab, unit: "%", labPanel: "bloodRoutine" },
+      { key: "bloodRbc", label: "RBC 红细胞数目", value: "", kind: "input", inputType: "number", editors: lab, unit: "10^12/L", labPanel: "bloodRoutine" },
+      { key: "bloodHgb", label: "HGB 血红蛋白", value: "", kind: "input", inputType: "number", editors: lab, unit: "g/L", labPanel: "bloodRoutine" },
+      { key: "bloodPlt", label: "PLT 血小板数目", value: "", kind: "input", inputType: "number", editors: lab, unit: "10^9/L", labPanel: "bloodRoutine" },
       {
         key: "ecgResult",
         label: "心电图",

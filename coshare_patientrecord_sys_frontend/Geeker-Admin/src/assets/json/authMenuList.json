@@ -44,6 +44,20 @@
           }
         },
         {
+          "path": "/workbench/lab-report",
+          "name": "workbenchLabReport",
+          "component": "/workbench/labReport/index",
+          "meta": {
+            "icon": "Memo",
+            "title": "检验报告模板",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
           "path": "/workbench/legacy",
           "name": "workbenchLegacy",
           "component": "/workbench/upload/index",
