@@ -45,6 +45,9 @@
           <el-button v-auth="'user:disable'" :type="row.status === '启用' ? 'danger' : 'primary'" link @click="toggleStatus(row)">
             {{ row.status === "启用" ? "停用" : "启用" }}
           </el-button>
+          <el-button v-auth="'user:delete'" type="danger" link :disabled="row.username === 'admin'" @click="deleteAccount(row)">
+            删除
+          </el-button>
         </template>
       </ProTable>
     </div>
@@ -134,6 +137,7 @@ import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import {
   getAccountDepartmentOptionsApi,
   getAccountListApi,
+  deleteAccountApi,
   resetAccountPasswordApi,
   saveAccountApi,
   setAccountStatusApi,
@@ -197,7 +201,7 @@ const columns = reactive<ColumnProps<AccountRow>[]>([
     search: { el: "select" }
   },
   { prop: "scope", label: "可操作范围", minWidth: 260 },
-  { prop: "operation", label: "操作", fixed: "right", width: 230 }
+  { prop: "operation", label: "操作", fixed: "right", width: 280 }
 ]);
 
 const drawerTitle = computed(() => (accountForm.id ? "账号详情" : "新增账号"));
@@ -294,6 +298,23 @@ const resetPassword = async (row: AccountRow) => {
 const resetPasswordFromDrawer = async () => {
   if (!accountForm.id) return;
   await resetPasswordWithPrompt({ id: accountForm.id, name: accountForm.name || accountForm.username || "" });
+};
+
+const deleteAccount = async (row: AccountRow) => {
+  if (row.username === "admin") {
+    ElMessage.warning("内置管理员账号不能删除");
+    return;
+  }
+  await ElMessageBox.confirm(`确定删除账号“${row.name || row.username}”吗？删除后该账号不能再登录。`, "删除账号", {
+    confirmButtonText: "删除",
+    cancelButtonText: "取消",
+    type: "warning"
+  });
+  await deleteAccountApi(row.id, { operator: operatorName.value, operatorRole: operatorRole.value });
+  ElMessage.success("账号已删除");
+  if (accountForm.id === row.id) drawerVisible.value = false;
+  await loadDepartments();
+  refresh();
 };
 </script>
 

@@ -11,6 +11,7 @@
 
       <template #operation="{ row }">
         <el-button v-auth="'department:update'" type="primary" link @click="openDialog(row)">编辑</el-button>
+        <el-button v-auth="'department:delete'" type="danger" link @click="deleteDepartment(row)">删除</el-button>
       </template>
     </ProTable>
 
@@ -41,11 +42,11 @@
 
 <script setup lang="ts" name="departmentManage">
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { CirclePlus } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
-import { getDepartmentListApi, saveDepartmentApi, type DepartmentRow } from "@/api/modules/clinic";
+import { deleteDepartmentApi, getDepartmentListApi, saveDepartmentApi, type DepartmentRow } from "@/api/modules/clinic";
 import { USER_ROLE_OPTIONS, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 
@@ -64,7 +65,7 @@ const columns = reactive<ColumnProps<DepartmentRow>[]>([
   { prop: "defaultRole", label: "默认角色", width: 130 },
   { prop: "uploadTypes", label: "默认上传类型", minWidth: 260 },
   { prop: "scope", label: "资料范围", minWidth: 260 },
-  { prop: "operation", label: "操作", fixed: "right", width: 120 }
+  { prop: "operation", label: "操作", fixed: "right", width: 160 }
 ]);
 
 const dataCallback = (data: { list: DepartmentRow[]; total: number }) => data;
@@ -81,6 +82,17 @@ const saveDepartment = async () => {
   await saveDepartmentApi({ ...departmentForm, operator: operatorName.value, operatorRole: operatorRole.value });
   ElMessage.success("科室配置已保存");
   dialogVisible.value = false;
+  refresh();
+};
+
+const deleteDepartment = async (row: DepartmentRow) => {
+  await ElMessageBox.confirm(`确定删除科室“${row.name}”吗？如仍有关联账号，系统会阻止删除。`, "删除科室", {
+    confirmButtonText: "删除",
+    cancelButtonText: "取消",
+    type: "warning"
+  });
+  await deleteDepartmentApi(row.id, { operator: operatorName.value, operatorRole: operatorRole.value });
+  ElMessage.success("科室已删除");
   refresh();
 };
 </script>

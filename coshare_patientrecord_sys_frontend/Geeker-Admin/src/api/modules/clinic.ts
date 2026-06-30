@@ -1037,6 +1037,31 @@ export const resetAccountPasswordApi = async (id: string, context: SystemOperati
   return response({ temporaryPassword }, "密码已重置，请记录临时密码");
 };
 
+export const deleteAccountApi = async (id: string, context: SystemOperationContext = {}) => {
+  ensureSystemManager(context.operatorRole);
+  const db = await readDb();
+  const list = db.accounts ?? [];
+  const target = list.find(item => item.id === id);
+  if (!target) return Promise.reject(new Error("账号不存在"));
+  if (target.id === "admin" || target.username === "admin") return Promise.reject(new Error("内置管理员账号不能删除"));
+  db.accounts = list.filter(item => item.id !== id);
+  appendAuditLog(db, {
+    operator: context.operator || roleLabel(context.operatorRole || "admin"),
+    role: roleLabel(context.operatorRole || "admin"),
+    patient: "-",
+    module: "system",
+    action: "删除账号",
+    actionCode: "account.delete",
+    targetType: "account",
+    targetKey: target.id,
+    targetLabel: target.name || target.username,
+    beforeValue: valuePreview(JSON.stringify(target)),
+    detail: `删除账号：${target.name || target.username}（${target.department}/${target.roleLabel}）`
+  });
+  await writeDb(db);
+  return response(null, "账号已删除");
+};
+
 export const getRoleListApi = async (params: { pageNum: number; pageSize: number; name?: string }) => {
   const db = await readDb();
   const filtered = (db.roles ?? []).filter(item => !params.name || item.name.includes(params.name));
@@ -1082,6 +1107,33 @@ export const saveRoleApi = async (params: Partial<RoleRow> & SystemOperationCont
   return response(null, "角色已保存");
 };
 
+export const deleteRoleApi = async (id: string, context: SystemOperationContext = {}) => {
+  ensureSystemManager(context.operatorRole);
+  const db = await readDb();
+  const list = db.roles ?? [];
+  const target = list.find(item => item.id === id);
+  if (!target) return Promise.reject(new Error("角色不存在"));
+  if (target.role === "admin") return Promise.reject(new Error("内置管理员角色不能删除"));
+  const memberCount = (db.accounts ?? []).filter(account => account.role === target.role).length;
+  if (memberCount > 0) return Promise.reject(new Error(`该角色仍有 ${memberCount} 个账号使用，请先调整账号角色`));
+  db.roles = list.filter(item => item.id !== id);
+  appendAuditLog(db, {
+    operator: context.operator || roleLabel(context.operatorRole || "admin"),
+    role: roleLabel(context.operatorRole || "admin"),
+    patient: "-",
+    module: "system",
+    action: "删除角色",
+    actionCode: "role.delete",
+    targetType: "role",
+    targetKey: target.id,
+    targetLabel: target.name,
+    beforeValue: valuePreview(JSON.stringify(target)),
+    detail: `删除角色：${target.name}（${roleLabel(target.role)}）`
+  });
+  await writeDb(db);
+  return response(null, "角色已删除");
+};
+
 export const getDepartmentListApi = async (params: { pageNum: number; pageSize: number; name?: string }) => {
   const db = await readDb();
   const filtered = (db.departments ?? []).filter(item => !params.name || item.name.includes(params.name));
@@ -1122,6 +1174,32 @@ export const saveDepartmentApi = async (params: Partial<DepartmentRow> & SystemO
   });
   await writeDb(db);
   return response(null, "科室已保存");
+};
+
+export const deleteDepartmentApi = async (id: string, context: SystemOperationContext = {}) => {
+  ensureSystemManager(context.operatorRole);
+  const db = await readDb();
+  const list = db.departments ?? [];
+  const target = list.find(item => item.id === id);
+  if (!target) return Promise.reject(new Error("科室不存在"));
+  const accountCount = (db.accounts ?? []).filter(account => account.department === target.name).length;
+  if (accountCount > 0) return Promise.reject(new Error(`该科室仍有 ${accountCount} 个账号使用，请先调整账号所属科室`));
+  db.departments = list.filter(item => item.id !== id);
+  appendAuditLog(db, {
+    operator: context.operator || roleLabel(context.operatorRole || "admin"),
+    role: roleLabel(context.operatorRole || "admin"),
+    patient: "-",
+    module: "system",
+    action: "删除科室",
+    actionCode: "department.delete",
+    targetType: "department",
+    targetKey: target.id,
+    targetLabel: target.name,
+    beforeValue: valuePreview(JSON.stringify(target)),
+    detail: `删除科室：${target.name}`
+  });
+  await writeDb(db);
+  return response(null, "科室已删除");
 };
 
 export const getDictListApi = async (params: { pageNum: number; pageSize: number; name?: string; department?: string }) => {

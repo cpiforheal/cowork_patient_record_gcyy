@@ -20,6 +20,9 @@
       <template #operation="{ row }">
         <el-button v-auth="'role:update'" type="primary" link @click="openRoleDialog(row)">编辑</el-button>
         <el-button v-auth="'role:grant'" type="primary" link @click="openRoleDialog(row)">授权</el-button>
+        <el-button v-auth="'role:delete'" type="danger" link :disabled="row.role === 'admin' || row.members > 0" @click="deleteRole(row)">
+          删除
+        </el-button>
       </template>
     </ProTable>
 
@@ -57,11 +60,11 @@
 
 <script setup lang="ts" name="roleManage">
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { CirclePlus } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
-import { getRoleListApi, saveRoleApi, type RoleRow } from "@/api/modules/clinic";
+import { deleteRoleApi, getRoleListApi, saveRoleApi, type RoleRow } from "@/api/modules/clinic";
 import { USER_ROLE_OPTIONS, recordSections } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 
@@ -93,7 +96,7 @@ const columns = reactive<ColumnProps<RoleRow>[]>([
   { prop: "desc", label: "说明", minWidth: 220 },
   { prop: "permissions", label: "按钮权限", minWidth: 260 },
   { prop: "editableSections", label: "可编辑章节", minWidth: 240 },
-  { prop: "operation", label: "操作", fixed: "right", width: 160 }
+  { prop: "operation", label: "操作", fixed: "right", width: 210 }
 ]);
 
 const dataCallback = (data: { list: RoleRow[]; total: number }) => data;
@@ -108,6 +111,25 @@ const saveRole = async () => {
   await saveRoleApi({ ...roleForm, operator: operatorName.value, operatorRole: operatorRole.value });
   ElMessage.success("角色权限已保存");
   dialogVisible.value = false;
+  proTable.value?.getTableList();
+};
+
+const deleteRole = async (row: RoleRow) => {
+  if (row.role === "admin") {
+    ElMessage.warning("内置管理员角色不能删除");
+    return;
+  }
+  if (row.members > 0) {
+    ElMessage.warning(`该角色仍有 ${row.members} 个账号使用，请先调整账号角色`);
+    return;
+  }
+  await ElMessageBox.confirm(`确定删除角色“${row.name}”吗？`, "删除角色", {
+    confirmButtonText: "删除",
+    cancelButtonText: "取消",
+    type: "warning"
+  });
+  await deleteRoleApi(row.id, { operator: operatorName.value, operatorRole: operatorRole.value });
+  ElMessage.success("角色已删除");
   proTable.value?.getTableList();
 };
 </script>
