@@ -116,7 +116,7 @@ public class ClinicAiDocumentService {
         requireAllowedRole(user);
         DraftInput input = validateInput(request);
         ClinicAiConfigService.EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
-        if (!config.enabled() || safe(config.apiKey()).isBlank() || safe(config.baseUrl()).isBlank()) {
+        if (!config.enabled() || safe(config.apiKey()).isBlank() || safe(config.baseUrl()).isBlank() || safe(config.model()).isBlank()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "AI文稿生成未配置，请先在AI接口配置中填写 base_url、api_key 和模型");
         }
 
@@ -180,7 +180,7 @@ public class ClinicAiDocumentService {
 
     private String generateFinalText(DraftInput input, ClinicAiConfigService.EffectiveAiConfig config) {
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("model", safe(config.model()).isBlank() ? "gpt-5.5" : safe(config.model()));
+        payload.put("model", safe(config.model()));
         payload.put("temperature", 0.45);
         payload.put("max_tokens", 4000);
         payload.put("stream", false);

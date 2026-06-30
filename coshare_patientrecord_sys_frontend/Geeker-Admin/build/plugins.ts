@@ -8,13 +8,13 @@ import vueSetupExtend from "unplugin-vue-setup-extend-plus/vite";
 import Components from "unplugin-vue-components/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
 
-export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOption[])[] => {
+export const createVitePlugins = (viteEnv: ViteEnv, command: "build" | "serve"): (PluginOption | PluginOption[])[] => {
   const { VITE_GLOB_APP_TITLE } = viteEnv;
 
   return [
     vue(),
     vueJsx(),
-    eslintPlugin(),
+    command === "serve" ? eslintPlugin() : null,
     vueSetupExtend({}),
     Components({
       dts: false,

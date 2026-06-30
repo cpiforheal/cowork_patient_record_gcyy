@@ -51,8 +51,8 @@ public class ClinicAiSummaryService {
         ClinicAiConfigService.EffectiveAiConfig aiConfig = aiConfigService.resolveEffectiveConfig();
         String baseUrl = normalizeChatCompletionsUrl(aiConfig.baseUrl());
         String apiKey = String.valueOf(aiConfig.apiKey() == null ? "" : aiConfig.apiKey()).trim();
-        String model = String.valueOf(aiConfig.model() == null || aiConfig.model().isBlank() ? "gpt-5.5" : aiConfig.model()).trim();
-        if (!aiConfig.enabled() || apiKey.isBlank() || baseUrl.isBlank()) {
+        String model = String.valueOf(aiConfig.model() == null ? "" : aiConfig.model()).trim();
+        if (!aiConfig.enabled() || apiKey.isBlank() || baseUrl.isBlank() || model.isBlank()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "AI服务未配置，请在系统设置中配置 AI base_url、api_key 和模型");
         }
         String patientId = request == null ? "" : String.valueOf(request.patientId() == null ? "" : request.patientId()).trim();

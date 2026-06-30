@@ -12,6 +12,10 @@ config/ai-secrets.local.env
 **/.vite/
 **/.cache/
 
+$log
+outputs/edge-profile/
+**/vite.config.ts.timestamp-*.mjs
+
 *.log
 *.tmp
 *.bak

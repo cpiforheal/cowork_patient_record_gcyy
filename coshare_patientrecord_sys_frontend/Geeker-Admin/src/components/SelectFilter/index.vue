@@ -71,7 +71,7 @@ watch(
   () => props.defaultValues,
   () => {
     props.data.forEach(item => {
-      selected.value[item.key] = item.multiple ? props.defaultValues[item.key] ?? [""] : props.defaultValues[item.key] ?? "";
+      selected.value[item.key] = item.multiple ? (props.defaultValues[item.key] ?? [""]) : (props.defaultValues[item.key] ?? "");
     });
   },
   { deep: true, immediate: true }

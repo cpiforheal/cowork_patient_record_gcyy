@@ -62,7 +62,7 @@ public class ClinicAiConfigService {
         ObjectMapper objectMapper,
         @Value("${clinic.ai.base-url:}") String defaultBaseUrl,
         @Value("${clinic.ai.api-key:}") String defaultApiKey,
-        @Value("${clinic.ai.model:gpt-5.5}") String defaultModel,
+        @Value("${clinic.ai.model:}") String defaultModel,
         @Value("${clinic.ai.doubao.base-url:}") String doubaoDefaultBaseUrl,
         @Value("${clinic.ai.doubao.api-key:}") String doubaoDefaultApiKey,
         @Value("${clinic.ai.doubao.model:}") String doubaoDefaultModel,
@@ -78,7 +78,7 @@ public class ClinicAiConfigService {
         this.objectMapper = objectMapper;
         this.defaultBaseUrl = normalizeBaseUrl(defaultBaseUrl);
         this.defaultApiKey = normalizeApiKey(defaultApiKey);
-        this.defaultModel = safe(defaultModel).isBlank() ? "gpt-5.5" : safe(defaultModel);
+        this.defaultModel = safe(defaultModel);
         this.doubaoDefaultBaseUrl = normalizeBaseUrl(firstNonBlank(doubaoDefaultBaseUrl, System.getenv("CLINIC_AI_DOUBAO_BASE_URL")));
         this.doubaoDefaultApiKey = normalizeApiKey(firstNonBlank(doubaoDefaultApiKey, System.getenv("CLINIC_AI_DOUBAO_API_KEY")));
         this.doubaoDefaultModel = safe(firstNonBlank(doubaoDefaultModel, System.getenv("CLINIC_AI_DOUBAO_MODEL")));

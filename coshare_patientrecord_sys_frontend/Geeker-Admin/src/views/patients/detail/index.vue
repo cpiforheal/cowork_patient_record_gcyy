@@ -492,67 +492,22 @@
             </div>
           </section>
 
-          <section v-if="detailWorkspaceMode === 'attachments'" class="attachment-workbench">
-            <div class="attachment-workbench-head">
-              <div>
-                <h3>检查与附件</h3>
+          <AttachmentWorkbench
+            v-if="detailWorkspaceMode === 'attachments'"
+            :attachments="currentAttachments"
+            :can-open-attachment="canOpenAttachment"
+            @upload="openSupplementUpload"
+            @open="openAttachment"
+          />
 
-                <p>检查报告、旧共享资料、图片证据统一在这里回查；目标病历只引用医生确认后的字段值。</p>
-              </div>
-
-              <el-button :icon="Upload" type="primary" plain @click="openSupplementUpload">补充图片</el-button>
-            </div>
-
-            <el-empty v-if="!currentAttachments.length" description="暂无附件资料" />
-
-            <div v-else class="attachment-workbench-list">
-              <article v-for="attachment in currentAttachments" :key="attachment.key">
-                <div>
-                  <strong>{{ attachment.title || attachment.fileName }}</strong>
-
-                  <span>{{ attachment.fieldLabel || "未关联字段" }} · {{ attachment.department || "未记录科室" }}</span>
-
-                  <small>{{ attachment.uploadedAt || "上传时间待补" }} · {{ attachment.uploader || "上传人待补" }}</small>
-                </div>
-
-                <el-button plain :disabled="!canOpenAttachment(attachment)" @click="openAttachment(attachment.url)"
-                  >打开</el-button
-                >
-              </article>
-            </div>
-          </section>
-
-          <section v-if="detailWorkspaceMode === 'timeline'" class="timeline-workbench">
-            <div class="attachment-workbench-head">
-              <div>
-                <h3>档案时间轴</h3>
-
-                <p>用于回查字段、附件、复查和归档动作的来源、人员和时间。</p>
-              </div>
-
-              <el-button :loading="auditLoading" @click="refreshAuditTimeline">刷新</el-button>
-            </div>
-
-            <el-empty v-if="!patientTimelineEvents.length" description="暂无档案时间轴" />
-
-            <div v-else class="timeline-workbench-list">
-              <article v-for="event in patientTimelineEvents" :key="event.id">
-                <span>{{ timelineDisplayTime(event.time) }}</span>
-
-                <div>
-                  <strong>{{ event.title }}</strong>
-
-                  <p>{{ event.detail || "暂无详情" }}</p>
-
-                  <small>
-                    {{ timelineSourceLabel(event.source) }} · {{ event.module || "档案" }}
-
-                    <template v-if="event.operator"> · {{ event.operator }}</template>
-                  </small>
-                </div>
-              </article>
-            </div>
-          </section>
+          <TimelineWorkbench
+            v-if="detailWorkspaceMode === 'timeline'"
+            :events="patientTimelineEvents"
+            :loading="auditLoading"
+            :timeline-display-time="timelineDisplayTime"
+            :timeline-source-label="timelineSourceLabel"
+            @refresh="refreshAuditTimeline"
+          />
 
           <div v-if="detailWorkspaceMode === 'archive'" class="record-layout" :class="`mode-${recordViewMode}`">
             <aside v-if="recordViewMode === 'full'" class="section-rail screen-only">
@@ -731,6 +686,11 @@
                     <FieldAttachmentEvidence
                       v-if="item.field.kind !== 'attachment'"
                       :attachments="matchedAttachments(item.field.key)"
+                      :can-open-attachment="canOpenAttachment"
+                      :is-image-attachment="isImageAttachment"
+                      :attachment-preview-url="attachmentPreviewUrl"
+                      :open-attachment="openAttachment"
+                      :role-label="roleLabel"
                     />
 
                     <p v-if="issueForField(item.field)" class="field-inline-issue">
@@ -944,6 +904,11 @@
                         <FieldAttachmentEvidence
                           v-if="field.kind !== 'attachment'"
                           :attachments="matchedAttachments(field.key)"
+                          :can-open-attachment="canOpenAttachment"
+                          :is-image-attachment="isImageAttachment"
+                          :attachment-preview-url="attachmentPreviewUrl"
+                          :open-attachment="openAttachment"
+                          :role-label="roleLabel"
                         />
 
                         <p v-if="issueForField(field)" class="field-inline-issue">
@@ -1074,7 +1039,15 @@
                       :type="field.kind === 'textarea' ? 'textarea' : field.inputType === 'tel' ? 'tel' : 'text'"
                     />
 
-                    <FieldAttachmentEvidence v-if="field.kind !== 'attachment'" :attachments="matchedAttachments(field.key)" />
+                    <FieldAttachmentEvidence
+                      v-if="field.kind !== 'attachment'"
+                      :attachments="matchedAttachments(field.key)"
+                      :can-open-attachment="canOpenAttachment"
+                      :is-image-attachment="isImageAttachment"
+                      :attachment-preview-url="attachmentPreviewUrl"
+                      :open-attachment="openAttachment"
+                      :role-label="roleLabel"
+                    />
 
                     <p v-if="issueForField(field)" class="field-inline-issue">
                       {{ issueForField(field)?.message }}
@@ -1807,230 +1780,35 @@
         </div>
       </el-drawer>
 
-      <el-dialog v-model="voidDialogVisible" title="作废附件" width="460px" destroy-on-close>
-        <div class="void-document-dialog">
-          <p>
-            <span>附件：</span>
+      <VoidAttachmentDialog
+        v-model:visible="voidDialogVisible"
+        v-model:reason="voidReason"
+        :target="voidTarget"
+        :voiding="voiding"
+        @confirm="confirmVoidDocument"
+      />
 
-            <strong>{{ voidTarget?.fileName }}</strong>
-          </p>
+      <PrintPreflightDialog v-model:visible="printPreflightVisible" :items="printPreflightItems" @confirm="executePrint" />
 
-          <el-input
-            v-model="voidReason"
-            type="textarea"
-            :rows="4"
-            maxlength="120"
-            show-word-limit
-            placeholder="请填写作废原因，例如：传错患者、重复上传、报告版本错误"
-          />
-        </div>
+      <ArchivePrecheckDialog
+        v-model:visible="archivePrecheckVisible"
+        :issues="archivePrecheckIssues"
+        @focus="focusPrecheckIssue"
+      />
 
-        <template #footer>
-          <el-button @click="voidDialogVisible = false">取消</el-button>
-
-          <el-button type="danger" :loading="voiding" :disabled="!voidReason.trim()" @click="confirmVoidDocument">
-            确认作废
-          </el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog
-        v-model="printPreflightVisible"
-        title="打印预检"
-        width="520px"
-        append-to-body
-        destroy-on-close
-        class="print-preflight-dialog"
-        :z-index="3200"
-      >
-        <div class="print-preflight-list">
-          <article v-for="item in printPreflightItems" :key="item.key" :class="`is-${item.level}`">
-            <span class="preflight-dot" aria-hidden="true"></span>
-
-            <div>
-              <strong>{{ item.label }}</strong>
-
-              <small>{{ item.value }}</small>
-            </div>
-          </article>
-        </div>
-
-        <template #footer>
-          <el-button @click="printPreflightVisible = false">返回补齐</el-button>
-
-          <el-button type="primary" :icon="Printer" @click="executePrint">继续打印</el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog
-        v-model="archivePrecheckVisible"
-        title="提交质控前预检"
-        width="600px"
-        append-to-body
-        destroy-on-close
-        class="archive-precheck-dialog"
-      >
-        <el-alert
-          title="系统正在保护当前档案：以下问题处理后再提交，可减少质控退回。"
-          type="warning"
-          show-icon
-          :closable="false"
-        />
-
-        <div class="archive-precheck-list">
-          <button v-for="issue in archivePrecheckIssues" :key="issue.fieldKey" type="button" @click="focusPrecheckIssue(issue)">
-            <span>{{ issue.level === "invalid" ? "格式异常" : "必填待补" }}</span>
-
-            <strong>{{ issue.sectionTitle }} · {{ issue.fieldLabel }}</strong>
-
-            <small>{{ issue.message }}</small>
-          </button>
-        </div>
-
-        <template #footer>
-          <el-button @click="archivePrecheckVisible = false">稍后处理</el-button>
-
-          <el-button type="primary" @click="focusPrecheckIssue(archivePrecheckIssues[0])">定位第一项</el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog
-        v-model="aiSummaryVisible"
-        title="AI健康档案总结"
-        width="760px"
-        append-to-body
-        destroy-on-close
+      <AiSummaryDialog
+        v-model:visible="aiSummaryVisible"
+        :loading="aiSummaryLoading"
+        :speaking="aiSummarySpeaking"
+        :summary="aiSummary"
+        :patient-name="fieldValues.patientName || '当前患者'"
+        :visit-no="fieldValues.visitNo || patientId"
         @closed="stopAiSummarySpeech"
-      >
-        <div v-loading="aiSummaryLoading" class="ai-summary-dialog" element-loading-text="正在生成AI总结...">
-          <el-alert
-            title="AI输出仅供院内辅助阅读，不替代医生判断和 HIS 官方病历质控。"
-            type="warning"
-            :closable="false"
-            show-icon
-          />
-
-          <el-empty v-if="!aiSummary && !aiSummaryLoading" description="暂无AI总结">
-            <el-button type="primary" @click="generateAiSummary">生成总结</el-button>
-          </el-empty>
-
-          <template v-if="aiSummary">
-            <section class="ai-summary-head">
-              <div>
-                <strong>{{ fieldValues.patientName || "当前患者" }}</strong>
-
-                <span>{{ fieldValues.visitNo || patientId }} · {{ aiSummary.generatedAt }}</span>
-              </div>
-
-              <el-tag effect="plain">{{ aiSummary.model }}</el-tag>
-            </section>
-
-            <section class="ai-summary-block">
-              <h4>患者概况</h4>
-
-              <p>{{ aiSummary.summary }}</p>
-            </section>
-
-            <section v-if="aiSummary.patientPortrait" class="ai-summary-block portrait">
-              <h4>一句话患者画像</h4>
-
-              <p>{{ aiSummary.patientPortrait }}</p>
-            </section>
-
-            <section class="ai-summary-grid">
-              <article>
-                <h4>诊疗摘要</h4>
-
-                <p>{{ aiSummary.clinicalSummary }}</p>
-              </article>
-
-              <article>
-                <h4>管理随访摘要</h4>
-
-                <p>{{ aiSummary.managementSummary }}</p>
-              </article>
-
-              <article>
-                <h4>复查随访</h4>
-
-                <p>{{ aiSummary.followupSummary }}</p>
-              </article>
-            </section>
-
-            <section class="ai-summary-lists">
-              <article v-if="aiSummary.priorityFocus?.length">
-                <h4>优先关注</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.priorityFocus" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-
-              <article v-if="aiSummary.overlookedInsights?.length">
-                <h4>容易忽略</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.overlookedInsights" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-
-              <article>
-                <h4>缺失/待补充</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.missingItems" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-
-              <article>
-                <h4>风险提醒</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.riskHints" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-
-              <article v-if="aiSummary.communicationTips?.length">
-                <h4>沟通建议</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.communicationTips" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-
-              <article v-if="aiSummary.nextFollowupSuggestions?.length">
-                <h4>下一步随访</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.nextFollowupSuggestions" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-
-              <article>
-                <h4>医生提醒</h4>
-
-                <ul>
-                  <li v-for="item in aiSummary.doctorTips" :key="item">{{ item }}</li>
-                </ul>
-              </article>
-            </section>
-
-            <p class="ai-summary-disclaimer">{{ aiSummary.disclaimer }}</p>
-          </template>
-        </div>
-
-        <template #footer>
-          <el-button @click="closeAiSummaryDialog">关闭</el-button>
-
-          <el-button :disabled="!aiSummary || aiSummaryLoading" :loading="aiSummarySpeaking" @click="toggleAiSummarySpeech">
-            {{ aiSummarySpeaking ? "停止朗读" : "朗读总结" }}
-          </el-button>
-
-          <el-button :disabled="!aiSummary" @click="copyAiSummary">复制总结</el-button>
-
-          <el-button type="primary" :loading="aiSummaryLoading" @click="generateAiSummary">重新生成</el-button>
-        </template>
-      </el-dialog>
+        @close="closeAiSummaryDialog"
+        @generate="generateAiSummary"
+        @toggle-speech="toggleAiSummarySpeech"
+        @copy="copyAiSummary"
+      />
 
       <el-dialog v-model="medicalRecordVisible" title="医生目标病历填写与生成" width="1040px" append-to-body destroy-on-close>
         <div v-loading="medicalRecordLoading" class="medical-record-generator" element-loading-text="正在处理目标病历...">
@@ -2259,13 +2037,13 @@ import {
   onMounted,
   reactive,
   ref,
-  watch,
-  type PropType
+  watch
 } from "vue";
+import type { PropType } from "vue";
 
 import { useDebounceFn } from "@vueuse/core";
 
-import { ElButton, ElImage, ElInput, ElMessage } from "element-plus";
+import { ElInput, ElMessage } from "element-plus";
 
 import { useRoute, useRouter } from "vue-router";
 
@@ -2327,7 +2105,17 @@ import { useUserStore } from "@/stores/modules/user";
 
 import medicalLogoUrl from "@/assets/images/logo.jpg";
 
+import AiSummaryDialog from "./components/AiSummaryDialog.vue";
+import ArchivePrecheckDialog from "./components/ArchivePrecheckDialog.vue";
+import AttachmentWorkbench from "./components/AttachmentWorkbench.vue";
+import FieldAttachmentEvidence from "./components/FieldAttachmentEvidence.vue";
+import FollowupRecordsEditor from "./components/FollowupRecordsEditor.vue";
 import LabMetricEditor from "./components/LabMetricEditor.vue";
+import PrintPreflightDialog from "./components/PrintPreflightDialog.vue";
+import TimelineWorkbench from "./components/TimelineWorkbench.vue";
+import VoidAttachmentDialog from "./components/VoidAttachmentDialog.vue";
+import type { PrintPreflightItem } from "./components/PrintPreflightDialog.vue";
+import type { FieldIssue, FollowupRecord } from "./components/types";
 
 const router = useRouter();
 
@@ -2473,20 +2261,6 @@ let aiSummaryAudioUrl = "";
 
 let aiSummarySpeechStoppedManually = false;
 
-type FieldIssue = {
-  fieldKey: string;
-
-  fieldLabel: string;
-
-  sectionKey: string;
-
-  sectionTitle: string;
-
-  message: string;
-
-  level: "missing" | "invalid";
-};
-
 type WorkflowHint = {
   visible: boolean;
 
@@ -2495,34 +2269,6 @@ type WorkflowHint = {
   title: string;
 
   desc: string;
-};
-
-type FollowupRecord = {
-  id: string;
-
-  date: string;
-
-  type: string;
-
-  node: string;
-
-  project: string;
-
-  management: string;
-
-  imagingRequirement: string;
-
-  completed: string;
-
-  recovery: string;
-
-  abnormal: string;
-
-  advice: string;
-
-  nextDate: string;
-
-  onTime: string;
 };
 
 const createFollowupRecord = (): FollowupRecord => ({
@@ -2564,80 +2310,6 @@ const standardFollowupNodes = [
 
   "痊愈归档"
 ];
-
-const FieldAttachmentEvidence = defineComponent({
-  name: "FieldAttachmentEvidence",
-
-  props: {
-    attachments: { type: Array as PropType<RecordAttachment[]>, default: () => [] }
-  },
-
-  setup(props) {
-    return () => {
-      const attachments = ensureArray(props.attachments);
-
-      if (!attachments.length) return null;
-
-      return h(
-        "div",
-
-        { class: "field-evidence-grid" },
-
-        attachments.map(attachment => {
-          const canOpen = canOpenAttachment(attachment);
-
-          const isImage = isImageAttachment(attachment);
-
-          const previewUrl = attachmentPreviewUrl(attachment.url);
-
-          const sourceRole = attachment.sourceRole ? roleLabel(attachment.sourceRole) : "";
-
-          const batchName = attachment.batchName || "";
-
-          const meta = [attachment.department, sourceRole, attachment.uploader, attachment.uploadedAt, batchName]
-            .filter(Boolean)
-            .join(" / ");
-
-          if (isImage && canOpen && previewUrl) {
-            return h("article", { class: "field-evidence-card image", key: attachment.key }, [
-              h(ElImage, {
-                src: previewUrl,
-
-                fit: "cover",
-
-                previewSrcList: [previewUrl],
-
-                previewTeleported: true,
-
-                hideOnClickModal: true
-              }),
-
-              h("div", [h("strong", attachment.title || attachment.fileName || "检查图片"), h("small", meta || "检查图片")])
-            ]);
-          }
-
-          return h(
-            "button",
-
-            {
-              class: ["field-evidence-card", "file", { disabled: !canOpen }],
-
-              key: attachment.key,
-
-              type: "button",
-
-              disabled: !canOpen,
-
-              onClick: () => openAttachment(attachment.url)
-            },
-
-            [h("strong", attachment.title || attachment.fileName || "附件"), h("small", meta || "点击打开附件")]
-          );
-        })
-      );
-    };
-  }
-});
 
 const FieldAttachmentUploader = defineComponent({
   name: "FieldAttachmentUploader",
@@ -2690,106 +2362,15 @@ const FieldAttachmentUploader = defineComponent({
             class: "field-attachment-remark"
           })
         ]),
-        h(FieldAttachmentEvidence, { attachments: props.attachments }),
+        h(FieldAttachmentEvidence, {
+          attachments: props.attachments,
+          canOpenAttachment,
+          isImageAttachment,
+          attachmentPreviewUrl,
+          openAttachment,
+          roleLabel
+        }),
         h("small", { class: "field-attachment-hint" }, props.field.placeholder || "该字段以图片/视频证据为主，无需填写大段文字。")
-      ]);
-  }
-});
-
-const FollowupRecordsEditor = defineComponent({
-  name: "FollowupRecordsEditor",
-
-  props: {
-    records: { type: Array as PropType<FollowupRecord[]>, required: true },
-
-    disabled: { type: Boolean, default: false }
-  },
-
-  emits: ["add", "remove"],
-
-  setup(props, { emit }) {
-    const input = (record: FollowupRecord, key: keyof FollowupRecord, placeholder = "", type = "text") =>
-      h(ElInput, {
-        modelValue: record[key],
-
-        "onUpdate:modelValue": (value: string) => {
-          record[key] = value;
-        },
-
-        disabled: props.disabled,
-
-        placeholder,
-
-        type,
-
-        rows: type === "textarea" ? 2 : undefined
-      });
-
-    return () =>
-      h("div", { class: "followup-editor" }, [
-        h("div", { class: "followup-editor-head" }, [
-          h("strong", "术后分级复诊健康管理台账"),
-
-          h("span", "默认覆盖术后7天、14天、30天、3/6/12月和痊愈归档节点"),
-
-          h(ElButton, { type: "primary", plain: true, disabled: props.disabled, onClick: () => emit("add") }, () => "新增复查")
-        ]),
-
-        props.records.length
-          ? h(
-              "div",
-
-              { class: "followup-record-list" },
-
-              props.records.map((record, index) =>
-                h("article", { class: "followup-record-item", key: record.id }, [
-                  h("div", { class: "followup-record-top" }, [
-                    h("span", record.node || `第 ${index + 1} 次`),
-
-                    h(
-                      ElButton,
-
-                      { type: "danger", link: true, disabled: props.disabled, onClick: () => emit("remove", record.id) },
-
-                      () => "删除"
-                    )
-                  ]),
-
-                  h("div", { class: "followup-record-grid" }, [
-                    h("label", [h("span", "复诊层级"), input(record, "node", "术后第7天/14天/30天/远期/痊愈")]),
-
-                    h("label", [h("span", "复查日期"), input(record, "date", "YYYY-MM-DD")]),
-
-                    h("label", [h("span", "复查项目"), input(record, "project", "换药/创面/肛门功能/肠镜等")]),
-
-                    h("label", [h("span", "完成状态"), input(record, "completed", "未完成/已完成")])
-                  ]),
-
-                  h("div", { class: "followup-record-grid wide" }, [
-                    h("label", [
-                      h("span", "健康管理内容"),
-
-                      input(record, "management", "宣教、换药、疼痛管理、饮食管理", "textarea")
-                    ]),
-
-                    h("label", [
-                      h("span", "影像归档要求"),
-
-                      input(record, "imagingRequirement", "创面照片/报告/无需归档", "textarea")
-                    ]),
-
-                    h("label", [h("span", "恢复情况"), input(record, "recovery", "每次检查的恢复情况", "textarea")]),
-
-                    h("label", [h("span", "异常情况"), input(record, "abnormal", "无异常可填无", "textarea")]),
-
-                    h("label", [h("span", "医生建议"), input(record, "advice", "用药、清洁、饮食、复查安排", "textarea")]),
-
-                    h("label", [h("span", "下次复查"), input(record, "nextDate", "YYYY-MM-DD")])
-                  ])
-                ])
-              )
-            )
-          : h("div", { class: "followup-empty" }, "暂无复查记录")
       ]);
   }
 });
@@ -3954,7 +3535,7 @@ const printFileTitle = computed(() =>
     .join("_")
 );
 
-const printPreflightItems = computed(() => [
+const printPreflightItems = computed<PrintPreflightItem[]>(() => [
   {
     key: "required",
 
