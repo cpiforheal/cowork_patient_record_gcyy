@@ -385,7 +385,11 @@
                         v-for="field in section.fields"
                         :key="field.key"
                         class="medical-record-field"
-                        :class="{ wide: isMedicalRecordTextareaField(field), missing: isMedicalRecordFieldMissing(field) }"
+                        :class="{
+                          wide: isMedicalRecordTextareaField(field),
+                          missing: isMedicalRecordFieldMissing(field),
+                          locked: Boolean(field.templateLocked)
+                        }"
                       >
                         <span>
                           {{ field.label }}
@@ -395,10 +399,30 @@
                           <em>{{ medicalRecordFieldAssistText(field) }}</em>
                         </span>
 
-                        <el-select
-                          v-if="isMedicalRecordSelectField(field)"
+                        <el-checkbox-group
+                          v-if="isMedicalRecordCheckboxField(field)"
+                          :model-value="medicalRecordFieldArrayValue(field)"
+                          class="medical-record-checklist"
+                          @change="value => updateMedicalRecordArrayField(field, value)"
+                        >
+                          <el-checkbox v-for="option in medicalRecordFieldOptions(field)" :key="option" :label="option" border>
+                            <span class="medical-record-option-text">{{ option }}</span>
+                          </el-checkbox>
+                        </el-checkbox-group>
+
+                        <el-input
+                          v-if="isMedicalRecordCheckboxField(field)"
                           v-model="fieldValues[field.key]"
-                          allow-create
+                          class="medical-record-paragraph-preview"
+                          type="textarea"
+                          :rows="4"
+                          placeholder="勾选后自动合并为正式段落，可补充少量特殊说明"
+                        />
+
+                        <el-select
+                          v-else-if="isMedicalRecordSelectField(field)"
+                          v-model="fieldValues[field.key]"
+                          :allow-create="!field.templateLocked"
                           clearable
                           default-first-option
                           filterable
@@ -1918,7 +1942,11 @@
                     v-for="field in section.fields"
                     :key="field.key"
                     class="medical-record-field"
-                    :class="{ wide: isMedicalRecordTextareaField(field), missing: isMedicalRecordFieldMissing(field) }"
+                    :class="{
+                      wide: isMedicalRecordTextareaField(field),
+                      missing: isMedicalRecordFieldMissing(field),
+                      locked: Boolean(field.templateLocked)
+                    }"
                   >
                     <span>
                       {{ field.label }}
@@ -1928,10 +1956,30 @@
                       <em>{{ medicalRecordFieldAssistText(field) }}</em>
                     </span>
 
-                    <el-select
-                      v-if="isMedicalRecordSelectField(field)"
+                    <el-checkbox-group
+                      v-if="isMedicalRecordCheckboxField(field)"
+                      :model-value="medicalRecordFieldArrayValue(field)"
+                      class="medical-record-checklist"
+                      @change="value => updateMedicalRecordArrayField(field, value)"
+                    >
+                      <el-checkbox v-for="option in medicalRecordFieldOptions(field)" :key="option" :label="option" border>
+                        <span class="medical-record-option-text">{{ option }}</span>
+                      </el-checkbox>
+                    </el-checkbox-group>
+
+                    <el-input
+                      v-if="isMedicalRecordCheckboxField(field)"
                       v-model="fieldValues[field.key]"
-                      allow-create
+                      class="medical-record-paragraph-preview"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="勾选后自动合并为正式段落，可补充少量特殊说明"
+                    />
+
+                    <el-select
+                      v-else-if="isMedicalRecordSelectField(field)"
+                      v-model="fieldValues[field.key]"
+                      :allow-create="!field.templateLocked"
                       clearable
                       default-first-option
                       filterable
@@ -3554,14 +3602,30 @@ const medicalRecordCompletionPercent = computed(() =>
 
 const medicalRecordFieldOptions = (field: MedicalRecordTemplateField) => ensureArray(field.options);
 
+const isMedicalRecordCheckboxField = (field: MedicalRecordTemplateField) =>
+  field.controlType === "checkboxParagraph" || field.renderMode === "paragraph" || field.kind === "checkboxParagraph";
+
 const isMedicalRecordSelectField = (field: MedicalRecordTemplateField) =>
-  field.kind === "select" || medicalRecordFieldOptions(field).length > 0;
+  !isMedicalRecordCheckboxField(field) && (field.kind === "select" || medicalRecordFieldOptions(field).length > 0);
 
 const isMedicalRecordDateField = (field: MedicalRecordTemplateField) => field.kind === "date" || field.inputType === "date";
 
-const isMedicalRecordTextareaField = (field: MedicalRecordTemplateField) => field.kind === "textarea";
+const isMedicalRecordTextareaField = (field: MedicalRecordTemplateField) =>
+  field.kind === "textarea" || isMedicalRecordCheckboxField(field);
+
+const medicalRecordFieldArrayValue = (field: MedicalRecordTemplateField) => {
+  const value = String(fieldValues[field.key] || "");
+  return medicalRecordFieldOptions(field).filter(option => value.includes(option));
+};
+
+const updateMedicalRecordArrayField = (field: MedicalRecordTemplateField, value: unknown) => {
+  const selected = Array.isArray(value) ? value.map(item => String(item)) : [];
+  fieldValues[field.key] = selected.join(field.joiner ?? "");
+};
 
 const medicalRecordFieldAssistText = (field: MedicalRecordTemplateField) => {
+  if (isMedicalRecordCheckboxField(field)) return `${medicalRecordFieldOptions(field).length} 个固定模板勾选项`;
+
   if (field.targetUse === "formOnly") return "医生确认字段，生成时合并进入目标病历对应位置";
 
   if (field.aiPolishable) return "固定段落可由医生确认后再润色";
@@ -10394,6 +10458,34 @@ onBeforeUnmount(() => {
 
     font-weight: 600;
   }
+}
+
+.medical-record-checklist {
+  display: grid;
+
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  gap: 8px;
+
+  :deep(.el-checkbox) {
+    height: auto;
+
+    min-height: 36px;
+
+    margin-right: 0;
+
+    padding: 7px 10px;
+
+    white-space: normal;
+  }
+}
+
+.medical-record-option-text {
+  line-height: 1.45;
+}
+
+.medical-record-paragraph-preview {
+  margin-top: 4px;
 }
 
 .medical-record-current {
