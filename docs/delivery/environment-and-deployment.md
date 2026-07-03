@@ -152,3 +152,4 @@ logs\backend.out.log
 
 更详细的部署步骤可继续参考 [内测部署检查清单](../pilot-deployment-checklist.md) 和 [内测交付包说明](../pilot-package-readme.md)。
 
+后端请求定位、健康检查和启动自检可参考 [后端上线排障与可观测性清单](../backend-observability-checklist.md)。

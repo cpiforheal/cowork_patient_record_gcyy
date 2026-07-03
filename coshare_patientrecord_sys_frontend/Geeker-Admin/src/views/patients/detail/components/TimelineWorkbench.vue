@@ -46,3 +46,78 @@ defineEmits<{
   refresh: [];
 }>();
 </script>
+
+<style scoped lang="scss">
+.timeline-workbench {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 24px;
+}
+
+.attachment-workbench-head {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+
+  h3,
+  p {
+    margin: 0;
+  }
+
+  h3 {
+    font-size: 18px;
+  }
+
+  p {
+    margin-top: 4px;
+    color: var(--hos-text-secondary);
+  }
+}
+
+.timeline-workbench-list {
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-workbench-list article {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 12px 14px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+
+  > span {
+    flex: 0 0 150px;
+    color: var(--hos-primary-deep);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  div {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  strong,
+  p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  span,
+  small,
+  p {
+    color: var(--hos-text-secondary);
+  }
+}
+</style>

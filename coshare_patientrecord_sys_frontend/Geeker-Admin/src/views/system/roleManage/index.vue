@@ -20,7 +20,13 @@
       <template #operation="{ row }">
         <el-button v-auth="'role:update'" type="primary" link @click="openRoleDialog(row)">编辑</el-button>
         <el-button v-auth="'role:grant'" type="primary" link @click="openRoleDialog(row)">授权</el-button>
-        <el-button v-auth="'role:delete'" type="danger" link :disabled="row.role === 'admin' || row.members > 0" @click="deleteRole(row)">
+        <el-button
+          v-auth="'role:delete'"
+          type="danger"
+          link
+          :disabled="row.role === 'admin' || row.members > 0"
+          @click="deleteRole(row)"
+        >
           删除
         </el-button>
       </template>

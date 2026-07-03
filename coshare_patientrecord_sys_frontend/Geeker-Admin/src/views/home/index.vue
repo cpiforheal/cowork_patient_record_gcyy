@@ -80,197 +80,51 @@
 
     <section class="workbench-grid">
       <div class="workbench-main">
-        <div class="task-panel">
-          <div class="panel-head">
-            <div>
-              <h2>我的待办</h2>
-              <p>{{ roleName }}登录后只看最该处理的动作，点击直接进入对应患者、章节或审核页。</p>
-            </div>
-            <el-button :icon="Refresh" link @click="loadTasks">刷新</el-button>
-          </div>
+        <HomeTaskPanel
+          :role-name="roleName"
+          :action-tasks="actionTasks"
+          :task-cards="taskCards"
+          @refresh="loadTasks"
+          @open-action-task="openActionTask"
+          @open-task="openTask"
+        />
 
-          <div class="action-task-list">
-            <button
-              v-for="task in actionTasks"
-              :key="task.id"
-              class="action-task-card"
-              :class="`is-${task.level}`"
-              @click="openActionTask(task)"
-            >
-              <span>{{ task.roleLabel }}</span>
-              <strong>{{ task.count }}</strong>
-              <em>{{ task.title }}</em>
-              <small>{{ task.desc }}</small>
-              <b>{{ task.actionText }}</b>
-            </button>
-          </div>
-
-          <el-empty v-if="!taskCards.length" description="当前岗位暂无待处理患者" />
-          <div v-else class="task-list patient-task-list">
-            <button v-for="task in taskCards" :key="task.id" class="task-card" @click="openTask(task)">
-              <div>
-                <strong>{{ task.patient.name }}</strong>
-                <span>{{ task.patient.visitNo }}</span>
-              </div>
-              <div>
-                <em>{{ task.title }}</em>
-                <small>{{ task.desc }}</small>
-              </div>
-              <el-tag :type="task.patient.riskType || 'info'" effect="plain">{{ task.patient.status }}</el-tag>
-            </button>
-          </div>
-        </div>
-
-        <div class="calendar-heatmap-card">
-          <div class="calendar-toolbar">
-            <div>
-              <span class="scope-eyebrow">主控区 · 月历热力</span>
-              <h2>{{ calendarMonthTitle }}</h2>
-              <p>本月收录 {{ calendarMonthTotal }} 人，单日峰值 {{ calendarPeakCount }} 人</p>
-            </div>
-            <div class="calendar-actions">
-              <el-button :icon="ArrowLeft" circle aria-label="上个月" @click="shiftCalendarMonth(-1)" />
-              <el-button @click="jumpToCurrentMonth">本月</el-button>
-              <el-button type="primary" plain @click="selectCalendarMonth">整月</el-button>
-              <el-button :icon="ArrowRight" circle aria-label="下个月" @click="shiftCalendarMonth(1)" />
-            </div>
-          </div>
-          <div class="calendar-weekdays">
-            <span v-for="weekday in weekdayLabels" :key="weekday">{{ weekday }}</span>
-          </div>
-          <div class="calendar-grid">
-            <button
-              v-for="day in calendarCells"
-              :key="day.key"
-              type="button"
-              class="calendar-day"
-              :class="[
-                `is-level-${day.level}`,
-                {
-                  'is-empty': day.isBlank,
-                  'is-today': day.isToday,
-                  'is-selected': day.isSelected
-                }
-              ]"
-              :disabled="day.isBlank"
-              :aria-label="day.ariaLabel"
-              @click="selectCalendarDate(day)"
-            >
-              <span class="day-number">{{ day.day || "" }}</span>
-              <span v-if="!day.isBlank" class="day-count">{{ day.count ? `${day.count} 人` : "空" }}</span>
-            </button>
-          </div>
-          <div class="heatmap-legend">
-            <span class="legend-anchor">0 人</span>
-            <i v-for="level in [0, 1, 2, 3, 4]" :key="level" :class="`is-level-${level}`" />
-            <span class="legend-anchor">1-3 人</span>
-            <span class="legend-anchor">4+ 人</span>
-          </div>
-        </div>
+        <CalendarHeatmap
+          :month-title="calendarMonthTitle"
+          :month-total="calendarMonthTotal"
+          :peak-count="calendarPeakCount"
+          :weekday-labels="weekdayLabels"
+          :cells="calendarCells"
+          @shift-month="shiftCalendarMonth"
+          @current-month="jumpToCurrentMonth"
+          @select-month="selectCalendarMonth"
+          @select-date="selectCalendarDate"
+        />
       </div>
 
-      <div class="shortcut-panel">
-        <div class="panel-head">
-          <div>
-            <h2>常用入口</h2>
-            <p>保留一线高频动作，系统配置入口靠后。</p>
-          </div>
-        </div>
-        <div class="shortcut-list">
-          <button v-for="item in quickEntries" :key="item.path" @click="router.push(item.path)">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.title }}</span>
-            <small>{{ item.desc }}</small>
-          </button>
-        </div>
-
-        <div class="production-panel">
-          <div class="panel-head compact">
-            <div>
-              <h2>生产提醒</h2>
-              <p>面向内测运行的风险提示与数据维护入口。</p>
-            </div>
-            <el-button :icon="Refresh" link :loading="maintenanceLoading" @click="loadTasks">巡检</el-button>
-          </div>
-
-          <div class="reminder-list">
-            <button
-              v-for="item in workReminders"
-              :key="item.id"
-              class="reminder-item"
-              :class="`is-${item.level}`"
-              @click="router.push(item.path)"
-            >
-              <span>{{ item.title }}</span>
-              <strong>{{ item.count }}</strong>
-              <small>{{ item.desc }}</small>
-            </button>
-          </div>
-
-          <div class="maintenance-card">
-            <div class="maintenance-summary">
-              <span>附件存储</span>
-              <strong>{{ storageSummary }}</strong>
-              <small>{{ maintenanceStatus?.storage.attachmentDir || "等待后端巡检" }}</small>
-            </div>
-            <div class="maintenance-summary">
-              <span>数据快照</span>
-              <strong>{{ snapshotSummary }}</strong>
-              <small>{{ maintenanceStatus?.latestSnapshotAt || "尚未生成快照" }}</small>
-            </div>
-            <el-button type="primary" plain :loading="maintenanceLoading" @click="createSnapshot">生成快照</el-button>
-          </div>
-
-          <div v-if="currentRole === 'admin'" class="backup-card">
-            <div class="backup-head">
-              <div>
-                <span>物理备份</span>
-                <strong>{{ latestBackupSummary }}</strong>
-                <small>{{ backupStatus?.schedule || "每天 02:00" }}，保留 7 天 / 4 周 / 12 月</small>
-              </div>
-              <el-switch
-                v-model="backupEnabled"
-                active-text="自动"
-                inactive-text="停用"
-                :disabled="backupLoading || backupStatus?.running"
-              />
-            </div>
-            <el-input
-              v-model="backupPath"
-              clearable
-              :disabled="backupLoading || choosingBackupDir || backupStatus?.running"
-              placeholder="例如：\\192.168.1.10\clinic-backup 或 D:\clinic-backup"
-            >
-              <template #append>
-                <el-button
-                  :loading="choosingBackupDir"
-                  :disabled="backupLoading || backupStatus?.running"
-                  @click="chooseBackupDirectory"
-                >
-                  选择目录
-                </el-button>
-              </template>
-            </el-input>
-            <div class="backup-meta">
-              <span>{{ backupStorageSummary }}</span>
-              <small>{{ backupStatus?.backupDir || "尚未设置备份路径" }}</small>
-            </div>
-            <div class="backup-health-grid">
-              <article v-for="item in backupHealthItems" :key="item.key" :class="`is-${item.level}`">
-                <i aria-hidden="true"></i>
-                <span>{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
-              </article>
-            </div>
-            <div class="backup-actions">
-              <el-button :loading="backupLoading" :disabled="backupStatus?.running" @click="saveBackupConfig">保存路径</el-button>
-              <el-button type="primary" :loading="backupLoading || backupStatus?.running" @click="runBackupNow">
-                立即备份
-              </el-button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ShortcutMaintenancePanel
+        v-model:backup-enabled="backupEnabled"
+        v-model:backup-path="backupPath"
+        :quick-entries="quickEntries"
+        :work-reminders="workReminders"
+        :current-role="currentRole"
+        :maintenance-loading="maintenanceLoading"
+        :storage-summary="storageSummary"
+        :snapshot-summary="snapshotSummary"
+        :maintenance-status="maintenanceStatus"
+        :latest-backup-summary="latestBackupSummary"
+        :backup-status="backupStatus"
+        :backup-loading="backupLoading"
+        :choosing-backup-dir="choosingBackupDir"
+        :backup-storage-summary="backupStorageSummary"
+        :backup-health-items="backupHealthItems"
+        @navigate="path => router.push(path)"
+        @refresh="loadTasks({ fullMaintenanceScan: true })"
+        @create-snapshot="createSnapshot"
+        @choose-backup-directory="chooseBackupDirectory"
+        @save-backup-config="saveBackupConfig"
+        @run-backup-now="runBackupNow"
+      />
     </section>
     <AiAssistantPanel
       v-model="assistantVisible"
@@ -286,11 +140,12 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { ArrowLeft, ArrowRight, ChatDotRound, Refresh } from "@element-plus/icons-vue";
+import { ArrowRight, ChatDotRound } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
   getBackupStatusApi,
+  getMaintenanceSummaryApi,
   getMaintenanceStatusApi,
   getOperationStatsApi,
   getPatientListApi,
@@ -307,6 +162,11 @@ import {
 import AiAssistantPanel from "@/components/AiAssistantPanel/index.vue";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
+import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
+import CalendarHeatmap from "./components/CalendarHeatmap.vue";
+import HomeTaskPanel from "./components/HomeTaskPanel.vue";
+import ShortcutMaintenancePanel from "./components/ShortcutMaintenancePanel.vue";
+import { useHomeDashboard } from "./composables/useHomeDashboard";
 
 interface HomeTask {
   id: string;
@@ -388,133 +248,37 @@ const editableSections = computed(() => recordSections.filter(section => canEdit
 const editableSectionCount = computed(() => editableSections.value.length);
 const firstEditableSection = computed(() => editableSections.value[0] ?? recordSections[0]);
 
-const allQuickEntries = [
-  { title: "患者流程看板", desc: "查看今日患者卡片", icon: "Connection", path: "/encounters/active" },
-  { title: "今日患者", desc: "按姓名和门诊号查询", icon: "UserFilled", path: "/patients/list" },
-  { title: "上传资料", desc: "门诊号识别后一键上传", icon: "UploadFilled", path: "/workbench/upload" },
-  { title: "旧资料导入", desc: "迁移共享文件夹资料", icon: "FolderOpened", path: "/workbench/legacy" },
-  { title: "字段权限", desc: "查看字段归属", icon: "DocumentCopy", path: "/templates/record" },
-  { title: "档案审核", desc: "退回整改或通过归档", icon: "Tickets", path: "/audit/review" },
-  { title: "操作日志", desc: "追踪资料改动", icon: "DocumentChecked", path: "/audit/log" }
-];
-
-const roleEntries: Record<string, string[]> = {
-  admin: [
-    "/encounters/active",
-    "/patients/list",
-    "/workbench/upload",
-    "/workbench/legacy",
-    "/templates/record",
-    "/audit/review",
-    "/audit/log"
-  ],
-  frontdesk: ["/encounters/active", "/patients/list", "/workbench/upload", "/workbench/legacy", "/templates/record"],
-  lab: ["/encounters/active", "/patients/list", "/workbench/upload", "/workbench/legacy", "/templates/record"],
-  ecg: ["/encounters/active", "/patients/list", "/workbench/upload", "/workbench/legacy", "/templates/record"],
-  ultrasound: ["/encounters/active", "/patients/list", "/workbench/upload", "/workbench/legacy", "/templates/record"],
-  nurse: ["/encounters/active", "/patients/list", "/workbench/upload", "/workbench/legacy", "/templates/record"],
-  doctor: ["/encounters/active", "/patients/list", "/templates/record"],
-  quality: ["/encounters/active", "/patients/list", "/workbench/legacy", "/templates/record", "/audit/review", "/audit/log"]
-};
-
-const quickEntries = computed(() => {
-  const allowPaths = roleEntries[currentRole.value] ?? roleEntries.frontdesk;
-  return allQuickEntries.filter(item => allowPaths.includes(item.path));
+const {
+  quickEntries,
+  formatBytes,
+  storageSummary,
+  snapshotSummary,
+  latestBackupSummary,
+  backupStorageSummary,
+  backupHealthItems
+} = useHomeDashboard({
+  currentRole,
+  maintenanceStatus,
+  backupStatus
 });
 
-const formatBytes = (bytes?: number) => {
-  if (!bytes) return "0 MB";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-};
-
-const storageSummary = computed(() => {
-  const storage = maintenanceStatus.value?.storage;
-  if (!storage) return "等待巡检";
-  return `${storage.fileCount} 个文件 / ${formatBytes(storage.totalBytes)}，缺失 ${storage.missingFileCount}`;
-});
-
-const snapshotSummary = computed(() => {
-  if (!maintenanceStatus.value) return "等待巡检";
-  return `${maintenanceStatus.value.snapshotCount} 个快照`;
-});
-
-const latestBackupSummary = computed(() => {
-  if (backupStatus.value?.running) return "备份进行中";
-  const latestRun = backupStatus.value?.latestRun;
-  if (!latestRun) return "尚未备份";
-  if (latestRun.status === "failed") return "上次失败";
-  if (latestRun.status === "running") return "备份进行中";
-  return `${formatBytes(latestRun.sizeBytes)} / ${latestRun.finishedAt || latestRun.startedAt}`;
-});
-
-const backupStorageSummary = computed(() => {
-  if (!backupStatus.value) return "等待备份巡检";
-  return `${backupStatus.value.backupFileCount} 个备份 / ${formatBytes(backupStatus.value.backupTotalBytes)}，可用 ${formatBytes(
-    backupStatus.value.usableSpaceBytes
-  )}`;
-});
-
-const backupHealthItems = computed(() => {
-  const latestRun = backupStatus.value?.latestRun;
-  const hasPath = Boolean(backupStatus.value?.backupDir);
-  const latestOk = latestRun?.status === "success";
-  const hasBackupFiles = (backupStatus.value?.backupFileCount || 0) > 0;
-  const hasSpace = (backupStatus.value?.usableSpaceBytes || 0) > 1024 * 1024 * 1024;
-  return [
-    {
-      key: "latest",
-      label: "最近结果",
-      value: backupStatus.value?.running ? "备份中" : latestRun ? latestRun.message || latestRun.status : "未执行",
-      level: backupStatus.value?.running ? "info" : latestOk ? "success" : "warning"
-    },
-    {
-      key: "database",
-      label: "数据库",
-      value: hasBackupFiles || latestOk ? "已纳入备份" : "等待首次备份",
-      level: hasBackupFiles || latestOk ? "success" : "warning"
-    },
-    {
-      key: "attachments",
-      label: "附件目录",
-      value: maintenanceStatus.value?.storage.attachmentDir ? "已巡检" : "待巡检",
-      level: maintenanceStatus.value?.storage.attachmentDir ? "success" : "warning"
-    },
-    {
-      key: "path",
-      label: "备份路径",
-      value: hasPath ? (hasSpace ? "可写空间充足" : "空间需关注") : "未配置",
-      level: hasPath ? (hasSpace ? "success" : "warning") : "danger"
-    }
-  ] as const;
-});
-
-const pendingRows = computed(() => patientRows.value.filter(item => item.status !== "旧资料已归档" && item.status !== "待归档"));
-const returnedRows = computed(() => patientRows.value.filter(item => item.status.includes("退回") || item.riskType === "danger"));
-const reviewRows = computed(() => patientRows.value.filter(item => item.status.includes("审核") || item.status === "待归档"));
-const attachmentTodoRows = computed(() =>
-  patientRows.value.filter(
-    item => item.currentStage.includes("检查") || item.currentStage.includes("附件") || item.currentStage.includes("影像")
-  )
+const patientStatusFlags = computed(
+  () => new Map(patientRows.value.map(patient => [patient.id, classifyPatientStatus(patient)] as const))
 );
-const registrationTodoRows = computed(() =>
-  patientRows.value.filter(
-    item => item.currentStage.includes("前台") || item.currentStage.includes("建档") || item.progressPercent < 25
-  )
-);
+const statusFlagsForPatient = (patient: PatientRow) => patientStatusFlags.value.get(patient.id) || classifyPatientStatus(patient);
+const pendingRows = computed(() => patientRows.value.filter(item => statusFlagsForPatient(item).isPending));
+const returnedRows = computed(() => patientRows.value.filter(item => statusFlagsForPatient(item).isReturned));
+const reviewRows = computed(() => patientRows.value.filter(item => statusFlagsForPatient(item).isReviewPending));
+const attachmentTodoRows = computed(() => patientRows.value.filter(item => statusFlagsForPatient(item).isAttachmentTodo));
+const registrationTodoRows = computed(() => patientRows.value.filter(item => statusFlagsForPatient(item).isRegistrationTodo));
 const rolePendingRows = computed(() =>
   pendingRows.value.filter(patient => {
     const stage = patient.currentStage || "";
     if (["lab", "ecg", "ultrasound", "inspection"].includes(currentRole.value)) {
       return /检查|检验|影像|心电|B超|筛查|附件/.test(stage);
     }
-    if (currentRole.value === "doctor") return /医师|诊断|治疗|方案|手术|中医/.test(stage) || patient.riskType === "warning";
+    if (currentRole.value === "doctor")
+      return /医师|诊断|治疗|方案|手术|中医/.test(stage) || statusFlagsForPatient(patient).riskTone === "warning";
     if (["nurse", "nursing"].includes(currentRole.value)) return /护理|宣教|住院|出院|随访/.test(stage);
     if (currentRole.value === "quality") return reviewRows.value.some(row => row.id === patient.id);
     if (currentRole.value === "frontdesk") return registrationTodoRows.value.some(row => row.id === patient.id);
@@ -810,7 +574,7 @@ const homeAssistantContext = computed(() => ({
       : undefined
 }));
 
-const loadTasks = async () => {
+const loadTasks = async (options: { fullMaintenanceScan?: boolean } = {}) => {
   try {
     const [{ data: patients }, { data: operationStats }] = await Promise.all([
       getPatientListApi({ pageNum: 1, pageSize: 5000 }),
@@ -824,7 +588,8 @@ const loadTasks = async () => {
 
   maintenanceLoading.value = true;
   try {
-    const [{ data: reminders }, { data: status }] = await Promise.all([getWorkRemindersApi(), getMaintenanceStatusApi()]);
+    const maintenanceRequest = options.fullMaintenanceScan ? getMaintenanceStatusApi : getMaintenanceSummaryApi;
+    const [{ data: reminders }, { data: status }] = await Promise.all([getWorkRemindersApi(), maintenanceRequest()]);
     workReminders.value = reminders;
     maintenanceStatus.value = status;
     if (currentRole.value === "admin") {

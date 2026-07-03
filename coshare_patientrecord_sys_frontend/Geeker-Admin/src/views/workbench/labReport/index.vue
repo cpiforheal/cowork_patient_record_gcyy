@@ -74,7 +74,15 @@
               :closable="false"
               title="心电图来自专用设备，本页只做拍照或图片上传；保存后回填心电图状态为已查。"
             />
-            <el-upload v-model:file-list="ecgFiles" drag action="#" :auto-upload="false" multiple accept="image/*" class="ecg-uploader">
+            <el-upload
+              v-model:file-list="ecgFiles"
+              drag
+              action="#"
+              :auto-upload="false"
+              multiple
+              accept="image/*"
+              class="ecg-uploader"
+            >
               <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
               <div class="el-upload__text">拖入心电图照片，或点击选择图片</div>
             </el-upload>
@@ -129,7 +137,9 @@
 
           <div class="actions">
             <el-button :icon="Refresh" @click="resetTemplateValues">重置当前模板</el-button>
-            <el-button :icon="Printer" :disabled="activeTemplate.id === 'ecgImage'" @click="printPreview">打印/导出预览</el-button>
+            <el-button :icon="Printer" :disabled="activeTemplate.id === 'ecgImage'" @click="printPreview">
+              打印/导出预览
+            </el-button>
             <el-button type="primary" :icon="FolderChecked" :loading="saving" @click="saveToArchive">保存入档</el-button>
           </div>
         </section>
@@ -195,16 +205,16 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { ElMessage, type UploadUserFile } from "element-plus";
 import { FolderChecked, Printer, Refresh, Search, UploadFilled } from "@element-plus/icons-vue";
-import { getPatientDetailApi, getPatientListApi, savePatientRecordApi, uploadDocumentsApi, type PatientRow } from "@/api/modules/clinic";
+import {
+  getPatientDetailApi,
+  getPatientListApi,
+  savePatientRecordApi,
+  uploadDocumentsApi,
+  type PatientRow
+} from "@/api/modules/clinic";
 import { roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
-import {
-  labReportTemplates,
-  labTemplateById,
-  metricReference,
-  type LabMetricDefinition,
-  type LabTemplateId
-} from "./templates";
+import { labReportTemplates, labTemplateById, metricReference, type LabTemplateId } from "./templates";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -347,7 +357,10 @@ const validateBeforeSave = () => {
   if (activeTemplate.value.id === "ecgImage" && !["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)) {
     return "当前账号不能回填心电图状态，请使用心电室、医生或管理员账号保存";
   }
-  if (activeTemplate.value.id !== "ecgImage" && activeTemplate.value.metrics.every(metric => !String(formValues[metric.key] || "").trim())) {
+  if (
+    activeTemplate.value.id !== "ecgImage" &&
+    activeTemplate.value.metrics.every(metric => !String(formValues[metric.key] || "").trim())
+  ) {
     return "请至少填写一个检验指标";
   }
   return "";

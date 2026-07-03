@@ -155,3 +155,106 @@ defineEmits<{
   copy: [];
 }>();
 </script>
+
+<style scoped lang="scss">
+.ai-summary-dialog {
+  display: grid;
+  gap: 14px;
+  min-height: 220px;
+}
+
+.ai-summary-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 16px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+.ai-summary-block,
+.ai-summary-grid article,
+.ai-summary-lists article {
+  min-width: 0;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  h4 {
+    margin: 0 0 8px;
+    color: var(--hos-text-primary);
+    font-size: 14px;
+  }
+
+  p {
+    margin: 0;
+    color: var(--hos-text-regular);
+    font-size: 13px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+  }
+}
+
+.ai-summary-block.portrait {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.ai-summary-grid,
+.ai-summary-lists {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-summary-lists {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+
+  ul {
+    display: grid;
+    gap: 6px;
+    padding-left: 18px;
+    margin: 0;
+    color: var(--hos-text-regular);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  li {
+    overflow-wrap: anywhere;
+  }
+}
+
+.ai-summary-disclaimer {
+  margin: 0;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+  .ai-summary-grid,
+  .ai-summary-lists {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

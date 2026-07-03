@@ -49,3 +49,53 @@ defineEmits<{
   confirm: [];
 }>();
 </script>
+
+<style scoped lang="scss">
+.print-preflight-list {
+  display: grid;
+  gap: 10px;
+
+  article {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 12px;
+    background: var(--hos-glass);
+    border: 1px solid var(--hos-border-light);
+    border-radius: var(--hos-radius-lg);
+
+    &.is-warning {
+      background: var(--hos-status-warning-soft);
+      border-color: rgb(217 119 6 / 20%);
+
+      .preflight-dot {
+        background: var(--hos-status-warning);
+        box-shadow: 0 0 0 5px rgb(217 119 6 / 10%);
+      }
+    }
+
+    &.is-success .preflight-dot {
+      background: var(--hos-status-success);
+      box-shadow: 0 0 0 5px rgb(22 163 74 / 10%);
+    }
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    margin-top: 4px;
+    color: var(--hos-text-secondary);
+  }
+}
+
+.preflight-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+}
+</style>

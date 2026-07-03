@@ -58,3 +58,69 @@ const attachmentMeta = (attachment: RecordAttachment) => {
   return [attachment.department, sourceRole, attachment.uploader, attachment.uploadedAt, batchName].filter(Boolean).join(" / ");
 };
 </script>
+
+<style scoped lang="scss">
+.field-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.field-evidence-card {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  background: #f8fbfa;
+  border: 1px solid #d8ebe5;
+  border-radius: 8px;
+
+  strong,
+  small {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: #1f3d35;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  small {
+    margin-top: 2px;
+    color: var(--hos-text-secondary);
+    font-size: 11px;
+  }
+
+  &.image {
+    :deep(.el-image) {
+      display: block;
+      width: 100%;
+      height: 84px;
+      background: #eef6f3;
+    }
+
+    div {
+      padding: 7px 8px 8px;
+    }
+  }
+
+  &.file {
+    display: grid;
+    gap: 2px;
+    width: 100%;
+    min-height: 62px;
+    padding: 8px 10px;
+    cursor: pointer;
+  }
+
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+  }
+}
+</style>

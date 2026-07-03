@@ -8,61 +8,20 @@
     @closed="stopSpeech"
   >
     <div class="assistant-workbench">
-      <aside class="assistant-sidebar">
-        <header class="assistant-brand">
-          <div class="assistant-avatar">
-            <img :src="doubaoAvatar" alt="豆包助手" />
-          </div>
-          <div>
-            <strong>豆包院内助手</strong>
-            <span>公共问答 · 多模态材料</span>
-          </div>
-        </header>
-
-        <el-button class="new-chat-button" type="primary" plain :icon="CirclePlus" @click="newConversation">新建会话</el-button>
-
-        <nav class="mode-list" aria-label="助手模式">
-          <button
-            v-for="item in assistantModes"
-            :key="item.value"
-            type="button"
-            :class="{ active: activeType === item.value }"
-            @click="switchType(item.value)"
-          >
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.label }}</span>
-            <small>{{ item.short }}</small>
-          </button>
-        </nav>
-
-        <section class="sidebar-block">
-          <div class="block-title">
-            <strong>最近会话</strong>
-            <span>{{ currentSession.messages.length }} 条</span>
-          </div>
-          <div class="recent-list">
-            <button v-for="item in recentSessions" :key="item.type" type="button" @click="switchType(item.type)">
-              <span>{{ item.title }}</span>
-              <small>{{ item.last || "暂无提问" }}</small>
-            </button>
-          </div>
-        </section>
-
-        <section class="sidebar-block material-status">
-          <div class="block-title">
-            <strong>已带入资料</strong>
-            <span>{{ materialCount }} 项</span>
-          </div>
-          <div class="status-chip active">知识库优先，通用问题可回答</div>
-          <div class="status-chip" :class="{ active: includeContext && hasContext }">
-            {{ includeContext && hasContext ? "当前页面上下文已带入" : "未带入页面上下文" }}
-          </div>
-          <div v-if="props.patientId && shouldSendPatientContext" class="status-chip active">患者摘要仅用于本次问答</div>
-          <div v-if="currentSession.attachments.length" class="status-chip active">
-            {{ currentSession.attachments.length }} 张图片待发送
-          </div>
-        </section>
-      </aside>
+      <AssistantSessionList
+        :avatar="doubaoAvatar"
+        :modes="assistantModes"
+        :active-type="activeType"
+        :current-message-count="currentSession.messages.length"
+        :recent-sessions="recentSessions"
+        :material-count="materialCount"
+        :include-context="includeContext"
+        :has-context="hasContext"
+        :show-patient-context="Boolean(props.patientId && shouldSendPatientContext)"
+        :attachment-count="currentSession.attachments.length"
+        @new-conversation="newConversation"
+        @switch-type="switchType"
+      />
 
       <main class="assistant-main">
         <header class="assistant-topbar">
@@ -100,171 +59,62 @@
           </button>
         </section>
 
-        <div ref="messageListRef" class="message-area">
-          <section v-if="!currentSession.messages.length && !loading" class="assistant-empty">
-            <div class="empty-mark">
-              <img :src="doubaoAvatar" alt="豆包助手" />
-            </div>
-            <h3>{{ activeMode.emptyTitle }}</h3>
-            <p>
-              我会优先依据系统知识库、当前角色和页面上下文回答；通用问题可直接回答，实时检索类问题会说明边界，不替代诊断、处方或质控结论。
-            </p>
-            <div class="prompt-suggestions">
-              <button v-for="question in recommendedPrompts" :key="question" type="button" @click="usePrompt(question)">
-                {{ question }}
-              </button>
-            </div>
-          </section>
+        <AssistantMessageList
+          ref="messageListRef"
+          :messages="currentSession.messages"
+          :loading="loading"
+          :avatar="doubaoAvatar"
+          :assistant-label="activeMode.label"
+          :empty-title="activeMode.emptyTitle"
+          :recommended-prompts="recommendedPrompts"
+          :speaking-message-id="speakingMessageId"
+          :render-markdown="renderMarkdown"
+          :format-file-size="formatFileSize"
+          @use-prompt="usePrompt"
+          @copy="copyMessage"
+          @toggle-speech="toggleSpeech"
+          @retry="retry"
+        />
 
-          <article
-            v-for="message in currentSession.messages"
-            :key="message.id"
-            class="message-row"
-            :class="[`is-${message.role}`, { error: message.error }]"
-          >
-            <div class="message-avatar" :class="{ 'is-user': message.role === 'user' }">
-              <span v-if="message.role === 'user'">我</span>
-              <img v-else :src="doubaoAvatar" alt="豆包助手" />
-            </div>
-            <div class="message-card">
-              <div class="message-meta">
-                <span>{{ message.role === "user" ? "我" : activeMode.label }}</span>
-                <small>{{ message.time }}</small>
-              </div>
-              <div v-if="message.role === 'assistant'" class="message-markdown" v-html="renderMarkdown(message.content)"></div>
-              <p v-else>{{ message.content }}</p>
-              <div v-if="message.attachments?.length" class="message-attachments">
-                <div v-for="file in message.attachments" :key="file.id" class="attachment-chip">
-                  <img v-if="file.dataUrl" :src="file.dataUrl" :alt="file.name" />
-                  <div>
-                    <strong>{{ file.name }}</strong>
-                    <small>{{ formatFileSize(file.size) }}</small>
-                  </div>
-                </div>
-              </div>
-              <div v-if="message.role === 'assistant' && !message.error" class="message-actions">
-                <el-button link type="primary" @click="copyMessage(message.content)">复制回答</el-button>
-                <el-button link type="primary" :loading="speakingMessageId === message.id" @click="toggleSpeech(message)">
-                  {{ speakingMessageId === message.id ? "停止朗读" : "朗读回答" }}
-                </el-button>
-                <el-button link :disabled="loading" @click="retry">重新生成</el-button>
-              </div>
-            </div>
-          </article>
-
-          <article v-if="loading" class="message-row is-assistant">
-            <div class="message-avatar">
-              <img :src="doubaoAvatar" alt="豆包助手" />
-            </div>
-            <div class="message-card loading-card">
-              <div class="message-meta">
-                <span>{{ activeMode.label }}</span>
-                <small>正在生成</small>
-              </div>
-              <div class="typing-dot"><i></i><i></i><i></i></div>
-            </div>
-          </article>
-        </div>
-
-        <footer class="assistant-composer-shell">
-          <section v-if="currentSession.attachments.length" class="composer-files">
-            <div v-for="file in currentSession.attachments" :key="file.id" class="composer-file">
-              <img v-if="file.dataUrl" :src="file.dataUrl" :alt="file.name" />
-              <div>
-                <strong>{{ file.name }}</strong>
-                <small>{{ file.type || "图片" }} · {{ formatFileSize(file.size) }}</small>
-              </div>
-              <el-button text circle aria-label="移除图片" @click="removeAttachment(file.id)">
-                <el-icon><Close /></el-icon>
-              </el-button>
-            </div>
-          </section>
-
-          <section class="assistant-composer">
-            <input ref="fileInputRef" type="file" accept="image/*" multiple hidden @change="handleFileChange" />
-            <el-dropdown trigger="click" placement="top-start" @command="handleMaterialCommand">
-              <el-button circle class="material-button" aria-label="添加材料">
-                <el-icon><Plus /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="upload">上传图片</el-dropdown-item>
-                  <el-dropdown-item command="context" :disabled="!hasContext">
-                    {{ includeContext ? "关闭当前页面上下文" : "带入当前页面上下文" }}
-                  </el-dropdown-item>
-                  <el-dropdown-item command="clearMaterials" :disabled="!currentSession.attachments.length && !includeContext">
-                    清除材料
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-
-            <el-input
-              v-model="currentSession.promptText"
-              type="textarea"
-              :autosize="{ minRows: 2, maxRows: 6 }"
-              maxlength="1600"
-              resize="none"
-              placeholder="输入问题，Ctrl + Enter 发送。可以问院内流程、系统操作、病历缺项、质控建议或管理风险。"
-              @keydown.ctrl.enter.prevent="submit"
-            />
-            <el-button
-              type="primary"
-              class="send-button"
-              :icon="Promotion"
-              :loading="loading"
-              :disabled="!canSend"
-              @click="submit"
-            >
-              发送
-            </el-button>
-          </section>
-
-          <div class="composer-meta">
-            <span>AI 仅供院内辅助，不替代医生诊断、处方、质控结论或正式病历。</span>
-            <div>
-              <el-button
-                link
-                :disabled="!currentSession.messages.length && !currentSession.promptText && !currentSession.attachments.length"
-                @click="clearConversation"
-              >
-                清空会话
-              </el-button>
-              <span v-if="currentSession.lastMeta">{{ currentSession.lastMeta }}</span>
-            </div>
-          </div>
-        </footer>
+        <AssistantComposer
+          ref="composerRef"
+          v-model:prompt-text="currentSession.promptText"
+          :attachments="currentSession.attachments"
+          :last-meta="currentSession.lastMeta"
+          :message-count="currentSession.messages.length"
+          :loading="loading"
+          :can-send="canSend"
+          :has-context="hasContext"
+          :include-context="includeContext"
+          :format-file-size="formatFileSize"
+          @file-change="handleFileChange"
+          @material-command="handleMaterialCommand"
+          @remove-attachment="removeAttachment"
+          @submit="submit"
+          @clear-conversation="clearConversation"
+        />
       </main>
     </div>
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import {
-  ChatDotRound,
-  CirclePlus,
-  Close,
-  Collection,
-  DataAnalysis,
-  FirstAidKit,
-  Link,
-  Picture,
-  Plus,
-  Promotion,
-  UserFilled
-} from "@element-plus/icons-vue";
+import { ChatDotRound, Close, Collection, DataAnalysis, FirstAidKit, Link, Picture, UserFilled } from "@element-plus/icons-vue";
 import {
   askAiAssistantApi,
   getAiAssistantTemplatesApi,
-  speakAiSummaryApi,
   type AiAssistantAttachment,
   type AiAssistantMessage,
   type AiAssistantType,
   type AiPromptTemplateCandidate
 } from "@/api/modules/clinic";
 import doubaoAvatar from "@/assets/images/doubao.webp";
+import AssistantComposer from "./components/AssistantComposer.vue";
+import AssistantMessageList from "./components/AssistantMessageList.vue";
+import AssistantSessionList from "./components/AssistantSessionList.vue";
+import { useAssistantSpeech } from "./composables/useAssistantSpeech";
 
 interface LocalAttachment extends AiAssistantAttachment {
   id: string;
@@ -376,16 +226,13 @@ const sessions = reactive<Record<AiAssistantType, ChatSession>>({
   leader: createSession()
 });
 
+const { speakingMessageId, stopSpeech, toggleSpeech } = useAssistantSpeech();
 const activeType = ref<AiAssistantType>(props.assistantType);
 const loading = ref(false);
-const speakingMessageId = ref("");
 const includeContext = ref(true);
 const templates = ref<AiPromptTemplateCandidate[]>([]);
-const fileInputRef = ref<HTMLInputElement>();
-const messageListRef = ref<HTMLElement>();
-let speechAudio: HTMLAudioElement | undefined;
-let speechAudioUrl = "";
-let speechStoppedManually = false;
+const messageListRef = ref<InstanceType<typeof AssistantMessageList>>();
+const composerRef = ref<InstanceType<typeof AssistantComposer>>();
 
 const currentSession = computed(() => sessions[activeType.value]);
 const activeMode = computed(() => assistantModes.find(item => item.value === activeType.value) || assistantModes[0]);
@@ -483,9 +330,7 @@ const nowTime = () =>
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const scrollToBottom = async () => {
-  await nextTick();
-  const el = messageListRef.value;
-  if (el) el.scrollTop = el.scrollHeight;
+  await messageListRef.value?.scrollToBottom();
 };
 
 const buildRecentMessages = (): AiAssistantMessage[] =>
@@ -647,85 +492,6 @@ const renderMarkdown = (content: string) => {
   return html.join("");
 };
 
-const stripMarkdownForSpeech = (content: string) =>
-  content
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*+]\s+/gm, "")
-    .replace(/^\s*\d+\.\s+/gm, "")
-    .replace(/[*_~>#|]/g, "")
-    .replace(/\r?\n+/g, "。")
-    .replace(/\s+/g, " ")
-    .trim();
-
-const base64ToBlob = (base64: string, mimeType: string) => {
-  const binary = window.atob(base64);
-  const chunks: ArrayBuffer[] = [];
-  for (let offset = 0; offset < binary.length; offset += 1024) {
-    const slice = binary.slice(offset, offset + 1024);
-    const bytes = new Uint8Array(slice.length);
-    for (let index = 0; index < slice.length; index += 1) {
-      bytes[index] = slice.charCodeAt(index);
-    }
-    chunks.push(bytes.buffer);
-  }
-  return new Blob(chunks, { type: mimeType || "audio/mpeg" });
-};
-
-const releaseSpeechAudio = () => {
-  if (speechAudioUrl) {
-    URL.revokeObjectURL(speechAudioUrl);
-    speechAudioUrl = "";
-  }
-  speechAudio = undefined;
-  speakingMessageId.value = "";
-};
-
-const stopSpeech = () => {
-  speechStoppedManually = true;
-  if (speechAudio) {
-    speechAudio.onended = null;
-    speechAudio.onerror = null;
-    speechAudio.pause();
-  }
-  releaseSpeechAudio();
-};
-
-const toggleSpeech = async (message: ChatMessage) => {
-  if (speakingMessageId.value === message.id) {
-    stopSpeech();
-    return;
-  }
-  const text = stripMarkdownForSpeech(message.content).slice(0, 1800);
-  if (!text) {
-    ElMessage.warning("暂无可朗读的回答内容");
-    return;
-  }
-  stopSpeech();
-  speechStoppedManually = false;
-  speakingMessageId.value = message.id;
-  try {
-    const { data } = await speakAiSummaryApi({ text });
-    const blob = base64ToBlob(data.audioBase64, data.mimeType);
-    speechAudioUrl = URL.createObjectURL(blob);
-    speechAudio = new Audio(speechAudioUrl);
-    speechAudio.onended = releaseSpeechAudio;
-    speechAudio.onerror = () => {
-      releaseSpeechAudio();
-      if (!speechStoppedManually) {
-        ElMessage.error("语音播放失败，请检查浏览器音频权限或 TTS 配置");
-      }
-    };
-    await speechAudio.play();
-  } catch (error) {
-    stopSpeech();
-    ElMessage.error(error instanceof Error ? error.message : "豆包语音朗读失败");
-  }
-};
-
 const toggleContext = () => {
   if (!hasContext.value) return;
   includeContext.value = !includeContext.value;
@@ -738,7 +504,7 @@ const clearMaterials = () => {
 
 const handleMaterialCommand = (command: string | number | object) => {
   if (command === "upload") {
-    fileInputRef.value?.click();
+    composerRef.value?.openFileDialog();
     return;
   }
   if (command === "context") {

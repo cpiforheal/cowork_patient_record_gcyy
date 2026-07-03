@@ -48,3 +48,22 @@ defineEmits<{
   confirm: [];
 }>();
 </script>
+
+<style scoped lang="scss">
+.void-document-dialog {
+  display: grid;
+  gap: 12px;
+
+  p {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+    color: var(--el-text-color-regular);
+
+    strong {
+      color: var(--el-text-color-primary);
+      word-break: break-word;
+    }
+  }
+}
+</style>

@@ -41,3 +41,56 @@ defineEmits<{
   focus: [issue: FieldIssue];
 }>();
 </script>
+
+<style scoped lang="scss">
+.archive-precheck-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+
+  button {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    padding: 12px 14px;
+    text-align: left;
+    cursor: pointer;
+    background: var(--hos-status-warning-soft);
+    border: 1px solid rgb(217 119 6 / 22%);
+    border-radius: var(--hos-radius-lg);
+    transition:
+      transform var(--hos-duration-fast) var(--liquid-ease),
+      border-color var(--hos-duration-fast) var(--liquid-ease),
+      box-shadow var(--hos-duration-fast) var(--liquid-ease);
+
+    &:hover {
+      border-color: rgb(217 119 6 / 36%);
+      box-shadow: 0 12px 28px rgb(217 119 6 / 12%);
+      transform: translateY(-1px);
+    }
+  }
+
+  span {
+    width: fit-content;
+    padding: 2px 8px;
+    color: var(--hos-status-warning);
+    background: rgb(255 255 255 / 70%);
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+  }
+
+  small {
+    color: var(--hos-text-secondary);
+  }
+}
+</style>

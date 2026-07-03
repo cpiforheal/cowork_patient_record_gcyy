@@ -183,6 +183,7 @@ import { createPatientApi, getPatientListApi, type CreatePatientParams, type Pat
 import { recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { usePatientNavigation } from "@/hooks/usePatientNavigation";
+import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 
 type DateScopeNode = {
   id: string;
@@ -206,15 +207,7 @@ const selectedDateValue = ref("");
 const allPatients = ref<PatientRow[]>([]);
 const currentTotal = ref(0);
 
-const patientRiskTone = (row: PatientRow) => {
-  const status = row.status || "";
-  if (row.riskType === "danger" || status.includes("退回") || status.includes("待质控") || status.includes("待档案审核")) {
-    return "danger";
-  }
-  if (row.riskType === "warning" || (row.progressPercent || 0) < 100) return "warning";
-  if (row.riskType === "success" || (row.progressPercent || 0) >= 100) return "success";
-  return "info";
-};
+const patientRiskTone = (row: PatientRow) => classifyPatientStatus(row).riskTone;
 
 const initParam = reactive<{
   visitDateFrom?: string;
@@ -420,12 +413,7 @@ const changeCalendarDate = (value: string | null) => {
   changeDateScope(value ? `date::${value}` : "");
 };
 
-const statusTagType = (status: string) => {
-  if (status.includes("归档") || status.includes("完整") || status.includes("上传")) return "success";
-  if (status.includes("待") || status.includes("补")) return "warning";
-  if (status.includes("作废")) return "danger";
-  return "info";
-};
+const statusTagType = (status: string) => classifyPatientStatus({ status }).statusTagType;
 
 const visitTypeTagType = (visitType: string) => {
   if (visitType.includes("住院")) return "warning";

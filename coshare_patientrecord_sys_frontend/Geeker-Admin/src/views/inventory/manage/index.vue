@@ -54,705 +54,132 @@
       <transition name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
-            <section class="overview-command-board">
-              <div class="board-signal" :class="executiveSignal.level">
-                <span>今日物资运行</span>
-                <strong>{{ executiveSignal.title }}</strong>
-                <small>{{ executiveSignal.desc }}</small>
-              </div>
-              <div class="board-metrics">
-                <button
-                  v-for="stat in currentTabStats"
-                  :key="`overview-${stat.label}`"
-                  class="board-metric"
-                  :class="stat.tone"
-                  @click="goTab(stat.tab || activeTab)"
-                >
-                  <span>{{ stat.label }}</span>
-                  <strong>{{ stat.value }}</strong>
-                  <small>{{ stat.desc }}</small>
-                </button>
-              </div>
-            </section>
-
-            <div class="operations-grid">
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>待处理事项</h2>
-                    <p>先处理审核、发放、签收这些会卡住闭环的事项。</p>
-                  </div>
-                </div>
-                <div v-if="todoRows.length" class="todo-list">
-                  <button v-for="row in todoRows" :key="row.id" class="todo-card" @click="openTodo(row)">
-                    <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
-                    <div>
-                      <strong>{{ row.title }}</strong>
-                      <small>{{ row.desc }}</small>
-                    </div>
-                    <span>{{ row.actionLabel }}</span>
-                  </button>
-                </div>
-                <el-empty v-else description="暂无待处理事项" :image-size="72" />
-              </section>
-
-              <section class="panel quick-actions-panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>常用动作</h2>
-                    <p>把一线高频动作放在第一屏，减少找菜单。</p>
-                  </div>
-                </div>
-                <div class="workflow-steps">
-                  <button
-                    v-for="(step, index) in visibleWorkflowSteps"
-                    :key="step.title"
-                    class="workflow-step"
-                    @click="handleWorkflowStep(step.action)"
-                  >
-                    <span class="step-index">{{ index + 1 }}</span>
-                    <strong>{{ step.title }}</strong>
-                    <small>{{ step.desc }}</small>
-                  </button>
-                </div>
-              </section>
-            </div>
-
-            <div class="operations-grid secondary">
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>风险清单</h2>
-                    <p>红色立即处理，黄色当天跟进。</p>
-                  </div>
-                  <el-button
-                    v-if="hasInventoryAuth('inventory:export')"
-                    plain
-                    :icon="Download"
-                    @click="exportCsv(riskRows, 'inventory-risk.csv')"
-                  >
-                    导出
-                  </el-button>
-                </div>
-                <el-table :data="riskRows" border>
-                  <el-table-column prop="type" label="类型" width="120">
-                    <template #default="{ row }">
-                      <el-tag :type="row.level" effect="plain">{{ row.type }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="subject" label="对象" min-width="160" />
-                  <el-table-column prop="department" label="科室" width="120" />
-                  <el-table-column prop="status" label="当前情况" min-width="220" />
-                  <el-table-column prop="suggestion" label="建议动作" min-width="240" />
-                  <el-table-column label="处理" width="110" fixed="right">
-                    <template #default="{ row }">
-                      <el-button link type="primary" @click="goTab(row.tab)">查看</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </section>
-
-              <section class="panel role-entry-panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>岗位入口</h2>
-                    <p>只保留当前角色常用入口。</p>
-                  </div>
-                </div>
-                <div class="role-entry-grid">
-                  <button
-                    v-for="card in visibleRoleEntryCards"
-                    :key="card.title"
-                    class="role-entry-card"
-                    @click="goTab(card.tab)"
-                  >
-                    <span>{{ card.scene }}</span>
-                    <strong>{{ card.title }}</strong>
-                    <small>{{ card.desc }}</small>
-                  </button>
-                </div>
-              </section>
-            </div>
+            <OverviewPanel
+              :active-tab="activeTab"
+              :executive-signal="executiveSignal"
+              :stats="currentTabStats"
+              :todo-rows="todoRows"
+              :workflow-steps="visibleWorkflowSteps"
+              :risk-rows="riskRows"
+              :role-entry-cards="visibleRoleEntryCards"
+              :can-export-risk="hasInventoryAuth('inventory:export')"
+              @go-tab="goTab"
+              @open-todo="openTodo"
+              @workflow="handleWorkflowStep"
+              @export-risk="exportCsv(riskRows, 'inventory-risk.csv')"
+            />
           </template>
 
           <template v-else-if="activeTab === 'executive'">
-            <section class="executive-filter-bar" aria-label="领导驾驶舱筛选">
-              <div class="filter-pills">
-                <button class="active" type="button">全部</button>
-                <button type="button" @click="goTab('stock')">库存预警</button>
-                <button type="button" @click="goTab('requests')">科室申领</button>
-                <button type="button" @click="goTab('trace')">出入库</button>
-                <button type="button" @click="goTab('requests')">待签字</button>
-              </div>
-              <div class="filter-fields">
-                <span>统计范围</span>
-                <strong>今日 00:00 至今</strong>
-                <strong>{{ canViewAllDepartments ? "全院科室" : currentDepartment || "本科室" }}</strong>
-                <strong>低库存优先</strong>
-              </div>
-            </section>
-
-            <section class="executive-summary-grid">
-              <article class="executive-summary-card signal" :class="executiveSignal.level">
-                <div>
-                  <h2>今日红绿灯</h2>
-                  <p>基于库存下限、申领时效、签字和风险综合判断</p>
-                </div>
-                <div class="signal-body">
-                  <span class="signal-dot"></span>
-                  <div>
-                    <strong>{{ executiveSignal.title.replace("有", "") }}</strong>
-                    <small>{{ executiveSignal.desc }}</small>
-                  </div>
-                </div>
-                <div class="signal-tags">
-                  <span>闭环率 {{ requestClosureRate }}%</span>
-                  <span>待签字 {{ executiveSignatureCount }}</span>
-                </div>
-              </article>
-
-              <button class="executive-summary-card urgent" type="button" @click="goTab('stock')">
-                <div>
-                  <h2>紧急风险</h2>
-                  <p>影响手术、抢救、基础护理的关键耗材</p>
-                </div>
-                <div class="large-number">
-                  <strong>{{ executiveUrgentCount }}</strong>
-                  <span>项</span>
-                </div>
-                <small>{{ executiveRiskText }}</small>
-              </button>
-
-              <button class="executive-summary-card attention" type="button" @click="goTab('requests')">
-                <div>
-                  <h2>关注事项</h2>
-                  <p>需要科室或库房协同跟进的单据</p>
-                </div>
-                <div class="large-number">
-                  <strong>{{ executiveAttentionCount }}</strong>
-                  <span>单</span>
-                </div>
-                <small>其中 {{ executiveOverdueAttentionCount }} 单超过 30 分钟未更新状态</small>
-              </button>
-
-              <article class="executive-summary-card compact">
-                <div>
-                  <h2>关键指标</h2>
-                </div>
-                <div class="metric-stack">
-                  <div v-for="item in executiveKeyMetrics" :key="item.label">
-                    <span>{{ item.label }}</span>
-                    <strong :class="item.tone">{{ item.value }}</strong>
-                  </div>
-                </div>
-              </article>
-            </section>
-
-            <div class="executive-content-grid primary">
-              <section class="panel">
-                <div class="panel-head compact">
-                  <div>
-                    <h2>科室消耗 TOP</h2>
-                    <p>按今日出库金额与高频耗材综合排序</p>
-                  </div>
-                </div>
-                <div v-if="departmentConsumptionTop.length" class="bar-list">
-                  <div v-for="row in departmentConsumptionTop.slice(0, 5)" :key="row.department" class="bar-row">
-                    <span>{{ row.department }}</span>
-                    <div><i :style="{ width: `${Math.max(8, (row.value / maxDepartmentConsumption) * 100)}%` }"></i></div>
-                    <strong>{{ Math.round((row.value / maxDepartmentConsumption) * 100) }}%</strong>
-                  </div>
-                </div>
-                <el-empty v-else description="暂无周消耗数据" :image-size="72" />
-              </section>
-
-              <section class="panel">
-                <div class="panel-head compact">
-                  <div>
-                    <h2>物资库存明细</h2>
-                    <p>保留原表格字段，增强风险状态可读性</p>
-                  </div>
-                </div>
-                <el-table :data="executiveStockPreviewRows" border>
-                  <el-table-column prop="name" label="物资名称" min-width="150" />
-                  <el-table-column prop="stockText" label="当前库存" width="120" />
-                  <el-table-column prop="safeText" label="安全库存" width="120" />
-                  <el-table-column label="状态" width="110">
-                    <template #default="{ row }">
-                      <el-tag :type="row.level" effect="light">{{ row.status }}</el-tag>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </section>
-            </div>
-
-            <div class="executive-content-grid secondary">
-              <section class="panel">
-                <div class="panel-head compact">
-                  <div>
-                    <h2>待签字事项</h2>
-                    <p>按超时风险排序，减少领导视角下的信息噪声</p>
-                  </div>
-                </div>
-                <div v-if="todoRows.length" class="signature-list">
-                  <button
-                    v-for="row in todoRows.slice(0, 3)"
-                    :key="row.id"
-                    class="signature-row"
-                    type="button"
-                    @click="openTodo(row)"
-                  >
-                    <span>{{ row.title.split(" ")[0] }}</span>
-                    <strong>{{ row.title.replace(row.title.split(" ")[0], "").trim() || row.type }}</strong>
-                    <em>{{ row.type }}</em>
-                    <small>{{ executiveTodoAge(row) }}</small>
-                  </button>
-                  <el-button v-if="todoRows.length > 3" type="primary" @click="goTab('requests')">进入签字中心</el-button>
-                </div>
-                <el-empty v-else description="暂无待签字事项" :image-size="72" />
-              </section>
-
-              <section class="panel">
-                <div class="panel-head compact">
-                  <div>
-                    <h2>风险闭环</h2>
-                    <p>把原来的分散卡片收敛成可追踪处理链路</p>
-                  </div>
-                </div>
-                <div class="risk-flow">
-                  <div v-for="step in executiveRiskFlow" :key="step.label" class="risk-step" :class="step.tone">
-                    <span>{{ step.index }}</span>
-                    <strong>{{ step.label }}</strong>
-                    <small>{{ step.desc }}</small>
-                  </div>
-                </div>
-              </section>
-            </div>
+            <ExecutivePanel
+              :executive-signal="executiveSignal"
+              :request-closure-rate="requestClosureRate"
+              :signature-count="executiveSignatureCount"
+              :urgent-count="executiveUrgentCount"
+              :risk-text="executiveRiskText"
+              :attention-count="executiveAttentionCount"
+              :overdue-attention-count="executiveOverdueAttentionCount"
+              :key-metrics="executiveKeyMetrics"
+              :department-consumption-top="departmentConsumptionTop"
+              :max-department-consumption="maxDepartmentConsumption"
+              :stock-preview-rows="executiveStockPreviewRows"
+              :todo-rows="todoRows"
+              :risk-flow="executiveRiskFlow"
+              :can-view-all-departments="canViewAllDepartments"
+              :current-department="currentDepartment"
+              :todo-age="executiveTodoAge"
+              @go-tab="goTab"
+              @open-todo="openTodo"
+            />
           </template>
 
           <template v-else-if="activeTab === 'stock'">
-            <div class="pane-grid">
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>当前库存</h2>
-                    <p>按物资汇总所有批次库存，低库存和临期会突出显示。</p>
-                  </div>
-                  <el-button
-                    v-if="hasInventoryAuth('inventory:export')"
-                    type="primary"
-                    plain
-                    :icon="Download"
-                    @click="exportCsv(stockRows, 'inventory-stock.csv')"
-                  >
-                    导出
-                  </el-button>
-                </div>
-                <div class="table-toolbar">
-                  <el-input v-model="stockFilters.keyword" clearable placeholder="搜索物资、规格、位置" />
-                  <el-select v-model="stockFilters.category" clearable placeholder="分类">
-                    <el-option v-for="item in categoryFilterOptions" :key="item" :label="item" :value="item" />
-                  </el-select>
-                  <el-select v-model="stockFilters.status" clearable placeholder="状态">
-                    <el-option label="低库存" value="low" />
-                    <el-option label="敏感物资" value="sensitive" />
-                  </el-select>
-                </div>
-                <el-table :data="filteredStockRows" border height="420">
-                  <el-table-column prop="name" label="物资" min-width="150" />
-                  <el-table-column prop="category" label="分类" width="110" />
-                  <el-table-column prop="spec" label="规格" min-width="130" />
-                  <el-table-column prop="stock" label="库存" width="110">
-                    <template #default="{ row }">
-                      <strong :class="{ danger: row.lowStock }">{{ row.stock }} {{ row.unit }}</strong>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="lowStockThreshold" label="预警线" width="100" />
-                  <el-table-column prop="location" label="存放位置" width="130" />
-                  <el-table-column label="状态" width="160">
-                    <template #default="{ row }">
-                      <el-tag v-if="row.lowStock" type="danger" effect="plain">低库存</el-tag>
-                      <el-tag v-else type="success" effect="plain">正常</el-tag>
-                      <el-tag v-if="row.sensitive" class="ml6" type="warning" effect="plain">敏感</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="180" fixed="right">
-                    <template #default="{ row }">
-                      <el-button
-                        v-if="hasInventoryAuth('inventory:issue')"
-                        link
-                        type="primary"
-                        @click="openInboundDialog(asInventoryItem(row.item))"
-                      >
-                        入库
-                      </el-button>
-                      <el-button
-                        v-if="hasInventoryAuth('inventory:issue')"
-                        link
-                        @click="openItemDialog(asInventoryItem(row.item))"
-                      >
-                        编辑
-                      </el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </section>
-
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>批次与效期</h2>
-                    <p>用于 P2 批号、效期、临期追溯。</p>
-                  </div>
-                </div>
-                <el-table :data="batchRows" border height="420">
-                  <el-table-column prop="itemName" label="物资" min-width="140" />
-                  <el-table-column prop="batchNo" label="批号" width="120" />
-                  <el-table-column prop="quantity" label="数量" width="90" />
-                  <el-table-column prop="expiryDate" label="有效期" width="120" />
-                  <el-table-column prop="location" label="位置" width="120" />
-                  <el-table-column label="提醒" width="110">
-                    <template #default="{ row }">
-                      <el-tag v-if="row.expired" type="danger" effect="plain">已过期</el-tag>
-                      <el-tag v-else-if="row.expirySoon" type="warning" effect="plain">临期</el-tag>
-                      <span v-else>-</span>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </section>
-            </div>
+            <StockPanel
+              v-model:keyword="stockFilters.keyword"
+              v-model:category="stockFilters.category"
+              v-model:status="stockFilters.status"
+              :rows="filteredStockRows"
+              :batch-rows="batchRows"
+              :category-options="categoryFilterOptions"
+              :can-export="hasInventoryAuth('inventory:export')"
+              :can-manage="hasInventoryAuth('inventory:issue')"
+              @export="exportCsv(stockRows, 'inventory-stock.csv')"
+              @inbound="openInboundDialog"
+              @edit="openItemDialog"
+            />
           </template>
 
           <template v-else-if="activeTab === 'items'">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>物资字典</h2>
-                  <p>统一名称、规格、单位、批号效期要求，后续申领与统计都从这里选择。</p>
-                </div>
-                <el-button v-if="hasInventoryAuth('inventory:issue')" type="primary" :icon="Plus" @click="openItemDialog()">
-                  新增物资
-                </el-button>
-              </div>
-              <div class="table-toolbar">
-                <el-input v-model="itemFilters.keyword" clearable placeholder="搜索名称、规格、位置" />
-                <el-select v-model="itemFilters.category" clearable placeholder="分类">
-                  <el-option v-for="item in categoryFilterOptions" :key="item" :label="item" :value="item" />
-                </el-select>
-              </div>
-              <el-table :data="filteredItemRows" border>
-                <el-table-column prop="name" label="名称" min-width="160" />
-                <el-table-column prop="category" label="分类" width="120" />
-                <el-table-column prop="spec" label="规格" min-width="140" />
-                <el-table-column prop="unit" label="单位" width="90" />
-                <el-table-column prop="lowStockThreshold" label="预警线" width="90" />
-                <el-table-column label="管理要求" min-width="180">
-                  <template #default="{ row }">
-                    <el-tag v-if="row.batchRequired" effect="plain">批号</el-tag>
-                    <el-tag v-if="row.expiryRequired" class="ml6" effect="plain">效期</el-tag>
-                    <el-tag v-if="row.sensitive" class="ml6" type="warning" effect="plain">敏感</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="location" label="默认位置" width="140" />
-                <el-table-column label="操作" width="90" fixed="right">
-                  <template #default="{ row }">
-                    <el-button
-                      v-if="hasInventoryAuth('inventory:issue')"
-                      link
-                      type="primary"
-                      @click="openItemDialog(asInventoryItem(row))"
-                    >
-                      编辑
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </section>
+            <ItemsPanel
+              v-model:keyword="itemFilters.keyword"
+              v-model:category="itemFilters.category"
+              :rows="filteredItemRows"
+              :category-options="categoryFilterOptions"
+              :can-manage="hasInventoryAuth('inventory:issue')"
+              @create="openItemDialog()"
+              @edit="openItemDialog"
+            />
           </template>
 
           <template v-else-if="activeTab === 'requests'">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>科室申领闭环</h2>
-                  <p>提交、审核、发放、签收全部留痕，避免口头领用和纸质单据断链。</p>
-                </div>
-                <el-button v-if="hasInventoryAuth('inventory:request')" type="primary" :icon="Plus" @click="openRequestDialog()">
-                  新增申领
-                </el-button>
-              </div>
-              <div class="table-toolbar wide">
-                <el-input v-model="requestFilters.keyword" clearable placeholder="搜索物资、科室、理由、负责人" />
-                <el-select v-model="requestFilters.status" clearable placeholder="状态">
-                  <el-option label="待审核" value="pending" />
-                  <el-option label="待发放" value="approved" />
-                  <el-option label="部分发放" value="partially_issued" />
-                  <el-option label="待签收" value="issued" />
-                  <el-option label="已签收" value="received" />
-                  <el-option label="已驳回" value="rejected" />
-                  <el-option label="已撤销" value="cancelled" />
-                  <el-option label="已作废" value="void" />
-                </el-select>
-                <el-select v-model="requestFilters.department" clearable filterable placeholder="科室">
-                  <el-option v-for="item in departmentOptions" :key="item" :label="item" :value="item" />
-                </el-select>
-                <el-date-picker
-                  v-model="requestFilters.dateRange"
-                  value-format="YYYY-MM-DD"
-                  type="daterange"
-                  start-placeholder="开始日期"
-                  end-placeholder="结束日期"
-                />
-              </div>
-              <el-table :data="filteredRequestRows" border :row-class-name="requestRowClassName">
-                <el-table-column prop="createdAt" label="申请时间" width="160" />
-                <el-table-column prop="department" label="科室" width="120" />
-                <el-table-column prop="itemSummary" label="物资明细" min-width="220">
-                  <template #default="{ row }">
-                    <div class="request-line-summary">
-                      <strong>{{ row.itemSummary || row.itemName }}</strong>
-                      <small>{{ row.itemCount || row.lines?.length || 1 }} 项，合计 {{ row.quantity }}</small>
-                    </div>
-                  </template>
-                </el-table-column>
-                <el-table-column label="发放" width="120">
-                  <template #default="{ row }">{{ row.issuedQuantity || 0 }} / {{ row.quantity }}</template>
-                </el-table-column>
-                <el-table-column prop="reason" label="理由" min-width="220" />
-                <el-table-column prop="owner" label="负责人" width="110" />
-                <el-table-column label="闭环进度" min-width="250">
-                  <template #default="{ row }">
-                    <el-steps
-                      class="request-steps"
-                      :active="requestStepActive(row.status)"
-                      finish-status="success"
-                      process-status="process"
-                      simple
-                    >
-                      <el-step title="审核" />
-                      <el-step title="发放" />
-                      <el-step title="签收" />
-                    </el-steps>
-                  </template>
-                </el-table-column>
-                <el-table-column label="状态" width="120">
-                  <template #default="{ row }">
-                    <el-tag :type="requestStatusMeta(row.status).type" effect="plain">{{
-                      requestStatusMeta(row.status).label
-                    }}</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="230" fixed="right">
-                  <template #default="{ row }">
-                    <el-button
-                      v-if="row.status === 'pending' && hasInventoryAuth('inventory:approve')"
-                      link
-                      type="primary"
-                      @click="approveRequest(asInventoryRequest(row))"
-                    >
-                      审核
-                    </el-button>
-                    <el-button
-                      v-if="row.status === 'approved' && hasInventoryAuth('inventory:issue')"
-                      link
-                      type="primary"
-                      @click="openIssueDialog(asInventoryRequest(row))"
-                    >
-                      发放
-                    </el-button>
-                    <el-button
-                      v-if="row.status === 'partially_issued' && hasInventoryAuth('inventory:issue')"
-                      link
-                      type="warning"
-                      @click="openIssueDialog(asInventoryRequest(row))"
-                    >
-                      继续发
-                    </el-button>
-                    <el-button
-                      v-if="row.status === 'issued' && hasInventoryAuth('inventory:receive')"
-                      link
-                      type="success"
-                      @click="receiveRequest(asInventoryRequest(row))"
-                    >
-                      签收
-                    </el-button>
-                    <el-button
-                      v-if="row.status === 'pending' && hasInventoryAuth('inventory:approve')"
-                      link
-                      type="warning"
-                      @click="rejectRequest(asInventoryRequest(row))"
-                    >
-                      驳回
-                    </el-button>
-                    <el-button
-                      v-if="row.status === 'pending' && hasInventoryAuth('inventory:request')"
-                      link
-                      type="info"
-                      @click="cancelRequest(asInventoryRequest(row))"
-                    >
-                      撤销
-                    </el-button>
-                    <el-button
-                      v-if="['pending', 'approved'].includes(row.status) && hasInventoryAuth('inventory:approve')"
-                      link
-                      type="danger"
-                      @click="voidRequest(asInventoryRequest(row))"
-                    >
-                      作废
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </section>
+            <RequestsPanel
+              v-model:keyword="requestFilters.keyword"
+              v-model:status="requestFilters.status"
+              v-model:department="requestFilters.department"
+              v-model:date-range="requestFilters.dateRange"
+              :rows="filteredRequestRows"
+              :department-options="departmentOptions"
+              :can-create="hasInventoryAuth('inventory:request')"
+              :can-approve="hasInventoryAuth('inventory:approve')"
+              :can-issue="hasInventoryAuth('inventory:issue')"
+              :can-receive="hasInventoryAuth('inventory:receive')"
+              :can-cancel="hasInventoryAuth('inventory:request')"
+              :row-class-name="requestRowClassName"
+              @create="openRequestDialog()"
+              @approve="approveRequest"
+              @issue="openIssueDialog"
+              @receive="receiveRequest"
+              @reject="rejectRequest"
+              @cancel="cancelRequest"
+              @void="voidRequest"
+            />
           </template>
 
           <template v-else-if="activeTab === 'weekly'">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>科室周消耗</h2>
-                  <p>记录本周实际消耗、剩余数量和下周预计领用，用于 P1 趋势与异常管理。</p>
-                </div>
-                <el-button v-if="hasInventoryAuth('inventory:request')" type="primary" :icon="Plus" @click="openWeeklyDialog()">
-                  新增周消耗
-                </el-button>
-              </div>
-              <el-table :data="weeklyRows" border>
-                <el-table-column prop="weekNo" label="周次" width="130" />
-                <el-table-column prop="department" label="科室" width="120" />
-                <el-table-column prop="itemName" label="物资" min-width="150" />
-                <el-table-column prop="consumedQuantity" label="本周消耗" width="110" />
-                <el-table-column prop="remainingQuantity" label="科室剩余" width="110" />
-                <el-table-column prop="nextWeekQuantity" label="下周预计" width="110" />
-                <el-table-column prop="owner" label="负责人" width="110" />
-                <el-table-column prop="abnormalReason" label="异常说明" min-width="220" />
-                <el-table-column prop="confirmedAt" label="确认时间" width="160" />
-              </el-table>
-            </section>
+            <WeeklyPanel :rows="weeklyRows" :can-create="hasInventoryAuth('inventory:request')" @create="openWeeklyDialog" />
           </template>
 
           <template v-else-if="activeTab === 'controls'">
-            <div class="control-grid">
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>盘点差异</h2>
-                    <p>账实不一致必须记录原因，形成 P2 盘点追溯。</p>
-                  </div>
-                  <el-button v-if="hasInventoryAuth('inventory:count')" type="primary" :icon="Plus" @click="openCountDialog()">
-                    新增盘点
-                  </el-button>
-                </div>
-                <el-table :data="countRows" border height="360">
-                  <el-table-column prop="countedAt" label="时间" width="160" />
-                  <el-table-column prop="itemName" label="物资" min-width="150" />
-                  <el-table-column prop="bookQuantity" label="账面" width="90" />
-                  <el-table-column prop="actualQuantity" label="实盘" width="90" />
-                  <el-table-column prop="differenceQuantity" label="差异" width="90" />
-                  <el-table-column prop="operator" label="盘点人" width="110" />
-                  <el-table-column prop="reason" label="原因" min-width="180" />
-                </el-table>
-              </section>
-
-              <section class="panel quick-control">
-                <div class="panel-head">
-                  <div>
-                    <h2>退回 / 报废</h2>
-                    <p>用于记录科室退回、库存报废和损耗说明。</p>
-                  </div>
-                </div>
-                <el-form ref="returnFormRef" :model="returnForm" :rules="returnFormRules" label-width="96px" status-icon>
-                  <el-form-item label="类型">
-                    <el-segmented v-model="returnForm.type" :options="availableReturnTypeOptions" />
-                  </el-form-item>
-                  <el-form-item label="物资" prop="itemId">
-                    <el-select v-model="returnForm.itemId" filterable placeholder="请选择物资" @change="returnForm.batchId = ''">
-                      <el-option v-for="item in db.items" :key="item.id" :label="item.name" :value="item.id" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item label="批次">
-                    <el-select v-model="returnForm.batchId" clearable filterable placeholder="自动选择或指定批次">
-                      <el-option
-                        v-for="batch in batchesForItem(returnForm.itemId)"
-                        :key="batch.id"
-                        :label="batchLabel(batch)"
-                        :value="batch.id"
-                      />
-                    </el-select>
-                    <div class="form-hint">退回时可不选批次，系统会自动落到可用批次；没有库存批次时会补录一条退回批次。</div>
-                  </el-form-item>
-                  <el-form-item label="数量" prop="quantity">
-                    <el-input-number v-model="returnForm.quantity" :min="0" :precision="2" />
-                  </el-form-item>
-                  <el-form-item label="科室">
-                    <el-select v-model="returnForm.department" filterable allow-create placeholder="请选择或输入科室">
-                      <el-option v-for="item in departmentOptions" :key="item" :label="item" :value="item" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item label="原因" prop="reason">
-                    <el-input
-                      v-model="returnForm.reason"
-                      type="textarea"
-                      :rows="3"
-                      placeholder="例如：科室未使用退回 / 临期报废 / 破损损耗"
-                    />
-                  </el-form-item>
-                  <el-form-item>
-                    <el-button v-if="canSubmitReturnOrScrap" type="primary" :loading="saving" @click="submitReturnOrScrap">
-                      保存变更
-                    </el-button>
-                  </el-form-item>
-                </el-form>
-              </section>
-            </div>
+            <ControlsPanel
+              ref="controlsPanelRef"
+              :count-rows="countRows"
+              :items="db.items"
+              :return-form="returnForm"
+              :return-form-rules="returnFormRules"
+              :return-type-options="availableReturnTypeOptions"
+              :department-options="departmentOptions"
+              :can-create-count="hasInventoryAuth('inventory:count')"
+              :can-submit-return-or-scrap="canSubmitReturnOrScrap"
+              :saving="saving"
+              :batches-for-item="batchesForItem"
+              :batch-label="batchLabel"
+              @create-count="openCountDialog"
+              @submit-return="submitReturnOrScrap"
+              @update:return-form="Object.assign(returnForm, $event)"
+            />
           </template>
 
           <template v-else-if="activeTab === 'trace'">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>库存流水与操作日志</h2>
-                  <p>按时间倒序记录所有库存变化和关键操作。</p>
-                </div>
-                <el-button
-                  v-if="hasInventoryAuth('inventory:export')"
-                  plain
-                  :icon="Download"
-                  @click="exportCsv(traceRows, 'inventory-trace.csv')"
-                >
-                  导出
-                </el-button>
-              </div>
-              <div class="table-toolbar wide">
-                <el-input v-model="traceFilters.keyword" clearable placeholder="搜索物资、科室、经办人、原因" />
-                <el-select v-model="traceFilters.type" clearable placeholder="类型">
-                  <el-option label="入库" value="inbound" />
-                  <el-option label="发放" value="issue" />
-                  <el-option label="退回" value="return" />
-                  <el-option label="报废" value="scrap" />
-                  <el-option label="盘点" value="count" />
-                </el-select>
-                <el-select v-model="traceFilters.department" clearable filterable placeholder="科室">
-                  <el-option v-for="item in departmentOptions" :key="item" :label="item" :value="item" />
-                </el-select>
-                <el-date-picker
-                  v-model="traceFilters.dateRange"
-                  value-format="YYYY-MM-DD"
-                  type="daterange"
-                  start-placeholder="开始日期"
-                  end-placeholder="结束日期"
-                />
-              </div>
-              <el-table :data="filteredTraceRows" border>
-                <el-table-column prop="createdAt" label="时间" width="160" />
-                <el-table-column prop="typeLabel" label="类型" width="110" />
-                <el-table-column prop="itemName" label="物资" min-width="150" />
-                <el-table-column prop="quantity" label="数量变化" width="110" />
-                <el-table-column prop="department" label="科室" width="120" />
-                <el-table-column prop="operator" label="经办人" width="120" />
-                <el-table-column prop="reason" label="原因/摘要" min-width="260" />
-              </el-table>
-            </section>
+            <TracePanel
+              v-model:keyword="traceFilters.keyword"
+              v-model:type="traceFilters.type"
+              v-model:department="traceFilters.department"
+              v-model:date-range="traceFilters.dateRange"
+              :rows="filteredTraceRows"
+              :department-options="departmentOptions"
+              :can-export="hasInventoryAuth('inventory:export')"
+              @export="exportCsv(traceRows, 'inventory-trace.csv')"
+            />
           </template>
         </div>
       </transition>
@@ -997,41 +424,31 @@ import {
   type InventoryBatch,
   type InventoryDb,
   type InventoryItem,
-  type InventoryRequestLine,
   type InventoryRequest,
   type ReturnOrScrapParams
 } from "@/api/modules/inventory";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
+import ControlsPanel from "./components/ControlsPanel.vue";
+import ExecutivePanel from "./components/ExecutivePanel.vue";
+import ItemsPanel from "./components/ItemsPanel.vue";
+import OverviewPanel from "./components/OverviewPanel.vue";
+import RequestsPanel from "./components/RequestsPanel.vue";
+import StockPanel from "./components/StockPanel.vue";
+import TracePanel from "./components/TracePanel.vue";
+import WeeklyPanel from "./components/WeeklyPanel.vue";
+import { createEmptyInventoryDb, useInventoryManage } from "./composables/useInventoryManage";
 import { exportCsv } from "./utils";
-
-const emptyDb = (): InventoryDb => ({
-  items: [],
-  batches: [],
-  requests: [],
-  weeklyConsumptions: [],
-  counts: [],
-  movements: [],
-  auditLogs: [],
-  summary: {
-    itemCount: 0,
-    batchCount: 0,
-    pendingRequestCount: 0,
-    approvedRequestCount: 0,
-    lowStockCount: 0,
-    expirySoonCount: 0,
-    movementCount: 0
-  }
-});
 
 const userStore = useUserStore();
 const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+const { operatorName, currentDepartment, today, currentWeekNo, newRequestLine, createDerivedRows } = useInventoryManage(
+  computed(() => userStore.userInfo)
+);
 
-const asInventoryItem = (row: unknown) => row as InventoryItem;
-const asInventoryRequest = (row: unknown) => row as InventoryRequest;
-const db = ref<InventoryDb>(emptyDb());
+const db = ref<InventoryDb>(createEmptyInventoryDb());
 const loading = ref(false);
 const saving = ref(false);
 const activeTab = ref("overview");
@@ -1050,8 +467,8 @@ const inboundFormRef = ref<FormInstance>();
 const requestFormRef = ref<FormInstance>();
 const issueFormRef = ref<FormInstance>();
 const weeklyFormRef = ref<FormInstance>();
-const returnFormRef = ref<FormInstance>();
 const countFormRef = ref<FormInstance>();
+const controlsPanelRef = ref<InstanceType<typeof ControlsPanel>>();
 
 const itemForm = reactive<Partial<InventoryItem> & { operator?: string }>({});
 const inboundForm = reactive({
@@ -1127,8 +544,6 @@ const traceFilters = reactive({
   dateRange: [] as string[]
 });
 
-const operatorName = computed(() => userStore.userInfo.name || userStore.userInfo.department || "当前账号");
-const currentDepartment = computed(() => userStore.userInfo.department || "");
 const tabRoutePathMap: Record<string, string> = {
   overview: "/inventory/overview",
   executive: "/inventory/executive",
@@ -1391,21 +806,8 @@ const requireInventoryAuth = (code: string, actionName: string) => {
   ElMessage.warning(`当前岗位暂无“${actionName}”权限，请由对应负责人处理`);
   return false;
 };
-const today = () => new Date().toISOString().slice(0, 10);
-const padWeek = (value: number) => String(value).padStart(2, "0");
-const currentWeekNo = () => {
-  const date = new Date();
-  const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const day = utcDate.getUTCDay() || 7;
-  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((utcDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${utcDate.getUTCFullYear()}-W${padWeek(week)}`;
-};
-const daysFromToday = (date?: string) => {
-  if (!date) return Number.POSITIVE_INFINITY;
-  return Math.ceil((new Date(date).getTime() - new Date(today()).getTime()) / 86400000);
-};
+const movementTypeLabel = (type: string) =>
+  ({ inbound: "入库", issue: "发放", return: "退回", scrap: "报废", count: "盘点" })[type] || type;
 const flashRequestRow = (id?: string) => {
   if (!id) return;
   highlightedRequestId.value = id;
@@ -1414,35 +816,37 @@ const flashRequestRow = (id?: string) => {
   }, 1200);
 };
 const requestRowClassName = ({ row }: { row: InventoryRequest }) => (row.id === highlightedRequestId.value ? "row-flash" : "");
-const normalizedRequestLines = (row: InventoryRequest): InventoryRequestLine[] => {
-  if (row.lines?.length) {
-    return row.lines.map(line => ({
-      ...line,
-      quantity: Number(line.quantity || 0),
-      issuedQuantity: Number(line.issuedQuantity || 0)
-    }));
-  }
-  return [
-    {
-      id: `${row.id}-legacy-line`,
-      itemId: row.itemId,
-      quantity: Number(row.quantity || 0),
-      issuedQuantity: Number(row.issuedQuantity || 0),
-      status: row.status
-    }
-  ];
-};
-const requestItemSummary = (lines: InventoryRequestLine[]) => {
-  const summary = lines
-    .slice(0, 3)
-    .map(line => `${itemName(line.itemId)} ${line.quantity}${itemUnit(line.itemId)}`)
-    .join("、");
-  return lines.length > 3 ? `${summary} 等 ${lines.length} 项` : summary;
-};
-const requestLineRemaining = (line: InventoryRequestLine) =>
-  Math.max(0, Number(line.quantity || 0) - Number(line.issuedQuantity || 0));
-const requestRemainingLines = (row?: InventoryRequest) =>
-  row ? normalizedRequestLines(row).filter(line => requestLineRemaining(line) > 0) : [];
+
+const {
+  stockByItem,
+  stockRows,
+  batchRows,
+  requestRows,
+  weeklyRows,
+  countRows,
+  traceRows,
+  lowStockRows,
+  expirySoonRows,
+  pendingRequestRows,
+  approvedRequestRows,
+  partiallyIssuedRequestRows,
+  issuedRequestRows,
+  expiredRows,
+  countDiffRows,
+  scrapRows,
+  traceRowsByType,
+  weeklySummary,
+  itemFlagCounts,
+  requestLineRemaining,
+  requestRemainingLines
+} = createDerivedRows({
+  db,
+  belongsToDepartment: belongsToCurrentDepartment,
+  itemName,
+  itemUnit,
+  movementTypeLabel
+});
+
 const activeRequestBatches = computed(() => {
   const itemIds = new Set(requestRemainingLines(activeRequest.value).map(line => line.itemId));
   return db.value.batches.filter(batch => itemIds.has(batch.itemId) && Number(batch.quantity || 0) > 0);
@@ -1459,81 +863,7 @@ const departmentOptions = computed(() =>
   ).filter(Boolean)
 );
 
-const stockRows = computed(() =>
-  db.value.items.map(item => {
-    const stock = db.value.batches
-      .filter(batch => batch.itemId === item.id)
-      .reduce((sum, batch) => sum + Number(batch.quantity || 0), 0);
-    return {
-      ...item,
-      item,
-      stock,
-      lowStock: stock <= Number(item.lowStockThreshold || 0)
-    };
-  })
-);
-
-const batchRows = computed(() =>
-  db.value.batches.map(batch => {
-    const days = daysFromToday(batch.expiryDate);
-    return {
-      ...batch,
-      itemName: itemName(batch.itemId),
-      expired: days < 0,
-      expirySoon: days >= 0 && days <= 30
-    };
-  })
-);
-
-const lowStockRows = computed(() => stockRows.value.filter(row => row.lowStock));
-const expirySoonRows = computed(() => batchRows.value.filter(row => row.expirySoon));
 const categoryFilterOptions = computed(() => Array.from(new Set(db.value.items.map(row => row.category).filter(Boolean))));
-const requestRows = computed(() =>
-  db.value.requests
-    .filter(row => belongsToCurrentDepartment(row.department))
-    .map(row => {
-      const lines = normalizedRequestLines(row);
-      return {
-        ...row,
-        lines,
-        itemName: itemName(row.itemId),
-        itemSummary: row.itemSummary || requestItemSummary(lines),
-        itemCount: row.itemCount || lines.length,
-        unit: itemUnit(row.itemId)
-      };
-    })
-);
-const weeklyRows = computed(() =>
-  db.value.weeklyConsumptions
-    .filter(row => belongsToCurrentDepartment(row.department))
-    .map(row => ({
-      ...row,
-      itemName: itemName(row.itemId)
-    }))
-);
-const countRows = computed(() =>
-  db.value.counts.map(row => ({
-    ...row,
-    itemName: itemName(row.itemId)
-  }))
-);
-const traceRows = computed(() =>
-  db.value.movements
-    .filter(row => belongsToCurrentDepartment(row.department))
-    .map(row => ({
-      ...row,
-      typeLabel: movementTypeLabel(row.type),
-      itemName: itemName(row.itemId)
-    }))
-);
-
-const pendingRequestRows = computed(() => requestRows.value.filter(row => row.status === "pending"));
-const approvedRequestRows = computed(() => requestRows.value.filter(row => row.status === "approved"));
-const partiallyIssuedRequestRows = computed(() => requestRows.value.filter(row => row.status === "partially_issued"));
-const issuedRequestRows = computed(() => requestRows.value.filter(row => row.status === "issued"));
-const expiredRows = computed(() => batchRows.value.filter(row => row.expired));
-const countDiffRows = computed(() => countRows.value.filter(row => Number(row.differenceQuantity || 0) !== 0));
-const scrapRows = computed(() => traceRows.value.filter(row => row.type === "scrap"));
 
 const containsText = (values: unknown[], keyword: string) => {
   const normalized = keyword.trim().toLowerCase();
@@ -1585,7 +915,7 @@ const filteredTraceRows = computed(() =>
   })
 );
 const selectedWeeklyItem = computed(() => itemMap.value.get(weeklyForm.itemId));
-const weeklyItemStock = computed(() => stockRows.value.find(row => row.id === weeklyForm.itemId)?.stock || 0);
+const weeklyItemStock = computed(() => stockByItem.value[weeklyForm.itemId] || 0);
 const weeklyLastRecord = computed(
   () =>
     weeklyRows.value
@@ -1904,123 +1234,101 @@ const riskRows = computed(() =>
   ].filter(row => canAccessTab(row.tab))
 );
 const currentTabStats = computed<TabStat[]>(() => {
-  const statsByTab: Record<string, TabStat[]> = {
-    overview: [
-      { label: "待审核申领", value: db.value.summary.pendingRequestCount, desc: "等待负责人确认", tab: "requests" },
-      {
-        label: "待发放申领",
-        value: db.value.summary.approvedRequestCount,
-        desc: "等待库管发放",
-        tone: "warning",
-        tab: "requests"
-      },
-      ...(canAccessTab("stock")
-        ? [
-            {
-              label: "低库存物资",
-              value: lowStockRows.value.length,
-              desc: "低于或等于预警线",
-              tone: "danger" as const,
-              tab: "stock"
-            }
-          ]
-        : []),
-      { label: "异常提醒", value: riskRows.value.length, desc: "低库存、临期和差异", tone: "danger", tab: "overview" }
-    ],
-    executive: [
-      {
-        label: "紧急风险",
-        value: executiveUrgentCount.value,
-        desc: "需要立即处理",
-        tone: executiveUrgentCount.value ? "danger" : undefined
-      },
-      {
-        label: "关注事项",
-        value: executiveAttentionCount.value,
-        desc: "今天跟进",
-        tone: executiveAttentionCount.value ? "warning" : undefined
-      },
-      { label: "闭环率", value: `${requestClosureRate.value}%`, desc: "已签收/全部申领", tab: "requests" },
-      {
-        label: "待签字",
-        value: pendingRequestRows.value.length + approvedRequestRows.value.length + partiallyIssuedRequestRows.value.length,
-        desc: "审核、发放或补发",
-        tone: "warning",
-        tab: "requests"
-      }
-    ],
-    requests: [
-      { label: "待审核", value: pendingRequestRows.value.length, desc: "负责人处理", tone: "warning" },
-      { label: "待发放", value: approvedRequestRows.value.length, desc: "库管处理" },
-      { label: "部分发放", value: partiallyIssuedRequestRows.value.length, desc: "到货后补发", tone: "warning" },
-      { label: "待签收", value: issuedRequestRows.value.length, desc: "科室确认" }
-    ],
-    stock: [
-      { label: "物资种类", value: db.value.summary.itemCount, desc: "已建档物资" },
-      { label: "库存批次", value: db.value.summary.batchCount, desc: "可追溯批次" },
-      { label: "低库存", value: lowStockRows.value.length, desc: "需要补库", tone: "danger" },
-      { label: "近 30 天临期", value: expirySoonRows.value.length, desc: "优先消耗", tone: "warning" }
-    ],
-    items: [
-      { label: "物资档案", value: db.value.items.length, desc: "统一名称规格" },
-      { label: "敏感物资", value: db.value.items.filter(row => row.sensitive).length, desc: "需重点追溯", tone: "warning" },
-      { label: "批号管理", value: db.value.items.filter(row => row.batchRequired).length, desc: "入库需填批号" },
-      { label: "效期管理", value: db.value.items.filter(row => row.expiryRequired).length, desc: "入库需填效期" }
-    ],
-    weekly: [
-      { label: "周消耗记录", value: weeklyRows.value.length, desc: "科室填报总量" },
-      { label: "涉及科室", value: new Set(weeklyRows.value.map(row => row.department).filter(Boolean)).size, desc: "已参与填报" },
-      {
-        label: "下周预计合计",
-        value: weeklyRows.value.reduce((sum, row) => sum + Number(row.nextWeekQuantity || 0), 0),
-        desc: "用于备货参考"
-      },
-      { label: "异常说明", value: weeklyRows.value.filter(row => row.abnormalReason).length, desc: "需要复核", tone: "warning" }
-    ],
-    controls: [
-      { label: "盘点记录", value: countRows.value.length, desc: "账实核对次数" },
-      { label: "盘点差异", value: countDiffRows.value.length, desc: "需原因闭环", tone: "warning" },
-      { label: "退回记录", value: traceRows.value.filter(row => row.type === "return").length, desc: "科室退回" },
-      { label: "报废记录", value: scrapRows.value.length, desc: "需重点说明", tone: "danger" }
-    ],
-    trace: [
-      { label: "库存流水", value: traceRows.value.length, desc: "全部变动记录" },
-      { label: "入库", value: traceRows.value.filter(row => row.type === "inbound").length, desc: "来源记录" },
-      { label: "发放", value: traceRows.value.filter(row => row.type === "issue").length, desc: "去向记录" },
-      { label: "审计日志", value: db.value.auditLogs.length, desc: "操作留痕" }
-    ]
-  };
-  return statsByTab[activeTab.value] || statsByTab.overview;
+  switch (activeTab.value) {
+    case "executive":
+      return [
+        {
+          label: "紧急风险",
+          value: executiveUrgentCount.value,
+          desc: "需要立即处理",
+          tone: executiveUrgentCount.value ? "danger" : undefined
+        },
+        {
+          label: "关注事项",
+          value: executiveAttentionCount.value,
+          desc: "今天跟进",
+          tone: executiveAttentionCount.value ? "warning" : undefined
+        },
+        { label: "闭环率", value: `${requestClosureRate.value}%`, desc: "已签收/全部申领", tab: "requests" },
+        {
+          label: "待签字",
+          value: pendingRequestRows.value.length + approvedRequestRows.value.length + partiallyIssuedRequestRows.value.length,
+          desc: "审核、发放或补发",
+          tone: "warning",
+          tab: "requests"
+        }
+      ];
+    case "requests":
+      return [
+        { label: "待审核", value: pendingRequestRows.value.length, desc: "负责人处理", tone: "warning" },
+        { label: "待发放", value: approvedRequestRows.value.length, desc: "库管处理" },
+        { label: "部分发放", value: partiallyIssuedRequestRows.value.length, desc: "到货后补发", tone: "warning" },
+        { label: "待签收", value: issuedRequestRows.value.length, desc: "科室确认" }
+      ];
+    case "stock":
+      return [
+        { label: "物资种类", value: db.value.summary.itemCount, desc: "已建档物资" },
+        { label: "库存批次", value: db.value.summary.batchCount, desc: "可追溯批次" },
+        { label: "低库存", value: lowStockRows.value.length, desc: "需要补库", tone: "danger" },
+        { label: "近 30 天临期", value: expirySoonRows.value.length, desc: "优先消耗", tone: "warning" }
+      ];
+    case "items":
+      return [
+        { label: "物资档案", value: db.value.items.length, desc: "统一名称规格" },
+        { label: "敏感物资", value: itemFlagCounts.value.sensitive, desc: "需重点追溯", tone: "warning" },
+        { label: "批号管理", value: itemFlagCounts.value.batchRequired, desc: "入库需填批号" },
+        { label: "效期管理", value: itemFlagCounts.value.expiryRequired, desc: "入库需填效期" }
+      ];
+    case "weekly":
+      return [
+        { label: "周消耗记录", value: weeklyRows.value.length, desc: "科室填报总量" },
+        { label: "涉及科室", value: weeklySummary.value.departmentCount, desc: "已参与填报" },
+        {
+          label: "下周预计合计",
+          value: weeklySummary.value.nextWeekTotal,
+          desc: "用于备货参考"
+        },
+        { label: "异常说明", value: weeklySummary.value.abnormalCount, desc: "需要复核", tone: "warning" }
+      ];
+    case "controls":
+      return [
+        { label: "盘点记录", value: countRows.value.length, desc: "账实核对次数" },
+        { label: "盘点差异", value: countDiffRows.value.length, desc: "需原因闭环", tone: "warning" },
+        { label: "退回记录", value: traceRowsByType.value.return?.length || 0, desc: "科室退回" },
+        { label: "报废记录", value: scrapRows.value.length, desc: "需重点说明", tone: "danger" }
+      ];
+    case "trace":
+      return [
+        { label: "库存流水", value: traceRows.value.length, desc: "全部变动记录" },
+        { label: "入库", value: traceRowsByType.value.inbound?.length || 0, desc: "来源记录" },
+        { label: "发放", value: traceRowsByType.value.issue?.length || 0, desc: "去向记录" },
+        { label: "审计日志", value: db.value.auditLogs.length, desc: "操作留痕" }
+      ];
+    default:
+      return [
+        { label: "待审核申领", value: db.value.summary.pendingRequestCount, desc: "等待负责人确认", tab: "requests" },
+        {
+          label: "待发放申领",
+          value: db.value.summary.approvedRequestCount,
+          desc: "等待库管发放",
+          tone: "warning",
+          tab: "requests"
+        },
+        ...(canAccessTab("stock")
+          ? [
+              {
+                label: "低库存物资",
+                value: lowStockRows.value.length,
+                desc: "低于或等于预警线",
+                tone: "danger" as const,
+                tab: "stock"
+              }
+            ]
+          : []),
+        { label: "异常提醒", value: riskRows.value.length, desc: "低库存、临期和差异", tone: "danger", tab: "overview" }
+      ];
+  }
 });
-
-const movementTypeLabel = (type: string) =>
-  ({ inbound: "入库", issue: "发放", return: "退回", scrap: "报废", count: "盘点" })[type] || type;
-
-type InventoryTagType = "success" | "warning" | "info" | "primary" | "danger";
-
-const requestStatusMeta = (status: string): { label: string; type: InventoryTagType } => {
-  const meta = {
-    pending: { label: "待审核", type: "warning" },
-    approved: { label: "待发放", type: "primary" },
-    partially_issued: { label: "部分发放", type: "warning" },
-    issued: { label: "待签收", type: "success" },
-    received: { label: "已签收", type: "info" },
-    rejected: { label: "已驳回", type: "danger" },
-    cancelled: { label: "已撤销", type: "info" },
-    void: { label: "已作废", type: "danger" }
-  }[status] || { label: status, type: "info" };
-  return meta as { label: string; type: InventoryTagType };
-};
-const requestStepActive = (status: string) => {
-  const stepMap: Record<string, number> = {
-    pending: 0,
-    approved: 1,
-    partially_issued: 2,
-    issued: 2,
-    received: 3
-  };
-  return stepMap[status] ?? 0;
-};
 
 const goTab = (tab: string) => {
   if (canAccessTab(tab)) {
@@ -2083,7 +1391,6 @@ const resetObject = (target: Record<string, unknown>, values: Record<string, unk
   });
   Object.assign(target, values);
 };
-const newRequestLine = () => ({ localId: `line-${Date.now()}-${Math.random()}`, itemId: "", quantity: 0 });
 const addRequestLine = () => requestForm.lines.push(newRequestLine());
 const removeRequestLine = (index: number) => {
   if (requestForm.lines.length <= 1) return;
@@ -2389,7 +1696,7 @@ const submitReturnOrScrap = async () => {
   const actionName = returnForm.type === "return" ? "退回物资" : "报废物资";
   const requiredAuth = returnForm.type === "return" ? "inventory:receive" : "inventory:count";
   if (!requireInventoryAuth(requiredAuth, actionName)) return;
-  if (!(await returnFormRef.value?.validate().catch(() => false))) return;
+  if (!(await controlsPanelRef.value?.validateReturnForm())) return;
   if (returnForm.type === "scrap") {
     const confirmed = await ElMessageBox.confirm("报废会形成不可忽略的追溯记录，请确认原因、数量和物资无误。", "确认报废", {
       confirmButtonText: "确认报废",
@@ -2550,9 +1857,6 @@ onMounted(loadInventory);
 .inventory-command,
 .ribbon-lead,
 .ribbon-metric,
-.overview-command-board,
-.executive-filter-bar,
-.executive-summary-card,
 .panel {
   background: var(--inventory-panel);
   border: 1px solid var(--inventory-line);
@@ -2649,8 +1953,7 @@ onMounted(loadInventory);
   }
 }
 
-.ribbon-metric,
-.board-metric {
+.ribbon-metric {
   display: grid;
   gap: 4px;
   text-align: left;
@@ -2820,256 +2123,8 @@ onMounted(loadInventory);
   align-self: start;
 }
 
-.overview-command-board {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1fr);
-  gap: 0;
-  overflow: hidden;
-}
-
-.board-signal {
-  display: grid;
-  align-content: center;
-  gap: 5px;
-  padding: 16px;
-  background: var(--inventory-success-soft);
-  border-right: 1px solid var(--inventory-line);
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span {
-    color: var(--inventory-success);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  strong {
-    color: var(--inventory-text);
-    font-size: 28px;
-    line-height: 1.18;
-  }
-
-  small {
-    color: var(--inventory-muted);
-    line-height: 1.5;
-  }
-
-  &.warning {
-    background: var(--inventory-warning-soft);
-
-    span {
-      color: var(--inventory-warning);
-    }
-  }
-
-  &.danger {
-    background: var(--inventory-danger-soft);
-
-    span {
-      color: var(--inventory-danger);
-    }
-  }
-}
-
-.board-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.board-metric {
-  min-width: 0;
-  padding: 14px;
-  background: #ffffff;
-  border: 0;
-  border-right: 1px solid var(--inventory-line-soft);
-
-  &:last-child {
-    border-right: 0;
-  }
-}
-
-.operations-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.62fr);
-  gap: 12px;
-
-  &.secondary {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.36fr);
-  }
-}
-
-.quick-actions-panel {
-  .panel-head {
-    margin-bottom: 8px;
-  }
-}
-
-.workflow-steps {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.workflow-step,
-.todo-card {
-  border: 1px solid var(--inventory-line-soft);
-  border-radius: 8px;
-  background: #ffffff;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease;
-
-  &:hover {
-    border-color: rgb(8 118 111 / 28%);
-    background: #f9fdfc;
-  }
-}
-
-.workflow-step {
-  display: grid;
-  gap: 6px;
-  min-height: 96px;
-  padding: 10px;
-
-  strong,
-  small {
-    display: block;
-  }
-
-  strong {
-    color: var(--inventory-primary);
-    font-size: 15px;
-    line-height: 1.35;
-  }
-
-  small {
-    color: var(--inventory-muted);
-    line-height: 1.45;
-  }
-}
-
-.step-index {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  color: #ffffff;
-  font-weight: 700;
-  background: var(--inventory-primary);
-  border-radius: 7px;
-}
-
-.todo-list {
-  display: grid;
-  gap: 10px;
-}
-
-.todo-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 11px;
-
-  strong,
-  small {
-    display: block;
-  }
-
-  strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  small {
-    margin-top: 3px;
-    color: var(--el-text-color-secondary);
-  }
-
-  > span:last-child {
-    color: var(--inventory-primary);
-    font-weight: 700;
-  }
-}
-
-.role-entry-panel {
-  .panel-head p {
-    display: block;
-  }
-}
-
-.role-entry-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-
-.role-entry-card {
-  display: grid;
-  gap: 5px;
-  min-height: 76px;
-  padding: 10px;
-  text-align: left;
-  cursor: pointer;
-  background: #ffffff;
-  border: 1px solid var(--inventory-line-soft);
-  border-radius: 8px;
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease;
-
-  &:hover {
-    border-color: rgb(8 118 111 / 28%);
-    background: #f9fdfc;
-  }
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span {
-    color: var(--inventory-primary);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  strong {
-    color: #111827;
-    font-size: 14px;
-    line-height: 1.35;
-  }
-
-  small {
-    color: var(--inventory-muted);
-    line-height: 1.45;
-  }
-}
-
 .danger {
   color: #dc2626;
-}
-
-.table-toolbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(140px, 180px);
-  gap: 8px;
-  margin-bottom: 10px;
-
-  &.wide {
-    grid-template-columns: minmax(240px, 1fr) minmax(130px, 160px) minmax(140px, 180px) minmax(260px, 320px);
-  }
 }
 
 :deep(.el-table) {
@@ -3085,474 +2140,8 @@ onMounted(loadInventory);
   }
 }
 
-.executive-filter-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 18px;
-  background: var(--inventory-panel);
-  border: 1px solid var(--inventory-line);
-  border-radius: 8px;
-}
-
-.filter-pills,
-.filter-fields {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.filter-pills button,
-.filter-fields strong {
-  min-height: 32px;
-  padding: 6px 17px;
-  color: #183044;
-  font-size: 13px;
-  font-weight: 700;
-  background: #ffffff;
-  border: 1px solid #cfd9e3;
-  border-radius: 999px;
-}
-
-.filter-pills button {
-  cursor: pointer;
-
-  &.active,
-  &:hover {
-    color: #ffffff;
-    background: var(--inventory-primary);
-    border-color: var(--inventory-primary);
-  }
-}
-
-.filter-fields {
-  justify-content: flex-end;
-
-  span {
-    color: #40556a;
-    font-size: 13px;
-    font-weight: 700;
-  }
-
-  strong {
-    min-width: 118px;
-    text-align: center;
-    border-radius: 7px;
-  }
-}
-
-.executive-summary-grid {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(240px, 0.9fr) minmax(260px, 0.9fr) minmax(260px, 0.92fr);
-  gap: 12px;
-}
-
-.executive-summary-card {
-  display: grid;
-  align-content: space-between;
-  gap: 14px;
-  min-height: 154px;
-  padding: 22px 22px 18px;
-  text-align: left;
-  background: #ffffff;
-  border: 1px solid var(--inventory-line);
-  border-radius: 8px;
-
-  h2,
-  p,
-  strong,
-  small {
-    display: block;
-    margin: 0;
-  }
-
-  h2 {
-    color: #061833;
-    font-size: 16px;
-    line-height: 1.3;
-  }
-
-  p,
-  small {
-    color: #53677d;
-    font-size: 13px;
-    line-height: 1.45;
-  }
-
-  &.urgent,
-  &.attention {
-    cursor: pointer;
-    transition:
-      border-color 0.16s ease,
-      background 0.16s ease;
-
-    &:hover {
-      background: #fbfdfd;
-      border-color: rgb(8 118 111 / 28%);
-    }
-  }
-}
-
-.signal-body {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-
-  strong {
-    color: var(--inventory-success);
-    font-size: 26px;
-    line-height: 1.1;
-  }
-
-  small {
-    margin-top: 4px;
-  }
-}
-
-.signal-dot {
-  display: inline-grid;
-  place-items: center;
-  width: 62px;
-  height: 62px;
-  background: rgb(35 128 95 / 14%);
-  border: 1px solid rgb(35 128 95 / 22%);
-  border-radius: 50%;
-
-  &::after {
-    width: 28px;
-    height: 28px;
-    content: "";
-    background: var(--inventory-success);
-    border-radius: 50%;
-  }
-}
-
-.executive-summary-card.signal.warning {
-  .signal-dot {
-    background: rgb(183 121 31 / 14%);
-    border-color: rgb(183 121 31 / 24%);
-
-    &::after {
-      background: var(--inventory-warning);
-    }
-  }
-
-  .signal-body strong {
-    color: var(--inventory-warning);
-  }
-}
-
-.executive-summary-card.signal.danger {
-  .signal-dot {
-    background: rgb(200 50 50 / 12%);
-    border-color: rgb(200 50 50 / 22%);
-
-    &::after {
-      background: var(--inventory-danger);
-    }
-  }
-
-  .signal-body strong {
-    color: var(--inventory-danger);
-  }
-}
-
-.signal-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-
-  span {
-    padding: 4px 10px;
-    color: var(--inventory-primary);
-    font-size: 12px;
-    font-weight: 700;
-    background: var(--inventory-primary-soft);
-    border-radius: 999px;
-
-    &:last-child {
-      color: var(--inventory-warning);
-      background: var(--inventory-warning-soft);
-    }
-  }
-}
-
-.large-number {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-
-  strong {
-    color: var(--inventory-danger);
-    font-size: 54px;
-    line-height: 0.9;
-    font-variant-numeric: tabular-nums;
-  }
-
-  span {
-    color: var(--inventory-danger);
-    font-size: 18px;
-    font-weight: 700;
-  }
-}
-
-.attention .large-number {
-  strong,
-  span {
-    color: #071a34;
-  }
-}
-
-.metric-stack {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  align-items: end;
-
-  div {
-    min-width: 0;
-  }
-
-  span,
-  strong {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  span {
-    color: #4b5f73;
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  strong {
-    margin-top: 10px;
-    color: var(--inventory-primary);
-    font-size: 26px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-
-  strong.warning {
-    color: var(--inventory-warning);
-  }
-
-  strong.danger {
-    color: var(--inventory-danger);
-  }
-}
-
-.executive-content-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.88fr) minmax(420px, 1fr);
-  gap: 12px;
-
-  &.secondary {
-    grid-template-columns: minmax(0, 0.88fr) minmax(420px, 1fr);
-  }
-}
-
 .panel-head.compact {
   margin-bottom: 12px;
-}
-
-.bar-list {
-  display: grid;
-  gap: 14px;
-  padding: 12px 6px 8px;
-}
-
-.bar-row {
-  display: grid;
-  grid-template-columns: minmax(86px, 104px) minmax(0, 1fr) 48px;
-  align-items: center;
-  gap: 16px;
-
-  span,
-  strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  div {
-    height: 10px;
-    overflow: hidden;
-    background: #eef3f7;
-    border-radius: 999px;
-  }
-
-  i {
-    display: block;
-    height: 100%;
-    background: var(--inventory-primary);
-    border-radius: inherit;
-  }
-
-  strong {
-    color: #4d5f75;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-  }
-}
-
-.bar-row:nth-child(2) i {
-  background: #2f8b5d;
-}
-
-.bar-row:nth-child(3) i {
-  background: #2563eb;
-}
-
-.bar-row:nth-child(4) i {
-  background: #b8751c;
-}
-
-.bar-row:nth-child(5) i {
-  background: #6b7280;
-}
-
-.signature-list {
-  display: grid;
-  gap: 0;
-
-  .el-button {
-    justify-self: start;
-    margin-top: 10px;
-  }
-}
-
-.signature-row {
-  display: grid;
-  grid-template-columns: minmax(86px, 120px) minmax(0, 1fr) minmax(96px, 130px) 76px;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 0;
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--inventory-line-soft);
-
-  span,
-  strong,
-  em,
-  small {
-    overflow: hidden;
-    font-style: normal;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  span,
-  strong {
-    color: #071a34;
-    font-weight: 700;
-  }
-
-  em {
-    color: var(--inventory-warning);
-    font-size: 13px;
-    font-weight: 700;
-  }
-
-  small {
-    color: #586b80;
-    font-size: 14px;
-    font-weight: 700;
-    text-align: right;
-  }
-
-  &:hover {
-    background: #fbfdfd;
-  }
-}
-
-.risk-flow {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 28px;
-  padding: 30px 10px 18px;
-
-  &::before {
-    position: absolute;
-    top: 50px;
-    right: 13%;
-    left: 13%;
-    height: 1px;
-    content: "";
-    background: #cdd6df;
-  }
-}
-
-.risk-step {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-
-  span {
-    display: inline-grid;
-    place-items: center;
-    width: 39px;
-    height: 39px;
-    color: var(--inventory-primary);
-    font-weight: 800;
-    background: #ffffff;
-    border: 3px solid currentcolor;
-    border-radius: 50%;
-  }
-
-  strong,
-  small {
-    display: block;
-  }
-
-  strong {
-    color: #071a34;
-    font-size: 14px;
-  }
-
-  small {
-    color: #53677d;
-    line-height: 1.45;
-  }
-
-  &.danger span {
-    color: var(--inventory-danger);
-  }
-
-  &.warning span {
-    color: var(--inventory-warning);
-  }
-
-  &.primary span {
-    color: #2563eb;
-  }
-
-  &.success span {
-    color: var(--inventory-success);
-  }
-}
-
-:deep(.row-flash) {
-  animation: inventory-row-flash 1.1s ease;
-}
-
-@keyframes inventory-row-flash {
-  0% {
-    background: rgb(220 252 231 / 92%);
-  }
-  100% {
-    background: transparent;
-  }
 }
 
 .ml6 {
@@ -3564,27 +2153,6 @@ onMounted(loadInventory);
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.45;
-}
-
-.request-steps {
-  min-width: 220px;
-}
-
-.request-line-summary {
-  display: grid;
-  gap: 3px;
-
-  strong,
-  small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  small {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-  }
 }
 
 .request-lines-editor,
@@ -3630,13 +2198,6 @@ onMounted(loadInventory);
   }
 }
 
-:deep(.request-steps.el-steps--simple) {
-  padding: 6px 8px;
-  background: rgb(248 250 252 / 92%);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-}
-
 .weekly-assist {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
@@ -3668,18 +2229,11 @@ onMounted(loadInventory);
 @media (max-width: 1080px) {
   .inventory-command,
   .pane-grid,
-  .control-grid,
-  .overview-command-board,
-  .operations-grid,
-  .operations-grid.secondary,
-  .executive-summary-grid,
-  .executive-content-grid,
-  .executive-content-grid.secondary {
+  .control-grid {
     grid-template-columns: 1fr;
   }
 
-  .inventory-command,
-  .executive-filter-bar {
+  .inventory-command {
     display: grid;
   }
 
@@ -3687,32 +2241,16 @@ onMounted(loadInventory);
     flex-wrap: wrap;
   }
 
-  .status-ribbon,
-  .board-metrics,
-  .executive-summary-grid {
+  .status-ribbon {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ribbon-lead,
-  .board-signal {
+  .ribbon-lead {
     grid-column: 1 / -1;
-  }
-
-  .board-signal {
-    border-right: 0;
-    border-bottom: 1px solid var(--inventory-line);
-  }
-
-  .workflow-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .module-switcher {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .role-entry-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .request-line-editor,
@@ -3730,11 +2268,7 @@ onMounted(loadInventory);
     }
   }
 
-  .status-ribbon,
-  .board-metrics,
-  .executive-summary-grid,
-  .metric-stack,
-  .risk-flow {
+  .status-ribbon {
     grid-template-columns: 1fr;
   }
 
@@ -3746,29 +2280,8 @@ onMounted(loadInventory);
     }
   }
 
-  .workflow-steps,
-  .todo-card,
-  .signature-row,
-  .module-switcher,
-  .role-entry-grid {
+  .module-switcher {
     grid-template-columns: 1fr;
-  }
-
-  .todo-card > span:last-child {
-    justify-self: start;
-  }
-
-  .risk-flow::before {
-    display: none;
-  }
-
-  .signature-row small {
-    text-align: left;
-  }
-
-  .signal-body strong,
-  .board-signal strong {
-    font-size: 24px;
   }
 
   .weekly-assist {

@@ -1,0 +1,20 @@
+export {
+  deleteAccountApi,
+  deleteDepartmentApi,
+  deleteRoleApi,
+  getAccountDepartmentOptionsApi,
+  getAccountListApi,
+  getDepartmentListApi,
+  getDictListApi,
+  getRoleListApi,
+  getTemplateFieldRuleListApi,
+  getTemplateFieldRulesApi,
+  getWorkRemindersApi,
+  resetAccountPasswordApi,
+  saveAccountApi,
+  saveDepartmentApi,
+  saveDictApi,
+  saveRoleApi,
+  saveTemplateFieldRuleApi,
+  setAccountStatusApi
+} from "./legacy";

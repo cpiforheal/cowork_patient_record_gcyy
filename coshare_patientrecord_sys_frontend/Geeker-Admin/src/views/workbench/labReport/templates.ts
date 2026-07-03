@@ -1,4 +1,12 @@
-export type LabTemplateId = "bloodRoutine" | "biochemistry" | "hbvFive" | "infectious" | "crpSaa" | "urineRoutine" | "hba1c" | "ecgImage";
+export type LabTemplateId =
+  | "bloodRoutine"
+  | "biochemistry"
+  | "hbvFive"
+  | "infectious"
+  | "crpSaa"
+  | "urineRoutine"
+  | "hba1c"
+  | "ecgImage";
 
 export type LabMetricInput = "number" | "text" | "select";
 
@@ -110,11 +118,32 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     documentTypeLabel: "乙肝五项模板报告",
     description: "用于术前八项中的乙肝五项结果记录。",
     metrics: [
-      { key: "hbsag", name: "乙肝表面抗原", shortName: "HBsAg", input: "select", options: qualitativeOptions, defaultValue: "阴性" },
-      { key: "hbsab", name: "乙肝表面抗体", shortName: "HBsAb", input: "select", options: qualitativeOptions, defaultValue: "阴性" },
+      {
+        key: "hbsag",
+        name: "乙肝表面抗原",
+        shortName: "HBsAg",
+        input: "select",
+        options: qualitativeOptions,
+        defaultValue: "阴性"
+      },
+      {
+        key: "hbsab",
+        name: "乙肝表面抗体",
+        shortName: "HBsAb",
+        input: "select",
+        options: qualitativeOptions,
+        defaultValue: "阴性"
+      },
       { key: "hbeag", name: "乙肝e抗原", shortName: "HBeAg", input: "select", options: qualitativeOptions, defaultValue: "阴性" },
       { key: "hbeab", name: "乙肝e抗体", shortName: "HBeAb", input: "select", options: qualitativeOptions, defaultValue: "阴性" },
-      { key: "hbcab", name: "乙肝核心抗体", shortName: "HBcAb", input: "select", options: qualitativeOptions, defaultValue: "阴性" }
+      {
+        key: "hbcab",
+        name: "乙肝核心抗体",
+        shortName: "HBcAb",
+        input: "select",
+        options: qualitativeOptions,
+        defaultValue: "阴性"
+      }
     ]
   },
   {
@@ -127,9 +156,30 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     documentTypeLabel: "术前感染筛查模板报告",
     description: "用于术前筛查中的 HIV、TPPA、HCV 结果记录。",
     metrics: [
-      { key: "hiv", name: "人免疫缺陷病毒抗体", shortName: "HIV", input: "select", options: qualitativeOptions, defaultValue: "阴性" },
-      { key: "tppa", name: "梅毒螺旋体抗体", shortName: "TPPA", input: "select", options: qualitativeOptions, defaultValue: "阴性" },
-      { key: "hcv", name: "丙型肝炎病毒抗体", shortName: "HCV", input: "select", options: qualitativeOptions, defaultValue: "阴性" }
+      {
+        key: "hiv",
+        name: "人免疫缺陷病毒抗体",
+        shortName: "HIV",
+        input: "select",
+        options: qualitativeOptions,
+        defaultValue: "阴性"
+      },
+      {
+        key: "tppa",
+        name: "梅毒螺旋体抗体",
+        shortName: "TPPA",
+        input: "select",
+        options: qualitativeOptions,
+        defaultValue: "阴性"
+      },
+      {
+        key: "hcv",
+        name: "丙型肝炎病毒抗体",
+        shortName: "HCV",
+        input: "select",
+        options: qualitativeOptions,
+        defaultValue: "阴性"
+      }
     ]
   },
   {
@@ -156,17 +206,66 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     documentTypeLabel: "尿常规模板报告",
     description: "复刻尿常规拍照报告中的常见项目。",
     metrics: [
-      { key: "wbc", name: "白细胞", shortName: "LEU", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" },
+      {
+        key: "wbc",
+        name: "白细胞",
+        shortName: "LEU",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      },
       { key: "nit", name: "亚硝酸盐", shortName: "NIT", input: "select", options: ["-", "+", "未查"], defaultValue: "-" },
       { key: "uro", name: "尿胆原", shortName: "URO", input: "text", reference: "正常" },
-      { key: "pro", name: "蛋白", shortName: "PRO", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" },
+      {
+        key: "pro",
+        name: "蛋白",
+        shortName: "PRO",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      },
       { key: "ph", name: "PH", shortName: "PH", input: "number", reference: "5.0-8.0" },
-      { key: "bld", name: "潜血", shortName: "BLD", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" },
+      {
+        key: "bld",
+        name: "潜血",
+        shortName: "BLD",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      },
       { key: "sg", name: "比重", shortName: "SG", input: "number", reference: "1.003-1.030" },
-      { key: "ket", name: "酮体", shortName: "KET", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" },
-      { key: "bil", name: "胆红素", shortName: "BIL", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" },
-      { key: "glu", name: "葡萄糖", shortName: "GLU", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" },
-      { key: "vc", name: "维生素C", shortName: "VC", input: "select", options: ["-", "+", "++", "+++", "未查"], defaultValue: "-" }
+      {
+        key: "ket",
+        name: "酮体",
+        shortName: "KET",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      },
+      {
+        key: "bil",
+        name: "胆红素",
+        shortName: "BIL",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      },
+      {
+        key: "glu",
+        name: "葡萄糖",
+        shortName: "GLU",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      },
+      {
+        key: "vc",
+        name: "维生素C",
+        shortName: "VC",
+        input: "select",
+        options: ["-", "+", "++", "+++", "未查"],
+        defaultValue: "-"
+      }
     ]
   },
   {

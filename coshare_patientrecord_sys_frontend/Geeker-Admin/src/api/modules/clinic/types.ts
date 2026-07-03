@@ -768,6 +768,7 @@ export interface MaintenanceStatus {
     missingFileCount: number;
     usableSpaceBytes: number;
     totalSpaceBytes: number;
+    scanSkipped?: boolean;
   };
 }
 

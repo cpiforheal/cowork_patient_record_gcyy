@@ -122,3 +122,78 @@ defineEmits<{
   remove: [id: string];
 }>();
 </script>
+
+<style scoped lang="scss">
+.followup-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.followup-editor-head,
+.followup-record-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.followup-editor-head strong,
+.followup-record-top span {
+  color: var(--hos-text-primary);
+  font-weight: 700;
+}
+
+.followup-record-list {
+  display: grid;
+  gap: 10px;
+}
+
+.followup-record-item {
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.followup-record-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+
+  &.wide {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 5px;
+  }
+
+  span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+.followup-empty {
+  padding: 18px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+
+@media (max-width: 760px) {
+  .followup-record-grid,
+  .followup-record-grid.wide {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

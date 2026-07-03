@@ -42,3 +42,71 @@ defineEmits<{
   open: [url: string];
 }>();
 </script>
+
+<style scoped lang="scss">
+.attachment-workbench {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 24px;
+}
+
+.attachment-workbench-head {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+
+  h3,
+  p {
+    margin: 0;
+  }
+
+  h3 {
+    font-size: 18px;
+  }
+
+  p {
+    margin-top: 4px;
+    color: var(--hos-text-secondary);
+  }
+}
+
+.attachment-workbench-list {
+  display: grid;
+  gap: 8px;
+}
+
+.attachment-workbench-list article {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+
+  div {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  strong,
+  p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  span,
+  small,
+  p {
+    color: var(--hos-text-secondary);
+  }
+}
+</style>
