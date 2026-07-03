@@ -51,7 +51,11 @@
     </nav>
 
     <div v-loading="loading" class="inventory-workspace" element-loading-text="正在同步库存...">
-      <transition name="inventory-fade" mode="out-in">
+      <div v-if="initialInventoryLoading" class="inventory-loading-skeleton">
+        <el-skeleton animated :rows="12" />
+      </div>
+
+      <transition v-else name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
             <OverviewPanel
@@ -450,6 +454,10 @@ const { operatorName, currentDepartment, today, currentWeekNo, newRequestLine, c
 
 const db = ref<InventoryDb>(createEmptyInventoryDb());
 const loading = ref(false);
+const initialInventoryLoading = computed(
+  () =>
+    loading.value && !db.value.items.length && !db.value.batches.length && !db.value.requests.length && !db.value.movements.length
+);
 const saving = ref(false);
 const activeTab = ref("overview");
 
@@ -2063,6 +2071,13 @@ onMounted(loadInventory);
 .inventory-workspace {
   display: grid;
   gap: 12px;
+}
+
+.inventory-loading-skeleton {
+  padding: 18px;
+  background: #ffffff;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
 }
 
 .workspace-pane {

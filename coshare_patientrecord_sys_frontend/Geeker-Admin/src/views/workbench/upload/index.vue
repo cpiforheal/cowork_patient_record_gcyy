@@ -73,13 +73,19 @@
 
           <div class="upload-actions">
             <el-button @click="() => clearInspectionFiles()">清空</el-button>
-            <el-button type="primary" size="large" :icon="Upload" :loading="uploading" @click="submitInspectionUpload">
-              上传检查室图片
+            <el-button
+              type="primary"
+              size="large"
+              :icon="Upload"
+              :loading="uploading || preparingUpload"
+              @click="submitInspectionUpload"
+            >
+              {{ preparingUpload ? "正在准备图片..." : "上传检查室图片" }}
             </el-button>
           </div>
 
           <el-progress
-            v-if="uploading || uploadSuccess"
+            v-if="uploading || preparingUpload || uploadSuccess"
             class="mt12"
             :percentage="uploadProgress"
             :status="uploadSuccess ? 'success' : undefined"
@@ -118,13 +124,19 @@
 
             <div class="upload-actions">
               <el-button :icon="CirclePlus" @click="addUploadItem">继续添加资料</el-button>
-              <el-button type="primary" size="large" :icon="Upload" :loading="uploading" @click="() => submitQuickUpload()">
-                一键提交
+              <el-button
+                type="primary"
+                size="large"
+                :icon="Upload"
+                :loading="uploading || preparingUpload"
+                @click="() => submitQuickUpload()"
+              >
+                {{ preparingUpload ? "正在准备文件..." : "一键提交" }}
               </el-button>
             </div>
 
             <el-progress
-              v-if="uploading || uploadSuccess"
+              v-if="uploading || preparingUpload || uploadSuccess"
               class="mt12"
               :percentage="uploadProgress"
               :status="uploadSuccess ? 'success' : undefined"
@@ -256,6 +268,7 @@ const searching = ref(false);
 const uploadKeywordInput = ref<{ focus: () => void }>();
 const matchedPatients = ref<PatientRow[]>([]);
 const selectedPatient = ref<PatientRow>();
+const preparingUpload = ref(false);
 const UPLOAD_FAILURE_SUMMARY_KEY = "clinic-upload-failure-summaries";
 const {
   uploading,
@@ -287,6 +300,11 @@ const inspectionRemark = ref("");
 const inspectionFiles = ref<InspectionFileItem[]>([]);
 const inspectionDirectoryInput = ref<HTMLInputElement>();
 const inspectionPreviewUrls = computed(() => inspectionFiles.value.map(item => item.previewUrl));
+
+const yieldToPaint = async () => {
+  await nextTick();
+  await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+};
 
 const legacyFileList = ref<UploadUserFile[]>([]);
 const legacyFileText = ref("");
@@ -427,6 +445,8 @@ const submitInspectionUpload = async () => {
     return;
   }
   beginUpload();
+  preparingUpload.value = true;
+  await yieldToPaint();
   try {
     const batchName = `检查室图片-${inspectionDate.value || timestampName()}`;
     const typeLabel =
@@ -456,6 +476,8 @@ const submitInspectionUpload = async () => {
   } catch (error) {
     markUploadFailed();
     ElMessage.error((error as Error).message || "检查室图片上传失败");
+  } finally {
+    preparingUpload.value = false;
   }
 };
 
@@ -489,6 +511,8 @@ const submitQuickUpload = async (retryFailureId?: string) => {
   }
 
   beginUpload(Boolean(retryFailureId));
+  preparingUpload.value = true;
+  await yieldToPaint();
   try {
     const { data } = await uploadDocumentsApi({
       patientId: selectedPatient.value.id,
@@ -505,6 +529,8 @@ const submitQuickUpload = async (retryFailureId?: string) => {
     markUploadFailed();
     rememberFailedUpload(error);
     ElMessage.error((error as Error).message);
+  } finally {
+    preparingUpload.value = false;
   }
 };
 

@@ -25,7 +25,7 @@
       <el-button size="large" :icon="ChatDotRound" @click="assistantVisible = true">豆包助手</el-button>
     </section>
 
-    <section class="exception-strip">
+    <section v-loading="dashboardLoading" class="exception-strip" element-loading-text="正在刷新待办...">
       <button
         class="exception-card"
         :class="{ warning: stats.pendingPatients > 0, 'is-zero': stats.pendingPatients === 0 }"
@@ -79,7 +79,7 @@
     </section>
 
     <section class="workbench-grid">
-      <div class="workbench-main">
+      <div v-loading="dashboardLoading" class="workbench-main" element-loading-text="正在刷新任务...">
         <HomeTaskPanel
           :role-name="roleName"
           :action-tasks="actionTasks"
@@ -203,6 +203,7 @@ type CalendarDayCell = {
 const router = useRouter();
 const userStore = useUserStore();
 const patientRows = ref<PatientRow[]>([]);
+const dashboardLoading = ref(false);
 const workReminders = ref<WorkReminder[]>([]);
 const maintenanceStatus = ref<MaintenanceStatus>();
 const maintenanceLoading = ref(false);
@@ -574,7 +575,8 @@ const homeAssistantContext = computed(() => ({
       : undefined
 }));
 
-const loadTasks = async (options: { fullMaintenanceScan?: boolean } = {}) => {
+const loadPrimaryDashboard = async () => {
+  dashboardLoading.value = true;
   try {
     const [{ data: patients }, { data: operationStats }] = await Promise.all([
       getPatientListApi({ pageNum: 1, pageSize: 5000 }),
@@ -584,8 +586,12 @@ const loadTasks = async (options: { fullMaintenanceScan?: boolean } = {}) => {
     stats.value = operationStats;
   } catch (error) {
     ElMessage.error((error as Error).message);
+  } finally {
+    dashboardLoading.value = false;
   }
+};
 
+const loadMaintenanceDashboard = async (options: { fullMaintenanceScan?: boolean } = {}) => {
   maintenanceLoading.value = true;
   try {
     const maintenanceRequest = options.fullMaintenanceScan ? getMaintenanceStatusApi : getMaintenanceSummaryApi;
@@ -603,6 +609,10 @@ const loadTasks = async (options: { fullMaintenanceScan?: boolean } = {}) => {
   } finally {
     maintenanceLoading.value = false;
   }
+};
+
+const loadTasks = async (options: { fullMaintenanceScan?: boolean } = {}) => {
+  await Promise.allSettled([loadPrimaryDashboard(), loadMaintenanceDashboard(options)]);
 };
 
 const saveBackupConfig = async () => {

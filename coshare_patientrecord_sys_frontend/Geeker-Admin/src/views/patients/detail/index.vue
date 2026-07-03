@@ -23,7 +23,17 @@
         <el-button type="primary" plain @click="retryLoadPatientDetail">重试</el-button>
       </section>
 
-      <section class="record-workbar screen-only">
+      <section v-else-if="isInitialDetailLoading" class="detail-loading-skeleton screen-only">
+        <div class="detail-loading-head">
+          <el-skeleton-item variant="h1" />
+
+          <el-skeleton-item variant="text" />
+        </div>
+
+        <el-skeleton :rows="10" animated />
+      </section>
+
+      <section v-show="!isInitialDetailLoading" class="record-workbar screen-only">
         <div class="workbar-main">
           <div class="workbar-title">
             <h2>{{ fieldValues.patientName || "当前患者" }} · {{ recordTitle }}</h2>
@@ -136,7 +146,7 @@
         </div>
       </section>
 
-      <section v-if="autoSaveStatus === 'conflict'" class="conflict-draft-banner screen-only">
+      <section v-if="autoSaveStatus === 'conflict'" v-show="!isInitialDetailLoading" class="conflict-draft-banner screen-only">
         <div>
           <strong>检测到其他终端已更新</strong>
 
@@ -148,7 +158,7 @@
         <el-button type="primary" @click="restoreConflictDraft">恢复本机草稿</el-button>
       </section>
 
-      <section class="record-context-strip screen-only">
+      <section v-show="!isInitialDetailLoading" class="record-context-strip screen-only">
         <article class="context-card fixed">
           <span>固定带入</span>
 
@@ -178,7 +188,11 @@
         </article>
       </section>
 
-      <section v-if="detailWorkspaceMode === 'archive'" class="health-archive-summary screen-only">
+      <section
+        v-if="detailWorkspaceMode === 'archive'"
+        v-show="!isInitialDetailLoading"
+        class="health-archive-summary screen-only"
+      >
         <article>
           <span>当前流转</span>
 
@@ -216,6 +230,7 @@
 
       <section
         v-if="detailWorkspaceMode === 'archive' && workflowHint?.visible"
+        v-show="!isInitialDetailLoading"
         class="workflow-hint screen-only"
         :class="`is-${workflowHint?.level || 'info'}`"
       >
@@ -230,7 +245,7 @@
         <el-button v-if="firstWorkflowIssue" text @click="focusIssue(firstWorkflowIssue)">定位处理</el-button>
       </section>
 
-      <div class="detail-workspace-shell screen-only">
+      <div v-show="!isInitialDetailLoading" class="detail-workspace-shell screen-only">
         <aside class="detail-side-nav" aria-label="患者详情模块">
           <button
             type="button"
@@ -1693,6 +1708,8 @@ const templateRules = ref<TemplateFieldRule[]>([]);
 const collapsedSectionKeys = ref<string[]>([]);
 
 const patientInfo = ref<PatientRow>();
+
+const isInitialDetailLoading = computed(() => detailLoading.value && !patientInfo.value && !detailError.value);
 
 const logoCandidates = [medicalLogoUrl];
 
@@ -4761,6 +4778,32 @@ onBeforeUnmount(() => {
 
     line-height: 1.5;
   }
+}
+
+.detail-loading-skeleton {
+  display: grid;
+
+  gap: 16px;
+
+  padding: 18px;
+
+  margin-bottom: 12px;
+
+  background: var(--hos-panel);
+
+  border: 1px solid var(--hos-border);
+
+  border-radius: var(--hos-radius-card);
+
+  box-shadow: var(--hos-shadow-soft);
+}
+
+.detail-loading-head {
+  display: grid;
+
+  max-width: 520px;
+
+  gap: 10px;
 }
 
 .record-workbar {

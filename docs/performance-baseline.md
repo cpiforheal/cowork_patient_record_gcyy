@@ -4,6 +4,15 @@ Date: 2026-07-02
 
 This document records the current optimization baseline for the patient record system. It is intended for engineering comparison only and does not add user-visible performance text.
 
+## 2026-07-03 Deploy Readiness Pass
+
+User-perceived loading improvements before deployment:
+
+- Home dashboard primary data and maintenance/backup data now refresh in parallel, with local loading masks on task areas instead of making the whole page feel blocked.
+- Patient detail shows an initial skeleton while the first archive payload is loading, then keeps the existing workspace behavior unchanged after data arrives.
+- Upload actions now enter a preparation state before file data URL conversion starts, allowing buttons and progress bars to paint before larger batches are read.
+- Inventory management shows an initial skeleton while the first inventory snapshot is loading, avoiding an empty workspace during startup.
+
 ## Build Baseline
 
 Command:
