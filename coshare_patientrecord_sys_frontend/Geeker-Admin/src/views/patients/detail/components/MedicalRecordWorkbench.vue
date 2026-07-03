@@ -105,8 +105,9 @@
               :key="medicalField.key"
               class="medical-record-field"
               :class="{
-                wide: isTextareaField(medicalField),
-                missing: isFieldMissing(medicalField)
+                wide: isTextareaLikeField(medicalField),
+                missing: isFieldMissing(medicalField),
+                locked: Boolean(medicalField.templateLocked)
               }"
             >
               <span>
@@ -117,10 +118,31 @@
                 <em>{{ fieldAssistText(medicalField) }}</em>
               </span>
 
-              <el-select
-                v-if="isSelectField(medicalField)"
+              <el-checkbox-group
+                v-if="isCheckboxField(medicalField)"
+                :model-value="fieldArrayValue(medicalField)"
+                class="medical-record-checklist"
+                @change="value => updateArrayField(medicalField, value)"
+              >
+                <el-checkbox v-for="option in fieldOptions(medicalField)" :key="option" :label="option" border>
+                  <span class="medical-record-option-text">{{ option }}</span>
+                </el-checkbox>
+              </el-checkbox-group>
+
+              <el-input
+                v-if="isCheckboxField(medicalField)"
                 :model-value="fieldValues[medicalField.key]"
-                allow-create
+                class="medical-record-paragraph-preview"
+                type="textarea"
+                :rows="4"
+                placeholder="勾选后自动合并为正式段落，可补充少量特殊说明"
+                @update:model-value="value => updateFieldValue(medicalField.key, value)"
+              />
+
+              <el-select
+                v-else-if="isSelectLikeField(medicalField)"
+                :model-value="fieldValues[medicalField.key]"
+                :allow-create="!medicalField.templateLocked"
                 clearable
                 default-first-option
                 filterable
@@ -142,8 +164,8 @@
               <el-input
                 v-else
                 :model-value="fieldValues[medicalField.key]"
-                :type="isTextareaField(medicalField) ? 'textarea' : 'text'"
-                :rows="isTextareaField(medicalField) ? 4 : undefined"
+                :type="isTextareaLikeField(medicalField) ? 'textarea' : 'text'"
+                :rows="isTextareaLikeField(medicalField) ? 4 : undefined"
                 :placeholder="medicalField.placeholder || medicalField.defaultValue || '请填写'"
                 @update:model-value="value => updateFieldValue(medicalField.key, value)"
               />
@@ -291,8 +313,25 @@ const activeSectionsModel = computed({
 const canVoidCurrentRecord = computed(() => Boolean(props.currentRecord && props.currentRecord.status !== "voided"));
 const isDraftCurrentRecord = computed(() => props.currentRecord?.status === "draft");
 
+const isCheckboxField = (field: MedicalRecordTemplateField) =>
+  field.controlType === "checkboxParagraph" || field.renderMode === "paragraph" || field.kind === "checkboxParagraph";
+
+const isTextareaLikeField = (field: MedicalRecordTemplateField) => props.isTextareaField(field) || isCheckboxField(field);
+
+const isSelectLikeField = (field: MedicalRecordTemplateField) => !isCheckboxField(field) && props.isSelectField(field);
+
+const fieldArrayValue = (field: MedicalRecordTemplateField) => {
+  const value = String(props.fieldValues[field.key] || "");
+  return props.fieldOptions(field).filter(option => value.includes(option));
+};
+
 const updateFieldValue = (key: string, value: string | number | boolean | undefined) => {
   emit("updateField", key, String(value ?? ""));
+};
+
+const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => {
+  const selected = Array.isArray(value) ? value.map(item => String(item)) : [];
+  emit("updateField", field.key, selected.join(field.joiner ?? ""));
 };
 </script>
 
@@ -441,6 +480,10 @@ const updateFieldValue = (key: string, value: string | number | boolean | undefi
     border-color: #f3d19e;
   }
 
+  &.locked {
+    background: #f8fafc;
+  }
+
   > span {
     display: flex;
     flex-wrap: wrap;
@@ -464,6 +507,28 @@ const updateFieldValue = (key: string, value: string | number | boolean | undefi
     font-style: normal;
     font-weight: 600;
   }
+}
+
+.medical-record-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  :deep(.el-checkbox) {
+    height: auto;
+    min-height: 36px;
+    margin-right: 0;
+    padding: 7px 10px;
+    white-space: normal;
+  }
+}
+
+.medical-record-option-text {
+  line-height: 1.45;
+}
+
+.medical-record-paragraph-preview {
+  margin-top: 4px;
 }
 
 .medical-record-current {

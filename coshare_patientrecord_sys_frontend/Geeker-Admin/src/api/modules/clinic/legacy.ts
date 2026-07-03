@@ -1346,6 +1346,11 @@ const documentTypeMeta = (type: string, typeLabel: string, role: string, fileNam
     labCrpSaa: { fieldKey: "crpStatus", fieldLabel: typeLabel || "CRP/SAA模板报告", department: roleToDepartment.lab },
     labUrineRoutine: { fieldKey: "urineRoutine", fieldLabel: typeLabel || "尿常规模板报告", department: roleToDepartment.lab },
     labHba1c: { fieldKey: "biochemistry", fieldLabel: typeLabel || "糖化血红蛋白模板报告", department: roleToDepartment.lab },
+    labPostprandialGlucose: {
+      fieldKey: "postprandialGlucose",
+      fieldLabel: typeLabel || "餐后血糖模板报告",
+      department: roleToDepartment.lab
+    },
     ecg: { fieldKey: "ecgResult", fieldLabel: typeLabel, department: roleToDepartment.ecg },
     ultrasound: { fieldKey: "colonoscopy", fieldLabel: typeLabel, department: roleToDepartment.ultrasound },
     followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk },

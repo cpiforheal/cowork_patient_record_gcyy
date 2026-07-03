@@ -6,6 +6,7 @@ export type LabTemplateId =
   | "crpSaa"
   | "urineRoutine"
   | "hba1c"
+  | "postprandialGlucose"
   | "ecgImage";
 
 export type LabMetricInput = "number" | "text" | "select";
@@ -265,6 +266,26 @@ export const labReportTemplates: LabTemplateDefinition[] = [
         input: "select",
         options: ["-", "+", "++", "+++", "未查"],
         defaultValue: "-"
+      }
+    ]
+  },
+  {
+    id: "postprandialGlucose",
+    name: "餐后血糖",
+    subtitle: "餐后2小时血糖值",
+    fieldKey: "postprandialGlucose",
+    statusKeys: ["postprandialGlucoseStatus"],
+    documentType: "labPostprandialGlucose",
+    documentTypeLabel: "餐后血糖模板报告",
+    description: "用于记录餐后血糖值，保存后医生端化验报告视图可直接查看。",
+    metrics: [
+      {
+        key: "postprandialGlucose",
+        name: "餐后2小时血糖",
+        shortName: "2hPG",
+        unit: "mmol/L",
+        input: "number",
+        reference: "<7.8"
       }
     ]
   },

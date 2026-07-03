@@ -42,6 +42,9 @@ public class MedicalRecordTemplateRenderer {
                 byte[] bytes = zipInputStream.readAllBytes();
                 if (entry.getName().matches("word/(document|header\\d*|footer\\d*)\\.xml")) {
                     String xml = new String(bytes, StandardCharsets.UTF_8);
+                    if ("word/document.xml".equals(entry.getName())) {
+                        xml = trimDocumentXmlToGenerationScope(xml);
+                    }
                     xml = applyReplacements(xml, replacements);
                     bytes = xml.getBytes(StandardCharsets.UTF_8);
                 }
@@ -89,7 +92,7 @@ public class MedicalRecordTemplateRenderer {
         return stream;
     }
 
-    private Set<String> templatePlaceholderKeys(String templateResource) {
+    public Set<String> templatePlaceholderKeys(String templateResource) {
         Set<String> keys = new HashSet<>();
         if (!templateAvailable(templateResource)) return keys;
         try (InputStream inputStream = templateInputStream(templateResource);
@@ -100,6 +103,9 @@ public class MedicalRecordTemplateRenderer {
                 byte[] bytes = zipInputStream.readAllBytes();
                 if (entry.getName().matches("word/(document|header\\d*|footer\\d*)\\.xml")) {
                     String xml = new String(bytes, StandardCharsets.UTF_8);
+                    if ("word/document.xml".equals(entry.getName())) {
+                        xml = trimDocumentXmlToGenerationScope(xml);
+                    }
                     var matcher = placeholder.matcher(xml);
                     while (matcher.find()) keys.add(matcher.group(1));
                 }
@@ -109,6 +115,20 @@ public class MedicalRecordTemplateRenderer {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "医生目标病历模板无法读取：" + error.getMessage(), error);
         }
         return keys;
+    }
+
+    private String trimDocumentXmlToGenerationScope(String xml) {
+        Pattern paragraphPattern = Pattern.compile("<w:p[\\s\\S]*?</w:p>");
+        var matcher = paragraphPattern.matcher(xml);
+        while (matcher.find()) {
+            String paragraph = matcher.group();
+            if (!paragraph.contains("首次病程记录")) continue;
+            int end = xml.indexOf("<w:sectPr", matcher.end());
+            if (end < 0) end = xml.indexOf("</w:body>", matcher.end());
+            if (end < 0) end = xml.length();
+            return xml.substring(0, matcher.start()) + xml.substring(end);
+        }
+        return xml;
     }
 
     private String xmlEscape(String value) {

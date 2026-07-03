@@ -2888,14 +2888,20 @@ const medicalRecordCompletionPercent = computed(() =>
 
 const medicalRecordFieldOptions = (field: MedicalRecordTemplateField) => ensureArray(field.options);
 
+const isMedicalRecordCheckboxField = (field: MedicalRecordTemplateField) =>
+  field.controlType === "checkboxParagraph" || field.renderMode === "paragraph" || field.kind === "checkboxParagraph";
+
 const isMedicalRecordSelectField = (field: MedicalRecordTemplateField) =>
-  field.kind === "select" || medicalRecordFieldOptions(field).length > 0;
+  !isMedicalRecordCheckboxField(field) && (field.kind === "select" || medicalRecordFieldOptions(field).length > 0);
 
 const isMedicalRecordDateField = (field: MedicalRecordTemplateField) => field.kind === "date" || field.inputType === "date";
 
-const isMedicalRecordTextareaField = (field: MedicalRecordTemplateField) => field.kind === "textarea";
+const isMedicalRecordTextareaField = (field: MedicalRecordTemplateField) =>
+  field.kind === "textarea" || isMedicalRecordCheckboxField(field);
 
 const medicalRecordFieldAssistText = (field: MedicalRecordTemplateField) => {
+  if (isMedicalRecordCheckboxField(field)) return `${medicalRecordFieldOptions(field).length} 个固定模板勾选项`;
+
   if (field.targetUse === "formOnly") return "医生确认字段，生成时合并进入目标病历对应位置";
 
   if (field.aiPolishable) return "固定段落可由医生确认后再润色";

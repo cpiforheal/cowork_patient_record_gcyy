@@ -81,7 +81,8 @@ public class ClinicMedicalRecordService {
 
     public Map<String, Object> templateStatus(SessionUser user) {
         requireReadRole();
-        ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, TARGET_FIELDS);
+        List<TargetField> outputFields = outputTargetFields();
+        ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, outputFields);
         ObjectNode status = objectMapper.createObjectNode();
         status.put("name", TEMPLATE_NAME);
         status.put("templateVersion", TEMPLATE_VERSION);
@@ -94,7 +95,7 @@ public class ClinicMedicalRecordService {
         ArrayNode sections = status.putArray("sections");
         targetSectionNames().forEach(sections::add);
         ArrayNode required = status.putArray("requiredFields");
-        TARGET_FIELDS.stream().filter(TargetField::required).forEach(field -> {
+        outputFields.stream().filter(TargetField::required).forEach(field -> {
             ObjectNode row = required.addObject();
             row.put("key", field.key());
             row.put("label", field.label());
@@ -111,8 +112,9 @@ public class ClinicMedicalRecordService {
         if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
         ObjectNode source = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
         ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, TARGET_FIELDS);
-        result.set("missingItems", sourceBuilder.missingItems(source, TARGET_FIELDS));
+        List<TargetField> outputFields = outputTargetFields();
+        ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, outputFields);
+        result.set("missingItems", sourceBuilder.missingItems(source, outputFields));
         result.set("unboundFields", unboundFields);
         result.set("fieldMatrix", targetFieldMatrix());
         result.put("ready", result.path("missingItems").isArray() && result.path("missingItems").isEmpty() && unboundFields.isEmpty());
@@ -146,7 +148,7 @@ public class ClinicMedicalRecordService {
         ObjectNode source = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
         ObjectNode result = objectMapper.createObjectNode();
         result.set("values", accepted);
-        result.set("missingItems", sourceBuilder.missingItems(source, TARGET_FIELDS));
+        result.set("missingItems", sourceBuilder.missingItems(source, outputTargetFields()));
         result.put("disclaimer", DISCLAIMER);
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
     }
@@ -173,19 +175,20 @@ public class ClinicMedicalRecordService {
         if (!templateRenderer.templateAvailable(TEMPLATE_RESOURCE)) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "医生目标病历模板未配置，请检查后端模板文件");
         }
-        ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, TARGET_FIELDS);
+        List<TargetField> outputFields = outputTargetFields();
+        ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, outputFields);
         if (!unboundFields.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "目标病历模板仍有动态字段未绑定占位符：" + joinArray(unboundFields));
         }
 
         ObjectNode sourceSnapshot = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
         ObjectNode logSnapshot = sourceBuilder.readPatientSource(patientId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION);
-        ArrayNode missingItems = sourceBuilder.missingItems(sourceSnapshot, TARGET_FIELDS);
+        ArrayNode missingItems = sourceBuilder.missingItems(sourceSnapshot, outputFields);
         if (!missingItems.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历动态字段未补齐：" + joinArray(missingItems));
         }
         JsonNode patient = sourceSnapshot.path("patient");
-        Map<String, String> replacements = sourceBuilder.buildTemplateValues(sourceSnapshot, TARGET_FIELDS);
+        Map<String, String> replacements = sourceBuilder.buildTemplateValues(sourceSnapshot, outputFields);
 
         int version = versionRepository.nextVersion(patientId);
         String id = "medrec-" + UUID.randomUUID();
@@ -290,7 +293,7 @@ public class ClinicMedicalRecordService {
     private ArrayNode targetFieldMatrix() {
         ArrayNode sections = objectMapper.createArrayNode();
         Map<String, ArrayNode> fieldsBySection = new LinkedHashMap<>();
-        for (TargetField field : TARGET_FIELDS) {
+        for (TargetField field : outputTargetFields()) {
             fieldsBySection.computeIfAbsent(field.section(), ignored -> objectMapper.createArrayNode()).add(targetFieldNode(field));
         }
         fieldsBySection.forEach((sectionName, fields) -> {
@@ -307,8 +310,13 @@ public class ClinicMedicalRecordService {
         row.put("label", field.label());
         row.put("section", field.section());
         row.put("kind", field.kind());
+        row.put("controlType", controlTypeFor(field));
+        row.put("renderMode", renderModeFor(field));
         row.put("required", field.required());
         row.put("aiPolishable", field.aiPolishable());
+        row.put("templateLocked", isParagraphTemplateField(field));
+        row.put("multiple", isParagraphTemplateField(field));
+        row.put("joiner", paragraphJoinerFor(field));
         row.put("placeholder", field.placeholder());
         row.set("options", targetFieldOptions(field));
         ArrayNode sources = row.putArray("sources");
@@ -326,6 +334,94 @@ public class ClinicMedicalRecordService {
             case "contactRelation" -> addOptionValues(options, List.of("配偶", "父母", "子女", "兄弟姐妹", "其他"));
             case "historyReliable" -> addOptionValues(options, List.of("是", "基本可靠", "需家属补充", "不确定"));
             case "anesthesiaMethod" -> addOptionValues(options, List.of("骶管内麻醉", "硬膜外麻醉", "静脉麻醉", "局部麻醉", "其他"));
+            case "presentIllnessText" -> addOptionValues(options, List.of(
+                "患者自诉既往曾因便血、脱出于门诊行硬化剂注射治疗，术后恢复良好。",
+                "间断便血，滴下状，色鲜红，无痛，便后即止，数天后可自行好转。",
+                "饮酒或食用辛辣食物后症状明显，反复发作。",
+                "便不尽感明显，时常久蹲排便，排便次数较前增多。",
+                "便时肛门肿物脱出，休息后可自行回纳。",
+                "近期症状加重，肿物脱出后需手托回纳。",
+                "今来院就诊，门诊检查后收入院进一步诊疗。",
+                "患者近期精神、饮食、小便可，睡眠及大便情况按实际病情记录，体重未见明显变化。"
+            ));
+            case "pastHistory" -> addOptionValues(options, List.of(
+                "否认外伤及慢性病史。",
+                "否认输血史。",
+                "否认重大手术史。",
+                "预防接种随社会进行。",
+                "否认药物及食物过敏史。"
+            ));
+            case "personalHistory" -> addOptionValues(options, List.of(
+                "生长于原籍，否认长期外地居住史。",
+                "否认特殊化学品及放射性接触史。",
+                "否认饮酒、吸烟及其他不良生活习惯。",
+                "否认冶游史。"
+            ));
+            case "marriageBirthHistory" -> addOptionValues(options, List.of("适龄结婚。", "配偶体健。", "子女体健。"));
+            case "familyHistory" -> addOptionValues(options, List.of(
+                "家族中无传染病、代谢性疾病、糖尿病、血友病、遗传性疾病、肿瘤及类似病史。",
+                "家族史无特殊。"
+            ));
+            case "tcmFourDiagnosisText" -> addOptionValues(options, List.of(
+                "神志清，精神可，面色正常，形体适中，语声清晰，语声平和，无异味。",
+                "舌质淡红，苔薄白，脉象按实际记录。",
+                "口干、口苦、纳眠及二便情况按实际问诊记录。"
+            ));
+            case "generalExam" -> addOptionValues(options, List.of(
+                "发育正常，体型中等，步入病房，自主体位，言语流利，神志清楚，查体合作，步态正常。",
+                "一般状态可，精神可，查体合作。"
+            ));
+            case "skinMucosaExam" -> addOptionValues(options, List.of(
+                "全身皮肤及黏膜无发绀、黄染及苍白，无皮疹，未见皮下出血。",
+                "毛发正常，皮肤湿度正常，弹性正常，无水肿，无肝掌，未见蜘蛛痣。"
+            ));
+            case "lymphNodeExam" -> addOptionValues(options, List.of("颈前、腋下及腹股沟浅表淋巴结未触及肿大。", "浅表淋巴结未触及肿大。"));
+            case "headOrganExam" -> addOptionValues(options, List.of(
+                "头颅正常无畸形，双眼睑正常，巩膜无黄染，双侧瞳孔等大等圆，对光反射正常。",
+                "双耳廓无畸形，外耳道通畅，无异常分泌物。",
+                "鼻无畸形，鼻中隔居中，嗅觉正常，鼻窦无压痛。",
+                "口唇红润，口腔黏膜无溃疡及出血点，伸舌居中，咽部无充血，声音正常。"
+            ));
+            case "neckExam" -> addOptionValues(options, List.of(
+                "颈软无抵抗，气管居中，颈静脉无怒张。",
+                "肝颈静脉回流征阴性，颈动脉搏动正常，甲状腺未触及肿大。"
+            ));
+            case "chestExam" -> addOptionValues(options, List.of(
+                "胸廓对称无畸形，呼吸节律正常，胸廓无压痛。",
+                "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音。",
+                "心率按实际记录，律齐，各瓣膜听诊区未闻及病理性杂音。"
+            ));
+            case "abdomenExam" -> addOptionValues(options, List.of(
+                "腹部平坦，未见胃肠型及蠕动波，未见腹壁静脉曲张。",
+                "腹软，无压痛、反跳痛及肌紧张，未触及腹部肿块。",
+                "肝、脾肋下未触及，双肾区无叩击痛，肠鸣音正常。"
+            ));
+            case "spineLimbsExam" -> addOptionValues(options, List.of(
+                "脊柱正常生理弯曲，活动自如，无压痛及叩击痛。",
+                "四肢活动自如，无畸形，关节无红肿，皮温正常。",
+                "无杵状指、趾，双下肢无明显水肿。"
+            ));
+            case "specialExamFullText" -> addOptionValues(options, List.of(
+                "截石位检查。",
+                "肛缘赘皮环状增生。",
+                "屏气用腹压可见肛缘组织缓慢增大。",
+                "肛门镜检查示直肠黏膜松弛、层叠状，阻塞视野。",
+                "内痔黏膜隆起糜烂。",
+                "退镜时可见黏膜脱出肛外。"
+            ));
+            case "dischargeAdvice" -> addOptionValues(options, List.of(
+                "注意休息，避免久坐、久蹲及负重。",
+                "保持大便通畅，避免辛辣刺激饮食及饮酒。",
+                "按医嘱用药，保持创面清洁干燥。",
+                "如出现明显便血、疼痛加重、发热或排便困难，及时复诊。",
+                "按期门诊复查。"
+            ));
+            case "tcmCareAdvice" -> addOptionValues(options, List.of(
+                "饮食宜清淡，忌辛辣厚味。",
+                "保持情志舒畅，避免劳累。",
+                "遵医嘱进行中药熏洗、耳穴、悬灸等中医调护。",
+                "注意肛周清洁，规律作息。"
+            ));
             default -> {
             }
         }
@@ -351,9 +447,45 @@ public class ClinicMedicalRecordService {
         }
     }
 
+    private String controlTypeFor(TargetField field) {
+        if (isParagraphTemplateField(field)) return "checkboxParagraph";
+        return field.kind();
+    }
+
+    private String renderModeFor(TargetField field) {
+        return isParagraphTemplateField(field) ? "paragraph" : field.kind();
+    }
+
+    private boolean isParagraphTemplateField(TargetField field) {
+        return switch (field.key()) {
+            case "presentIllnessText",
+                "pastHistory",
+                "personalHistory",
+                "marriageBirthHistory",
+                "familyHistory",
+                "tcmFourDiagnosisText",
+                "generalExam",
+                "skinMucosaExam",
+                "lymphNodeExam",
+                "headOrganExam",
+                "neckExam",
+                "chestExam",
+                "abdomenExam",
+                "spineLimbsExam",
+                "specialExamFullText",
+                "dischargeAdvice",
+                "tcmCareAdvice" -> true;
+            default -> false;
+        };
+    }
+
+    private String paragraphJoinerFor(TargetField field) {
+        return isParagraphTemplateField(field) ? "" : "";
+    }
+
     private List<String> targetSectionNames() {
         List<String> names = new ArrayList<>();
-        for (TargetField field : TARGET_FIELDS) {
+        for (TargetField field : outputTargetFields()) {
             if (!names.contains(field.section())) names.add(field.section());
         }
         return names;
@@ -361,8 +493,16 @@ public class ClinicMedicalRecordService {
 
     private Set<String> targetFieldKeys() {
         Set<String> keys = new HashSet<>();
-        TARGET_FIELDS.forEach(field -> keys.add(field.key()));
+        outputTargetFields().forEach(field -> keys.add(field.key()));
         return keys;
+    }
+
+    private List<TargetField> outputTargetFields() {
+        Set<String> placeholders = templateRenderer.templatePlaceholderKeys(TEMPLATE_RESOURCE);
+        if (placeholders.isEmpty()) return TARGET_FIELDS;
+        return TARGET_FIELDS.stream()
+            .filter(field -> placeholders.contains(field.key()) || field.anchors().stream().anyMatch(placeholders::contains))
+            .toList();
     }
 
     private void requireReadRole() {

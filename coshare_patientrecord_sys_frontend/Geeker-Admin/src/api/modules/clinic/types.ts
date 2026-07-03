@@ -396,6 +396,11 @@ export interface MedicalRecordTemplateField {
   placeholder: string;
   options?: string[];
   defaultValue?: string;
+  controlType?: string;
+  renderMode?: string;
+  templateLocked?: boolean;
+  multiple?: boolean;
+  joiner?: string;
   inputType?: string;
   targetUse?: "dynamic" | "formOnly" | string;
   sources?: string[];

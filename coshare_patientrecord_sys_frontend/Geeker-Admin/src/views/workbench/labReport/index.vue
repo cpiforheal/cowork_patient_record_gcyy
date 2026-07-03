@@ -348,6 +348,9 @@ const buildArchiveValues = () => {
       bloodPlt: formValues.plt || ""
     });
   }
+  if (activeTemplate.value.id === "postprandialGlucose") {
+    values.postprandialGlucose = formValues.postprandialGlucose || "";
+  }
   return values;
 };
 
