@@ -116,33 +116,49 @@
             <el-option v-for="item in roleViewOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
 
-          <el-button :icon="Upload" @click="openSupplementUpload">补充图片</el-button>
+          <PatientFieldSearch
+            v-if="detailWorkspaceMode === 'archive'"
+            :items="patientFieldSearchItems"
+            @select="selectPatientFieldSearchItem"
+          />
 
-          <el-button :icon="FolderOpened" @click="router.push('/workbench/legacy')">导入旧共享资料</el-button>
-
-          <el-button @click="openQualityReview">档案审核</el-button>
-
-          <el-button :icon="Clock" @click="openAuditTimeline">操作轨迹</el-button>
-
-          <el-button :loading="aiSummaryLoading" @click="openAiSummary">AI总结</el-button>
-
-          <el-button :icon="ChatDotRound" @click="patientAssistantVisible = true">患者助手</el-button>
-
-          <el-button :loading="medicalRecordLoading" @click="openMedicalRecord">医生目标病历</el-button>
-
-          <el-button v-if="canUseRoleViewFilter" @click="openRoleView('inspection')">检查室视图</el-button>
-
-          <el-button v-if="canUseRoleViewFilter" type="primary" plain @click="openRoleView('lab')">化验报告视图</el-button>
-
-          <el-button :icon="View" @click="previewVisible = true">预览</el-button>
+          <el-button type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
 
           <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
 
           <el-button v-else type="primary" @click="submitArchive">提交档案审核</el-button>
 
-          <el-button :icon="DocumentCopy" @click="copyRecord">复制</el-button>
-
           <el-button type="primary" :icon="Printer" @click="openPreviewThenPrint">打印/PDF</el-button>
+
+          <el-dropdown trigger="click" @command="handleMoreAction">
+            <el-button>更多操作</el-button>
+
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="preview" :icon="View">预览</el-dropdown-item>
+
+                <el-dropdown-item command="upload" :icon="Upload">补充图片</el-dropdown-item>
+
+                <el-dropdown-item command="legacy" :icon="FolderOpened">导入旧共享资料</el-dropdown-item>
+
+                <el-dropdown-item command="quality">档案审核</el-dropdown-item>
+
+                <el-dropdown-item command="timeline" :icon="Clock">操作轨迹</el-dropdown-item>
+
+                <el-dropdown-item command="ai" :disabled="aiSummaryLoading">AI总结</el-dropdown-item>
+
+                <el-dropdown-item command="assistant" :icon="ChatDotRound">患者助手</el-dropdown-item>
+
+                <el-dropdown-item command="medicalRecord" :disabled="medicalRecordLoading">医生目标病历</el-dropdown-item>
+
+                <el-dropdown-item v-if="canUseRoleViewFilter" command="inspection">检查室视图</el-dropdown-item>
+
+                <el-dropdown-item v-if="canUseRoleViewFilter" command="lab">化验报告视图</el-dropdown-item>
+
+                <el-dropdown-item command="copy" :icon="DocumentCopy">复制</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </section>
 
@@ -1627,6 +1643,7 @@ const AiSummaryDialog = defineAsyncComponent(() => import("./components/AiSummar
 const ArchivePrecheckDialog = defineAsyncComponent(() => import("./components/ArchivePrecheckDialog.vue"));
 const AttachmentWorkbench = defineAsyncComponent(() => import("./components/AttachmentWorkbench.vue"));
 const MedicalRecordWorkbench = defineAsyncComponent(() => import("./components/MedicalRecordWorkbench.vue"));
+const PatientFieldSearch = defineAsyncComponent(() => import("./components/PatientFieldSearch.vue"));
 const PatientOverviewPanel = defineAsyncComponent(() => import("./components/PatientOverviewPanel.vue"));
 const PrintPreflightDialog = defineAsyncComponent(() => import("./components/PrintPreflightDialog.vue"));
 const RecordPreviewOverlay = defineAsyncComponent(() => import("./components/RecordPreviewOverlay.vue"));
@@ -1649,6 +1666,27 @@ const roleName = computed(() => roleLabel(currentRole.value));
 const patientId = computed(() => String(route.params.id || "").trim());
 
 type DetailWorkspaceMode = "medicalRecord" | "archive" | "attachments" | "timeline";
+type PatientFieldSearchType = "field" | "attachment" | "stage";
+type PatientFieldSearchItem = {
+  key: string;
+  label: string;
+  description: string;
+  type: PatientFieldSearchType;
+  typeLabel: string;
+  keywords: string;
+};
+type PatientDetailMoreCommand =
+  | "preview"
+  | "upload"
+  | "legacy"
+  | "quality"
+  | "timeline"
+  | "ai"
+  | "assistant"
+  | "medicalRecord"
+  | "inspection"
+  | "lab"
+  | "copy";
 
 const doctorFirstRoles = new Set<UserRole>(["admin", "doctor"]);
 
@@ -3541,6 +3579,50 @@ const patientWorkflowTasks = usePatientWorkflowTasks({
   isFieldEditable: isEditable
 });
 
+const patientFieldSearchItems = computed<PatientFieldSearchItem[]>(() => {
+  const fieldItems = recordSectionsByRule.value.flatMap(section =>
+    section.fields.map(field => {
+      const issue = issueForField(field);
+      const attachmentCount = matchedAttachments(field.key).length;
+      const typeLabel = field.kind === "attachment" || field.evidence ? "附件字段" : "档案字段";
+      const status = issue?.message || (attachmentCount ? `附件 ${attachmentCount} 份` : field.required ? "必填字段" : "可定位");
+
+      return {
+        key: `field:${field.key}`,
+        label: field.label,
+        description: `${shortTitle(section.title)} · ${status}`,
+        type: "field" as const,
+        typeLabel,
+        keywords: `${section.title} ${section.department} ${field.key} ${field.printLabel || ""} ${fieldAssistText(field)}`
+      };
+    })
+  );
+
+  const attachmentItems = recordSectionsByRule.value.flatMap(section =>
+    section.fields
+      .filter(field => field.kind === "attachment" || field.evidence)
+      .map(field => ({
+        key: `attachment:${field.key}`,
+        label: field.label,
+        description: `${shortTitle(section.title)} · ${matchedAttachments(field.key).length || "待补"} 份证据`,
+        type: "attachment" as const,
+        typeLabel: "附件证据",
+        keywords: `${section.title} ${section.department} ${field.key} ${field.printLabel || ""}`
+      }))
+  );
+
+  const stageItems = patientWorkflowTasks.value.stageNodes.map(stage => ({
+    key: `stage:${stage.key}`,
+    label: stage.title,
+    description: `${stage.department} · ${stage.completed}/${stage.total} · 待补 ${stage.missing}`,
+    type: "stage" as const,
+    typeLabel: "流程节点",
+    keywords: `${stage.shortTitle} ${stage.owner} ${stage.department} ${stage.key}`
+  }));
+
+  return [...fieldItems, ...attachmentItems, ...stageItems];
+});
+
 const patientAssistantPrompt = computed(
   () => "请根据当前患者档案，帮我总结重点、缺失项、附件证据和下一步处理建议。请只给院内辅助建议，不要替代诊断。"
 );
@@ -3723,6 +3805,10 @@ const scrollToSection = (sectionKey: string) => {
 const focusIssue = async (issue?: FieldIssue) => {
   if (!issue) return;
 
+  detailWorkspaceMode.value = "archive";
+
+  if (activeRoleView.value === "lab") activeRoleView.value = "all";
+
   activeSectionKey.value = issue.sectionKey;
 
   if (recordViewMode.value === "full" && ensureArray(collapsedSectionKeys.value).includes(issue.sectionKey)) {
@@ -3794,6 +3880,8 @@ const focusWorkflowStage = async (stage: WorkflowStageNode) => {
 
   detailWorkspaceMode.value = "archive";
 
+  if (activeRoleView.value === "lab") activeRoleView.value = "all";
+
   recordViewMode.value = "full";
 
   if (ensureArray(collapsedSectionKeys.value).includes(targetSectionKey)) {
@@ -3803,6 +3891,102 @@ const focusWorkflowStage = async (stage: WorkflowStageNode) => {
   await nextTick();
 
   scrollToSection(targetSectionKey);
+};
+
+const findSearchFieldContext = (fieldKey: string) => {
+  for (const section of recordSectionsByRule.value) {
+    const field = section.fields.find(item => item.key === fieldKey);
+
+    if (field) return { section, field };
+  }
+
+  return undefined;
+};
+
+const selectPatientFieldSearchItem = async (key: string) => {
+  const [type, targetKey] = key.split(":") as [PatientFieldSearchType, string];
+
+  if (!targetKey) return;
+
+  if (type === "stage") {
+    const stage = patientWorkflowTasks.value.stageNodes.find(item => item.key === targetKey);
+    if (stage) await focusWorkflowStage(stage);
+    return;
+  }
+
+  const context = findSearchFieldContext(targetKey);
+  if (!context) return;
+
+  if (type === "attachment") {
+    await focusWorkflowAttachment({
+      fieldKey: context.field.key,
+      fieldLabel: context.field.label,
+      sectionKey: context.section.key,
+      sectionTitle: context.section.title,
+      attachmentCount: matchedAttachments(context.field.key).length,
+      required: Boolean(context.field.required || context.field.evidence),
+      editable: isEditable(context.field)
+    });
+    return;
+  }
+
+  await focusIssue({
+    fieldKey: context.field.key,
+    fieldLabel: context.field.label,
+    sectionKey: context.section.key,
+    sectionTitle: context.section.title,
+    message: issueForField(context.field)?.message || "已定位到字段",
+    level: issueForField(context.field)?.level || "missing"
+  });
+};
+
+const handleMoreAction = (command: PatientDetailMoreCommand) => {
+  if (command === "preview") {
+    previewVisible.value = true;
+    return;
+  }
+
+  if (command === "upload") {
+    openSupplementUpload();
+    return;
+  }
+
+  if (command === "legacy") {
+    router.push("/workbench/legacy");
+    return;
+  }
+
+  if (command === "quality") {
+    openQualityReview();
+    return;
+  }
+
+  if (command === "timeline") {
+    void openAuditTimeline();
+    return;
+  }
+
+  if (command === "ai") {
+    openAiSummary();
+    return;
+  }
+
+  if (command === "assistant") {
+    patientAssistantVisible.value = true;
+    return;
+  }
+
+  if (command === "medicalRecord") {
+    void openMedicalRecord();
+    return;
+  }
+
+  if (command === "inspection" || command === "lab") {
+    openRoleView(command);
+    return;
+  }
+
+  copyRecord();
 };
 
 const focusPrecheckIssue = async (issue?: FieldIssue) => {
