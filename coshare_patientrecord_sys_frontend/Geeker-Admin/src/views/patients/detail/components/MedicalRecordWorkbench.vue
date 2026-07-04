@@ -76,9 +76,9 @@
     <section v-if="fieldSections.length" class="medical-record-workspace">
       <div class="medical-record-workspace-head">
         <div>
-          <strong>医生目标病历填写</strong>
+          <strong>目标病历协作填写</strong>
 
-          <span v-if="variant === 'inline'">控件类型由后端字段矩阵驱动，下拉、日期、勾选类字段不会降级为文本框。</span>
+          <span v-if="variant === 'inline'">各岗位共同维护目标病历，本岗位负责字段可编辑，其他字段保留只读上下文。</span>
 
           <span v-else>已填 {{ completedCount }}/{{ totalCount }} 项 · 必填缺失 {{ missingItems.length }} 项</span>
         </div>
@@ -86,15 +86,19 @@
         <div>
           <el-button plain :loading="loading" @click="emit('precheck')">生成预检</el-button>
 
-          <el-button type="primary" plain :loading="loading" @click="emit('saveWorkspace')">保存填写</el-button>
+          <el-button type="primary" plain :loading="loading" :disabled="!hasEditableFields" @click="emit('saveWorkspace')">
+            保存填写
+          </el-button>
 
-          <el-button v-if="variant === 'inline'" type="primary" :loading="loading" @click="emit('generate')">生成 docx</el-button>
+          <el-button v-if="variant === 'inline' && roleCanGenerate" type="primary" :loading="loading" @click="emit('generate')">
+            生成 docx
+          </el-button>
         </div>
       </div>
 
       <el-collapse v-model="activeSectionsModel" class="medical-record-sections">
         <el-collapse-item
-          v-for="section in fieldSections"
+          v-for="section in visibleFieldSections"
           :key="section.section"
           :title="section.section"
           :name="section.section"
@@ -107,7 +111,8 @@
               :class="{
                 wide: isTextareaLikeField(medicalField),
                 missing: isFieldMissing(medicalField),
-                locked: Boolean(medicalField.templateLocked)
+                locked: Boolean(medicalField.templateLocked),
+                readonly: !canEditMedicalField(medicalField)
               }"
             >
               <span>
@@ -116,12 +121,15 @@
                 <sup v-if="medicalField.required">*</sup>
 
                 <em>{{ fieldAssistText(medicalField) }}</em>
+
+                <small>{{ fieldRoleHint(medicalField) }}</small>
               </span>
 
               <el-checkbox-group
                 v-if="isCheckboxField(medicalField)"
                 :model-value="fieldArrayValue(medicalField)"
                 class="medical-record-checklist"
+                :disabled="!canEditMedicalField(medicalField)"
                 @change="value => updateArrayField(medicalField, value)"
               >
                 <el-checkbox v-for="option in fieldOptions(medicalField)" :key="option" :label="option" border>
@@ -135,19 +143,21 @@
                 class="medical-record-paragraph-preview"
                 type="textarea"
                 :rows="4"
+                :disabled="!canEditMedicalField(medicalField)"
                 placeholder="勾选后自动合并为正式段落，可补充少量特殊说明"
-                @update:model-value="value => updateFieldValue(medicalField.key, value)"
+                @update:model-value="value => updateFieldValue(medicalField, value)"
               />
 
               <el-select
                 v-else-if="isSelectLikeField(medicalField)"
                 :model-value="fieldValues[medicalField.key]"
-                :allow-create="!medicalField.templateLocked"
+                :allow-create="canEditMedicalField(medicalField) && !medicalField.templateLocked"
                 clearable
                 default-first-option
+                :disabled="!canEditMedicalField(medicalField) || medicalField.templateLocked"
                 filterable
                 :placeholder="medicalField.placeholder || '选择或输入'"
-                @update:model-value="value => updateFieldValue(medicalField.key, value)"
+                @update:model-value="value => updateFieldValue(medicalField, value)"
               >
                 <el-option v-for="option in fieldOptions(medicalField)" :key="option" :label="option" :value="option" />
               </el-select>
@@ -157,8 +167,9 @@
                 :model-value="fieldValues[medicalField.key]"
                 type="date"
                 value-format="YYYY-MM-DD"
+                :disabled="!canEditMedicalField(medicalField)"
                 :placeholder="medicalField.placeholder || '选择日期'"
-                @update:model-value="value => updateFieldValue(medicalField.key, value)"
+                @update:model-value="value => updateFieldValue(medicalField, value)"
               />
 
               <el-input
@@ -166,8 +177,9 @@
                 :model-value="fieldValues[medicalField.key]"
                 :type="isTextareaLikeField(medicalField) ? 'textarea' : 'text'"
                 :rows="isTextareaLikeField(medicalField) ? 4 : undefined"
+                :disabled="!canEditMedicalField(medicalField)"
                 :placeholder="medicalField.placeholder || medicalField.defaultValue || '请填写'"
-                @update:model-value="value => updateFieldValue(medicalField.key, value)"
+                @update:model-value="value => updateFieldValue(medicalField, value)"
               />
             </label>
           </div>
@@ -198,7 +210,9 @@
         <div v-if="variant === 'inline'">
           <el-button type="primary" plain @click="emit('download')">下载/打开目标病历</el-button>
 
-          <el-button v-if="currentRecord?.status === 'draft'" type="success" plain @click="emit('finalize')">确认定稿</el-button>
+          <el-button v-if="roleCanGenerate && currentRecord?.status === 'draft'" type="success" plain @click="emit('finalize')">
+            确认定稿
+          </el-button>
         </div>
 
         <el-button v-else type="primary" plain @click="emit('download')">下载 docx</el-button>
@@ -206,7 +220,7 @@
     </section>
 
     <el-empty v-else-if="variant === 'dialog'" description="暂无医生目标病历">
-      <el-button type="primary" @click="emit('generate')">生成目标病历</el-button>
+      <el-button v-if="roleCanGenerate" type="primary" @click="emit('generate')">生成目标病历</el-button>
     </el-empty>
 
     <section v-if="versions.length" class="medical-record-history">
@@ -230,7 +244,7 @@
 
       <el-button :loading="loading" @click="emit('precheck')">生成预检</el-button>
 
-      <el-button :loading="loading" @click="emit('saveWorkspace')">保存填写</el-button>
+      <el-button :loading="loading" :disabled="!hasEditableFields" @click="emit('saveWorkspace')">保存填写</el-button>
 
       <el-button :disabled="!currentRecord" @click="emit('download')">下载 docx</el-button>
 
@@ -238,7 +252,7 @@
 
       <el-button v-if="isDraftCurrentRecord" type="success" :loading="loading" @click="emit('finalize')">确认定稿</el-button>
 
-      <el-button type="primary" :loading="loading" @click="emit('generate')">生成 docx 新版本</el-button>
+      <el-button v-if="roleCanGenerate" type="primary" :loading="loading" @click="emit('generate')">生成 docx 新版本</el-button>
     </div>
   </div>
 </template>
@@ -246,6 +260,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GeneratedMedicalRecord, MedicalRecordTemplateField, MedicalRecordTemplateStatus } from "@/api/modules/clinic";
+import { roleLabel, type UserRole } from "@/config/fieldPermissions";
 
 type MedicalRecordFieldSection = {
   section: string;
@@ -264,6 +279,8 @@ const props = withDefaults(
     fieldSections?: MedicalRecordFieldSection[];
     activeSections?: string[];
     fieldValues: Record<string, string>;
+    currentRole?: UserRole;
+    canGenerate?: boolean;
     currentRecord?: GeneratedMedicalRecord;
     versions?: GeneratedMedicalRecord[];
     completedCount?: number;
@@ -288,7 +305,9 @@ const props = withDefaults(
     currentRecord: undefined,
     versions: () => [],
     completedCount: 0,
-    totalCount: 0
+    totalCount: 0,
+    currentRole: undefined,
+    canGenerate: false
   }
 );
 
@@ -310,8 +329,11 @@ const activeSectionsModel = computed({
   set: value => emit("update:activeSections", value)
 });
 
-const canVoidCurrentRecord = computed(() => Boolean(props.currentRecord && props.currentRecord.status !== "voided"));
-const isDraftCurrentRecord = computed(() => props.currentRecord?.status === "draft");
+const roleCanGenerate = computed(() => props.canGenerate);
+const canVoidCurrentRecord = computed(
+  () => roleCanGenerate.value && Boolean(props.currentRecord && props.currentRecord.status !== "voided")
+);
+const isDraftCurrentRecord = computed(() => roleCanGenerate.value && props.currentRecord?.status === "draft");
 
 const isCheckboxField = (field: MedicalRecordTemplateField) =>
   field.controlType === "checkboxParagraph" || field.renderMode === "paragraph" || field.kind === "checkboxParagraph";
@@ -320,16 +342,59 @@ const isTextareaLikeField = (field: MedicalRecordTemplateField) => props.isTexta
 
 const isSelectLikeField = (field: MedicalRecordTemplateField) => !isCheckboxField(field) && props.isSelectField(field);
 
+const canViewMedicalField = (field: MedicalRecordTemplateField) => {
+  if (!props.currentRole || props.currentRole === "admin") return true;
+  if (!field.viewerRoles?.length) return true;
+
+  return field.viewerRoles.includes(props.currentRole);
+};
+
+const canEditMedicalField = (field: MedicalRecordTemplateField) => {
+  if (props.currentRole === "admin") return true;
+  if (!props.currentRole) return false;
+  if (!field.editorRoles?.length) return props.currentRole === "doctor";
+
+  return field.editorRoles.includes(props.currentRole);
+};
+
+const visibleFieldSections = computed(() =>
+  props.fieldSections
+    .map(section => ({
+      ...section,
+      fields: section.fields.filter(canViewMedicalField)
+    }))
+    .filter(section => section.fields.length > 0)
+);
+
+const hasEditableFields = computed(() => visibleFieldSections.value.some(section => section.fields.some(canEditMedicalField)));
+
+const fieldRoleHint = (field: MedicalRecordTemplateField) => {
+  if (canEditMedicalField(field)) return "本岗位可维护";
+  if (!field.editorRoles?.length) return "医生维护";
+
+  const labels = field.editorRoles
+    .slice(0, 3)
+    .map(role => roleLabel(role))
+    .join("、");
+  const suffix = field.editorRoles.length > 3 ? "等维护" : "维护";
+
+  return `${labels}${suffix}`;
+};
+
 const fieldArrayValue = (field: MedicalRecordTemplateField) => {
   const value = String(props.fieldValues[field.key] || "");
   return props.fieldOptions(field).filter(option => value.includes(option));
 };
 
-const updateFieldValue = (key: string, value: string | number | boolean | undefined) => {
-  emit("updateField", key, String(value ?? ""));
+const updateFieldValue = (field: MedicalRecordTemplateField, value: string | number | boolean | undefined) => {
+  if (!canEditMedicalField(field)) return;
+
+  emit("updateField", field.key, String(value ?? ""));
 };
 
 const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => {
+  if (!canEditMedicalField(field)) return;
+
   const selected = Array.isArray(value) ? value.map(item => String(item)) : [];
   emit("updateField", field.key, selected.join(field.joiner ?? ""));
 };
@@ -484,6 +549,20 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
     background: #f8fafc;
   }
 
+  &.readonly {
+    background: #f8fafc;
+    border-color: #e5e7eb;
+
+    > span {
+      color: var(--hos-text-secondary);
+    }
+
+    em {
+      color: #64748b;
+      background: #eef2f7;
+    }
+  }
+
   > span {
     display: flex;
     flex-wrap: wrap;
@@ -505,6 +584,15 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
     border-radius: 999px;
     font-size: 11px;
     font-style: normal;
+    font-weight: 600;
+  }
+
+  small {
+    padding: 1px 6px;
+    color: #475569;
+    background: #f1f5f9;
+    border-radius: 999px;
+    font-size: 11px;
     font-weight: 600;
   }
 }

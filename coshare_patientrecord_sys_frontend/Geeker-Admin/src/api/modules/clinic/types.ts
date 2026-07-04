@@ -404,6 +404,9 @@ export interface MedicalRecordTemplateField {
   inputType?: string;
   targetUse?: "dynamic" | "formOnly" | string;
   sources?: string[];
+  viewerRoles?: UserRole[];
+  editorRoles?: UserRole[];
+  sourceArchiveKeys?: string[];
 }
 
 export interface MedicalRecordTemplateSection {

@@ -67,6 +67,7 @@ public class MedicalRecordTemplateRenderer {
         ArrayNode rows = objectMapper.createArrayNode();
         Set<String> placeholders = templatePlaceholderKeys(templateResource);
         for (TargetField field : targetFields) {
+            if ("formOnly".equals(field.targetUse())) continue;
             if (!placeholders.contains(field.key())) {
                 rows.add(field.section() + " - " + field.label() + "（" + field.key() + "）");
             }

@@ -270,7 +270,7 @@
           >
             <strong>医生目标病历</strong>
 
-            <span>{{ medicalRecordMissingItems.length ? `${medicalRecordMissingItems.length} 项待补` : "docx 生成工作台" }}</span>
+            <span>{{ medicalRecordMissingItems.length ? `${medicalRecordMissingItems.length} 项待补` : "多岗位协作填写" }}</span>
           </button>
 
           <button type="button" :class="{ active: detailWorkspaceMode === 'archive' }" @click="switchDetailWorkspace('archive')">
@@ -304,11 +304,11 @@
           <section v-if="detailWorkspaceMode === 'medicalRecord'" class="doctor-record-workbench">
             <div class="doctor-record-hero">
               <div>
-                <span>医生端核心交付</span>
+                <span>核心协作病历</span>
 
-                <h3>目标病历 docx 生成工作台</h3>
+                <h3>目标病历协作工作台</h3>
 
-                <p>只展示最终目标病历需要确认的动态字段；健康管理档案、附件和时间轴在左侧子视图独立维护。</p>
+                <p>前台、检查、化验、护理和医生共同维护目标病历字段；健康管理档案保留为完整档案和备用入口。</p>
               </div>
 
               <div class="doctor-record-progress">
@@ -335,6 +335,8 @@
               :field-sections="medicalRecordFieldSections"
               v-model:active-sections="medicalRecordActiveSections"
               :field-values="fieldValues"
+              :current-role="currentRole"
+              :can-generate="canGenerateMedicalRecord"
               :current-record="currentMedicalRecord"
               :versions="medicalRecordVersions"
               :completed-count="medicalRecordCompletedCount"
@@ -427,7 +429,7 @@
                 <div class="lab-report-overview-head">
                   <div>
                     <strong>化验报告模板视图</strong>
-                    <span>医生端优先查看结构化报告摘要，原始附件仍保留在附件索引中。</span>
+                    <span>目标病历优先汇总结构化报告摘要，原始附件仍保留在附件索引中。</span>
                   </div>
                   <el-button plain @click="router.push('/workbench/lab-report')">打开检验模板填写</el-button>
                 </div>
@@ -1499,7 +1501,7 @@
       <el-dialog
         v-if="medicalRecordVisible"
         v-model="medicalRecordVisible"
-        title="医生目标病历填写与生成"
+        title="目标病历协作填写与生成"
         width="1040px"
         append-to-body
         destroy-on-close
@@ -1513,6 +1515,8 @@
           :field-sections="medicalRecordFieldSections"
           v-model:active-sections="medicalRecordActiveSections"
           :field-values="fieldValues"
+          :current-role="currentRole"
+          :can-generate="canGenerateMedicalRecord"
           :current-record="currentMedicalRecord"
           :versions="medicalRecordVersions"
           :completed-count="medicalRecordCompletedCount"
@@ -1688,9 +1692,23 @@ type PatientDetailMoreCommand =
   | "lab"
   | "copy";
 
-const doctorFirstRoles = new Set<UserRole>(["admin", "doctor"]);
+const medicalRecordFirstRoles = new Set<UserRole>([
+  "admin",
+  "frontdesk",
+  "reception",
+  "lab",
+  "ecg",
+  "ultrasound",
+  "inspection",
+  "doctor",
+  "nurse",
+  "nursing",
+  "quality"
+]);
 
-const detailWorkspaceMode = ref<DetailWorkspaceMode>(doctorFirstRoles.has(currentRole.value) ? "medicalRecord" : "archive");
+const detailWorkspaceMode = ref<DetailWorkspaceMode>(
+  medicalRecordFirstRoles.has(currentRole.value) ? "medicalRecord" : "archive"
+);
 
 const recordViewMode = ref<"mine" | "full">("mine");
 
@@ -2941,6 +2959,17 @@ const medicalRecordFields = computed<MedicalRecordTemplateField[]>(() =>
   medicalRecordFieldSections.value.flatMap(section => ensureArray(section.fields))
 );
 
+const canGenerateMedicalRecord = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
+
+const canEditMedicalRecordField = (field: MedicalRecordTemplateField) => {
+  if (currentRole.value === "admin") return true;
+  if (!field.editorRoles?.length) return currentRole.value === "doctor";
+
+  return field.editorRoles.includes(currentRole.value);
+};
+
+const medicalRecordEditableFields = computed(() => medicalRecordFields.value.filter(canEditMedicalRecordField));
+
 const medicalRecordDynamicFieldCount = computed(
   () => medicalRecordFields.value.filter(field => (field.targetUse || "dynamic") === "dynamic").length
 );
@@ -2999,7 +3028,7 @@ const medicalRecordTotalCount = computed(() => medicalRecordFields.value.length)
 const medicalRecordCompletedCount = computed(() => medicalRecordFields.value.filter(isMedicalRecordFieldFilled).length);
 
 const medicalRecordWorkspaceValues = () =>
-  medicalRecordFields.value.reduce<Record<string, string>>((payload, field) => {
+  medicalRecordEditableFields.value.reduce<Record<string, string>>((payload, field) => {
     payload[field.key] = String(fieldValues[field.key] || "");
 
     return payload;
@@ -4230,17 +4259,29 @@ const precheckMedicalRecord = async (showMessage = true) => {
 const saveMedicalRecordWorkspace = async (showMessage = true) => {
   if (!patientId.value || !medicalRecordFields.value.length) return false;
 
+  if (!medicalRecordEditableFields.value.length) {
+    if (showMessage) ElMessage.warning("当前岗位暂无可保存的目标病历字段");
+
+    return false;
+  }
+
   const { data } = await saveMedicalRecordWorkspaceApi(patientId.value, medicalRecordWorkspaceValues());
 
   medicalRecordMissingItems.value = ensureArray(data.missingItems);
 
-  if (showMessage) ElMessage.success("医生目标病历填写已保存");
+  if (showMessage) ElMessage.success("目标病历协作字段已保存");
 
   return true;
 };
 
 const generateMedicalRecord = async () => {
   if (!patientId.value) return;
+
+  if (!canGenerateMedicalRecord.value) {
+    ElMessage.warning("当前岗位可维护目标病历字段，但生成 docx 需由医生或管理员操作");
+
+    return;
+  }
 
   medicalRecordLoading.value = true;
 
@@ -4282,6 +4323,12 @@ const generateMedicalRecord = async () => {
 const finalizeMedicalRecord = async () => {
   if (!currentMedicalRecord.value) return;
 
+  if (!canGenerateMedicalRecord.value) {
+    ElMessage.warning("目标病历定稿需由医生或管理员操作");
+
+    return;
+  }
+
   medicalRecordLoading.value = true;
 
   try {
@@ -4301,6 +4348,12 @@ const finalizeMedicalRecord = async () => {
 
 const voidMedicalRecord = async () => {
   if (!currentMedicalRecord.value) return;
+
+  if (!canGenerateMedicalRecord.value) {
+    ElMessage.warning("目标病历作废需由医生或管理员操作");
+
+    return;
+  }
 
   medicalRecordLoading.value = true;
 
@@ -4552,7 +4605,7 @@ const loadPatientDetail = () =>
 
       Object.assign(fieldValues, data.fieldValues || {});
 
-      if (doctorFirstRoles.has(currentRole.value)) {
+      if (medicalRecordFirstRoles.has(currentRole.value)) {
         detailWorkspaceMode.value = "medicalRecord";
 
         void loadMedicalRecordWorkspace();
@@ -4871,7 +4924,7 @@ watch(fieldValues, () => {
 
   const hasEditableField =
     detailWorkspaceMode.value === "medicalRecord"
-      ? medicalRecordFields.value.length > 0
+      ? medicalRecordEditableFields.value.length > 0
       : detailWorkspaceMode.value === "archive" &&
         (recordViewMode.value === "mine" ? myEditableFields.value.length > 0 : activeSection.value.fields.some(isEditable));
 

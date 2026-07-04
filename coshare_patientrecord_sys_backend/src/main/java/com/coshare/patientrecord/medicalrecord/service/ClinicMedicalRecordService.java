@@ -48,7 +48,28 @@ public class ClinicMedicalRecordService {
     private static final String TEMPLATE_RESOURCE = "medical-record-templates/target-medical-record-template.docx";
     private static final String TEMPLATE_SOURCE_NAME = "周xx病历模版.docx";
     private static final String GENERATOR_NAME = "docx-template";
-    private static final String DISCLAIMER = "本目标病历由医生填写的动态字段按固定 docx 模板生成；模板固定文字、格式和页眉页脚不由系统改写。定稿后不可直接修改，只能作废或重新生成新版本。";
+    private static final String DISCLAIMER = "本目标病历由多岗位协作维护的动态字段按固定 docx 模板生成；模板固定文字、格式和页眉页脚不由系统改写。定稿后不可直接修改，只能作废或重新生成新版本。";
+    private static final List<String> COLLABORATOR_ROLES = List.of(
+        "admin",
+        "frontdesk",
+        "reception",
+        "lab",
+        "ecg",
+        "ultrasound",
+        "inspection",
+        "doctor",
+        "nurse",
+        "nursing",
+        "quality"
+    );
+    private static final List<String> DOCTOR_EDITORS = List.of("admin", "doctor");
+    private static final List<String> FRONTDESK_EDITORS = List.of("admin", "frontdesk", "reception");
+    private static final List<String> LAB_EDITORS = List.of("admin", "lab");
+    private static final List<String> ECG_EDITORS = List.of("admin", "ecg");
+    private static final List<String> INSPECTION_EDITORS = List.of("admin", "inspection");
+    private static final List<String> ULTRASOUND_EDITORS = List.of("admin", "ultrasound");
+    private static final List<String> NURSE_EDITORS = List.of("admin", "nurse", "nursing");
+    private static final List<String> SCREENING_REVIEW_EDITORS = List.of("admin", "lab", "doctor", "nurse");
     private static final List<TargetField> TARGET_FIELDS = buildTargetFields();
 
     private final MedicalRecordSchemaInitializer schemaInitializer;
@@ -89,7 +110,7 @@ public class ClinicMedicalRecordService {
         status.put("configured", templateRenderer.templateAvailable(TEMPLATE_RESOURCE) && unboundFields.isEmpty());
         status.put("promptConfigurable", false);
         status.put("templateSource", TEMPLATE_SOURCE_NAME);
-        status.put("commandSource", "固定 docx 母版 + 医生动态字段填充；本轮不调用 AI");
+        status.put("commandSource", "固定 docx 母版 + 多岗位协作字段填充；本轮不调用 AI");
         status.put("disclaimer", DISCLAIMER);
         status.put("generatedDir", generatedDir.toString());
         ArrayNode sections = status.putArray("sections");
@@ -124,14 +145,14 @@ public class ClinicMedicalRecordService {
 
     @Transactional
     public Map<String, Object> saveWorkspace(WorkspaceSaveRequest request, SessionUser user) {
-        requireGenerateRole();
+        requireWorkspaceRole();
         String patientId = safe(request == null ? "" : request.patientId());
         if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
         sourceBuilder.assertCanReadPatient(patientId);
         JsonNode values = request == null || request.values() == null ? objectMapper.createObjectNode() : objectMapper.valueToTree(request.values());
         if (!values.isObject()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历字段必须是对象");
 
-        Set<String> allowedKeys = targetFieldKeys();
+        Set<String> allowedKeys = editableTargetFieldKeys(user);
         ObjectNode accepted = objectMapper.createObjectNode();
         values.fields().forEachRemaining(entry -> {
             if (allowedKeys.contains(entry.getKey())) {
@@ -139,7 +160,7 @@ public class ClinicMedicalRecordService {
             }
         });
         if (accepted.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "没有可保存的目标病历字段");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前岗位没有可保存的目标病历字段");
         }
 
         accepted.fields().forEachRemaining(entry -> versionRepository.upsertRecordField(patientId, entry.getKey(), entry.getValue().asText("")));
@@ -321,6 +342,13 @@ public class ClinicMedicalRecordService {
         row.set("options", targetFieldOptions(field));
         ArrayNode sources = row.putArray("sources");
         field.sources().forEach(sources::add);
+        ArrayNode viewerRoles = row.putArray("viewerRoles");
+        field.viewerRoles().forEach(viewerRoles::add);
+        ArrayNode editorRoles = row.putArray("editorRoles");
+        field.editorRoles().forEach(editorRoles::add);
+        ArrayNode sourceArchiveKeys = row.putArray("sourceArchiveKeys");
+        field.sourceArchiveKeys().forEach(sourceArchiveKeys::add);
+        row.put("targetUse", field.targetUse());
         return row;
     }
 
@@ -334,6 +362,21 @@ public class ClinicMedicalRecordService {
             case "contactRelation" -> addOptionValues(options, List.of("配偶", "父母", "子女", "兄弟姐妹", "其他"));
             case "historyReliable" -> addOptionValues(options, List.of("是", "基本可靠", "需家属补充", "不确定"));
             case "anesthesiaMethod" -> addOptionValues(options, List.of("骶管内麻醉", "硬膜外麻醉", "静脉麻醉", "局部麻醉", "其他"));
+            case "bloodRoutineStatus",
+                "coagulationStatus",
+                "preOpEightStatus",
+                "ecgStatus",
+                "liverFunctionStatus",
+                "renalFunctionStatus",
+                "fastingGlucoseStatus",
+                "postprandialGlucoseStatus",
+                "bloodLipidStatus",
+                "urineRoutineStatus",
+                "crpStatus",
+                "hpTestStatus",
+                "gastroscopyStatus",
+                "colonoscopyStatus",
+                "drChestStatus" -> addOptionValues(options, List.of("未查", "已查", "异常"));
             case "presentIllnessText" -> addOptionValues(options, List.of(
                 "患者自诉既往曾因便血、脱出于门诊行硬化剂注射治疗，术后恢复良好。",
                 "间断便血，滴下状，色鲜红，无痛，便后即止，数天后可自行好转。",
@@ -491,9 +534,14 @@ public class ClinicMedicalRecordService {
         return names;
     }
 
-    private Set<String> targetFieldKeys() {
+    private Set<String> editableTargetFieldKeys(SessionUser user) {
         Set<String> keys = new HashSet<>();
-        outputTargetFields().forEach(field -> keys.add(field.key()));
+        String role = user == null ? "" : safe(user.role());
+        outputTargetFields().forEach(field -> {
+            if ("admin".equals(role) || field.editorRoles().contains(role)) {
+                keys.add(field.key());
+            }
+        });
         return keys;
     }
 
@@ -501,12 +549,16 @@ public class ClinicMedicalRecordService {
         Set<String> placeholders = templateRenderer.templatePlaceholderKeys(TEMPLATE_RESOURCE);
         if (placeholders.isEmpty()) return TARGET_FIELDS;
         return TARGET_FIELDS.stream()
-            .filter(field -> placeholders.contains(field.key()) || field.anchors().stream().anyMatch(placeholders::contains))
+            .filter(field -> "formOnly".equals(field.targetUse()) || placeholders.contains(field.key()) || field.anchors().stream().anyMatch(placeholders::contains))
             .toList();
     }
 
     private void requireReadRole() {
-        AuthPermission.requireAnyRole("当前账号无权查看目标病历", "admin", "doctor", "quality", "nurse");
+        AuthPermission.requireAnyRole("当前账号无权查看目标病历", COLLABORATOR_ROLES.toArray(String[]::new));
+    }
+
+    private void requireWorkspaceRole() {
+        AuthPermission.requireAnyRole("当前账号无权维护目标病历", COLLABORATOR_ROLES.toArray(String[]::new));
     }
 
     private void requireGenerateRole() {
@@ -572,24 +624,56 @@ public class ClinicMedicalRecordService {
         return new TargetField(section, key, label, kind, required, aiPolishable, defaultValue, placeholder, sources, anchors);
     }
 
+    private static TargetField tf(
+        String section,
+        String key,
+        String label,
+        String kind,
+        boolean required,
+        boolean aiPolishable,
+        String defaultValue,
+        String placeholder,
+        List<String> sources,
+        List<String> anchors,
+        List<String> editorRoles,
+        String targetUse
+    ) {
+        return new TargetField(
+            section,
+            key,
+            label,
+            kind,
+            required,
+            aiPolishable,
+            defaultValue,
+            placeholder,
+            sources,
+            anchors,
+            COLLABORATOR_ROLES,
+            editorRoles,
+            sources,
+            targetUse
+        );
+    }
+
     private static List<TargetField> buildTargetFields() {
         return List.of(
-            tf("病历首页", "patientName", "姓名", "input", true, false, "", "患者真实姓名", List.of("patient.name"), List.of("周xx")),
-            tf("病历首页", "gender", "性别", "select", true, false, "", "男/女", List.of(), List.of()),
-            tf("病历首页", "age", "年龄", "input", true, false, "", "例如：33", List.of("patientAge"), List.of("33岁")),
-            tf("病历首页", "nativePlace", "籍贯", "input", true, false, "", "例如：河南固始", List.of(), List.of("河南固始")),
-            tf("病历首页", "occupation", "职业", "input", true, false, "", "例如：农民", List.of(), List.of("农民")),
-            tf("病历首页", "maritalStatus", "婚姻", "input", true, false, "", "例如：已婚", List.of(), List.of("已婚")),
-            tf("病历首页", "nation", "民族", "input", true, false, "汉族", "例如：汉族", List.of(), List.of()),
-            tf("病历首页", "admissionDate", "入院日期", "date", true, false, "", "YYYY-MM-DD", List.of("patient.visitDate"), List.of("2026-02-24")),
-            tf("病历首页", "address", "家庭住址", "textarea", true, false, "", "家庭住址/现住址", List.of(), List.of("三角村")),
-            tf("病历首页", "historyCollectedAt", "病史采集日期", "date", true, false, "", "YYYY-MM-DD", List.of("admissionDate", "patient.visitDate"), List.of()),
-            tf("病历首页", "contactName", "联系人", "input", true, false, "", "联系人姓名", List.of("familyDecisionMaker"), List.of("杨xx")),
-            tf("病历首页", "historyProvider", "病史陈述者", "input", true, false, "患者本人", "例如：患者本人", List.of(), List.of("患者本人")),
-            tf("病历首页", "contactRelation", "与患者关系", "input", true, false, "", "例如：配偶", List.of("familyDecisionMaker"), List.of("配偶")),
-            tf("病历首页", "contactPhone", "联系人电话", "input", true, false, "", "11位手机号", List.of("phone", "familyContact"), List.of("1xxxxxxxxx5")),
-            tf("病历首页", "contactAddress", "联系人地址", "textarea", false, false, "同上", "联系人地址", List.of("address"), List.of("同上")),
-            tf("病历首页", "historyReliable", "陈述内容是否可靠", "select", true, false, "是", "是/基本可靠/需补充", List.of(), List.of("是")),
+            tf("病历首页", "patientName", "姓名", "input", true, false, "", "患者真实姓名", List.of("patient.name"), List.of("周xx"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "gender", "性别", "select", true, false, "", "男/女", List.of(), List.of(), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "age", "年龄", "input", true, false, "", "例如：33", List.of("patientAge"), List.of("33岁"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "nativePlace", "籍贯", "input", true, false, "", "例如：河南固始", List.of(), List.of("河南固始"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "occupation", "职业", "input", true, false, "", "例如：农民", List.of(), List.of("农民"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "maritalStatus", "婚姻", "input", true, false, "", "例如：已婚", List.of(), List.of("已婚"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "nation", "民族", "input", true, false, "汉族", "例如：汉族", List.of(), List.of(), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "admissionDate", "入院日期", "date", true, false, "", "YYYY-MM-DD", List.of("patient.visitDate"), List.of("2026-02-24"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "address", "家庭住址", "textarea", true, false, "", "家庭住址/现住址", List.of(), List.of("三角村"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "historyCollectedAt", "病史采集日期", "date", true, false, "", "YYYY-MM-DD", List.of("admissionDate", "patient.visitDate"), List.of(), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "contactName", "联系人", "input", true, false, "", "联系人姓名", List.of("familyDecisionMaker"), List.of("杨xx"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "historyProvider", "病史陈述者", "input", true, false, "患者本人", "例如：患者本人", List.of(), List.of("患者本人"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "contactRelation", "与患者关系", "input", true, false, "", "例如：配偶", List.of("familyDecisionMaker"), List.of("配偶"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "contactPhone", "联系人电话", "input", true, false, "", "11位手机号", List.of("phone", "familyContact"), List.of("1xxxxxxxxx5"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "contactAddress", "联系人地址", "textarea", false, false, "同上", "联系人地址", List.of("address"), List.of("同上"), FRONTDESK_EDITORS, "dynamic"),
+            tf("病历首页", "historyReliable", "陈述内容是否可靠", "select", true, false, "是", "是/基本可靠/需补充", List.of(), List.of("是"), FRONTDESK_EDITORS, "dynamic"),
             tf("病历首页", "solarTermOnset", "发病节气", "input", false, false, "", "例如：雨水", List.of(), List.of("雨水")),
             tf("病历首页", "allergyHistory", "过敏药物", "textarea", true, true, "", "过敏药物或否认过敏史", List.of(), List.of("无")),
             tf("主诉与现病史", "chiefComplaintText", "主诉", "textarea", true, true, "", "完整主诉", List.of(), List.of("间断便血伴便时肿物脱出1年，加重1月余")),
@@ -603,7 +687,7 @@ public class ClinicMedicalRecordService {
             tf("中医四诊", "tcmFourDiagnosisText", "中医四诊观察", "textarea", true, true, "", "神志、精神、面色、形体、语声、气味等", List.of("tcmLook"), List.of("神志清，精神可，面色正常，形体微胖，体态自如，言语清晰，语声适中，未闻及异常气息及气味，口干、舌淡紫、无苔，舌中裂纹，脉弦数。")),
             tf("中医四诊", "tongue", "舌象", "input", true, false, "", "舌质、舌苔", List.of(), List.of("舌淡紫、无苔，舌中裂纹")),
             tf("中医四诊", "pulseCondition", "脉象", "input", true, false, "", "例如：脉弦数", List.of(), List.of("脉弦数")),
-            tf("体格检查", "vitalSigns", "生命体征", "input", true, false, "", "T/P/R/BP", List.of(), List.of("36.3", "70", "17", "115", "75")),
+            tf("体格检查", "vitalSigns", "生命体征", "input", true, false, "", "T/P/R/BP", List.of(), List.of("36.3", "70", "17", "115", "75"), NURSE_EDITORS, "dynamic"),
             tf("体格检查", "generalExam", "一般状况检查", "textarea", true, true, "", "一般状况", List.of(), List.of("发育正常，体型微胖，步入病房，自主体位，言语流利，神志清楚，查体合作，步态正常。")),
             tf("体格检查", "skinMucosaExam", "皮肤和黏膜检查", "textarea", true, true, "", "皮肤黏膜", List.of(), List.of("全身皮肤及粘膜无发绀、黄染及苍白，无皮疹。未见皮下出血。毛发状况：正常。皮肤湿度正常，弹性正常，无水肿，无肝掌，未见蜘蛛痣。")),
             tf("体格检查", "lymphNodeExam", "浅表淋巴结检查", "textarea", true, true, "", "浅表淋巴结", List.of(), List.of("颈前、腋下及腹股沟淋巴结未触及肿大")),
@@ -614,8 +698,39 @@ public class ClinicMedicalRecordService {
             tf("体格检查", "externalGenitaliaExam", "外生殖器检查", "textarea", false, true, "未查", "外生殖器检查", List.of(), List.of("未查")),
             tf("体格检查", "spineLimbsExam", "脊柱四肢检查", "textarea", true, true, "", "脊柱四肢", List.of(), List.of("脊柱正常生理弯曲，活动自如，无压痛及叩击痛。四肢活动自如，无畸形，关节无红肿，活动自如，皮温正常。无杵状指、趾，双下肢无明显水肿。")),
             tf("体格检查", "nervousSystemExam", "神经系统检查", "textarea", false, true, "未查", "神经系统检查", List.of(), List.of("未查。")),
-            tf("专科及辅助检查", "specialExamFullText", "专科检查", "textarea", true, true, "", "肛门专科检查完整段落", List.of("lithotomyExam", "digitalExam", "anoscope"), List.of("肛门赘皮环状增生，截石位4-5、7、11-1点明显，屏气用腹压可见其缓慢增大，色青紫，质柔软，镜检示直肠黏膜松弛、层叠状，阻塞视野，4、7、11点内痔粘膜隆起糜烂，退镜时4、11点粘膜可脱出肛外。")),
+            tf("专科及辅助检查", "specialExamFullText", "专科检查", "textarea", true, true, "", "肛门专科检查完整段落", List.of("lithotomyExam", "digitalExam", "anoscope"), List.of("肛门赘皮环状增生，截石位4-5、7、11-1点明显，屏气用腹压可见其缓慢增大，色青紫，质柔软，镜检示直肠黏膜松弛、层叠状，阻塞视野，4、7、11点内痔粘膜隆起糜烂，退镜时4、11点粘膜可脱出肛外。"), INSPECTION_EDITORS, "dynamic"),
             tf("专科及辅助检查", "auxiliaryExamSummary", "辅助检查结果", "textarea", true, true, "", "检查检验摘要", List.of("bloodRoutine", "ecgResult"), List.of("WBC:7.32X10^9/L    PLT:321X10^9/L    HGB:153g/L    GLU:5.42mmol/L", "胸部DR：心/肺/隔未见明显异常")),
+            tf("专科及辅助检查", "bloodRoutine", "血常规", "textarea", false, false, "", "血常规报告摘要", List.of("bloodRoutine"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodWbc", "WBC 白细胞数目", "input", false, false, "", "10^9/L", List.of("bloodWbc"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodNeuPercent", "NeU% 中性粒细胞百分比", "input", false, false, "", "%", List.of("bloodNeuPercent"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodLymPercent", "Lym% 淋巴细胞百分比", "input", false, false, "", "%", List.of("bloodLymPercent"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodMonPercent", "Mon% 单核细胞百分比", "input", false, false, "", "%", List.of("bloodMonPercent"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodRbc", "RBC 红细胞数目", "input", false, false, "", "10^12/L", List.of("bloodRbc"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodHgb", "HGB 血红蛋白", "input", false, false, "", "g/L", List.of("bloodHgb"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "bloodPlt", "PLT 血小板数目", "input", false, false, "", "10^9/L", List.of("bloodPlt"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "coagulation", "凝血功能", "textarea", false, false, "", "凝血功能报告摘要", List.of("coagulation"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "preOpEight", "术前八项", "textarea", false, false, "", "术前八项报告摘要", List.of("preOpEight"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "urineRoutine", "尿常规", "textarea", false, false, "", "尿常规报告摘要", List.of("urineRoutine"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "biochemistry", "生化/糖化", "textarea", false, false, "", "生化/糖化报告摘要", List.of("biochemistry"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "postprandialGlucose", "餐后血糖值", "input", false, false, "", "mmol/L", List.of("postprandialGlucose"), List.of(), LAB_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "ecgResult", "心电图", "textarea", false, false, "", "心电图报告摘要", List.of("ecgResult"), List.of(), ECG_EDITORS, "formOnly"),
+            tf("专科及辅助检查", "colonoscopy", "无痛电子肠镜", "textarea", false, false, "", "肠镜检查摘要", List.of("colonoscopy"), List.of(), ULTRASOUND_EDITORS, "formOnly"),
+            tf("术前筛查", "bloodRoutineStatus", "血常规状态", "select", false, false, "", "未查/已查/异常", List.of("bloodRoutineStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "coagulationStatus", "凝血四项状态", "select", false, false, "", "未查/已查/异常", List.of("coagulationStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "preOpEightStatus", "术前八项状态", "select", false, false, "", "未查/已查/异常", List.of("preOpEightStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "ecgStatus", "心电图状态", "select", false, false, "", "未查/已查/异常", List.of("ecgStatus"), List.of(), List.of("admin", "ecg", "doctor", "nurse"), "formOnly"),
+            tf("术前筛查", "liverFunctionStatus", "肝功能状态", "select", false, false, "", "未查/已查/异常", List.of("liverFunctionStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "renalFunctionStatus", "肾功能状态", "select", false, false, "", "未查/已查/异常", List.of("renalFunctionStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "fastingGlucoseStatus", "空腹血糖状态", "select", false, false, "", "未查/已查/异常", List.of("fastingGlucoseStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "postprandialGlucoseStatus", "餐后血糖状态", "select", false, false, "", "未查/已查/异常", List.of("postprandialGlucoseStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "bloodLipidStatus", "血脂四项状态", "select", false, false, "", "未查/已查/异常", List.of("bloodLipidStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "urineRoutineStatus", "尿常规状态", "select", false, false, "", "未查/已查/异常", List.of("urineRoutineStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "crpStatus", "C反应蛋白状态", "select", false, false, "", "未查/已查/异常", List.of("crpStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "hpTestStatus", "幽门螺杆菌检测状态", "select", false, false, "", "未查/已查/异常", List.of("hpTestStatus"), List.of(), SCREENING_REVIEW_EDITORS, "formOnly"),
+            tf("术前筛查", "gastroscopyStatus", "电子胃镜状态", "select", false, false, "", "未查/已查/异常", List.of("gastroscopyStatus"), List.of(), List.of("admin", "ultrasound", "doctor", "nurse"), "formOnly"),
+            tf("术前筛查", "colonoscopyStatus", "电子肠镜状态", "select", false, false, "", "未查/已查/异常", List.of("colonoscopyStatus"), List.of(), List.of("admin", "ultrasound", "doctor", "nurse"), "formOnly"),
+            tf("术前筛查", "drChestStatus", "DR胸片状态", "select", false, false, "", "未查/已查/异常", List.of("drChestStatus"), List.of(), List.of("admin", "ultrasound", "doctor", "nurse"), "formOnly"),
+            tf("术前筛查", "uncheckedItemsNote", "未查项目说明", "textarea", false, false, "", "未查、异常或补查说明", List.of("uncheckedItemsNote"), List.of(), List.of("admin", "doctor", "nurse", "quality"), "formOnly"),
             tf("诊断", "tcmDiagnosis", "中医诊断", "textarea", true, true, "", "中医诊断及证型", List.of(), List.of("痔病（肝胃不和  气阴两虚）")),
             tf("诊断", "westernDiagnosis", "西医诊断", "textarea", true, true, "", "西医诊断多条", List.of(), List.of("混合痔", "直肠粘膜松弛")),
             tf("首次病程记录", "firstCourseAdmissionTime", "首次病程入院时间", "input", true, false, "", "例如：17:45", List.of(), List.of("17:45")),
