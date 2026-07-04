@@ -37,7 +37,7 @@
         :key="tab.key"
         type="button"
         :class="{ active: activeTab === tab.key }"
-        @click="activeTab = tab.key"
+        @click="selectTab(tab.key)"
       >
         <strong>{{ tab.label }}</strong>
         <span>{{ tab.count }}</span>
@@ -50,6 +50,19 @@
           <strong>{{ activeTabMeta.title }}</strong>
 
           <span>{{ activeTabMeta.count }} 项</span>
+        </div>
+
+        <div class="workflow-task-filters" aria-label="任务筛选">
+          <button
+            v-for="filter in taskFilters"
+            :key="filter.key"
+            type="button"
+            :class="{ active: activeFilter === filter.key }"
+            @click="activeFilter = filter.key"
+          >
+            {{ filter.label }}
+            <span>{{ filter.count }}</span>
+          </button>
         </div>
 
         <el-empty v-if="!visibleTasks.length" :description="activeTabMeta.emptyText" />
@@ -65,7 +78,7 @@
           <span>
             <strong>{{ task.fieldLabel }}</strong>
 
-            <small>{{ task.sectionTitle }} · {{ task.issueMessage || task.categoryLabel }}</small>
+            <small>{{ task.sectionTitle }} · {{ task.reason }}</small>
 
             <small class="workflow-task-meta"> {{ task.relationLabel }} · 主责 {{ task.primaryOwner || task.department }} </small>
           </span>
@@ -73,13 +86,7 @@
           <span class="workflow-task-tags">
             <el-tag v-if="task.critical" type="danger" effect="plain" size="small">关键</el-tag>
 
-            <el-tag
-              :type="task.issueLevel === 'invalid' ? 'danger' : task.complete ? 'info' : 'warning'"
-              effect="plain"
-              size="small"
-            >
-              {{ task.issueLevel === "invalid" ? "异常" : task.required || task.archiveRequired ? "必填" : "待补" }}
-            </el-tag>
+            <el-tag :type="task.statusTone" effect="plain" size="small">{{ task.statusLabel }}</el-tag>
           </span>
         </button>
       </article>
@@ -136,7 +143,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type {
   PatientWorkflowTaskState,
   WorkflowAttachmentTask,
@@ -145,6 +152,7 @@ import type {
 } from "../composables/usePatientWorkflowTasks";
 
 type TaskTabKey = "owner" | "support" | "review" | "pending";
+type TaskFilterKey = "all" | "missing" | "attachment" | "review" | "critical";
 
 const props = defineProps<{
   state: PatientWorkflowTaskState;
@@ -156,7 +164,16 @@ const emit = defineEmits<{
   focusStage: [stage: WorkflowStageNode];
 }>();
 
-const activeTab = ref<TaskTabKey>("owner");
+const resolvePreferredTab = (): TaskTabKey => {
+  if (props.state.ownerTasks.length) return "owner";
+  if (props.state.supportTasks.length) return "support";
+  if (props.state.reviewTasks.length) return "review";
+  return "pending";
+};
+
+const activeTab = ref<TaskTabKey>(resolvePreferredTab());
+const activeFilter = ref<TaskFilterKey>("all");
+const userSelectedTab = ref(false);
 
 const pendingTasks = computed(() => {
   const byKey = new Map<string, WorkflowFieldTask>();
@@ -168,6 +185,13 @@ const pendingTasks = computed(() => {
 
   return Array.from(byKey.values()).slice(0, 10);
 });
+
+const taskCountByTab = computed<Record<TaskTabKey, number>>(() => ({
+  owner: props.state.ownerTasks.length,
+  support: props.state.supportTasks.length,
+  review: props.state.reviewTasks.length,
+  pending: pendingTasks.value.length
+}));
 
 const tabs = computed(() => [
   { key: "owner" as const, label: "我负责填写", count: props.state.ownerTasks.length },
@@ -188,10 +212,51 @@ const activeTabMeta = computed(() => {
 });
 
 const visibleTasks = computed(() => {
-  if (activeTab.value === "owner") return props.state.ownerTasks;
-  if (activeTab.value === "support") return props.state.supportTasks;
-  if (activeTab.value === "review") return props.state.reviewTasks;
-  return pendingTasks.value;
+  const currentTasks =
+    activeTab.value === "owner"
+      ? props.state.ownerTasks
+      : activeTab.value === "support"
+        ? props.state.supportTasks
+        : activeTab.value === "review"
+          ? props.state.reviewTasks
+          : pendingTasks.value;
+
+  if (activeFilter.value === "all") return currentTasks;
+  if (activeFilter.value === "attachment") return currentTasks.filter(task => task.status === "attachment");
+  if (activeFilter.value === "review") return currentTasks.filter(task => task.status === "review");
+  if (activeFilter.value === "critical") return currentTasks.filter(task => task.critical || task.status === "critical");
+  return currentTasks.filter(
+    task => task.status === "invalid" || (task.status === "missing" && (task.required || task.archiveRequired))
+  );
+});
+
+const taskFilters = computed(() => {
+  const currentTasks =
+    activeTab.value === "owner"
+      ? props.state.ownerTasks
+      : activeTab.value === "support"
+        ? props.state.supportTasks
+        : activeTab.value === "review"
+          ? props.state.reviewTasks
+          : pendingTasks.value;
+
+  return [
+    { key: "all" as const, label: "全部待处理", count: currentTasks.length },
+    {
+      key: "missing" as const,
+      label: "必填缺失",
+      count: currentTasks.filter(
+        task => task.status === "invalid" || (task.status === "missing" && (task.required || task.archiveRequired))
+      ).length
+    },
+    { key: "attachment" as const, label: "附件待补", count: currentTasks.filter(task => task.status === "attachment").length },
+    { key: "review" as const, label: "待复核", count: currentTasks.filter(task => task.status === "review").length },
+    {
+      key: "critical" as const,
+      label: "关键字段",
+      count: currentTasks.filter(task => task.critical || task.status === "critical").length
+    }
+  ];
 });
 
 const attachmentSummary = computed(() => {
@@ -204,6 +269,23 @@ const attachmentSummary = computed(() => {
 const emitStageFocus = (stage: WorkflowStageNode) => {
   emit("focusStage", stage);
 };
+
+const selectTab = (tab: TaskTabKey) => {
+  userSelectedTab.value = true;
+  activeTab.value = tab;
+  activeFilter.value = "all";
+};
+
+watch(
+  () => taskCountByTab.value,
+  counts => {
+    if (!userSelectedTab.value || counts[activeTab.value] === 0) {
+      activeTab.value = resolvePreferredTab();
+      activeFilter.value = "all";
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <style scoped lang="scss">
@@ -392,6 +474,40 @@ const emitStageFocus = (stage: WorkflowStageNode) => {
   }
 }
 
+.workflow-task-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  button {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+    min-width: 0;
+    min-height: 30px;
+    padding: 5px 9px;
+    color: var(--hos-text-secondary);
+    background: #f8fafc;
+    border: 1px solid var(--hos-border-light);
+    border-radius: var(--hos-radius-sm);
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+
+    &.active {
+      color: #1d4ed8;
+      background: rgba(239, 246, 255, 0.92);
+      border-color: rgba(37, 99, 235, 0.26);
+    }
+
+    span {
+      color: inherit;
+      opacity: 0.72;
+    }
+  }
+}
+
 .workflow-task-row {
   width: 100%;
   min-height: 64px;
@@ -485,6 +601,16 @@ const emitStageFocus = (stage: WorkflowStageNode) => {
   .workflow-readiness {
     min-width: 0;
     text-align: left;
+  }
+
+  .workflow-task-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workflow-task-tags {
+    justify-content: flex-start;
+    max-width: none;
   }
 }
 </style>

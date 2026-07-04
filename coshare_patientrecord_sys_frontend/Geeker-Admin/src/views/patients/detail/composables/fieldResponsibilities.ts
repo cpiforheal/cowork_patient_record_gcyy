@@ -154,6 +154,44 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     reviewerRoles: ["admin", "quality"],
     viewerRoles: ["nurse", "nursing"]
   },
+  treatmentExpectation: {
+    stageKey: "reception",
+    category: "judgement",
+    firstFillRoles: ["frontdesk"],
+    primaryRoles: ["frontdesk", "doctor"],
+    collaboratorRoles: ["reception"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["nurse", "nursing"],
+    critical: true
+  },
+  symptomPattern: {
+    stageKey: "reception",
+    category: "fact",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["reception"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["inspection", "nurse"]
+  },
+  aggravation: {
+    stageKey: "reception",
+    category: "fact",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["reception"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["inspection", "nurse"],
+    critical: true
+  },
+  generalCondition: {
+    stageKey: "reception",
+    category: "fact",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse", "reception"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["inspection", "nursing"]
+  },
   inspectionImages: {
     stageKey: "inspection",
     category: "fact",
@@ -174,6 +212,46 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     reviewerRoles: ["doctor", "admin", "quality"],
     viewerRoles: ["reception", "nurse"],
     critical: true
+  },
+  lithotomyExam: {
+    stageKey: "inspection",
+    category: "fact",
+    firstFillRoles: ["inspection"],
+    primaryRoles: ["inspection", "doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception", "nursing"],
+    critical: true
+  },
+  analTension: {
+    stageKey: "inspection",
+    category: "fact",
+    firstFillRoles: ["inspection"],
+    primaryRoles: ["inspection", "doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception", "nursing"]
+  },
+  digitalExam: {
+    stageKey: "inspection",
+    category: "fact",
+    firstFillRoles: ["inspection"],
+    primaryRoles: ["inspection", "doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception", "nursing"],
+    critical: true
+  },
+  anoscope: {
+    stageKey: "inspection",
+    category: "fact",
+    firstFillRoles: ["inspection"],
+    primaryRoles: ["inspection", "doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception", "nursing"],
+    critical: true,
+    requiresAttachment: true
   },
   bloodRoutineStatus: {
     stageKey: "screening",
@@ -274,6 +352,39 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     critical: true,
     requiresAttachment: true
   },
+  postprandialGlucoseStatus: {
+    stageKey: "screening",
+    category: "process",
+    firstFillRoles: ["lab"],
+    primaryRoles: ["lab"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
+  crpStatus: {
+    stageKey: "screening",
+    category: "process",
+    firstFillRoles: ["lab"],
+    primaryRoles: ["lab"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
+  drChestStatus: {
+    stageKey: "screening",
+    category: "process",
+    firstFillRoles: ["ultrasound"],
+    primaryRoles: ["ultrasound"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
   tcmDiagnosis: {
     stageKey: "decision",
     category: "judgement",
@@ -327,6 +438,37 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     critical: true,
     archiveRequired: true
   },
+  operationIndication: {
+    stageKey: "operationRecord",
+    category: "judgement",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "nursing"],
+    critical: true,
+    archiveRequired: true
+  },
+  anesthesia: {
+    stageKey: "operationRecord",
+    category: "process",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "nursing"],
+    critical: true
+  },
+  operationLevel: {
+    stageKey: "operationRecord",
+    category: "quality",
+    firstFillRoles: ["quality"],
+    primaryRoles: ["quality"],
+    collaboratorRoles: ["doctor"],
+    reviewerRoles: ["admin", "doctor"],
+    viewerRoles: ["nurse", "nursing"],
+    archiveRequired: true
+  },
   admissionAssessment: {
     stageKey: "nursingPrep",
     category: "fact",
@@ -345,6 +487,16 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     collaboratorRoles: ["nurse", "doctor"],
     reviewerRoles: ["admin", "quality"],
     viewerRoles: ["frontdesk", "reception"]
+  },
+  intraoperativeNotice: {
+    stageKey: "outpatientTreatment",
+    category: "process",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse", "frontdesk"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception", "nursing"],
+    critical: true
   },
   followupRecordsJson: {
     stageKey: "followupClosure",
@@ -395,6 +547,54 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     reviewerRoles: ["admin", "quality"],
     viewerRoles: ["reception", "nursing"],
     critical: true
+  },
+  tcmSitzBathPlan: {
+    stageKey: "nursingPrep",
+    category: "process",
+    firstFillRoles: ["doctor", "nurse"],
+    primaryRoles: ["doctor", "nurse"],
+    collaboratorRoles: ["nursing"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "reception"],
+    critical: true
+  },
+  dietEducation: {
+    stageKey: "nursingPrep",
+    category: "process",
+    firstFillRoles: ["nurse"],
+    primaryRoles: ["nurse", "nursing"],
+    collaboratorRoles: ["doctor"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "reception"],
+    critical: true
+  },
+  analFunctionExercise: {
+    stageKey: "nursingPrep",
+    category: "process",
+    firstFillRoles: ["nurse"],
+    primaryRoles: ["nurse", "nursing"],
+    collaboratorRoles: ["doctor"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "reception"]
+  },
+  complicationRecord: {
+    stageKey: "followupClosure",
+    category: "quality",
+    firstFillRoles: ["doctor", "nurse"],
+    primaryRoles: ["doctor", "nurse"],
+    collaboratorRoles: ["frontdesk", "nursing"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception"],
+    critical: true
+  },
+  medicationRecord: {
+    stageKey: "followupClosure",
+    category: "process",
+    firstFillRoles: ["doctor", "nurse"],
+    primaryRoles: ["doctor", "nurse"],
+    collaboratorRoles: ["frontdesk", "nursing"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception"]
   },
   archiveClosedSignature: {
     stageKey: "qualityArchive",

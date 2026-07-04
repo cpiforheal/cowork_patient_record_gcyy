@@ -14,6 +14,8 @@ export type WorkflowStageStatus = "done" | "active" | "attention" | "waiting";
 
 export type WorkflowTaskRelation = "owner" | "support" | "review" | "readonly";
 
+export type WorkflowTaskStatus = "missing" | "invalid" | "attachment" | "review" | "critical" | "complete";
+
 export type WorkflowFieldTask = {
   fieldKey: string;
   fieldLabel: string;
@@ -36,6 +38,10 @@ export type WorkflowFieldTask = {
   primaryOwner: string;
   issueMessage: string;
   issueLevel?: FieldIssue["level"];
+  status: WorkflowTaskStatus;
+  statusLabel: string;
+  statusTone: "danger" | "warning" | "success" | "info";
+  reason: string;
 };
 
 export type WorkflowStageNode = {
@@ -148,6 +154,49 @@ const rankTask = (task: WorkflowFieldTask) =>
   (task.critical ? 0 : 1) +
   (task.required || task.archiveRequired ? 0 : 1);
 
+const taskStatusMeta: Record<WorkflowTaskStatus, { label: string; tone: WorkflowFieldTask["statusTone"]; reason: string }> = {
+  missing: { label: "必填缺失", tone: "warning", reason: "必填或归档必需字段尚未补齐" },
+  invalid: { label: "格式异常", tone: "danger", reason: "字段内容未通过当前校验规则" },
+  attachment: { label: "附件待补", tone: "warning", reason: "该字段需要补齐附件证据" },
+  review: { label: "待复核", tone: "info", reason: "需要当前岗位或质控角色复核确认" },
+  critical: { label: "关键未闭环", tone: "danger", reason: "关键字段还未形成可归档记录" },
+  complete: { label: "已完成", tone: "success", reason: "字段已完成，可继续推进流程" }
+};
+
+const resolveTaskStatus = (
+  task: Omit<WorkflowFieldTask, "status" | "statusLabel" | "statusTone" | "reason">
+): Pick<WorkflowFieldTask, "status" | "statusLabel" | "statusTone" | "reason"> => {
+  const missing = task.issueLevel === "missing" || ((task.required || task.archiveRequired) && !task.complete);
+  const invalid = task.issueLevel === "invalid";
+  const attachmentMissing = task.requiresAttachment && task.attachmentCount === 0;
+  const reviewPending = task.relation === "review" && (!task.complete || Boolean(task.issueMessage) || task.critical);
+  const criticalOpen = task.critical && !task.complete;
+  const optionalPending = !task.complete;
+  const status: WorkflowTaskStatus = invalid
+    ? "invalid"
+    : missing
+      ? "missing"
+      : attachmentMissing
+        ? "attachment"
+        : reviewPending
+          ? "review"
+          : criticalOpen
+            ? "critical"
+            : optionalPending
+              ? "missing"
+              : "complete";
+  const meta = taskStatusMeta[status];
+  const optionalPendingMeta = optionalPending && status === "missing" && !missing;
+  const reason = task.issueMessage || meta.reason;
+
+  return {
+    status,
+    statusLabel: optionalPendingMeta ? "待补充" : meta.label,
+    statusTone: optionalPendingMeta ? "info" : meta.tone,
+    reason: optionalPendingMeta ? "可补充字段尚未填写，处理后有助于完整归档" : reason
+  };
+};
+
 export const usePatientWorkflowTasks = ({
   sections,
   lifecycleStages,
@@ -254,7 +303,7 @@ export const usePatientWorkflowTasks = ({
               : "readonly";
         const category = responsibility?.category || (field.qualityCheck ? "quality" : "fact");
 
-        return {
+        const baseTask: Omit<WorkflowFieldTask, "status" | "statusLabel" | "statusTone" | "reason"> = {
           fieldKey: field.key,
           fieldLabel: field.label,
           sectionKey: section.key,
@@ -277,6 +326,11 @@ export const usePatientWorkflowTasks = ({
             roleNames(responsibility?.primaryRoles) || section.owner || stage?.owner || activeLifecycleStage.value.owner,
           issueMessage: issue?.message || "",
           issueLevel: issue?.level
+        };
+
+        return {
+          ...baseTask,
+          ...resolveTaskStatus(baseTask)
         };
       })
     );
@@ -312,7 +366,7 @@ export const usePatientWorkflowTasks = ({
         const task = fieldTasks.find(item => item.fieldKey === issue.fieldKey);
         const stage = section ? stageForSection[section.key] || activeLifecycleStage.value : activeLifecycleStage.value;
 
-        return {
+        const baseTask: Omit<WorkflowFieldTask, "status" | "statusLabel" | "statusTone" | "reason"> = {
           fieldKey: issue.fieldKey,
           fieldLabel: issue.fieldLabel,
           sectionKey: issue.sectionKey,
@@ -334,6 +388,11 @@ export const usePatientWorkflowTasks = ({
           primaryOwner: task?.primaryOwner || section?.owner || stage.owner,
           issueMessage: issue.message,
           issueLevel: issue.level
+        };
+
+        return {
+          ...baseTask,
+          ...resolveTaskStatus(baseTask)
         };
       })
       .sort((left, right) => rankTask(left) - rankTask(right))
