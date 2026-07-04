@@ -391,6 +391,14 @@
             </aside>
 
             <main class="form-panel screen-only">
+              <PatientOverviewPanel
+                v-if="showPatientOverviewPanel"
+                :state="patientWorkflowTasks"
+                @focus-field="focusWorkflowTask"
+                @focus-attachment="focusWorkflowAttachment"
+                @focus-stage="focusWorkflowStage"
+              />
+
               <WorkflowTaskPanel
                 v-if="!showLabReportOverview"
                 :state="patientWorkflowTasks"
@@ -1619,6 +1627,7 @@ const AiSummaryDialog = defineAsyncComponent(() => import("./components/AiSummar
 const ArchivePrecheckDialog = defineAsyncComponent(() => import("./components/ArchivePrecheckDialog.vue"));
 const AttachmentWorkbench = defineAsyncComponent(() => import("./components/AttachmentWorkbench.vue"));
 const MedicalRecordWorkbench = defineAsyncComponent(() => import("./components/MedicalRecordWorkbench.vue"));
+const PatientOverviewPanel = defineAsyncComponent(() => import("./components/PatientOverviewPanel.vue"));
 const PrintPreflightDialog = defineAsyncComponent(() => import("./components/PrintPreflightDialog.vue"));
 const RecordPreviewOverlay = defineAsyncComponent(() => import("./components/RecordPreviewOverlay.vue"));
 const TimelineWorkbench = defineAsyncComponent(() => import("./components/TimelineWorkbench.vue"));
@@ -2009,6 +2018,9 @@ const roleViewOptions: { label: string; value: RoleViewKey }[] = [
 const activeRoleView = ref<RoleViewKey>("all");
 const canViewFullArchive = computed(() => fullArchiveRoles.has(currentRole.value));
 const canUseRoleViewFilter = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
+const showPatientOverviewPanel = computed(
+  () => !showLabReportOverview.value && (currentRole.value === "admin" || currentRole.value === "quality")
+);
 
 const roleViewSections: Record<Exclude<RoleViewKey, "all">, Set<string>> = {
   doctorRecord: new Set([
