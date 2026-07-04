@@ -391,6 +391,14 @@
             </aside>
 
             <main class="form-panel screen-only">
+              <WorkflowTaskPanel
+                v-if="!showLabReportOverview"
+                :state="patientWorkflowTasks"
+                @focus-field="focusWorkflowTask"
+                @focus-attachment="focusWorkflowAttachment"
+                @focus-stage="focusWorkflowStage"
+              />
+
               <section v-if="showLabReportOverview" class="lab-report-overview">
                 <div class="lab-report-overview-head">
                   <div>
@@ -1598,6 +1606,12 @@ import { useAttachmentPreview } from "./composables/useAttachmentPreview";
 import { useArchiveAutosave } from "./composables/useArchiveAutosave";
 import { useArchiveFieldIndex } from "./composables/useArchiveFieldIndex";
 import { useAiSummary } from "./composables/useAiSummary";
+import {
+  usePatientWorkflowTasks,
+  type WorkflowAttachmentTask,
+  type WorkflowFieldTask,
+  type WorkflowStageNode
+} from "./composables/usePatientWorkflowTasks";
 import { useRecordPrintPreview } from "./composables/useRecordPrintPreview";
 import type { FieldIssue, FollowupRecord } from "./components/types";
 
@@ -1609,6 +1623,7 @@ const PrintPreflightDialog = defineAsyncComponent(() => import("./components/Pri
 const RecordPreviewOverlay = defineAsyncComponent(() => import("./components/RecordPreviewOverlay.vue"));
 const TimelineWorkbench = defineAsyncComponent(() => import("./components/TimelineWorkbench.vue"));
 const VoidAttachmentDialog = defineAsyncComponent(() => import("./components/VoidAttachmentDialog.vue"));
+const WorkflowTaskPanel = defineAsyncComponent(() => import("./components/WorkflowTaskPanel.vue"));
 
 const router = useRouter();
 
@@ -2843,6 +2858,8 @@ const validateFieldValue = (field: RecordField, value?: string): string => {
 };
 
 const {
+  attachmentsByField,
+  completionBySection,
   fieldIssues,
   completionStats,
   matchedAttachments,
@@ -3499,6 +3516,19 @@ const lifecycleProgress = computed(() => {
   };
 });
 
+const patientWorkflowTasks = usePatientWorkflowTasks({
+  sections: recordSectionsByRule,
+  lifecycleStages: activeLifecycleStages,
+  activeLifecycleStage,
+  currentRole,
+  roleName,
+  fieldIssues,
+  completionBySection,
+  attachmentsByField,
+  isFieldComplete: isRecordFieldComplete,
+  isFieldEditable: isEditable
+});
+
 const patientAssistantPrompt = computed(
   () => "请根据当前患者档案，帮我总结重点、缺失项、附件证据和下一步处理建议。请只给院内辅助建议，不要替代诊断。"
 );
@@ -3709,6 +3739,58 @@ const focusIssue = async (issue?: FieldIssue) => {
   const input = target?.querySelector<HTMLElement>("input, textarea, .el-select__wrapper");
 
   input?.focus();
+};
+
+const focusWorkflowTask = async (task: WorkflowFieldTask) => {
+  detailWorkspaceMode.value = "archive";
+
+  recordViewMode.value = "full";
+
+  await focusIssue({
+    fieldKey: task.fieldKey,
+    fieldLabel: task.fieldLabel,
+    sectionKey: task.sectionKey,
+    sectionTitle: task.sectionTitle,
+    message: task.issueMessage || "请处理该字段",
+    level: task.issueLevel || "missing"
+  });
+};
+
+const focusWorkflowAttachment = async (task: WorkflowAttachmentTask) => {
+  detailWorkspaceMode.value = "archive";
+
+  recordViewMode.value = "full";
+
+  await focusIssue({
+    fieldKey: task.fieldKey,
+    fieldLabel: task.fieldLabel,
+    sectionKey: task.sectionKey,
+    sectionTitle: task.sectionTitle,
+    message: task.attachmentCount ? "查看附件证据" : "补充附件证据",
+    level: "missing"
+  });
+};
+
+const focusWorkflowStage = async (stage: WorkflowStageNode) => {
+  const targetStage = activeLifecycleStages.value.find(item => item.key === stage.key);
+
+  const targetSectionKey = targetStage?.sectionKeys.find(sectionKey =>
+    recordSectionsByRule.value.some(section => section.key === sectionKey)
+  );
+
+  if (!targetSectionKey) return;
+
+  detailWorkspaceMode.value = "archive";
+
+  recordViewMode.value = "full";
+
+  if (ensureArray(collapsedSectionKeys.value).includes(targetSectionKey)) {
+    collapsedSectionKeys.value = collapsedSectionKeys.value.filter(sectionKey => sectionKey !== targetSectionKey);
+  }
+
+  await nextTick();
+
+  scrollToSection(targetSectionKey);
 };
 
 const focusPrecheckIssue = async (issue?: FieldIssue) => {
