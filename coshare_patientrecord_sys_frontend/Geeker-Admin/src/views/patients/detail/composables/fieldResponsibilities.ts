@@ -374,6 +374,36 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     critical: true,
     requiresAttachment: true
   },
+  hpTestStatus: {
+    stageKey: "screening",
+    category: "process",
+    firstFillRoles: ["lab"],
+    primaryRoles: ["lab"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    requiresAttachment: true
+  },
+  gastroscopyStatus: {
+    stageKey: "screening",
+    category: "process",
+    firstFillRoles: ["ultrasound"],
+    primaryRoles: ["ultrasound"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    requiresAttachment: true
+  },
+  colonoscopyStatus: {
+    stageKey: "screening",
+    category: "process",
+    firstFillRoles: ["ultrasound"],
+    primaryRoles: ["ultrasound"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    requiresAttachment: true
+  },
   drChestStatus: {
     stageKey: "screening",
     category: "process",
@@ -384,6 +414,69 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     viewerRoles: ["inspection", "nursing"],
     critical: true,
     requiresAttachment: true
+  },
+  uncheckedItemsNote: {
+    stageKey: "screening",
+    category: "quality",
+    firstFillRoles: ["doctor", "nurse"],
+    primaryRoles: ["doctor", "nurse"],
+    collaboratorRoles: ["lab", "ecg", "ultrasound", "inspection"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "reception", "nursing"]
+  },
+  bloodRoutine: {
+    stageKey: "screening",
+    category: "fact",
+    firstFillRoles: ["lab"],
+    primaryRoles: ["lab"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
+  coagulation: {
+    stageKey: "screening",
+    category: "fact",
+    firstFillRoles: ["lab"],
+    primaryRoles: ["lab"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
+  preOpEight: {
+    stageKey: "screening",
+    category: "fact",
+    firstFillRoles: ["lab"],
+    primaryRoles: ["lab"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
+  ecgResult: {
+    stageKey: "screening",
+    category: "fact",
+    firstFillRoles: ["ecg"],
+    primaryRoles: ["ecg"],
+    collaboratorRoles: ["doctor", "nurse"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["inspection", "nursing"],
+    critical: true,
+    requiresAttachment: true
+  },
+  vitalSigns: {
+    stageKey: "screening",
+    category: "fact",
+    firstFillRoles: ["nurse"],
+    primaryRoles: ["nurse"],
+    collaboratorRoles: ["doctor"],
+    reviewerRoles: ["doctor", "admin", "quality"],
+    viewerRoles: ["lab", "ecg", "ultrasound", "inspection"],
+    critical: true
   },
   tcmDiagnosis: {
     stageKey: "decision",
@@ -407,6 +500,26 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     critical: true,
     archiveRequired: true
   },
+  tcmSyndrome: {
+    stageKey: "decision",
+    category: "judgement",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["reception"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "nurse", "nursing"],
+    critical: true
+  },
+  tcmTreatment: {
+    stageKey: "decision",
+    category: "judgement",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "reception", "nursing"],
+    critical: true
+  },
   surgeryFeasibility: {
     stageKey: "decision",
     category: "judgement",
@@ -427,6 +540,16 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     viewerRoles: ["reception", "nursing"],
     critical: true
   },
+  operationGroup: {
+    stageKey: "operationRecord",
+    category: "process",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "nursing"],
+    critical: true
+  },
   operationName: {
     stageKey: "operationRecord",
     category: "judgement",
@@ -437,6 +560,15 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     viewerRoles: ["frontdesk", "nursing"],
     critical: true,
     archiveRequired: true
+  },
+  additionalOperation: {
+    stageKey: "operationRecord",
+    category: "judgement",
+    firstFillRoles: ["doctor"],
+    primaryRoles: ["doctor"],
+    collaboratorRoles: ["nurse"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "nursing"]
   },
   operationIndication: {
     stageKey: "operationRecord",
@@ -518,6 +650,16 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     viewerRoles: ["reception"],
     critical: true
   },
+  followupCompliance: {
+    stageKey: "followupClosure",
+    category: "quality",
+    firstFillRoles: ["nurse", "doctor"],
+    primaryRoles: ["nurse", "doctor"],
+    collaboratorRoles: ["frontdesk", "nursing"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["reception"],
+    critical: true
+  },
   recoverySummary: {
     stageKey: "followupClosure",
     category: "judgement",
@@ -557,6 +699,15 @@ export const archiveFieldResponsibilities: Record<string, ArchiveFieldResponsibi
     reviewerRoles: ["admin", "quality"],
     viewerRoles: ["frontdesk", "reception"],
     critical: true
+  },
+  tcmOralRegulation: {
+    stageKey: "nursingPrep",
+    category: "process",
+    firstFillRoles: ["doctor", "nurse"],
+    primaryRoles: ["doctor", "nurse"],
+    collaboratorRoles: ["nursing"],
+    reviewerRoles: ["admin", "quality"],
+    viewerRoles: ["frontdesk", "reception"]
   },
   dietEducation: {
     stageKey: "nursingPrep",

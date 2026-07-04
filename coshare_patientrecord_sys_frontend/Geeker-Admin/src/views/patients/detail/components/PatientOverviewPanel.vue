@@ -21,7 +21,8 @@
         :key="metric.key"
         type="button"
         class="overview-metric"
-        :class="metric.tone"
+        :class="[metric.tone, { disabled: metric.value === 0 }]"
+        :disabled="metric.value === 0"
         @click="focusMetric(metric.key)"
       >
         <span>{{ metric.label }}</span>
@@ -126,6 +127,12 @@ const priorityItems = computed(() =>
     .slice(0, 5)
 );
 
+const metricCandidates = computed(() =>
+  [...props.state.blockingItems, ...props.state.ownerTasks, ...props.state.supportTasks, ...props.state.reviewTasks].filter(
+    (task, index, tasks) => tasks.findIndex(item => item.fieldKey === task.fieldKey) === index
+  )
+);
+
 const focusMetric = (key: MetricKey) => {
   if (key === "attachment") {
     const attachmentTask = props.state.attachmentTasks.find(task => task.required && task.attachmentCount === 0);
@@ -137,8 +144,8 @@ const focusMetric = (key: MetricKey) => {
     key === "review"
       ? props.state.reviewTasks[0]
       : key === "critical"
-        ? priorityItems.value.find(item => item.critical)
-        : priorityItems.value.find(item => item.issueLevel === key);
+        ? metricCandidates.value.find(item => item.critical || item.status === "critical")
+        : metricCandidates.value.find(item => item.issueLevel === key || item.status === key);
 
   if (task) emit("focusField", task);
 };
@@ -243,6 +250,11 @@ const focusMetric = (key: MetricKey) => {
   &.info strong {
     color: #2563eb;
   }
+
+  &.disabled {
+    cursor: default;
+    opacity: 0.58;
+  }
 }
 
 .overview-body {
@@ -342,6 +354,7 @@ const focusMetric = (key: MetricKey) => {
 
   strong,
   small {
+    min-width: 0;
     overflow-wrap: anywhere;
   }
 

@@ -88,19 +88,26 @@ const selectItem = (key: string) => {
 
 .patient-field-search-select {
   width: 100%;
+
+  :deep(.el-select__placeholder),
+  :deep(.el-select__selected-item) {
+    min-width: 0;
+  }
 }
 
 .search-option {
   display: grid;
   gap: 2px;
+  width: 100%;
   min-width: 0;
   padding: 4px 0;
 
   strong,
   small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+    white-space: normal;
   }
 
   strong {

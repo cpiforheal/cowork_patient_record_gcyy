@@ -65,7 +65,7 @@
           </button>
         </div>
 
-        <el-empty v-if="!visibleTasks.length" :description="activeTabMeta.emptyText" />
+        <el-empty v-if="!visibleTasks.length" :description="emptyTaskText" />
 
         <button
           v-for="task in visibleTasks"
@@ -211,52 +211,54 @@ const activeTabMeta = computed(() => {
   return meta[activeTab.value];
 });
 
-const visibleTasks = computed(() => {
-  const currentTasks =
-    activeTab.value === "owner"
-      ? props.state.ownerTasks
-      : activeTab.value === "support"
-        ? props.state.supportTasks
-        : activeTab.value === "review"
-          ? props.state.reviewTasks
-          : pendingTasks.value;
+const currentTasks = computed(() =>
+  activeTab.value === "owner"
+    ? props.state.ownerTasks
+    : activeTab.value === "support"
+      ? props.state.supportTasks
+      : activeTab.value === "review"
+        ? props.state.reviewTasks
+        : pendingTasks.value
+);
 
-  if (activeFilter.value === "all") return currentTasks;
-  if (activeFilter.value === "attachment") return currentTasks.filter(task => task.status === "attachment");
-  if (activeFilter.value === "review") return currentTasks.filter(task => task.status === "review");
-  if (activeFilter.value === "critical") return currentTasks.filter(task => task.critical || task.status === "critical");
-  return currentTasks.filter(
+const visibleTasks = computed(() => {
+  if (activeFilter.value === "all") return currentTasks.value;
+  if (activeFilter.value === "attachment") return currentTasks.value.filter(task => task.status === "attachment");
+  if (activeFilter.value === "review") return currentTasks.value.filter(task => task.status === "review");
+  if (activeFilter.value === "critical") return currentTasks.value.filter(task => task.critical || task.status === "critical");
+  return currentTasks.value.filter(
     task => task.status === "invalid" || (task.status === "missing" && (task.required || task.archiveRequired))
   );
 });
 
 const taskFilters = computed(() => {
-  const currentTasks =
-    activeTab.value === "owner"
-      ? props.state.ownerTasks
-      : activeTab.value === "support"
-        ? props.state.supportTasks
-        : activeTab.value === "review"
-          ? props.state.reviewTasks
-          : pendingTasks.value;
-
   return [
-    { key: "all" as const, label: "全部待处理", count: currentTasks.length },
+    { key: "all" as const, label: "全部待处理", count: currentTasks.value.length },
     {
       key: "missing" as const,
       label: "必填缺失",
-      count: currentTasks.filter(
+      count: currentTasks.value.filter(
         task => task.status === "invalid" || (task.status === "missing" && (task.required || task.archiveRequired))
       ).length
     },
-    { key: "attachment" as const, label: "附件待补", count: currentTasks.filter(task => task.status === "attachment").length },
-    { key: "review" as const, label: "待复核", count: currentTasks.filter(task => task.status === "review").length },
+    {
+      key: "attachment" as const,
+      label: "附件待补",
+      count: currentTasks.value.filter(task => task.status === "attachment").length
+    },
+    { key: "review" as const, label: "待复核", count: currentTasks.value.filter(task => task.status === "review").length },
     {
       key: "critical" as const,
       label: "关键字段",
-      count: currentTasks.filter(task => task.critical || task.status === "critical").length
+      count: currentTasks.value.filter(task => task.critical || task.status === "critical").length
     }
   ];
+});
+
+const emptyTaskText = computed(() => {
+  if (currentTasks.value.length === 0) return activeTabMeta.value.emptyText;
+  const filter = taskFilters.value.find(item => item.key === activeFilter.value);
+  return `${activeTabMeta.value.title}中暂无${filter?.label || "该类"}任务`;
 });
 
 const attachmentSummary = computed(() => {
@@ -428,8 +430,10 @@ watch(
 
     span {
       flex: 0 0 auto;
+      min-width: 20px;
       color: var(--hos-text-secondary);
       font-size: 12px;
+      text-align: right;
     }
   }
 }
@@ -483,6 +487,7 @@ watch(
     display: inline-flex;
     gap: 5px;
     align-items: center;
+    flex: 0 1 auto;
     min-width: 0;
     min-height: 30px;
     padding: 5px 9px;
@@ -529,10 +534,12 @@ watch(
     display: grid;
     gap: 3px;
     min-width: 0;
+    max-width: 100%;
   }
 
   strong,
   small {
+    min-width: 0;
     overflow-wrap: anywhere;
   }
 
@@ -555,7 +562,7 @@ watch(
   flex-wrap: wrap;
   gap: 4px;
   justify-content: flex-end;
-  max-width: 110px;
+  max-width: min(140px, 40%);
 }
 
 .workflow-next-step {
@@ -610,6 +617,7 @@ watch(
 
   .workflow-task-tags {
     justify-content: flex-start;
+    width: 100%;
     max-width: none;
   }
 }
