@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,14 +173,137 @@ public class MedicalRecordSourceBuilder {
 
     private String fieldValue(JsonNode patient, JsonNode record, TargetField field) {
         String direct = record.path(field.key()).asText("");
-        if (!direct.isBlank()) return direct;
+        if (!isIncomplete(direct)) return direct;
+        if ("auxiliaryExamSummary".equals(field.key())) {
+            String synthesized = synthesizeAuxiliaryExamSummary(record);
+            if (!synthesized.isBlank()) return synthesized;
+        }
         for (String source : field.sources()) {
             String value = source.startsWith("patient.")
                 ? patient.path(source.substring("patient.".length())).asText("")
                 : record.path(source).asText("");
-            if (!value.isBlank()) return value;
+            if (!isIncomplete(value)) return value;
         }
         return field.defaultValue();
+    }
+
+    private String synthesizeAuxiliaryExamSummary(JsonNode record) {
+        List<String> summaries = new ArrayList<>();
+        addMetricSummary(
+            summaries,
+            "血常规",
+            record,
+            List.of(
+                metric("bloodWbc", "WBC", "10^9/L"),
+                metric("bloodNeuPercent", "NeU%", "%"),
+                metric("bloodLymPercent", "Lym%", "%"),
+                metric("bloodMonPercent", "Mon%", "%"),
+                metric("bloodRbc", "RBC", "10^12/L"),
+                metric("bloodHgb", "HGB", "g/L"),
+                metric("bloodPlt", "PLT", "10^9/L"),
+                metric("lab_bloodRoutine_neuCount", "NeU#", "10^9/L"),
+                metric("lab_bloodRoutine_lymCount", "Lym#", "10^9/L"),
+                metric("lab_bloodRoutine_monCount", "Mon#", "10^9/L")
+            ),
+            "bloodRoutine"
+        );
+        addMetricSummary(
+            summaries,
+            "CRP/SAA",
+            record,
+            List.of(metric("lab_crpSaa_crp", "CRP", "mg/L"), metric("lab_crpSaa_saa", "SAA", "mg/L")),
+            "crpStatus"
+        );
+        addMetricSummary(
+            summaries,
+            "餐后血糖",
+            record,
+            List.of(metric("postprandialGlucose", "2hPG", "mmol/L")),
+            "postprandialGlucose"
+        );
+        addMetricSummary(
+            summaries,
+            "生化肝肾功",
+            record,
+            List.of(
+                metric("lab_biochemistry_glu", "Glu", "mmol/L"),
+                metric("lab_biochemistry_alt", "ALT", "U/L"),
+                metric("lab_biochemistry_ast", "AST", "U/L"),
+                metric("lab_biochemistry_crea", "CREA", "umol/L"),
+                metric("lab_biochemistry_ua", "UA", "umol/L"),
+                metric("lab_biochemistry_urea", "UREA", "mmol/L")
+            ),
+            "biochemistry"
+        );
+        addMetricSummary(
+            summaries,
+            "尿常规",
+            record,
+            List.of(
+                metric("lab_urineRoutine_wbc", "LEU", ""),
+                metric("lab_urineRoutine_nit", "NIT", ""),
+                metric("lab_urineRoutine_pro", "PRO", ""),
+                metric("lab_urineRoutine_bld", "BLD", ""),
+                metric("lab_urineRoutine_glu", "GLU", "")
+            ),
+            "urineRoutine"
+        );
+        addMetricSummary(
+            summaries,
+            "术前筛查",
+            record,
+            List.of(
+                metric("lab_hbvFive_hbsag", "HBsAg", ""),
+                metric("lab_hbvFive_hbsab", "HBsAb", ""),
+                metric("lab_infectious_hiv", "HIV", ""),
+                metric("lab_infectious_tppa", "TPPA", ""),
+                metric("lab_infectious_hcv", "HCV", "")
+            ),
+            "preOpEight"
+        );
+        addMetricSummary(
+            summaries,
+            "糖化血红蛋白",
+            record,
+            List.of(metric("lab_hba1c_hba1c", "HbA1c", "%")),
+            ""
+        );
+        String ecg = firstClean(record, "ecgResult", "ecgStatus");
+        if (!ecg.isBlank()) summaries.add("心电图：" + ecg);
+        return String.join("；", summaries);
+    }
+
+    private Metric metric(String key, String label, String unit) {
+        return new Metric(key, label, unit);
+    }
+
+    private void addMetricSummary(List<String> summaries, String title, JsonNode record, List<Metric> metrics, String fallbackKey) {
+        List<String> filled = new ArrayList<>();
+        for (Metric metric : metrics) {
+            String value = cleanValue(record.path(metric.key()).asText(""));
+            if (!value.isBlank()) filled.add(metric.label() + " " + value + metric.unit());
+        }
+        if (!filled.isEmpty()) {
+            summaries.add(title + "：" + String.join("，", filled));
+            return;
+        }
+        if (!fallbackKey.isBlank()) {
+            String fallback = cleanValue(record.path(fallbackKey).asText(""));
+            if (!fallback.isBlank()) summaries.add(fallback);
+        }
+    }
+
+    private String firstClean(JsonNode record, String... keys) {
+        for (String key : keys) {
+            String value = cleanValue(record.path(key).asText(""));
+            if (!value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private String cleanValue(String value) {
+        String text = safe(value);
+        return isIncomplete(text) ? "" : text;
     }
 
     private String firstNonBlank(JsonNode node, String first, String fallback) {
@@ -225,4 +349,6 @@ public class MedicalRecordSourceBuilder {
     private static String safe(String value) {
         return String.valueOf(value == null ? "" : value).trim();
     }
+
+    private record Metric(String key, String label, String unit) {}
 }

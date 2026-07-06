@@ -1,4 +1,5 @@
 import {
+  labReportRecordFields,
   recordSections,
   roleLabel,
   screeningCollaborators,
@@ -241,29 +242,49 @@ const seedDictionaries = (): DictRow[] => [
 ];
 
 export const seedTemplateFieldRules = (): TemplateFieldRule[] =>
-  recordSections.flatMap((section, sectionIndex) =>
-    section.fields.map((field: RecordField, fieldIndex) => {
-      const editors = collaborativeEditorsFor(section, field);
-      return {
-        id: `${section.key}-${field.key}`,
-        sectionKey: section.key,
-        sectionTitle: section.title,
-        stage: section.stage,
-        department: section.department,
-        fieldKey: field.key,
-        fieldLabel: field.label,
-        editors,
-        editorLabels: editors.map(editor => roleLabel(editor)),
-        required: Boolean(field.required),
-        evidence: field.evidence || "",
-        enabled: true,
-        printable: true,
-        qualityCheck: Boolean(field.required || field.evidence),
-        sortNo: sectionIndex * 100 + fieldIndex + 1,
-        updatedAt: "2026-06-10 08:00:00"
-      };
-    })
-  );
+  [
+    ...recordSections.flatMap((section, sectionIndex) =>
+      section.fields.map((field: RecordField, fieldIndex) => {
+        const editors = collaborativeEditorsFor(section, field);
+        return {
+          id: `${section.key}-${field.key}`,
+          sectionKey: section.key,
+          sectionTitle: section.title,
+          stage: section.stage,
+          department: section.department,
+          fieldKey: field.key,
+          fieldLabel: field.label,
+          editors,
+          editorLabels: editors.map(editor => roleLabel(editor)),
+          required: Boolean(field.required),
+          evidence: field.evidence || "",
+          enabled: true,
+          printable: true,
+          qualityCheck: Boolean(field.required || field.evidence),
+          sortNo: sectionIndex * 100 + fieldIndex + 1,
+          updatedAt: "2026-06-10 08:00:00"
+        };
+      })
+    ),
+    ...labReportRecordFields.map((field, fieldIndex) => ({
+      id: `lab-report-${field.key}`,
+      sectionKey: "labReportInternal",
+      sectionTitle: "检验报告内部字段",
+      stage: "检验报告",
+      department: "化验室/心电室",
+      fieldKey: field.key,
+      fieldLabel: field.label,
+      editors: field.editors,
+      editorLabels: field.editors.map(editor => roleLabel(editor)),
+      required: false,
+      evidence: "",
+      enabled: true,
+      printable: false,
+      qualityCheck: false,
+      sortNo: 9000 + fieldIndex,
+      updatedAt: "2026-07-04 00:00:00"
+    }))
+  ];
 
 const collaborativeSectionKeys = new Set([
   "basic",
@@ -305,7 +326,7 @@ const collaborativeEditorsFor = (section: RecordSection, field: RecordField) => 
 const applyCollaborativeRuleDefaults = (rules: TemplateFieldRule[] = []) => {
   const defaultRules = seedTemplateFieldRules();
   const defaultByField = new Map(defaultRules.map(rule => [rule.fieldKey, rule]));
-  return rules.map(rule => {
+  const merged = rules.map(rule => {
     const defaultRule = defaultByField.get(rule.fieldKey);
     if (!defaultRule) return rule;
     const editors = defaultRule.editors.length > rule.editors.length ? defaultRule.editors : rule.editors;
@@ -315,15 +336,15 @@ const applyCollaborativeRuleDefaults = (rules: TemplateFieldRule[] = []) => {
       editorLabels: editors.map(editor => roleLabel(editor))
     };
   });
+  const existingFields = new Set(merged.map(rule => rule.fieldKey));
+  return [...merged, ...defaultRules.filter(rule => !existingFields.has(rule.fieldKey))];
 };
 
 const seedAuditLogs = (): AuditLogRow[] => [];
 
 export const initialFieldValues = () =>
-  recordSections.reduce<Record<string, string>>((values, section) => {
-    section.fields.forEach(field => {
-      values[field.key] = field.key === "hospitalName" ? field.value : "";
-    });
+  [...recordSections.map(section => section.fields).flat(), ...labReportRecordFields].reduce<Record<string, string>>((values, field) => {
+    values[field.key] = field.key === "hospitalName" ? field.value : "";
     return values;
   }, {});
 

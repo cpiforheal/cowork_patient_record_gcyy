@@ -253,6 +253,14 @@ const roleName = computed(() => roleLabel(currentRole.value));
 const uploadMode = ref(currentRole.value === "inspection" || route.query.mode === "inspection" ? "inspection" : "normal");
 const canSwitchInspectionMode = computed(() => ["admin", "doctor"].includes(currentRole.value));
 const isInspectionMode = computed(() => currentRole.value === "inspection" || uploadMode.value === "inspection");
+
+watch(
+  currentRole,
+  role => {
+    if (role === "lab" && route.path === "/workbench/upload") router.replace("/workbench/lab-report");
+  },
+  { immediate: true }
+);
 const departments = ["前台", "门诊", "化验室", "心电室", "B超/放射", "治疗室", "质控/病案", "信息/院办"];
 const documentTypes = [
   { label: "血常规", value: "bloodRoutine" },

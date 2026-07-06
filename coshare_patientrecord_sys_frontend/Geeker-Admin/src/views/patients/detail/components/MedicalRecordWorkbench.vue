@@ -73,6 +73,22 @@
       <el-tag v-for="item in unboundFields" :key="item" type="danger" effect="plain">{{ item }}</el-tag>
     </section>
 
+    <section v-if="labReportValues" class="medical-record-lab-preview">
+      <div class="medical-record-lab-preview-head">
+        <div>
+          <strong>化验室报告预览</strong>
+          <span>来自检验报告模板，供医生确认辅助检查摘要，不直接替代最终病历文字。</span>
+        </div>
+      </div>
+      <LabReportPreview
+        compact
+        :field-values="labReportValues"
+        :patient-name="patientName"
+        :patient-gender="patientGender"
+        :visit-no="visitNo"
+      />
+    </section>
+
     <section v-if="fieldSections.length" class="medical-record-workspace">
       <div class="medical-record-workspace-head">
         <div>
@@ -86,11 +102,13 @@
         <div>
           <el-button plain :loading="loading" @click="emit('precheck')">生成预检</el-button>
 
+          <el-button plain :loading="loading" @click="emit('syncFromArchive')">从档案补齐空白项</el-button>
+
           <el-button type="primary" plain :loading="loading" :disabled="!hasEditableFields" @click="emit('saveWorkspace')">
             保存填写
           </el-button>
 
-          <el-button v-if="variant === 'inline' && roleCanGenerate" type="primary" :loading="loading" @click="emit('generate')">
+          <el-button v-if="variant === 'inline' && canManageVersions" type="primary" :loading="loading" @click="emit('generate')">
             生成 docx
           </el-button>
         </div>
@@ -181,6 +199,10 @@
                 :placeholder="medicalField.placeholder || medicalField.defaultValue || '请填写'"
                 @update:model-value="value => updateFieldValue(medicalField, value)"
               />
+
+              <small v-if="fieldSourceHint(medicalField)" class="medical-record-source-hint">
+                {{ fieldSourceHint(medicalField) }}
+              </small>
             </label>
           </div>
         </el-collapse-item>
@@ -210,7 +232,7 @@
         <div v-if="variant === 'inline'">
           <el-button type="primary" plain @click="emit('download')">下载/打开目标病历</el-button>
 
-          <el-button v-if="roleCanGenerate && currentRecord?.status === 'draft'" type="success" plain @click="emit('finalize')">
+          <el-button v-if="canManageVersions && currentRecord?.status === 'draft'" type="success" plain @click="emit('finalize')">
             确认定稿
           </el-button>
         </div>
@@ -219,8 +241,8 @@
       </div>
     </section>
 
-    <el-empty v-else-if="variant === 'dialog'" description="暂无医生目标病历">
-      <el-button v-if="roleCanGenerate" type="primary" @click="emit('generate')">生成目标病历</el-button>
+    <el-empty v-else-if="variant === 'dialog' && canManageVersions" description="暂无医生目标病历">
+      <el-button type="primary" @click="emit('generate')">生成目标病历</el-button>
     </el-empty>
 
     <section v-if="versions.length" class="medical-record-history">
@@ -244,15 +266,19 @@
 
       <el-button :loading="loading" @click="emit('precheck')">生成预检</el-button>
 
+      <el-button :loading="loading" @click="emit('syncFromArchive')">从档案补齐空白项</el-button>
+
       <el-button :loading="loading" :disabled="!hasEditableFields" @click="emit('saveWorkspace')">保存填写</el-button>
 
       <el-button :disabled="!currentRecord" @click="emit('download')">下载 docx</el-button>
 
-      <el-button v-if="canVoidCurrentRecord" type="danger" plain @click="emit('void')">作废版本</el-button>
+      <el-button v-if="canManageVersions && canVoidCurrentRecord" type="danger" plain @click="emit('void')">作废版本</el-button>
 
-      <el-button v-if="isDraftCurrentRecord" type="success" :loading="loading" @click="emit('finalize')">确认定稿</el-button>
+      <el-button v-if="canManageVersions && isDraftCurrentRecord" type="success" :loading="loading" @click="emit('finalize')">
+        确认定稿
+      </el-button>
 
-      <el-button v-if="roleCanGenerate" type="primary" :loading="loading" @click="emit('generate')">生成 docx 新版本</el-button>
+      <el-button v-if="canManageVersions" type="primary" :loading="loading" @click="emit('generate')">生成 docx 新版本</el-button>
     </div>
   </div>
 </template>
@@ -260,6 +286,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GeneratedMedicalRecord, MedicalRecordTemplateField, MedicalRecordTemplateStatus } from "@/api/modules/clinic";
+import LabReportPreview from "./LabReportPreview.vue";
 import { roleLabel, type UserRole } from "@/config/fieldPermissions";
 
 type MedicalRecordFieldSection = {
@@ -281,13 +308,19 @@ const props = withDefaults(
     fieldValues: Record<string, string>;
     currentRole?: UserRole;
     canGenerate?: boolean;
+    labReportValues?: Record<string, string>;
+    patientName?: string;
+    patientGender?: string;
+    visitNo?: string;
     currentRecord?: GeneratedMedicalRecord;
     versions?: GeneratedMedicalRecord[];
     completedCount?: number;
     totalCount?: number;
+    canManageVersions?: boolean;
     isTextareaField: (field: MedicalRecordTemplateField) => boolean;
     isFieldMissing: (field: MedicalRecordTemplateField) => boolean;
     fieldAssistText: (field: MedicalRecordTemplateField) => string;
+    fieldSourceHint?: (field: MedicalRecordTemplateField) => string;
     isSelectField: (field: MedicalRecordTemplateField) => boolean;
     fieldOptions: (field: MedicalRecordTemplateField) => string[];
     isDateField: (field: MedicalRecordTemplateField) => boolean;
@@ -303,11 +336,17 @@ const props = withDefaults(
     fieldSections: () => [],
     activeSections: () => [],
     currentRecord: undefined,
+    labReportValues: undefined,
+    patientName: "",
+    patientGender: "",
+    visitNo: "",
     versions: () => [],
     completedCount: 0,
     totalCount: 0,
     currentRole: undefined,
-    canGenerate: false
+    canGenerate: false,
+    canManageVersions: false,
+    fieldSourceHint: () => ""
   }
 );
 
@@ -316,6 +355,7 @@ const emit = defineEmits<{
   updateField: [key: string, value: string];
   precheck: [];
   saveWorkspace: [];
+  syncFromArchive: [];
   generate: [];
   download: [];
   finalize: [];
@@ -341,6 +381,7 @@ const isCheckboxField = (field: MedicalRecordTemplateField) =>
 const isTextareaLikeField = (field: MedicalRecordTemplateField) => props.isTextareaField(field) || isCheckboxField(field);
 
 const isSelectLikeField = (field: MedicalRecordTemplateField) => !isCheckboxField(field) && props.isSelectField(field);
+const canManageVersions = computed(() => props.canManageVersions);
 
 const canViewMedicalField = (field: MedicalRecordTemplateField) => {
   if (!props.currentRole || props.currentRole === "admin") return true;
@@ -383,7 +424,7 @@ const fieldRoleHint = (field: MedicalRecordTemplateField) => {
 
 const fieldArrayValue = (field: MedicalRecordTemplateField) => {
   const value = String(props.fieldValues[field.key] || "");
-  return props.fieldOptions(field).filter(option => value.includes(option));
+  return (props.fieldOptions(field) || []).filter(option => value.includes(String(option)));
 };
 
 const updateFieldValue = (field: MedicalRecordTemplateField, value: string | number | boolean | undefined) => {
@@ -493,6 +534,36 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
   background: #ffffff;
   border: 1px solid var(--hos-border-light);
   border-radius: 8px;
+}
+
+.medical-record-lab-preview {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: #f8fbff;
+  border: 1px solid #dce8f5;
+  border-radius: 8px;
+}
+
+.medical-record-lab-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+
+  div {
+    display: grid;
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
 }
 
 .medical-record-workspace-head {
@@ -617,6 +688,12 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
 
 .medical-record-paragraph-preview {
   margin-top: 4px;
+}
+
+.medical-record-source-hint {
+  color: #047857;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .medical-record-current {

@@ -23,6 +23,21 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   frontdesk: [
     "/home/index",
     "/workbench/upload",
+    "/workbench/lab-report",
+    "/patients",
+    "/patients/list",
+    "/patients/detail/:id",
+    "/encounters",
+    "/encounters/active",
+    "/templates",
+    "/templates/record",
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
+  ],
+  inspection: [
+    "/home/index",
+    "/workbench/upload",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -36,6 +51,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   lab: [
     "/home/index",
     "/workbench/upload",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -49,6 +65,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   ecg: [
     "/home/index",
     "/workbench/upload",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -62,6 +79,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   ultrasound: [
     "/home/index",
     "/workbench/upload",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -74,6 +92,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   ],
   doctor: [
     "/home/index",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -87,6 +106,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   nurse: [
     "/home/index",
     "/workbench/upload",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -99,6 +119,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   ],
   quality: [
     "/home/index",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -117,6 +138,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   nursing: [
     "/home/index",
     "/workbench/upload",
+    "/workbench/lab-report",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -149,15 +171,27 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
   frontdesk: {
     home: ["view"],
     workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:read", "document:read"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:create", "patient:read", "patient:update"],
     patientDetail: ["field:read", "field:edit", "document:read", "document:upload", "document:download"],
     ...INVENTORY_STAFF_BUTTONS
   },
+  inspection: {
+    home: ["view"],
+    workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:read", "document:read"],
+    encounterActive: ["patient:read", "field:read"],
+    recordTemplate: ["field:read"],
+    patientList: ["patient:read"],
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
+  },
   lab: {
     home: ["view"],
     workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:edit", "document:upload"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
@@ -167,6 +201,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
   ecg: {
     home: ["view"],
     workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:read", "document:upload"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
@@ -176,6 +211,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
   ultrasound: {
     home: ["view"],
     workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:read", "document:read"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
@@ -184,6 +220,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
   },
   doctor: {
     home: ["view"],
+    workbenchLabReport: ["patient:search", "field:edit", "document:upload"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
@@ -193,6 +230,17 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
   nurse: {
     home: ["view"],
     workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:read", "document:read"],
+    encounterActive: ["patient:read", "field:read"],
+    recordTemplate: ["field:read"],
+    patientList: ["patient:read"],
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
+  },
+  nursing: {
+    home: ["view"],
+    workbenchUpload: ["patient:search", "document:upload"],
+    workbenchLabReport: ["patient:search", "field:read", "document:read"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
@@ -201,6 +249,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
   },
   quality: {
     home: ["view"],
+    workbenchLabReport: ["patient:search", "field:read", "document:read"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],

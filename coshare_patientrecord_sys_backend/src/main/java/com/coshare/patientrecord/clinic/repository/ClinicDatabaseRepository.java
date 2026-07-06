@@ -134,7 +134,7 @@ public class ClinicDatabaseRepository {
         if (visibilityPolicy.isClinicAdmin(user)) return true;
         JsonNode document = dbReader.readDocumentByStoragePath(storagePath);
         if (document == null) return false;
-        return visibilityPolicy.canReadDocument(document, user);
+        return visibilityPolicy.canReadStoredFile(document, user);
     }
 
     public ArrayNode patientTimeline(String patientId, SessionUser user) {

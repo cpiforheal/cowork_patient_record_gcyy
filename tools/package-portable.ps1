@@ -409,9 +409,11 @@ CREATE DATABASE IF NOT EXISTS $db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_
 CREATE USER IF NOT EXISTS '$user'@'127.0.0.1' IDENTIFIED BY '$password';
 ALTER USER '$user'@'127.0.0.1' IDENTIFIED BY '$password';
 GRANT ALL PRIVILEGES ON $db.* TO '$user'@'127.0.0.1';
+GRANT RELOAD, FLUSH_TABLES ON *.* TO '$user'@'127.0.0.1';
 CREATE USER IF NOT EXISTS '$user'@'localhost' IDENTIFIED BY '$password';
 ALTER USER '$user'@'localhost' IDENTIFIED BY '$password';
 GRANT ALL PRIVILEGES ON $db.* TO '$user'@'localhost';
+GRANT RELOAD, FLUSH_TABLES ON *.* TO '$user'@'localhost';
 FLUSH PRIVILEGES;
 "@
     try {

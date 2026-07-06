@@ -337,13 +337,19 @@
               :field-values="fieldValues"
               :current-role="currentRole"
               :can-generate="canGenerateMedicalRecord"
+              :lab-report-values="fieldValues"
+              :patient-name="fieldValues.patientName"
+              :patient-gender="fieldValues.gender"
+              :visit-no="fieldValues.visitNo || patientId"
               :current-record="currentMedicalRecord"
               :versions="medicalRecordVersions"
               :completed-count="medicalRecordCompletedCount"
               :total-count="medicalRecordTotalCount"
+              :can-manage-versions="canManageMedicalRecordVersions"
               :is-textarea-field="isMedicalRecordTextareaField"
               :is-field-missing="isMedicalRecordFieldMissing"
               :field-assist-text="medicalRecordFieldAssistText"
+              :field-source-hint="medicalRecordArchiveSourceHint"
               :is-select-field="isMedicalRecordSelectField"
               :field-options="medicalRecordFieldOptions"
               :is-date-field="isMedicalRecordDateField"
@@ -352,6 +358,7 @@
               @update-field="updateMedicalRecordField"
               @precheck="() => precheckMedicalRecord()"
               @save-workspace="() => saveMedicalRecordWorkspace()"
+              @sync-from-archive="fillMedicalRecordBlanksFromArchive"
               @generate="generateMedicalRecord"
               @download="openCurrentMedicalRecord"
               @finalize="finalizeMedicalRecord"
@@ -429,32 +436,52 @@
                 <div class="lab-report-overview-head">
                   <div>
                     <strong>化验报告模板视图</strong>
-                    <span>目标病历优先汇总结构化报告摘要，原始附件仍保留在附件索引中。</span>
+                    <span>
+                      {{ fieldValues.patientName || patientInfo?.name || "当前患者" }} ·
+                      {{ fieldValues.visitNo || patientInfo?.visitNo || patientId }} ·
+                      最近更新 {{ patientInfo?.updatedAt || generatedAt || "待同步" }}
+                    </span>
                   </div>
-                  <el-button plain @click="router.push('/workbench/lab-report')">打开检验模板填写</el-button>
+                  <el-button type="primary" plain @click="openLabReportWorkbench">填写/更新检验报告</el-button>
                 </div>
 
-                <div class="lab-report-card-grid">
-                  <article v-for="report in labReportOverviewCards" :key="report.key" class="lab-report-card">
-                    <div class="lab-report-card-head">
-                      <strong>{{ report.title }}</strong>
-                      <el-tag
-                        :type="report.status === '已查' ? 'success' : report.status === '异常' ? 'danger' : 'info'"
-                        effect="plain"
-                      >
-                        {{ report.status || "待补充" }}
-                      </el-tag>
-                    </div>
-                    <div class="lab-report-metrics">
-                      <span v-for="metric in report.metrics" :key="metric.label">
-                        <em>{{ metric.label }}</em>
-                        <strong>{{ metric.value || "待补充" }}</strong>
-                        <small>{{ metric.unit }}</small>
-                      </span>
-                    </div>
-                    <p>{{ report.summary || "暂无结构化摘要，保存检验报告模板后自动同步。" }}</p>
-                  </article>
-                </div>
+                <LabReportPreview
+                  :field-values="fieldValues"
+                  :patient-name="fieldValues.patientName"
+                  :patient-gender="fieldValues.gender"
+                  :visit-no="fieldValues.visitNo || patientId"
+                />
+
+                <section class="lab-report-supplement">
+                  <div>
+                    <strong>化验室补充信息</strong>
+                    <span>模板报告之外的少量状态和说明仍可在这里查看或补充。</span>
+                  </div>
+                  <div class="lab-report-supplement-grid">
+                    <label>
+                      <span>幽门螺杆菌检测</span>
+                      <el-select v-model="fieldValues.hpTestStatus" clearable placeholder="选择状态">
+                        <el-option label="未查" value="未查" />
+                        <el-option label="已查" value="已查" />
+                        <el-option label="异常" value="异常" />
+                      </el-select>
+                    </label>
+                    <label class="wide">
+                      <span>未查项目说明</span>
+                      <el-input
+                        v-model="fieldValues.uncheckedItemsNote"
+                        :disabled="!canEditLabSupplementNote"
+                        type="textarea"
+                        :rows="2"
+                        placeholder="如需说明暂缓检查、患者原因或医生补查安排，可在这里记录"
+                      />
+                    </label>
+                  </div>
+                  <div class="lab-report-supplement-actions">
+                    <el-button :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
+                    <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
+                  </div>
+                </section>
 
                 <div class="lab-report-overview-foot">
                   <span>原始图片/报告附件仍保留在“检查与附件”和对应字段证据中。</span>
@@ -492,6 +519,26 @@
                     核心 {{ fieldLayerStats.core }} · 推荐 {{ fieldLayerStats.recommended }} · 按需 {{ fieldLayerStats.optional }}
                   </span>
                 </div>
+
+                <section v-if="showNursingLabReportReference" class="nursing-lab-reference">
+                  <div class="nursing-lab-reference-head">
+                    <div>
+                      <strong>检验报告参考</strong>
+                      <span>护士站可查看已录入检验结果；医生最终确认后写入目标病历。</span>
+                    </div>
+                    <el-button text @click="openLabReportWorkbench">查看检验报告模板</el-button>
+                  </div>
+                  <LabReportPreview
+                    v-if="hasArchiveLabReportData"
+                    compact
+                    :show-empty="false"
+                    :field-values="fieldValues"
+                    :patient-name="fieldValues.patientName"
+                    :patient-gender="fieldValues.gender"
+                    :visit-no="fieldValues.visitNo || patientId"
+                  />
+                  <el-empty v-else description="暂无检验报告数据" />
+                </section>
 
                 <div v-if="myFieldIssues.length" class="field-issue-banner">
                   <div>
@@ -1517,13 +1564,19 @@
           :field-values="fieldValues"
           :current-role="currentRole"
           :can-generate="canGenerateMedicalRecord"
+          :lab-report-values="fieldValues"
+          :patient-name="fieldValues.patientName"
+          :patient-gender="fieldValues.gender"
+          :visit-no="fieldValues.visitNo || patientId"
           :current-record="currentMedicalRecord"
           :versions="medicalRecordVersions"
           :completed-count="medicalRecordCompletedCount"
           :total-count="medicalRecordTotalCount"
+          :can-manage-versions="canManageMedicalRecordVersions"
           :is-textarea-field="isMedicalRecordTextareaField"
           :is-field-missing="isMedicalRecordFieldMissing"
           :field-assist-text="medicalRecordFieldAssistText"
+          :field-source-hint="medicalRecordArchiveSourceHint"
           :is-select-field="isMedicalRecordSelectField"
           :field-options="medicalRecordFieldOptions"
           :is-date-field="isMedicalRecordDateField"
@@ -1533,6 +1586,7 @@
           @close="medicalRecordVisible = false"
           @precheck="() => precheckMedicalRecord()"
           @save-workspace="() => saveMedicalRecordWorkspace()"
+          @sync-from-archive="fillMedicalRecordBlanksFromArchive"
           @generate="generateMedicalRecord"
           @download="downloadMedicalRecord"
           @void="voidMedicalRecord"
@@ -1630,6 +1684,7 @@ import { traceAsync } from "@/utils/performanceTrace";
 import medicalLogoUrl from "@/assets/images/logo.jpg";
 
 import ArchiveFieldRenderer from "./components/ArchiveFieldRenderer.vue";
+import LabReportPreview from "./components/LabReportPreview.vue";
 import { useAttachmentPreview } from "./composables/useAttachmentPreview";
 import { useArchiveAutosave } from "./composables/useArchiveAutosave";
 import { useArchiveFieldIndex } from "./composables/useArchiveFieldIndex";
@@ -1642,6 +1697,7 @@ import {
 } from "./composables/usePatientWorkflowTasks";
 import { useRecordPrintPreview } from "./composables/useRecordPrintPreview";
 import type { FieldIssue, FollowupRecord } from "./components/types";
+import { buildLabReportSummary, hasLabReportData } from "@/views/workbench/labReport/summary";
 
 const AiSummaryDialog = defineAsyncComponent(() => import("./components/AiSummaryDialog.vue"));
 const ArchivePrecheckDialog = defineAsyncComponent(() => import("./components/ArchivePrecheckDialog.vue"));
@@ -1666,6 +1722,7 @@ const normalizeUserRole = (role?: string): UserRole => (USER_ROLES.includes(role
 const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 
 const roleName = computed(() => roleLabel(currentRole.value));
+const canManageMedicalRecordVersions = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
 
 const patientId = computed(() => String(route.params.id || "").trim());
 
@@ -1880,6 +1937,28 @@ const ruleMap = computed(() =>
 );
 
 const fullArchiveRoles = new Set<UserRole>(["admin", "doctor", "quality"]);
+const firstVisitCollaboratorRoles: UserRole[] = ["admin", "frontdesk", "reception", "doctor"];
+const firstVisitCollaborativeFieldKeys = new Set([
+  "historyProvider",
+  "historyReliable",
+  "chiefComplaintText",
+  "onset",
+  "symptomPattern",
+  "aggravation",
+  "generalCondition",
+  "operationHistory",
+  "chronicDisease",
+  "traumaTransfusion",
+  "allergyHistory",
+  "pastHistory",
+  "personalHistory",
+  "marriageBirthHistory",
+  "familyHistory",
+  "presentIllnessText",
+  "admissionReason",
+  "generalConditionText",
+  "auxiliaryExamSummary"
+]);
 
 const roleVisibleSections: Partial<Record<UserRole, Set<string>>> = {
   frontdesk: new Set([
@@ -1888,6 +1967,12 @@ const roleVisibleSections: Partial<Record<UserRole, Set<string>>> = {
     "arrivalSource",
 
     "specialNeeds",
+
+    "chiefComplaint",
+
+    "presentIllness",
+
+    "history",
 
     "familyRelationship",
 
@@ -1989,48 +2074,6 @@ const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
 
     "visitNo",
 
-    "bloodRoutine",
-
-    "bloodWbc",
-
-    "bloodNeuPercent",
-
-    "bloodLymPercent",
-
-    "bloodMonPercent",
-
-    "bloodRbc",
-
-    "bloodHgb",
-
-    "bloodPlt",
-
-    "coagulation",
-
-    "preOpEight",
-
-    "urineRoutine",
-
-    "biochemistry",
-
-    "bloodRoutineStatus",
-
-    "coagulationStatus",
-
-    "preOpEightStatus",
-
-    "liverFunctionStatus",
-
-    "renalFunctionStatus",
-
-    "fastingGlucoseStatus",
-
-    "bloodLipidStatus",
-
-    "urineRoutineStatus",
-
-    "crpStatus",
-
     "hpTestStatus",
 
     "uncheckedItemsNote",
@@ -2091,7 +2134,17 @@ const roleViewSections: Record<Exclude<RoleViewKey, "all">, Set<string>> = {
     "treatmentPlanManagement",
     "operation"
   ]),
-  frontdesk: new Set(["basic", "arrivalSource", "specialNeeds", "familyRelationship", "trustCooperation", "patientFeedback"]),
+  frontdesk: new Set([
+    "basic",
+    "arrivalSource",
+    "specialNeeds",
+    "chiefComplaint",
+    "presentIllness",
+    "history",
+    "familyRelationship",
+    "trustCooperation",
+    "patientFeedback"
+  ]),
   inspection: new Set(["basic", "specialExam", "preOpScreening", "documentScope"]),
   lab: new Set(["basic", "auxiliary", "preOpScreening", "documentScope"]),
   nursing: new Set([
@@ -2118,17 +2171,6 @@ const roleViewFieldKeys: Partial<Record<RoleViewKey, Set<string>>> = {
   lab: new Set([
     "patientName",
     "visitNo",
-    "bloodRoutine",
-    "bloodWbc",
-    "bloodNeuPercent",
-    "bloodLymPercent",
-    "bloodMonPercent",
-    "bloodRbc",
-    "bloodHgb",
-    "bloodPlt",
-    "biochemistry",
-    "urineRoutine",
-    "preOpEight",
     "ecgResult",
     "colonoscopy",
     "uncheckedItemsNote",
@@ -2143,6 +2185,11 @@ const isVisibleForSelectedRoleView = (section: RecordSection, field: RecordField
   const visibleFields = roleViewFieldKeys[activeRoleView.value];
   if (visibleFields && !visibleFields.has(field.key)) return false;
   return true;
+};
+
+const mergeFirstVisitEditors = (fieldKey: string, editors: UserRole[] = []) => {
+  if (!firstVisitCollaborativeFieldKeys.has(fieldKey)) return editors;
+  return Array.from(new Set([...editors, ...firstVisitCollaboratorRoles]));
 };
 
 const isAttachmentVisibleForSelectedRoleView = (attachment: RecordAttachment) => {
@@ -2189,7 +2236,7 @@ const applyRuleToField = (field: RecordField): RecordField | null => {
   return {
     ...field,
 
-    editors: rule?.editors || field.editors,
+    editors: mergeFirstVisitEditors(field.key, rule?.editors || field.editors),
 
     required: rule?.required ?? field.required,
 
@@ -2809,61 +2856,12 @@ const screeningRows = computed(() => [
 ]);
 
 const showLabReportOverview = computed(
-  () => detailWorkspaceMode.value === "archive" && canUseRoleViewFilter.value && activeRoleView.value === "lab"
+  () =>
+    detailWorkspaceMode.value === "archive" &&
+    (currentRole.value === "lab" || (canUseRoleViewFilter.value && activeRoleView.value === "lab"))
 );
 
-const labMetricValue = (key: string) => displayFieldValue(key, "");
-
-const labReportOverviewCards = computed(() => [
-  {
-    key: "bloodRoutine",
-    title: "血常规五分类",
-    status: fieldValues.bloodRoutineStatus || "",
-    summary: displayFieldValue("bloodRoutine", ""),
-    metrics: [
-      { label: "WBC", value: labMetricValue("bloodWbc"), unit: "10^9/L" },
-      { label: "NeU%", value: labMetricValue("bloodNeuPercent"), unit: "%" },
-      { label: "Lym%", value: labMetricValue("bloodLymPercent"), unit: "%" },
-      { label: "Mon%", value: labMetricValue("bloodMonPercent"), unit: "%" },
-      { label: "RBC", value: labMetricValue("bloodRbc"), unit: "10^12/L" },
-      { label: "HGB", value: labMetricValue("bloodHgb"), unit: "g/L" },
-      { label: "PLT", value: labMetricValue("bloodPlt"), unit: "10^9/L" }
-    ]
-  },
-  {
-    key: "biochemistry",
-    title: "生化肝肾功",
-    status: fieldValues.liverFunctionStatus || fieldValues.renalFunctionStatus || "",
-    summary: displayFieldValue("biochemistry", ""),
-    metrics: [
-      { label: "肝功能", value: fieldValues.liverFunctionStatus || "", unit: "" },
-      { label: "肾功能", value: fieldValues.renalFunctionStatus || "", unit: "" },
-      { label: "血糖", value: fieldValues.fastingGlucoseStatus || "", unit: "" },
-      { label: "血脂", value: fieldValues.bloodLipidStatus || "", unit: "" }
-    ]
-  },
-  {
-    key: "urineRoutine",
-    title: "尿常规",
-    status: fieldValues.urineRoutineStatus || "",
-    summary: displayFieldValue("urineRoutine", ""),
-    metrics: [{ label: "状态", value: fieldValues.urineRoutineStatus || "", unit: "" }]
-  },
-  {
-    key: "preOpEight",
-    title: "术前感染筛查",
-    status: fieldValues.preOpEightStatus || "",
-    summary: displayFieldValue("preOpEight", ""),
-    metrics: [{ label: "状态", value: fieldValues.preOpEightStatus || "", unit: "" }]
-  },
-  {
-    key: "ecg",
-    title: "心电图",
-    status: fieldValues.ecgStatus || "",
-    summary: displayFieldValue("ecgResult", ""),
-    metrics: [{ label: "状态", value: fieldValues.ecgStatus || "", unit: "" }]
-  }
-]);
+const canEditLabSupplementNote = computed(() => ["admin", "doctor", "lab", "nurse", "quality"].includes(currentRole.value));
 
 const treatmentManagementRows = computed(() => [
   ["手术可行性评估", displayFieldValue("surgeryFeasibility")],
@@ -2953,7 +2951,16 @@ const completionPercent = computed(() =>
   completionStats.value.total ? Math.round((completionStats.value.completed / completionStats.value.total) * 100) : 0
 );
 
-const medicalRecordFieldSections = computed(() => ensureArray(medicalRecordTemplate.value?.fieldMatrix));
+const medicalRecordFieldSections = computed(() =>
+  ensureArray(medicalRecordTemplate.value?.fieldMatrix)
+    .map(section => {
+      const fields = ensureArray(section.fields).filter(
+        field => canManageMedicalRecordVersions.value || firstVisitCollaborativeFieldKeys.has(field.key)
+      );
+      return { ...section, fields };
+    })
+    .filter(section => section.fields.length)
+);
 
 const medicalRecordFields = computed<MedicalRecordTemplateField[]>(() =>
   medicalRecordFieldSections.value.flatMap(section => ensureArray(section.fields))
@@ -2996,6 +3003,8 @@ const isMedicalRecordTextareaField = (field: MedicalRecordTemplateField) =>
   field.kind === "textarea" || isMedicalRecordCheckboxField(field);
 
 const medicalRecordFieldAssistText = (field: MedicalRecordTemplateField) => {
+  if (firstVisitCollaborativeFieldKeys.has(field.key)) return "前台初填，医生审核";
+
   if (isMedicalRecordCheckboxField(field)) return `${medicalRecordFieldOptions(field).length} 个固定模板勾选项`;
 
   if (field.targetUse === "formOnly") return "医生确认字段，生成时合并进入目标病历对应位置";
@@ -3033,6 +3042,78 @@ const medicalRecordWorkspaceValues = () =>
 
     return payload;
   }, {});
+
+const medicalRecordArchiveSyncKeys = new Set([
+  "presentIllnessText",
+  "pastHistory",
+  "personalHistory",
+  "marriageBirthHistory",
+  "familyHistory",
+  "generalConditionText",
+  "auxiliaryExamSummary"
+]);
+
+const cleanArchivePart = (value?: string) => {
+  const normalized = String(value || "").trim();
+  if (!normalized || !isFieldComplete(normalized) || normalized === "待补充" || normalized === "未见记录") return "";
+  return normalized;
+};
+
+const joinArchiveParts = (parts: string[]) => {
+  const unique = Array.from(new Set(parts.map(cleanArchivePart).filter(Boolean)));
+  return unique.map(item => (/[。；;.!?？]$/.test(item) ? item : `${item}。`)).join("");
+};
+
+const buildPresentIllnessFromArchive = () =>
+  joinArchiveParts([
+    fieldValues.onset,
+    fieldValues.symptomPattern,
+    fieldValues.aggravation,
+    fieldValues.admissionReason,
+    fieldValues.generalConditionText || fieldValues.generalCondition
+  ]);
+
+const buildPastHistoryFromArchive = () =>
+  joinArchiveParts([fieldValues.operationHistory, fieldValues.chronicDisease, fieldValues.traumaTransfusion, fieldValues.allergyHistory]);
+
+const archiveLabReportSummary = computed(() => buildLabReportSummary(fieldValues));
+const hasArchiveLabReportData = computed(() => hasLabReportData(fieldValues));
+const showNursingLabReportReference = computed(() => ["nurse", "nursing"].includes(currentRole.value));
+
+const buildAuxiliaryExamSummaryFromArchive = () => cleanArchivePart(archiveLabReportSummary.value);
+
+const archiveToMedicalRecordDraft = () => ({
+  presentIllnessText: buildPresentIllnessFromArchive(),
+  generalConditionText: cleanArchivePart(fieldValues.generalConditionText || fieldValues.generalCondition),
+  pastHistory: buildPastHistoryFromArchive(),
+  personalHistory: cleanArchivePart(fieldValues.personalHistory),
+  marriageBirthHistory: cleanArchivePart(fieldValues.marriageBirthHistory || fieldValues.familyHistory),
+  familyHistory: cleanArchivePart(fieldValues.familyHistory),
+  auxiliaryExamSummary: buildAuxiliaryExamSummaryFromArchive()
+});
+
+const syncMedicalRecordDraftFromArchive = (showMessage = false) => {
+  const draft = archiveToMedicalRecordDraft();
+  const availableKeys = new Set(medicalRecordFields.value.map(field => field.key));
+  let filledCount = 0;
+
+  Object.entries(draft).forEach(([key, value]) => {
+    if (!availableKeys.has(key) || !value) return;
+    if (cleanArchivePart(fieldValues[key])) return;
+    fieldValues[key] = value;
+    filledCount += 1;
+  });
+
+  if (showMessage) {
+    if (filledCount) ElMessage.success(`已从健康管理档案补齐 ${filledCount} 个目标病历空白项`);
+    else ElMessage.info("目标病历暂无可补齐的空白项，医生已填写内容不会被覆盖");
+  }
+
+  return filledCount;
+};
+
+const medicalRecordArchiveSourceHint = (field: MedicalRecordTemplateField) =>
+  medicalRecordArchiveSyncKeys.has(field.key) ? "来自健康管理档案，医生可修改为最终采用文本" : "";
 
 const archivePrecheckIssues = computed(() => fieldIssues.value.slice(0, 12));
 
@@ -3187,12 +3268,6 @@ const coreFieldKeys = new Set([
   "surgeryFeasibility",
 
   "sameDayTreatment",
-
-  "bloodRoutineStatus",
-
-  "coagulationStatus",
-
-  "preOpEightStatus",
 
   "ecgStatus",
 
@@ -3494,6 +3569,8 @@ const fieldAssistText = (field: RecordField) => {
   }
 
   if (isLabMetricField(field)) return "指标面板自动生成文本";
+
+  if (firstVisitCollaborativeFieldKeys.has(field.key)) return "前台初填，医生审核";
 
   if (field.inputType === "date") return "YYYY-MM-DD";
 
@@ -4218,6 +4295,9 @@ const openMedicalRecord = async () => {
 const precheckMedicalRecord = async (showMessage = true) => {
   if (!patientId.value) return false;
 
+  const syncedCount = syncMedicalRecordDraftFromArchive(false);
+  if (syncedCount) await saveMedicalRecordWorkspace(false, false);
+
   const { data } = await precheckMedicalRecordApi(patientId.value);
 
   medicalRecordMissingItems.value = ensureArray(data.missingItems);
@@ -4256,7 +4336,7 @@ const precheckMedicalRecord = async (showMessage = true) => {
   return data.ready;
 };
 
-const saveMedicalRecordWorkspace = async (showMessage = true) => {
+const saveMedicalRecordWorkspace = async (showMessage = true, syncArchive = true) => {
   if (!patientId.value || !medicalRecordFields.value.length) return false;
 
   if (!medicalRecordEditableFields.value.length) {
@@ -4265,6 +4345,8 @@ const saveMedicalRecordWorkspace = async (showMessage = true) => {
     return false;
   }
 
+  if (syncArchive) syncMedicalRecordDraftFromArchive(false);
+
   const { data } = await saveMedicalRecordWorkspaceApi(patientId.value, medicalRecordWorkspaceValues());
 
   medicalRecordMissingItems.value = ensureArray(data.missingItems);
@@ -4272,6 +4354,14 @@ const saveMedicalRecordWorkspace = async (showMessage = true) => {
   if (showMessage) ElMessage.success("目标病历协作字段已保存");
 
   return true;
+};
+
+const fillMedicalRecordBlanksFromArchive = async () => {
+  const syncedCount = syncMedicalRecordDraftFromArchive(true);
+  if (syncedCount) {
+    await saveMedicalRecordWorkspace(false, false);
+    await precheckMedicalRecord(false);
+  }
 };
 
 const generateMedicalRecord = async () => {
@@ -4404,6 +4494,13 @@ const openRoleView = async (view: RoleViewKey) => {
   activeRoleView.value = view;
   recordViewMode.value = "full";
   await switchDetailWorkspace("archive");
+};
+
+const openLabReportWorkbench = () => {
+  router.push({
+    path: "/workbench/lab-report",
+    query: { patientId: patientInfo.value?.id || patientId.value }
+  });
 };
 
 const loadPatientAuditLogs = async (targetPatientId = patientId.value, targetPatientName = fieldValues.patientName) => {
@@ -4745,6 +4842,16 @@ const saveMyFields = async () => {
   if (!ensureNoInvalidIssues("mine", "保存当前层内容")) return false;
 
   return saveRecordValues(myFieldValues(), "当前层内容已保存");
+};
+
+const saveLabSupplementFields = async () => {
+  const values: Record<string, string> = {
+    hpTestStatus: fieldValues.hpTestStatus || ""
+  };
+
+  if (canEditLabSupplementNote.value) values.uncheckedItemsNote = fieldValues.uncheckedItemsNote || "";
+
+  return saveRecordValues(values, "化验室补充信息已保存");
 };
 
 const saveMyFieldsAndBack = async () => {
@@ -5735,6 +5842,45 @@ onBeforeUnmount(() => {
     font-size: 13px;
 
     white-space: nowrap;
+  }
+}
+
+.nursing-lab-reference {
+  display: grid;
+
+  gap: 12px;
+
+  padding: 14px;
+
+  margin-bottom: 14px;
+
+  background: #f8fbff;
+
+  border: 1px solid #dbeafe;
+
+  border-radius: 8px;
+}
+
+.nursing-lab-reference-head {
+  display: flex;
+
+  gap: 12px;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  span {
+    margin-top: 3px;
+
+    color: var(--el-text-color-secondary);
+
+    font-size: 12px;
   }
 }
 
@@ -6746,6 +6892,68 @@ onBeforeUnmount(() => {
   font-size: 13px;
 
   line-height: 1.6;
+}
+
+.lab-report-supplement {
+  display: grid;
+
+  gap: 12px;
+
+  padding: 14px;
+
+  background: #ffffff;
+
+  border: 1px solid var(--hos-border-light);
+
+  border-radius: var(--hos-radius-md);
+
+  strong {
+    display: block;
+
+    margin-bottom: 4px;
+
+    color: var(--hos-text-primary);
+
+    font-size: 15px;
+  }
+
+  > div:first-child span {
+    color: var(--hos-text-secondary);
+
+    font-size: 13px;
+  }
+}
+
+.lab-report-supplement-grid {
+  display: grid;
+
+  grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+
+  gap: 12px;
+
+  align-items: start;
+
+  label {
+    display: grid;
+
+    gap: 6px;
+
+    min-width: 0;
+
+    color: var(--hos-text-secondary);
+
+    font-size: 13px;
+  }
+}
+
+.lab-report-supplement-actions {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 8px;
+
+  justify-content: flex-end;
 }
 
 .lab-report-overview-foot {

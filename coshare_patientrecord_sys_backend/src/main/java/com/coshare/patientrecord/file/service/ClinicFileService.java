@@ -34,7 +34,7 @@ public class ClinicFileService {
     public ClinicFileService(
         @Value("${clinic.attachment-dir}") String attachmentDir,
         @Value("${clinic.attachment.max-size-bytes:52428800}") long maxSizeBytes,
-        @Value("${clinic.attachment.allowed-mime-types:image/jpeg,image/png,image/webp,image/bmp,image/gif,application/pdf}") String allowedMimeTypes
+        @Value("${clinic.attachment.allowed-mime-types:image/jpeg,image/jpg,image/png,image/webp,image/bmp,image/gif,application/pdf,text/html}") String allowedMimeTypes
     ) {
         this.attachmentDir = Path.of(attachmentDir).toAbsolutePath().normalize();
         this.maxSizeBytes = maxSizeBytes;
@@ -55,7 +55,7 @@ public class ClinicFileService {
         );
         Path target = attachmentDir.resolve(storagePath).normalize();
         if (!target.startsWith(attachmentDir)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file path");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件保存路径不合法");
         }
 
         Files.createDirectories(target.getParent());
@@ -146,32 +146,35 @@ public class ClinicFileService {
 
     private DataUrl parseDataUrl(String contentDataUrl) {
         if (contentDataUrl == null || contentDataUrl.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentDataUrl is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件内容不能为空，请重新选择原始文件上传");
         }
         int commaIndex = contentDataUrl.indexOf(',');
         if (!contentDataUrl.startsWith("data:") || commaIndex < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentDataUrl must be a data URL");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件内容格式不正确，请重新选择原始文件上传");
         }
 
         String meta = contentDataUrl.substring(5, commaIndex);
         String mimeType = meta.split(";")[0];
         if (!meta.contains(";base64") || mimeType.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentDataUrl must be base64 encoded");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件内容不是有效的 base64 数据，请重新选择原始文件上传");
         }
 
         try {
             return new DataUrl(mimeType, Base64.getDecoder().decode(contentDataUrl.substring(commaIndex + 1)));
         } catch (IllegalArgumentException error) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid base64 file content", error);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件 base64 内容无法解析，请重新选择原始文件上传", error);
         }
     }
 
     private void validateFile(DataUrl dataUrl) {
         if (dataUrl.bytes().length > maxSizeBytes) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "File exceeds max upload size");
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "文件超过系统允许大小");
         }
         if (!allowedMimeTypes.contains(dataUrl.mimeType())) {
-            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported file type");
+            throw new ResponseStatusException(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "文件类型不支持，请上传图片、PDF 或系统生成的检验报告"
+            );
         }
     }
 

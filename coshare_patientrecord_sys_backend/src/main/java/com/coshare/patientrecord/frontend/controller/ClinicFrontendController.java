@@ -19,7 +19,18 @@ public class ClinicFrontendController {
         this.frontendDir = frontendDir == null ? "" : frontendDir.trim();
     }
 
-    @GetMapping({ "/", "/index.html" })
+    @GetMapping({
+        "/",
+        "/index.html",
+        "/login",
+        "/home",
+        "/workbench/**",
+        "/patients/**",
+        "/system/**",
+        "/templates/**",
+        "/inventory/**",
+        "/encounters/**"
+    })
     public ResponseEntity<FileSystemResource> index() {
         if (frontendDir.isBlank()) {
             return ResponseEntity.notFound().build();

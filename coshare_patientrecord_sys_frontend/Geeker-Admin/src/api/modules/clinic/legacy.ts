@@ -10,7 +10,7 @@ import {
   type RecordField
 } from "@/config/fieldPermissions";
 import { initialFieldValues, roleToDepartment, seedTemplateFieldRules } from "./seed";
-import { storeClinicFileApi } from "./files";
+import { isValidDataUrl, storeClinicFileApi } from "./files";
 import { getClinicApiBaseUrl, patchDb, readDb, writeDb } from "./storage";
 import { authHeaders, handleUnauthorizedResponse, isUnauthorizedApiResponse } from "../authToken";
 import type {
@@ -335,7 +335,10 @@ const persistDocumentFile = async (document: {
   type?: string;
   typeLabel?: string;
 }) => {
-  if (!document.contentDataUrl) {
+  if (!document.contentDataUrl || !isValidDataUrl(document.contentDataUrl)) {
+    if (document.contentDataUrl && !document.url && !document.storagePath) {
+      throw new Error("文件内容不是有效的 base64 数据，请重新选择原始文件上传");
+    }
     return {
       url: document.url || "",
       storagePath: document.storagePath

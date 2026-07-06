@@ -38,6 +38,27 @@ export interface LabTemplateDefinition {
 
 export const qualitativeOptions = ["阴性", "阳性", "弱阳性", "可疑", "未查"];
 
+const legacyMetricValueKeys: Partial<Record<LabTemplateId, Record<string, string>>> = {
+  bloodRoutine: {
+    wbc: "bloodWbc",
+    neuPercent: "bloodNeuPercent",
+    lymPercent: "bloodLymPercent",
+    monPercent: "bloodMonPercent",
+    rbc: "bloodRbc",
+    hgb: "bloodHgb",
+    plt: "bloodPlt"
+  },
+  postprandialGlucose: {
+    postprandialGlucose: "postprandialGlucose"
+  }
+};
+
+export const metricStorageKey = (templateId: LabTemplateId, metricKey: string) =>
+  legacyMetricValueKeys[templateId]?.[metricKey] || `lab_${templateId}_${metricKey}`;
+
+export const metricStoredValue = (values: Record<string, string>, templateId: LabTemplateId, metricKey: string) =>
+  values[metricStorageKey(templateId, metricKey)] || values[`lab_${templateId}_${metricKey}`] || "";
+
 export const labReportTemplates: LabTemplateDefinition[] = [
   {
     id: "bloodRoutine",

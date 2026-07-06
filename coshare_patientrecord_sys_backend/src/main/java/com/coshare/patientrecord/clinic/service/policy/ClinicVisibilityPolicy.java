@@ -15,6 +15,78 @@ import org.springframework.stereotype.Component;
 @Component
 public class ClinicVisibilityPolicy {
 
+    private static final Set<String> LAB_REPORT_FIELDS = Set.of(
+        "bloodRoutine",
+        "bloodRoutineStatus",
+        "bloodWbc",
+        "bloodNeuPercent",
+        "bloodLymPercent",
+        "bloodMonPercent",
+        "bloodRbc",
+        "bloodHgb",
+        "bloodPlt",
+        "lab_bloodRoutine_neuCount",
+        "lab_bloodRoutine_lymCount",
+        "lab_bloodRoutine_monCount",
+        "biochemistry",
+        "liverFunctionStatus",
+        "renalFunctionStatus",
+        "fastingGlucoseStatus",
+        "bloodLipidStatus",
+        "lab_biochemistry_glu",
+        "lab_biochemistry_tbil",
+        "lab_biochemistry_dbil",
+        "lab_biochemistry_alt",
+        "lab_biochemistry_ast",
+        "lab_biochemistry_alp",
+        "lab_biochemistry_ggt",
+        "lab_biochemistry_tp",
+        "lab_biochemistry_alb",
+        "lab_biochemistry_glo",
+        "lab_biochemistry_ag",
+        "lab_biochemistry_tg",
+        "lab_biochemistry_tc",
+        "lab_biochemistry_crea",
+        "lab_biochemistry_ua",
+        "lab_biochemistry_urea",
+        "lab_biochemistry_k",
+        "lab_biochemistry_na",
+        "lab_biochemistry_cl",
+        "lab_biochemistry_ca",
+        "preOpEight",
+        "preOpEightStatus",
+        "lab_hbvFive_hbsag",
+        "lab_hbvFive_hbsab",
+        "lab_hbvFive_hbeag",
+        "lab_hbvFive_hbeab",
+        "lab_hbvFive_hbcab",
+        "lab_infectious_hiv",
+        "lab_infectious_tppa",
+        "lab_infectious_hcv",
+        "crpStatus",
+        "lab_crpSaa_crp",
+        "lab_crpSaa_saa",
+        "urineRoutine",
+        "urineRoutineStatus",
+        "lab_urineRoutine_wbc",
+        "lab_urineRoutine_nit",
+        "lab_urineRoutine_uro",
+        "lab_urineRoutine_pro",
+        "lab_urineRoutine_ph",
+        "lab_urineRoutine_bld",
+        "lab_urineRoutine_sg",
+        "lab_urineRoutine_ket",
+        "lab_urineRoutine_bil",
+        "lab_urineRoutine_glu",
+        "lab_urineRoutine_vc",
+        "postprandialGlucose",
+        "postprandialGlucoseStatus",
+        "lab_hba1c_hba1c",
+        "auxiliaryExamSummary"
+    );
+
+    private static final Set<String> ECG_REPORT_FIELDS = Set.of("ecgStatus", "auxiliaryExamSummary");
+
     private final ObjectMapper objectMapper;
 
     public ClinicVisibilityPolicy(ObjectMapper objectMapper) {
@@ -57,6 +129,11 @@ public class ClinicVisibilityPolicy {
         String uploaderRole = text(document, "uploaderRole", text(document, "role"));
         if (!department.isBlank() && department.equals(user.department())) return true;
         return !uploaderRole.isBlank() && uploaderRole.equals(user.role());
+    }
+
+    public boolean canReadStoredFile(JsonNode document, SessionUser user) {
+        if (document == null || !document.isObject() || user == null) return false;
+        return canReadDocument(document, user);
     }
 
     private void removeAdminSections(ObjectNode payload) {
@@ -125,6 +202,12 @@ public class ClinicVisibilityPolicy {
                     }
                 }
             }
+        }
+        if (Set.of("doctor", "lab").contains(role)) {
+            allowedFields.addAll(LAB_REPORT_FIELDS);
+        }
+        if (Set.of("doctor", "lab", "ecg", "nurse").contains(role)) {
+            allowedFields.addAll(ECG_REPORT_FIELDS);
         }
         return allowedFields;
     }

@@ -65,6 +65,7 @@
             <el-tag v-if="activeTemplate.id === 'biochemistry'" type="info" effect="plain">
               参考范围：{{ patientGender || "未填写性别" }}
             </el-tag>
+            <el-tag v-if="!canSaveActiveTemplate" type="warning" effect="plain">当前岗位只读</el-tag>
           </div>
 
           <template v-if="activeTemplate.id === 'ecgImage'">
@@ -79,6 +80,7 @@
               drag
               action="#"
               :auto-upload="false"
+              :disabled="!canSaveActiveTemplate"
               multiple
               accept="image/*"
               class="ecg-uploader"
@@ -112,6 +114,7 @@
                   <el-select
                     v-if="metric.input === 'select'"
                     v-model="formValues[metric.key]"
+                    :disabled="!canSaveActiveTemplate"
                     filterable
                     allow-create
                     default-first-option
@@ -122,13 +125,14 @@
                   <el-input-number
                     v-else-if="metric.input === 'number'"
                     v-model="numericValues[metric.key]"
+                    :disabled="!canSaveActiveTemplate"
                     :precision="2"
                     :controls="false"
                     class="metric-number"
                     placeholder="填写数值"
                     @change="syncNumberValue(metric.key)"
                   />
-                  <el-input v-else v-model="formValues[metric.key]" placeholder="填写结果" />
+                  <el-input v-else v-model="formValues[metric.key]" :disabled="!canSaveActiveTemplate" placeholder="填写结果" />
                   <small>参考：{{ metricReference(metric, patientGender) || "按报告单" }}</small>
                 </article>
               </div>
@@ -136,11 +140,13 @@
           </template>
 
           <div class="actions">
-            <el-button :icon="Refresh" @click="resetTemplateValues">重置当前模板</el-button>
+            <el-button :icon="Refresh" :disabled="!canSaveActiveTemplate" @click="resetTemplateValues">重置当前模板</el-button>
             <el-button :icon="Printer" :disabled="activeTemplate.id === 'ecgImage'" @click="printPreview">
               打印/导出预览
             </el-button>
-            <el-button type="primary" :icon="FolderChecked" :loading="saving" @click="saveToArchive">保存入档</el-button>
+            <el-button type="primary" :icon="FolderChecked" :loading="saving" :disabled="!canSaveActiveTemplate" @click="saveToArchive">
+              保存入档
+            </el-button>
           </div>
         </section>
 
@@ -202,9 +208,10 @@
 </template>
 
 <script setup lang="ts" name="labReportWorkbench">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, type UploadUserFile } from "element-plus";
 import { FolderChecked, Printer, Refresh, Search, UploadFilled } from "@element-plus/icons-vue";
+import { useRoute } from "vue-router";
 import {
   getPatientDetailApi,
   getPatientListApi,
@@ -214,13 +221,16 @@ import {
 } from "@/api/modules/clinic";
 import { roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
-import { labReportTemplates, labTemplateById, metricReference, type LabTemplateId } from "./templates";
+import { labReportTemplates, labTemplateById, metricReference, metricStorageKey, type LabTemplateId } from "./templates";
+import { buildLabReportSummary } from "./summary";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const route = useRoute();
 const userStore = useUserStore();
 const currentRole = computed(() => userStore.userInfo.role || "lab");
 const roleName = computed(() => userStore.userInfo.name || roleLabel(currentRole.value));
+const canEditLabMetrics = computed(() => ["admin", "doctor", "lab"].includes(currentRole.value));
 
 const keyword = ref("");
 const searching = ref(false);
@@ -228,6 +238,7 @@ const saving = ref(false);
 const matchedPatients = ref<PatientRow[]>([]);
 const selectedPatient = ref<PatientRow | null>(null);
 const patientGender = ref("");
+const patientFieldValues = ref<Record<string, string>>({});
 const activeTemplateId = ref<LabTemplateId>("bloodRoutine");
 const reportDate = ref(today());
 const reportRemark = ref("");
@@ -237,6 +248,9 @@ const ecgFiles = ref<UploadUserFile[]>([]);
 const previewRef = ref<HTMLElement>();
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
+const canSaveActiveTemplate = computed(() =>
+  activeTemplate.value.id === "ecgImage" ? ["admin", "doctor", "nurse", "ecg"].includes(currentRole.value) : canEditLabMetrics.value
+);
 
 const resetTemplateValues = () => {
   Object.keys(formValues).forEach(key => delete formValues[key]);
@@ -248,7 +262,17 @@ const resetTemplateValues = () => {
   if (activeTemplate.value.id === "ecgImage") ecgFiles.value = [];
 };
 
-watch(activeTemplateId, resetTemplateValues, { immediate: true });
+const hydrateTemplateValues = () => {
+  resetTemplateValues();
+  activeTemplate.value.metrics.forEach(metric => {
+    const storedValue = String(patientFieldValues.value[metricStorageKey(activeTemplate.value.id, metric.key)] || "").trim();
+    if (!storedValue) return;
+    formValues[metric.key] = storedValue;
+    if (metric.input === "number") numericValues[metric.key] = Number(storedValue);
+  });
+};
+
+watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
 
 const searchPatients = async () => {
   searching.value = true;
@@ -272,13 +296,40 @@ const searchPatients = async () => {
 const selectPatient = async (patient: PatientRow) => {
   selectedPatient.value = patient;
   patientGender.value = "";
+  patientFieldValues.value = {};
   try {
     const { data } = await getPatientDetailApi(patient.id);
     patientGender.value = data.fieldValues.gender || "";
+    patientFieldValues.value = data.fieldValues || {};
+    hydrateTemplateValues();
   } catch {
     patientGender.value = "";
   }
 };
+
+const loadPatientFromRoute = async () => {
+  const queryPatientId = route.query.patientId;
+  const routePatientId = String(Array.isArray(queryPatientId) ? queryPatientId[0] : queryPatientId || "").trim();
+  if (!routePatientId || String(selectedPatient.value?.id || "") === routePatientId) return;
+
+  searching.value = true;
+  try {
+    const { data } = await getPatientDetailApi(routePatientId);
+    selectedPatient.value = data.patient;
+    matchedPatients.value = [data.patient];
+    keyword.value = `${data.patient.name} ${data.patient.visitNo}`;
+    patientGender.value = data.fieldValues.gender || "";
+    patientFieldValues.value = data.fieldValues || {};
+    hydrateTemplateValues();
+  } catch (error) {
+    ElMessage.error((error as Error).message || "患者信息加载失败");
+  } finally {
+    searching.value = false;
+  }
+};
+
+onMounted(loadPatientFromRoute);
+watch(() => route.query.patientId, loadPatientFromRoute);
 
 const syncNumberValue = (key: string) => {
   const value = numericValues[key];
@@ -313,7 +364,14 @@ const htmlReport = () => {
   }</span><span>备注：${reportRemark.value || "无"}</span></footer></body></html>`;
 };
 
-const textToDataUrl = (text: string, mime = "text/html;charset=utf-8") => `data:${mime},${encodeURIComponent(text)}`;
+const textToDataUrl = (text: string, mime = "text/html;charset=utf-8") => {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  bytes.forEach(byte => {
+    binary += String.fromCharCode(byte);
+  });
+  return `data:${mime};base64,${btoa(binary)}`;
+};
 
 const fileToDataUrl = (file?: File) =>
   new Promise<string>(resolve => {
@@ -329,7 +387,10 @@ const fileToDataUrl = (file?: File) =>
 
 const buildArchiveValues = () => {
   if (activeTemplate.value.id === "ecgImage") {
-    return { ecgStatus: "已查" };
+    const values: Record<string, string> = { ecgStatus: "已查" };
+    const summary = buildLabReportSummary({ ...patientFieldValues.value, ...values });
+    if (summary) values.auxiliaryExamSummary = summary;
+    return values;
   }
   const values: Record<string, string> = {
     [activeTemplate.value.fieldKey]: reportSummary()
@@ -337,25 +398,17 @@ const buildArchiveValues = () => {
   activeTemplate.value.statusKeys.forEach(key => {
     values[key] = "已查";
   });
-  if (activeTemplate.value.id === "bloodRoutine") {
-    Object.assign(values, {
-      bloodWbc: formValues.wbc || "",
-      bloodNeuPercent: formValues.neuPercent || "",
-      bloodLymPercent: formValues.lymPercent || "",
-      bloodMonPercent: formValues.monPercent || "",
-      bloodRbc: formValues.rbc || "",
-      bloodHgb: formValues.hgb || "",
-      bloodPlt: formValues.plt || ""
-    });
-  }
-  if (activeTemplate.value.id === "postprandialGlucose") {
-    values.postprandialGlucose = formValues.postprandialGlucose || "";
-  }
+  activeTemplate.value.metrics.forEach(metric => {
+    values[metricStorageKey(activeTemplate.value.id, metric.key)] = formValues[metric.key] || "";
+  });
+  const summary = buildLabReportSummary({ ...patientFieldValues.value, ...values });
+  if (summary) values.auxiliaryExamSummary = summary;
   return values;
 };
 
 const validateBeforeSave = () => {
   if (!selectedPatient.value) return "请先选择患者";
+  if (!canSaveActiveTemplate.value) return "当前岗位只能查看该检验报告模板，不能保存检验数值";
   if (activeTemplate.value.id === "ecgImage" && !ecgFiles.value.length) return "请先选择心电图图片";
   if (activeTemplate.value.id === "ecgImage" && !["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)) {
     return "当前账号不能回填心电图状态，请使用心电室、医生或管理员账号保存";
@@ -380,12 +433,14 @@ const saveToArchive = async () => {
   saving.value = true;
   try {
     const batchId = `lab-${selectedPatient.value.id}-${Date.now()}`;
+    const archiveValues = buildArchiveValues();
     await savePatientRecordApi({
       id: selectedPatient.value.id,
       role: currentRole.value,
       operator: roleName.value,
-      values: buildArchiveValues()
+      values: archiveValues
     });
+    patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
     if (activeTemplate.value.id === "ecgImage") {
       const documents = await Promise.all(
         ecgFiles.value.map(async file => ({

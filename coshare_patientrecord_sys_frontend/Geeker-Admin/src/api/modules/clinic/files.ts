@@ -23,6 +23,9 @@ export interface ClinicStoreFileParams {
 
 const CLINIC_API_FILES_URL = import.meta.env.VITE_CLINIC_API_FILES_URL || "/clinic-api/files";
 const API_UNAVAILABLE_MESSAGE = "本地病历文件服务未连接，请确认后端服务正在运行";
+const INVALID_DATA_URL_MESSAGE = "文件内容不是有效的 base64 数据，请重新选择原始文件上传";
+
+export const isValidDataUrl = (value?: string) => /^data:[^;,]+(?:;[^,]*)*;base64,[A-Za-z0-9+/=\r\n]+$/.test(String(value || ""));
 
 const parseClinicFileResponse = async (result: Response) => {
   if (result.status === 401) {
@@ -40,6 +43,10 @@ const parseClinicFileResponse = async (result: Response) => {
 };
 
 export const storeClinicFileApi = async (params: ClinicStoreFileParams) => {
+  if (!isValidDataUrl(params.contentDataUrl)) {
+    throw new Error(INVALID_DATA_URL_MESSAGE);
+  }
+
   let result: Response;
   try {
     result = await fetch(CLINIC_API_FILES_URL, {

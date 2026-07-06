@@ -142,13 +142,14 @@ export const editorLabels = (editors: UserRole[] = []) =>
     .filter(Boolean)
     .join("、");
 
-export const allRecordFields = () => recordSections.flatMap(section => section.fields);
+export const allRecordFields = () => [...recordSections.flatMap(section => section.fields), ...labReportRecordFields];
 
 export const recordAttachments: RecordAttachment[] = [];
 
 const doctor: UserRole[] = ["admin", "doctor"];
 const frontdesk: UserRole[] = ["admin", "frontdesk"];
 const reception: UserRole[] = ["admin", "frontdesk", "reception"];
+const firstVisitCollaborators: UserRole[] = ["admin", "frontdesk", "reception", "doctor"];
 const nurse: UserRole[] = ["admin", "nurse"];
 const nursing: UserRole[] = ["admin", "nurse", "nursing"];
 const inspection: UserRole[] = ["admin", "inspection"];
@@ -181,6 +182,80 @@ export const screeningCollaborators: UserRole[] = [
   "nursing",
   "quality"
 ];
+
+const labReportEditors: UserRole[] = ["admin", "doctor", "lab"];
+const labReportSummaryEditors: UserRole[] = ["admin", "doctor", "lab", "ecg", "nurse"];
+
+export const labReportRecordFields: RecordField[] = [
+  { key: "bloodRoutine", label: "血常规报告摘要", value: "", kind: "textarea", editors: labReportEditors },
+  { key: "bloodRoutineStatus", label: "血常规状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "bloodWbc", label: "WBC", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "bloodNeuPercent", label: "NeU%", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "bloodLymPercent", label: "Lym%", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "bloodMonPercent", label: "Mon%", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "bloodRbc", label: "RBC", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "bloodHgb", label: "HGB", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "bloodPlt", label: "PLT", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_bloodRoutine_neuCount", label: "NeU#", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_bloodRoutine_lymCount", label: "Lym#", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_bloodRoutine_monCount", label: "Mon#", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "biochemistry", label: "生化肝肾功摘要", value: "", kind: "textarea", editors: labReportEditors },
+  { key: "liverFunctionStatus", label: "肝功能状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "renalFunctionStatus", label: "肾功能状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "fastingGlucoseStatus", label: "空腹血糖状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "bloodLipidStatus", label: "血脂状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_biochemistry_glu", label: "Glu", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_tbil", label: "T-Bil", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_dbil", label: "D-Bil", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_alt", label: "ALT", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_ast", label: "AST", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_alp", label: "ALP", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_ggt", label: "GGT", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_tp", label: "TP", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_alb", label: "ALB", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_glo", label: "Glo", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_ag", label: "A/G", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_tg", label: "TG", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_tc", label: "TC", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_crea", label: "CREA", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_ua", label: "UA", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_urea", label: "UREA", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_k", label: "K", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_na", label: "Na", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_cl", label: "CL", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_biochemistry_ca", label: "Ca", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "preOpEight", label: "术前筛查摘要", value: "", kind: "textarea", editors: labReportEditors },
+  { key: "preOpEightStatus", label: "术前筛查状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_hbvFive_hbsag", label: "HBsAg", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_hbvFive_hbsab", label: "HBsAb", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_hbvFive_hbeag", label: "HBeAg", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_hbvFive_hbeab", label: "HBeAb", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_hbvFive_hbcab", label: "HBcAb", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_infectious_hiv", label: "HIV", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_infectious_tppa", label: "TPPA", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_infectious_hcv", label: "HCV", value: "", kind: "select", editors: labReportEditors },
+  { key: "crpStatus", label: "CRP/SAA状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_crpSaa_crp", label: "CRP", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_crpSaa_saa", label: "SAA", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "urineRoutine", label: "尿常规摘要", value: "", kind: "textarea", editors: labReportEditors },
+  { key: "urineRoutineStatus", label: "尿常规状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_wbc", label: "LEU", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_nit", label: "NIT", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_uro", label: "URO", value: "", kind: "input", editors: labReportEditors },
+  { key: "lab_urineRoutine_pro", label: "PRO", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_ph", label: "PH", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_urineRoutine_bld", label: "BLD", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_sg", label: "SG", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_urineRoutine_ket", label: "KET", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_bil", label: "BIL", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_glu", label: "GLU", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_urineRoutine_vc", label: "VC", value: "", kind: "select", editors: labReportEditors },
+  { key: "postprandialGlucose", label: "餐后血糖", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "postprandialGlucoseStatus", label: "餐后血糖状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "lab_hba1c_hba1c", label: "HbA1c", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "auxiliaryExamSummary", label: "辅助检查自动摘要", value: "", kind: "textarea", editors: labReportSummaryEditors }
+];
+
 export const isCollaborativeField = (field: RecordField) =>
   Array.isArray(field.editors) &&
   healthArchiveCollaborators.length === field.editors.length &&
@@ -398,7 +473,7 @@ export const recordSections: RecordSection[] = [
         label: "病史陈述者",
         value: "患者本人",
         kind: "input",
-        editors: reception,
+        editors: firstVisitCollaborators,
         placeholder: "例如：患者本人、配偶、子女、陪同家属"
       },
       {
@@ -407,7 +482,7 @@ export const recordSections: RecordSection[] = [
         value: "是",
         kind: "select",
         options: ["是", "基本可靠", "需家属补充", "不确定"],
-        editors: reception
+        editors: firstVisitCollaborators
       },
       {
         key: "admissionAssessment",
@@ -731,7 +806,7 @@ export const recordSections: RecordSection[] = [
         label: "主诉",
         value: "肛门肿块伴便血 3 天，加重 1 天。",
         kind: "textarea",
-        editors: doctor,
+        editors: firstVisitCollaborators,
         required: true,
         placeholder: "例：肛门肿块伴便血 3 天，加重 1 天。"
       }
@@ -751,7 +826,7 @@ export const recordSections: RecordSection[] = [
         label: "起病经过",
         value: "患者 3 天前无明显诱因出现肛门肿块，伴便血，色鲜红，呈滴下状。",
         kind: "textarea",
-        editors: doctor,
+        editors: firstVisitCollaborators,
         required: true
       },
       {
@@ -759,21 +834,21 @@ export const recordSections: RecordSection[] = [
         label: "症状性质",
         value: "间断发作，伴肛门憋闷坠胀，保守治疗可缓解。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       },
       {
         key: "aggravation",
         label: "加重及入院原因",
         value: "1 天前症状加重，门诊以混合痔收入院。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       },
       {
         key: "generalCondition",
         label: "一般情况",
         value: "精神可，饮食可，大便每日 1 次，小便无明显变化，体重无明显下降，无恶寒发热。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       }
     ]
   },
@@ -786,35 +861,35 @@ export const recordSections: RecordSection[] = [
     status: "waiting",
     description: "覆盖手术史、慢性病、外伤输血、过敏、个人史、婚育家族史。",
     fields: [
-      { key: "operationHistory", label: "手术史", value: "否认手术史。", kind: "textarea", editors: doctor },
+      { key: "operationHistory", label: "手术史", value: "否认手术史。", kind: "textarea", editors: firstVisitCollaborators },
       {
         key: "chronicDisease",
         label: "慢性病史",
         value: "否认高血压、糖尿病、冠心病等慢性病史。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       },
       {
         key: "traumaTransfusion",
         label: "外伤/输血史",
         value: "否认重大外伤史，否认输血史；预防接种随社会。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       },
-      { key: "allergyHistory", label: "过敏史", value: "否认药物及食物过敏史。", kind: "textarea", editors: doctor },
+      { key: "allergyHistory", label: "过敏史", value: "否认药物及食物过敏史。", kind: "textarea", editors: firstVisitCollaborators },
       {
         key: "personalHistory",
         label: "个人史",
         value: "生于原籍，无外地长期居住史，无烟酒嗜好，否认特殊接触史，否认冶游史。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       },
       {
         key: "familyHistory",
         label: "婚育/家族史",
         value: "适龄结婚，配偶及子女体健。否认传染病、遗传病、肿瘤及类似病史。",
         kind: "textarea",
-        editors: doctor
+        editors: firstVisitCollaborators
       }
     ]
   },
@@ -922,131 +997,8 @@ export const recordSections: RecordSection[] = [
     owner: "检查科室",
     department: "化验室/心电室/B超放射",
     status: "active",
-    description: "包含尿常规、生化、凝血、术前八项、肠镜、心电图、生命体征等标准项。",
+    description: "化验室检验结果由检验报告模板维护；本节仅保留心电图、肠镜、生命体征等非化验室冗余字段。",
     fields: [
-      {
-        key: "urineRoutine",
-        label: "尿常规",
-        value: "尿比重、pH、尿蛋白、尿糖、隐血、白细胞、红细胞、亚硝酸盐、酮体、胆红素、尿胆原、结晶：余无异常。",
-        kind: "textarea",
-        editors: lab,
-        labPanel: "urineRoutine"
-      },
-      {
-        key: "biochemistry",
-        label: "生化/糖化",
-        value: "ALT、AST、TBil、DBil、IBIL、TP、ALB、GLB、A/G、GGT、ALP、TG、TC、GLU、糖化血红蛋白、CREA、UA、UREA：余无异常。",
-        kind: "textarea",
-        editors: lab,
-        labPanel: "biochemistry"
-      },
-      {
-        key: "postprandialGlucose",
-        label: "餐后血糖值",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "mmol/L",
-        labPanel: "biochemistry"
-      },
-      {
-        key: "coagulation",
-        label: "凝血功能",
-        value: "PT、APTT、TT、FIB、INR：余无异常。",
-        kind: "textarea",
-        editors: lab,
-        evidence: "凝血功能报告",
-        labPanel: "coagulation"
-      },
-      {
-        key: "preOpEight",
-        label: "术前八项",
-        value: "乙肝五项、丙肝抗体、梅毒抗体、艾滋病抗体：按实际填写，余无异常。",
-        kind: "textarea",
-        editors: lab,
-        evidence: "术前八项报告",
-        labPanel: "preOpEight"
-      },
-      {
-        key: "bloodRoutine",
-        label: "血常规",
-        value: "WBC、PLT、HGB 按实际填写，余无异常。",
-        kind: "textarea",
-        editors: lab,
-        evidence: "血常规报告",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodWbc",
-        label: "WBC 白细胞数目",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "10^9/L",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodNeuPercent",
-        label: "NeU% 中性粒细胞百分比",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "%",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodLymPercent",
-        label: "Lym% 淋巴细胞百分比",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "%",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodMonPercent",
-        label: "Mon% 单核细胞百分比",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "%",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodRbc",
-        label: "RBC 红细胞数目",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "10^12/L",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodHgb",
-        label: "HGB 血红蛋白",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "g/L",
-        labPanel: "bloodRoutine"
-      },
-      {
-        key: "bloodPlt",
-        label: "PLT 血小板数目",
-        value: "",
-        kind: "input",
-        inputType: "number",
-        editors: lab,
-        unit: "10^9/L",
-        labPanel: "bloodRoutine"
-      },
       {
         key: "ecgResult",
         label: "心电图",
@@ -1081,35 +1033,8 @@ export const recordSections: RecordSection[] = [
     owner: "检查科室/医生",
     department: "化验室/心电室/B超放射/门诊医生",
     status: "active",
-    description: "按领导模板汇总术前准入检查状态，记录未查、已查、异常及补查说明。",
+    description: "化验室状态由检验报告模板自动同步；本节仅保留非化验设备状态和医生补充说明。",
     fields: [
-      {
-        key: "bloodRoutineStatus",
-        label: "血常规状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "血常规报告"
-      },
-      {
-        key: "coagulationStatus",
-        label: "凝血四项状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "凝血四项报告"
-      },
-      {
-        key: "preOpEightStatus",
-        label: "术前八项状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "术前八项报告"
-      },
       {
         key: "ecgStatus",
         label: "心电图状态",
@@ -1118,69 +1043,6 @@ export const recordSections: RecordSection[] = [
         options: ["未查", "已查", "异常"],
         editors: ["admin", "ecg", "doctor", "nurse"],
         evidence: "心电图报告"
-      },
-      {
-        key: "liverFunctionStatus",
-        label: "肝功能状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "生化报告"
-      },
-      {
-        key: "renalFunctionStatus",
-        label: "肾功能状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "生化报告"
-      },
-      {
-        key: "fastingGlucoseStatus",
-        label: "空腹血糖状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "生化报告"
-      },
-      {
-        key: "postprandialGlucoseStatus",
-        label: "餐后血糖状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "餐后血糖报告"
-      },
-      {
-        key: "bloodLipidStatus",
-        label: "血脂四项状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "生化报告"
-      },
-      {
-        key: "urineRoutineStatus",
-        label: "尿常规状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "尿常规报告"
-      },
-      {
-        key: "crpStatus",
-        label: "C反应蛋白状态",
-        value: "",
-        kind: "select",
-        options: ["未查", "已查", "异常"],
-        editors: ["admin", "lab", "doctor", "nurse"],
-        evidence: "CRP报告"
       },
       {
         key: "hpTestStatus",

@@ -1,6 +1,6 @@
 import type { ResultData } from "@/api/interface";
 import { authHeaders, handleUnauthorizedResponse } from "../authToken";
-import { createSeedDb, hydrateDb } from "./seed";
+import { createSeedDb, hydrateDb, seedTemplateFieldRules } from "./seed";
 import type { ClinicDb } from "./types";
 
 const STORAGE_KEY = "hos-unitywork-clinic-db";
@@ -106,12 +106,18 @@ const readLocalDb = (): ClinicDb => {
   }
 };
 
+const hasCompleteTemplateRuleBaseline = (db: ClinicDb) => {
+  const existingFields = new Set((db.templateFieldRules ?? []).map(rule => rule.fieldKey));
+  return seedTemplateFieldRules().every(rule => existingFields.has(rule.fieldKey));
+};
+
 const needsBaselineMigration = (db: ClinicDb) =>
   !db.accounts?.length ||
   !db.roles?.length ||
   !db.departments?.length ||
   !db.dictionaries?.length ||
   !db.templateFieldRules?.length ||
+  !hasCompleteTemplateRuleBaseline(db) ||
   !db.auditLogs;
 
 const parseClinicDbResponse = async (result: Response) => {
