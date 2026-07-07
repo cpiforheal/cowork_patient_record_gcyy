@@ -1,25 +1,33 @@
 <template>
   <section class="workflow-role-preview">
-    <aside class="workflow-role-list" aria-label="岗位流程">
-      <article v-for="preview in previews" :key="preview.key" class="role-card-stack">
-        <button
-          type="button"
-          class="workflow-role-card"
-          :class="{ active: preview.key === selectedKey }"
-          @click="$emit('update:selectedKey', preview.key)"
-        >
-          <span class="role-card-head">
-            <strong>{{ preview.title }}</strong>
-
-            <el-tag :type="preview.statusTone" effect="plain" size="small">{{ preview.statusLabel }}</el-tag>
+    <aside class="workflow-role-timeline" aria-label="岗位流程">
+      <article
+        v-for="(preview, index) in previews"
+        :key="preview.key"
+        class="workflow-timeline-item"
+        :class="{ active: preview.key === selectedKey, complete: preview.completedCount > 0 || preview.attachmentCount > 0 }"
+      >
+        <button type="button" class="workflow-role-node" @click="$emit('update:selectedKey', preview.key)">
+          <span class="timeline-marker" aria-hidden="true">
+            <i>{{ index + 1 }}</i>
           </span>
 
-          <small>{{ preview.subtitle }}</small>
+          <span class="role-node-body">
+            <span class="role-card-head">
+              <strong>{{ preview.title }}</strong>
 
-          <span class="role-card-stats">
-            <em>已填 {{ preview.completedCount }}/{{ preview.totalCount || 0 }}</em>
+              <el-tag :type="preview.statusTone" effect="plain" size="small">{{ preview.statusLabel }}</el-tag>
+            </span>
 
-            <em>附件 {{ preview.attachmentCount }}</em>
+            <small>{{ preview.subtitle }}</small>
+
+            <span class="role-card-stats">
+              <em>已填 {{ preview.completedCount }}/{{ preview.totalCount || 0 }}</em>
+
+              <em>图片 {{ preview.imageCount }}</em>
+
+              <em>附件 {{ preview.attachmentCount }}</em>
+            </span>
           </span>
         </button>
 
@@ -46,10 +54,10 @@
     <main class="workflow-role-detail">
       <el-empty v-if="!activePreview" description="点击左侧岗位卡片，查看该岗位已完成内容、附件证据和下一步处理建议" />
 
-      <article v-else class="role-detail-panel">
-        <header class="role-detail-head">
+      <article v-else class="role-report-paper">
+        <header class="report-head">
           <div>
-            <span>岗位预览</span>
+            <span>岗位流程预览</span>
 
             <h3>{{ activePreview.title }}</h3>
 
@@ -59,7 +67,7 @@
           <el-tag :type="activePreview.statusTone" effect="plain">{{ activePreview.statusLabel }}</el-tag>
         </header>
 
-        <section class="role-detail-actions">
+        <section class="report-actions">
           <el-button type="primary" plain @click="$emit('edit', activePreview)">
             {{ activePreview.primaryActionLabel }}
           </el-button>
@@ -69,83 +77,98 @@
           </el-button>
         </section>
 
-        <section class="role-preview-grid">
-          <article class="role-preview-block">
-            <div class="role-preview-title">
-              <strong>已完成信息</strong>
+        <section v-if="activePreview.contextItems.length" class="report-section">
+          <div class="report-section-title">
+            <strong>{{ activePreview.contextTitle }}</strong>
 
-              <span>{{ activePreview.summaryItems.length }} 项</span>
-            </div>
+            <span>{{ activePreview.contextItems.length }} 项</span>
+          </div>
 
-            <el-empty v-if="!activePreview.summaryItems.length" description="该岗位尚未形成可预览内容" />
+          <button
+            v-for="item in activePreview.contextItems"
+            :key="`context-${item.source}-${item.key}`"
+            type="button"
+            class="report-field-row"
+            @click="$emit('focusField', item.key)"
+          >
+            <span>{{ item.label }}</span>
 
-            <button
-              v-for="item in activePreview.summaryItems"
-              v-else
-              :key="`${item.source}-${item.key}`"
-              type="button"
-              class="role-field-row"
-              @click="$emit('focusField', item.key)"
-            >
-              <span>
-                <strong>{{ item.label }}</strong>
-
-                <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
-              </span>
-
-              <em>{{ item.value }}</em>
-            </button>
-          </article>
-
-          <article class="role-preview-block">
-            <div class="role-preview-title">
-              <strong>待补/待复核</strong>
-
-              <span>{{ activePreview.missingCount }} 项</span>
-            </div>
-
-            <el-empty
-              v-if="!activePreview.missingItems.length && !activePreview.taskItems.length"
-              description="暂无明确待处理项"
-            />
-
-            <button
-              v-for="item in activePreview.missingItems"
-              v-else
-              :key="`${item.source}-${item.key}`"
-              type="button"
-              class="role-field-row pending"
-              @click="$emit('focusField', item.key)"
-            >
-              <span>
-                <strong>{{ item.label }}</strong>
-
-                <small>{{ item.section }} · 必填缺失</small>
-              </span>
-
-              <el-tag type="warning" effect="plain" size="small">待补</el-tag>
-            </button>
-
-            <button
-              v-for="task in activePreview.taskItems"
-              :key="`task-${task.sectionKey}-${task.fieldKey}`"
-              type="button"
-              class="role-field-row pending"
-              @click="$emit('focusField', task.fieldKey)"
-            >
-              <span>
-                <strong>{{ task.fieldLabel }}</strong>
-
-                <small>{{ task.sectionTitle }} · {{ task.reason }}</small>
-              </span>
-
-              <el-tag :type="task.statusTone" effect="plain" size="small">{{ task.statusLabel }}</el-tag>
-            </button>
-          </article>
+            <em>{{ item.value }}</em>
+          </button>
         </section>
 
-        <section class="role-attachment-preview">
-          <div class="role-preview-title">
+        <section class="report-section">
+          <div class="report-section-title">
+            <strong>已形成内容</strong>
+
+            <span>{{ activePreview.summaryItems.length }} 项</span>
+          </div>
+
+          <el-empty v-if="!activePreview.summaryItems.length" description="该岗位尚未形成可预览内容" />
+
+          <button
+            v-for="item in activePreview.summaryItems"
+            v-else
+            :key="`${item.source}-${item.key}`"
+            type="button"
+            class="report-field-row"
+            @click="$emit('focusField', item.key)"
+          >
+            <span>
+              <strong>{{ item.label }}</strong>
+
+              <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
+            </span>
+
+            <em>{{ item.value }}</em>
+          </button>
+        </section>
+
+        <section class="report-section">
+          <div class="report-section-title">
+            <strong>待补与下一步</strong>
+
+            <span>{{ activePreview.missingCount }} 项</span>
+          </div>
+
+          <el-empty v-if="!activePreview.missingItems.length && !activePreview.taskItems.length" description="暂无明确待处理项" />
+
+          <button
+            v-for="item in activePreview.missingItems"
+            v-else
+            :key="`${item.source}-${item.key}`"
+            type="button"
+            class="report-field-row pending"
+            @click="$emit('focusField', item.key)"
+          >
+            <span>
+              <strong>{{ item.label }}</strong>
+
+              <small>{{ item.section }} · 必填缺失</small>
+            </span>
+
+            <el-tag type="warning" effect="plain" size="small">待补</el-tag>
+          </button>
+
+          <button
+            v-for="task in activePreview.taskItems"
+            :key="`task-${task.sectionKey}-${task.fieldKey}`"
+            type="button"
+            class="report-field-row pending"
+            @click="$emit('focusField', task.fieldKey)"
+          >
+            <span>
+              <strong>{{ task.fieldLabel }}</strong>
+
+              <small>{{ task.sectionTitle }} · {{ task.reason }}</small>
+            </span>
+
+            <el-tag :type="task.statusTone" effect="plain" size="small">{{ task.statusLabel }}</el-tag>
+          </button>
+        </section>
+
+        <section class="report-section">
+          <div class="report-section-title">
             <strong>图片与附件</strong>
 
             <span>{{ activePreview.imageCount }} 张图片 · {{ activePreview.attachmentCount }} 份附件</span>
@@ -158,7 +181,7 @@
             v-else
             :key="attachment.key"
             type="button"
-            class="role-attachment-row"
+            class="report-attachment-row"
             @click="$emit('openAttachments', activePreview)"
           >
             <img
@@ -203,56 +226,125 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 <style scoped lang="scss">
 .workflow-role-preview {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
 }
 
-.workflow-role-list {
+.workflow-role-timeline {
+  position: relative;
   display: grid;
-  gap: 10px;
+  gap: 0;
+  min-width: 0;
 }
 
-.role-card-stack {
-  display: grid;
-  gap: 6px;
-}
-
-.workflow-role-card {
+.workflow-timeline-item {
+  position: relative;
   display: grid;
   gap: 8px;
+  min-width: 0;
+  padding: 0 0 14px 34px;
+
+  &::before {
+    position: absolute;
+    top: 26px;
+    bottom: -2px;
+    left: 14px;
+    width: 2px;
+    content: "";
+    background: #dbe3ef;
+  }
+
+  &:last-child {
+    padding-bottom: 0;
+
+    &::before {
+      display: none;
+    }
+  }
+
+  &.active {
+    .timeline-marker {
+      color: #fff;
+      background: #2563eb;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 5px rgb(37 99 235 / 12%);
+    }
+
+    .workflow-role-node {
+      border-color: #2563eb;
+      box-shadow: 0 10px 28px rgb(37 99 235 / 12%);
+    }
+  }
+
+  &.complete:not(.active) .timeline-marker {
+    color: #047857;
+    background: #ecfdf5;
+    border-color: #34d399;
+  }
+}
+
+.workflow-role-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   width: 100%;
   min-width: 0;
-  padding: 14px;
+  padding: 13px 14px;
   text-align: left;
   cursor: pointer;
-  background: var(--hos-panel);
+  background: #fff;
   border: 1px solid var(--hos-border);
-  border-radius: var(--hos-radius-card);
+  border-radius: 8px;
   box-shadow: var(--hos-shadow-soft);
   transition:
     border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+    box-shadow 0.18s ease;
 
-  &.active {
-    border-color: var(--hos-border-interactive);
-    box-shadow:
-      inset 4px 0 0 var(--hos-primary),
-      var(--hos-shadow-soft);
-    transform: translateY(-1px);
+  &:hover {
+    border-color: #93c5fd;
   }
+}
 
-  small {
+.timeline-marker {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: #64748b;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  border-radius: 999px;
+
+  i {
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 1;
+  }
+}
+
+.role-node-body {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+
+  > small {
+    min-width: 0;
     color: var(--hos-text-secondary);
     line-height: 1.45;
+    overflow-wrap: anywhere;
   }
 }
 
 .role-card-head,
 .role-card-stats,
-.role-preview-title,
-.role-detail-actions {
+.report-section-title,
+.report-actions {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -264,10 +356,11 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--hos-text-primary);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .role-card-stats {
+  flex-wrap: wrap;
   justify-content: flex-start;
   color: var(--hos-text-secondary);
   font-size: 12px;
@@ -282,10 +375,10 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
-  padding: 8px;
+  padding: 8px 10px;
   background: #f8fafc;
   border: 1px dashed var(--hos-border-light);
-  border-radius: var(--hos-radius-sm);
+  border-radius: 8px;
 }
 
 .role-attachment-chip {
@@ -298,7 +391,7 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   cursor: pointer;
   background: var(--hos-glass);
   border: 1px solid var(--hos-border-light);
-  border-radius: var(--hos-radius-sm);
+  border-radius: 6px;
 
   img {
     width: 100%;
@@ -320,19 +413,27 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 .workflow-role-detail {
   min-width: 0;
   min-height: 520px;
-  padding: 16px;
-  background: var(--hos-panel);
+  padding: 18px;
+  background: #f8fafc;
   border: 1px solid var(--hos-border);
-  border-radius: var(--hos-radius-card);
+  border-radius: 8px;
   box-shadow: var(--hos-shadow-soft);
 }
 
-.role-detail-panel {
+.role-report-paper {
   display: grid;
-  gap: 14px;
+  gap: 16px;
+  max-width: 980px;
+  min-width: 0;
+  padding: 22px;
+  margin: 0 auto;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #1f2937;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 8%);
 }
 
-.role-detail-head {
+.report-head {
   display: flex;
   gap: 12px;
   align-items: flex-start;
@@ -340,7 +441,7 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 
   span,
   p {
-    color: var(--hos-text-secondary);
+    color: #64748b;
   }
 
   h3,
@@ -350,55 +451,55 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 
   h3 {
     margin-top: 4px;
-    color: var(--hos-text-primary);
+    color: #111827;
     font-size: 22px;
   }
 }
 
-.role-detail-actions {
+.report-actions {
   justify-content: flex-start;
   flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #1f2937;
 }
 
-.role-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.role-preview-block,
-.role-attachment-preview {
+.report-section {
   display: grid;
   gap: 10px;
   min-width: 0;
-  padding: 12px;
-  background: var(--hos-glass);
-  border: 1px solid var(--hos-border-light);
-  border-radius: var(--hos-radius-md);
+  padding-top: 2px;
 }
 
-.role-preview-title {
+.report-section-title {
+  padding: 7px 10px;
+  background: #f3f4f6;
+  border: 1px solid #1f2937;
+
   strong {
-    color: var(--hos-text-primary);
+    color: #111827;
   }
 
   span {
-    color: var(--hos-text-secondary);
+    color: #475569;
     font-size: 12px;
   }
 }
 
-.role-field-row {
+.report-field-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 10px;
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   background: #fff;
-  border: 1px solid var(--hos-border-light);
-  border-radius: var(--hos-radius-sm);
+  border: 1px solid #d1d5db;
+  border-radius: 0;
+
+  &:hover {
+    background: #f8fafc;
+  }
 
   span {
     display: grid;
@@ -412,13 +513,13 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   }
 
   small {
-    color: var(--hos-text-secondary);
+    color: #64748b;
   }
 
   em {
     display: -webkit-box;
     overflow: hidden;
-    color: var(--hos-text-primary);
+    color: #111827;
     font-size: 13px;
     font-style: normal;
     line-height: 1.55;
@@ -432,7 +533,7 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   }
 }
 
-.role-attachment-row {
+.report-attachment-row {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 10px;
@@ -442,8 +543,12 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   text-align: left;
   cursor: pointer;
   background: #fff;
-  border: 1px solid var(--hos-border-light);
-  border-radius: var(--hos-radius-sm);
+  border: 1px solid #d1d5db;
+  border-radius: 0;
+
+  &:hover {
+    background: #f8fafc;
+  }
 
   img,
   > span {
@@ -459,8 +564,8 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   > span {
     display: grid;
     place-items: center;
-    color: var(--hos-primary-deep);
-    background: var(--hos-primary-soft);
+    color: #1d4ed8;
+    background: #eff6ff;
   }
 
   em {
@@ -479,18 +584,42 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   }
 
   small {
-    color: var(--hos-text-secondary);
+    color: #64748b;
   }
 }
 
 @media (max-width: 960px) {
-  .workflow-role-preview,
-  .role-preview-grid {
+  .workflow-role-preview {
     grid-template-columns: 1fr;
   }
 
   .workflow-role-detail {
     min-height: 360px;
+  }
+
+  .role-report-paper {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .workflow-role-preview {
+    gap: 12px;
+  }
+
+  .workflow-timeline-item {
+    padding-left: 30px;
+  }
+
+  .role-card-head,
+  .report-head,
+  .report-section-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-field-row.pending {
+    grid-template-columns: 1fr;
   }
 }
 </style>

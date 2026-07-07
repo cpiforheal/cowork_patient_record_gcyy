@@ -36,6 +36,8 @@ export type WorkflowRolePreview = {
   summaryItems: WorkflowRolePreviewField[];
   missingItems: WorkflowRolePreviewField[];
   taskItems: WorkflowFieldTask[];
+  contextTitle: string;
+  contextItems: WorkflowRolePreviewField[];
   attachments: WorkflowRolePreviewAttachment[];
   focusFieldKeys: string[];
   canEdit: boolean;
@@ -53,6 +55,9 @@ type RolePreviewConfig = {
   medicalSections: string[];
   archiveFieldKeys: string[];
   medicalFieldKeys: string[];
+  contextTitle?: string;
+  contextArchiveFieldKeys?: string[];
+  contextMedicalFieldKeys?: string[];
   primaryTarget: RolePreviewTarget;
   primaryActionLabel: string;
 };
@@ -84,10 +89,40 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
     primaryActionLabel: "进入目标病历维护基础信息"
   },
   {
+    key: "inspection",
+    title: "检查室/影像",
+    subtitle: "图片上传与初步检查所见",
+    description:
+      "先完成图片/视频上传和初步检查所见记录，例如截石位、指检、肛门镜、心电或影像提示；这里只沉淀事实证据，不承担最终诊断。",
+    roles: ["inspection", "ecg", "ultrasound"],
+    sectionKeys: ["specialExam", "preOpScreening", "documentScope"],
+    medicalSections: ["专科及辅助检查", "术前筛查"],
+    archiveFieldKeys: [
+      "inspectionImages",
+      "inspectionBriefNote",
+      "lithotomyExam",
+      "digitalExam",
+      "anoscope",
+      "ecgResult",
+      "colonoscopy"
+    ],
+    medicalFieldKeys: [
+      "specialExamFullText",
+      "ecgResult",
+      "colonoscopy",
+      "ecgStatus",
+      "gastroscopyStatus",
+      "colonoscopyStatus",
+      "drChestStatus"
+    ],
+    primaryTarget: "medicalRecord",
+    primaryActionLabel: "进入目标病历维护检查所见"
+  },
+  {
     key: "reception",
     title: "接诊/问诊",
-    subtitle: "主诉、现病史和病史采集",
-    description: "沉淀医生生成综合病历前最关键的病史文本，后续医生可在目标病历中复核和润色。",
+    subtitle: "依据检查结果给出下一步建议",
+    description: "接诊室先读取检查室上传的图片和初步所见，再补充主诉、现病史、病史采集，并给出下一步行动建议。",
     roles: ["reception", "doctor"],
     sectionKeys: ["chiefComplaint", "presentIllness", "history", "specialNeeds"],
     medicalSections: ["主诉与现病史", "既往个人婚育家族史", "中医四诊"],
@@ -105,29 +140,11 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "tongue",
       "pulseCondition"
     ],
+    contextTitle: "检查室传出结果",
+    contextArchiveFieldKeys: ["inspectionBriefNote", "lithotomyExam", "digitalExam", "anoscope", "ecgResult", "colonoscopy"],
+    contextMedicalFieldKeys: ["specialExamFullText", "ecgResult", "colonoscopy"],
     primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护问诊内容"
-  },
-  {
-    key: "inspection",
-    title: "检查室/影像",
-    subtitle: "专科检查、心电和影像资料",
-    description: "维护专科检查、心电、B超、DR、肠镜等结果，医生在目标病历中同步读取。",
-    roles: ["inspection", "ecg", "ultrasound"],
-    sectionKeys: ["specialExam", "preOpScreening", "documentScope"],
-    medicalSections: ["专科及辅助检查", "术前筛查"],
-    archiveFieldKeys: ["lithotomyExam", "digitalExam", "anoscope", "ecgResult", "colonoscopy"],
-    medicalFieldKeys: [
-      "specialExamFullText",
-      "ecgResult",
-      "colonoscopy",
-      "ecgStatus",
-      "gastroscopyStatus",
-      "colonoscopyStatus",
-      "drChestStatus"
-    ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护检查结果"
+    primaryActionLabel: "进入目标病历维护接诊建议"
   },
   {
     key: "lab",
@@ -336,6 +353,23 @@ export const usePatientRolePreview = ({
         .map(field => toPreviewField(field, String(fieldValues[field.key] || ""), currentRole.value));
 
       const allFields = uniqueBy([...medicalFieldItems, ...archiveFieldItems], item => item.key);
+      const contextArchiveItems = archiveFields
+        .filter(({ field }) => config.contextArchiveFieldKeys?.includes(field.key))
+        .map<WorkflowRolePreviewField>(({ field, section }) => ({
+          key: field.key,
+          label: field.label,
+          section: section.title,
+          value: String(fieldValues[field.key] || ""),
+          source: "archive",
+          editable: currentRole.value === "admin" || field.editors.includes(currentRole.value),
+          required: false
+        }));
+      const contextMedicalItems = medicalFields
+        .filter(field => config.contextMedicalFieldKeys?.includes(field.key))
+        .map(field => toPreviewField(field, String(fieldValues[field.key] || ""), currentRole.value));
+      const contextItems = uniqueBy([...contextMedicalItems, ...contextArchiveItems], item => item.key)
+        .filter(item => isValueFilled(item.value))
+        .slice(0, 6);
       const summaryItems = allFields.filter(item => isValueFilled(item.value)).slice(0, 8);
       const missingItems = allFields.filter(item => item.required && !isValueFilled(item.value)).slice(0, 8);
       const relatedFieldKeys = new Set([
@@ -387,6 +421,8 @@ export const usePatientRolePreview = ({
         summaryItems,
         missingItems,
         taskItems: relatedTasks,
+        contextTitle: config.contextTitle || "上游参考",
+        contextItems,
         attachments: attachments.slice(0, 6),
         focusFieldKeys,
         canEdit: roleCanEdit(currentRole.value, config.roles) || allFields.some(field => field.editable),

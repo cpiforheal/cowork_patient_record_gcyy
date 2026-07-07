@@ -261,8 +261,12 @@
         <el-button v-if="firstWorkflowIssue" text @click="focusIssue(firstWorkflowIssue)">定位处理</el-button>
       </section>
 
-      <div v-show="!isInitialDetailLoading" class="detail-workspace-shell screen-only">
-        <aside class="detail-side-nav" aria-label="患者详情模块">
+      <div
+        v-show="!isInitialDetailLoading"
+        class="detail-workspace-shell screen-only"
+        :class="{ 'is-flow-mode': detailWorkspaceMode === 'flow' }"
+      >
+        <aside v-show="detailWorkspaceMode !== 'flow'" class="detail-side-nav" aria-label="患者详情模块">
           <button type="button" :class="{ active: detailWorkspaceMode === 'flow' }" @click="switchDetailWorkspace('flow')">
             <strong>流程视图</strong>
 
@@ -5386,6 +5390,10 @@ onBeforeUnmount(() => {
   gap: 12px;
 
   align-items: start;
+
+  &.is-flow-mode {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .detail-side-nav {
