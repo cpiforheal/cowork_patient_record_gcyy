@@ -25,6 +25,18 @@ import org.springframework.web.server.ResponseStatusException;
 public class MedicalRecordTemplateRenderer {
 
     private final ObjectMapper objectMapper;
+    private static final List<String> GENERATION_SCOPE_STOP_MARKERS = List.of(
+        "十三、",
+        "十三.",
+        "十三．",
+        "13、",
+        "13.",
+        "13．",
+        "查房时序",
+        "自动生成文书范围",
+        "质控校验",
+        "首次病程记录"
+    );
 
     public MedicalRecordTemplateRenderer(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -123,7 +135,7 @@ public class MedicalRecordTemplateRenderer {
         var matcher = paragraphPattern.matcher(xml);
         while (matcher.find()) {
             String paragraph = matcher.group();
-            if (!paragraph.contains("首次病程记录")) continue;
+            if (GENERATION_SCOPE_STOP_MARKERS.stream().noneMatch(paragraph::contains)) continue;
             int end = xml.indexOf("<w:sectPr", matcher.end());
             if (end < 0) end = xml.indexOf("</w:body>", matcher.end());
             if (end < 0) end = xml.length();

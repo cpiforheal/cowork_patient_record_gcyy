@@ -125,6 +125,7 @@
             <label
               v-for="medicalField in section.fields"
               :key="medicalField.key"
+              :id="`medical-record-field-${medicalField.key}`"
               class="medical-record-field"
               :class="{
                 wide: isTextareaLikeField(medicalField),

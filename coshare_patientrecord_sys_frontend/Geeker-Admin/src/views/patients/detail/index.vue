@@ -263,6 +263,12 @@
 
       <div v-show="!isInitialDetailLoading" class="detail-workspace-shell screen-only">
         <aside class="detail-side-nav" aria-label="患者详情模块">
+          <button type="button" :class="{ active: detailWorkspaceMode === 'flow' }" @click="switchDetailWorkspace('flow')">
+            <strong>流程视图</strong>
+
+            <span>岗位卡片与右侧预览</span>
+          </button>
+
           <button
             type="button"
             :class="{ active: detailWorkspaceMode === 'medicalRecord' }"
@@ -301,6 +307,15 @@
         </aside>
 
         <main class="detail-workspace-content">
+          <WorkflowRolePreviewPanel
+            v-if="detailWorkspaceMode === 'flow'"
+            v-model:selected-key="activeWorkflowRoleKey"
+            :previews="patientRolePreviews"
+            @edit="openWorkflowRolePreviewEdit"
+            @open-attachments="openWorkflowRolePreviewAttachments"
+            @focus-field="focusWorkflowPreviewField"
+          />
+
           <section v-if="detailWorkspaceMode === 'medicalRecord'" class="doctor-record-workbench">
             <div class="doctor-record-hero">
               <div>
@@ -438,8 +453,8 @@
                     <strong>化验报告模板视图</strong>
                     <span>
                       {{ fieldValues.patientName || patientInfo?.name || "当前患者" }} ·
-                      {{ fieldValues.visitNo || patientInfo?.visitNo || patientId }} ·
-                      最近更新 {{ patientInfo?.updatedAt || generatedAt || "待同步" }}
+                      {{ fieldValues.visitNo || patientInfo?.visitNo || patientId }} · 最近更新
+                      {{ patientInfo?.updatedAt || generatedAt || "待同步" }}
                     </span>
                   </div>
                   <el-button type="primary" plain @click="openLabReportWorkbench">填写/更新检验报告</el-button>
@@ -1695,6 +1710,7 @@ import {
   type WorkflowFieldTask,
   type WorkflowStageNode
 } from "./composables/usePatientWorkflowTasks";
+import { usePatientRolePreview, type WorkflowRolePreview } from "./composables/usePatientRolePreview";
 import { useRecordPrintPreview } from "./composables/useRecordPrintPreview";
 import type { FieldIssue, FollowupRecord } from "./components/types";
 import { buildLabReportSummary, hasLabReportData } from "@/views/workbench/labReport/summary";
@@ -1709,6 +1725,7 @@ const PrintPreflightDialog = defineAsyncComponent(() => import("./components/Pri
 const RecordPreviewOverlay = defineAsyncComponent(() => import("./components/RecordPreviewOverlay.vue"));
 const TimelineWorkbench = defineAsyncComponent(() => import("./components/TimelineWorkbench.vue"));
 const VoidAttachmentDialog = defineAsyncComponent(() => import("./components/VoidAttachmentDialog.vue"));
+const WorkflowRolePreviewPanel = defineAsyncComponent(() => import("./components/WorkflowRolePreviewPanel.vue"));
 const WorkflowTaskPanel = defineAsyncComponent(() => import("./components/WorkflowTaskPanel.vue"));
 
 const router = useRouter();
@@ -1726,7 +1743,7 @@ const canManageMedicalRecordVersions = computed(() => currentRole.value === "adm
 
 const patientId = computed(() => String(route.params.id || "").trim());
 
-type DetailWorkspaceMode = "medicalRecord" | "archive" | "attachments" | "timeline";
+type DetailWorkspaceMode = "flow" | "medicalRecord" | "archive" | "attachments" | "timeline";
 type PatientFieldSearchType = "field" | "attachment" | "stage";
 type PatientFieldSearchItem = {
   key: string;
@@ -1763,9 +1780,9 @@ const medicalRecordFirstRoles = new Set<UserRole>([
   "quality"
 ]);
 
-const detailWorkspaceMode = ref<DetailWorkspaceMode>(
-  medicalRecordFirstRoles.has(currentRole.value) ? "medicalRecord" : "archive"
-);
+const detailWorkspaceMode = ref<DetailWorkspaceMode>("flow");
+
+const activeWorkflowRoleKey = ref("");
 
 const recordViewMode = ref<"mine" | "full">("mine");
 
@@ -2069,17 +2086,7 @@ const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
     "documentScope"
   ]),
 
-  lab: new Set([
-    "patientName",
-
-    "visitNo",
-
-    "hpTestStatus",
-
-    "uncheckedItemsNote",
-
-    "documentScope"
-  ]),
+  lab: new Set(["patientName", "visitNo", "hpTestStatus", "uncheckedItemsNote", "documentScope"]),
 
   ecg: new Set(["patientName", "visitNo", "ecgResult", "ecgStatus", "uncheckedItemsNote", "documentScope"]),
 
@@ -2168,14 +2175,7 @@ const roleViewSections: Record<Exclude<RoleViewKey, "all">, Set<string>> = {
 
 const roleViewFieldKeys: Partial<Record<RoleViewKey, Set<string>>> = {
   inspection: new Set([...Array.from(roleVisibleFieldKeys.inspection || []), "inspectionPending"]),
-  lab: new Set([
-    "patientName",
-    "visitNo",
-    "ecgResult",
-    "colonoscopy",
-    "uncheckedItemsNote",
-    "documentScope"
-  ])
+  lab: new Set(["patientName", "visitNo", "ecgResult", "colonoscopy", "uncheckedItemsNote", "documentScope"])
 };
 
 const isVisibleForSelectedRoleView = (section: RecordSection, field: RecordField) => {
@@ -3074,7 +3074,12 @@ const buildPresentIllnessFromArchive = () =>
   ]);
 
 const buildPastHistoryFromArchive = () =>
-  joinArchiveParts([fieldValues.operationHistory, fieldValues.chronicDisease, fieldValues.traumaTransfusion, fieldValues.allergyHistory]);
+  joinArchiveParts([
+    fieldValues.operationHistory,
+    fieldValues.chronicDisease,
+    fieldValues.traumaTransfusion,
+    fieldValues.allergyHistory
+  ]);
 
 const archiveLabReportSummary = computed(() => buildLabReportSummary(fieldValues));
 const hasArchiveLabReportData = computed(() => hasLabReportData(fieldValues));
@@ -3685,6 +3690,15 @@ const patientWorkflowTasks = usePatientWorkflowTasks({
   isFieldEditable: isEditable
 });
 
+const patientRolePreviews = usePatientRolePreview({
+  sections: recordSectionsByRule,
+  medicalRecordSections: medicalRecordFieldSections,
+  workflowTasks: patientWorkflowTasks,
+  attachmentsByField,
+  currentRole,
+  fieldValues
+});
+
 const patientFieldSearchItems = computed<PatientFieldSearchItem[]>(() => {
   const fieldItems = recordSectionsByRule.value.flatMap(section =>
     section.fields.map(field => {
@@ -3997,6 +4011,62 @@ const focusWorkflowStage = async (stage: WorkflowStageNode) => {
   await nextTick();
 
   scrollToSection(targetSectionKey);
+};
+
+const openWorkflowRolePreviewEdit = async (preview: WorkflowRolePreview) => {
+  if (preview.primaryTarget === "attachments") {
+    await switchDetailWorkspace("attachments");
+    return;
+  }
+
+  if (preview.primaryTarget === "archive") {
+    recordViewMode.value = "full";
+    await switchDetailWorkspace("archive");
+    const targetSectionKey = preview.sectionKeys.find(sectionKey =>
+      recordSectionsByRule.value.some(section => section.key === sectionKey)
+    );
+    if (targetSectionKey) scrollToSection(targetSectionKey);
+    return;
+  }
+
+  await switchDetailWorkspace("medicalRecord");
+};
+
+const openWorkflowRolePreviewAttachments = async () => {
+  await switchDetailWorkspace("attachments");
+};
+
+const focusWorkflowPreviewField = async (fieldKey: string) => {
+  const medicalField = medicalRecordFields.value.find(field => field.key === fieldKey);
+
+  if (medicalField) {
+    await switchDetailWorkspace("medicalRecord");
+
+    const activeSections = new Set(medicalRecordActiveSections.value);
+    activeSections.add(medicalField.section);
+    medicalRecordActiveSections.value = Array.from(activeSections);
+
+    await nextTick();
+
+    const target = document.getElementById(`medical-record-field-${fieldKey}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    return;
+  }
+
+  const archiveContext = findSearchFieldContext(fieldKey);
+  if (!archiveContext) return;
+
+  recordViewMode.value = "full";
+
+  await focusIssue({
+    fieldKey: archiveContext.field.key,
+    fieldLabel: archiveContext.field.label,
+    sectionKey: archiveContext.section.key,
+    sectionTitle: archiveContext.section.title,
+    message: "从流程预览定位到原字段",
+    level: "missing"
+  });
 };
 
 const findSearchFieldContext = (fieldKey: string) => {
@@ -4702,13 +4772,9 @@ const loadPatientDetail = () =>
 
       Object.assign(fieldValues, data.fieldValues || {});
 
-      if (medicalRecordFirstRoles.has(currentRole.value)) {
-        detailWorkspaceMode.value = "medicalRecord";
+      detailWorkspaceMode.value = "flow";
 
-        void loadMedicalRecordWorkspace();
-      } else {
-        detailWorkspaceMode.value = "archive";
-      }
+      if (medicalRecordFirstRoles.has(currentRole.value)) void loadMedicalRecordWorkspace();
 
       if (targetSection && recordSectionsByRule.value.some(section => section.key === targetSection)) {
         activeSectionKey.value = targetSection;

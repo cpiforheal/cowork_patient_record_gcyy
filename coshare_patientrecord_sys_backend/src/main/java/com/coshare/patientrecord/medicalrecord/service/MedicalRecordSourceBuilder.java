@@ -138,7 +138,25 @@ public class MedicalRecordSourceBuilder {
         JsonNode copy = node.deepCopy();
         if (copy.isObject()) {
             ObjectNode object = (ObjectNode) copy;
-            List.of("name", "phone", "address", "contactName", "contactPhone", "contactAddress").forEach(key -> {
+            List.of(
+                "name",
+                "phone",
+                "mobile",
+                "telephone",
+                "idCard",
+                "idNo",
+                "idNumber",
+                "identityNo",
+                "identityCard",
+                "cardNo",
+                "address",
+                "currentAddress",
+                "homeAddress",
+                "contactName",
+                "contactPhone",
+                "contactMobile",
+                "contactAddress"
+            ).forEach(key -> {
                 if (object.has(key)) object.put(key, maskSensitive(object.path(key).asText("")));
             });
         }
@@ -168,7 +186,7 @@ public class MedicalRecordSourceBuilder {
     }
 
     private void put(Map<String, String> values, String key, String value) {
-        values.put(key, value == null || value.isBlank() ? "待补充" : value);
+        values.put(key, value == null ? "" : value.trim());
     }
 
     private String fieldValue(JsonNode patient, JsonNode record, TargetField field) {
