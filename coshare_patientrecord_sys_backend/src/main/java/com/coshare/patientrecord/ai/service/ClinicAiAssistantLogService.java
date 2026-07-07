@@ -4,6 +4,7 @@ import com.coshare.patientrecord.ai.model.AssistantLogDraft;
 import com.coshare.patientrecord.ai.repository.ClinicAiAssistantLogRepository;
 import com.coshare.patientrecord.ai.repository.ClinicAiAssistantLogSchemaInitializer;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.security.AuthPermission;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,15 +37,18 @@ public class ClinicAiAssistantLogService {
     private final ClinicAiAssistantLogRepository logRepository;
     private final ClinicAiAssistantLogSchemaInitializer schemaInitializer;
     private final ObjectMapper objectMapper;
+    private final SensitiveDataMasker sensitiveDataMasker;
 
     public ClinicAiAssistantLogService(
         ClinicAiAssistantLogRepository logRepository,
         ClinicAiAssistantLogSchemaInitializer schemaInitializer,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        SensitiveDataMasker sensitiveDataMasker
     ) {
         this.logRepository = logRepository;
         this.schemaInitializer = schemaInitializer;
         this.objectMapper = objectMapper;
+        this.sensitiveDataMasker = sensitiveDataMasker;
     }
 
     @PostConstruct
@@ -68,8 +72,8 @@ public class ClinicAiAssistantLogService {
             boolean patientLike = isPatientSensitive(assistantType, draft.patientId(), context);
             String prompt = safe(draft.prompt());
             String answer = safe(draft.answer());
-            String sanitizedPrompt = patientLike ? desensitize(prompt) : prompt;
-            String sanitizedAnswer = patientLike ? desensitize(answer) : answer;
+            String sanitizedPrompt = patientLike ? sensitiveDataMasker.maskText(prompt) : prompt;
+            String sanitizedAnswer = patientLike ? sensitiveDataMasker.maskText(answer) : answer;
             String intent = classifyIntent(prompt + " " + safe(context));
 
             log.put("id", id);
@@ -93,11 +97,12 @@ public class ClinicAiAssistantLogService {
             log.put("systemPromptSummary", trimText(safe(draft.systemPromptSummary()), 1200));
             log.put("contextSummary", summarizeContext(context, draft.patientId(), draft.attachmentCount()));
             log.put("patientContextIncluded", !safe(draft.patientId()).isBlank());
-            log.put("patientId", patientLike ? maskPatientId(draft.patientId()) : safe(draft.patientId()));
+            log.put("patientId", patientLike ? sensitiveDataMasker.maskPatientId(draft.patientId()) : safe(draft.patientId()));
             log.put("attachmentCount", Math.max(0, draft.attachmentCount()));
             log.put("imageCount", Math.max(0, draft.imageCount()));
             log.put("errorMessage", trimText(safe(draft.errorMessage()), 500));
             log.put("sensitive", patientLike);
+            if (patientLike) log.put("desensitizationPolicyVersion", sensitiveDataMasker.policyVersion());
             log.put("templateCandidate", false);
             log.set("knowledgeSources", objectMapper.valueToTree(draft.knowledgeSources() == null ? List.of() : draft.knowledgeSources()));
 
@@ -389,20 +394,6 @@ public class ClinicAiAssistantLogService {
         if (!safe(patientId).isBlank()) parts.add("包含患者上下文");
         if (attachmentCount > 0) parts.add("上传材料：" + attachmentCount + " 个");
         return parts.isEmpty() ? "知识库优先" : String.join("；", parts);
-    }
-
-    private String desensitize(String value) {
-        String text = safe(value);
-        text = text.replaceAll("1[3-9]\\d{9}", "1**********");
-        text = text.replaceAll("\\b\\d{15}(\\d{2}[0-9Xx])?\\b", "******************");
-        text = text.replaceAll("(visitNo|就诊号|门诊号|住院号)[：:\\s]*[A-Za-z0-9_-]+", "$1：**");
-        return text;
-    }
-
-    private String maskPatientId(String patientId) {
-        String value = safe(patientId);
-        if (value.length() <= 4) return value.isBlank() ? "" : "***";
-        return value.substring(0, 2) + "***" + value.substring(value.length() - 2);
     }
 
     private String normalizePromptKey(String prompt) {

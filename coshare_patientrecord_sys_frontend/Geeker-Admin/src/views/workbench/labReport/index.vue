@@ -144,7 +144,13 @@
             <el-button :icon="Printer" :disabled="activeTemplate.id === 'ecgImage'" @click="printPreview">
               打印/导出预览
             </el-button>
-            <el-button type="primary" :icon="FolderChecked" :loading="saving" :disabled="!canSaveActiveTemplate" @click="saveToArchive">
+            <el-button
+              type="primary"
+              :icon="FolderChecked"
+              :loading="saving"
+              :disabled="!canSaveActiveTemplate"
+              @click="saveToArchive"
+            >
               保存入档
             </el-button>
           </div>
@@ -249,7 +255,9 @@ const previewRef = ref<HTMLElement>();
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
 const canSaveActiveTemplate = computed(() =>
-  activeTemplate.value.id === "ecgImage" ? ["admin", "doctor", "nurse", "ecg"].includes(currentRole.value) : canEditLabMetrics.value
+  activeTemplate.value.id === "ecgImage"
+    ? ["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)
+    : canEditLabMetrics.value
 );
 
 const resetTemplateValues = () => {

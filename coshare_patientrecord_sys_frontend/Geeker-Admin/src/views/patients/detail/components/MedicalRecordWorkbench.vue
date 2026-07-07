@@ -23,6 +23,20 @@
       <el-tag effect="plain">{{ templateStatus?.configured ? "模板已启用" : "模板待配置" }}</el-tag>
     </section>
 
+    <section v-if="hasRoleFocus" class="medical-record-role-focus">
+      <div>
+        <span>当前岗位聚焦</span>
+
+        <strong>{{ focusedRoleLabel || "岗位协作" }}</strong>
+
+        <small>
+          已定位 {{ focusedFieldKeySet.size }} 个目标病历字段，其中 {{ focusedEditableFields.length }} 个当前岗位可维护。
+        </small>
+      </div>
+
+      <el-switch v-model="showFocusedOnly" active-text="只看本岗位" inactive-text="查看全部上下文" />
+    </section>
+
     <section v-if="variant === 'inline'" class="medical-record-focus-strip">
       <article>
         <span>生成规则</span>
@@ -131,6 +145,7 @@
                 wide: isTextareaLikeField(medicalField),
                 missing: isFieldMissing(medicalField),
                 locked: Boolean(medicalField.templateLocked),
+                'role-focused': isFocusedField(medicalField),
                 readonly: !canEditMedicalField(medicalField)
               }"
             >
@@ -285,7 +300,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import type { GeneratedMedicalRecord, MedicalRecordTemplateField, MedicalRecordTemplateStatus } from "@/api/modules/clinic";
 import LabReportPreview from "./LabReportPreview.vue";
 import { roleLabel, type UserRole } from "@/config/fieldPermissions";
@@ -313,6 +328,9 @@ const props = withDefaults(
     patientName?: string;
     patientGender?: string;
     visitNo?: string;
+    focusedRoleKey?: string;
+    focusedRoleLabel?: string;
+    focusedFieldKeys?: string[];
     currentRecord?: GeneratedMedicalRecord;
     versions?: GeneratedMedicalRecord[];
     completedCount?: number;
@@ -341,6 +359,9 @@ const props = withDefaults(
     patientName: "",
     patientGender: "",
     visitNo: "",
+    focusedRoleKey: "",
+    focusedRoleLabel: "",
+    focusedFieldKeys: () => [],
     versions: () => [],
     completedCount: 0,
     totalCount: 0,
@@ -375,6 +396,10 @@ const canVoidCurrentRecord = computed(
   () => roleCanGenerate.value && Boolean(props.currentRecord && props.currentRecord.status !== "voided")
 );
 const isDraftCurrentRecord = computed(() => roleCanGenerate.value && props.currentRecord?.status === "draft");
+const showFocusedOnly = ref(false);
+
+const focusedFieldKeySet = computed(() => new Set(props.focusedFieldKeys.filter(Boolean)));
+const hasRoleFocus = computed(() => Boolean(props.focusedRoleKey && focusedFieldKeySet.value.size));
 
 const isCheckboxField = (field: MedicalRecordTemplateField) =>
   field.controlType === "checkboxParagraph" || field.renderMode === "paragraph" || field.kind === "checkboxParagraph";
@@ -399,16 +424,33 @@ const canEditMedicalField = (field: MedicalRecordTemplateField) => {
   return field.editorRoles.includes(props.currentRole);
 };
 
+const isFocusedField = (field: MedicalRecordTemplateField) => focusedFieldKeySet.value.has(field.key);
+
 const visibleFieldSections = computed(() =>
   props.fieldSections
     .map(section => ({
       ...section,
-      fields: section.fields.filter(canViewMedicalField)
+      fields: section.fields
+        .filter(field => canViewMedicalField(field) && (!showFocusedOnly.value || isFocusedField(field)))
+        .sort((left, right) => Number(isFocusedField(right)) - Number(isFocusedField(left)))
     }))
     .filter(section => section.fields.length > 0)
 );
 
+const focusedEditableFields = computed(() =>
+  visibleFieldSections.value
+    .flatMap(section => section.fields)
+    .filter(field => isFocusedField(field) && canEditMedicalField(field))
+);
+
 const hasEditableFields = computed(() => visibleFieldSections.value.some(section => section.fields.some(canEditMedicalField)));
+
+watch(
+  () => props.focusedRoleKey,
+  () => {
+    showFocusedOnly.value = false;
+  }
+);
 
 const fieldRoleHint = (field: MedicalRecordTemplateField) => {
   if (canEditMedicalField(field)) return "本岗位可维护";
@@ -475,6 +517,34 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
   span {
     color: var(--hos-text-secondary);
     font-size: 12px;
+  }
+}
+
+.medical-record-role-focus {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+
+  div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  span,
+  small {
+    color: #0369a1;
+    font-size: 12px;
+  }
+
+  strong {
+    overflow-wrap: anywhere;
+    color: #0f172a;
   }
 }
 
@@ -615,6 +685,12 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
   &.missing {
     background: #fff8e6;
     border-color: #f3d19e;
+  }
+
+  &.role-focused {
+    background: #eff6ff;
+    border-color: #60a5fa;
+    box-shadow: inset 3px 0 0 #2563eb;
   }
 
   &.locked {
@@ -788,6 +864,7 @@ const updateArrayField = (field: MedicalRecordTemplateField, value: unknown) => 
   }
 
   .medical-record-workspace-head,
+  .medical-record-role-focus,
   .medical-record-template-strip,
   .medical-record-current-head,
   .medical-record-file-card {

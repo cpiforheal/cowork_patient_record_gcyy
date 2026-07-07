@@ -2,6 +2,7 @@ package com.coshare.patientrecord.medicalrecord.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
+import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.medicalrecord.model.TargetField;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,7 +13,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,17 +23,21 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class MedicalRecordSourceBuilder {
 
-    private static final Pattern MOBILE_PATTERN = Pattern.compile("1[3-9]\\d{9}");
-    private static final Pattern ID_CARD_PATTERN = Pattern.compile("\\d{6}(?:19|20)\\d{2}\\d{7}[0-9Xx]");
-
     private final ObjectMapper objectMapper;
     private final ClinicDatabaseService databaseService;
     private final JdbcTemplate jdbcTemplate;
+    private final SensitiveDataMasker sensitiveDataMasker;
 
-    public MedicalRecordSourceBuilder(ObjectMapper objectMapper, ClinicDatabaseService databaseService, JdbcTemplate jdbcTemplate) {
+    public MedicalRecordSourceBuilder(
+        ObjectMapper objectMapper,
+        ClinicDatabaseService databaseService,
+        JdbcTemplate jdbcTemplate,
+        SensitiveDataMasker sensitiveDataMasker
+    ) {
         this.objectMapper = objectMapper;
         this.databaseService = databaseService;
         this.jdbcTemplate = jdbcTemplate;
+        this.sensitiveDataMasker = sensitiveDataMasker;
     }
 
     public ObjectNode readPatientSource(
@@ -94,11 +98,12 @@ public class MedicalRecordSourceBuilder {
         String templateVersion
     ) {
         ObjectNode source = objectMapper.createObjectNode();
-        source.set("patient", maskSensitive ? desensitize(patient) : safeObject(patient));
+        source.set("patient", maskSensitive ? sensitiveDataMasker.maskJson(patient) : safeObject(patient));
         source.set("recordFields", compactFields(record, maskSensitive));
         source.set("attachments", compactDocuments(documents, maskSensitive));
         source.put("generatedFor", templateName);
         source.put("templateVersion", templateVersion);
+        if (maskSensitive) source.put("desensitizationPolicyVersion", sensitiveDataMasker.policyVersion());
         return source;
     }
 
@@ -114,7 +119,7 @@ public class MedicalRecordSourceBuilder {
         while (iterator.hasNext()) {
             Map.Entry<String, JsonNode> entry = iterator.next();
             String value = entry.getValue().asText("");
-            if (maskSensitive) value = maskSensitive(value);
+            if (maskSensitive) value = sensitiveDataMasker.maskFieldValue(entry.getKey(), value);
             if (!value.isBlank()) fields.put(entry.getKey(), value.length() > 2000 ? value.substring(0, 2000) + "..." : value);
         }
         return fields;
@@ -125,42 +130,12 @@ public class MedicalRecordSourceBuilder {
         if (documents == null || !documents.isArray()) return rows;
         for (JsonNode document : documents) {
             ObjectNode row = rows.addObject();
-            row.put("fileName", maskSensitive ? maskSensitive(text(document, "fileName")) : text(document, "fileName"));
+            row.put("fileName", maskSensitive ? sensitiveDataMasker.maskFieldValue("fileName", text(document, "fileName")) : text(document, "fileName"));
             row.put("fieldLabel", text(document, "fieldLabel"));
             row.put("department", text(document, "department"));
             row.put("uploadedAt", text(document, "uploadedAt"));
         }
         return rows;
-    }
-
-    private JsonNode desensitize(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) return objectMapper.createObjectNode();
-        JsonNode copy = node.deepCopy();
-        if (copy.isObject()) {
-            ObjectNode object = (ObjectNode) copy;
-            List.of(
-                "name",
-                "phone",
-                "mobile",
-                "telephone",
-                "idCard",
-                "idNo",
-                "idNumber",
-                "identityNo",
-                "identityCard",
-                "cardNo",
-                "address",
-                "currentAddress",
-                "homeAddress",
-                "contactName",
-                "contactPhone",
-                "contactMobile",
-                "contactAddress"
-            ).forEach(key -> {
-                if (object.has(key)) object.put(key, maskSensitive(object.path(key).asText("")));
-            });
-        }
-        return copy;
     }
 
     private JsonNode findPatient(JsonNode patients, String patientId) {
@@ -169,20 +144,6 @@ public class MedicalRecordSourceBuilder {
             if (patientId.equals(text(patient, "id"))) return patient;
         }
         return null;
-    }
-
-    private String maskSensitive(String value) {
-        String text = safe(value);
-        if (text.isBlank()) return "";
-        text = MOBILE_PATTERN.matcher(text).replaceAll(match -> {
-            String raw = match.group();
-            return raw.substring(0, 3) + "****" + raw.substring(7);
-        });
-        text = ID_CARD_PATTERN.matcher(text).replaceAll(match -> {
-            String raw = match.group();
-            return raw.substring(0, 6) + "********" + raw.substring(raw.length() - 4);
-        });
-        return text;
     }
 
     private void put(Map<String, String> values, String key, String value) {

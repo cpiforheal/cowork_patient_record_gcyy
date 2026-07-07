@@ -6,6 +6,7 @@ import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
 import com.coshare.patientrecord.ai.repository.ClinicAiDocumentRepository;
 import com.coshare.patientrecord.ai.repository.ClinicAiDocumentSchemaInitializer;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,6 +60,7 @@ public class ClinicAiDocumentService {
     private final ClinicAiDocumentRepository documentRepository;
     private final ObjectMapper objectMapper;
     private final ClinicAiConfigService aiConfigService;
+    private final SensitiveDataMasker sensitiveDataMasker;
     private final HttpClient httpClient;
     private final Path generatedDir;
 
@@ -67,12 +69,14 @@ public class ClinicAiDocumentService {
         ClinicAiDocumentRepository documentRepository,
         ObjectMapper objectMapper,
         ClinicAiConfigService aiConfigService,
+        SensitiveDataMasker sensitiveDataMasker,
         @Value("${clinic.generated-ai-document-dir:${clinic.attachment-dir}/../generated-ai-documents}") String generatedDir
     ) {
         this.schemaInitializer = schemaInitializer;
         this.documentRepository = documentRepository;
         this.objectMapper = objectMapper;
         this.aiConfigService = aiConfigService;
+        this.sensitiveDataMasker = sensitiveDataMasker;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
@@ -220,7 +224,14 @@ public class ClinicAiDocumentService {
 
             用户粘贴的材料和要求：
             %s
-            """.formatted(input.title(), templateName(input.docType()), input.content());
+
+            脱敏策略版本：%s
+            """.formatted(
+            sensitiveDataMasker.maskText(input.title()),
+            templateName(input.docType()),
+            sensitiveDataMasker.maskText(input.content()),
+            sensitiveDataMasker.policyVersion()
+        );
     }
 
     private ObjectNode previewNode(String title, String docType, List<String> paragraphs) {

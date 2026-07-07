@@ -356,6 +356,9 @@
               :patient-name="fieldValues.patientName"
               :patient-gender="fieldValues.gender"
               :visit-no="fieldValues.visitNo || patientId"
+              :focused-role-key="focusedMedicalRecordRoleKey"
+              :focused-role-label="focusedMedicalRecordRoleLabel"
+              :focused-field-keys="focusedMedicalRecordFieldKeys"
               :current-record="currentMedicalRecord"
               :versions="medicalRecordVersions"
               :completed-count="medicalRecordCompletedCount"
@@ -1583,6 +1586,9 @@
           :patient-name="fieldValues.patientName"
           :patient-gender="fieldValues.gender"
           :visit-no="fieldValues.visitNo || patientId"
+          :focused-role-key="focusedMedicalRecordRoleKey"
+          :focused-role-label="focusedMedicalRecordRoleLabel"
+          :focused-field-keys="focusedMedicalRecordFieldKeys"
           :current-record="currentMedicalRecord"
           :versions="medicalRecordVersions"
           :completed-count="medicalRecordCompletedCount"
@@ -1827,6 +1833,12 @@ const medicalRecordMissingItems = ref<string[]>([]);
 const medicalRecordUnboundFields = ref<string[]>([]);
 
 const medicalRecordActiveSections = ref<string[]>([]);
+
+const focusedMedicalRecordRoleKey = ref("");
+
+const focusedMedicalRecordRoleLabel = ref("");
+
+const focusedMedicalRecordFieldKeys = ref<string[]>([]);
 
 const auditTimelineVisible = ref(false);
 
@@ -4013,6 +4025,23 @@ const focusWorkflowStage = async (stage: WorkflowStageNode) => {
   scrollToSection(targetSectionKey);
 };
 
+const applyMedicalRecordRoleFocus = (preview?: WorkflowRolePreview) => {
+  if (!preview) return;
+
+  focusedMedicalRecordRoleKey.value = preview.key;
+  focusedMedicalRecordRoleLabel.value = preview.title;
+  focusedMedicalRecordFieldKeys.value = preview.focusFieldKeys;
+
+  const activeSections = new Set(medicalRecordActiveSections.value);
+  medicalRecordFields.value
+    .filter(field => preview.focusFieldKeys.includes(field.key))
+    .forEach(field => activeSections.add(field.section));
+
+  if (activeSections.size) medicalRecordActiveSections.value = Array.from(activeSections);
+};
+
+const activeWorkflowRolePreview = () => patientRolePreviews.value.find(preview => preview.key === activeWorkflowRoleKey.value);
+
 const openWorkflowRolePreviewEdit = async (preview: WorkflowRolePreview) => {
   if (preview.primaryTarget === "attachments") {
     await switchDetailWorkspace("attachments");
@@ -4029,7 +4058,16 @@ const openWorkflowRolePreviewEdit = async (preview: WorkflowRolePreview) => {
     return;
   }
 
+  applyMedicalRecordRoleFocus(preview);
+
   await switchDetailWorkspace("medicalRecord");
+
+  await nextTick();
+
+  const firstTarget = preview.focusFieldKeys
+    .map(fieldKey => document.getElementById(`medical-record-field-${fieldKey}`))
+    .find(Boolean);
+  firstTarget?.scrollIntoView({ behavior: "smooth", block: "center" });
 };
 
 const openWorkflowRolePreviewAttachments = async () => {
@@ -4040,6 +4078,8 @@ const focusWorkflowPreviewField = async (fieldKey: string) => {
   const medicalField = medicalRecordFields.value.find(field => field.key === fieldKey);
 
   if (medicalField) {
+    applyMedicalRecordRoleFocus(activeWorkflowRolePreview());
+
     await switchDetailWorkspace("medicalRecord");
 
     const activeSections = new Set(medicalRecordActiveSections.value);

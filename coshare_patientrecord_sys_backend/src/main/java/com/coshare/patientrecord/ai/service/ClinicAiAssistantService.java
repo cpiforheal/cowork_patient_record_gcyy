@@ -9,6 +9,7 @@ import com.coshare.patientrecord.ai.model.KnowledgeItem;
 import com.coshare.patientrecord.ai.model.KnowledgeSelection;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
+import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.security.AuthPermission;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -46,6 +47,7 @@ public class ClinicAiAssistantService {
     private final ClinicAiKnowledgeService knowledgeService;
     private final ClinicAiAssistantLogService logService;
     private final ObjectMapper objectMapper;
+    private final SensitiveDataMasker sensitiveDataMasker;
     private final HttpClient httpClient;
 
     public ClinicAiAssistantService(
@@ -53,13 +55,15 @@ public class ClinicAiAssistantService {
         ClinicAiConfigService aiConfigService,
         ClinicAiKnowledgeService knowledgeService,
         ClinicAiAssistantLogService logService,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        SensitiveDataMasker sensitiveDataMasker
     ) {
         this.databaseService = databaseService;
         this.aiConfigService = aiConfigService;
         this.knowledgeService = knowledgeService;
         this.logService = logService;
         this.objectMapper = objectMapper;
+        this.sensitiveDataMasker = sensitiveDataMasker;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -102,7 +106,7 @@ public class ClinicAiAssistantService {
             payload.put("stream", false);
             ArrayNode messages = payload.putArray("messages");
             messages.addObject().put("role", "system").put("content", systemPrompt(assistantType));
-            appendConversationMessages(messages, currentRequest);
+            appendConversationMessages(messages, currentRequest, shouldMaskRequest(assistantType, currentRequest));
             appendCurrentUserMessage(messages, currentRequest, currentUser, assistantType, knowledge);
 
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(baseUrl))
@@ -171,13 +175,16 @@ public class ClinicAiAssistantService {
         );
     }
 
-    private void appendConversationMessages(ArrayNode messages, AiAssistantRequest request) {
+    private void appendConversationMessages(ArrayNode messages, AiAssistantRequest request, boolean maskSensitive) {
         List<AiAssistantMessage> history = request == null || request.messages() == null ? List.of() : request.messages();
         history.stream()
             .skip(Math.max(0, history.size() - 8))
             .filter(item -> item != null && List.of("user", "assistant").contains(safe(item.role())))
             .filter(item -> !safe(item.content()).isBlank())
-            .forEach(item -> messages.addObject().put("role", safe(item.role())).put("content", trimText(item.content(), 1200)));
+            .forEach(item -> {
+                String content = maskSensitive ? sensitiveDataMasker.maskText(item.content()) : item.content();
+                messages.addObject().put("role", safe(item.role())).put("content", trimText(content, 1200));
+            });
     }
 
     private void appendCurrentUserMessage(
@@ -212,16 +219,19 @@ public class ClinicAiAssistantService {
         KnowledgeSelection knowledge
     ) {
         ObjectNode payload = objectMapper.createObjectNode();
+        boolean maskSensitive = shouldMaskRequest(assistantType, request);
         payload.put("assistantType", assistantType);
-        payload.put("question", safe(request.prompt()));
+        payload.put("question", maskSensitive ? sensitiveDataMasker.maskText(request.prompt()) : safe(request.prompt()));
         ObjectNode operator = payload.putObject("operator");
         operator.put("name", safe(user.name()));
         operator.put("role", safe(user.role()));
         operator.put("department", safe(user.department()));
-        payload.set("userContext", request.context() == null ? objectMapper.createObjectNode() : objectMapper.valueToTree(request.context()));
+        JsonNode userContext = request.context() == null ? objectMapper.createObjectNode() : objectMapper.valueToTree(request.context());
+        payload.set("userContext", maskSensitive ? sensitiveDataMasker.maskJson(userContext) : userContext);
         payload.set("attachmentIds", objectMapper.valueToTree(request.attachmentIds() == null ? List.of() : request.attachmentIds()));
-        payload.set("uploadedMaterials", compactUploadedMaterials(request.attachments()));
+        payload.set("uploadedMaterials", compactUploadedMaterials(request.attachments(), maskSensitive));
         payload.set("knowledgeBase", compactKnowledge(knowledge));
+        if (maskSensitive) payload.put("desensitizationPolicyVersion", sensitiveDataMasker.policyVersion());
 
         String patientId = safe(request.patientId());
         if (!patientId.isBlank()) {
@@ -230,10 +240,10 @@ public class ClinicAiAssistantService {
             if (patient == null) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到患者，或当前账号无权访问该患者。");
             }
-            payload.set("patient", patient);
+            payload.set("patient", sensitiveDataMasker.maskJson(patient));
             payload.set("recordFields", compactRecord(db.path("records").path(patientId)));
             payload.set("attachments", compactDocuments(db.path("documents").path(patientId)));
-            payload.set("archive", db.path("archive").path(patientId));
+            payload.set("archive", sensitiveDataMasker.maskJson(db.path("archive").path(patientId)));
         }
 
         payload.put(
@@ -260,12 +270,13 @@ public class ClinicAiAssistantService {
         return result;
     }
 
-    private ArrayNode compactUploadedMaterials(List<AiAssistantAttachment> attachments) {
+    private ArrayNode compactUploadedMaterials(List<AiAssistantAttachment> attachments, boolean maskSensitive) {
         ArrayNode compact = objectMapper.createArrayNode();
         if (attachments == null) return compact;
         attachments.stream().limit(8).forEach(attachment -> {
             ObjectNode item = compact.addObject();
-            item.put("name", trimText(attachment.name(), 160));
+            String name = maskSensitive ? sensitiveDataMasker.maskFieldValue("fileName", attachment.name()) : safe(attachment.name());
+            item.put("name", trimText(name, 160));
             item.put("type", safe(attachment.type()));
             item.put("size", attachment.size() == null ? 0 : attachment.size());
             item.put("source", safe(attachment.source()));
@@ -349,6 +360,11 @@ public class ClinicAiAssistantService {
         return "public";
     }
 
+    private boolean shouldMaskRequest(String assistantType, AiAssistantRequest request) {
+        if (request != null && !safe(request.patientId()).isBlank()) return true;
+        return List.of("patient", "quality").contains(assistantType);
+    }
+
     private static String normalizeChatCompletionsUrl(String rawUrl) {
         String url = safe(rawUrl);
         if (url.isBlank()) return "";
@@ -374,7 +390,7 @@ public class ClinicAiAssistantService {
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> entry = fields.next();
             String value = entry.getValue().asText("");
-            if (!value.isBlank()) compact.put(entry.getKey(), trimText(value, 800));
+            if (!value.isBlank()) compact.put(entry.getKey(), trimText(sensitiveDataMasker.maskFieldValue(entry.getKey(), value), 800));
         }
         return compact;
     }
@@ -385,7 +401,7 @@ public class ClinicAiAssistantService {
         for (JsonNode document : documents) {
             ObjectNode item = compact.addObject();
             item.put("id", document.path("id").asText(document.path("key").asText("")));
-            item.put("fileName", document.path("fileName").asText(""));
+            item.put("fileName", sensitiveDataMasker.maskFieldValue("fileName", document.path("fileName").asText("")));
             item.put("fieldLabel", document.path("fieldLabel").asText(""));
             item.put("department", document.path("department").asText(""));
             item.put("uploadedAt", document.path("uploadedAt").asText(""));

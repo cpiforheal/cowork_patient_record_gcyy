@@ -25,6 +25,9 @@ import org.springframework.web.server.ResponseStatusException;
 public class MedicalRecordTemplateRenderer {
 
     private final ObjectMapper objectMapper;
+    private static final Pattern UNBOUND_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{[^}]+}");
+    private static final Pattern TABLE_ROW_PATTERN = Pattern.compile("<w:tr[\\s\\S]*?</w:tr>");
+    private static final Pattern PARAGRAPH_PATTERN = Pattern.compile("<w:p[\\s\\S]*?</w:p>");
     private static final List<String> GENERATION_SCOPE_STOP_MARKERS = List.of(
         "十三、",
         "十三.",
@@ -58,6 +61,10 @@ public class MedicalRecordTemplateRenderer {
                         xml = trimDocumentXmlToGenerationScope(xml);
                     }
                     xml = applyReplacements(xml, replacements);
+                    xml = UNBOUND_PLACEHOLDER_PATTERN.matcher(xml).replaceAll("");
+                    if ("word/document.xml".equals(entry.getName())) {
+                        xml = cleanGeneratedDocumentXml(xml);
+                    }
                     bytes = xml.getBytes(StandardCharsets.UTF_8);
                 }
                 zipOutputStream.write(bytes);
@@ -131,8 +138,7 @@ public class MedicalRecordTemplateRenderer {
     }
 
     private String trimDocumentXmlToGenerationScope(String xml) {
-        Pattern paragraphPattern = Pattern.compile("<w:p[\\s\\S]*?</w:p>");
-        var matcher = paragraphPattern.matcher(xml);
+        var matcher = PARAGRAPH_PATTERN.matcher(xml);
         while (matcher.find()) {
             String paragraph = matcher.group();
             if (GENERATION_SCOPE_STOP_MARKERS.stream().noneMatch(paragraph::contains)) continue;
@@ -142,6 +148,37 @@ public class MedicalRecordTemplateRenderer {
             return xml.substring(0, matcher.start()) + xml.substring(end);
         }
         return xml;
+    }
+
+    private String cleanGeneratedDocumentXml(String xml) {
+        String withoutEmptyRows = removeEmptyBlocks(xml, TABLE_ROW_PATTERN);
+        return removeEmptyBlocks(withoutEmptyRows, PARAGRAPH_PATTERN);
+    }
+
+    private String removeEmptyBlocks(String xml, Pattern blockPattern) {
+        var matcher = blockPattern.matcher(xml);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find()) {
+            String block = matcher.group();
+            matcher.appendReplacement(buffer, shouldRemoveGeneratedBlock(block) ? "" : java.util.regex.Matcher.quoteReplacement(block));
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private boolean shouldRemoveGeneratedBlock(String block) {
+        if (block.contains("<w:sectPr") || block.contains("<w:drawing") || block.contains("<w:pict") || block.contains("<w:object")) {
+            return false;
+        }
+        String visible = block
+            .replaceAll("<[^>]+>", "")
+            .replace("&nbsp;", "")
+            .replace("&#160;", "")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .trim();
+        return visible.isBlank();
     }
 
     private String xmlEscape(String value) {

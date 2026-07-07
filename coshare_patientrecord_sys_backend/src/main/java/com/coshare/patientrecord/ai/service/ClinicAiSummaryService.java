@@ -4,6 +4,7 @@ import com.coshare.patientrecord.ai.dto.AiSummaryRequest;
 import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
+import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.security.AuthPermission;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -38,16 +39,19 @@ public class ClinicAiSummaryService {
     private final ClinicDatabaseService databaseService;
     private final ClinicAiConfigService aiConfigService;
     private final ObjectMapper objectMapper;
+    private final SensitiveDataMasker sensitiveDataMasker;
     private final HttpClient httpClient;
 
     public ClinicAiSummaryService(
         ClinicDatabaseService databaseService,
         ClinicAiConfigService aiConfigService,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        SensitiveDataMasker sensitiveDataMasker
     ) {
         this.databaseService = databaseService;
         this.aiConfigService = aiConfigService;
         this.objectMapper = objectMapper;
+        this.sensitiveDataMasker = sensitiveDataMasker;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -143,10 +147,14 @@ public class ClinicAiSummaryService {
 
     private String buildPrompt(JsonNode patient, JsonNode record, JsonNode documents, JsonNode archive) {
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.set("patient", patient);
+        payload.set("patient", sensitiveDataMasker.maskJson(patient));
         payload.set("recordFields", compactRecord(record));
         payload.set("attachments", compactDocuments(documents));
-        payload.set("archive", archive == null || archive.isMissingNode() ? objectMapper.createObjectNode() : archive);
+        payload.set(
+            "archive",
+            archive == null || archive.isMissingNode() ? objectMapper.createObjectNode() : sensitiveDataMasker.maskJson(archive)
+        );
+        payload.put("desensitizationPolicyVersion", sensitiveDataMasker.policyVersion());
         payload.put("instruction", "请生成一份院内辅助阅读意见：既要概括患者档案，也要指出值得关注但容易被忽略的沟通、随访、复查和档案完整性问题。控制篇幅，避免模板化套话。");
         try {
             return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(payload);
@@ -163,7 +171,8 @@ public class ClinicAiSummaryService {
             Map.Entry<String, JsonNode> entry = fields.next();
             String value = entry.getValue().asText("");
             if (!value.isBlank()) {
-                compact.put(entry.getKey(), value.length() > 900 ? value.substring(0, 900) + "..." : value);
+                String masked = sensitiveDataMasker.maskFieldValue(entry.getKey(), value);
+                compact.put(entry.getKey(), masked.length() > 900 ? masked.substring(0, 900) + "..." : masked);
             }
         }
         return compact;
@@ -174,7 +183,7 @@ public class ClinicAiSummaryService {
         if (documents == null || !documents.isArray()) return compact;
         for (JsonNode document : documents) {
             ObjectNode item = compact.addObject();
-            item.put("fileName", document.path("fileName").asText(""));
+            item.put("fileName", sensitiveDataMasker.maskFieldValue("fileName", document.path("fileName").asText("")));
             item.put("fieldLabel", document.path("fieldLabel").asText(""));
             item.put("department", document.path("department").asText(""));
             item.put("uploadedAt", document.path("uploadedAt").asText(""));

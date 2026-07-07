@@ -37,6 +37,7 @@ export type WorkflowRolePreview = {
   missingItems: WorkflowRolePreviewField[];
   taskItems: WorkflowFieldTask[];
   attachments: WorkflowRolePreviewAttachment[];
+  focusFieldKeys: string[];
   canEdit: boolean;
   primaryTarget: RolePreviewTarget;
   primaryActionLabel: string;
@@ -367,6 +368,7 @@ export const usePatientRolePreview = ({
       const imageCount = attachments.filter(attachment => attachment.isImage).length;
       const statusTone: WorkflowRolePreview["statusTone"] =
         missingCount > 0 ? "warning" : completedCount > 0 || attachments.length > 0 ? "success" : "info";
+      const focusFieldKeys = uniqueBy([...config.medicalFieldKeys, ...medicalFieldItems.map(field => field.key)], key => key);
 
       return {
         key: config.key,
@@ -386,6 +388,7 @@ export const usePatientRolePreview = ({
         missingItems,
         taskItems: relatedTasks,
         attachments: attachments.slice(0, 6),
+        focusFieldKeys,
         canEdit: roleCanEdit(currentRole.value, config.roles) || allFields.some(field => field.editable),
         primaryTarget: config.primaryTarget,
         primaryActionLabel: config.primaryActionLabel

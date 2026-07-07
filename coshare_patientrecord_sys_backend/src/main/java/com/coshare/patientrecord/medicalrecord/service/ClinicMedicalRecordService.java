@@ -63,7 +63,7 @@ public class ClinicMedicalRecordService {
         "quality"
     );
     private static final List<String> DOCTOR_EDITORS = List.of("admin", "doctor");
-    private static final List<String> FRONTDESK_EDITORS = List.of("admin", "frontdesk", "reception");
+    private static final List<String> FRONTDESK_EDITORS = List.of("admin", "frontdesk", "reception", "nurse", "nursing");
     private static final List<String> LAB_EDITORS = List.of("admin", "lab");
     private static final List<String> ECG_EDITORS = List.of("admin", "ecg");
     private static final List<String> INSPECTION_EDITORS = List.of("admin", "inspection");

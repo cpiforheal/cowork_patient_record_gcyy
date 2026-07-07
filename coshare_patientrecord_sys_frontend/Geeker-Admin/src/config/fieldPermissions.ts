@@ -153,7 +153,6 @@ const firstVisitCollaborators: UserRole[] = ["admin", "frontdesk", "reception", 
 const nurse: UserRole[] = ["admin", "nurse"];
 const nursing: UserRole[] = ["admin", "nurse", "nursing"];
 const inspection: UserRole[] = ["admin", "inspection"];
-const lab: UserRole[] = ["admin", "lab"];
 const ecg: UserRole[] = ["admin", "ecg"];
 const ultrasound: UserRole[] = ["admin", "ultrasound"];
 const quality: UserRole[] = ["admin", "quality"];
@@ -876,7 +875,13 @@ export const recordSections: RecordSection[] = [
         kind: "textarea",
         editors: firstVisitCollaborators
       },
-      { key: "allergyHistory", label: "过敏史", value: "否认药物及食物过敏史。", kind: "textarea", editors: firstVisitCollaborators },
+      {
+        key: "allergyHistory",
+        label: "过敏史",
+        value: "否认药物及食物过敏史。",
+        kind: "textarea",
+        editors: firstVisitCollaborators
+      },
       {
         key: "personalHistory",
         label: "个人史",

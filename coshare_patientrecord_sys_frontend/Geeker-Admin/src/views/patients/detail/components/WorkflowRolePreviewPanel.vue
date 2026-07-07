@@ -1,30 +1,36 @@
 <template>
   <section class="workflow-role-preview">
     <aside class="workflow-role-list" aria-label="岗位流程">
-      <button
-        v-for="preview in previews"
-        :key="preview.key"
-        type="button"
-        class="workflow-role-card"
-        :class="{ active: preview.key === selectedKey }"
-        @click="$emit('update:selectedKey', preview.key)"
-      >
-        <span class="role-card-head">
-          <strong>{{ preview.title }}</strong>
+      <article v-for="preview in previews" :key="preview.key" class="role-card-stack">
+        <button
+          type="button"
+          class="workflow-role-card"
+          :class="{ active: preview.key === selectedKey }"
+          @click="$emit('update:selectedKey', preview.key)"
+        >
+          <span class="role-card-head">
+            <strong>{{ preview.title }}</strong>
 
-          <el-tag :type="preview.statusTone" effect="plain" size="small">{{ preview.statusLabel }}</el-tag>
-        </span>
+            <el-tag :type="preview.statusTone" effect="plain" size="small">{{ preview.statusLabel }}</el-tag>
+          </span>
 
-        <small>{{ preview.subtitle }}</small>
+          <small>{{ preview.subtitle }}</small>
 
-        <span class="role-card-stats">
-          <em>已填 {{ preview.completedCount }}/{{ preview.totalCount || 0 }}</em>
+          <span class="role-card-stats">
+            <em>已填 {{ preview.completedCount }}/{{ preview.totalCount || 0 }}</em>
 
-          <em>附件 {{ preview.attachmentCount }}</em>
-        </span>
+            <em>附件 {{ preview.attachmentCount }}</em>
+          </span>
+        </button>
 
-        <span v-if="preview.attachments.length" class="role-card-attachments">
-          <span v-for="attachment in preview.attachments.slice(0, 3)" :key="attachment.key" class="role-attachment-chip">
+        <section v-if="preview.attachments.length" class="role-card-attachments" aria-label="岗位图片与附件摘要">
+          <button
+            v-for="attachment in preview.attachments.slice(0, 4)"
+            :key="attachment.key"
+            type="button"
+            class="role-attachment-chip"
+            @click="$emit('openAttachments', preview)"
+          >
             <img
               v-if="attachment.isImage && attachment.url"
               :src="attachment.url"
@@ -32,9 +38,9 @@
             />
 
             <i v-else>{{ attachment.fileName || attachment.title }}</i>
-          </span>
-        </span>
-      </button>
+          </button>
+        </section>
+      </article>
     </aside>
 
     <main class="workflow-role-detail">
@@ -207,6 +213,11 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   gap: 10px;
 }
 
+.role-card-stack {
+  display: grid;
+  gap: 6px;
+}
+
 .workflow-role-card {
   display: grid;
   gap: 8px;
@@ -267,18 +278,24 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 }
 
 .role-card-attachments {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px dashed var(--hos-border-light);
+  border-radius: var(--hos-radius-sm);
 }
 
 .role-attachment-chip {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 34px;
+  width: 100%;
+  height: 42px;
   overflow: hidden;
   color: var(--hos-text-secondary);
+  cursor: pointer;
   background: var(--hos-glass);
   border: 1px solid var(--hos-border-light);
   border-radius: var(--hos-radius-sm);
