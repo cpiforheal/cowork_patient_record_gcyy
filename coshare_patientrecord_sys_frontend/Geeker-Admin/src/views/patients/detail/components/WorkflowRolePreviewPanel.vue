@@ -94,7 +94,9 @@
                 {{
                   activePreview.key === "inspection"
                     ? "先上传图片/视频，再补充镜下所见和初步检查描述。"
-                    : "只维护当前岗位负责字段，最终目标病历仍由医生汇总生成。"
+                    : activePreview.key === "doctorDecision"
+                      ? "承接上游检查、问诊和化验结果，分别维护西医诊疗判断与中医辨证治法。"
+                      : "只维护当前岗位负责字段，最终目标病历仍由医生汇总生成。"
                 }}
               </span>
             </div>
@@ -115,45 +117,55 @@
 
           <el-empty v-if="!maintenanceFields.length" description="当前岗位暂无可直接维护字段，请进入目标病历或完整档案处理。" />
 
-          <div v-else class="maintain-field-list">
-            <article
-              v-for="item in maintenanceFields"
-              :key="item.field.key"
-              class="maintain-field-card"
-              :class="{ featured: activePreview.key === 'inspection' && item.field.key === 'inspectionImages' }"
-            >
-              <header>
-                <div>
-                  <strong>{{ item.field.label }}</strong>
+          <div v-else class="maintain-field-groups">
+            <section v-for="group in maintenanceFieldGroups" :key="group.key" class="maintain-field-group">
+              <header v-if="group.title" class="maintain-group-head">
+                <strong>{{ group.title }}</strong>
 
-                  <small>{{ item.sectionTitle }}</small>
-                </div>
-
-                <el-tag v-if="!isFieldEditable(item.field)" effect="plain" size="small">只读</el-tag>
-                <el-tag v-else-if="item.field.required" type="warning" effect="plain" size="small">必填</el-tag>
+                <span>{{ group.description }}</span>
               </header>
 
-              <ArchiveFieldRenderer
-                :field="item.field"
-                :model-value="fieldValues[item.field.key]"
-                :disabled="!isFieldEditable(item.field)"
-                :issue="issueForField(item.field)"
-                :attachments="matchedAttachments(item.field.key)"
-                :select-options="selectOptions(item.field)"
-                :followup-records="followupRecords"
-                :role-label="roleLabel"
-                :can-open-attachment="canOpenAttachment"
-                :is-image-attachment="isImageAttachment"
-                :attachment-preview-url="attachmentPreviewUrl"
-                :open-attachment="openAttachment"
-                :textarea-rows="activePreview.key === 'inspection' ? 3 : 2"
-                @update:model-value="$emit('updateField', item.field.key, $event)"
-                @update-lab-metric="(field, value) => $emit('updateLabMetric', field, value)"
-                @upload="(field, files, remark) => $emit('upload', field, files, remark)"
-                @add-followup-record="$emit('addFollowupRecord')"
-                @remove-followup-record="$emit('removeFollowupRecord', $event)"
-              />
-            </article>
+              <div class="maintain-field-list">
+                <article
+                  v-for="item in group.items"
+                  :key="item.field.key"
+                  class="maintain-field-card"
+                  :class="{ featured: activePreview.key === 'inspection' && item.field.key === 'inspectionImages' }"
+                >
+                  <header>
+                    <div>
+                      <strong>{{ item.field.label }}</strong>
+
+                      <small>{{ item.sectionTitle }}</small>
+                    </div>
+
+                    <el-tag v-if="!isFieldEditable(item.field)" effect="plain" size="small">只读</el-tag>
+                    <el-tag v-else-if="item.field.required" type="warning" effect="plain" size="small">必填</el-tag>
+                  </header>
+
+                  <ArchiveFieldRenderer
+                    :field="item.field"
+                    :model-value="fieldValues[item.field.key]"
+                    :disabled="!isFieldEditable(item.field)"
+                    :issue="issueForField(item.field)"
+                    :attachments="matchedAttachments(item.field.key)"
+                    :select-options="selectOptions(item.field)"
+                    :followup-records="followupRecords"
+                    :role-label="roleLabel"
+                    :can-open-attachment="canOpenAttachment"
+                    :is-image-attachment="isImageAttachment"
+                    :attachment-preview-url="attachmentPreviewUrl"
+                    :open-attachment="openAttachment"
+                    :textarea-rows="activePreview.key === 'inspection' || activePreview.key === 'doctorDecision' ? 3 : 2"
+                    @update:model-value="$emit('updateField', item.field.key, $event)"
+                    @update-lab-metric="(field, value) => $emit('updateLabMetric', field, value)"
+                    @upload="(field, files, remark) => $emit('upload', field, files, remark)"
+                    @add-followup-record="$emit('addFollowupRecord')"
+                    @remove-followup-record="$emit('removeFollowupRecord', $event)"
+                  />
+                </article>
+              </div>
+            </section>
           </div>
         </section>
 
@@ -313,6 +325,12 @@ type WorkflowRoleMaintenanceField = {
   sectionTitle: string;
   field: RecordField;
 };
+type WorkflowRoleMaintenanceGroup = {
+  key: string;
+  title: string;
+  description: string;
+  items: WorkflowRoleMaintenanceField[];
+};
 
 const props = defineProps<{
   previews: WorkflowRolePreview[];
@@ -348,6 +366,51 @@ defineEmits<{
 const activePreview = computed(() => props.previews.find(preview => preview.key === props.selectedKey));
 const rolePanelMode = ref<RolePanelMode>("preview");
 const editableMaintenanceFields = computed(() => props.maintenanceFields.filter(item => props.isFieldEditable(item.field)));
+const westernDoctorFieldKeys = new Set([
+  "westernDiagnosis",
+  "secondaryDiagnosisList",
+  "otherMainDiagnosis",
+  "surgeryFeasibility"
+]);
+const tcmDoctorFieldKeys = new Set(["tcmDiagnosis", "tcmSyndrome", "tcmTreatment", "comorbidityDisease", "comorbiditySyndrome"]);
+const maintenanceFieldGroups = computed<WorkflowRoleMaintenanceGroup[]>(() => {
+  if (activePreview.value?.key !== "doctorDecision") {
+    return [
+      {
+        key: "default",
+        title: "",
+        description: "",
+        items: props.maintenanceFields
+      }
+    ];
+  }
+
+  const westernItems = props.maintenanceFields.filter(item => westernDoctorFieldKeys.has(item.field.key));
+  const tcmItems = props.maintenanceFields.filter(item => tcmDoctorFieldKeys.has(item.field.key));
+  const groupedKeys = new Set([...westernDoctorFieldKeys, ...tcmDoctorFieldKeys]);
+  const otherItems = props.maintenanceFields.filter(item => !groupedKeys.has(item.field.key));
+
+  return [
+    {
+      key: "western",
+      title: "西医诊疗",
+      description: "维护西医诊断、次诊断、鉴别/合并判断与治疗方案依据。",
+      items: westernItems
+    },
+    {
+      key: "tcm",
+      title: "中医诊疗",
+      description: "维护中医诊断、证型、辨证依据与中医治法建议。",
+      items: tcmItems
+    },
+    {
+      key: "other",
+      title: "其他诊疗信息",
+      description: "补充医生诊疗决策相关的其他字段。",
+      items: otherItems
+    }
+  ].filter(group => group.items.length);
+});
 
 watch(
   () =>
@@ -616,6 +679,7 @@ watch(
 
 .maintain-panel,
 .preview-panel,
+.maintain-field-groups,
 .maintain-field-list {
   display: grid;
   gap: 14px;
@@ -643,6 +707,31 @@ watch(
   span {
     color: #64748b;
     line-height: 1.6;
+  }
+}
+
+.maintain-field-group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.maintain-group-head {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border-left: 4px solid #2563eb;
+
+  strong {
+    color: #111827;
+    font-size: 15px;
+  }
+
+  span {
+    color: #64748b;
+    line-height: 1.55;
   }
 }
 

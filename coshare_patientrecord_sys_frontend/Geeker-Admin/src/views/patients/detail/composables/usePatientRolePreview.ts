@@ -59,7 +59,9 @@ type RolePreviewConfig = {
   contextTitle?: string;
   contextArchiveFieldKeys?: string[];
   contextMedicalFieldKeys?: string[];
+  contextLimit?: number;
   maintenanceFieldKeys?: string[];
+  includeRoleOwnedMedicalFields?: boolean;
   primaryTarget: RolePreviewTarget;
   primaryActionLabel: string;
 };
@@ -216,6 +218,81 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
     primaryActionLabel: "进入目标病历维护化验字段"
   },
   {
+    key: "doctorDecision",
+    title: "医生诊疗决策",
+    subtitle: "中西医诊断、辨证与治疗方案",
+    description: "承接检查室、接诊室和化验室的上游信息，形成西医诊断、中医辨证和治疗/手术方案。",
+    roles: ["doctor"],
+    sectionKeys: ["mainDiagnosis", "secondaryDiagnosis", "comorbidityTcm", "tcmInspection", "treatmentPlanManagement"],
+    medicalSections: ["诊断", "首次病程记录", "术前小结"],
+    archiveFieldKeys: [
+      "westernDiagnosis",
+      "secondaryDiagnosisList",
+      "otherMainDiagnosis",
+      "surgeryFeasibility",
+      "tcmDiagnosis",
+      "tcmSyndrome",
+      "tcmTreatment",
+      "comorbidityDisease",
+      "comorbiditySyndrome"
+    ],
+    medicalFieldKeys: [
+      "westernDiagnosis",
+      "tcmDiagnosis",
+      "tcmSyndromeBasis",
+      "westernDiagnosisBasis",
+      "tcmDifferentialDiagnosis",
+      "westernDifferentialDiagnosis",
+      "diagnosisTreatmentPlan",
+      "preOpDiagnosis",
+      "operationIndication"
+    ],
+    contextTitle: "上游检查、问诊与化验依据",
+    contextArchiveFieldKeys: [
+      "inspectionBriefNote",
+      "lithotomyExam",
+      "analTension",
+      "digitalExam",
+      "anoscope",
+      "ecgResult",
+      "colonoscopy",
+      "chiefComplaint",
+      "onset",
+      "bloodRoutine",
+      "coagulation",
+      "preOpEight",
+      "urineRoutine",
+      "biochemistry"
+    ],
+    contextMedicalFieldKeys: [
+      "specialExamFullText",
+      "ecgResult",
+      "colonoscopy",
+      "chiefComplaintText",
+      "presentIllnessText",
+      "bloodRoutine",
+      "coagulation",
+      "preOpEight",
+      "urineRoutine",
+      "biochemistry"
+    ],
+    contextLimit: 12,
+    maintenanceFieldKeys: [
+      "westernDiagnosis",
+      "secondaryDiagnosisList",
+      "otherMainDiagnosis",
+      "surgeryFeasibility",
+      "tcmDiagnosis",
+      "tcmSyndrome",
+      "tcmTreatment",
+      "comorbidityDisease",
+      "comorbiditySyndrome"
+    ],
+    includeRoleOwnedMedicalFields: false,
+    primaryTarget: "medicalRecord",
+    primaryActionLabel: "进入目标病历汇总/医生工作台"
+  },
+  {
     key: "treatment",
     title: "治疗/手术",
     subtitle: "术前、术中与术后处理",
@@ -361,7 +438,7 @@ export const usePatientRolePreview = ({
           field =>
             config.medicalSections.includes(field.section) ||
             config.medicalFieldKeys.includes(field.key) ||
-            field.editorRoles?.some(role => config.roles.includes(role))
+            (config.includeRoleOwnedMedicalFields !== false && field.editorRoles?.some(role => config.roles.includes(role)))
         )
         .map(field => toPreviewField(field, String(fieldValues[field.key] || ""), currentRole.value));
 
@@ -382,7 +459,7 @@ export const usePatientRolePreview = ({
         .map(field => toPreviewField(field, String(fieldValues[field.key] || ""), currentRole.value));
       const contextItems = uniqueBy([...contextMedicalItems, ...contextArchiveItems], item => item.key)
         .filter(item => isValueFilled(item.value))
-        .slice(0, 6);
+        .slice(0, config.contextLimit || 6);
       const summaryItems = allFields.filter(item => isValueFilled(item.value)).slice(0, 8);
       const missingItems = allFields.filter(item => item.required && !isValueFilled(item.value)).slice(0, 8);
       const relatedFieldKeys = new Set([
