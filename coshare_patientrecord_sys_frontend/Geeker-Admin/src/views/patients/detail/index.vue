@@ -315,6 +315,25 @@
             v-if="detailWorkspaceMode === 'flow'"
             v-model:selected-key="activeWorkflowRoleKey"
             :previews="patientRolePreviews"
+            :current-role="currentRole"
+            :maintenance-fields="activeWorkflowMaintenanceFields"
+            :field-values="fieldValues"
+            :followup-records="followupRecords"
+            :is-field-editable="isEditable"
+            :issue-for-field="issueForField"
+            :matched-attachments="matchedAttachments"
+            :select-options="selectOptions"
+            :role-label="roleLabel"
+            :can-open-attachment="canOpenAttachment"
+            :is-image-attachment="isImageAttachment"
+            :attachment-preview-url="attachmentPreviewUrl"
+            :open-attachment="openAttachment"
+            @update-field="updateWorkflowMaintenanceField"
+            @update-lab-metric="updateLabMetricField"
+            @upload="uploadFieldAttachments"
+            @save-maintained-fields="saveWorkflowRoleMaintenanceFields"
+            @add-followup-record="addFollowupRecord"
+            @remove-followup-record="removeFollowupRecord"
             @edit="openWorkflowRolePreviewEdit"
             @open-attachments="openWorkflowRolePreviewAttachments"
             @focus-field="focusWorkflowPreviewField"
@@ -1690,6 +1709,7 @@ import {
 import {
   editorLabels,
   isLifecycleStageSkipped,
+  labReportRecordFields,
   patientLifecycleStages,
   recordAttachments as defaultRecordAttachments,
   recordSections,
@@ -3553,6 +3573,10 @@ const updateMedicalRecordField = (key: string, value: string) => {
   fieldValues[key] = value;
 };
 
+const updateWorkflowMaintenanceField = (key: string, value: string) => {
+  fieldValues[key] = value;
+};
+
 const updateLabMetricField = (field: RecordField, value: string) => {
   fieldValues[field.key] = value;
 
@@ -3713,6 +3737,27 @@ const patientRolePreviews = usePatientRolePreview({
   attachmentsByField,
   currentRole,
   fieldValues
+});
+
+const activeWorkflowMaintenanceFields = computed(() => {
+  const preview = patientRolePreviews.value.find(item => item.key === activeWorkflowRoleKey.value);
+  if (!preview) return [];
+
+  const fieldContextByKey = new Map<string, { sectionTitle: string; field: RecordField }>();
+
+  recordSectionsByRule.value.forEach(section => {
+    section.fields.forEach(field => {
+      fieldContextByKey.set(field.key, { sectionTitle: shortTitle(section.title), field });
+    });
+  });
+
+  labReportRecordFields.forEach(field => {
+    if (!fieldContextByKey.has(field.key)) fieldContextByKey.set(field.key, { sectionTitle: "化验报告", field });
+  });
+
+  return preview.maintenanceFieldKeys
+    .map(fieldKey => fieldContextByKey.get(fieldKey))
+    .filter((item): item is { sectionTitle: string; field: RecordField } => Boolean(item));
 });
 
 const patientFieldSearchItems = computed<PatientFieldSearchItem[]>(() => {
@@ -4962,6 +5007,32 @@ const saveLabSupplementFields = async () => {
   if (canEditLabSupplementNote.value) values.uncheckedItemsNote = fieldValues.uncheckedItemsNote || "";
 
   return saveRecordValues(values, "化验室补充信息已保存");
+};
+
+const saveWorkflowRoleMaintenanceFields = async (fieldKeys: string[]) => {
+  const editableKeys = new Set(
+    activeWorkflowMaintenanceFields.value
+      .filter(item => fieldKeys.includes(item.field.key) && isEditable(item.field))
+      .map(item => item.field.key)
+  );
+
+  if (!editableKeys.size) {
+    ElMessage.warning("当前岗位暂无可保存字段");
+    return false;
+  }
+
+  const invalidIssue = fieldIssues.value.find(issue => editableKeys.has(issue.fieldKey) && issue.level === "invalid");
+  if (invalidIssue) {
+    ElMessage.warning(`${invalidIssue.sectionTitle}：${invalidIssue.fieldLabel} ${invalidIssue.message}`);
+    return false;
+  }
+
+  const values = Array.from(editableKeys).reduce<Record<string, string>>((payload, fieldKey) => {
+    payload[fieldKey] = fieldValues[fieldKey] || "";
+    return payload;
+  }, {});
+
+  return saveRecordValues(values, "本岗位维护内容已保存");
 };
 
 const saveMyFieldsAndBack = async () => {

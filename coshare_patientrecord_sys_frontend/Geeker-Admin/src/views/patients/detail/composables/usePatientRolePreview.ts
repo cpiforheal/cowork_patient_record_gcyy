@@ -40,6 +40,7 @@ export type WorkflowRolePreview = {
   contextItems: WorkflowRolePreviewField[];
   attachments: WorkflowRolePreviewAttachment[];
   focusFieldKeys: string[];
+  maintenanceFieldKeys: string[];
   canEdit: boolean;
   primaryTarget: RolePreviewTarget;
   primaryActionLabel: string;
@@ -58,6 +59,7 @@ type RolePreviewConfig = {
   contextTitle?: string;
   contextArchiveFieldKeys?: string[];
   contextMedicalFieldKeys?: string[];
+  maintenanceFieldKeys?: string[];
   primaryTarget: RolePreviewTarget;
   primaryActionLabel: string;
 };
@@ -114,6 +116,16 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "gastroscopyStatus",
       "colonoscopyStatus",
       "drChestStatus"
+    ],
+    maintenanceFieldKeys: [
+      "inspectionImages",
+      "inspectionBriefNote",
+      "lithotomyExam",
+      "analTension",
+      "digitalExam",
+      "anoscope",
+      "ecgResult",
+      "colonoscopy"
     ],
     primaryTarget: "medicalRecord",
     primaryActionLabel: "进入目标病历维护检查所见"
@@ -178,29 +190,30 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "postprandialGlucoseStatus",
       "urineRoutineStatus"
     ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护化验字段"
-  },
-  {
-    key: "medicalRecord",
-    title: "医生目标病历",
-    subtitle: "综合诊断与最终文书",
-    description: "目标病历是所有岗位共同维护的核心对象；医生负责诊断、生成、下载、定稿和作废。",
-    roles: ["doctor", "admin"],
-    sectionKeys: ["mainDiagnosis", "treatmentPlanManagement", "dip", "documentScope"],
-    medicalSections: ["诊断", "DIP", "签名与日期"],
-    archiveFieldKeys: ["tcmDiagnosis", "westernDiagnosis", "treatmentPlan", "mainOperation"],
-    medicalFieldKeys: [
-      "tcmDiagnosis",
-      "westernDiagnosis",
-      "primaryDiagnosis",
-      "secondaryDiagnosis",
-      "diagnosisTreatmentPlan",
-      "doctorSignature",
-      "seniorDoctorSignature"
+    maintenanceFieldKeys: [
+      "bloodRoutine",
+      "bloodRoutineStatus",
+      "bloodWbc",
+      "bloodNeuPercent",
+      "bloodLymPercent",
+      "bloodMonPercent",
+      "bloodRbc",
+      "bloodHgb",
+      "bloodPlt",
+      "coagulation",
+      "coagulationStatus",
+      "preOpEight",
+      "preOpEightStatus",
+      "urineRoutine",
+      "urineRoutineStatus",
+      "biochemistry",
+      "liverFunctionStatus",
+      "renalFunctionStatus",
+      "postprandialGlucose",
+      "postprandialGlucoseStatus"
     ],
     primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历医生工作台"
+    primaryActionLabel: "进入目标病历维护化验字段"
   },
   {
     key: "treatment",
@@ -425,6 +438,7 @@ export const usePatientRolePreview = ({
         contextItems,
         attachments: attachments.slice(0, 6),
         focusFieldKeys,
+        maintenanceFieldKeys: config.maintenanceFieldKeys || config.archiveFieldKeys,
         canEdit: roleCanEdit(currentRole.value, config.roles) || allFields.some(field => field.editable),
         primaryTarget: config.primaryTarget,
         primaryActionLabel: config.primaryActionLabel

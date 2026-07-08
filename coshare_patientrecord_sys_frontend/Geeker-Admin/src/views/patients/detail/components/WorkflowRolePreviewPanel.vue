@@ -54,10 +54,10 @@
     <main class="workflow-role-detail">
       <el-empty v-if="!activePreview" description="点击左侧岗位卡片，查看该岗位已完成内容、附件证据和下一步处理建议" />
 
-      <article v-else class="role-report-paper">
+      <article v-else class="role-workspace-paper">
         <header class="report-head">
           <div>
-            <span>岗位流程预览</span>
+            <span>岗位流程工作区</span>
 
             <h3>{{ activePreview.title }}</h3>
 
@@ -67,137 +67,233 @@
           <el-tag :type="activePreview.statusTone" effect="plain">{{ activePreview.statusLabel }}</el-tag>
         </header>
 
-        <section class="report-actions">
-          <el-button type="primary" plain @click="$emit('edit', activePreview)">
-            {{ activePreview.primaryActionLabel }}
-          </el-button>
+        <section class="role-mode-bar">
+          <el-radio-group v-model="rolePanelMode" size="small">
+            <el-radio-button label="maintain">维护基础信息</el-radio-button>
 
-          <el-button plain :disabled="!activePreview.attachmentCount" @click="$emit('openAttachments', activePreview)">
-            查看图片/附件
-          </el-button>
+            <el-radio-button label="preview">实时预览</el-radio-button>
+          </el-radio-group>
+
+          <div class="report-actions">
+            <el-button type="primary" plain @click="$emit('edit', activePreview)">
+              {{ activePreview.primaryActionLabel }}
+            </el-button>
+
+            <el-button plain :disabled="!activePreview.attachmentCount" @click="$emit('openAttachments', activePreview)">
+              查看图片/附件
+            </el-button>
+          </div>
         </section>
 
-        <section v-if="activePreview.contextItems.length" class="report-section">
-          <div class="report-section-title">
-            <strong>{{ activePreview.contextTitle }}</strong>
+        <section v-if="rolePanelMode === 'maintain'" class="maintain-panel">
+          <div class="maintain-head">
+            <div>
+              <strong>{{ activePreview.key === "inspection" ? "检查室优先维护" : "本岗位维护内容" }}</strong>
 
-            <span>{{ activePreview.contextItems.length }} 项</span>
+              <span>
+                {{
+                  activePreview.key === "inspection"
+                    ? "先上传图片/视频，再补充镜下所见和初步检查描述。"
+                    : "只维护当前岗位负责字段，最终目标病历仍由医生汇总生成。"
+                }}
+              </span>
+            </div>
+
+            <el-button
+              type="primary"
+              :disabled="!editableMaintenanceFields.length"
+              @click="
+                $emit(
+                  'saveMaintainedFields',
+                  editableMaintenanceFields.map(item => item.field.key)
+                )
+              "
+            >
+              保存本岗位维护内容
+            </el-button>
           </div>
 
-          <button
-            v-for="item in activePreview.contextItems"
-            :key="`context-${item.source}-${item.key}`"
-            type="button"
-            class="report-field-row"
-            @click="$emit('focusField', item.key)"
-          >
-            <span>{{ item.label }}</span>
+          <el-empty v-if="!maintenanceFields.length" description="当前岗位暂无可直接维护字段，请进入目标病历或完整档案处理。" />
 
-            <em>{{ item.value }}</em>
-          </button>
+          <div v-else class="maintain-field-list">
+            <article
+              v-for="item in maintenanceFields"
+              :key="item.field.key"
+              class="maintain-field-card"
+              :class="{ featured: activePreview.key === 'inspection' && item.field.key === 'inspectionImages' }"
+            >
+              <header>
+                <div>
+                  <strong>{{ item.field.label }}</strong>
+
+                  <small>{{ item.sectionTitle }}</small>
+                </div>
+
+                <el-tag v-if="!isFieldEditable(item.field)" effect="plain" size="small">只读</el-tag>
+                <el-tag v-else-if="item.field.required" type="warning" effect="plain" size="small">必填</el-tag>
+              </header>
+
+              <ArchiveFieldRenderer
+                :field="item.field"
+                :model-value="fieldValues[item.field.key]"
+                :disabled="!isFieldEditable(item.field)"
+                :issue="issueForField(item.field)"
+                :attachments="matchedAttachments(item.field.key)"
+                :select-options="selectOptions(item.field)"
+                :followup-records="followupRecords"
+                :role-label="roleLabel"
+                :can-open-attachment="canOpenAttachment"
+                :is-image-attachment="isImageAttachment"
+                :attachment-preview-url="attachmentPreviewUrl"
+                :open-attachment="openAttachment"
+                :textarea-rows="activePreview.key === 'inspection' ? 3 : 2"
+                @update:model-value="$emit('updateField', item.field.key, $event)"
+                @update-lab-metric="(field, value) => $emit('updateLabMetric', field, value)"
+                @upload="(field, files, remark) => $emit('upload', field, files, remark)"
+                @add-followup-record="$emit('addFollowupRecord')"
+                @remove-followup-record="$emit('removeFollowupRecord', $event)"
+              />
+            </article>
+          </div>
         </section>
 
-        <section class="report-section">
-          <div class="report-section-title">
-            <strong>已形成内容</strong>
+        <section v-else class="preview-panel">
+          <LabReportPreview
+            v-if="activePreview.key === 'lab'"
+            :field-values="fieldValues"
+            :patient-name="fieldValues.patientName"
+            :patient-gender="fieldValues.gender"
+            :visit-no="fieldValues.visitNo"
+            compact
+          />
 
-            <span>{{ activePreview.summaryItems.length }} 项</span>
-          </div>
+          <template v-else>
+            <section v-if="activePreview.contextItems.length" class="report-section">
+              <div class="report-section-title">
+                <strong>{{ activePreview.contextTitle }}</strong>
 
-          <el-empty v-if="!activePreview.summaryItems.length" description="该岗位尚未形成可预览内容" />
+                <span>{{ activePreview.contextItems.length }} 项</span>
+              </div>
 
-          <button
-            v-for="item in activePreview.summaryItems"
-            v-else
-            :key="`${item.source}-${item.key}`"
-            type="button"
-            class="report-field-row"
-            @click="$emit('focusField', item.key)"
-          >
-            <span>
-              <strong>{{ item.label }}</strong>
+              <button
+                v-for="item in activePreview.contextItems"
+                :key="`context-${item.source}-${item.key}`"
+                type="button"
+                class="report-field-row"
+                @click="$emit('focusField', item.key)"
+              >
+                <span>{{ item.label }}</span>
 
-              <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
-            </span>
+                <em>{{ item.value }}</em>
+              </button>
+            </section>
 
-            <em>{{ item.value }}</em>
-          </button>
-        </section>
+            <section class="report-section">
+              <div class="report-section-title">
+                <strong>已形成内容</strong>
 
-        <section class="report-section">
-          <div class="report-section-title">
-            <strong>待补与下一步</strong>
+                <span>{{ activePreview.summaryItems.length }} 项</span>
+              </div>
 
-            <span>{{ activePreview.missingCount }} 项</span>
-          </div>
+              <el-empty v-if="!activePreview.summaryItems.length" description="该岗位尚未形成可预览内容" />
 
-          <el-empty v-if="!activePreview.missingItems.length && !activePreview.taskItems.length" description="暂无明确待处理项" />
+              <button
+                v-for="item in activePreview.summaryItems"
+                v-else
+                :key="`${item.source}-${item.key}`"
+                type="button"
+                class="report-field-row"
+                @click="$emit('focusField', item.key)"
+              >
+                <span>
+                  <strong>{{ item.label }}</strong>
 
-          <button
-            v-for="item in activePreview.missingItems"
-            v-else
-            :key="`${item.source}-${item.key}`"
-            type="button"
-            class="report-field-row pending"
-            @click="$emit('focusField', item.key)"
-          >
-            <span>
-              <strong>{{ item.label }}</strong>
+                  <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
+                </span>
 
-              <small>{{ item.section }} · 必填缺失</small>
-            </span>
+                <em>{{ item.value }}</em>
+              </button>
+            </section>
+          </template>
 
-            <el-tag type="warning" effect="plain" size="small">待补</el-tag>
-          </button>
+          <section class="report-section">
+            <div class="report-section-title">
+              <strong>待补与下一步</strong>
 
-          <button
-            v-for="task in activePreview.taskItems"
-            :key="`task-${task.sectionKey}-${task.fieldKey}`"
-            type="button"
-            class="report-field-row pending"
-            @click="$emit('focusField', task.fieldKey)"
-          >
-            <span>
-              <strong>{{ task.fieldLabel }}</strong>
+              <span>{{ activePreview.missingCount }} 项</span>
+            </div>
 
-              <small>{{ task.sectionTitle }} · {{ task.reason }}</small>
-            </span>
-
-            <el-tag :type="task.statusTone" effect="plain" size="small">{{ task.statusLabel }}</el-tag>
-          </button>
-        </section>
-
-        <section class="report-section">
-          <div class="report-section-title">
-            <strong>图片与附件</strong>
-
-            <span>{{ activePreview.imageCount }} 张图片 · {{ activePreview.attachmentCount }} 份附件</span>
-          </div>
-
-          <el-empty v-if="!activePreview.attachments.length" description="该岗位暂无附件证据" />
-
-          <button
-            v-for="attachment in activePreview.attachments"
-            v-else
-            :key="attachment.key"
-            type="button"
-            class="report-attachment-row"
-            @click="$emit('openAttachments', activePreview)"
-          >
-            <img
-              v-if="attachment.isImage && attachment.url"
-              :src="attachment.url"
-              :alt="attachment.title || attachment.fileName"
+            <el-empty
+              v-if="!activePreview.missingItems.length && !activePreview.taskItems.length"
+              description="暂无明确待处理项"
             />
 
-            <span v-else>{{ attachment.fileName?.slice(0, 1) || "附" }}</span>
+            <button
+              v-for="item in activePreview.missingItems"
+              v-else
+              :key="`${item.source}-${item.key}`"
+              type="button"
+              class="report-field-row pending"
+              @click="$emit('focusField', item.key)"
+            >
+              <span>
+                <strong>{{ item.label }}</strong>
 
-            <em>
-              <strong>{{ attachment.title || attachment.fieldLabel || "附件资料" }}</strong>
+                <small>{{ item.section }} · 必填缺失</small>
+              </span>
 
-              <small>{{ attachment.fileName }} · {{ attachment.uploadedAt || "待记录时间" }}</small>
-            </em>
-          </button>
+              <el-tag type="warning" effect="plain" size="small">待补</el-tag>
+            </button>
+
+            <button
+              v-for="task in activePreview.taskItems"
+              :key="`task-${task.sectionKey}-${task.fieldKey}`"
+              type="button"
+              class="report-field-row pending"
+              @click="$emit('focusField', task.fieldKey)"
+            >
+              <span>
+                <strong>{{ task.fieldLabel }}</strong>
+
+                <small>{{ task.sectionTitle }} · {{ task.reason }}</small>
+              </span>
+
+              <el-tag :type="task.statusTone" effect="plain" size="small">{{ task.statusLabel }}</el-tag>
+            </button>
+          </section>
+
+          <section class="report-section">
+            <div class="report-section-title">
+              <strong>图片与附件</strong>
+
+              <span>{{ activePreview.imageCount }} 张图片 · {{ activePreview.attachmentCount }} 份附件</span>
+            </div>
+
+            <el-empty v-if="!activePreview.attachments.length" description="该岗位暂无附件证据" />
+
+            <button
+              v-for="attachment in activePreview.attachments"
+              v-else
+              :key="attachment.key"
+              type="button"
+              class="report-attachment-row"
+              @click="$emit('openAttachments', activePreview)"
+            >
+              <img
+                v-if="attachment.isImage && attachment.url"
+                :src="attachment.url"
+                :alt="attachment.title || attachment.fileName"
+              />
+
+              <span v-else>{{ attachment.fileName?.slice(0, 1) || "附" }}</span>
+
+              <em>
+                <strong>{{ attachment.title || attachment.fieldLabel || "附件资料" }}</strong>
+
+                <small>{{ attachment.fileName }} · {{ attachment.uploadedAt || "待记录时间" }}</small>
+              </em>
+            </button>
+          </section>
         </section>
       </article>
     </main>
@@ -205,22 +301,64 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
+import type { RecordAttachment, RecordField, UserRole } from "@/config/fieldPermissions";
+import ArchiveFieldRenderer from "./ArchiveFieldRenderer.vue";
+import LabReportPreview from "./LabReportPreview.vue";
+import type { FieldIssue, FollowupRecord } from "./types";
 import type { WorkflowRolePreview } from "../composables/usePatientRolePreview";
+
+type RolePanelMode = "maintain" | "preview";
+type WorkflowRoleMaintenanceField = {
+  sectionTitle: string;
+  field: RecordField;
+};
 
 const props = defineProps<{
   previews: WorkflowRolePreview[];
   selectedKey: string;
+  currentRole: UserRole;
+  maintenanceFields: WorkflowRoleMaintenanceField[];
+  fieldValues: Record<string, string>;
+  followupRecords: FollowupRecord[];
+  isFieldEditable: (field: RecordField) => boolean;
+  issueForField: (field: RecordField) => FieldIssue | undefined;
+  matchedAttachments: (fieldKey: string) => RecordAttachment[];
+  selectOptions: (field: RecordField) => string[];
+  roleLabel: (role?: string) => string;
+  canOpenAttachment: (attachmentOrUrl?: RecordAttachment | string) => boolean;
+  isImageAttachment: (attachment: RecordAttachment) => boolean;
+  attachmentPreviewUrl: (url?: string) => string;
+  openAttachment: (url: string) => void | Promise<void>;
 }>();
 
 defineEmits<{
   "update:selectedKey": [key: string];
+  updateField: [key: string, value: string];
+  updateLabMetric: [field: RecordField, value: string];
+  upload: [field: RecordField, files: File[], remark: string];
+  saveMaintainedFields: [fieldKeys: string[]];
+  addFollowupRecord: [];
+  removeFollowupRecord: [id: string];
   edit: [preview: WorkflowRolePreview];
   openAttachments: [preview: WorkflowRolePreview];
   focusField: [fieldKey: string];
 }>();
 
 const activePreview = computed(() => props.previews.find(preview => preview.key === props.selectedKey));
+const rolePanelMode = ref<RolePanelMode>("preview");
+const editableMaintenanceFields = computed(() => props.maintenanceFields.filter(item => props.isFieldEditable(item.field)));
+
+watch(
+  () =>
+    [activePreview.value?.key, activePreview.value?.canEdit, props.currentRole, editableMaintenanceFields.value.length] as const,
+  () => {
+    const preview = activePreview.value;
+    const reviewerRole = props.currentRole === "admin" || props.currentRole === "doctor";
+    rolePanelMode.value = preview?.canEdit && !reviewerRole && editableMaintenanceFields.value.length ? "maintain" : "preview";
+  },
+  { immediate: true }
+);
 </script>
 
 <style scoped lang="scss">
@@ -420,7 +558,7 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   box-shadow: var(--hos-shadow-soft);
 }
 
-.role-report-paper {
+.role-workspace-paper {
   display: grid;
   gap: 16px;
   max-width: 980px;
@@ -431,6 +569,15 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
   background: #fff;
   border: 1px solid #1f2937;
   box-shadow: 0 8px 24px rgb(15 23 42 / 8%);
+}
+
+.role-mode-bar,
+.maintain-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 .report-head {
@@ -459,8 +606,82 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 .report-actions {
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.role-mode-bar {
+  flex-wrap: wrap;
   padding-bottom: 12px;
   border-bottom: 1px solid #1f2937;
+}
+
+.maintain-panel,
+.preview-panel,
+.maintain-field-list {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.maintain-head {
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #dbe4ef;
+  border-radius: 8px;
+
+  > div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  strong {
+    color: #0f172a;
+    font-size: 15px;
+  }
+
+  span {
+    color: #64748b;
+    line-height: 1.6;
+  }
+}
+
+.maintain-field-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #dbe4ef;
+  border-radius: 8px;
+
+  &.featured {
+    border-color: #93c5fd;
+    box-shadow: 0 10px 24px rgb(37 99 235 / 10%);
+  }
+
+  > header {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    justify-content: space-between;
+    min-width: 0;
+
+    > div {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    strong {
+      color: #172554;
+      overflow-wrap: anywhere;
+    }
+
+    small {
+      color: #64748b;
+    }
+  }
 }
 
 .report-section {
@@ -597,7 +818,7 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
     min-height: 360px;
   }
 
-  .role-report-paper {
+  .role-workspace-paper {
     padding: 16px;
   }
 }
@@ -613,7 +834,10 @@ const activePreview = computed(() => props.previews.find(preview => preview.key 
 
   .role-card-head,
   .report-head,
-  .report-section-title {
+  .report-section-title,
+  .role-mode-bar,
+  .maintain-head,
+  .maintain-field-card > header {
     align-items: flex-start;
     flex-direction: column;
   }
