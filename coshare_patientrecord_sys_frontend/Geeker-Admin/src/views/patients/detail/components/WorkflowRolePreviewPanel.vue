@@ -5,9 +5,22 @@
         v-for="(preview, index) in previews"
         :key="preview.key"
         class="workflow-timeline-item"
-        :class="{ active: preview.key === selectedKey, complete: preview.completedCount > 0 || preview.attachmentCount > 0 }"
+        :class="[
+          `runtime-${preview.runtimeStatus}`,
+          {
+            active: preview.key === selectedKey,
+            complete: preview.runtimeStatus === 'done' || preview.runtimeStatus === 'archived',
+            actionable: preview.taskSummary.canHandle
+          }
+        ]"
       >
-        <button type="button" class="workflow-role-node" @click="$emit('update:selectedKey', preview.key)">
+        <button
+          type="button"
+          class="workflow-role-node"
+          :aria-current="preview.key === selectedKey ? 'step' : undefined"
+          :aria-pressed="preview.key === selectedKey"
+          @click="$emit('update:selectedKey', preview.key)"
+        >
           <span class="timeline-marker" aria-hidden="true">
             <i>{{ index + 1 }}</i>
           </span>
@@ -16,17 +29,27 @@
             <span class="role-card-head">
               <strong>{{ preview.title }}</strong>
 
-              <el-tag :type="preview.statusTone" effect="plain" size="small">{{ preview.statusLabel }}</el-tag>
+              <el-tag :type="preview.statusTone" effect="plain" size="small">{{ preview.runtimeStatusLabel }}</el-tag>
             </span>
 
             <small>{{ preview.subtitle }}</small>
 
+            <span class="role-task-goal">{{ preview.taskSummary.primaryTodo || preview.processGoal }}</span>
+
             <span class="role-card-stats">
               <em>已填 {{ preview.completedCount }}/{{ preview.totalCount || 0 }}</em>
+
+              <em v-if="preview.taskSummary.todoCount">待办 {{ preview.taskSummary.todoCount }}</em>
+
+              <em v-if="preview.taskSummary.blockingCount">阻塞 {{ preview.taskSummary.blockingCount }}</em>
 
               <em>图片 {{ preview.imageCount }}</em>
 
               <em>附件 {{ preview.attachmentCount }}</em>
+            </span>
+
+            <span v-if="preview.taskSummary.blockingReason" class="role-blocking-reason">
+              {{ preview.taskSummary.blockingReason }}
             </span>
           </span>
         </button>
@@ -52,262 +75,439 @@
     </aside>
 
     <main class="workflow-role-detail">
-      <el-empty v-if="!activePreview" description="点击左侧岗位卡片，查看该岗位已完成内容、附件证据和下一步处理建议" />
+      <Transition name="role-preview-switch" mode="out-in">
+        <el-empty
+          v-if="!activePreview"
+          key="empty"
+          description="点击左侧岗位卡片，查看该岗位已完成内容、附件证据和下一步处理建议"
+        />
 
-      <article v-else class="role-workspace-paper">
-        <header class="report-head">
-          <div>
-            <span>岗位流程工作区</span>
-
-            <h3>{{ activePreview.title }}</h3>
-
-            <p>{{ activePreview.description }}</p>
-          </div>
-
-          <el-tag :type="activePreview.statusTone" effect="plain">{{ activePreview.statusLabel }}</el-tag>
-        </header>
-
-        <section class="role-mode-bar">
-          <el-radio-group v-model="rolePanelMode" size="small">
-            <el-radio-button label="maintain">维护基础信息</el-radio-button>
-
-            <el-radio-button label="preview">实时预览</el-radio-button>
-          </el-radio-group>
-
-          <div class="report-actions">
-            <el-button type="primary" plain @click="$emit('edit', activePreview)">
-              {{ activePreview.primaryActionLabel }}
-            </el-button>
-
-            <el-button plain :disabled="!activePreview.attachmentCount" @click="$emit('openAttachments', activePreview)">
-              查看图片/附件
-            </el-button>
-          </div>
-        </section>
-
-        <section v-if="rolePanelMode === 'maintain'" class="maintain-panel">
-          <div class="maintain-head">
+        <article v-else :key="activePreview.key" class="role-workspace-paper">
+          <header class="report-head">
             <div>
-              <strong>{{ activePreview.key === "inspection" ? "检查室优先维护" : "本岗位维护内容" }}</strong>
+              <span>岗位流程工作区</span>
 
-              <span>
-                {{
-                  activePreview.key === "inspection"
-                    ? "先上传图片/视频，再补充镜下所见和初步检查描述。"
-                    : activePreview.key === "doctorDecision"
-                      ? "承接上游检查、问诊和化验结果，分别维护西医诊疗判断与中医辨证治法。"
-                      : "只维护当前岗位负责字段，最终目标病历仍由医生汇总生成。"
-                }}
-              </span>
+              <h3>{{ activePreview.title }}</h3>
+
+              <p>{{ activePreview.description }}</p>
             </div>
 
-            <el-button
-              type="primary"
-              :disabled="!editableMaintenanceFields.length"
-              @click="
-                $emit(
-                  'saveMaintainedFields',
-                  editableMaintenanceFields.map(item => item.field.key)
-                )
-              "
-            >
-              保存本岗位维护内容
-            </el-button>
-          </div>
+            <el-tag :type="activePreview.statusTone" effect="plain">{{ activePreview.statusLabel }}</el-tag>
+          </header>
 
-          <el-empty v-if="!maintenanceFields.length" description="当前岗位暂无可直接维护字段，请进入目标病历或完整档案处理。" />
+          <section class="decision-summary-card" aria-label="当前决策摘要">
+            <div class="decision-summary-main">
+              <span>当前阶段</span>
 
-          <div v-else class="maintain-field-groups">
-            <section v-for="group in maintenanceFieldGroups" :key="group.key" class="maintain-field-group">
-              <header v-if="group.title" class="maintain-group-head">
-                <strong>{{ group.title }}</strong>
+              <strong>{{ activePreview.decisionSummary.stageLabel }}</strong>
 
-                <span>{{ group.description }}</span>
-              </header>
-
-              <div class="maintain-field-list">
-                <article
-                  v-for="item in group.items"
-                  :key="item.field.key"
-                  class="maintain-field-card"
-                  :class="{ featured: activePreview.key === 'inspection' && item.field.key === 'inspectionImages' }"
-                >
-                  <header>
-                    <div>
-                      <strong>{{ item.field.label }}</strong>
-
-                      <small>{{ item.sectionTitle }}</small>
-                    </div>
-
-                    <el-tag v-if="!isFieldEditable(item.field)" effect="plain" size="small">只读</el-tag>
-                    <el-tag v-else-if="item.field.required" type="warning" effect="plain" size="small">必填</el-tag>
-                  </header>
-
-                  <ArchiveFieldRenderer
-                    :field="item.field"
-                    :model-value="fieldValues[item.field.key]"
-                    :disabled="!isFieldEditable(item.field)"
-                    :issue="issueForField(item.field)"
-                    :attachments="matchedAttachments(item.field.key)"
-                    :select-options="selectOptions(item.field)"
-                    :followup-records="followupRecords"
-                    :role-label="roleLabel"
-                    :can-open-attachment="canOpenAttachment"
-                    :is-image-attachment="isImageAttachment"
-                    :attachment-preview-url="attachmentPreviewUrl"
-                    :open-attachment="openAttachment"
-                    :textarea-rows="activePreview.key === 'inspection' || activePreview.key === 'doctorDecision' ? 3 : 2"
-                    @update:model-value="$emit('updateField', item.field.key, $event)"
-                    @update-lab-metric="(field, value) => $emit('updateLabMetric', field, value)"
-                    @upload="(field, files, remark) => $emit('upload', field, files, remark)"
-                    @add-followup-record="$emit('addFollowupRecord')"
-                    @remove-followup-record="$emit('removeFollowupRecord', $event)"
-                  />
-                </article>
-              </div>
-            </section>
-          </div>
-        </section>
-
-        <section v-else class="preview-panel">
-          <LabReportPreview
-            v-if="activePreview.key === 'lab'"
-            :field-values="fieldValues"
-            :patient-name="fieldValues.patientName"
-            :patient-gender="fieldValues.gender"
-            :visit-no="fieldValues.visitNo"
-            compact
-          />
-
-          <template v-else>
-            <section v-if="activePreview.contextItems.length" class="report-section">
-              <div class="report-section-title">
-                <strong>{{ activePreview.contextTitle }}</strong>
-
-                <span>{{ activePreview.contextItems.length }} 项</span>
-              </div>
-
-              <button
-                v-for="item in activePreview.contextItems"
-                :key="`context-${item.source}-${item.key}`"
-                type="button"
-                class="report-field-row"
-                @click="$emit('focusField', item.key)"
-              >
-                <span>{{ item.label }}</span>
-
-                <em>{{ item.value }}</em>
-              </button>
-            </section>
-
-            <section class="report-section">
-              <div class="report-section-title">
-                <strong>已形成内容</strong>
-
-                <span>{{ activePreview.summaryItems.length }} 项</span>
-              </div>
-
-              <el-empty v-if="!activePreview.summaryItems.length" description="该岗位尚未形成可预览内容" />
-
-              <button
-                v-for="item in activePreview.summaryItems"
-                v-else
-                :key="`${item.source}-${item.key}`"
-                type="button"
-                class="report-field-row"
-                @click="$emit('focusField', item.key)"
-              >
-                <span>
-                  <strong>{{ item.label }}</strong>
-
-                  <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
-                </span>
-
-                <em>{{ item.value }}</em>
-              </button>
-            </section>
-          </template>
-
-          <section class="report-section">
-            <div class="report-section-title">
-              <strong>待补与下一步</strong>
-
-              <span>{{ activePreview.missingCount }} 项</span>
+              <small>{{ activePreview.decisionSummary.progressText }}</small>
             </div>
 
-            <el-empty
-              v-if="!activePreview.missingItems.length && !activePreview.taskItems.length"
-              description="暂无明确待处理项"
-            />
+            <div class="decision-summary-grid">
+              <article>
+                <span>当前责任</span>
 
-            <button
-              v-for="item in activePreview.missingItems"
-              v-else
-              :key="`${item.source}-${item.key}`"
-              type="button"
-              class="report-field-row pending"
-              @click="$emit('focusField', item.key)"
-            >
-              <span>
-                <strong>{{ item.label }}</strong>
+                <strong>{{ activePreview.stageOwner || activePreview.decisionSummary.ownerLabel }}</strong>
+              </article>
 
-                <small>{{ item.section }} · 必填缺失</small>
-              </span>
+              <article>
+                <span>关键结论</span>
 
-              <el-tag type="warning" effect="plain" size="small">待补</el-tag>
-            </button>
+                <strong>{{ activePreview.keyConclusion }}</strong>
+              </article>
 
-            <button
-              v-for="task in activePreview.taskItems"
-              :key="`task-${task.sectionKey}-${task.fieldKey}`"
-              type="button"
-              class="report-field-row pending"
-              @click="$emit('focusField', task.fieldKey)"
-            >
-              <span>
-                <strong>{{ task.fieldLabel }}</strong>
+              <article>
+                <span>阻塞原因</span>
 
-                <small>{{ task.sectionTitle }} · {{ task.reason }}</small>
-              </span>
+                <strong>{{ activePreview.blockingReason }}</strong>
+              </article>
 
-              <el-tag :type="task.statusTone" effect="plain" size="small">{{ task.statusLabel }}</el-tag>
-            </button>
+              <article>
+                <span>下一步</span>
+
+                <strong>{{ activePreview.nextAction }}</strong>
+              </article>
+            </div>
           </section>
 
-          <section class="report-section">
-            <div class="report-section-title">
-              <strong>图片与附件</strong>
+          <section class="role-mode-bar">
+            <el-radio-group v-model="rolePanelMode" size="small">
+              <el-radio-button label="maintain">填写任务</el-radio-button>
 
-              <span>{{ activePreview.imageCount }} 张图片 · {{ activePreview.attachmentCount }} 份附件</span>
+              <el-radio-button label="preview">报告预览</el-radio-button>
+            </el-radio-group>
+
+            <div class="report-actions">
+              <el-button type="primary" plain @click="$emit('edit', activePreview)">
+                {{ activePreview.primaryActionLabel }}
+              </el-button>
+
+              <el-button plain :disabled="!activePreview.attachmentCount" @click="$emit('openAttachments', activePreview)">
+                查看图片/附件
+              </el-button>
             </div>
+          </section>
 
-            <el-empty v-if="!activePreview.attachments.length" description="该岗位暂无附件证据" />
+          <Transition name="role-panel-mode-fade" mode="out-in">
+            <section v-if="rolePanelMode === 'maintain'" key="maintain" class="maintain-panel">
+              <div class="maintain-head">
+                <div>
+                  <strong>{{ activePreview.key === "inspection" ? "检查室填写任务" : "本岗位填写任务" }}</strong>
 
-            <button
-              v-for="attachment in activePreview.attachments"
-              v-else
-              :key="attachment.key"
-              type="button"
-              class="report-attachment-row"
-              @click="$emit('openAttachments', activePreview)"
-            >
-              <img
-                v-if="attachment.isImage && attachment.url"
-                :src="attachment.url"
-                :alt="attachment.title || attachment.fileName"
+                  <span>
+                    {{
+                      activePreview.key === "inspection"
+                        ? "先上传图片/视频，再补充镜下所见和初步检查描述。"
+                        : activePreview.key === "doctorDecision"
+                          ? "承接上游检查、问诊和化验结果，分别维护西医诊疗判断与中医辨证治法。"
+                          : "只维护当前岗位负责字段，最终目标病历仍由医生汇总生成。"
+                    }}
+                  </span>
+
+                  <span class="maintain-objective">处理目标：{{ activePreview.processGoal }}</span>
+                </div>
+
+                <el-button
+                  type="primary"
+                  :disabled="!editableMaintenanceFields.length"
+                  @click="
+                    $emit(
+                      'saveMaintainedFields',
+                      editableMaintenanceFields.map(item => item.field.key)
+                    )
+                  "
+                >
+                  保存并完成本岗位内容
+                </el-button>
+              </div>
+
+              <section v-if="maintenanceFields.length" class="task-overview-strip" aria-label="本岗位任务概览">
+                <article>
+                  <span>必须完成</span>
+                  <strong>{{ requiredMaintenanceFields.length }}</strong>
+                </article>
+
+                <article>
+                  <span>建议补充</span>
+                  <strong>{{ optionalMaintenanceFields.length }}</strong>
+                </article>
+
+                <article>
+                  <span>参考信息</span>
+                  <strong>{{ activePreview.referenceItems.items.length }}</strong>
+                </article>
+
+                <article>
+                  <span>附件证据</span>
+                  <strong>{{ activePreview.attachmentCount }}</strong>
+                </article>
+              </section>
+
+              <el-empty
+                v-if="!maintenanceFields.length"
+                description="当前岗位暂无可直接维护字段，请进入目标病历或完整档案处理。"
               />
 
-              <span v-else>{{ attachment.fileName?.slice(0, 1) || "附" }}</span>
+              <div v-else class="task-workspace">
+                <section class="task-section must-do">
+                  <header class="task-section-head">
+                    <div>
+                      <strong>{{ activePreview.requiredTasks.title }}</strong>
 
-              <em>
-                <strong>{{ attachment.title || attachment.fieldLabel || "附件资料" }}</strong>
+                      <span>{{ activePreview.requiredTasks.description }}</span>
+                    </div>
 
-                <small>{{ attachment.fileName }} · {{ attachment.uploadedAt || "待记录时间" }}</small>
-              </em>
-            </button>
-          </section>
-        </section>
-      </article>
+                    <el-tag type="warning" effect="plain">{{ requiredMaintenanceFields.length }} 项</el-tag>
+                  </header>
+
+                  <el-empty v-if="!requiredMaintenanceFields.length" description="暂无必须完成项" />
+
+                  <div v-else class="maintain-field-list">
+                    <article
+                      v-for="item in requiredMaintenanceFields"
+                      :key="item.field.key"
+                      class="maintain-field-card"
+                      :class="{ featured: activePreview.key === 'inspection' && item.field.key === 'inspectionImages' }"
+                    >
+                      <header>
+                        <div>
+                          <strong>{{ item.field.label }}</strong>
+
+                          <small>{{ item.sectionTitle }}</small>
+                        </div>
+
+                        <el-tag v-if="!isFieldEditable(item.field)" effect="plain" size="small">只读</el-tag>
+                        <el-tag v-else type="warning" effect="plain" size="small">必须完成</el-tag>
+                      </header>
+
+                      <ArchiveFieldRenderer
+                        :field="item.field"
+                        :model-value="fieldValues[item.field.key]"
+                        :disabled="!isFieldEditable(item.field)"
+                        :issue="issueForField(item.field)"
+                        :attachments="matchedAttachments(item.field.key)"
+                        :select-options="selectOptions(item.field)"
+                        :followup-records="followupRecords"
+                        :role-label="roleLabel"
+                        :can-open-attachment="canOpenAttachment"
+                        :is-image-attachment="isImageAttachment"
+                        :attachment-preview-url="attachmentPreviewUrl"
+                        :open-attachment="openAttachment"
+                        :textarea-rows="activePreview.key === 'inspection' || activePreview.key === 'doctorDecision' ? 3 : 2"
+                        @update:model-value="$emit('updateField', item.field.key, $event)"
+                        @update-lab-metric="(field, value) => $emit('updateLabMetric', field, value)"
+                        @upload="(field, files, remark) => $emit('upload', field, files, remark)"
+                        @add-followup-record="$emit('addFollowupRecord')"
+                        @remove-followup-record="$emit('removeFollowupRecord', $event)"
+                      />
+                    </article>
+                  </div>
+                </section>
+
+                <section class="task-section optional-do">
+                  <header class="task-section-head">
+                    <div>
+                      <strong>{{ activePreview.optionalTasks.title }}</strong>
+
+                      <span>{{ activePreview.optionalTasks.description }}</span>
+                    </div>
+
+                    <el-tag effect="plain">{{ optionalMaintenanceFields.length }} 项</el-tag>
+                  </header>
+
+                  <el-empty v-if="!optionalMaintenanceFields.length" description="暂无建议补充项" />
+
+                  <details v-else class="task-collapsible">
+                    <summary>展开 {{ optionalMaintenanceFields.length }} 项建议补充字段</summary>
+
+                    <div class="maintain-field-list compact">
+                      <article v-for="item in optionalMaintenanceFields" :key="item.field.key" class="maintain-field-card">
+                        <header>
+                          <div>
+                            <strong>{{ item.field.label }}</strong>
+
+                            <small>{{ item.sectionTitle }}</small>
+                          </div>
+
+                          <el-tag v-if="!isFieldEditable(item.field)" effect="plain" size="small">只读</el-tag>
+                          <el-tag v-else effect="plain" size="small">建议补充</el-tag>
+                        </header>
+
+                        <ArchiveFieldRenderer
+                          :field="item.field"
+                          :model-value="fieldValues[item.field.key]"
+                          :disabled="!isFieldEditable(item.field)"
+                          :issue="issueForField(item.field)"
+                          :attachments="matchedAttachments(item.field.key)"
+                          :select-options="selectOptions(item.field)"
+                          :followup-records="followupRecords"
+                          :role-label="roleLabel"
+                          :can-open-attachment="canOpenAttachment"
+                          :is-image-attachment="isImageAttachment"
+                          :attachment-preview-url="attachmentPreviewUrl"
+                          :open-attachment="openAttachment"
+                          :textarea-rows="2"
+                          @update:model-value="$emit('updateField', item.field.key, $event)"
+                          @update-lab-metric="(field, value) => $emit('updateLabMetric', field, value)"
+                          @upload="(field, files, remark) => $emit('upload', field, files, remark)"
+                          @add-followup-record="$emit('addFollowupRecord')"
+                          @remove-followup-record="$emit('removeFollowupRecord', $event)"
+                        />
+                      </article>
+                    </div>
+                  </details>
+                </section>
+
+                <section class="task-section reference-do">
+                  <header class="task-section-head">
+                    <div>
+                      <strong>{{ activePreview.referenceItems.title }}</strong>
+
+                      <span>{{ activePreview.referenceItems.description }}</span>
+                    </div>
+
+                    <el-tag effect="plain">{{ activePreview.referenceItems.items.length }} 项</el-tag>
+                  </header>
+
+                  <el-empty v-if="!activePreview.referenceItems.items.length" description="暂无上游参考信息" />
+
+                  <div v-else class="reference-list">
+                    <button
+                      v-for="item in activePreview.referenceItems.items"
+                      :key="`reference-${item.source}-${item.key}`"
+                      type="button"
+                      class="reference-row"
+                      @click="$emit('focusField', item.key)"
+                    >
+                      <span>
+                        <strong>{{ item.label }}</strong>
+
+                        <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
+                      </span>
+
+                      <em>{{ item.value }}</em>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <section v-else key="preview" class="preview-panel">
+              <section class="report-paper-head">
+                <div>
+                  <span>岗位报告</span>
+
+                  <h4>{{ activePreview.reportTitle }}</h4>
+
+                  <p>{{ activePreview.description }}</p>
+                </div>
+
+                <el-tag :type="activePreview.reviewAdvice.statusTone" effect="plain">
+                  {{ activePreview.reviewAdvice.statusLabel }}
+                </el-tag>
+              </section>
+
+              <section class="report-section">
+                <div class="report-section-title">
+                  <strong>患者信息</strong>
+
+                  <span>{{ activePreview.runtimeStatusLabel }}</span>
+                </div>
+
+                <div class="patient-report-line">
+                  <span>姓名：{{ fieldValues.patientName || "待补充" }}</span>
+
+                  <span>性别：{{ fieldValues.gender || "待补充" }}</span>
+
+                  <span>门诊/住院号：{{ fieldValues.visitNo || "待补充" }}</span>
+                </div>
+              </section>
+
+              <LabReportPreview
+                v-if="activePreview.key === 'lab'"
+                :field-values="fieldValues"
+                :patient-name="fieldValues.patientName"
+                :patient-gender="fieldValues.gender"
+                :visit-no="fieldValues.visitNo"
+                compact
+              />
+
+              <template v-else>
+                <section v-for="section in activePreview.reportSections" :key="section.key" class="report-section">
+                  <div class="report-section-title">
+                    <strong>{{ section.title }}</strong>
+
+                    <span>{{ section.items.length ? `证据 ${section.items.length} 项` : "待形成" }}</span>
+                  </div>
+
+                  <p class="report-section-summary">{{ section.summary }}</p>
+
+                  <el-empty v-if="!section.items.length" :description="section.emptyText" />
+
+                  <div v-else class="report-evidence-list">
+                    <button
+                      v-for="item in section.items"
+                      :key="`${section.key}-${item.source}-${item.key}`"
+                      type="button"
+                      class="report-field-row"
+                      @click="$emit('focusField', item.key)"
+                    >
+                      <span>
+                        <strong>{{ item.label }}</strong>
+
+                        <small>{{ item.section }} · {{ item.source === "medicalRecord" ? "目标病历" : "完整档案" }}</small>
+                      </span>
+
+                      <em>{{ item.value }}</em>
+                    </button>
+                  </div>
+                </section>
+              </template>
+
+              <section class="report-section">
+                <div class="report-section-title">
+                  <strong>附件证据</strong>
+
+                  <span>{{ activePreview.imageCount }} 张图片 · {{ activePreview.attachmentCount }} 份附件</span>
+                </div>
+
+                <el-empty v-if="!activePreview.attachments.length" description="该岗位暂无附件证据" />
+
+                <button
+                  v-for="attachment in activePreview.attachments"
+                  v-else
+                  :key="attachment.key"
+                  type="button"
+                  class="report-attachment-row"
+                  @click="$emit('openAttachments', activePreview)"
+                >
+                  <img
+                    v-if="attachment.isImage && attachment.url"
+                    :src="attachment.url"
+                    :alt="attachment.title || attachment.fileName"
+                  />
+
+                  <span v-else>{{ attachment.fileName?.slice(0, 1) || "附" }}</span>
+
+                  <em>
+                    <strong>{{ attachment.title || attachment.fieldLabel || "附件资料" }}</strong>
+
+                    <small>{{ attachment.fileName }} · {{ attachment.uploadedAt || "待记录时间" }}</small>
+                  </em>
+                </button>
+              </section>
+
+              <section class="review-advice-card">
+                <header>
+                  <div>
+                    <strong>医生审阅建议</strong>
+
+                    <span>{{ activePreview.reviewAdvice.recommendation }}</span>
+                  </div>
+
+                  <el-tag :type="activePreview.reviewAdvice.statusTone" effect="plain">
+                    {{ activePreview.reviewAdvice.statusLabel }}
+                  </el-tag>
+                </header>
+
+                <el-empty v-if="!activePreview.reviewAdvice.issues.length" description="暂无明确审阅问题" />
+
+                <div v-else class="review-issue-list">
+                  <button
+                    v-for="issue in activePreview.reviewAdvice.issues"
+                    :key="issue.key"
+                    type="button"
+                    class="review-issue-row"
+                    @click="issue.fieldKey && $emit('focusField', issue.fieldKey)"
+                  >
+                    <span>
+                      <strong>{{ issue.label }}</strong>
+
+                      <small>{{ issue.reason }}</small>
+                    </span>
+
+                    <el-tag :type="issue.tone" effect="plain" size="small">定位</el-tag>
+                  </button>
+                </div>
+
+                <footer>
+                  <span>下一步：{{ activePreview.reviewAdvice.nextStep }}</span>
+
+                  <el-button
+                    size="small"
+                    plain
+                    :disabled="!activePreview.reviewAdvice.focusFieldKeys.length"
+                    @click="$emit('focusField', activePreview.reviewAdvice.focusFieldKeys[0])"
+                  >
+                    定位缺失字段
+                  </el-button>
+                </footer>
+              </section>
+            </section>
+          </Transition>
+        </article>
+      </Transition>
     </main>
   </section>
 </template>
@@ -324,12 +524,6 @@ type RolePanelMode = "maintain" | "preview";
 type WorkflowRoleMaintenanceField = {
   sectionTitle: string;
   field: RecordField;
-};
-type WorkflowRoleMaintenanceGroup = {
-  key: string;
-  title: string;
-  description: string;
-  items: WorkflowRoleMaintenanceField[];
 };
 
 const props = defineProps<{
@@ -366,50 +560,30 @@ defineEmits<{
 const activePreview = computed(() => props.previews.find(preview => preview.key === props.selectedKey));
 const rolePanelMode = ref<RolePanelMode>("preview");
 const editableMaintenanceFields = computed(() => props.maintenanceFields.filter(item => props.isFieldEditable(item.field)));
-const westernDoctorFieldKeys = new Set([
-  "westernDiagnosis",
-  "secondaryDiagnosisList",
-  "otherMainDiagnosis",
-  "surgeryFeasibility"
-]);
-const tcmDoctorFieldKeys = new Set(["tcmDiagnosis", "tcmSyndrome", "tcmTreatment", "comorbidityDisease", "comorbiditySyndrome"]);
-const maintenanceFieldGroups = computed<WorkflowRoleMaintenanceGroup[]>(() => {
-  if (activePreview.value?.key !== "doctorDecision") {
-    return [
-      {
-        key: "default",
-        title: "",
-        description: "",
-        items: props.maintenanceFields
-      }
-    ];
-  }
+const requiredMaintenanceFields = computed(() => {
+  const preview = activePreview.value;
+  if (!preview) return [];
 
-  const westernItems = props.maintenanceFields.filter(item => westernDoctorFieldKeys.has(item.field.key));
-  const tcmItems = props.maintenanceFields.filter(item => tcmDoctorFieldKeys.has(item.field.key));
-  const groupedKeys = new Set([...westernDoctorFieldKeys, ...tcmDoctorFieldKeys]);
-  const otherItems = props.maintenanceFields.filter(item => !groupedKeys.has(item.field.key));
+  const requiredKeys = new Set([
+    ...preview.requiredTasks.fieldKeys,
+    ...preview.missingItems.map(item => item.key),
+    ...preview.taskItems
+      .filter(task => task.status !== "complete" && (task.required || task.archiveRequired))
+      .map(task => task.fieldKey)
+  ]);
+  const matched = props.maintenanceFields.filter(item => requiredKeys.has(item.field.key) || item.field.required);
 
-  return [
-    {
-      key: "western",
-      title: "西医诊疗",
-      description: "维护西医诊断、次诊断、鉴别/合并判断与治疗方案依据。",
-      items: westernItems
-    },
-    {
-      key: "tcm",
-      title: "中医诊疗",
-      description: "维护中医诊断、证型、辨证依据与中医治法建议。",
-      items: tcmItems
-    },
-    {
-      key: "other",
-      title: "其他诊疗信息",
-      description: "补充医生诊疗决策相关的其他字段。",
-      items: otherItems
-    }
-  ].filter(group => group.items.length);
+  if (matched.length) return matched;
+  return props.maintenanceFields.filter(item => props.issueForField(item.field));
+});
+const optionalMaintenanceFields = computed(() => {
+  const preview = activePreview.value;
+  const requiredKeys = new Set(requiredMaintenanceFields.value.map(item => item.field.key));
+  const optionalKeys = new Set(preview?.optionalTasks.fieldKeys || []);
+  const matched = props.maintenanceFields.filter(item => optionalKeys.has(item.field.key) && !requiredKeys.has(item.field.key));
+
+  if (matched.length) return matched.slice(0, 5);
+  return props.maintenanceFields.filter(item => !requiredKeys.has(item.field.key) && props.issueForField(item.field)).slice(0, 5);
 });
 
 watch(
@@ -467,14 +641,26 @@ watch(
   &.active {
     .timeline-marker {
       color: #fff;
-      background: #2563eb;
-      border-color: #2563eb;
+      background: var(--hos-accent);
+      border-color: var(--hos-accent);
       box-shadow: 0 0 0 5px rgb(37 99 235 / 12%);
+      transform: scale(1.04);
     }
 
     .workflow-role-node {
-      border-color: #2563eb;
-      box-shadow: 0 10px 28px rgb(37 99 235 / 12%);
+      background: linear-gradient(135deg, #fff 0%, var(--hos-accent-soft) 100%);
+      border-color: var(--hos-accent);
+      box-shadow: 0 14px 32px rgb(37 99 235 / 16%);
+    }
+
+    .workflow-role-node::before {
+      opacity: 1;
+    }
+
+    .role-card-stats em {
+      color: var(--hos-accent);
+      background: rgb(255 255 255 / 72%);
+      border-color: rgb(37 99 235 / 16%);
     }
   }
 
@@ -483,27 +669,82 @@ watch(
     background: #ecfdf5;
     border-color: #34d399;
   }
+
+  &.runtime-needsSupplement,
+  &.runtime-returned {
+    .workflow-role-node {
+      border-color: #fbbf24;
+      background: #fffbeb;
+    }
+
+    .timeline-marker {
+      color: #92400e;
+      background: #fef3c7;
+      border-color: #f59e0b;
+    }
+  }
+
+  &.runtime-returned {
+    .workflow-role-node {
+      border-color: #fca5a5;
+      background: #fff1f2;
+    }
+
+    .timeline-marker {
+      color: #b91c1c;
+      background: #fee2e2;
+      border-color: #ef4444;
+    }
+  }
+
+  &.runtime-notStarted {
+    opacity: 0.78;
+  }
+
+  &.actionable:not(.active) .workflow-role-node {
+    border-color: #bfdbfe;
+  }
 }
 
 .workflow-role-node {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   width: 100%;
   min-width: 0;
   padding: 13px 14px;
+  overflow: hidden;
   text-align: left;
   cursor: pointer;
   background: #fff;
-  border: 1px solid var(--hos-border);
-  border-radius: 8px;
-  box-shadow: var(--hos-shadow-soft);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+  box-shadow: var(--hos-shadow-card);
   transition:
+    background-color 0.18s ease,
     border-color 0.18s ease,
-    box-shadow 0.18s ease;
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    content: "";
+    background: var(--hos-accent);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
 
   &:hover {
     border-color: #93c5fd;
+    box-shadow: var(--hos-shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
   }
 }
 
@@ -520,6 +761,12 @@ watch(
   background: #fff;
   border: 2px solid #cbd5e1;
   border-radius: 999px;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
 
   i {
     font-size: 12px;
@@ -567,8 +814,38 @@ watch(
   font-size: 12px;
 
   em {
+    padding: 2px 7px;
     font-style: normal;
+    background: var(--hos-bg-surface);
+    border: 1px solid var(--hos-border-light);
+    border-radius: 999px;
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease;
   }
+}
+
+.role-task-goal,
+.role-blocking-reason {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.role-task-goal {
+  color: #334155;
+  font-size: 13px;
+}
+
+.role-blocking-reason {
+  padding: 6px 8px;
+  color: #92400e;
+  font-size: 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 7px;
 }
 
 .role-card-attachments {
@@ -593,11 +870,26 @@ watch(
   background: var(--hos-glass);
   border: 1px solid var(--hos-border-light);
   border-radius: 6px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 8px 18px rgb(15 23 42 / 12%);
+    transform: translateY(-1px) scale(1.02);
+  }
+
+  &:hover img {
+    transform: scale(1.04);
+  }
 
   img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: transform 0.18s ease;
   }
 
   i {
@@ -615,10 +907,10 @@ watch(
   min-width: 0;
   min-height: 520px;
   padding: 18px;
-  background: #f8fafc;
-  border: 1px solid var(--hos-border);
-  border-radius: 8px;
-  box-shadow: var(--hos-shadow-soft);
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-card);
 }
 
 .role-workspace-paper {
@@ -628,10 +920,12 @@ watch(
   min-width: 0;
   padding: 22px;
   margin: 0 auto;
-  color: #111827;
+  overflow: hidden;
+  color: var(--hos-text-primary);
   background: #fff;
-  border: 1px solid #1f2937;
-  box-shadow: 0 8px 24px rgb(15 23 42 / 8%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-card-hover);
 }
 
 .role-mode-bar,
@@ -641,6 +935,62 @@ watch(
   align-items: center;
   justify-content: space-between;
   min-width: 0;
+}
+
+.decision-summary-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(0, 1.75fr);
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #dbe4ef;
+  border-radius: var(--hos-radius-md);
+}
+
+.decision-summary-main,
+.decision-summary-grid article,
+.role-objective-card {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.decision-summary-main {
+  align-content: start;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+}
+
+.decision-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.decision-summary-grid article {
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+}
+
+.decision-summary-card span,
+.decision-summary-card small,
+.role-objective-card span {
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.decision-summary-card strong,
+.role-objective-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  line-height: 1.5;
 }
 
 .report-head {
@@ -673,13 +1023,15 @@ watch(
 
 .role-mode-bar {
   flex-wrap: wrap;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #1f2937;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
 }
 
 .maintain-panel,
 .preview-panel,
-.maintain-field-groups,
+.task-workspace,
 .maintain-field-list {
   display: grid;
   gap: 14px;
@@ -707,6 +1059,81 @@ watch(
   span {
     color: #64748b;
     line-height: 1.6;
+  }
+}
+
+.maintain-objective {
+  color: #1d4ed8 !important;
+}
+
+.task-overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-overview-strip article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+}
+
+.task-overview-strip span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.task-overview-strip strong {
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.task-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #dbe4ef;
+  border-radius: var(--hos-radius-md);
+
+  &.must-do {
+    border-color: #fbbf24;
+    background: #fffdf7;
+  }
+
+  &.reference-do {
+    background: #f8fafc;
+  }
+}
+
+.task-section-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+
+  > div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  strong {
+    color: #0f172a;
+    font-size: 15px;
+  }
+
+  span {
+    color: #64748b;
+    line-height: 1.55;
   }
 }
 
@@ -742,7 +1169,17 @@ watch(
   padding: 14px;
   background: #fff;
   border: 1px solid #dbe4ef;
-  border-radius: 8px;
+  border-radius: var(--hos-radius-md);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &:hover {
+    border-color: #bfdbfe;
+    box-shadow: 0 8px 20px rgb(37 99 235 / 8%);
+    transform: translateY(-1px);
+  }
 
   &.featured {
     border-color: #93c5fd;
@@ -773,6 +1210,91 @@ watch(
   }
 }
 
+.maintain-field-list.compact .maintain-field-card {
+  padding: 12px;
+  box-shadow: none;
+}
+
+.task-collapsible {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.task-collapsible summary {
+  padding: 9px 11px;
+  color: #475569;
+  font-size: 13px;
+  cursor: pointer;
+  background: #f8fafc;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+}
+
+.task-collapsible[open] summary {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.reference-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reference-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &:hover {
+    background: #f8fafc;
+    border-color: #bfdbfe;
+    box-shadow: 0 8px 18px rgb(15 23 42 / 6%);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  strong,
+  em {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  small {
+    color: #64748b;
+  }
+
+  em {
+    color: #111827;
+    font-size: 13px;
+    font-style: normal;
+    line-height: 1.6;
+  }
+}
+
 .report-section {
   display: grid;
   gap: 10px;
@@ -780,17 +1302,89 @@ watch(
   padding-top: 2px;
 }
 
+.report-paper-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #dbe4ef;
+  border-radius: var(--hos-radius-md);
+
+  > div {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  span,
+  p {
+    color: #64748b;
+  }
+
+  h4,
+  p {
+    margin: 0;
+  }
+
+  h4 {
+    color: #0f172a;
+    font-size: 20px;
+  }
+}
+
+.patient-report-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  min-width: 0;
+  padding: 10px 12px;
+  color: #334155;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+}
+
+.report-section-summary {
+  margin: 0;
+  padding: 11px 13px;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.8;
+  background: #ffffff;
+  border: 1px solid var(--hos-border-light);
+  border-left: 4px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.report-evidence-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.role-objective-card {
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-left: 4px solid var(--hos-accent);
+  border-radius: var(--hos-radius-md);
+}
+
 .report-section-title {
-  padding: 7px 10px;
-  background: #f3f4f6;
-  border: 1px solid #1f2937;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
 
   strong {
-    color: #111827;
+    color: var(--hos-text-primary);
   }
 
   span {
-    color: #475569;
+    color: var(--hos-text-secondary);
     font-size: 12px;
   }
 }
@@ -804,11 +1398,23 @@ watch(
   text-align: left;
   cursor: pointer;
   background: #fff;
-  border: 1px solid #d1d5db;
-  border-radius: 0;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 
   &:hover {
     background: #f8fafc;
+    border-color: #bfdbfe;
+    box-shadow: 0 8px 20px rgb(15 23 42 / 6%);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
   }
 
   span {
@@ -840,6 +1446,7 @@ watch(
   &.pending {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
+    border-left: 3px solid var(--hos-status-warning);
   }
 }
 
@@ -853,11 +1460,23 @@ watch(
   text-align: left;
   cursor: pointer;
   background: #fff;
-  border: 1px solid #d1d5db;
-  border-radius: 0;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 
   &:hover {
     background: #f8fafc;
+    border-color: #93c5fd;
+    box-shadow: 0 8px 20px rgb(15 23 42 / 7%);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
   }
 
   img,
@@ -867,8 +1486,14 @@ watch(
     border-radius: var(--hos-radius-sm);
   }
 
+  &:hover img {
+    transform: scale(1.04);
+  }
+
   img {
+    overflow: hidden;
     object-fit: cover;
+    transition: transform 0.18s ease;
   }
 
   > span {
@@ -898,6 +1523,145 @@ watch(
   }
 }
 
+.review-advice-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #dbe4ef;
+  border-radius: var(--hos-radius-md);
+
+  header,
+  footer {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  header > div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  strong {
+    color: #0f172a;
+  }
+
+  span,
+  small,
+  footer {
+    color: #64748b;
+    line-height: 1.55;
+  }
+}
+
+.review-issue-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.review-issue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &:hover {
+    background: #fff;
+    border-color: #bfdbfe;
+    box-shadow: 0 8px 18px rgb(15 23 42 / 6%);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  strong,
+  small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.role-preview-switch-enter-active,
+.role-preview-switch-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.role-preview-switch-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.role-preview-switch-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.role-panel-mode-fade-enter-active,
+.role-panel-mode-fade-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.role-panel-mode-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.role-panel-mode-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
+.role-mode-bar :deep(.el-radio-button__inner) {
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease;
+}
+
+.role-mode-bar :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  box-shadow: 0 6px 16px rgb(37 99 235 / 14%);
+}
+
+@media (min-width: 961px) {
+  .workflow-role-timeline {
+    position: sticky;
+    top: 68px;
+    max-height: calc(100vh - 96px);
+    overflow: auto;
+  }
+}
+
 @media (max-width: 960px) {
   .workflow-role-preview {
     grid-template-columns: 1fr;
@@ -909,6 +1673,12 @@ watch(
 
   .role-workspace-paper {
     padding: 16px;
+  }
+
+  .decision-summary-card,
+  .decision-summary-grid,
+  .task-overview-strip {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -923,15 +1693,21 @@ watch(
 
   .role-card-head,
   .report-head,
+  .report-paper-head,
   .report-section-title,
   .role-mode-bar,
   .maintain-head,
-  .maintain-field-card > header {
+  .task-section-head,
+  .maintain-field-card > header,
+  .review-advice-card header,
+  .review-advice-card footer {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .report-field-row.pending {
+  .report-field-row.pending,
+  .reference-row,
+  .review-issue-row {
     grid-template-columns: 1fr;
   }
 }

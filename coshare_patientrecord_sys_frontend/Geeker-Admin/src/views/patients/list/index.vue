@@ -78,7 +78,7 @@
             <el-button v-auth="'patient:create'" type="primary" :icon="CirclePlus" @click="createDialogVisible = true">
               新建患者
             </el-button>
-            <span class="patient-table-hint">按日期查看患者。</span>
+            <span class="patient-table-hint">新建后自动打开患者详情流程视图。</span>
           </div>
         </template>
 
@@ -163,9 +163,13 @@
             <el-input v-model="createForm.phone" maxlength="11" show-word-limit type="tel" placeholder="同一患者可填写" />
           </el-form-item>
         </el-form>
+        <div class="create-flow-hint">
+          <strong>创建成功后将进入患者详情页</strong>
+          <span>默认展示岗位流程视图，可继续打开目标病历或完整档案。</span>
+        </div>
         <template #footer>
           <el-button @click="createDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="creating" @click="submitCreatePatient">确认创建</el-button>
+          <el-button type="primary" :loading="creating" @click="submitCreatePatient">确认创建并打开档案</el-button>
         </template>
       </el-dialog>
     </section>
@@ -693,6 +697,27 @@ onMounted(loadDateTree);
   .patient-table-hint {
     color: var(--el-text-color-secondary);
     font-size: 13px;
+  }
+}
+
+.create-flow-hint {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  margin-top: 4px;
+  background: var(--hos-primary-soft);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-md);
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 14px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
   }
 }
 

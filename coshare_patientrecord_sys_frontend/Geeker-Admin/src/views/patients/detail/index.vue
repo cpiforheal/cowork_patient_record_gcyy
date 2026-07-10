@@ -311,475 +311,342 @@
         </aside>
 
         <main class="detail-workspace-content">
-          <WorkflowRolePreviewPanel
-            v-if="detailWorkspaceMode === 'flow'"
-            v-model:selected-key="activeWorkflowRoleKey"
-            :previews="patientRolePreviews"
-            :current-role="currentRole"
-            :maintenance-fields="activeWorkflowMaintenanceFields"
-            :field-values="fieldValues"
-            :followup-records="followupRecords"
-            :is-field-editable="isEditable"
-            :issue-for-field="issueForField"
-            :matched-attachments="matchedAttachments"
-            :select-options="selectOptions"
-            :role-label="roleLabel"
-            :can-open-attachment="canOpenAttachment"
-            :is-image-attachment="isImageAttachment"
-            :attachment-preview-url="attachmentPreviewUrl"
-            :open-attachment="openAttachment"
-            @update-field="updateWorkflowMaintenanceField"
-            @update-lab-metric="updateLabMetricField"
-            @upload="uploadFieldAttachments"
-            @save-maintained-fields="saveWorkflowRoleMaintenanceFields"
-            @add-followup-record="addFollowupRecord"
-            @remove-followup-record="removeFollowupRecord"
-            @edit="openWorkflowRolePreviewEdit"
-            @open-attachments="openWorkflowRolePreviewAttachments"
-            @focus-field="focusWorkflowPreviewField"
-          />
-
-          <section v-if="detailWorkspaceMode === 'medicalRecord'" class="doctor-record-workbench">
-            <div class="doctor-record-hero">
-              <div>
-                <span>核心协作病历</span>
-
-                <h3>目标病历协作工作台</h3>
-
-                <p>前台、检查、化验、护理和医生共同维护目标病历字段；健康管理档案保留为完整档案和备用入口。</p>
-              </div>
-
-              <div class="doctor-record-progress">
-                <strong>{{ medicalRecordCompletionPercent }}%</strong>
-
-                <span>
-                  已填 {{ medicalRecordCompletedCount }}/{{ medicalRecordTotalCount }} · 入文档
-
-                  {{ medicalRecordDynamicFieldCount }} · 辅助确认
-
-                  {{ medicalRecordFormOnlyFieldCount }}
-                </span>
-
-                <i><em :style="{ width: `${medicalRecordCompletionPercent}%` }"></em></i>
-              </div>
-            </div>
-
-            <MedicalRecordWorkbench
-              variant="inline"
-              :loading="medicalRecordLoading"
-              :template-status="medicalRecordTemplate"
-              :missing-items="medicalRecordMissingItems"
-              :unbound-fields="medicalRecordUnboundFields"
-              :field-sections="medicalRecordFieldSections"
-              v-model:active-sections="medicalRecordActiveSections"
-              :field-values="fieldValues"
+          <Transition name="fade-transform" mode="out-in">
+            <WorkflowRolePreviewPanel
+              v-if="detailWorkspaceMode === 'flow'"
+              key="flow"
+              v-model:selected-key="activeWorkflowRoleKey"
+              :previews="patientRolePreviews"
               :current-role="currentRole"
-              :can-generate="canGenerateMedicalRecord"
-              :lab-report-values="fieldValues"
-              :patient-name="fieldValues.patientName"
-              :patient-gender="fieldValues.gender"
-              :visit-no="fieldValues.visitNo || patientId"
-              :focused-role-key="focusedMedicalRecordRoleKey"
-              :focused-role-label="focusedMedicalRecordRoleLabel"
-              :focused-field-keys="focusedMedicalRecordFieldKeys"
-              :current-record="currentMedicalRecord"
-              :versions="medicalRecordVersions"
-              :completed-count="medicalRecordCompletedCount"
-              :total-count="medicalRecordTotalCount"
-              :can-manage-versions="canManageMedicalRecordVersions"
-              :is-textarea-field="isMedicalRecordTextareaField"
-              :is-field-missing="isMedicalRecordFieldMissing"
-              :field-assist-text="medicalRecordFieldAssistText"
-              :field-source-hint="medicalRecordArchiveSourceHint"
-              :is-select-field="isMedicalRecordSelectField"
-              :field-options="medicalRecordFieldOptions"
-              :is-date-field="isMedicalRecordDateField"
-              :status-label="medicalRecordStatusLabel"
-              :status-type="medicalRecordStatusType"
-              @update-field="updateMedicalRecordField"
-              @precheck="() => precheckMedicalRecord()"
-              @save-workspace="() => saveMedicalRecordWorkspace()"
-              @sync-from-archive="fillMedicalRecordBlanksFromArchive"
-              @generate="generateMedicalRecord"
-              @download="openCurrentMedicalRecord"
-              @finalize="finalizeMedicalRecord"
-              @select-version="selectMedicalRecordVersion"
+              :maintenance-fields="activeWorkflowMaintenanceFields"
+              :field-values="fieldValues"
+              :followup-records="followupRecords"
+              :is-field-editable="isEditable"
+              :issue-for-field="issueForField"
+              :matched-attachments="matchedAttachments"
+              :select-options="selectOptions"
+              :role-label="roleLabel"
+              :can-open-attachment="canOpenAttachment"
+              :is-image-attachment="isImageAttachment"
+              :attachment-preview-url="attachmentPreviewUrl"
+              :open-attachment="openAttachment"
+              @update-field="updateWorkflowMaintenanceField"
+              @update-lab-metric="updateLabMetricField"
+              @upload="uploadFieldAttachments"
+              @save-maintained-fields="saveWorkflowRoleMaintenanceFields"
+              @add-followup-record="addFollowupRecord"
+              @remove-followup-record="removeFollowupRecord"
+              @edit="openWorkflowRolePreviewEdit"
+              @open-attachments="openWorkflowRolePreviewAttachments"
+              @focus-field="focusWorkflowPreviewField"
             />
-          </section>
 
-          <AttachmentWorkbench
-            v-if="detailWorkspaceMode === 'attachments'"
-            :attachments="currentAttachments"
-            :can-open-attachment="canOpenAttachment"
-            @upload="openSupplementUpload"
-            @open="openAttachment"
-          />
+            <section v-else-if="detailWorkspaceMode === 'medicalRecord'" key="medicalRecord" class="doctor-record-workbench">
+              <div class="doctor-record-hero">
+                <div>
+                  <span>核心协作病历</span>
 
-          <TimelineWorkbench
-            v-if="detailWorkspaceMode === 'timeline'"
-            :events="patientTimelineEvents"
-            :loading="auditLoading"
-            :timeline-display-time="timelineDisplayTime"
-            :timeline-source-label="timelineSourceLabel"
-            @refresh="refreshAuditTimeline"
-          />
+                  <h3>目标病历协作工作台</h3>
 
-          <div v-if="detailWorkspaceMode === 'archive'" class="record-layout" :class="`mode-${recordViewMode}`">
-            <aside v-if="recordViewMode === 'full' && !showLabReportOverview" class="section-rail screen-only">
-              <div class="lifecycle-rail-summary">
-                <span>当前流转</span>
-
-                <strong>{{ activeLifecycleStage.title }}</strong>
-
-                <small>{{ lifecycleRailSummary }}</small>
-              </div>
-
-              <button
-                v-for="(section, index) in recordSectionsByRule"
-                :key="section.key"
-                type="button"
-                class="rail-item"
-                :class="{ active: activeSectionKey === section.key }"
-                @click="activeSectionKey = section.key"
-              >
-                <span>{{ index + 1 }}</span>
-
-                <strong>{{ shortTitle(section.title) }}</strong>
-
-                <small
-                  >{{ lifecycleStageForSection(section)?.shortTitle || section.department }} · {{ section.department }}</small
-                >
-
-                <em v-if="sectionRequiredMissingCount(section)" class="rail-missing-badge">
-                  {{ sectionRequiredMissingCount(section) }}
-                </em>
-              </button>
-            </aside>
-
-            <main class="form-panel screen-only">
-              <PatientOverviewPanel
-                v-if="showPatientOverviewPanel"
-                :state="patientWorkflowTasks"
-                @focus-field="focusWorkflowTask"
-                @focus-attachment="focusWorkflowAttachment"
-                @focus-stage="focusWorkflowStage"
-              />
-
-              <WorkflowTaskPanel
-                v-if="!showLabReportOverview"
-                :state="patientWorkflowTasks"
-                @focus-field="focusWorkflowTask"
-                @focus-attachment="focusWorkflowAttachment"
-                @focus-stage="focusWorkflowStage"
-              />
-
-              <section v-if="showLabReportOverview" class="lab-report-overview">
-                <div class="lab-report-overview-head">
-                  <div>
-                    <strong>化验报告模板视图</strong>
-                    <span>
-                      {{ fieldValues.patientName || patientInfo?.name || "当前患者" }} ·
-                      {{ fieldValues.visitNo || patientInfo?.visitNo || patientId }} · 最近更新
-                      {{ patientInfo?.updatedAt || generatedAt || "待同步" }}
-                    </span>
-                  </div>
-                  <el-button type="primary" plain @click="openLabReportWorkbench">填写/更新检验报告</el-button>
+                  <p>前台、检查、化验、护理和医生共同维护目标病历字段；健康管理档案保留为完整档案和备用入口。</p>
                 </div>
 
-                <LabReportPreview
-                  :field-values="fieldValues"
-                  :patient-name="fieldValues.patientName"
-                  :patient-gender="fieldValues.gender"
-                  :visit-no="fieldValues.visitNo || patientId"
-                />
-
-                <section class="lab-report-supplement">
-                  <div>
-                    <strong>化验室补充信息</strong>
-                    <span>模板报告之外的少量状态和说明仍可在这里查看或补充。</span>
-                  </div>
-                  <div class="lab-report-supplement-grid">
-                    <label>
-                      <span>幽门螺杆菌检测</span>
-                      <el-select v-model="fieldValues.hpTestStatus" clearable placeholder="选择状态">
-                        <el-option label="未查" value="未查" />
-                        <el-option label="已查" value="已查" />
-                        <el-option label="异常" value="异常" />
-                      </el-select>
-                    </label>
-                    <label class="wide">
-                      <span>未查项目说明</span>
-                      <el-input
-                        v-model="fieldValues.uncheckedItemsNote"
-                        :disabled="!canEditLabSupplementNote"
-                        type="textarea"
-                        :rows="2"
-                        placeholder="如需说明暂缓检查、患者原因或医生补查安排，可在这里记录"
-                      />
-                    </label>
-                  </div>
-                  <div class="lab-report-supplement-actions">
-                    <el-button :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
-                    <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
-                  </div>
-                </section>
-
-                <div class="lab-report-overview-foot">
-                  <span>原始图片/报告附件仍保留在“检查与附件”和对应字段证据中。</span>
-                  <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
-                </div>
-              </section>
-
-              <section v-if="recordViewMode === 'mine'" class="my-fields-panel">
-                <div class="my-fields-head">
-                  <div>
-                    <h3>{{ fieldLayerTitle }} · {{ layeredEditableFields.length }} 项</h3>
-
-                    <p>
-                      {{ fieldLayerDescription }}
-                    </p>
-                  </div>
-
-                  <el-tag :type="myRequiredMissingCount ? 'warning' : 'success'" effect="plain">
-                    {{ myRequiredMissingCount ? "待处理" : "已就绪" }}
-                  </el-tag>
-                </div>
-
-                <div class="field-layer-switch">
-                  <el-radio-group v-model="fieldLayerMode">
-                    <el-radio-button label="core">核心</el-radio-button>
-
-                    <el-radio-button label="recommended">推荐</el-radio-button>
-
-                    <el-radio-button label="optional">按需</el-radio-button>
-
-                    <el-radio-button label="all">全部</el-radio-button>
-                  </el-radio-group>
+                <div class="doctor-record-progress">
+                  <strong>{{ medicalRecordCompletionPercent }}%</strong>
 
                   <span>
-                    核心 {{ fieldLayerStats.core }} · 推荐 {{ fieldLayerStats.recommended }} · 按需 {{ fieldLayerStats.optional }}
+                    已填 {{ medicalRecordCompletedCount }}/{{ medicalRecordTotalCount }} · 入文档
+
+                    {{ medicalRecordDynamicFieldCount }} · 辅助确认
+
+                    {{ medicalRecordFormOnlyFieldCount }}
                   </span>
+
+                  <i><em :style="{ width: `${medicalRecordCompletionPercent}%` }"></em></i>
+                </div>
+              </div>
+
+              <MedicalRecordWorkbench
+                variant="inline"
+                :loading="medicalRecordLoading"
+                :template-status="medicalRecordTemplate"
+                :missing-items="medicalRecordMissingItems"
+                :unbound-fields="medicalRecordUnboundFields"
+                :field-sections="medicalRecordFieldSections"
+                v-model:active-sections="medicalRecordActiveSections"
+                :field-values="fieldValues"
+                :current-role="currentRole"
+                :can-generate="canGenerateMedicalRecord"
+                :lab-report-values="fieldValues"
+                :patient-name="fieldValues.patientName"
+                :patient-gender="fieldValues.gender"
+                :visit-no="fieldValues.visitNo || patientId"
+                :focused-role-key="focusedMedicalRecordRoleKey"
+                :focused-role-label="focusedMedicalRecordRoleLabel"
+                :focused-field-keys="focusedMedicalRecordFieldKeys"
+                :current-record="currentMedicalRecord"
+                :versions="medicalRecordVersions"
+                :completed-count="medicalRecordCompletedCount"
+                :total-count="medicalRecordTotalCount"
+                :can-manage-versions="canManageMedicalRecordVersions"
+                :is-textarea-field="isMedicalRecordTextareaField"
+                :is-field-missing="isMedicalRecordFieldMissing"
+                :field-assist-text="medicalRecordFieldAssistText"
+                :field-source-hint="medicalRecordArchiveSourceHint"
+                :is-select-field="isMedicalRecordSelectField"
+                :field-options="medicalRecordFieldOptions"
+                :is-date-field="isMedicalRecordDateField"
+                :status-label="medicalRecordStatusLabel"
+                :status-type="medicalRecordStatusType"
+                @update-field="updateMedicalRecordField"
+                @precheck="() => precheckMedicalRecord()"
+                @save-workspace="() => saveMedicalRecordWorkspace()"
+                @sync-from-archive="fillMedicalRecordBlanksFromArchive"
+                @generate="generateMedicalRecord"
+                @download="openCurrentMedicalRecord"
+                @finalize="finalizeMedicalRecord"
+                @select-version="selectMedicalRecordVersion"
+              />
+            </section>
+
+            <AttachmentWorkbench
+              v-else-if="detailWorkspaceMode === 'attachments'"
+              key="attachments"
+              :attachments="currentAttachments"
+              :can-open-attachment="canOpenAttachment"
+              @upload="openSupplementUpload"
+              @open="openAttachment"
+            />
+
+            <TimelineWorkbench
+              v-else-if="detailWorkspaceMode === 'timeline'"
+              key="timeline"
+              :events="patientTimelineEvents"
+              :loading="auditLoading"
+              :timeline-display-time="timelineDisplayTime"
+              :timeline-source-label="timelineSourceLabel"
+              @refresh="refreshAuditTimeline"
+            />
+
+            <div
+              v-else-if="detailWorkspaceMode === 'archive'"
+              key="archive"
+              class="record-layout"
+              :class="`mode-${recordViewMode}`"
+            >
+              <aside v-if="recordViewMode === 'full' && !showLabReportOverview" class="section-rail screen-only">
+                <div class="lifecycle-rail-summary">
+                  <span>当前流转</span>
+
+                  <strong>{{ activeLifecycleStage.title }}</strong>
+
+                  <small>{{ lifecycleRailSummary }}</small>
                 </div>
 
-                <section v-if="showNursingLabReportReference" class="nursing-lab-reference">
-                  <div class="nursing-lab-reference-head">
+                <button
+                  v-for="(section, index) in recordSectionsByRule"
+                  :key="section.key"
+                  type="button"
+                  class="rail-item"
+                  :class="{ active: activeSectionKey === section.key }"
+                  @click="activeSectionKey = section.key"
+                >
+                  <span>{{ index + 1 }}</span>
+
+                  <strong>{{ shortTitle(section.title) }}</strong>
+
+                  <small
+                    >{{ lifecycleStageForSection(section)?.shortTitle || section.department }} · {{ section.department }}</small
+                  >
+
+                  <em v-if="sectionRequiredMissingCount(section)" class="rail-missing-badge">
+                    {{ sectionRequiredMissingCount(section) }}
+                  </em>
+                </button>
+              </aside>
+
+              <main class="form-panel screen-only">
+                <PatientOverviewPanel
+                  v-if="showPatientOverviewPanel"
+                  :state="patientWorkflowTasks"
+                  @focus-field="focusWorkflowTask"
+                  @focus-attachment="focusWorkflowAttachment"
+                  @focus-stage="focusWorkflowStage"
+                />
+
+                <WorkflowTaskPanel
+                  v-if="!showLabReportOverview"
+                  :state="patientWorkflowTasks"
+                  @focus-field="focusWorkflowTask"
+                  @focus-attachment="focusWorkflowAttachment"
+                  @focus-stage="focusWorkflowStage"
+                />
+
+                <section v-if="showLabReportOverview" class="lab-report-overview">
+                  <div class="lab-report-overview-head">
                     <div>
-                      <strong>检验报告参考</strong>
-                      <span>护士站可查看已录入检验结果；医生最终确认后写入目标病历。</span>
+                      <strong>化验报告模板视图</strong>
+                      <span>
+                        {{ fieldValues.patientName || patientInfo?.name || "当前患者" }} ·
+                        {{ fieldValues.visitNo || patientInfo?.visitNo || patientId }} · 最近更新
+                        {{ patientInfo?.updatedAt || generatedAt || "待同步" }}
+                      </span>
                     </div>
-                    <el-button text @click="openLabReportWorkbench">查看检验报告模板</el-button>
+                    <el-button type="primary" plain @click="openLabReportWorkbench">填写/更新检验报告</el-button>
                   </div>
+
                   <LabReportPreview
-                    v-if="hasArchiveLabReportData"
-                    compact
-                    :show-empty="false"
                     :field-values="fieldValues"
                     :patient-name="fieldValues.patientName"
                     :patient-gender="fieldValues.gender"
                     :visit-no="fieldValues.visitNo || patientId"
                   />
-                  <el-empty v-else description="暂无检验报告数据" />
+
+                  <section class="lab-report-supplement">
+                    <div>
+                      <strong>化验室补充信息</strong>
+                      <span>模板报告之外的少量状态和说明仍可在这里查看或补充。</span>
+                    </div>
+                    <div class="lab-report-supplement-grid">
+                      <label>
+                        <span>幽门螺杆菌检测</span>
+                        <el-select v-model="fieldValues.hpTestStatus" clearable placeholder="选择状态">
+                          <el-option label="未查" value="未查" />
+                          <el-option label="已查" value="已查" />
+                          <el-option label="异常" value="异常" />
+                        </el-select>
+                      </label>
+                      <label class="wide">
+                        <span>未查项目说明</span>
+                        <el-input
+                          v-model="fieldValues.uncheckedItemsNote"
+                          :disabled="!canEditLabSupplementNote"
+                          type="textarea"
+                          :rows="2"
+                          placeholder="如需说明暂缓检查、患者原因或医生补查安排，可在这里记录"
+                        />
+                      </label>
+                    </div>
+                    <div class="lab-report-supplement-actions">
+                      <el-button :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
+                      <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
+                    </div>
+                  </section>
+
+                  <div class="lab-report-overview-foot">
+                    <span>原始图片/报告附件仍保留在“检查与附件”和对应字段证据中。</span>
+                    <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
+                  </div>
                 </section>
 
-                <div v-if="myFieldIssues.length" class="field-issue-banner">
-                  <div>
-                    <strong>先处理 {{ myFieldIssues.length }} 项</strong>
-
-                    <span>{{ myFieldIssues[0].fieldLabel }}：{{ myFieldIssues[0].message }}</span>
-                  </div>
-
-                  <el-button text @click="focusIssue(myFieldIssues[0])">定位</el-button>
-                </div>
-
-                <el-empty v-if="!layeredEditableFields.length" description="当前层暂无待填字段">
-                  <el-button type="primary" @click="recordViewMode = 'full'">查看完整档案</el-button>
-                </el-empty>
-
-                <div v-else class="my-field-grid">
-                  <div
-                    v-for="item in layeredEditableFields"
-                    :key="item.field.key"
-                    class="my-field-item"
-                    :id="`my-field-${item.field.key}`"
-                    :class="{
-                      wide: item.field.kind === 'textarea' || isLabMetricField(item.field),
-
-                      complete: isRecordFieldComplete(item.field),
-
-                      missing: issueForField(item.field)?.level === 'missing',
-
-                      invalid: issueForField(item.field)?.level === 'invalid',
-
-                      focused: highlightedFieldKey === item.field.key
-                    }"
-                  >
-                    <div class="my-field-label">
-                      <label>
-                        {{ item.field.label }}
-
-                        <sup v-if="item.field.required">*</sup>
-                      </label>
-
-                      <span>{{ shortTitle(item.section.title) }}</span>
-                    </div>
-
-                    <ArchiveFieldRenderer
-                      :field="item.field"
-                      v-model="fieldValues[item.field.key]"
-                      :disabled="!isEditable(item.field)"
-                      :issue="issueForField(item.field)"
-                      :attachments="matchedAttachments(item.field.key)"
-                      :select-options="selectOptions(item.field)"
-                      :followup-records="followupRecords"
-                      :role-label="roleLabel"
-                      :can-open-attachment="canOpenAttachment"
-                      :is-image-attachment="isImageAttachment"
-                      :attachment-preview-url="attachmentPreviewUrl"
-                      :open-attachment="openAttachment"
-                      :textarea-rows="3"
-                      @update-lab-metric="updateLabMetricField"
-                      @upload="uploadFieldAttachments"
-                      @add-followup-record="addFollowupRecord"
-                      @remove-followup-record="removeFollowupRecord"
-                    />
-                  </div>
-                </div>
-
-                <div v-if="layeredEditableFields.length" class="my-fields-footer">
-                  <el-button :loading="saving" @click="saveMyFields">保存当前层内容</el-button>
-
-                  <el-button type="primary" :loading="saving" @click="saveMyFieldsAndBack">保存并返回看板</el-button>
-                </div>
-              </section>
-
-              <div v-if="recordViewMode === 'full' && !showLabReportOverview" class="workspace-anchor">
-                <button
-                  v-for="(section, index) in recordSectionsByRule"
-                  :key="section.key"
-                  :class="{
-                    active: activeSectionKey === section.key,
-
-                    done: isSectionComplete(section),
-
-                    attention: sectionRequiredMissingCount(section) > 0
-                  }"
-                  type="button"
-                  @click="scrollToSection(section.key)"
-                >
-                  <span>{{ index + 1 }}</span>
-
-                  {{ shortTitle(section.title) }}
-
-                  <em v-if="sectionRequiredMissingCount(section)">{{ sectionRequiredMissingCount(section) }}</em>
-                </button>
-              </div>
-
-              <div v-if="recordViewMode === 'full' && !showLabReportOverview" class="all-section-form">
-                <section
-                  v-for="(section, sectionIndex) in recordSectionsByRule"
-                  :id="`record-section-${section.key}`"
-                  :key="section.key"
-                  class="section-card"
-                  :class="{
-                    saved: savedSectionKey === section.key,
-
-                    collapsed: isSectionCollapsed(section),
-
-                    attention: sectionRequiredMissingCount(section) > 0,
-
-                    readonly: !canEditRecordSection(section),
-
-                    editable: canEditRecordSection(section)
-                  }"
-                >
-                  <div class="section-card-head">
+                <section v-if="recordViewMode === 'mine'" class="my-fields-panel">
+                  <div class="my-fields-head">
                     <div>
-                      <span class="section-index">{{ sectionIndex + 1 }}</span>
+                      <h3>{{ fieldLayerTitle }} · {{ layeredEditableFields.length }} 项</h3>
 
-                      <h3>{{ section.title }}</h3>
-
-                      <p>{{ section.description }}</p>
+                      <p>
+                        {{ fieldLayerDescription }}
+                      </p>
                     </div>
 
-                    <div class="section-head-actions">
-                      <el-tag :type="sectionStatusType(section)" effect="plain">
-                        {{ sectionStatusLabel(section) }}
-                      </el-tag>
-
-                      <el-button
-                        v-if="canExpandFullSection(section)"
-                        text
-                        class="section-fold-button"
-                        @click="toggleSectionCollapse(section.key)"
-                      >
-                        <el-icon :class="{ folded: isSectionCollapsed(section) }"><ArrowDown /></el-icon>
-
-                        {{ isSectionCollapsed(section) ? "展开" : "收起" }}
-                      </el-button>
-                    </div>
+                    <el-tag :type="myRequiredMissingCount ? 'warning' : 'success'" effect="plain">
+                      {{ myRequiredMissingCount ? "待处理" : "已就绪" }}
+                    </el-tag>
                   </div>
 
-                  <div class="section-summary-line">
-                    <span>已填 {{ sectionCompletedCount(section) }}/{{ section.fields.length }}</span>
+                  <div class="field-layer-switch">
+                    <el-radio-group v-model="fieldLayerMode">
+                      <el-radio-button label="core">核心</el-radio-button>
 
-                    <span v-if="sectionRequiredMissingCount(section)" class="needs-fill">
-                      必填待补 {{ sectionRequiredMissingCount(section) }}
-                    </span>
+                      <el-radio-button label="recommended">推荐</el-radio-button>
 
-                    <span v-else class="is-complete">必填已齐</span>
+                      <el-radio-button label="optional">按需</el-radio-button>
 
-                    <span v-if="sectionEvidenceCount(section)">附件 {{ sectionEvidenceCount(section) }} 份</span>
+                      <el-radio-button label="all">全部</el-radio-button>
+                    </el-radio-group>
 
-                    <span>{{ canEditRecordSection(section) ? "可填写" : "其他岗位" }}</span>
-
-                    <span v-if="sectionSaveTimes[section.key]" class="section-save-time">
-                      最后保存 {{ sectionSaveTimes[section.key] }}
+                    <span>
+                      核心 {{ fieldLayerStats.core }} · 推荐 {{ fieldLayerStats.recommended }} · 按需
+                      {{ fieldLayerStats.optional }}
                     </span>
                   </div>
 
-                  <div v-if="sectionIssues(section).length" class="section-issue-line">
-                    <span>待处理：{{ sectionIssues(section)[0].fieldLabel }} - {{ sectionIssues(section)[0].message }}</span>
+                  <section v-if="showNursingLabReportReference" class="nursing-lab-reference">
+                    <div class="nursing-lab-reference-head">
+                      <div>
+                        <strong>检验报告参考</strong>
+                        <span>护士站可查看已录入检验结果；医生最终确认后写入目标病历。</span>
+                      </div>
+                      <el-button text @click="openLabReportWorkbench">查看检验报告模板</el-button>
+                    </div>
+                    <LabReportPreview
+                      v-if="hasArchiveLabReportData"
+                      compact
+                      :show-empty="false"
+                      :field-values="fieldValues"
+                      :patient-name="fieldValues.patientName"
+                      :patient-gender="fieldValues.gender"
+                      :visit-no="fieldValues.visitNo || patientId"
+                    />
+                    <el-empty v-else description="暂无检验报告数据" />
+                  </section>
 
-                    <el-button text @click="focusIssue(sectionIssues(section)[0])">定位</el-button>
+                  <div v-if="myFieldIssues.length" class="field-issue-banner">
+                    <div>
+                      <strong>先处理 {{ myFieldIssues.length }} 项</strong>
+
+                      <span>{{ myFieldIssues[0].fieldLabel }}：{{ myFieldIssues[0].message }}</span>
+                    </div>
+
+                    <el-button text @click="focusIssue(myFieldIssues[0])">定位</el-button>
                   </div>
 
-                  <div v-show="canExpandFullSection(section) && !isSectionCollapsed(section)" class="section-fields">
+                  <el-empty v-if="!layeredEditableFields.length" description="当前层暂无待填字段">
+                    <el-button type="primary" @click="recordViewMode = 'full'">查看完整档案</el-button>
+                  </el-empty>
+
+                  <div v-else class="my-field-grid">
                     <div
-                      v-for="recordField in section.fields"
-                      :key="recordField.key"
-                      :id="`section-field-${recordField.key}`"
-                      class="field-row workbench-field-row"
+                      v-for="item in layeredEditableFields"
+                      :key="item.field.key"
+                      class="my-field-item"
+                      :id="`my-field-${item.field.key}`"
                       :class="{
-                        locked: !isEditable(recordField),
+                        wide: item.field.kind === 'textarea' || isLabMetricField(item.field),
 
-                        complete: isRecordFieldComplete(recordField),
+                        complete: isRecordFieldComplete(item.field),
 
-                        missing: issueForField(recordField)?.level === 'missing',
+                        missing: issueForField(item.field)?.level === 'missing',
 
-                        invalid: issueForField(recordField)?.level === 'invalid',
+                        invalid: issueForField(item.field)?.level === 'invalid',
 
-                        focused: highlightedFieldKey === recordField.key
+                        focused: highlightedFieldKey === item.field.key
                       }"
                     >
-                      <div class="field-label">
-                        <label>{{ recordField.label }}</label>
+                      <div class="my-field-label">
+                        <label>
+                          {{ item.field.label }}
 
-                        <small>{{ fieldAssistText(recordField) }}</small>
+                          <sup v-if="item.field.required">*</sup>
+                        </label>
+
+                        <span>{{ shortTitle(item.section.title) }}</span>
                       </div>
 
                       <ArchiveFieldRenderer
-                        :field="recordField"
-                        v-model="fieldValues[recordField.key]"
-                        :disabled="!isEditable(recordField)"
-                        :issue="issueForField(recordField)"
-                        :attachments="matchedAttachments(recordField.key)"
-                        :select-options="selectOptions(recordField)"
+                        :field="item.field"
+                        v-model="fieldValues[item.field.key]"
+                        :disabled="!isEditable(item.field)"
+                        :issue="issueForField(item.field)"
+                        :attachments="matchedAttachments(item.field.key)"
+                        :select-options="selectOptions(item.field)"
                         :followup-records="followupRecords"
                         :role-label="roleLabel"
                         :can-open-attachment="canOpenAttachment"
                         :is-image-attachment="isImageAttachment"
                         :attachment-preview-url="attachmentPreviewUrl"
                         :open-attachment="openAttachment"
+                        :textarea-rows="3"
                         @update-lab-metric="updateLabMetricField"
                         @upload="uploadFieldAttachments"
                         @add-followup-record="addFollowupRecord"
@@ -788,83 +655,227 @@
                     </div>
                   </div>
 
-                  <div v-show="canExpandFullSection(section) && !isSectionCollapsed(section)" class="section-card-actions">
-                    <el-button
-                      type="primary"
-                      :loading="saving && activeSectionKey === section.key"
-                      :disabled="!canEditRecordSection(section)"
-                      @click="saveSection(section.key)"
-                    >
-                      保存本段
-                    </el-button>
+                  <div v-if="layeredEditableFields.length" class="my-fields-footer">
+                    <el-button :loading="saving" @click="saveMyFields">保存当前层内容</el-button>
+
+                    <el-button type="primary" :loading="saving" @click="saveMyFieldsAndBack">保存并返回看板</el-button>
                   </div>
                 </section>
-              </div>
 
-              <div class="section-header">
-                <div>
-                  <h3>{{ activeSection.title }}</h3>
+                <div v-if="recordViewMode === 'full' && !showLabReportOverview" class="workspace-anchor">
+                  <button
+                    v-for="(section, index) in recordSectionsByRule"
+                    :key="section.key"
+                    :class="{
+                      active: activeSectionKey === section.key,
 
-                  <p>{{ activeSection.description }}</p>
+                      done: isSectionComplete(section),
+
+                      attention: sectionRequiredMissingCount(section) > 0
+                    }"
+                    type="button"
+                    @click="scrollToSection(section.key)"
+                  >
+                    <span>{{ index + 1 }}</span>
+
+                    {{ shortTitle(section.title) }}
+
+                    <em v-if="sectionRequiredMissingCount(section)">{{ sectionRequiredMissingCount(section) }}</em>
+                  </button>
                 </div>
 
-                <el-tag :type="canEditRecordSection(activeSection) ? 'success' : 'info'" effect="plain">
-                  {{ canEditRecordSection(activeSection) ? "本岗位可填写" : "当前只读" }}
-                </el-tag>
-              </div>
+                <div v-if="recordViewMode === 'full' && !showLabReportOverview" class="all-section-form">
+                  <section
+                    v-for="(section, sectionIndex) in recordSectionsByRule"
+                    :id="`record-section-${section.key}`"
+                    :key="section.key"
+                    class="section-card"
+                    :class="{
+                      saved: savedSectionKey === section.key,
 
-              <div class="compact-form">
-                <div
-                  v-for="activeField in activeSection.fields"
-                  :id="`active-field-${activeField.key}`"
-                  :key="activeField.key"
-                  class="field-row"
-                  :class="{
-                    locked: !isEditable(activeField),
+                      collapsed: isSectionCollapsed(section),
 
-                    missing: issueForField(activeField)?.level === 'missing',
+                      attention: sectionRequiredMissingCount(section) > 0,
 
-                    invalid: issueForField(activeField)?.level === 'invalid',
+                      readonly: !canEditRecordSection(section),
 
-                    focused: highlightedFieldKey === activeField.key
-                  }"
-                >
-                  <div class="field-label">
-                    <label>{{ activeField.label }}</label>
+                      editable: canEditRecordSection(section)
+                    }"
+                  >
+                    <div class="section-card-head">
+                      <div>
+                        <span class="section-index">{{ sectionIndex + 1 }}</span>
 
-                    <small>{{ fieldAssistText(activeField) }}</small>
+                        <h3>{{ section.title }}</h3>
+
+                        <p>{{ section.description }}</p>
+                      </div>
+
+                      <div class="section-head-actions">
+                        <el-tag :type="sectionStatusType(section)" effect="plain">
+                          {{ sectionStatusLabel(section) }}
+                        </el-tag>
+
+                        <el-button
+                          v-if="canExpandFullSection(section)"
+                          text
+                          class="section-fold-button"
+                          @click="toggleSectionCollapse(section.key)"
+                        >
+                          <el-icon :class="{ folded: isSectionCollapsed(section) }"><ArrowDown /></el-icon>
+
+                          {{ isSectionCollapsed(section) ? "展开" : "收起" }}
+                        </el-button>
+                      </div>
+                    </div>
+
+                    <div class="section-summary-line">
+                      <span>已填 {{ sectionCompletedCount(section) }}/{{ section.fields.length }}</span>
+
+                      <span v-if="sectionRequiredMissingCount(section)" class="needs-fill">
+                        必填待补 {{ sectionRequiredMissingCount(section) }}
+                      </span>
+
+                      <span v-else class="is-complete">必填已齐</span>
+
+                      <span v-if="sectionEvidenceCount(section)">附件 {{ sectionEvidenceCount(section) }} 份</span>
+
+                      <span>{{ canEditRecordSection(section) ? "可填写" : "其他岗位" }}</span>
+
+                      <span v-if="sectionSaveTimes[section.key]" class="section-save-time">
+                        最后保存 {{ sectionSaveTimes[section.key] }}
+                      </span>
+                    </div>
+
+                    <div v-if="sectionIssues(section).length" class="section-issue-line">
+                      <span>待处理：{{ sectionIssues(section)[0].fieldLabel }} - {{ sectionIssues(section)[0].message }}</span>
+
+                      <el-button text @click="focusIssue(sectionIssues(section)[0])">定位</el-button>
+                    </div>
+
+                    <div v-show="canExpandFullSection(section) && !isSectionCollapsed(section)" class="section-fields">
+                      <div
+                        v-for="recordField in section.fields"
+                        :key="recordField.key"
+                        :id="`section-field-${recordField.key}`"
+                        class="field-row workbench-field-row"
+                        :class="{
+                          locked: !isEditable(recordField),
+
+                          complete: isRecordFieldComplete(recordField),
+
+                          missing: issueForField(recordField)?.level === 'missing',
+
+                          invalid: issueForField(recordField)?.level === 'invalid',
+
+                          focused: highlightedFieldKey === recordField.key
+                        }"
+                      >
+                        <div class="field-label">
+                          <label>{{ recordField.label }}</label>
+
+                          <small>{{ fieldAssistText(recordField) }}</small>
+                        </div>
+
+                        <ArchiveFieldRenderer
+                          :field="recordField"
+                          v-model="fieldValues[recordField.key]"
+                          :disabled="!isEditable(recordField)"
+                          :issue="issueForField(recordField)"
+                          :attachments="matchedAttachments(recordField.key)"
+                          :select-options="selectOptions(recordField)"
+                          :followup-records="followupRecords"
+                          :role-label="roleLabel"
+                          :can-open-attachment="canOpenAttachment"
+                          :is-image-attachment="isImageAttachment"
+                          :attachment-preview-url="attachmentPreviewUrl"
+                          :open-attachment="openAttachment"
+                          @update-lab-metric="updateLabMetricField"
+                          @upload="uploadFieldAttachments"
+                          @add-followup-record="addFollowupRecord"
+                          @remove-followup-record="removeFollowupRecord"
+                        />
+                      </div>
+                    </div>
+
+                    <div v-show="canExpandFullSection(section) && !isSectionCollapsed(section)" class="section-card-actions">
+                      <el-button
+                        type="primary"
+                        :loading="saving && activeSectionKey === section.key"
+                        :disabled="!canEditRecordSection(section)"
+                        @click="saveSection(section.key)"
+                      >
+                        保存本段
+                      </el-button>
+                    </div>
+                  </section>
+                </div>
+
+                <div class="section-header">
+                  <div>
+                    <h3>{{ activeSection.title }}</h3>
+
+                    <p>{{ activeSection.description }}</p>
                   </div>
 
-                  <ArchiveFieldRenderer
-                    :field="activeField"
-                    v-model="fieldValues[activeField.key]"
-                    :disabled="!isEditable(activeField)"
-                    :issue="issueForField(activeField)"
-                    :attachments="matchedAttachments(activeField.key)"
-                    :select-options="selectOptions(activeField)"
-                    :followup-records="followupRecords"
-                    :role-label="roleLabel"
-                    :can-open-attachment="canOpenAttachment"
-                    :is-image-attachment="isImageAttachment"
-                    :attachment-preview-url="attachmentPreviewUrl"
-                    :open-attachment="openAttachment"
-                    @update-lab-metric="updateLabMetricField"
-                    @upload="uploadFieldAttachments"
-                    @add-followup-record="addFollowupRecord"
-                    @remove-followup-record="removeFollowupRecord"
-                  />
+                  <el-tag :type="canEditRecordSection(activeSection) ? 'success' : 'info'" effect="plain">
+                    {{ canEditRecordSection(activeSection) ? "本岗位可填写" : "当前只读" }}
+                  </el-tag>
                 </div>
-              </div>
 
-              <div class="form-footer">
-                <el-button type="success" :loading="saving" @click="saveCurrentSection">保存当前章节</el-button>
+                <div class="compact-form">
+                  <div
+                    v-for="activeField in activeSection.fields"
+                    :id="`active-field-${activeField.key}`"
+                    :key="activeField.key"
+                    class="field-row"
+                    :class="{
+                      locked: !isEditable(activeField),
 
-                <el-button :disabled="isFirstSection" @click="switchSection(-1)">上一段</el-button>
+                      missing: issueForField(activeField)?.level === 'missing',
 
-                <el-button :disabled="isLastSection" type="primary" @click="switchSection(1)">下一段</el-button>
-              </div>
-            </main>
-          </div>
+                      invalid: issueForField(activeField)?.level === 'invalid',
+
+                      focused: highlightedFieldKey === activeField.key
+                    }"
+                  >
+                    <div class="field-label">
+                      <label>{{ activeField.label }}</label>
+
+                      <small>{{ fieldAssistText(activeField) }}</small>
+                    </div>
+
+                    <ArchiveFieldRenderer
+                      :field="activeField"
+                      v-model="fieldValues[activeField.key]"
+                      :disabled="!isEditable(activeField)"
+                      :issue="issueForField(activeField)"
+                      :attachments="matchedAttachments(activeField.key)"
+                      :select-options="selectOptions(activeField)"
+                      :followup-records="followupRecords"
+                      :role-label="roleLabel"
+                      :can-open-attachment="canOpenAttachment"
+                      :is-image-attachment="isImageAttachment"
+                      :attachment-preview-url="attachmentPreviewUrl"
+                      :open-attachment="openAttachment"
+                      @update-lab-metric="updateLabMetricField"
+                      @upload="uploadFieldAttachments"
+                      @add-followup-record="addFollowupRecord"
+                      @remove-followup-record="removeFollowupRecord"
+                    />
+                  </div>
+                </div>
+
+                <div class="form-footer">
+                  <el-button type="success" :loading="saving" @click="saveCurrentSection">保存当前章节</el-button>
+
+                  <el-button :disabled="isFirstSection" @click="switchSection(-1)">上一段</el-button>
+
+                  <el-button :disabled="isLastSection" type="primary" @click="switchSection(1)">下一段</el-button>
+                </div>
+              </main>
+            </div>
+          </Transition>
         </main>
       </div>
 
@@ -5510,7 +5521,19 @@ onBeforeUnmount(() => {
     transition:
       background-color 0.18s ease,
       border-color 0.18s ease,
-      color 0.18s ease;
+      box-shadow 0.18s ease,
+      color 0.18s ease,
+      transform 0.18s ease;
+
+    &:hover {
+      border-color: var(--hos-border-interactive);
+      box-shadow: var(--hos-shadow-card-hover);
+      transform: translateY(-1px);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
 
     strong {
       color: var(--hos-text-primary);
@@ -5539,7 +5562,9 @@ onBeforeUnmount(() => {
 
       border-color: var(--hos-border-interactive);
 
-      box-shadow: inset 3px 0 0 var(--hos-primary);
+      box-shadow:
+        inset 3px 0 0 var(--hos-primary),
+        var(--hos-shadow-card);
 
       strong {
         color: var(--hos-primary-deep);

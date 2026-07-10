@@ -12,6 +12,16 @@ type SectionCompletion = {
 
 export type WorkflowStageStatus = "done" | "active" | "attention" | "waiting";
 
+export type WorkflowStageRuntimeStatus =
+  | "notStarted"
+  | "available"
+  | "inProgress"
+  | "done"
+  | "needsSupplement"
+  | "returned"
+  | "skipped"
+  | "archived";
+
 export type WorkflowTaskRelation = "owner" | "support" | "review" | "readonly";
 
 export type WorkflowTaskStatus = "missing" | "invalid" | "attachment" | "review" | "critical" | "complete";
@@ -51,10 +61,25 @@ export type WorkflowStageNode = {
   owner: string;
   department: string;
   status: WorkflowStageStatus;
+  runtimeStatus: WorkflowStageRuntimeStatus;
+  runtimeStatusLabel: string;
+  runtimeStatusTone: "danger" | "warning" | "success" | "info";
   completed: number;
   total: number;
   missing: number;
   evidenceCount: number;
+  taskSummary: WorkflowStageTaskSummary;
+};
+
+export type WorkflowStageTaskSummary = {
+  todoCount: number;
+  blockingCount: number;
+  attachmentMissingCount: number;
+  primaryTodo?: string;
+  blockingReason?: string;
+  nextAction: string;
+  handoffTarget?: string;
+  canHandle: boolean;
 };
 
 export type WorkflowAttachmentTask = {
@@ -71,6 +96,7 @@ export type PatientWorkflowTaskState = {
   currentStage: WorkflowStageNode;
   nextStage?: WorkflowStageNode;
   stageNodes: WorkflowStageNode[];
+  decisionSummary: WorkflowDecisionSummary;
   primaryTasks: WorkflowFieldTask[];
   collaborationTasks: WorkflowFieldTask[];
   reviewTasks: WorkflowFieldTask[];
@@ -97,6 +123,15 @@ export type PatientWorkflowTaskState = {
   nextStepAdvice: string;
 };
 
+export type WorkflowDecisionSummary = {
+  stageLabel: string;
+  ownerLabel: string;
+  keyConclusion: string;
+  blockingReason: string;
+  nextAction: string;
+  progressText: string;
+};
+
 const emptyStageNode: WorkflowStageNode = {
   key: "empty",
   title: "流程待识别",
@@ -104,10 +139,20 @@ const emptyStageNode: WorkflowStageNode = {
   owner: "当前岗位",
   department: "院内协作",
   status: "waiting",
+  runtimeStatus: "notStarted",
+  runtimeStatusLabel: "未开始",
+  runtimeStatusTone: "info",
   completed: 0,
   total: 0,
   missing: 0,
-  evidenceCount: 0
+  evidenceCount: 0,
+  taskSummary: {
+    todoCount: 0,
+    blockingCount: 0,
+    attachmentMissingCount: 0,
+    nextAction: "等待前序岗位形成资料",
+    canHandle: false
+  }
 };
 
 const categoryLabels: Record<ArchiveFieldCategory, string> = {
@@ -154,6 +199,14 @@ const rankTask = (task: WorkflowFieldTask) =>
   (task.critical ? 0 : 1) +
   (task.required || task.archiveRequired ? 0 : 1);
 
+const isBlockingTask = (task: WorkflowFieldTask) =>
+  task.status === "invalid" ||
+  task.status === "attachment" ||
+  task.status === "critical" ||
+  (task.status === "missing" && (task.required || task.archiveRequired || task.issueLevel === "missing"));
+
+export const isWorkflowBlockingTask = (task: WorkflowFieldTask) => isBlockingTask(task);
+
 const taskStatusMeta: Record<WorkflowTaskStatus, { label: string; tone: WorkflowFieldTask["statusTone"]; reason: string }> = {
   missing: { label: "必填缺失", tone: "warning", reason: "必填或归档必需字段尚未补齐" },
   invalid: { label: "格式异常", tone: "danger", reason: "字段内容未通过当前校验规则" },
@@ -161,6 +214,63 @@ const taskStatusMeta: Record<WorkflowTaskStatus, { label: string; tone: Workflow
   review: { label: "待复核", tone: "info", reason: "需要当前岗位或质控角色复核确认" },
   critical: { label: "关键未闭环", tone: "danger", reason: "关键字段还未形成可归档记录" },
   complete: { label: "已完成", tone: "success", reason: "字段已完成，可继续推进流程" }
+};
+
+const runtimeStatusMeta: Record<WorkflowStageRuntimeStatus, { label: string; tone: WorkflowStageNode["runtimeStatusTone"] }> = {
+  notStarted: { label: "未开始", tone: "info" },
+  available: { label: "可处理", tone: "info" },
+  inProgress: { label: "处理中", tone: "warning" },
+  done: { label: "已完成", tone: "success" },
+  needsSupplement: { label: "待补充", tone: "warning" },
+  returned: { label: "被退回", tone: "danger" },
+  skipped: { label: "已跳过", tone: "info" },
+  archived: { label: "已归档", tone: "success" }
+};
+
+const getRuntimeStatus = ({
+  stage,
+  stageIndex,
+  activeStageIndex,
+  completed,
+  total,
+  missing,
+  blockingCount,
+  hasInvalidIssue,
+  canHandle,
+  archiveReady
+}: {
+  stage: PatientLifecycleStage;
+  stageIndex: number;
+  activeStageIndex: number;
+  completed: number;
+  total: number;
+  missing: number;
+  blockingCount: number;
+  hasInvalidIssue: boolean;
+  canHandle: boolean;
+  archiveReady: boolean;
+}): WorkflowStageRuntimeStatus => {
+  if (stage.key === "qualityArchive" && archiveReady) return "archived";
+  if (hasInvalidIssue) return "returned";
+  if (blockingCount > 0 || missing > 0) return "needsSupplement";
+  if (total > 0 && completed >= total) return "done";
+  if (completed > 0) return "inProgress";
+  if (stageIndex === activeStageIndex || canHandle) return "available";
+  return "notStarted";
+};
+
+const summarizeStageTodo = (tasks: WorkflowFieldTask[]) => {
+  const pending = tasks.filter(task => task.status !== "complete").sort((left, right) => rankTask(left) - rankTask(right));
+  const blocking = pending.filter(isBlockingTask);
+  const attachmentMissingCount = pending.filter(task => task.status === "attachment").length;
+
+  return {
+    pending,
+    blocking,
+    attachmentMissingCount,
+    primaryTodo: pending[0] ? `${pending[0].sectionTitle}：${pending[0].fieldLabel}` : undefined,
+    blockingReason: blocking[0] ? `${blocking[0].fieldLabel}：${blocking[0].statusLabel}` : undefined
+  };
 };
 
 const resolveTaskStatus = (
@@ -243,7 +353,7 @@ export const usePatientWorkflowTasks = ({
       return index;
     }, {});
 
-    const stageNodes = lifecycleStages.value.map<WorkflowStageNode>(stage => {
+    const baseStageNodes = lifecycleStages.value.map<WorkflowStageNode>(stage => {
       const stageSections = stage.sectionKeys.map(sectionKey => sectionsByKey[sectionKey]).filter(Boolean);
       const stats = stageSections.reduce(
         (result, section) => {
@@ -268,19 +378,28 @@ export const usePatientWorkflowTasks = ({
         owner: stage.owner,
         department: stage.department,
         status: isActive ? (stats.missing ? "attention" : "active") : isDone ? "done" : "waiting",
-        ...stats
+        runtimeStatus: "notStarted",
+        runtimeStatusLabel: "未开始",
+        runtimeStatusTone: "info",
+        ...stats,
+        taskSummary: {
+          todoCount: 0,
+          blockingCount: 0,
+          attachmentMissingCount: 0,
+          nextAction: "等待前序岗位形成资料",
+          canHandle: false
+        }
       };
     });
 
     const currentStage =
-      stageNodes.find(stage => stage.key === activeLifecycleStage.value.key) || stageNodes[0] || emptyStageNode;
-    const currentStageIndex = stageNodes.findIndex(stage => stage.key === currentStage.key);
-    const nextStage = stageNodes[currentStageIndex + 1];
+      baseStageNodes.find(stage => stage.key === activeLifecycleStage.value.key) || baseStageNodes[0] || emptyStageNode;
+    const currentStageIndex = baseStageNodes.findIndex(stage => stage.key === currentStage.key);
     const currentStageSectionKeys = new Set(activeLifecycleStage.value.sectionKeys);
     const currentStageSections = sections.value.filter(section => currentStageSectionKeys.has(section.key));
     const taskSections = currentStageSections.length ? currentStageSections : sections.value;
 
-    const fieldTasks = taskSections.flatMap(section =>
+    const fieldTasks = sections.value.flatMap(section =>
       section.fields.map<WorkflowFieldTask>(field => {
         const responsibility = getArchiveFieldResponsibility(field.key);
         const stage = responsibility
@@ -443,6 +562,54 @@ export const usePatientWorkflowTasks = ({
       : 0;
     archiveReadiness.ready = archiveReadiness.missing === 0 && blockingItems.length === 0 && archiveReadiness.total > 0;
 
+    const stageNodes = baseStageNodes.map((stage, index) => {
+      const stageTasks = fieldTasks.filter(task => task.stageKey === stage.key);
+      const taskSummaryBase = summarizeStageTodo(stageTasks);
+      const canHandle = stageTasks.some(task => task.relation === "owner" || task.relation === "support");
+      const hasInvalidIssue = stageTasks.some(task => task.issueLevel === "invalid");
+      const runtimeStatus = getRuntimeStatus({
+        stage: lifecycleStages.value[index],
+        stageIndex: index,
+        activeStageIndex: currentStageIndex,
+        completed: stage.completed,
+        total: stage.total,
+        missing: stage.missing,
+        blockingCount: taskSummaryBase.blocking.length,
+        hasInvalidIssue,
+        canHandle,
+        archiveReady: archiveReadiness.ready
+      });
+      const runtimeMeta = runtimeStatusMeta[runtimeStatus];
+      const nextStageForNode = baseStageNodes[index + 1];
+      const fallbackAction =
+        runtimeStatus === "done" || runtimeStatus === "archived"
+          ? `已完成，后续流向 ${nextStageForNode?.owner || "质控归档"}`
+          : runtimeStatus === "notStarted"
+            ? `等待前序岗位完成后由 ${stage.owner} 处理`
+            : canHandle
+              ? `${stage.owner}处理本节点待办`
+              : `等待 ${stage.owner} 补齐资料`;
+
+      return {
+        ...stage,
+        runtimeStatus,
+        runtimeStatusLabel: runtimeMeta.label,
+        runtimeStatusTone: runtimeMeta.tone,
+        taskSummary: {
+          todoCount: taskSummaryBase.pending.length,
+          blockingCount: taskSummaryBase.blocking.length,
+          attachmentMissingCount: taskSummaryBase.attachmentMissingCount,
+          primaryTodo: taskSummaryBase.primaryTodo,
+          blockingReason: taskSummaryBase.blockingReason,
+          nextAction: taskSummaryBase.primaryTodo ? `优先处理 ${taskSummaryBase.primaryTodo}` : fallbackAction,
+          handoffTarget: nextStageForNode?.owner,
+          canHandle
+        }
+      };
+    });
+    const resolvedCurrentStage = stageNodes.find(stage => stage.key === currentStage.key) || stageNodes[0] || emptyStageNode;
+    const nextStage = stageNodes[stageNodes.findIndex(stage => stage.key === resolvedCurrentStage.key) + 1];
+
     const nextStepAdvice = ownerTasks.length
       ? `${roleName.value}先处理 ${ownerTasks[0].sectionTitle}：${ownerTasks[0].fieldLabel}`
       : supportTasks.length
@@ -453,12 +620,31 @@ export const usePatientWorkflowTasks = ({
             ? `当前岗位已处理，等待 ${blockingItems[0].primaryOwner || blockingItems[0].department} 补齐 ${blockingItems[0].fieldLabel}`
             : archiveReadiness.ready
               ? "字段和必填项已就绪，可继续预览、打印或提交质控归档"
-              : `继续推进 ${currentStage.title}，完成后流转到 ${nextStage?.owner || currentStage.owner}`;
+              : `继续推进 ${resolvedCurrentStage.title}，完成后流转到 ${nextStage?.owner || resolvedCurrentStage.owner}`;
+
+    const keyConclusion =
+      reviewTasks[0]?.fieldLabel ||
+      ownerTasks[0]?.fieldLabel ||
+      supportTasks[0]?.fieldLabel ||
+      blockingItems[0]?.fieldLabel ||
+      (archiveReadiness.ready ? "归档资料已就绪" : "等待岗位资料继续补齐");
+    const decisionSummary: WorkflowDecisionSummary = {
+      stageLabel: resolvedCurrentStage.title,
+      ownerLabel: resolvedCurrentStage.owner,
+      keyConclusion,
+      blockingReason:
+        blockingItems[0]?.reason ||
+        resolvedCurrentStage.taskSummary.blockingReason ||
+        (archiveReadiness.ready ? "暂无阻塞项" : "仍有资料待岗位补齐"),
+      nextAction: nextStepAdvice,
+      progressText: `已完成 ${archiveReadiness.completed}/${archiveReadiness.total} 项，缺失 ${archiveReadiness.missing} 项`
+    };
 
     return {
-      currentStage,
+      currentStage: resolvedCurrentStage,
       nextStage,
       stageNodes,
+      decisionSummary,
       primaryTasks: ownerTasks,
       collaborationTasks: supportTasks,
       reviewTasks,
