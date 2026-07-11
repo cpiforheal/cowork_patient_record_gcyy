@@ -18,6 +18,7 @@ export const roleToDepartment: Record<UserRole, string> = {
   ecg: "心电室",
   ultrasound: "B超/放射",
   inspection: "检查室",
+  tcm: "中医科",
   doctor: "门诊",
   nurse: "治疗室",
   nursing: "护理部",

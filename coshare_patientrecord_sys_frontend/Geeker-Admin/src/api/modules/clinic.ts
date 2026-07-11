@@ -49,6 +49,7 @@ export type {
   MedicalRecordGenerateResult,
   MedicalRecordPrecheckResult,
   MedicalRecordTemplateField,
+  MedicalRecordTemplateSection,
   MedicalRecordTemplateStatus,
   MedicalRecordWorkspaceSaveResult,
   OperationStats,
@@ -85,5 +86,6 @@ export * from "./clinic/audit";
 export * from "./clinic/backup";
 export * from "./clinic/medicalRecord";
 export * from "./clinic/patients";
+export * from "./clinic/preAi";
 export * from "./clinic/system";
 export * from "./clinic/uploads";

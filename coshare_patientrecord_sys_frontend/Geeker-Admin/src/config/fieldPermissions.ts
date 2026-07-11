@@ -6,6 +6,7 @@ export type UserRole =
   | "ecg"
   | "ultrasound"
   | "inspection"
+  | "tcm"
   | "doctor"
   | "nurse"
   | "nursing"
@@ -98,6 +99,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   ecg: "心电室",
   ultrasound: "B超/放射",
   inspection: "检查室",
+  tcm: "中医",
   doctor: "医生",
   nurse: "护士/治疗室",
   nursing: "护理部",
@@ -110,6 +112,7 @@ export const USER_ROLES: UserRole[] = [
   "frontdesk",
   "reception",
   "inspection",
+  "tcm",
   "lab",
   "ecg",
   "ultrasound",

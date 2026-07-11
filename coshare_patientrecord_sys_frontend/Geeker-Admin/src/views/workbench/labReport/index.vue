@@ -119,6 +119,7 @@
                     allow-create
                     default-first-option
                     placeholder="选择结果"
+                    @change="markMetricTouched(metric.key)"
                   >
                     <el-option v-for="option in metric.options || []" :key="option" :label="option" :value="option" />
                   </el-select>
@@ -132,7 +133,13 @@
                     placeholder="填写数值"
                     @change="syncNumberValue(metric.key)"
                   />
-                  <el-input v-else v-model="formValues[metric.key]" :disabled="!canSaveActiveTemplate" placeholder="填写结果" />
+                  <el-input
+                    v-else
+                    v-model="formValues[metric.key]"
+                    :disabled="!canSaveActiveTemplate"
+                    placeholder="填写结果"
+                    @input="markMetricTouched(metric.key)"
+                  />
                   <small>参考：{{ metricReference(metric, patientGender) || "按报告单" }}</small>
                 </article>
               </div>
@@ -221,6 +228,9 @@ import { useRoute } from "vue-router";
 import {
   getPatientDetailApi,
   getPatientListApi,
+  getPreAiEncountersApi,
+  getPreAiWorkspaceApi,
+  savePreAiLabReportApi,
   savePatientRecordApi,
   uploadDocumentsApi,
   type PatientRow
@@ -238,11 +248,17 @@ const currentRole = computed(() => userStore.userInfo.role || "lab");
 const roleName = computed(() => userStore.userInfo.name || roleLabel(currentRole.value));
 const canEditLabMetrics = computed(() => ["admin", "doctor", "lab"].includes(currentRole.value));
 
+type LabPatientCandidate = PatientRow & {
+  preAiEncounterId?: string;
+  legacyPatientId?: string;
+  preAiGender?: string;
+};
+
 const keyword = ref("");
 const searching = ref(false);
 const saving = ref(false);
-const matchedPatients = ref<PatientRow[]>([]);
-const selectedPatient = ref<PatientRow | null>(null);
+const matchedPatients = ref<LabPatientCandidate[]>([]);
+const selectedPatient = ref<LabPatientCandidate | null>(null);
 const patientGender = ref("");
 const patientFieldValues = ref<Record<string, string>>({});
 const activeTemplateId = ref<LabTemplateId>("bloodRoutine");
@@ -250,6 +266,7 @@ const reportDate = ref(today());
 const reportRemark = ref("");
 const formValues = reactive<Record<string, string>>({});
 const numericValues = reactive<Record<string, number | undefined>>({});
+const touchedMetricKeys = ref(new Set<string>());
 const ecgFiles = ref<UploadUserFile[]>([]);
 const previewRef = ref<HTMLElement>();
 
@@ -261,6 +278,7 @@ const canSaveActiveTemplate = computed(() =>
 );
 
 const resetTemplateValues = () => {
+  touchedMetricKeys.value = new Set<string>();
   Object.keys(formValues).forEach(key => delete formValues[key]);
   Object.keys(numericValues).forEach(key => delete numericValues[key]);
   activeTemplate.value.metrics.forEach(metric => {
@@ -276,6 +294,7 @@ const hydrateTemplateValues = () => {
     const storedValue = String(patientFieldValues.value[metricStorageKey(activeTemplate.value.id, metric.key)] || "").trim();
     if (!storedValue) return;
     formValues[metric.key] = storedValue;
+    touchedMetricKeys.value.add(metric.key);
     if (metric.input === "number") numericValues[metric.key] = Number(storedValue);
   });
 };
@@ -285,9 +304,38 @@ watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
 const searchPatients = async () => {
   searching.value = true;
   try {
-    const { data } = await getPatientListApi({ pageNum: 1, pageSize: 5000 });
+    const [{ data }, { data: preAiData }] = await Promise.all([
+      getPatientListApi({ pageNum: 1, pageSize: 5000 }),
+      getPreAiEncountersApi()
+    ]);
+    const candidates = new Map<string, LabPatientCandidate>();
+    data.list.forEach(patient => candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id }));
+    preAiData.list.forEach(encounter => {
+      const linkedKey = encounter.sourcePatientId ? `legacy:${encounter.sourcePatientId}` : "";
+      if (linkedKey && candidates.has(linkedKey)) {
+        Object.assign(candidates.get(linkedKey)!, { preAiEncounterId: encounter.id, preAiGender: encounter.gender });
+        return;
+      }
+      candidates.set(`preai:${encounter.id}`, {
+        id: `preai:${encounter.id}`,
+        name: encounter.patientName,
+        visitNo: encounter.caseToken,
+        visitDate: encounter.visitDate,
+        visitType: encounter.route === "INPATIENT" ? "住院" : "门诊",
+        doctor: "",
+        currentStage: encounter.currentStage,
+        completedCount: 0,
+        progressPercent: 0,
+        status: encounter.status,
+        riskType: "info",
+        createdAt: encounter.createdAt,
+        updatedAt: encounter.updatedAt,
+        preAiEncounterId: encounter.id,
+        preAiGender: encounter.gender
+      });
+    });
     const normalized = keyword.value.trim().toLowerCase();
-    matchedPatients.value = data.list.filter(patient => {
+    matchedPatients.value = Array.from(candidates.values()).filter(patient => {
       if (!normalized) return true;
       return (
         patient.name.toLowerCase().includes(normalized) ||
@@ -301,12 +349,16 @@ const searchPatients = async () => {
   }
 };
 
-const selectPatient = async (patient: PatientRow) => {
+const selectPatient = async (patient: LabPatientCandidate) => {
   selectedPatient.value = patient;
-  patientGender.value = "";
+  patientGender.value = patient.preAiGender || "";
   patientFieldValues.value = {};
+  if (!patient.legacyPatientId) {
+    hydrateTemplateValues();
+    return;
+  }
   try {
-    const { data } = await getPatientDetailApi(patient.id);
+    const { data } = await getPatientDetailApi(patient.legacyPatientId);
     patientGender.value = data.fieldValues.gender || "";
     patientFieldValues.value = data.fieldValues || {};
     hydrateTemplateValues();
@@ -316,15 +368,59 @@ const selectPatient = async (patient: PatientRow) => {
 };
 
 const loadPatientFromRoute = async () => {
+  const queryEncounterId = route.query.encounterId;
+  const encounterId = String(Array.isArray(queryEncounterId) ? queryEncounterId[0] : queryEncounterId || "").trim();
   const queryPatientId = route.query.patientId;
   const routePatientId = String(Array.isArray(queryPatientId) ? queryPatientId[0] : queryPatientId || "").trim();
-  if (!routePatientId || String(selectedPatient.value?.id || "") === routePatientId) return;
+  if (!encounterId && (!routePatientId || String(selectedPatient.value?.legacyPatientId || "") === routePatientId)) return;
 
   searching.value = true;
   try {
+    if (encounterId) {
+      const { data: workspace } = await getPreAiWorkspaceApi(encounterId);
+      let candidate: LabPatientCandidate = {
+        id: workspace.encounter.sourcePatientId || `preai:${encounterId}`,
+        name: workspace.encounter.patient.patientName || "待补姓名",
+        visitNo: workspace.encounter.caseToken,
+        visitDate: workspace.encounter.patient.visitDate || "",
+        visitType: workspace.encounter.route === "INPATIENT" ? "住院" : "门诊",
+        doctor: "",
+        currentStage: workspace.encounter.currentStage,
+        completedCount: 0,
+        progressPercent: 0,
+        status: workspace.encounter.status,
+        riskType: "info",
+        createdAt: workspace.encounter.createdAt,
+        updatedAt: workspace.encounter.updatedAt,
+        preAiEncounterId: encounterId,
+        legacyPatientId: workspace.encounter.sourcePatientId || undefined,
+        preAiGender: workspace.encounter.patient.gender || ""
+      };
+      if (candidate.legacyPatientId) {
+        try {
+          const { data: detail } = await getPatientDetailApi(candidate.legacyPatientId);
+          candidate = {
+            ...detail.patient,
+            legacyPatientId: detail.patient.id,
+            preAiEncounterId: encounterId,
+            preAiGender: workspace.encounter.patient.gender || detail.fieldValues.gender || ""
+          };
+          patientFieldValues.value = detail.fieldValues || {};
+        } catch {
+          patientFieldValues.value = {};
+        }
+      }
+      selectedPatient.value = candidate;
+      matchedPatients.value = [candidate];
+      keyword.value = `${candidate.name} ${candidate.visitNo}`;
+      patientGender.value = candidate.preAiGender || "";
+      hydrateTemplateValues();
+      return;
+    }
     const { data } = await getPatientDetailApi(routePatientId);
-    selectedPatient.value = data.patient;
-    matchedPatients.value = [data.patient];
+    const candidate: LabPatientCandidate = { ...data.patient, legacyPatientId: data.patient.id };
+    selectedPatient.value = candidate;
+    matchedPatients.value = [candidate];
     keyword.value = `${data.patient.name} ${data.patient.visitNo}`;
     patientGender.value = data.fieldValues.gender || "";
     patientFieldValues.value = data.fieldValues || {};
@@ -338,10 +434,16 @@ const loadPatientFromRoute = async () => {
 
 onMounted(loadPatientFromRoute);
 watch(() => route.query.patientId, loadPatientFromRoute);
+watch(() => route.query.encounterId, loadPatientFromRoute);
 
 const syncNumberValue = (key: string) => {
+  markMetricTouched(key);
   const value = numericValues[key];
   formValues[key] = value === undefined || value === null ? "" : String(value);
+};
+
+const markMetricTouched = (key: string) => {
+  touchedMetricKeys.value.add(key);
 };
 
 const reportSummary = () => {
@@ -416,6 +518,8 @@ const buildArchiveValues = () => {
 
 const validateBeforeSave = () => {
   if (!selectedPatient.value) return "请先选择患者";
+  if (activeTemplate.value.id === "ecgImage" && !selectedPatient.value.legacyPatientId)
+    return "心电图不属于本次前置病历化验室节点";
   if (!canSaveActiveTemplate.value) return "当前岗位只能查看该检验报告模板，不能保存检验数值";
   if (activeTemplate.value.id === "ecgImage" && !ecgFiles.value.length) return "请先选择心电图图片";
   if (activeTemplate.value.id === "ecgImage" && !["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)) {
@@ -423,7 +527,9 @@ const validateBeforeSave = () => {
   }
   if (
     activeTemplate.value.id !== "ecgImage" &&
-    activeTemplate.value.metrics.every(metric => !String(formValues[metric.key] || "").trim())
+    activeTemplate.value.metrics.every(
+      metric => !touchedMetricKeys.value.has(metric.key) || !String(formValues[metric.key] || "").trim()
+    )
   ) {
     return "请至少填写一个检验指标";
   }
@@ -442,14 +548,16 @@ const saveToArchive = async () => {
   try {
     const batchId = `lab-${selectedPatient.value.id}-${Date.now()}`;
     const archiveValues = buildArchiveValues();
-    await savePatientRecordApi({
-      id: selectedPatient.value.id,
-      role: currentRole.value,
-      operator: roleName.value,
-      values: archiveValues
-    });
-    patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
-    if (activeTemplate.value.id === "ecgImage") {
+    if (selectedPatient.value.legacyPatientId) {
+      await savePatientRecordApi({
+        id: selectedPatient.value.legacyPatientId,
+        role: currentRole.value,
+        operator: roleName.value,
+        values: archiveValues
+      });
+      patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
+    }
+    if (activeTemplate.value.id === "ecgImage" && selectedPatient.value.legacyPatientId) {
       const documents = await Promise.all(
         ecgFiles.value.map(async file => ({
           type: activeTemplate.value.documentType,
@@ -460,7 +568,7 @@ const saveToArchive = async () => {
         }))
       );
       await uploadDocumentsApi({
-        patientId: selectedPatient.value.id,
+        patientId: selectedPatient.value.legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         sourceRole: "ecg",
@@ -468,9 +576,9 @@ const saveToArchive = async () => {
         batchName: `${activeTemplate.value.name}-${reportDate.value}`,
         documents
       });
-    } else {
+    } else if (activeTemplate.value.id !== "ecgImage" && selectedPatient.value.legacyPatientId) {
       await uploadDocumentsApi({
-        patientId: selectedPatient.value.id,
+        patientId: selectedPatient.value.legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         sourceRole: "lab",
@@ -487,7 +595,28 @@ const saveToArchive = async () => {
         ]
       });
     }
-    ElMessage.success("检验报告已保存入档，并同步到附件索引与时间轴");
+    if (selectedPatient.value.preAiEncounterId && activeTemplate.value.id !== "ecgImage") {
+      const metrics = activeTemplate.value.metrics
+        .map(metric => ({
+          key: metric.key,
+          name: metric.name,
+          shortName: metric.shortName,
+          value: String(formValues[metric.key] || "").trim(),
+          unit: metric.unit || "",
+          reference: metricReference(metric, patientGender.value) || ""
+        }))
+        .filter(metric => metric.value && touchedMetricKeys.value.has(metric.key));
+      await savePreAiLabReportApi(selectedPatient.value.preAiEncounterId, {
+        templateId: activeTemplate.value.id,
+        templateName: activeTemplate.value.name,
+        reportDate: reportDate.value,
+        remark: reportRemark.value,
+        metrics
+      });
+    }
+    ElMessage.success(
+      selectedPatient.value.preAiEncounterId ? "检验报告已保存，并同步到前置病历" : "检验报告已保存入档，并同步到附件索引与时间轴"
+    );
   } catch (error) {
     ElMessage.error((error as Error).message || "保存失败");
   } finally {

@@ -497,7 +497,8 @@ public class ClinicApiController {
             "lab",
             "ecg",
             "ultrasound",
-            "inspection"
+            "inspection",
+            "tcm"
         );
     }
 }

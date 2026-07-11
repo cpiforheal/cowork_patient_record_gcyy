@@ -16,6 +16,36 @@
       }
     },
     {
+      "path": "/pre-ai",
+      "name": "preAi",
+      "redirect": "/pre-ai/encounters",
+      "meta": {
+        "icon": "DocumentChecked",
+        "title": "前置病历",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/pre-ai/encounters",
+          "name": "preAiEncounters",
+          "component": "/preAi/encounters/index",
+          "meta": {
+            "icon": "EditPen",
+            "title": "事实采集与脱敏资料",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
       "path": "/workbench",
       "name": "workbench",
       "redirect": "/workbench/upload",
