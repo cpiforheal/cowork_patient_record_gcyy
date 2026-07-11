@@ -195,7 +195,7 @@ const seedRoles = (): RoleRow[] => [
     role: "manager",
     members: 0,
     desc: "院办文稿、会议纪要、管理汇报和公共助手使用。",
-    permissions: ["ai:document", "ai:assistant", "inventory:read"],
+    permissions: ["ai:document", "ai:assistant"],
     editableSections: []
   },
   {

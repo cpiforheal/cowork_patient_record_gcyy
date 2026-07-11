@@ -174,35 +174,23 @@
         <el-button type="primary" @click="restoreConflictDraft">恢复本机草稿</el-button>
       </section>
 
-      <section v-show="!isInitialDetailLoading" class="record-context-strip screen-only">
-        <article class="context-card fixed">
-          <span>固定带入</span>
-
-          <strong>{{ fieldValues.patientName || "未登记姓名" }}</strong>
-
-          <small>
-            {{ visitNoLabel }}：{{ fieldValues.visitNo || patientId }} · {{ currentVisitType }} · {{ visitDateLabel }}：{{
-              fieldValues.admissionDate || patientInfo?.visitDate || "待补录"
-            }}
-          </small>
-        </article>
-
-        <article class="context-card editable">
-          <span>可填写区</span>
-
-          <strong>{{ layeredEditableFields.length }}/{{ myEditableFields.length }} 项显示</strong>
-
-          <small>当前层 {{ fieldLayerLabel }} · 必填待补 {{ myRequiredMissingCount }} 项</small>
-        </article>
-
-        <article class="context-card attachments">
-          <span>附件区</span>
-
-          <strong>{{ currentAttachments.length }} 份证据</strong>
-
-          <small>{{ validAttachmentCount }} 份可打开 · {{ invalidAttachmentCount }} 份待补源文件</small>
-        </article>
-      </section>
+      <PatientContextStrip
+        v-show="!isInitialDetailLoading"
+        :patient-name="fieldValues.patientName"
+        :patient-id="patientId"
+        :visit-no="fieldValues.visitNo"
+        :visit-no-label="visitNoLabel"
+        :visit-type="currentVisitType"
+        :visit-date-label="visitDateLabel"
+        :visit-date="fieldValues.admissionDate || patientInfo?.visitDate"
+        :visible-editable-count="layeredEditableFields.length"
+        :editable-count="myEditableFields.length"
+        :field-layer-label="fieldLayerLabel"
+        :required-missing-count="myRequiredMissingCount"
+        :attachment-count="currentAttachments.length"
+        :valid-attachment-count="validAttachmentCount"
+        :invalid-attachment-count="invalidAttachmentCount"
+      />
 
       <section
         v-if="detailWorkspaceMode === 'archive'"
@@ -266,49 +254,14 @@
         class="detail-workspace-shell screen-only"
         :class="{ 'is-flow-mode': detailWorkspaceMode === 'flow' }"
       >
-        <aside v-show="detailWorkspaceMode !== 'flow'" class="detail-side-nav" aria-label="患者详情模块">
-          <button type="button" :class="{ active: detailWorkspaceMode === 'flow' }" @click="switchDetailWorkspace('flow')">
-            <strong>流程视图</strong>
-
-            <span>岗位卡片与右侧预览</span>
-          </button>
-
-          <button
-            type="button"
-            :class="{ active: detailWorkspaceMode === 'medicalRecord' }"
-            @click="switchDetailWorkspace('medicalRecord')"
-          >
-            <strong>医生目标病历</strong>
-
-            <span>{{ medicalRecordMissingItems.length ? `${medicalRecordMissingItems.length} 项待补` : "多岗位协作填写" }}</span>
-          </button>
-
-          <button type="button" :class="{ active: detailWorkspaceMode === 'archive' }" @click="switchDetailWorkspace('archive')">
-            <strong>健康管理档案</strong>
-
-            <span>管理、随访、协作字段</span>
-          </button>
-
-          <button
-            type="button"
-            :class="{ active: detailWorkspaceMode === 'attachments' }"
-            @click="switchDetailWorkspace('attachments')"
-          >
-            <strong>检查与附件</strong>
-
-            <span>{{ currentAttachments.length }} 份资料</span>
-          </button>
-
-          <button
-            type="button"
-            :class="{ active: detailWorkspaceMode === 'timeline' }"
-            @click="switchDetailWorkspace('timeline')"
-          >
-            <strong>时间轴</strong>
-
-            <span>{{ patientTimelineEvents.length }} 条追溯记录</span>
-          </button>
-        </aside>
+        <DetailWorkspaceNav
+          v-show="detailWorkspaceMode !== 'flow'"
+          :model-value="detailWorkspaceMode"
+          :medical-record-missing-count="medicalRecordMissingItems.length"
+          :attachment-count="currentAttachments.length"
+          :timeline-count="patientTimelineEvents.length"
+          @change="switchDetailWorkspace"
+        />
 
         <main class="detail-workspace-content">
           <Transition name="fade-transform" mode="out-in">
@@ -1740,7 +1693,9 @@ import { traceAsync } from "@/utils/performanceTrace";
 import medicalLogoUrl from "@/assets/images/logo.jpg";
 
 import ArchiveFieldRenderer from "./components/ArchiveFieldRenderer.vue";
+import DetailWorkspaceNav, { type DetailWorkspaceMode } from "./components/DetailWorkspaceNav.vue";
 import LabReportPreview from "./components/LabReportPreview.vue";
+import PatientContextStrip from "./components/PatientContextStrip.vue";
 import { useAttachmentPreview } from "./composables/useAttachmentPreview";
 import { useArchiveAutosave } from "./composables/useArchiveAutosave";
 import { useArchiveFieldIndex } from "./composables/useArchiveFieldIndex";
@@ -1784,7 +1739,6 @@ const canManageMedicalRecordVersions = computed(() => currentRole.value === "adm
 
 const patientId = computed(() => String(route.params.id || "").trim());
 
-type DetailWorkspaceMode = "flow" | "medicalRecord" | "archive" | "attachments" | "timeline";
 type PatientFieldSearchType = "field" | "attachment" | "stage";
 type PatientFieldSearchItem = {
   key: string;
@@ -4673,44 +4627,65 @@ const openLabReportWorkbench = () => {
   });
 };
 
-const loadPatientAuditLogs = async (targetPatientId = patientId.value, targetPatientName = fieldValues.patientName) => {
+const auditRequestByPatient = new Map<string, Promise<void>>();
+const timelineRequestByPatient = new Map<string, Promise<void>>();
+
+const loadPatientAuditLogs = (targetPatientId = patientId.value, targetPatientName = fieldValues.patientName) => {
+  if (!targetPatientId) return Promise.resolve();
+
+  const pendingRequest = auditRequestByPatient.get(targetPatientId);
+  if (pendingRequest) return pendingRequest;
+
   auditLoading.value = true;
 
-  try {
-    const { data } = await getAuditLogListApi({ pageNum: 1, pageSize: 80, patientId: targetPatientId });
+  const request = (async () => {
+    try {
+      const { data } = await getAuditLogListApi({ pageNum: 1, pageSize: 80, patientId: targetPatientId });
 
-    const legacyLogs = targetPatientName
-      ? await getAuditLogListApi({ pageNum: 1, pageSize: 80, patient: targetPatientName })
-      : null;
+      const legacyLogs = targetPatientName
+        ? await getAuditLogListApi({ pageNum: 1, pageSize: 80, patient: targetPatientName })
+        : null;
 
-    if (targetPatientId !== patientId.value) return;
+      if (targetPatientId !== patientId.value) return;
 
-    const knownIds = new Set(data.list.map(log => log.id));
+      const knownIds = new Set(data.list.map(log => log.id));
+      const legacyOnly = (legacyLogs?.data.list || []).filter(log => !log.patientId && !knownIds.has(log.id));
 
-    const legacyOnly = (legacyLogs?.data.list || []).filter(log => !log.patientId && !knownIds.has(log.id));
+      patientAuditLogs.value = [...data.list, ...legacyOnly].sort((left, right) => right.time.localeCompare(left.time));
+    } finally {
+      auditRequestByPatient.delete(targetPatientId);
+      if (targetPatientId === patientId.value) auditLoading.value = false;
+    }
+  })();
 
-    patientAuditLogs.value = [...data.list, ...legacyOnly].sort((left, right) => right.time.localeCompare(left.time));
-  } finally {
-    if (targetPatientId === patientId.value) auditLoading.value = false;
-  }
+  auditRequestByPatient.set(targetPatientId, request);
+  return request;
 };
 
-const loadPatientTimeline = async (targetPatientId = patientId.value) => {
+const loadPatientTimeline = (targetPatientId = patientId.value) => {
   if (!targetPatientId) {
     patientTimelineEvents.value = [];
-
-    return;
+    return Promise.resolve();
   }
 
-  try {
-    const { data } = await getPatientTimelineApi(targetPatientId);
+  const pendingRequest = timelineRequestByPatient.get(targetPatientId);
+  if (pendingRequest) return pendingRequest;
 
-    if (targetPatientId !== patientId.value) return;
+  const request = (async () => {
+    try {
+      const { data } = await getPatientTimelineApi(targetPatientId);
 
-    patientTimelineEvents.value = data;
-  } catch {
-    if (targetPatientId === patientId.value) patientTimelineEvents.value = [];
-  }
+      if (targetPatientId !== patientId.value) return;
+      patientTimelineEvents.value = data;
+    } catch {
+      if (targetPatientId === patientId.value) patientTimelineEvents.value = [];
+    } finally {
+      timelineRequestByPatient.delete(targetPatientId);
+    }
+  })();
+
+  timelineRequestByPatient.set(targetPatientId, request);
+  return request;
 };
 
 const openAuditTimeline = async () => {
@@ -4898,15 +4873,14 @@ const loadPatientDetail = () =>
 
       hydrateCollapsedSections();
 
-      await Promise.all([
-        loadPatientAuditLogs(targetPatientId, data.fieldValues.patientName || data.patient.name),
-
-        loadPatientTimeline(targetPatientId)
-      ]);
-
       if (loadSeq !== patientDetailLoadSeq) return;
 
       if (targetSection) window.setTimeout(() => scrollToSection(targetSection), 120);
+
+      window.setTimeout(() => {
+        if (loadSeq !== patientDetailLoadSeq || targetPatientId !== patientId.value) return;
+        void loadPatientAuditLogs(targetPatientId, data.fieldValues.patientName || data.patient.name);
+      }, 0);
     } catch (error) {
       if (loadSeq !== patientDetailLoadSeq) return;
 
@@ -5475,101 +5449,6 @@ onBeforeUnmount(() => {
 
   &.is-flow-mode {
     grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.detail-side-nav {
-  position: sticky;
-
-  top: 68px;
-
-  z-index: 8;
-
-  display: grid;
-
-  gap: 8px;
-
-  padding: 10px;
-
-  background: var(--hos-panel);
-
-  border: 1px solid var(--hos-border);
-
-  border-radius: var(--hos-radius-card);
-
-  box-shadow: var(--hos-shadow-soft);
-
-  button {
-    display: grid;
-
-    gap: 4px;
-
-    min-width: 0;
-
-    padding: 12px 12px;
-
-    text-align: left;
-
-    cursor: pointer;
-
-    background: var(--hos-glass);
-
-    border: 1px solid var(--hos-border-light);
-
-    border-radius: var(--hos-radius-md);
-
-    transition:
-      background-color 0.18s ease,
-      border-color 0.18s ease,
-      box-shadow 0.18s ease,
-      color 0.18s ease,
-      transform 0.18s ease;
-
-    &:hover {
-      border-color: var(--hos-border-interactive);
-      box-shadow: var(--hos-shadow-card-hover);
-      transform: translateY(-1px);
-    }
-
-    &:active {
-      transform: translateY(0);
-    }
-
-    strong {
-      color: var(--hos-text-primary);
-
-      font-size: 14px;
-
-      line-height: 1.35;
-    }
-
-    span {
-      overflow: hidden;
-
-      color: var(--hos-text-secondary);
-
-      font-size: 12px;
-
-      line-height: 1.45;
-
-      text-overflow: ellipsis;
-
-      white-space: nowrap;
-    }
-
-    &.active {
-      background: var(--hos-primary-soft);
-
-      border-color: var(--hos-border-interactive);
-
-      box-shadow:
-        inset 3px 0 0 var(--hos-primary),
-        var(--hos-shadow-card);
-
-      strong {
-        color: var(--hos-primary-deep);
-      }
-    }
   }
 }
 
@@ -6452,16 +6331,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.record-context-strip {
-  display: grid;
-
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-
-  gap: 10px;
-
-  margin-bottom: 12px;
-}
-
 .health-archive-summary {
   display: grid;
 
@@ -6599,116 +6468,6 @@ onBeforeUnmount(() => {
     border-color: #bbf7d0;
 
     border-left-color: #16a34a;
-  }
-}
-
-.context-card {
-  position: relative;
-
-  min-width: 0;
-
-  padding: 13px 14px;
-
-  overflow: hidden;
-
-  background: var(--hos-glass);
-
-  border: 1px solid var(--hos-border-light);
-
-  border-radius: var(--hos-radius-lg);
-
-  box-shadow: var(--hos-shadow-soft);
-
-  &::before {
-    position: absolute;
-
-    inset: 0 auto 0 0;
-
-    width: 4px;
-
-    content: "";
-
-    background: #cbd5e1;
-  }
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span {
-    color: var(--hos-text-secondary);
-
-    font-size: 12px;
-
-    font-weight: 700;
-  }
-
-  strong {
-    margin-top: 4px;
-
-    overflow: hidden;
-
-    color: var(--hos-text-primary);
-
-    font-size: 17px;
-
-    text-overflow: ellipsis;
-
-    white-space: nowrap;
-  }
-
-  small {
-    margin-top: 4px;
-
-    overflow: hidden;
-
-    color: var(--hos-text-secondary);
-
-    text-overflow: ellipsis;
-
-    white-space: nowrap;
-  }
-
-  &.fixed {
-    background: var(--hos-accent-soft);
-
-    border-color: var(--hos-border);
-
-    &::before {
-      background: var(--record-fixed);
-    }
-  }
-
-  &.editable {
-    background: var(--hos-primary-soft);
-
-    border-color: var(--hos-border-interactive);
-
-    &::before {
-      background: var(--record-accent);
-    }
-
-    span,
-    strong {
-      color: var(--hos-primary-deep);
-    }
-  }
-
-  &.attachments {
-    background: var(--record-warning-soft);
-
-    border-color: #fed7aa;
-
-    &::before {
-      background: var(--record-warning);
-    }
-
-    span,
-    strong {
-      color: #b45309;
-    }
   }
 }
 

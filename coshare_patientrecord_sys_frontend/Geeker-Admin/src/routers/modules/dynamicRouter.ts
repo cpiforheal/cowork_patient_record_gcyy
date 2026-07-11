@@ -1,26 +1,45 @@
 import router from "@/routers/index";
-import { LOGIN_URL } from "@/config";
 import { RouteRecordRaw } from "vue-router";
 import { ElNotification } from "element-plus";
-import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
+import { notFoundRouter } from "@/routers/modules/staticRouter";
 
 // 引入 views 文件夹下所有 vue 文件
 const modules = import.meta.glob("@/views/**/*.vue");
+const NOT_FOUND_ROUTE_NAME = "notFound";
+
+const resolveViewComponent = (componentPath: string) => {
+  const normalizedPath = componentPath.startsWith("/") ? componentPath : `/${componentPath}`;
+  const modulePath = `/src/views${normalizedPath}.vue`;
+  const component = modules[modulePath];
+  if (!component) throw new Error(`动态路由组件不存在：${modulePath}`);
+  return component;
+};
+
+const createDynamicRoute = (menuItem: Menu.MenuOptions): RouteRecordRaw => {
+  const route = {
+    ...menuItem,
+    meta: { ...menuItem.meta }
+  } as unknown as RouteRecordRaw;
+
+  delete route.children;
+  if (typeof menuItem.component === "string") route.component = resolveViewComponent(menuItem.component);
+  return route;
+};
+
+const ensureNotFoundRoute = () => {
+  if (!router.hasRoute(NOT_FOUND_ROUTE_NAME)) router.addRoute(notFoundRouter);
+};
 
 /**
- * @description 初始化动态路由
+ * @description 初始化动态路由。只负责加载权限并注册路由，不在内部执行页面跳转。
  */
 export const initDynamicRouter = async () => {
-  const userStore = useUserStore();
   const authStore = useAuthStore();
 
   try {
-    // 1.获取菜单列表 && 按钮权限列表
-    await authStore.getAuthMenuList();
-    await authStore.getAuthButtonList();
+    await Promise.all([authStore.getAuthMenuList(), authStore.getAuthButtonList()]);
 
-    // 2.判断当前用户有没有菜单权限
     if (!authStore.authMenuListGet.length) {
       ElNotification({
         title: "无权限访问",
@@ -28,28 +47,24 @@ export const initDynamicRouter = async () => {
         type: "warning",
         duration: 3000
       });
-      userStore.setToken("");
-      router.replace(LOGIN_URL);
-      return Promise.reject("No permission");
+      throw new Error("当前账号无任何菜单权限");
     }
 
-    // 3.添加动态路由
+    const registeredPaths = new Set<string>();
     authStore.flatMenuListGet.forEach(item => {
-      if (item.name && router.hasRoute(item.name)) return;
-      item.children && delete item.children;
-      if (item.component && typeof item.component == "string") {
-        item.component = modules["/src/views" + item.component + ".vue"];
-      }
-      if (item.meta.isFull) {
-        router.addRoute(item as unknown as RouteRecordRaw);
-      } else {
-        router.addRoute("layout", item as unknown as RouteRecordRaw);
-      }
+      if (!item.name) throw new Error(`动态路由缺少名称：${item.path}`);
+      if (registeredPaths.has(item.path)) throw new Error(`动态路由路径重复：${item.path}`);
+      registeredPaths.add(item.path);
+      if (router.hasRoute(item.name)) return;
+
+      const route = createDynamicRoute(item);
+      if (item.meta?.isFull) router.addRoute(route);
+      else router.addRoute("layout", route);
     });
+
+    ensureNotFoundRoute();
   } catch (error) {
-    // 当按钮 || 菜单请求出错时，重定向到登陆页
-    userStore.setToken("");
-    router.replace(LOGIN_URL);
-    return Promise.reject(error);
+    ensureNotFoundRoute();
+    throw error instanceof Error ? error : new Error(String(error));
   }
 };

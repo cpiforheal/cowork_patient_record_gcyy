@@ -42,9 +42,10 @@ export const staticRouter: RouteRecordRaw[] = [
 ];
 
 /**
- * errorRouter (错误页面路由)
+ * errorRouter (固定错误页面路由)
+ * 通配 404 必须在动态路由初始化完成后注册，避免首次直达业务页时被提前吞掉。
  */
-export const errorRouter = [
+export const errorRouter: RouteRecordRaw[] = [
   {
     path: "/403",
     name: "403",
@@ -68,10 +69,14 @@ export const errorRouter = [
     meta: {
       title: "500页面"
     }
-  },
-  // Resolve refresh page, route warnings
-  {
-    path: "/:pathMatch(.*)*",
-    component: () => import("@/components/ErrorMessage/404.vue")
   }
 ];
+
+export const notFoundRouter: RouteRecordRaw = {
+  path: "/:pathMatch(.*)*",
+  name: "notFound",
+  component: () => import("@/components/ErrorMessage/404.vue"),
+  meta: {
+    title: "页面不存在"
+  }
+};

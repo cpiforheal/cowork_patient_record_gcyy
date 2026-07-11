@@ -38,7 +38,7 @@
           </div>
           <div class="scene-card card-stock">
             <i></i>
-            <span>物资追溯</span>
+            <span>病历协同</span>
           </div>
           <div class="nurse-figure">
             <span class="nurse-cap"></span>

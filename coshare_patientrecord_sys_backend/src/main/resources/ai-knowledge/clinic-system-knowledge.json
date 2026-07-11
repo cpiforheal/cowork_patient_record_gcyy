@@ -2,103 +2,200 @@
   {
     "id": "system-overview",
     "title": "系统定位与 AI 边界",
-    "tags": ["public", "patient", "quality", "leader", "system", "ai"],
-    "content": "本系统是院内内网部署的患者健康管理档案、质控归档、附件管理、进销存和备份协作平台。AI 助手只提供院内辅助说明、清单、草稿、风险提示和操作建议，不替代医生诊断、处方、医嘱、手术决策、正式病历、质控结论或归档审核。回答系统规则、菜单、权限和院内流程时必须优先依据知识库和当前页面上下文；知识库未覆盖时要明确说明未覆盖，不能编造菜单、权限或流程，但可以补充标注为通用建议的判断和核验路径。非系统类通用问题可以直接回答；实时新闻、最新政策、价格、法规更新或外部检索问题需要说明当前未接入实时联网检索。"
+    "tags": [
+      "public",
+      "patient",
+      "quality",
+      "leader",
+      "system",
+      "ai"
+    ],
+    "content": "本系统是院内内网部署的患者健康管理档案、质控归档、附件管理和备份协作平台。AI 助手只提供院内辅助说明、清单、草稿、风险提示和操作建议，不替代医生诊断、处方、医嘱、手术决策、正式病历、质控结论或归档审核。回答系统规则、菜单、权限和院内流程时必须优先依据知识库和当前页面上下文；知识库未覆盖时要明确说明未覆盖，不能编造菜单、权限或流程，但可以补充标注为通用建议的判断和核验路径。非系统类通用问题可以直接回答；实时新闻、最新政策、价格、法规更新或外部检索问题需要说明当前未接入实时联网检索。"
   },
   {
     "id": "assistant-modes",
     "title": "豆包助手四种模式",
-    "tags": ["public", "patient", "quality", "leader", "ai"],
+    "tags": [
+      "public",
+      "patient",
+      "quality",
+      "leader",
+      "ai"
+    ],
     "content": "公共助手回答系统使用、岗位协作、院内流程和日常医疗协作问题。患者助手在患者详情页辅助总结患者资料、缺失字段、附件摘要、宣教草稿和沟通文本。质控助手辅助发现缺项、逻辑冲突、附件异常和退回原因草稿，但不能直接判定通过归档。管理助手辅助汇总今日风险、待办、科室异常、备份状态和闭环建议。四种助手共用豆包配置，只切换上下文和回答规则。"
   },
   {
     "id": "role-frontdesk",
     "title": "前台角色职责",
-    "tags": ["public", "patient", "permission", "workflow", "frontdesk"],
+    "tags": [
+      "public",
+      "patient",
+      "permission",
+      "workflow",
+      "frontdesk"
+    ],
     "content": "前台负责患者建档与分诊，主要维护基础信息、来院来源、首次接触、就诊类型、建档信息和旧资料预检。前台不负责诊断、处方、手术建议、质控结论或归档审核。常用动作是新建患者、补齐基础信息、上传或确认基础资料、处理疑似重复患者。"
   },
   {
     "id": "role-reception",
     "title": "接诊室角色职责",
-    "tags": ["public", "patient", "permission", "workflow", "reception"],
+    "tags": [
+      "public",
+      "patient",
+      "permission",
+      "workflow",
+      "reception"
+    ],
     "content": "接诊室负责问诊与症状采集，主要维护主诉、现病史、既往史、特殊诉求、沟通偏好和初步症状信息。接诊室可以帮助医生整理病史线索，但不承担最终诊断和治疗决策。"
   },
   {
     "id": "role-inspection",
     "title": "检查室角色职责",
-    "tags": ["public", "patient", "permission", "workflow", "inspection", "attachment"],
+    "tags": [
+      "public",
+      "patient",
+      "permission",
+      "workflow",
+      "inspection",
+      "attachment"
+    ],
     "content": "检查室负责初检和影像证据采集，重点上传专科检查图片、肛门镜、摄像头、指检等证据，可填写简短检查备注。检查室不强制填写长篇诊断性文字，诊断解释和治疗建议仍由医生承担。"
   },
   {
     "id": "role-lab-ecg-ultrasound",
     "title": "辅助检查岗位职责",
-    "tags": ["public", "patient", "permission", "workflow", "lab", "ecg", "ultrasound", "screening"],
+    "tags": [
+      "public",
+      "patient",
+      "permission",
+      "workflow",
+      "lab",
+      "ecg",
+      "ultrasound",
+      "screening"
+    ],
     "content": "化验室、心电室、B 超、放射等岗位主要补充辅助检查和术前筛查结果。相关岗位可维护检查结果、上传检查附件或补充简要说明。辅助检查岗位不承担最终诊断、治疗方案和质控归档结论。"
   },
   {
     "id": "role-doctor",
     "title": "医生角色职责",
-    "tags": ["public", "patient", "permission", "workflow", "doctor"],
+    "tags": [
+      "public",
+      "patient",
+      "permission",
+      "workflow",
+      "doctor"
+    ],
     "content": "医生负责病史判断、专科结论、主诊断、次诊断、合并病、门诊或住院分流、手术建议、中医方案、治疗方案和病程相关内容。医生可以使用 AI 生成摘要或草稿，但必须人工确认后才能进入正式业务字段。"
   },
   {
     "id": "role-nurse-nursing",
     "title": "护士与护理部职责",
-    "tags": ["public", "patient", "permission", "workflow", "nurse", "nursing"],
+    "tags": [
+      "public",
+      "patient",
+      "permission",
+      "workflow",
+      "nurse",
+      "nursing"
+    ],
     "content": "护士和护理部负责治疗执行、院前问候、术前准备、宣教、护理观察、出院指导和随访协作。住院患者必须进入护理准备与宣教节点；门诊患者可显示为无需住院护理或不适用。"
   },
   {
     "id": "role-quality-admin",
     "title": "质控与管理员职责",
-    "tags": ["public", "quality", "leader", "permission", "audit", "admin"],
+    "tags": [
+      "public",
+      "quality",
+      "leader",
+      "permission",
+      "audit",
+      "admin"
+    ],
     "content": "质控负责档案审核、缺项检查、逻辑冲突、退回整改、资料异常和归档建议；质控不能让 AI 自动通过审核。管理员负责账号、角色、AI 配置、备份、系统维护和全局数据可见性。关键操作应保留账号、角色和时间线索。"
   },
   {
     "id": "patient-lifecycle",
     "title": "患者全生命周期流程",
-    "tags": ["public", "patient", "quality", "leader", "workflow", "lifecycle"],
+    "tags": [
+      "public",
+      "patient",
+      "quality",
+      "leader",
+      "workflow",
+      "lifecycle"
+    ],
     "content": "患者生命周期分为十个环节：前台建档与分诊、接诊问诊与症状采集、检查室初检与影像采集、医师诊断与去向决策、辅助/术前检查完善、门诊治疗或中医方案、住院护理准备与宣教、手术/治疗执行记录、出院复查与健康管理、质控审核与归档。看板和详情页应围绕当前环节、下一责任科室、完成环节数和是否可跳过住院护理来解释流程。"
   },
   {
     "id": "record-edit-quality",
     "title": "病历填写与实时质控",
-    "tags": ["patient", "quality", "record", "audit", "field"],
+    "tags": [
+      "patient",
+      "quality",
+      "record",
+      "audit",
+      "field"
+    ],
     "content": "病历填写按字段权限和生命周期分工处理。提交质控前应优先检查必填缺失、格式异常、逻辑冲突、附件缺失和未保存草稿。章节侧栏会提示未完成或异常数量；退回原因应尽量定位到具体字段或章节。AI 可以生成缺项清单、整改建议和退回原因草稿，但不能自动提交或自动通过。"
   },
   {
     "id": "attachment-upload",
     "title": "附件上传与失败处理",
-    "tags": ["public", "patient", "quality", "attachment", "upload"],
+    "tags": [
+      "public",
+      "patient",
+      "quality",
+      "attachment",
+      "upload"
+    ],
     "content": "附件用于承载检查图片、旧资料、检验报告、影像资料和病历相关证明。上传失败时不应清空患者上下文和已选上传类型；本页会话可保留失败文件并允许重试。检查室以图片/附件证据和可选简短备注为主，不要求长文字诊断。"
-  },
-  {
-    "id": "inventory-flow",
-    "title": "进销存申领与签收闭环",
-    "tags": ["public", "leader", "inventory", "workflow"],
-    "content": "进销存模块服务科室申领、库管审核、发放、签收、库存风险、低库存、临期、盘点和报废闭环。第一阶段重点是少填、少找、少解释：常用物资快捷申领、复用上次申领、展示可用库存/低库存/临期优先提示、发放时推荐批次。领导视角关注谁负责、卡在哪里、哪些事项超时未闭环。"
   },
   {
     "id": "backup-health",
     "title": "备份健康与恢复边界",
-    "tags": ["public", "leader", "backup", "admin"],
+    "tags": [
+      "public",
+      "leader",
+      "backup",
+      "admin"
+    ],
     "content": "内网医疗系统必须关注备份状态。管理员应查看最近一次备份时间、备份结果、是否包含数据库、是否包含附件目录、备份路径是否可写，以及恢复演练或恢复说明。本轮只展示备份健康和手动备份入口，不做自动恢复。"
   },
   {
     "id": "account-security",
     "title": "账号与权限安全",
-    "tags": ["public", "leader", "permission", "account", "admin"],
+    "tags": [
+      "public",
+      "leader",
+      "permission",
+      "account",
+      "admin"
+    ],
     "content": "账号管理要保持角色与字段权限一致。不要共用账号；关键操作要能追溯到具体账号。普通岗位应只看到和处理自己职责相关的数据入口；管理员和质控拥有更高可见性。权限问题优先检查账号角色、科室、字段编辑权限和菜单权限。"
   },
   {
     "id": "faq-submit-archive",
     "title": "常见问题：为什么不能提交或归档",
-    "tags": ["public", "patient", "quality", "faq", "audit"],
+    "tags": [
+      "public",
+      "patient",
+      "quality",
+      "faq",
+      "audit"
+    ],
     "content": "不能提交或归档通常与必填字段缺失、关键检查未完成、附件缺失、保存失败、质控退回未整改、字段格式异常或当前账号无权限有关。处理顺序：先查看页面提示和章节红点，再定位缺失字段，补齐或上传附件，确认自动保存成功，最后重新提交质控。"
   },
   {
     "id": "faq-ai-usage",
     "title": "常见问题：AI 生成内容怎么使用",
-    "tags": ["public", "patient", "quality", "faq", "ai"],
+    "tags": [
+      "public",
+      "patient",
+      "quality",
+      "faq",
+      "ai"
+    ],
     "content": "AI 输出必须由院内人员人工判断、复制或改写后使用。AI 可以帮忙总结、列清单、写宣教草稿、写退回原因草稿、解释系统流程，但不能替代医生确认，不能自动写入正式病历，不能自动给出质控通过结论。涉及医疗风险时应提示用户找责任医生或质控人员确认。"
   }
 ]

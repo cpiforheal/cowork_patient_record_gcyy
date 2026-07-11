@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory, createWebHistory, RouteLocationNormalized } from "vue-router";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
 import { HOME_URL, LOGIN_URL, ROUTER_WHITE_LIST } from "@/config";
@@ -12,6 +12,7 @@ const routerMode = {
   hash: () => createWebHashHistory(),
   history: () => createWebHistory()
 };
+const createHistory = routerMode[mode as keyof typeof routerMode] ?? routerMode.hash;
 
 /**
  * @description 📚 路由参数配置简介
@@ -30,50 +31,55 @@ const routerMode = {
  * @param meta.isKeepAlive ==> 当前路由是否缓存
  * */
 const router = createRouter({
-  history: routerMode[mode](),
+  history: createHistory(),
   routes: [...staticRouter, ...errorRouter],
   strict: false,
   scrollBehavior: () => ({ left: 0, top: 0 })
 });
 
+const setDocumentTitle = (to: RouteLocationNormalized) => {
+  const title = import.meta.env.VITE_GLOB_APP_TITLE;
+  document.title = to.meta.title ? `${to.meta.title} - ${title}` : title;
+};
+
 /**
  * @description 路由拦截 beforeEach
- * */
-router.beforeEach(async (to, from, next) => {
+ */
+router.beforeEach(async to => {
   const userStore = useUserStore();
   const authStore = useAuthStore();
 
-  // 1.NProgress 开始
   NProgress.start();
+  setDocumentTitle(to);
 
-  // 2.动态设置标题
-  const title = import.meta.env.VITE_GLOB_APP_TITLE;
-  document.title = to.meta.title ? `${to.meta.title} - ${title}` : title;
-
-  // 3.判断是访问登陆页，有 Token 就在当前页面，没有 Token 重置路由到登陆页
   if (to.path.toLocaleLowerCase() === LOGIN_URL) {
-    if (userStore.token) return next({ path: HOME_URL, replace: true });
+    if (userStore.token) return { path: HOME_URL, replace: true };
     resetRouter();
-    return next();
+    return true;
   }
 
-  // 4.判断访问页面是否在路由白名单地址(静态路由)中，如果存在直接放行
-  if (ROUTER_WHITE_LIST.includes(to.path)) return next();
+  if (ROUTER_WHITE_LIST.includes(to.path)) return true;
+  if (!userStore.token) return { path: LOGIN_URL, replace: true };
 
-  // 5.判断是否有 Token，没有重定向到 login 页面
-  if (!userStore.token) return next({ path: LOGIN_URL, replace: true });
+  try {
+    if (!authStore.authMenuListGet.length) {
+      await initDynamicRouter();
+      const resolvedTarget = router.resolve(to.fullPath);
+      if (!resolvedTarget.matched.length || resolvedTarget.name === "notFound") {
+        return { path: "/404", replace: true };
+      }
+      return { path: to.fullPath, replace: true };
+    }
 
-  // 6.如果没有菜单列表，就重新请求菜单列表并添加动态路由
-  if (!authStore.authMenuListGet.length) {
-    await initDynamicRouter();
-    return next({ ...to, replace: true });
+    if (to.name === "notFound") return { path: "/404", replace: true };
+    await authStore.setRouteName(String(to.name || ""));
+    return true;
+  } catch (error) {
+    console.error("动态路由初始化失败", error);
+    userStore.setToken("");
+    resetRouter();
+    return { path: LOGIN_URL, replace: true };
   }
-
-  // 7.存储 routerName 做按钮权限筛选
-  authStore.setRouteName(to.name as string);
-
-  // 8.正常访问页面
-  next();
 });
 
 /**
@@ -86,6 +92,10 @@ export const resetRouter = () => {
     const { name } = route;
     if (name && !staticRouteNames.has(String(name)) && router.hasRoute(name)) router.removeRoute(name);
   });
+  if (router.hasRoute("notFound")) router.removeRoute("notFound");
+  authStore.authMenuList = [];
+  authStore.authButtonList = {};
+  authStore.routeName = "";
 };
 
 /**

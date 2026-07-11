@@ -369,7 +369,6 @@ public class ClinicAiAssistantLogService {
         if (containsAny(value, "权限", "账号", "角色", "菜单", "登录", "permission", "role")) return "permission";
         if (containsAny(value, "质控", "审核", "退回", "归档", "缺项", "冲突", "quality", "audit")) return "quality";
         if (containsAny(value, "患者", "病历", "档案", "问诊", "诊断", "patient", "record")) return "patient";
-        if (containsAny(value, "库存", "进销存", "申领", "发放", "签收", "盘点", "inventory")) return "inventory";
         if (containsAny(value, "备份", "恢复", "附件", "路径", "backup", "file")) return "backup";
         if (containsAny(value, "模型", "api", "key", "401", "豆包", "ai")) return "ai_config";
         if (containsAny(value, "流程", "怎么操作", "哪里点", "步骤", "workflow")) return "workflow";

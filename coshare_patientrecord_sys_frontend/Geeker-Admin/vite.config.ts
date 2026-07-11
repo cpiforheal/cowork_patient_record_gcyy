@@ -29,7 +29,7 @@ const manualChunks = (id: string) => {
 };
 
 // @see: https://vitejs.dev/config/
-export default defineConfig(({ mode, command }: ConfigEnv): UserConfig => {
+export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
   const root = process.cwd();
   const env = loadEnv(mode, root);
   const viteEnv = wrapperEnv(env);
@@ -60,7 +60,7 @@ export default defineConfig(({ mode, command }: ConfigEnv): UserConfig => {
       // Load proxy configuration from .env.development
       proxy: createProxy(viteEnv.VITE_PROXY)
     },
-    plugins: createVitePlugins(viteEnv, command),
+    plugins: createVitePlugins(viteEnv),
     esbuild: {
       pure: viteEnv.VITE_DROP_CONSOLE ? ["console.log", "debugger"] : []
     },

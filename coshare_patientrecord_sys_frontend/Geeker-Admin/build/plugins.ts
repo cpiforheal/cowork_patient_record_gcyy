@@ -1,20 +1,18 @@
 import type { PluginOption } from "vite";
 import vue from "@vitejs/plugin-vue";
 import vueJsx from "@vitejs/plugin-vue-jsx";
-import eslintPlugin from "vite-plugin-eslint";
 import { createHtmlPlugin } from "vite-plugin-html";
 import viteCompression from "vite-plugin-compression";
 import vueSetupExtend from "unplugin-vue-setup-extend-plus/vite";
 import Components from "unplugin-vue-components/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
 
-export const createVitePlugins = (viteEnv: ViteEnv, command: "build" | "serve"): (PluginOption | PluginOption[])[] => {
+export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOption[])[] => {
   const { VITE_GLOB_APP_TITLE } = viteEnv;
 
   return [
     vue(),
     vueJsx(),
-    command === "serve" ? eslintPlugin() : null,
     vueSetupExtend({}),
     Components({
       dts: false,

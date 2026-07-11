@@ -27,7 +27,6 @@ public class SecurityConfig {
                     "/patients/**",
                     "/system/**",
                     "/templates/**",
-                    "/inventory/**",
                     "/encounters/**",
                     "/favicon.ico",
                     "/assets/**",
@@ -36,7 +35,7 @@ public class SecurityConfig {
                     "/auth/options",
                     "/auth/options/accounts"
                 ).permitAll()
-                .requestMatchers("/health/db", "/auth/logout", "/auth/password", "/clinic-api/**", "/inventory-api/**").authenticated()
+                .requestMatchers("/health/db", "/auth/logout", "/auth/password", "/clinic-api/**").authenticated()
                 .anyRequest().authenticated()
             )
             .httpBasic(httpBasic -> httpBasic.disable())

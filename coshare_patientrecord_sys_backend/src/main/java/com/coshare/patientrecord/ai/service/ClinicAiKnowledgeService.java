@@ -87,7 +87,6 @@ public class ClinicAiKnowledgeService {
             Map.entry("doctor", List.of("医生", "诊断", "分流", "住院", "门诊", "手术", "中医", "治疗")),
             Map.entry("nurse", List.of("护士", "护理", "宣教", "院前", "出院")),
             Map.entry("quality", List.of("质控", "审核", "退回", "归档", "缺项", "冲突")),
-            Map.entry("inventory", List.of("库存", "进销存", "申领", "发放", "签收", "低库存", "临期", "盘点", "报废")),
             Map.entry("backup", List.of("备份", "恢复", "路径", "数据库", "附件")),
             Map.entry("permission", List.of("权限", "角色", "账号", "科室", "能不能", "看不到")),
             Map.entry("attachment", List.of("附件", "上传", "图片", "报告", "重试")),
@@ -110,7 +109,6 @@ public class ClinicAiKnowledgeService {
             Map.entry("patient", List.of("patient", "患者", "病历", "档案", "detail")),
             Map.entry("quality", List.of("quality", "audit", "质控", "审核", "review")),
             Map.entry("leader", List.of("leader", "manager", "管理", "首页", "home")),
-            Map.entry("inventory", List.of("inventory", "库存", "进销存")),
             Map.entry("backup", List.of("backup", "备份")),
             Map.entry("permission", List.of("permission", "权限", "role", "账号"))
         );

@@ -43,7 +43,7 @@ class PreAiPrivacyServiceTests {
         String documentXml = unzipEntry(docx, "word/document.xml");
 
         assertTrue(docx.length > 1000);
-        assertTrue(documentXml.contains("脱敏前置病历资料"));
+        assertTrue(documentXml.contains("中医肛肠医院住院病历自动生成资料"));
         assertTrue(documentXml.contains("便血3月"));
         assertTrue(documentXml.contains("周xx"));
         assertFalse(documentXml.contains("周明华"));
@@ -52,6 +52,50 @@ class PreAiPrivacyServiceTests {
         assertFalse(documentXml.contains("幸福路88号"));
         assertFalse(documentXml.contains("原始照片.jpg"));
         assertFalse(documentXml.contains("张医生"));
+    }
+
+    @Test
+    void marksNumericAndQualitativeLabAbnormalities() {
+        ObjectNode high = objectMapper.createObjectNode();
+        high.put("value", "12.5");
+        high.put("reference", "4.0-10.0");
+        ObjectNode low = objectMapper.createObjectNode();
+        low.put("value", "3.2");
+        low.put("reference", "4.0-10.0");
+        ObjectNode positive = objectMapper.createObjectNode();
+        positive.put("value", "阳性");
+        positive.put("reference", "阴性");
+
+        assertEquals("偏高", service.labAbnormalLabel(high));
+        assertEquals("偏低", service.labAbnormalLabel(low));
+        assertEquals("异常", service.labAbnormalLabel(positive));
+    }
+
+    @Test
+    void docxKeepsOnlyFilledLabMetricsAndHighlightsAbnormalResult() throws Exception {
+        ObjectNode workspace = sampleWorkspace();
+        ObjectNode labTask = workspace.withArray("auxiliaryTasks").addObject();
+        labTask.put("taskType", "LAB");
+        labTask.put("status", "COMPLETED");
+        ObjectNode report = workspace.withArray("labReports").addObject();
+        report.put("templateName", "血常规");
+        report.put("reportDate", "2026-07-10");
+        ObjectNode abnormal = report.putArray("metrics").addObject();
+        abnormal.put("name", "白细胞");
+        abnormal.put("value", "12.5");
+        abnormal.put("unit", "10^9/L");
+        abnormal.put("reference", "4.0-10.0");
+        ObjectNode empty = report.withArray("metrics").addObject();
+        empty.put("name", "未填写指标");
+        empty.put("value", "");
+        empty.put("reference", "1-2");
+
+        ObjectNode masked = service.maskWorkspace(workspace);
+        String documentXml = unzipEntry(service.renderDocx(masked, workspace), "word/document.xml");
+
+        assertEquals("偏高", masked.path("labReports").path(0).path("metrics").path(0).path("abnormal").asText());
+        assertTrue(documentXml.contains("白细胞：12.510^9/L【异常·偏高】"));
+        assertFalse(documentXml.contains("未填写指标"));
     }
 
     @Test
@@ -114,6 +158,7 @@ class PreAiPrivacyServiceTests {
         addStage(stages, "SURGERY", "COMPLETED", surgery);
 
         workspace.putArray("auxiliaryTasks");
+        workspace.putArray("labReports");
         ObjectNode attachment = workspace.putArray("attachments").addObject();
         attachment.put("fileName", "周明华-原始照片.jpg");
         attachment.put("uploader", "张医生");

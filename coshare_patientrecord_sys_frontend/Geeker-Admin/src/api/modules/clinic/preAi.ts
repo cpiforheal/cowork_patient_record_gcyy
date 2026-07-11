@@ -328,8 +328,19 @@ export const generatePreAiExportApi = (encounterId: string) =>
     "POST"
   );
 
+export const normalizePreAiDownloadPath = (path: string) => {
+  const value = String(path || "").trim();
+  if (!value) return value;
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.pathname.replace(/^(?:\/clinic-api)+(?=\/)/, "") + url.search;
+  } catch {
+    return value.replace(/^(?:\/clinic-api)+(?=\/)/, "");
+  }
+};
+
 const downloadAuthenticatedFile = async (path: string, fileName: string) => {
-  const result = await clinicFetch(path, { headers: authHeaders() });
+  const result = await clinicFetch(normalizePreAiDownloadPath(path), { headers: authHeaders() });
   if (result.status === 401) handleUnauthorizedResponse();
   if (!result.ok) {
     const message = await result.text();
@@ -353,7 +364,7 @@ export const downloadPreAiAttachmentApi = (attachment: PreAiAttachment) =>
   downloadAuthenticatedFile(attachment.downloadUrl, attachment.fileName);
 
 export const getPreAiAttachmentObjectUrlApi = async (attachment: PreAiAttachment) => {
-  const result = await clinicFetch(attachment.downloadUrl, { headers: authHeaders() });
+  const result = await clinicFetch(normalizePreAiDownloadPath(attachment.downloadUrl), { headers: authHeaders() });
   if (result.status === 401) handleUnauthorizedResponse();
   if (!result.ok) throw new Error((await result.text()) || "图片加载失败");
   return URL.createObjectURL(await result.blob());

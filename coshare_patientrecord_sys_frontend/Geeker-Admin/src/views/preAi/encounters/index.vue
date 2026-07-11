@@ -3,9 +3,8 @@
   <div class="pre-ai-page">
     <header class="page-hero">
       <div>
-        <el-tag type="primary" effect="dark">前置环节</el-tag>
-        <h2>病历事实采集与脱敏资料</h2>
-        <p>各岗位只维护本阶段事实；医生复核后生成脱敏 DOCX，本系统流程随即结束。</p>
+        <el-tag type="primary" effect="plain">前置病历</el-tag>
+        <h2>病历事实采集</h2>
       </div>
       <div class="hero-actions">
         <el-button :icon="Refresh" @click="loadEncounterList">刷新</el-button>
@@ -24,22 +23,23 @@
         aria-label="关闭患者列表"
         @click="patientDrawerOpen = false"
       ></button>
-      <aside
-        class="encounter-sidebar"
-        :class="{ expanded: patientDrawerOpen }"
-        tabindex="0"
-        @mouseenter="openPatientDrawer"
-        @mouseleave="schedulePatientDrawerClose"
-        @focusin="openPatientDrawer"
-        @focusout="schedulePatientDrawerClose"
-      >
-        <button type="button" class="patient-drawer-rail" @click="togglePatientDrawer">
+      <aside class="encounter-sidebar" :class="{ expanded: patientDrawerOpen }">
+        <button
+          type="button"
+          class="patient-drawer-rail"
+          :aria-expanded="patientDrawerOpen"
+          :aria-label="patientDrawerOpen ? '收起患者主档案' : '展开患者主档案'"
+          @click="togglePatientDrawer"
+        >
           <el-icon><User /></el-icon>
           <strong>{{ patientCases.length }}</strong>
           <span>{{ selectedPatientCase?.patientName || "患者" }}</span>
         </button>
         <div class="sidebar-title">
-          <strong>患者主档案</strong>
+          <div class="sidebar-title__head">
+            <strong>患者主档案</strong>
+            <el-button link type="primary" @click="patientDrawerOpen = false">收起</el-button>
+          </div>
           <el-input v-model="keyword" clearable placeholder="姓名/病例标识" :prefix-icon="Search" />
         </div>
         <el-scrollbar height="calc(100vh - 285px)">
@@ -73,76 +73,57 @@
         </el-scrollbar>
       </aside>
 
-      <aside v-if="workspace" class="workflow-sidebar">
-        <section class="workflow-patient-card">
-          <span>当前患者</span>
-          <strong>{{ workspace.encounter.patient.patientName || "待补姓名" }}</strong>
-          <small>{{ workspace.encounter.caseToken }}</small>
-          <div>
-            <el-tag size="small" :type="encounterStatusType(workspace.encounter.status)">
-              {{ encounterStatusLabel[workspace.encounter.status] || workspace.encounter.status }}
-            </el-tag>
-            <em>{{ routeLabel(workspace.encounter.route) }}</em>
-          </div>
-        </section>
-        <div class="workflow-title">
-          <strong>院内流转</strong>
-          <span>点击岗位卡片进入办理</span>
-        </div>
-        <el-scrollbar height="calc(100vh - 385px)">
-          <div class="workflow-flow">
-            <div v-for="card in workflowCards" :key="card.key" class="workflow-card-wrap">
-              <button
-                type="button"
-                class="workflow-card"
-                :class="{
-                  active: isWorkflowCardActive(card),
-                  mine: card.roles.includes(currentRole),
-                  current: isCurrentWorkflowCard(card),
-                  skipped: workflowCardStatus(card) === 'SKIPPED'
-                }"
-                @click="selectWorkflowCard(card)"
-              >
-                <span class="workflow-order">{{ card.order }}</span>
-                <div class="workflow-card-main">
-                  <strong>{{ card.title }}</strong>
-                  <small>{{ card.owner }}</small>
-                  <em v-if="card.roles.includes(currentRole)">当前岗位可办理</em>
-                </div>
-                <el-tag size="small" :type="stageStatusType(workflowCardStatus(card))">
-                  {{ workflowCardStatusLabel(card) }}
-                </el-tag>
-              </button>
-            </div>
-          </div>
-        </el-scrollbar>
-      </aside>
+      <WorkflowSidebar
+        v-if="workspace"
+        :workspace="workspace"
+        :cards="workflowCards"
+        :current-role="currentRole"
+        :encounter-status-label="encounterStatusLabel"
+        :encounter-status-type="encounterStatusType"
+        :route-label="routeLabel"
+        :status-of="workflowCardStatus"
+        :status-label="workflowCardStatusLabel"
+        :status-type="stageStatusType"
+        :is-active="isWorkflowCardActive"
+        :is-current="isCurrentWorkflowCard"
+        @select="selectWorkflowCard"
+      />
 
       <main v-loading="workspaceLoading" class="encounter-workspace">
         <el-empty v-if="!workspace" description="请从左侧选择患者，或新建前置病历" />
         <section v-else-if="!workflowSelected" class="workflow-empty-panel">
-          <el-empty :image-size="112" description="请点击左侧院内流转岗位卡片">
-            <template #description>
-              <strong>请选择需要查看或填写的岗位节点</strong>
-              <p>患者资料、岗位流转和填写内容已整合在同一个工作台中。</p>
-            </template>
-          </el-empty>
+          <el-empty :image-size="96" description="请选择左侧岗位节点" />
         </section>
         <template v-else>
           <section class="patient-banner">
-            <div>
-              <h3>{{ workspace.encounter.patient.patientName || "待补姓名" }}</h3>
-              <p>
-                {{ workspace.encounter.caseToken }} · {{ workspace.encounter.patient.gender || "待补性别" }} ·
-                {{ workspace.encounter.patient.age || "待补年龄" }}
-              </p>
+            <div class="patient-banner__identity">
+              <span class="patient-avatar">{{ (workspace.encounter.patient.patientName || "患").slice(0, 1) }}</span>
+              <div>
+                <small>当前就诊患者</small>
+                <h3>{{ workspace.encounter.patient.patientName || "待补姓名" }}</h3>
+                <p>
+                  {{ workspace.encounter.caseToken }} · {{ workspace.encounter.patient.gender || "待补性别" }} ·
+                  {{ workspace.encounter.patient.age || "待补年龄" }} ·
+                  {{ workspace.encounter.patient.visitDate || "待补就诊时间" }}
+                </p>
+              </div>
             </div>
-            <div class="patient-banner__meta">
-              <el-tag :type="encounterStatusType(workspace.encounter.status)">
-                {{ encounterStatusLabel[workspace.encounter.status] || workspace.encounter.status }}
-              </el-tag>
-              <span>{{ routeLabel(workspace.encounter.route) }}</span>
-              <span>{{ treatmentPathLabel(workspace.encounter.treatmentPath) }}</span>
+            <div class="patient-banner__overview">
+              <div class="context-stat">
+                <small>流程进度</small>
+                <strong>{{ workflowProgress.completed }}/{{ workflowProgress.total }}</strong>
+              </div>
+              <div class="context-stat" :class="{ warning: workflowProgress.returned }">
+                <small>待处理异常</small>
+                <strong>{{ workflowProgress.returned }}</strong>
+              </div>
+              <div class="patient-banner__meta">
+                <el-tag :type="encounterStatusType(workspace.encounter.status)">
+                  {{ encounterStatusLabel[workspace.encounter.status] || workspace.encounter.status }}
+                </el-tag>
+                <span>{{ routeLabel(workspace.encounter.route) }}</span>
+                <span>{{ treatmentPathLabel(workspace.encounter.treatmentPath) }}</span>
+              </div>
             </div>
           </section>
 
@@ -174,471 +155,358 @@
             </el-tag>
           </div>
 
-          <section v-if="editorMode === 'PREVIEW'" class="template-preview-panel">
-            <div class="document-preview-toolbar">
-              <div>
-                <strong>前置病历事实资料预览</strong>
-                <span>内部预览使用真实资料，正式导出时由系统自动脱敏</span>
-              </div>
-              <el-tag type="warning" effect="plain">非正式住院病历</el-tag>
-            </div>
-            <article class="document-sheet">
-              <header class="document-header">
-                <h2>前置病历事实资料</h2>
-                <p>供医生复核并作为外部病历生成前的结构化事实来源</p>
-                <div class="document-meta">
-                  <span>病例标识：{{ workspace.encounter.caseToken }}</span>
-                  <span>就诊日期：{{ workspace.encounter.patient.visitDate || "待填写" }}</span>
-                  <span>就诊分支：{{ routeLabel(workspace.encounter.route) }}</span>
-                </div>
-              </header>
-              <section v-for="section in documentPreviewSections" :key="section.key" class="document-section">
-                <h3>{{ section.title }}</h3>
-                <p v-if="section.note" class="document-section-note">{{ section.note }}</p>
-                <div v-if="section.rows.length" class="document-fields">
-                  <div v-for="row in section.rows" :key="row.key" :class="{ wide: row.wide }">
-                    <strong>{{ row.label }}：</strong>
-                    <span :class="{ empty: row.empty }">{{ row.value }}</span>
+          <Transition name="workspace-mode" mode="out-in">
+            <MedicalRecordPreview
+              v-if="editorMode === 'PREVIEW'"
+              key="preview"
+              :case-token="workspace.encounter.caseToken"
+              :visit-date="workspace.encounter.patient.visitDate"
+              :route-label="routeLabel(workspace.encounter.route)"
+              :sections="documentPreviewSections"
+            />
+
+            <div v-else key="edit" class="editor-mode-content">
+              <section v-if="selectedPanel === 'STAGE'" class="stage-panel">
+                <template v-if="selectedStageCode !== 'REVIEW'">
+                  <div class="panel-heading">
+                    <div>
+                      <h3>{{ selectedStage.title }}</h3>
+                    </div>
+                    <div class="heading-tags">
+                      <el-tag effect="plain">责任岗位：{{ selectedStage.owner }}</el-tag>
+                      <el-tag :type="stageStatusType(selectedStageSubmission.status)">
+                        {{ stageStatusLabel[selectedStageSubmission.status] }}
+                      </el-tag>
+                    </div>
                   </div>
-                </div>
-                <p v-else class="document-empty">本节暂无已维护内容</p>
-              </section>
-              <footer class="document-footer">各岗位维护事实 · 医生统一复核 · 导出自动脱敏</footer>
-            </article>
-          </section>
 
-          <template v-else>
-            <section v-if="selectedPanel === 'STAGE'" class="stage-panel">
-              <template v-if="selectedStageCode !== 'REVIEW'">
-                <div class="panel-heading">
-                  <div>
-                    <h3>{{ selectedStage.title }}</h3>
-                    <p>{{ selectedStage.description }}</p>
+                  <el-alert
+                    v-if="selectedStageSubmission.status === 'RETURNED'"
+                    type="warning"
+                    show-icon
+                    :closable="false"
+                    :title="`医生退回：${selectedStageSubmission.returnedReason || '请核对后重新提交'}`"
+                  />
+                  <el-alert
+                    v-if="!canEditSelectedStage"
+                    type="info"
+                    show-icon
+                    :closable="false"
+                    :title="
+                      selectedStageSubmission.status === 'COMPLETED'
+                        ? '本阶段已完成；需要修改时请由医生退回。'
+                        : `当前账号为${roleLabel(currentRole)}，本页仅可查看。`
+                    "
+                  />
+
+                  <div v-if="selectedStageCode === 'INSPECTION'" class="inspection-view-tabs">
+                    <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="inspectionView = 'CURRENT'">
+                      本次检查
+                    </button>
+                    <button type="button" :class="{ active: inspectionView === 'HISTORY' }" @click="showInspectionTimeline">
+                      历史时间轴
+                    </button>
                   </div>
-                  <div class="heading-tags">
-                    <el-tag effect="plain">责任岗位：{{ selectedStage.owner }}</el-tag>
-                    <el-tag :type="stageStatusType(selectedStageSubmission.status)">
-                      {{ stageStatusLabel[selectedStageSubmission.status] }}
-                    </el-tag>
-                  </div>
-                </div>
 
-                <el-alert
-                  v-if="selectedStageSubmission.status === 'RETURNED'"
-                  type="warning"
-                  show-icon
-                  :closable="false"
-                  :title="`医生退回：${selectedStageSubmission.returnedReason || '请核对后重新提交'}`"
-                />
-                <el-alert
-                  v-if="!canEditSelectedStage"
-                  type="info"
-                  show-icon
-                  :closable="false"
-                  :title="
-                    selectedStageSubmission.status === 'COMPLETED'
-                      ? '本阶段已完成；需要修改时请由医生退回。'
-                      : `当前账号为${roleLabel(currentRole)}，本页仅可查看。`
-                  "
-                />
-
-                <div v-if="selectedStageCode === 'INSPECTION'" class="inspection-view-tabs">
-                  <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="inspectionView = 'CURRENT'">
-                    本次检查
-                  </button>
-                  <button type="button" :class="{ active: inspectionView === 'HISTORY' }" @click="showInspectionTimeline">
-                    历史时间轴
-                  </button>
-                </div>
-
-                <section
-                  v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'HISTORY'"
-                  v-loading="timelineLoading"
-                  class="inspection-timeline"
-                >
-                  <el-empty v-if="!inspectionTimeline.length" description="暂无历次检查记录" />
-                  <article
-                    v-for="(node, index) in inspectionTimeline"
-                    :key="node.encounterId"
-                    class="timeline-node"
-                    :class="{ latest: index === inspectionTimeline.length - 1 }"
+                  <section
+                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'HISTORY'"
+                    v-loading="timelineLoading"
+                    class="inspection-timeline"
                   >
-                    <i class="timeline-dot"></i>
-                    <header>
-                      <div>
-                        <strong>第 {{ node.visitNo }} 次来访 · {{ node.visitDate || "日期待补" }}</strong>
-                        <small>{{ node.caseToken }} · {{ routeLabel(node.route) }}</small>
-                      </div>
-                      <el-tag :type="stageStatusType(node.inspectionStatus)">{{
-                        stageStatusLabel[node.inspectionStatus]
-                      }}</el-tag>
-                    </header>
-                    <div class="timeline-facts">
-                      <div v-for="entry in nonEmptyEntries(node.inspection)" :key="entry[0]">
-                        <span>{{ fieldLabel("INSPECTION", entry[0]) }}</span>
-                        <p>{{ humanValue(entry[1]) }}</p>
-                      </div>
-                    </div>
-                    <div v-if="node.attachments.length" class="timeline-attachment-groups">
-                      <section
-                        v-for="group in timelineAttachmentGroups(node.attachments)"
-                        :key="group.id"
-                        class="timeline-attachment-group"
-                      >
-                        <strong>{{ group.name }}</strong>
-                        <div class="timeline-images">
-                          <button
-                            v-for="attachment in group.items"
-                            :key="attachment.id"
-                            type="button"
-                            class="timeline-image"
-                            @click="openTimelineAttachment(attachment)"
-                          >
-                            <img
-                              v-if="timelineImageUrls[attachment.id]"
-                              :src="timelineImageUrls[attachment.id]"
-                              :alt="attachment.fileName"
-                            />
-                            <span v-else>{{ attachment.mimeType?.startsWith("image/") ? "加载图片" : "查看文件" }}</span>
-                            <small>{{ attachment.fileName }}</small>
-                          </button>
-                        </div>
-                      </section>
-                    </div>
-                    <details v-if="hasVisitMeta(node.visitMeta)" class="visit-meta-summary">
-                      <summary>来访描述与交费参考</summary>
-                      <p v-if="node.visitMeta.visitReason">来访原因：{{ node.visitMeta.visitReason }}</p>
-                      <p v-if="node.visitMeta.description">描述：{{ node.visitMeta.description }}</p>
-                      <p>交费参考：{{ paymentStatusLabel(node.visitMeta.paymentStatus) }}</p>
-                    </details>
-                  </article>
-                </section>
-
-                <section
-                  v-if="upstreamStages.length && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
-                  class="upstream-section"
-                >
-                  <div class="section-caption">上游只读事实</div>
-                  <el-collapse>
-                    <el-collapse-item
-                      v-for="item in upstreamStages"
-                      :key="item.stageCode"
-                      :title="stageByCode(item.stageCode).title"
+                    <el-empty v-if="!inspectionTimeline.length" description="暂无历次检查记录" />
+                    <article
+                      v-for="(node, index) in inspectionTimeline"
+                      :key="node.encounterId"
+                      class="timeline-node"
+                      :class="{ latest: index === inspectionTimeline.length - 1 }"
                     >
-                      <div class="read-only-grid">
-                        <div v-for="entry in nonEmptyEntries(item.data)" :key="entry[0]">
-                          <span>{{ fieldLabel(item.stageCode, entry[0]) }}</span>
+                      <i class="timeline-dot"></i>
+                      <header>
+                        <div>
+                          <strong>第 {{ node.visitNo }} 次来访 · {{ node.visitDate || "日期待补" }}</strong>
+                          <small>{{ node.caseToken }} · {{ routeLabel(node.route) }}</small>
+                        </div>
+                        <el-tag :type="stageStatusType(node.inspectionStatus)">{{
+                          stageStatusLabel[node.inspectionStatus]
+                        }}</el-tag>
+                      </header>
+                      <div class="timeline-facts">
+                        <div v-for="entry in nonEmptyEntries(node.inspection)" :key="entry[0]">
+                          <span>{{ fieldLabel("INSPECTION", entry[0]) }}</span>
                           <p>{{ humanValue(entry[1]) }}</p>
                         </div>
                       </div>
-                    </el-collapse-item>
-                  </el-collapse>
-                </section>
-
-                <el-form
-                  v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
-                  label-position="top"
-                  class="stage-form"
-                >
-                  <div class="form-grid">
-                    <el-form-item
-                      v-for="field in visibleStageFields"
-                      :key="field.key"
-                      :label="field.label"
-                      :required="field.required"
-                      :class="{ 'span-2': field.span === 2 }"
-                    >
-                      <el-input
-                        v-if="field.kind === 'input' || field.kind === 'number'"
-                        v-model="stageForms[selectedStageCode][field.key]"
-                        :type="field.kind === 'number' ? 'number' : 'text'"
-                        :placeholder="field.placeholder"
-                        :disabled="!canEditSelectedStage"
-                      />
-                      <el-input
-                        v-else-if="field.kind === 'textarea'"
-                        v-model="stageForms[selectedStageCode][field.key]"
-                        type="textarea"
-                        :rows="field.rows || 3"
-                        :placeholder="field.placeholder"
-                        :disabled="!canEditSelectedStage"
-                      />
-                      <el-select
-                        v-else-if="field.kind === 'select'"
-                        v-model="stageForms[selectedStageCode][field.key]"
-                        clearable
-                        filterable
-                        :allow-create="field.creatable"
-                        default-first-option
-                        :placeholder="field.placeholder || `请选择${field.label}`"
-                        :disabled="!canEditSelectedStage"
-                      >
-                        <el-option
-                          v-for="option in fieldOptions(field)"
-                          :key="option.value"
-                          :label="option.label"
-                          :value="option.value"
-                        />
-                      </el-select>
-                      <el-select
-                        v-else-if="field.kind === 'multi'"
-                        v-model="stageForms[selectedStageCode][field.key]"
-                        multiple
-                        clearable
-                        filterable
-                        :allow-create="field.creatable || !fieldOptions(field).length"
-                        default-first-option
-                        :placeholder="field.placeholder || `请选择或输入${field.label}`"
-                        :disabled="!canEditSelectedStage"
-                      >
-                        <el-option
-                          v-for="option in fieldOptions(field)"
-                          :key="option.value"
-                          :label="option.label"
-                          :value="option.value"
-                        />
-                      </el-select>
-                      <el-date-picker
-                        v-else
-                        v-model="stageForms[selectedStageCode][field.key]"
-                        :type="field.kind === 'date' ? 'date' : 'datetime'"
-                        :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
-                        :placeholder="`请选择${field.label}`"
-                        :disabled="!canEditSelectedStage"
-                      />
-                    </el-form-item>
-                  </div>
-                </el-form>
-
-                <section
-                  v-if="
-                    (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT') &&
-                    (selectedStageCode === 'INSPECTION' || selectedStageCode === 'SURGERY')
-                  "
-                  class="attachment-section"
-                >
-                  <div class="section-caption">本阶段附件（不会进入外部 DOCX）</div>
-                  <div class="attachment-list">
-                    <section v-for="group in selectedAttachmentGroups" :key="group.id" class="attachment-batch">
-                      <header>
-                        <strong>{{ group.name }}</strong>
-                        <small>{{ group.items.length }} 个文件</small>
-                      </header>
-                      <div v-for="attachment in group.items" :key="attachment.id" class="attachment-row">
-                        <div class="attachment-name">
-                          <span>{{ attachment.fileName }}</span>
-                          <small>{{ attachment.relativePath || attachment.description || "独立文件" }}</small>
-                        </div>
-                        <el-button link type="primary" @click="downloadPreAiAttachmentApi(attachment)">下载</el-button>
-                        <el-button v-if="canEditSelectedStage" link type="danger" @click="voidAttachment(attachment.id)"
-                          >作废</el-button
+                      <div v-if="node.attachments.length" class="timeline-attachment-groups">
+                        <section
+                          v-for="group in timelineAttachmentGroups(node.attachments)"
+                          :key="group.id"
+                          class="timeline-attachment-group"
                         >
+                          <strong>{{ group.name }}</strong>
+                          <div class="timeline-images">
+                            <button
+                              v-for="attachment in group.items"
+                              :key="attachment.id"
+                              type="button"
+                              class="timeline-image"
+                              @click="openTimelineAttachment(attachment)"
+                            >
+                              <img
+                                v-if="timelineImageUrls[attachment.id]"
+                                :src="timelineImageUrls[attachment.id]"
+                                :alt="attachment.fileName"
+                              />
+                              <span v-else>{{ attachment.mimeType?.startsWith("image/") ? "加载图片" : "查看文件" }}</span>
+                              <small>{{ attachment.fileName }}</small>
+                            </button>
+                          </div>
+                        </section>
                       </div>
-                    </section>
-                    <div v-if="canEditSelectedStage" class="upload-actions">
-                      <label class="upload-button">
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*,.pdf"
-                          @change="event => uploadAttachments(event, selectedStageCode)"
+                      <details v-if="hasVisitMeta(node.visitMeta)" class="visit-meta-summary">
+                        <summary>来访描述与交费参考</summary>
+                        <p v-if="node.visitMeta.visitReason">来访原因：{{ node.visitMeta.visitReason }}</p>
+                        <p v-if="node.visitMeta.description">描述：{{ node.visitMeta.description }}</p>
+                        <p>交费参考：{{ paymentStatusLabel(node.visitMeta.paymentStatus) }}</p>
+                      </details>
+                    </article>
+                  </section>
+
+                  <section
+                    v-if="upstreamStages.length && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
+                    class="upstream-section"
+                  >
+                    <div class="section-caption">上游只读事实</div>
+                    <el-collapse>
+                      <el-collapse-item
+                        v-for="item in upstreamStages"
+                        :key="item.stageCode"
+                        :title="stageByCode(item.stageCode).title"
+                      >
+                        <div class="read-only-grid">
+                          <div v-for="entry in nonEmptyEntries(item.data)" :key="entry[0]">
+                            <span>{{ fieldLabel(item.stageCode, entry[0]) }}</span>
+                            <p>{{ humanValue(entry[1]) }}</p>
+                          </div>
+                        </div>
+                      </el-collapse-item>
+                    </el-collapse>
+                  </section>
+
+                  <el-form
+                    v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
+                    label-position="top"
+                    class="stage-form"
+                  >
+                    <div class="form-grid">
+                      <el-form-item
+                        v-for="field in visibleStageFields"
+                        :key="field.key"
+                        :label="field.label"
+                        :required="field.required"
+                        :class="{ 'span-2': field.span === 2 }"
+                      >
+                        <el-input
+                          v-if="field.kind === 'input' || field.kind === 'number'"
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          :type="field.kind === 'number' ? 'number' : 'text'"
+                          :placeholder="field.placeholder"
+                          :disabled="!canEditSelectedStage"
                         />
-                        <el-icon><Upload /></el-icon> 选择多个文件
-                      </label>
-                      <label class="upload-button">
-                        <input
-                          type="file"
-                          multiple
-                          webkitdirectory
-                          @change="event => uploadAttachments(event, selectedStageCode, undefined, true)"
+                        <el-input
+                          v-else-if="field.kind === 'textarea'"
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          type="textarea"
+                          :rows="field.rows || 3"
+                          :placeholder="field.placeholder"
+                          :disabled="!canEditSelectedStage"
                         />
-                        <el-icon><FolderOpened /></el-icon> 选择文件夹
-                      </label>
+                        <el-select
+                          v-else-if="field.kind === 'select'"
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          clearable
+                          filterable
+                          :allow-create="field.creatable"
+                          default-first-option
+                          :placeholder="field.placeholder || `请选择${field.label}`"
+                          :disabled="!canEditSelectedStage"
+                        >
+                          <el-option
+                            v-for="option in fieldOptions(field)"
+                            :key="option.value"
+                            :label="option.label"
+                            :value="option.value"
+                          />
+                        </el-select>
+                        <el-select
+                          v-else-if="field.kind === 'multi'"
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          multiple
+                          clearable
+                          filterable
+                          :allow-create="field.creatable || !fieldOptions(field).length"
+                          default-first-option
+                          :placeholder="field.placeholder || `请选择或输入${field.label}`"
+                          :disabled="!canEditSelectedStage"
+                        >
+                          <el-option
+                            v-for="option in fieldOptions(field)"
+                            :key="option.value"
+                            :label="option.label"
+                            :value="option.value"
+                          />
+                        </el-select>
+                        <el-date-picker
+                          v-else
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          :type="field.kind === 'date' ? 'date' : 'datetime'"
+                          :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
+                          :placeholder="`请选择${field.label}`"
+                          :disabled="!canEditSelectedStage"
+                        />
+                      </el-form-item>
                     </div>
-                    <el-progress
-                      v-if="attachmentUpload.total"
-                      :percentage="attachmentUpload.percent"
-                      :status="
-                        attachmentUpload.failed
-                          ? 'warning'
-                          : attachmentUpload.success === attachmentUpload.total
-                            ? 'success'
-                            : undefined
-                      "
-                    />
-                    <small v-if="attachmentUpload.total" class="upload-summary">
-                      共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                      {{ attachmentUpload.failed }} 个
-                    </small>
-                  </div>
-                </section>
+                  </el-form>
 
-                <footer v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'" class="panel-actions">
-                  <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
-                    >退回修改</el-button
-                  >
-                  <div></div>
-                  <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage">保存草稿</el-button>
-                  <el-button v-if="canEditSelectedStage" type="primary" :loading="actionLoading" @click="completeSelectedStage"
-                    >完成并交接</el-button
-                  >
-                </footer>
-              </template>
+                  <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section">
+                    <div class="section-caption">检查室原始图片</div>
+                    <div v-if="inspectionImageAttachments.length" class="upstream-image-grid">
+                      <button
+                        v-for="attachment in inspectionImageAttachments"
+                        :key="attachment.id"
+                        type="button"
+                        class="upstream-image-card"
+                        @click="openWorkspaceAttachment(attachment)"
+                      >
+                        <img
+                          v-if="workspaceImageUrls[attachment.id]"
+                          :src="workspaceImageUrls[attachment.id]"
+                          :alt="attachment.fileName"
+                        />
+                        <span v-else>点击查看图片</span>
+                        <small>{{ attachment.fileName }}</small>
+                      </button>
+                    </div>
+                    <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
+                  </section>
 
-              <template v-else>
-                <div class="panel-heading">
-                  <div>
-                    <h3>医生最终复核</h3>
-                    <p>下面预览的是即将进入脱敏 DOCX 的内容；身份证、详细地址、真实业务编号、人员姓名和原图不会输出。</p>
-                  </div>
-                  <el-button :icon="Refresh" @click="loadReviewPreview">刷新预览</el-button>
-                </div>
-                <el-alert
-                  v-if="reviewPreview?.blockers?.length"
-                  type="warning"
-                  show-icon
-                  :closable="false"
-                  title="当前不能完成复核"
-                >
-                  <template #default>{{ reviewPreview.blockers.join("；") }}</template>
-                </el-alert>
-                <div v-if="reviewPreview" class="masked-preview">
-                  <section v-for="section in maskedSections" :key="section.title">
-                    <h4>{{ section.title }}</h4>
-                    <div class="read-only-grid">
-                      <div v-for="entry in section.entries" :key="entry[0]">
-                        <span>{{ reviewFieldLabel(entry[0]) }}</span>
-                        <p>{{ humanValue(entry[1]) }}</p>
+                  <section
+                    v-if="
+                      (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT') &&
+                      (selectedStageCode === 'INSPECTION' || selectedStageCode === 'SURGERY')
+                    "
+                    class="attachment-section"
+                  >
+                    <div class="section-caption">本阶段附件</div>
+                    <div class="attachment-list">
+                      <section v-for="group in selectedAttachmentGroups" :key="group.id" class="attachment-batch">
+                        <header>
+                          <strong>{{ group.name }}</strong>
+                          <small>{{ group.items.length }} 个文件</small>
+                        </header>
+                        <div v-for="attachment in group.items" :key="attachment.id" class="attachment-row">
+                          <div class="attachment-name">
+                            <span>{{ attachment.fileName }}</span>
+                            <small>{{ attachment.relativePath || attachment.description || "独立文件" }}</small>
+                          </div>
+                          <el-button link type="primary" @click="downloadPreAiAttachmentApi(attachment)">下载</el-button>
+                          <el-button v-if="canEditSelectedStage" link type="danger" @click="voidAttachment(attachment.id)"
+                            >作废</el-button
+                          >
+                        </div>
+                      </section>
+                      <div v-if="canEditSelectedStage" class="upload-actions">
+                        <label class="upload-button">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,.pdf"
+                            @change="event => uploadAttachments(event, selectedStageCode)"
+                          />
+                          <el-icon><Upload /></el-icon> 选择多个文件
+                        </label>
+                        <label class="upload-button">
+                          <input
+                            type="file"
+                            multiple
+                            webkitdirectory
+                            @change="event => uploadAttachments(event, selectedStageCode, undefined, true)"
+                          />
+                          <el-icon><FolderOpened /></el-icon> 选择文件夹
+                        </label>
                       </div>
+                      <el-progress
+                        v-if="attachmentUpload.total"
+                        :percentage="attachmentUpload.percent"
+                        :status="
+                          attachmentUpload.failed
+                            ? 'warning'
+                            : attachmentUpload.success === attachmentUpload.total
+                              ? 'success'
+                              : undefined
+                        "
+                      />
+                      <small v-if="attachmentUpload.total" class="upload-summary">
+                        共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                        {{ attachmentUpload.failed }} 个
+                      </small>
                     </div>
                   </section>
-                </div>
-                <el-input v-if="canReview" v-model="reviewStatement" type="textarea" :rows="3" placeholder="复核说明（选填）" />
-                <footer class="panel-actions">
-                  <div></div>
-                  <el-button
-                    v-if="canReview && workspace.encounter.status !== 'REVIEWED' && workspace.encounter.status !== 'EXPORTED'"
-                    type="primary"
-                    :disabled="!reviewPreview?.ready"
-                    :loading="actionLoading"
-                    @click="confirmReview"
-                    >确认事实无误</el-button
-                  >
-                  <el-button
-                    v-if="canReview && ['REVIEWED', 'EXPORTED'].includes(workspace.encounter.status)"
-                    type="success"
-                    :loading="actionLoading"
-                    @click="generateExport"
-                    >生成脱敏 DOCX</el-button
-                  >
-                </footer>
-                <section v-if="workspace.exports.length" class="export-list">
-                  <div class="section-caption">历史导出版本（新版本不覆盖旧文件）</div>
-                  <div v-for="version in workspace.exports" :key="version.id" class="export-row">
-                    <div>
-                      <strong>{{ version.fileName }}</strong>
-                      <small>{{ version.generatedAt }} · {{ version.generatedByRole || "医生" }}</small>
-                    </div>
-                    <el-button type="primary" plain @click="downloadPreAiExportApi(version)">下载</el-button>
-                  </div>
-                </section>
-              </template>
-            </section>
 
-            <section v-else class="stage-panel auxiliary-panel">
-              <div class="panel-heading">
-                <div>
-                  <h3>化验室检验报告</h3>
-                  <p>检验数值仍在原化验报告模板中填写；此处展示已经保存的完整报告并负责完成交接。</p>
-                </div>
-                <el-button v-if="canOpenLabWorkbench" type="primary" @click="openLabWorkbench">去填写/继续填写</el-button>
-              </div>
-              <el-alert
-                v-if="labTask?.status === 'RETURNED'"
-                type="warning"
-                show-icon
-                :closable="false"
-                title="医生已退回化验室，请补充或更正报告后重新完成交接。"
-              />
-              <el-empty
-                v-if="!workspace.labReports.length"
-                :image-size="72"
-                description="尚未保存检验报告，请进入化验报告模板填写"
-              />
-              <el-tabs v-else v-model="activeLabReportId" class="lab-report-tabs">
-                <el-tab-pane
-                  v-for="report in workspace.labReports"
-                  :key="report.id"
-                  :name="report.id"
-                  :label="`${report.templateName} · ${report.reportDate}`"
-                >
-                  <article class="lab-report-paper">
-                    <header>
-                      <h3>固始中医肛肠医院检验报告单</h3>
-                      <p>{{ report.templateName }}</p>
-                    </header>
-                    <div class="lab-patient-line">
-                      <span>姓名：{{ workspace.encounter.patient.patientName }}</span>
-                      <span>性别：{{ workspace.encounter.patient.gender || "待补充" }}</span>
-                      <span>病例标识：{{ workspace.encounter.caseToken }}</span>
-                      <span>日期：{{ report.reportDate }}</span>
-                    </div>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>项目</th>
-                          <th>简称</th>
-                          <th>结果</th>
-                          <th>单位</th>
-                          <th>参考范围</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr v-for="metric in report.metrics" :key="metric.key">
-                          <td>{{ metric.name }}</td>
-                          <td>{{ metric.shortName }}</td>
-                          <td>{{ metric.value }}</td>
-                          <td>{{ metric.unit }}</td>
-                          <td>{{ metric.reference }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <footer>
-                      <span>报告版本：v{{ report.version }}</span
-                      ><span>备注：{{ report.remark || "无" }}</span>
-                    </footer>
-                  </article>
-                </el-tab-pane>
-              </el-tabs>
-              <section v-if="legacyAuxiliaryTasks.length" class="legacy-auxiliary">
-                <div class="section-caption">旧辅助资料（只读保留）</div>
-                <div v-for="task in legacyAuxiliaryTasks" :key="task.id" class="read-only-grid">
-                  <div>
-                    <span>{{ auxiliaryTaskLabel[task.taskType] }}</span>
-                    <p>{{ humanValue(task.data) }}</p>
-                  </div>
-                </div>
-              </section>
-              <footer class="panel-actions compact-actions">
-                <el-button
-                  v-if="canReview && labTask?.status === 'COMPLETED'"
-                  type="warning"
-                  plain
-                  @click="returnAuxTask(labTask.id)"
-                  >退回化验室</el-button
-                >
-                <div></div>
-                <el-button
-                  v-if="canCompleteLab"
-                  type="primary"
+                  <footer
+                    v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
+                    class="panel-actions sticky-actions"
+                  >
+                    <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
+                      >退回修改</el-button
+                    >
+                    <div></div>
+                    <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
+                      >保存草稿</el-button
+                    >
+                    <el-button v-if="canEditSelectedStage" type="primary" :loading="actionLoading" @click="completeSelectedStage"
+                      >完成并交接</el-button
+                    >
+                  </footer>
+                </template>
+
+                <DoctorReviewPanel
+                  v-else
+                  v-model:statement="reviewStatement"
+                  :preview="reviewPreview"
+                  :sections="maskedSections"
+                  :can-review="canReview"
                   :loading="actionLoading"
-                  :disabled="!workspace.labReports.length || labTask?.status === 'COMPLETED'"
-                  @click="completeLab"
-                  >完成并交接</el-button
-                >
-              </footer>
-            </section>
-          </template>
+                  :encounter-status="workspace.encounter.status"
+                  :exports="workspace.exports"
+                  :field-label="reviewFieldLabel"
+                  :human-value="humanValue"
+                  @refresh="loadReviewPreview"
+                  @confirm="confirmReview"
+                  @generate="generateExport"
+                  @download="downloadPreAiExportApi"
+                />
+              </section>
+
+              <LabReportPanel
+                v-else
+                v-model:active-report-id="activeLabReportId"
+                :workspace="workspace"
+                :lab-task="labTask"
+                :legacy-tasks="legacyAuxiliaryTasks"
+                :can-open-workbench="canOpenLabWorkbench"
+                :can-review="canReview"
+                :can-complete="canCompleteLab"
+                :loading="actionLoading"
+                :task-label="auxiliaryTaskLabel"
+                :human-value="humanValue"
+                :abnormal-label="labMetricAbnormalLabel"
+                :is-metric-abnormal="isLabMetricAbnormal"
+                @open-workbench="openLabWorkbench"
+                @return-task="returnAuxTask"
+                @complete="completeLab"
+              />
+            </div>
+          </Transition>
         </template>
       </main>
     </section>
@@ -790,6 +658,13 @@ import {
   type PreAiStageStatus,
   type PreAiWorkspace
 } from "@/api/modules/clinic";
+import WorkflowSidebar, { type WorkflowCard } from "./components/WorkflowSidebar.vue";
+import MedicalRecordPreview, {
+  type DocumentPreviewRow,
+  type DocumentPreviewSection
+} from "./components/MedicalRecordPreview.vue";
+import LabReportPanel from "./components/LabReportPanel.vue";
+import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import {
   auxiliaryTaskFields,
   auxiliaryTaskLabel,
@@ -814,7 +689,6 @@ const patientCases = ref<PreAiPatientCase[]>([]);
 const keyword = ref("");
 const selectedPatientCaseId = ref("");
 const patientDrawerOpen = ref(false);
-let patientDrawerCloseTimer: ReturnType<typeof setTimeout> | undefined;
 const selectedEncounterId = ref("");
 const workspace = ref<PreAiWorkspace>();
 const workspaceLoading = ref(false);
@@ -829,6 +703,7 @@ const inspectionView = ref<"CURRENT" | "HISTORY">("CURRENT");
 const inspectionTimeline = ref<InspectionTimelineNode[]>([]);
 const timelineLoading = ref(false);
 const timelineImageUrls = reactive<Record<string, string>>({});
+const workspaceImageUrls = reactive<Record<string, string>>({});
 const stageForms = reactive<Record<PreAiStageCode, Record<string, any>>>({
   REGISTRATION: {},
   INSPECTION: {},
@@ -850,19 +725,6 @@ const legacyPatients = ref<PatientRow[]>([]);
 const followUpDialogVisible = ref(false);
 const followUpPatientCase = ref<PreAiPatientCase>();
 const followUpForm = reactive<Record<string, any>>({ visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00" });
-
-type WorkflowCard = {
-  key: string;
-  order: number;
-  kind: "STAGE" | "AUX";
-  title: string;
-  owner: string;
-  roles: string[];
-  stageCode?: PreAiStageCode;
-};
-
-type DocumentPreviewRow = { key: string; label: string; value: string; empty: boolean; wide: boolean };
-type DocumentPreviewSection = { key: string; title: string; note?: string; rows: DocumentPreviewRow[] };
 
 const filteredPatientCases = computed(() => {
   const value = keyword.value.trim().toLowerCase();
@@ -937,6 +799,14 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     roles: ["admin", "doctor"]
   }
 ]);
+const workflowProgress = computed(() => {
+  const statuses = workflowCards.value.map(card => workflowCardStatus(card));
+  return {
+    total: statuses.length,
+    completed: statuses.filter(status => ["COMPLETED", "SKIPPED"].includes(status)).length,
+    returned: statuses.filter(status => status === "RETURNED").length
+  };
+});
 const activeWorkflowCard = computed(
   () =>
     workflowCards.value.find(card =>
@@ -979,6 +849,12 @@ const upstreamStages = computed(() => {
 });
 const selectedStageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === selectedStageCode.value && !item.taskId) || []
+);
+const imageFilePattern = /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i;
+const isImageAttachment = (attachment: PreAiAttachment) =>
+  attachment.mimeType?.startsWith("image/") || imageFilePattern.test(attachment.fileName || "");
+const inspectionImageAttachments = computed(
+  () => workspace.value?.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item)) || []
 );
 const selectedAttachmentGroups = computed(() => {
   const groups = new Map<string, { id: string; name: string; items: typeof selectedStageAttachments.value }>();
@@ -1029,18 +905,24 @@ const documentPreviewSections = computed<DocumentPreviewSection[]>(() => {
     previewStageSection("RECEPTION", "主诉和现病情况"),
     previewStageSection("INSPECTION", "专科检查事实", "原始图片不进入导出文档，仅呈现确认后的文字所见。")
   ];
-  const auxiliaryRows: DocumentPreviewRow[] = workspace.value.labReports.map(report => {
-    const values = report.metrics.map(
-      metric => `${metric.name}${metric.shortName ? `（${metric.shortName}）` : ""}：${metric.value}${metric.unit || ""}`
-    );
-    return {
-      key: report.id,
-      label: `${report.templateName}｜${report.reportDate}`,
-      value: values.length ? values.join("；") : "________________",
-      empty: !values.length,
-      wide: true
-    };
-  });
+  const auxiliaryRows: DocumentPreviewRow[] = workspace.value.labReports
+    .map(report => {
+      const values = report.metrics.map(metric => {
+        const abnormal = labMetricAbnormalLabel(metric);
+        return `${metric.name}${metric.shortName ? `（${metric.shortName}）` : ""}：${metric.value}${metric.unit || ""}${
+          abnormal ? `【${abnormal}】` : ""
+        }`;
+      });
+      return {
+        key: report.id,
+        label: `${report.templateName}｜${report.reportDate}`,
+        value: values.join("；"),
+        empty: !values.length,
+        wide: true,
+        abnormal: report.metrics.some(isLabMetricAbnormal)
+      };
+    })
+    .filter(row => !row.empty);
   sections.push({
     key: "AUX",
     title: "化验室检验报告",
@@ -1111,6 +993,32 @@ const nonEmptyEntries = (value: Record<string, any> = {}) =>
   Object.entries(value).filter(
     ([, item]) => item !== undefined && item !== null && item !== "" && (!Array.isArray(item) || item.length)
   );
+const parseReferenceRange = (reference = "") => {
+  const normalized = reference.replace(/[～—–至]/g, "-").replace(/\s+/g, "");
+  const range = normalized.match(/^(-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)$/);
+  if (range) return { min: Number(range[1]), max: Number(range[2]) };
+  const upper = normalized.match(/^(?:≤|<=|<)(-?\d+(?:\.\d+)?)$/);
+  if (upper) return { max: Number(upper[1]), exclusiveMax: normalized.startsWith("<") && !normalized.startsWith("<=") };
+  const lower = normalized.match(/^(?:≥|>=|>)(-?\d+(?:\.\d+)?)$/);
+  if (lower) return { min: Number(lower[1]), exclusiveMin: normalized.startsWith(">") && !normalized.startsWith(">=") };
+  return undefined;
+};
+const labMetricAbnormalLabel = (metric: { value: string; reference?: string }) => {
+  const value = String(metric.value || "").trim();
+  const reference = String(metric.reference || "").trim();
+  if (!value || !reference || value === "未查") return "";
+  const numericValue = Number(value.replace(/,/g, ""));
+  const range = parseReferenceRange(reference);
+  if (range && Number.isFinite(numericValue)) {
+    if (range.min !== undefined && (range.exclusiveMin ? numericValue <= range.min : numericValue < range.min)) return "偏低";
+    if (range.max !== undefined && (range.exclusiveMax ? numericValue >= range.max : numericValue > range.max)) return "偏高";
+    return "";
+  }
+  const normalQualitative = ["阴性", "-", "正常"];
+  if (normalQualitative.includes(reference) || reference === "阴性") return normalQualitative.includes(value) ? "" : "异常";
+  return "";
+};
+const isLabMetricAbnormal = (metric: { value: string; reference?: string }) => Boolean(labMetricAbnormalLabel(metric));
 const humanValue = (value: any) =>
   Array.isArray(value) ? value.join("、") : typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
 const fieldOptions = (field: PreAiFieldConfig) => field.optionsFor?.(stageForms[selectedStageCode.value]) || field.options || [];
@@ -1176,17 +1084,17 @@ const previewStageSection = (
   const rows = stageByCode(code)
     .fields.filter(field => !excludedKeys.includes(field.key))
     .filter(field => !field.visible || field.visible(form))
-    .map(field => {
+    .filter(field => {
       const value = form[field.key];
-      const empty = value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length);
-      return {
-        key: `${code}-${field.key}`,
-        label: field.label,
-        value: empty ? "________________" : formatPreviewValue(field.key, value),
-        empty,
-        wide: field.span === 2 || field.kind === "textarea" || field.kind === "multi"
-      };
-    });
+      return value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
+    })
+    .map(field => ({
+      key: `${code}-${field.key}`,
+      label: field.label,
+      value: formatPreviewValue(field.key, form[field.key]),
+      empty: false,
+      wide: field.span === 2 || field.kind === "textarea" || field.kind === "multi"
+    }));
   return { key: code, title, note, rows };
 };
 
@@ -1204,8 +1112,28 @@ const loadEncounterList = async () => {
   }
 };
 
+const clearWorkspaceImageUrls = () => {
+  Object.values(workspaceImageUrls).forEach(url => URL.revokeObjectURL(url));
+  Object.keys(workspaceImageUrls).forEach(key => delete workspaceImageUrls[key]);
+};
+
+const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
+  clearWorkspaceImageUrls();
+  const images = value.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item));
+  await Promise.all(
+    images.map(async attachment => {
+      try {
+        workspaceImageUrls[attachment.id] = await getPreAiAttachmentObjectUrlApi(attachment);
+      } catch {
+        // 单张检查图片失败时保留下载入口，不阻断工作区加载。
+      }
+    })
+  );
+};
+
 const hydrateWorkspace = (value: PreAiWorkspace) => {
   workspace.value = value;
+  void loadWorkspaceInspectionImages(value);
   value.stages.forEach(stage => {
     const normalized = deepCopy(stage.data);
     stageByCode(stage.stageCode).fields.forEach(field => {
@@ -1251,21 +1179,8 @@ const selectPatientCase = async (patientCase: PreAiPatientCase) => {
   await selectEncounter(patientCase.latestEncounter.id);
 };
 
-const openPatientDrawer = () => {
-  if (patientDrawerCloseTimer) clearTimeout(patientDrawerCloseTimer);
-  patientDrawerOpen.value = true;
-};
-
-const schedulePatientDrawerClose = () => {
-  if (patientDrawerCloseTimer) clearTimeout(patientDrawerCloseTimer);
-  patientDrawerCloseTimer = setTimeout(() => {
-    patientDrawerOpen.value = false;
-  }, 360);
-};
-
 const togglePatientDrawer = () => {
-  if (window.matchMedia("(max-width: 680px)").matches) patientDrawerOpen.value = !patientDrawerOpen.value;
-  else openPatientDrawer();
+  patientDrawerOpen.value = !patientDrawerOpen.value;
 };
 
 const selectStage = async (code: PreAiStageCode) => {
@@ -1306,6 +1221,15 @@ const showInspectionTimeline = async () => {
   } finally {
     timelineLoading.value = false;
   }
+};
+
+const openWorkspaceAttachment = async (attachment: PreAiAttachment) => {
+  const url = workspaceImageUrls[attachment.id];
+  if (url) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  await downloadPreAiAttachmentApi(attachment);
 };
 
 const openTimelineAttachment = async (attachment: PreAiAttachment) => {
@@ -1610,7 +1534,7 @@ const runAction = async (action: () => Promise<void>) => {
 onMounted(loadEncounterList);
 onBeforeUnmount(() => {
   clearTimelineImageUrls();
-  if (patientDrawerCloseTimer) clearTimeout(patientDrawerCloseTimer);
+  clearWorkspaceImageUrls();
 });
 </script>
 
@@ -1625,7 +1549,6 @@ onBeforeUnmount(() => {
 .patient-banner,
 .stage-panel,
 .encounter-sidebar,
-.workflow-sidebar,
 .workflow-empty-panel,
 .template-preview-panel {
   border: 1px solid var(--el-border-color-light);
@@ -1642,19 +1565,46 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color)), var(--el-bg-color));
 }
 .page-hero h2 {
-  margin: 8px 0 4px;
+  margin: 8px 0 0;
   font-size: 24px;
-}
-.page-hero p,
-.panel-heading p {
-  margin: 0;
-  color: var(--el-text-color-secondary);
 }
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+.hero-actions :deep(.el-button),
+.panel-actions :deep(.el-button),
+.heading-tags :deep(.el-tag) {
+  margin-left: 0;
+}
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.panel-heading h3 {
+  margin: 0;
+}
+.heading-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.panel-actions > div {
+  flex: 1 1 auto;
 }
 .workspace-shell {
   position: relative;
@@ -1678,8 +1628,6 @@ onBeforeUnmount(() => {
     width 0.24s ease,
     box-shadow 0.24s ease;
 }
-.encounter-sidebar:hover,
-.encounter-sidebar:focus-within,
 .encounter-sidebar.expanded {
   width: 310px;
   box-shadow: 12px 12px 34px rgb(31 78 120 / 18%);
@@ -1691,10 +1639,6 @@ onBeforeUnmount(() => {
   pointer-events: none;
   transition: opacity 0.16s ease;
 }
-.encounter-sidebar:hover .sidebar-title,
-.encounter-sidebar:hover :deep(.el-scrollbar),
-.encounter-sidebar:focus-within .sidebar-title,
-.encounter-sidebar:focus-within :deep(.el-scrollbar),
 .encounter-sidebar.expanded .sidebar-title,
 .encounter-sidebar.expanded :deep(.el-scrollbar) {
   opacity: 1;
@@ -1726,13 +1670,19 @@ onBeforeUnmount(() => {
 .patient-drawer-mask {
   display: none;
 }
-.workflow-sidebar {
-  padding: 14px;
-}
 .sidebar-title {
   display: grid;
   gap: 10px;
   margin-bottom: 12px;
+}
+.sidebar-title__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sidebar-title__head :deep(.el-button) {
+  margin-left: 0;
 }
 .sidebar-title strong {
   font-size: 17px;
@@ -1790,149 +1740,6 @@ onBeforeUnmount(() => {
 .mini-steps i.skipped {
   background: var(--el-color-info-light-5);
 }
-.workflow-patient-card {
-  display: grid;
-  gap: 5px;
-  padding: 13px;
-  margin-bottom: 14px;
-  color: white;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #2f6da5, #4f93c8);
-  box-shadow: 0 9px 20px rgb(47 109 165 / 20%);
-}
-.workflow-patient-card > span,
-.workflow-patient-card > small {
-  color: rgb(255 255 255 / 78%);
-}
-.workflow-patient-card > strong {
-  font-size: 18px;
-}
-.workflow-patient-card > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-.workflow-patient-card em {
-  font-style: normal;
-  font-size: 12px;
-}
-.workflow-title {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 2px 10px;
-}
-.workflow-title span {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-.workflow-flow {
-  display: grid;
-  gap: 15px;
-  padding: 2px 3px 10px;
-}
-.workflow-card-wrap {
-  position: relative;
-}
-.workflow-card-wrap:not(:last-child)::after {
-  position: absolute;
-  left: 19px;
-  top: calc(100% + 2px);
-  width: 2px;
-  height: 12px;
-  content: "";
-  background: linear-gradient(var(--el-border-color), var(--el-color-primary-light-7));
-}
-.workflow-card-wrap:not(:last-child)::before {
-  position: absolute;
-  z-index: 2;
-  left: 15px;
-  top: calc(100% + 8px);
-  width: 8px;
-  height: 8px;
-  content: "";
-  border-right: 2px solid var(--el-color-primary-light-5);
-  border-bottom: 2px solid var(--el-color-primary-light-5);
-  transform: rotate(45deg);
-}
-.workflow-card {
-  position: relative;
-  width: 100%;
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  padding: 11px 9px;
-  text-align: left;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
-  background: var(--el-bg-color);
-  cursor: pointer;
-  transition: 0.2s ease;
-}
-.workflow-card:hover,
-.workflow-card.active {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 8px 20px rgb(64 158 255 / 14%);
-  transform: translateX(4px);
-}
-.workflow-card.active {
-  background: linear-gradient(135deg, var(--el-color-primary-light-9), var(--el-bg-color));
-}
-.workflow-card.current::after {
-  position: absolute;
-  inset: 7px auto 7px 0;
-  width: 3px;
-  content: "";
-  border-radius: 0 4px 4px 0;
-  background: var(--el-color-warning);
-  animation: current-stage-pulse 1.8s ease-in-out infinite;
-}
-@keyframes current-stage-pulse {
-  50% {
-    opacity: 0.42;
-    box-shadow: 0 0 0 5px rgb(230 162 60 / 10%);
-  }
-}
-.workflow-card.mine .workflow-order {
-  color: white;
-  background: var(--el-color-primary);
-}
-.workflow-card.skipped {
-  opacity: 0.58;
-}
-.workflow-order {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  color: var(--el-color-primary);
-  font-weight: 700;
-  border-radius: 50%;
-  background: var(--el-color-primary-light-9);
-}
-.workflow-card-main {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-.workflow-card-main strong,
-.workflow-card-main small,
-.workflow-card-main em {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workflow-card-main small {
-  color: var(--el-text-color-secondary);
-}
-.workflow-card-main em {
-  color: var(--el-color-primary);
-  font-style: normal;
-  font-size: 11px;
-}
 .encounter-workspace {
   min-width: 0;
 }
@@ -1955,23 +1762,81 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
+  gap: 20px;
+  padding: 16px 18px;
   margin-bottom: 10px;
+  overflow: hidden;
+  border-color: var(--el-border-color-light);
+  background: var(--el-bg-color);
+}
+.patient-banner__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.patient-avatar {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: var(--el-color-primary);
+  font-size: 20px;
+  font-weight: 800;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 14px;
+  background: var(--el-color-primary-light-9);
+}
+.patient-banner__identity small,
+.context-stat small {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 .patient-banner h3 {
-  margin: 0 0 5px;
-  font-size: 21px;
+  margin: 2px 0 4px;
+  font-size: 22px;
+  line-height: 1.2;
 }
 .patient-banner p {
   margin: 0;
   color: var(--el-text-color-secondary);
+}
+.patient-banner__overview {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.context-stat {
+  min-width: 76px;
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+}
+.context-stat strong {
+  color: var(--el-color-primary);
+  font-size: 18px;
+}
+.context-stat.warning strong {
+  color: var(--el-color-warning);
 }
 .patient-banner__meta {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+.patient-banner__meta > span {
+  padding: 5px 9px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
 }
 .workspace-modebar {
   position: sticky;
@@ -2015,6 +1880,34 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   cursor: pointer;
   user-select: none;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+.mode-pill:hover {
+  transform: translateY(-1px);
+}
+.mode-pill.active {
+  transform: translateY(-1px);
+}
+.editor-mode-content {
+  min-width: 0;
+}
+.workspace-mode-enter-active,
+.workspace-mode-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.workspace-mode-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.workspace-mode-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 .mode-pill.edit {
   color: var(--el-color-primary);
@@ -2170,224 +2063,107 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   border-top: 1px dashed var(--el-border-color);
 }
-.template-preview-panel {
-  padding: 18px;
-  background: var(--el-fill-color-light);
-}
-.document-preview-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.document-preview-toolbar > div {
-  display: grid;
-  gap: 3px;
-}
-.document-preview-toolbar span {
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-.document-sheet {
-  width: min(100%, 860px);
-  min-height: 1120px;
-  margin: 0 auto;
-  padding: 52px 58px;
-  color: #252525;
-  border: 1px solid #d9d9d9;
-  background: white;
-  box-shadow: 0 16px 45px rgb(0 0 0 / 10%);
-  font-family: "SimSun", "宋体", serif;
-}
-.document-header {
-  padding-bottom: 20px;
-  text-align: center;
-  border-bottom: 2px solid #2f2f2f;
-}
-.document-header h2 {
-  margin: 0 0 9px;
-  font-family: "SimHei", "黑体", sans-serif;
-  font-size: 25px;
-  letter-spacing: 4px;
-}
-.document-header p {
-  margin: 0 0 17px;
-  color: #666;
-  font-size: 13px;
-}
-.document-meta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  text-align: left;
-  font-size: 13px;
-}
-.document-section {
-  padding-top: 21px;
-}
-.document-section h3 {
-  margin: 0 0 12px;
-  padding: 7px 10px;
-  font-family: "SimHei", "黑体", sans-serif;
-  font-size: 16px;
-  border-left: 4px solid #335d82;
-  background: #edf3f7;
-}
-.document-section-note {
-  margin: -3px 0 12px;
-  color: #777;
-  font-size: 12px;
-}
-.document-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 11px 20px;
-  line-height: 1.8;
-  font-size: 14px;
-}
-.document-fields > div {
-  min-width: 0;
-  padding-bottom: 5px;
-  border-bottom: 1px dotted #aaa;
-}
-.document-fields > div.wide {
-  grid-column: span 2;
-}
-.document-fields strong {
-  font-family: "SimHei", "黑体", sans-serif;
-  font-weight: 500;
-}
-.document-fields span {
-  white-space: pre-wrap;
-}
-.document-fields span.empty,
-.document-empty {
-  color: #aaa;
-}
-.document-empty {
-  margin: 0;
-  font-size: 13px;
-}
-.document-footer {
-  padding-top: 36px;
-  margin-top: 28px;
-  color: #777;
-  text-align: center;
-  border-top: 1px solid #bbb;
-  font-size: 12px;
-  letter-spacing: 1px;
-}
-.stage-panel {
-  padding: 20px;
-}
-.panel-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-.panel-heading h3 {
-  margin: 0 0 6px;
-  font-size: 20px;
-}
-.heading-tags {
-  display: flex;
-  gap: 7px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
-}
-.form-grid .span-2 {
-  grid-column: span 2;
-}
-.stage-form {
-  margin-top: 18px;
-}
-.stage-form :deep(.el-select),
-.stage-form :deep(.el-date-editor),
-.dialog-grid :deep(.el-select),
-.dialog-grid :deep(.el-date-editor),
-.aux-card :deep(.el-date-editor) {
-  width: 100%;
-}
 .section-caption {
-  margin: 18px 0 10px;
-  padding-left: 9px;
-  border-left: 3px solid var(--el-color-primary);
-  font-weight: 650;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 700;
 }
-.upstream-section {
-  margin-bottom: 16px;
-}
-.read-only-grid {
+.upstream-image-section,
+.attachment-section {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 18px;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 14px;
+  background: var(--el-fill-color-lighter);
 }
-.read-only-grid div {
-  padding: 10px 12px;
-  border-radius: 9px;
-  background: var(--el-fill-color-light);
+.upstream-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
 }
-.read-only-grid span {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-.read-only-grid p {
-  margin: 0;
-  white-space: pre-wrap;
-  line-height: 1.7;
-}
-.panel-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+.upstream-image-card {
+  min-width: 0;
+  display: grid;
   gap: 8px;
-  padding-top: 18px;
-  margin-top: 16px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  padding: 8px;
+  overflow: hidden;
+  color: var(--el-text-color-primary);
+  text-align: left;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 11px;
+  background: var(--el-bg-color);
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
-.panel-actions > div {
-  flex: 1;
+.upstream-image-card:hover {
+  border-color: var(--el-color-primary-light-5);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgb(64 158 255 / 12%);
+}
+.upstream-image-card img,
+.upstream-image-card > span {
+  width: 100%;
+  height: 120px;
+  display: grid;
+  place-items: center;
+  object-fit: cover;
+  color: var(--el-text-color-secondary);
+  border-radius: 8px;
+  background: var(--el-fill-color);
+}
+.upstream-image-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attachment-list {
   display: grid;
-  gap: 8px;
-}
-.attachment-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-radius: 9px;
-  background: var(--el-fill-color-light);
-}
-.attachment-row span {
-  flex: 1;
+  gap: 12px;
 }
 .attachment-batch {
   overflow: hidden;
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
+  border-radius: 11px;
+  background: var(--el-bg-color);
 }
 .attachment-batch > header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 10px 12px;
-  background: var(--el-fill-color-lighter);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+}
+.attachment-batch > header small,
+.attachment-name small,
+.upload-summary {
+  color: var(--el-text-color-secondary);
+}
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.attachment-row:last-child {
+  border-bottom: 0;
+}
+.attachment-row :deep(.el-button) {
+  flex: 0 0 auto;
+  margin-left: 0;
 }
 .attachment-name {
-  display: grid;
-  flex: 1;
   min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 3px;
 }
 .attachment-name span,
 .attachment-name small {
@@ -2398,130 +2174,58 @@ onBeforeUnmount(() => {
 .upload-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-.upload-summary {
-  color: var(--el-text-color-secondary);
-}
-.attachment-row small {
-  color: var(--el-text-color-secondary);
+  gap: 10px;
 }
 .upload-button {
+  min-height: 38px;
   display: inline-flex;
-  width: fit-content;
   align-items: center;
-  gap: 6px;
-  padding: 8px 13px;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
   color: var(--el-color-primary);
-  border: 1px dashed var(--el-color-primary);
-  border-radius: 8px;
+  font-size: 14px;
+  border: 1px dashed var(--el-color-primary-light-5);
+  border-radius: 9px;
+  background: var(--el-color-primary-light-9);
   cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+.upload-button:hover {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-8);
 }
 .upload-button input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
-.aux-card {
-  margin-top: 14px;
-  padding: 16px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
-}
-.aux-card header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-.aux-card header > div {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.compact {
-  margin-top: 12px;
-}
-.compact-actions {
-  margin-top: 10px;
-}
-.lab-report-tabs {
-  margin-top: 14px;
-}
-.lab-report-paper {
-  padding: 22px;
-  color: #1f2937;
-  border: 1px solid #d6dce5;
-  background: #fff;
-  box-shadow: 0 10px 24px rgb(15 23 42 / 8%);
-}
-.lab-report-paper header {
+.upload-summary {
   display: block;
-  margin-bottom: 14px;
-  text-align: center;
 }
-.lab-report-paper h3,
-.lab-report-paper p {
-  margin: 0 0 6px;
-}
-.lab-patient-line {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  padding: 10px 0;
-  font-size: 13px;
-}
-.lab-report-paper table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.lab-report-paper th,
-.lab-report-paper td {
-  padding: 8px;
-  text-align: center;
-  border: 1px solid #4b5563;
-}
-.lab-report-paper footer {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 14px;
-}
-.legacy-auxiliary {
-  margin-top: 18px;
-}
-.masked-preview {
-  display: grid;
-  gap: 14px;
-  margin-top: 15px;
-}
-.masked-preview section {
-  padding: 14px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
-}
-.masked-preview h4 {
-  margin: 0 0 10px;
-  color: var(--el-color-primary);
-}
-.export-list {
-  margin-top: 20px;
-}
-.export-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 15px;
-  padding: 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.export-row div {
-  display: grid;
-  gap: 4px;
-}
-.export-row small {
-  color: var(--el-text-color-secondary);
+.template-preview-panel {
+  padding: 18px;
+  background: var(--el-fill-color-light);
 }
 .legacy-select {
   width: 100%;
   margin-top: 18px;
+}
+.sticky-actions {
+  position: sticky;
+  z-index: 9;
+  bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
+  box-shadow: 0 -8px 26px rgb(31 78 120 / 10%);
+  backdrop-filter: blur(10px);
 }
 @media (max-width: 1100px) {
   .workspace-shell {
@@ -2538,6 +2242,16 @@ onBeforeUnmount(() => {
     flex-direction: column;
     align-items: stretch;
   }
+  .hero-actions,
+  .heading-tags,
+  .panel-actions {
+    justify-content: stretch;
+  }
+  .hero-actions :deep(.el-button),
+  .panel-actions :deep(.el-button) {
+    flex: 1 1 140px;
+    margin-left: 0;
+  }
   .form-grid,
   .read-only-grid {
     grid-template-columns: 1fr;
@@ -2552,7 +2266,6 @@ onBeforeUnmount(() => {
   .encounter-workspace {
     grid-column: auto;
   }
-  .workflow-sidebar,
   .encounter-sidebar {
     max-height: none;
   }
@@ -2577,8 +2290,7 @@ onBeforeUnmount(() => {
     border: 0;
     background: rgb(0 0 0 / 30%);
   }
-  .workspace-modebar,
-  .document-preview-toolbar {
+  .workspace-modebar {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -2587,6 +2299,27 @@ onBeforeUnmount(() => {
   }
   .workspace-modebar > .el-tag:last-child {
     justify-self: start;
+  }
+  .patient-banner__overview {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .context-stat {
+    flex: 1;
+  }
+  .sticky-actions {
+    bottom: 6px;
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .sticky-actions > div {
+    display: none;
+  }
+  .sticky-actions :deep(.el-button) {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 120px;
+    margin-left: 0;
   }
   .document-sheet {
     min-height: auto;

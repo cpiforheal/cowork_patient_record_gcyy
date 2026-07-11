@@ -1526,8 +1526,12 @@ public class PreAiEncounterService {
         row.put("generatedBy", safe(rs.getString("generated_by")));
         row.put("generatedByRole", safe(rs.getString("generated_by_role")));
         row.put("generatedAt", rs.getString("generated_at"));
-        row.put("downloadUrl", "/clinic-api/pre-ai/encounters/" + text(row, "encounterId") + "/exports/" + text(row, "id") + "/download");
+        row.put("downloadUrl", exportDownloadUrl(text(row, "encounterId"), text(row, "id")));
         return row;
+    }
+
+    static String exportDownloadUrl(String encounterId, String exportId) {
+        return "/pre-ai/encounters/" + encounterId + "/exports/" + exportId + "/download";
     }
 
     private ObjectNode stageStatusMap(String encounterId) {

@@ -18,9 +18,9 @@ export const useTabsStore = defineStore({
       if (this.tabsMenuList.every(item => item.path !== tabItem.path)) {
         this.tabsMenuList.push(tabItem);
       }
-      // add keepalive
-      if (!keepAliveStore.keepAliveName.includes(tabItem.name) && tabItem.isKeepAlive) {
-        keepAliveStore.addKeepAliveName(tabItem.path);
+      // KeepAlive 的 include 只接受组件名称，不能混用 path/fullPath。
+      if (tabItem.name && !keepAliveStore.keepAliveName.includes(tabItem.name) && tabItem.isKeepAlive) {
+        keepAliveStore.addKeepAliveName(tabItem.name);
       }
     },
     // Remove Tabs
@@ -35,7 +35,7 @@ export const useTabsStore = defineStore({
       }
       // remove keepalive
       const tabItem = this.tabsMenuList.find(item => item.path === tabPath);
-      tabItem?.isKeepAlive && keepAliveStore.removeKeepAliveName(tabItem.path);
+      tabItem?.isKeepAlive && tabItem.name && keepAliveStore.removeKeepAliveName(tabItem.name);
       // set tabs
       this.tabsMenuList = this.tabsMenuList.filter(item => item.path !== tabPath);
     },
@@ -49,8 +49,8 @@ export const useTabsStore = defineStore({
         });
       }
       // set keepalive
-      const KeepAliveList = this.tabsMenuList.filter(item => item.isKeepAlive);
-      keepAliveStore.setKeepAliveName(KeepAliveList.map(item => item.path));
+      const keepAliveList = this.tabsMenuList.filter(item => item.isKeepAlive && item.name);
+      keepAliveStore.setKeepAliveName([...new Set(keepAliveList.map(item => item.name))]);
     },
     // Close MultipleTab
     async closeMultipleTab(tabsMenuValue?: string) {
@@ -58,8 +58,8 @@ export const useTabsStore = defineStore({
         return item.path === tabsMenuValue || !item.close;
       });
       // set keepalive
-      const KeepAliveList = this.tabsMenuList.filter(item => item.isKeepAlive);
-      keepAliveStore.setKeepAliveName(KeepAliveList.map(item => item.path));
+      const keepAliveList = this.tabsMenuList.filter(item => item.isKeepAlive && item.name);
+      keepAliveStore.setKeepAliveName([...new Set(keepAliveList.map(item => item.name))]);
     },
     // Set Tabs
     async setTabs(tabsMenuList: TabsMenuProps[]) {

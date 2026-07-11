@@ -121,11 +121,14 @@ public class PreAiPrivacyService {
                 putIfPresent(row, "remark", maskClinicalText(text(report, "remark"), patient, caseToken));
                 ArrayNode metrics = row.putArray("metrics");
                 for (JsonNode metric : report.path("metrics")) {
+                    if (text(metric, "value").isBlank()) continue;
                     ObjectNode clean = metrics.addObject();
                     for (String key : List.of("name", "shortName", "value", "unit", "reference")) {
                         String value = text(metric, key);
                         if (!value.isBlank()) clean.put(key, maskClinicalText(value, patient, caseToken));
                     }
+                    String abnormal = labAbnormalLabel(clean);
+                    if (!abnormal.isBlank()) clean.put("abnormal", abnormal);
                 }
                 if (metrics.isEmpty()) labReports.remove(labReports.size() - 1);
             }
@@ -245,8 +248,8 @@ public class PreAiPrivacyService {
 
     private String buildDocumentXml(ObjectNode masked) {
         StringBuilder body = new StringBuilder();
-        body.append(paragraph("脱敏前置病历资料", "Title"));
-        body.append(paragraph("本文件仅包含经岗位维护并由医生复核的诊疗事实，不是正式住院病历。", "Subtitle"));
+        body.append(paragraph("中医肛肠医院住院病历自动生成资料", "Title"));
+        body.append(paragraph("依据前置流程已填写、已选择的事实生成；未选择候选项不输出。", "Subtitle"));
 
         JsonNode metadata = masked.path("metadata");
         addSection(body, "脱敏病例标识及就诊信息", List.of(
@@ -284,8 +287,10 @@ public class PreAiPrivacyService {
                     String unit = text(metric, "unit");
                     String reference = text(metric, "reference");
                     String label = name + (shortName.isBlank() ? "" : "（" + shortName + "）");
-                    String line = label + "：" + value + unit + (reference.isBlank() ? "" : "；参考范围：" + reference);
-                    body.append(paragraph(line, "Normal"));
+                    String abnormal = text(metric, "abnormal");
+                    String line = label + "：" + value + unit + (abnormal.isBlank() ? "" : "【异常·" + abnormal + "】")
+                        + (reference.isBlank() ? "" : "；参考范围：" + reference);
+                    body.append(paragraph(line, abnormal.isBlank() ? "Normal" : "Abnormal"));
                 }
                 if (!text(report, "remark").isBlank()) body.append(paragraph("备注：" + text(report, "remark"), "Normal"));
             }
@@ -324,6 +329,40 @@ public class PreAiPrivacyService {
     private String paragraph(String value, String style) {
         String text = safe(value).replace("\n", "；");
         return "<w:p><w:pPr><w:pStyle w:val=\"" + style + "\"/></w:pPr><w:r><w:t xml:space=\"preserve\">" + xml(text) + "</w:t></w:r></w:p>";
+    }
+
+    String labAbnormalLabel(JsonNode metric) {
+        String value = text(metric, "value");
+        String reference = text(metric, "reference");
+        if (value.isBlank() || reference.isBlank() || "未查".equals(value)) return "";
+        String normalized = reference.replaceAll("\\s+", "").replace('～', '-').replace('—', '-').replace('–', '-');
+        try {
+            double numeric = Double.parseDouble(value.replace(",", ""));
+            Matcher range = Pattern.compile("^(-?\\d+(?:\\.\\d+)?)-(-?\\d+(?:\\.\\d+)?)$").matcher(normalized);
+            if (range.matches()) {
+                double min = Double.parseDouble(range.group(1));
+                double max = Double.parseDouble(range.group(2));
+                return numeric < min ? "偏低" : numeric > max ? "偏高" : "";
+            }
+            Matcher upper = Pattern.compile("^(≤|<=|<)(-?\\d+(?:\\.\\d+)?)$").matcher(normalized);
+            if (upper.matches()) {
+                double max = Double.parseDouble(upper.group(2));
+                boolean abnormal = "<".equals(upper.group(1)) ? numeric >= max : numeric > max;
+                return abnormal ? "偏高" : "";
+            }
+            Matcher lower = Pattern.compile("^(≥|>=|>)(-?\\d+(?:\\.\\d+)?)$").matcher(normalized);
+            if (lower.matches()) {
+                double min = Double.parseDouble(lower.group(2));
+                boolean abnormal = ">".equals(lower.group(1)) ? numeric <= min : numeric < min;
+                return abnormal ? "偏低" : "";
+            }
+        } catch (NumberFormatException ignored) {
+            // 定性指标在下方判断。
+        }
+        if (Set.of("阴性", "-", "正常").contains(reference)) {
+            return Set.of("阴性", "-", "正常").contains(value) ? "" : "异常";
+        }
+        return "";
     }
 
     private String displayValue(JsonNode value) {
@@ -405,6 +444,7 @@ public class PreAiPrivacyService {
             + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"300\"/></w:pPr><w:rPr><w:color w:val=\"666666\"/><w:sz w:val=\"19\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"260\" w:after=\"140\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"28\"/><w:color w:val=\"1F4E78\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"180\" w:after=\"100\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"24\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Abnormal\"><w:name w:val=\"Abnormal\"/><w:basedOn w:val=\"Normal\"/><w:rPr><w:b/><w:color w:val=\"C00000\"/></w:rPr><w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"FDE9E7\"/></w:pPr></w:style>"
             + "</w:styles>";
     }
 
