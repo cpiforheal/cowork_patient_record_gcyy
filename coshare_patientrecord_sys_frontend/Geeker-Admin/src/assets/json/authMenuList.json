@@ -297,6 +297,50 @@
       ]
     },
     {
+      "path": "/tcm-pharmacy",
+      "name": "tcmPharmacy",
+      "redirect": "/tcm-pharmacy/workbench",
+      "meta": {
+        "icon": "FirstAidKit",
+        "title": "中药房",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/tcm-pharmacy/workbench",
+          "name": "tcmPharmacyWorkbench",
+          "component": "/tcmPharmacy/workbench/index",
+          "meta": {
+            "icon": "List",
+            "title": "业务工作台",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/tcm-pharmacy/display",
+          "name": "tcmPharmacyDisplayMenu",
+          "component": "/tcmPharmacy/display/index",
+          "meta": {
+            "icon": "Monitor",
+            "title": "取药展示大屏",
+            "isLink": "",
+            "isHide": false,
+            "isFull": true,
+            "isAffix": false,
+            "isKeepAlive": false
+          }
+        }
+      ]
+    },
+    {
       "path": "/system",
       "name": "system",
       "redirect": "/system/accountManage",

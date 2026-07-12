@@ -32,7 +32,14 @@ public class PreAiPrivacyService {
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
         "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "factualConclusion"),
-        "RECEPTION", List.of("chiefComplaint", "presentIllness", "symptomDuration", "symptomChanges", "previousTreatment", "pastHistory", "medicationHistory", "allergyHistory", "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"),
+        "RECEPTION", List.of(
+            "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
+            "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
+            "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness",
+            "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory",
+            "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
+            "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"
+        ),
         "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
         "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedOperationName", "plannedOperationSite", "plannedOperationPlan"),
         "SURGERY", List.of("actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings", "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff")
@@ -129,6 +136,8 @@ public class PreAiPrivacyService {
                     }
                     String abnormal = labAbnormalLabel(clean);
                     if (!abnormal.isBlank()) clean.put("abnormal", abnormal);
+                    boolean critical = metric.path("critical").asBoolean(false) || "CRITICAL".equalsIgnoreCase(text(metric, "severity"));
+                    clean.put("severity", critical ? "CRITICAL" : abnormal.isBlank() ? "NORMAL" : "ABNORMAL");
                 }
                 if (metrics.isEmpty()) labReports.remove(labReports.size() - 1);
             }
@@ -288,8 +297,10 @@ public class PreAiPrivacyService {
                     String reference = text(metric, "reference");
                     String label = name + (shortName.isBlank() ? "" : "（" + shortName + "）");
                     String abnormal = text(metric, "abnormal");
-                    String line = label + "：" + value + unit + (abnormal.isBlank() ? "" : "【异常·" + abnormal + "】")
-                        + (reference.isBlank() ? "" : "；参考范围：" + reference);
+                    String severity = text(metric, "severity");
+                    String marker = "CRITICAL".equals(severity) ? "【危急值·" + (abnormal.isBlank() ? "异常" : abnormal) + "】"
+                        : abnormal.isBlank() ? "" : "【异常·" + abnormal + "】";
+                    String line = label + "：" + value + unit + marker + (reference.isBlank() ? "" : "；参考范围：" + reference);
                     body.append(paragraph(line, abnormal.isBlank() ? "Normal" : "Abnormal"));
                 }
                 if (!text(report, "remark").isBlank()) body.append(paragraph("备注：" + text(report, "remark"), "Normal"));
@@ -510,8 +521,12 @@ public class PreAiPrivacyService {
             {"contactName", "联系人"}, {"contactRelation", "联系人关系"}, {"contactPhone", "联系人电话"}, {"patientSource", "患者来源"}, {"registrationNote", "登记备注"},
             {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"}, {"visualFindings", "外观所见"},
             {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"factualConclusion", "检查事实结论"},
-            {"chiefComplaint", "主诉"}, {"presentIllness", "现病经过"}, {"symptomDuration", "症状持续时间"}, {"symptomChanges", "症状变化"}, {"previousTreatment", "既往相关治疗"},
-            {"pastHistory", "重要既往史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
+            {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
+            {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
+            {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
+            {"presentIllness", "现病史最终文本"}, {"pastHistory", "慢性病及重要既往史"}, {"surgicalHistory", "手术史"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
+            {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
+            {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
             {"dispositionSuggestion", "建议就诊分支"}, {"recommendedAuxiliaryExams", "建议辅助检查"},
             {"tcmDisease", "中医病名"}, {"primarySyndrome", "主证"}, {"concurrentSyndrome", "兼证"}, {"inspection", "望诊"}, {"auscultationOlfaction", "闻诊"}, {"inquiry", "问诊"}, {"palpation", "切诊"},
             {"tongue", "舌象"}, {"pulse", "脉象"}, {"syndromeBasis", "辨证依据"}, {"treatmentPrinciple", "治法治则"},

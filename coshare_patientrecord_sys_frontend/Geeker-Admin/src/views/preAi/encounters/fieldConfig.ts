@@ -211,57 +211,240 @@ export const preAiStages: PreAiStageConfig[] = [
     code: "RECEPTION",
     title: "接诊室",
     shortTitle: "接诊",
-    owner: "接诊室",
-    roles: ["admin", "reception"],
-    description: "回看检查资料，补充病史事实并给出下一步建议。",
+    owner: "接诊室 / 医生复核",
+    roles: ["admin", "reception", "doctor"],
+    description: "按模板采集现病史及各类病史事实；结构化选择可生成原文，医生仍可修改最终文本。",
     fields: [
       {
         key: "chiefComplaint",
-        label: "主诉",
+        label: "主诉症状",
         kind: "multi",
         required: true,
-        options: options(["肛周肿块", "肛周疼痛", "溢脓", "便血", "肿物脱出", "肛周潮湿", "肛门坠胀", "肛周瘙痒", "排便异常"]),
+        options: options([
+          "肛周肿块",
+          "肛周疼痛",
+          "溢脓",
+          "便血",
+          "肿物脱出",
+          "肛周潮湿",
+          "肛门坠胀",
+          "肛周瘙痒",
+          "排便异常",
+          "便不尽感"
+        ]),
         creatable: true,
         span: 2
       },
-      { key: "presentIllness", label: "现病经过", kind: "textarea", required: true, rows: 5, span: 2 },
-      { key: "symptomDuration", label: "症状持续时间", kind: "input" },
+      { key: "symptomDuration", label: "主要症状病程", kind: "input", placeholder: "如：1年、3月余、20年前开始" },
       {
-        key: "symptomChanges",
-        label: "症状变化",
+        key: "onsetTrigger",
+        label: "起病诱因",
+        kind: "select",
+        options: options(["无明显诱因", "饮酒后", "进食辛辣后", "便秘后", "腹泻后", "劳累后", "妊娠或分娩后", "外伤或手术后"]),
+        creatable: true
+      },
+      {
+        key: "symptomPattern",
+        label: "症状发作方式",
         kind: "multi",
-        options: options(["持续性", "间歇性", "近期加重", "自行缓解", "保守治疗后缓解", "无明显变化"]),
+        options: options(["持续性", "间歇性", "反复发作", "进行性加重", "自行缓解", "便后缓解", "休息后缓解"]),
+        creatable: true
+      },
+      {
+        key: "aggravatingFactors",
+        label: "加重诱因",
+        kind: "multi",
+        options: options(["饮酒", "辛辣饮食", "便秘", "腹泻", "久坐", "久蹲排便", "劳累", "无明显诱因"]),
+        creatable: true
+      },
+      {
+        key: "bleedingFeatures",
+        label: "便血特征",
+        kind: "multi",
+        options: options([
+          "色鲜红",
+          "色暗红",
+          "手纸带血",
+          "滴血",
+          "喷射状出血",
+          "便表面附血",
+          "与大便混合",
+          "便后即止",
+          "无便血"
+        ]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "painFeatures",
+        label: "疼痛特征",
+        kind: "multi",
+        options: options(["无痛", "便时疼痛", "便后疼痛", "持续性疼痛", "间歇性疼痛", "胀痛", "灼痛", "刺痛", "跳痛"]),
+        creatable: true
+      },
+      {
+        key: "prolapseReduction",
+        label: "脱出与回纳",
+        kind: "select",
+        options: options(["无脱出", "便时脱出便后自行回纳", "休息后自行回纳", "需手托回纳", "不能回纳", "平时亦可脱出"]),
+        creatable: true
+      },
+      {
+        key: "associatedSymptoms",
+        label: "伴随症状",
+        kind: "multi",
+        options: options(["肛周潮湿", "肛周瘙痒", "溢脓", "便不尽感", "肛门坠胀", "恶寒发热", "无恶寒发热"]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "recentAggravation",
+        label: "近期加重情况",
+        kind: "select",
+        options: options(["近期无明显变化", "近3天加重", "近1周加重", "近1月加重", "症状加重伴疼痛", "症状加重伴出血"]),
         creatable: true
       },
       {
         key: "previousTreatment",
         label: "既往相关治疗",
         kind: "multi",
-        options: options(["未治疗", "口服药物", "外用药物", "坐浴", "输液治疗", "既往手术治疗"]),
+        options: options([
+          "未治疗",
+          "口服药物",
+          "外用药物",
+          "坐浴",
+          "输液治疗",
+          "硬化剂注射",
+          "既往手术治疗",
+          "保守治疗效果不佳",
+          "治疗后好转"
+        ]),
+        creatable: true
+      },
+      {
+        key: "generalCondition",
+        label: "一般情况",
+        kind: "multi",
+        options: options([
+          "精神可",
+          "精神差",
+          "饮食可",
+          "饮食差",
+          "睡眠可",
+          "入睡困难",
+          "睡眠差",
+          "小便正常",
+          "小便不畅",
+          "体重无明显变化",
+          "体重下降"
+        ]),
         creatable: true,
+        span: 2
+      },
+      { key: "stoolFrequency", label: "大便频次", kind: "input", placeholder: "如：每日1次、每日2-3次" },
+      {
+        key: "stoolCharacteristics",
+        label: "大便性状",
+        kind: "multi",
+        options: options(["正常", "干结", "稀溏", "干稀不调", "大便频数", "排便困难", "便意频繁"]),
+        creatable: true
+      },
+      {
+        key: "presentIllness",
+        label: "现病史最终文本（医生可修改）",
+        kind: "textarea",
+        required: true,
+        rows: 6,
+        placeholder: "可由上方结构化事实生成，也可由接诊人员或医生直接修订。",
         span: 2
       },
       {
         key: "pastHistory",
-        label: "重要既往史",
+        label: "慢性病及重要既往史",
         kind: "multi",
-        options: options(["无特殊既往史", "高血压", "糖尿病", "冠心病", "慢性胃炎", "既往手术史", "输血史"]),
+        options: options(["否认慢性病史", "高血压", "糖尿病", "冠心病", "脑血管病", "慢性胃炎", "传染病史", "其他慢性病"]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "surgicalHistory",
+        label: "手术史",
+        kind: "multi",
+        options: options(["否认手术史", "既往肛肠手术", "既往腹部手术", "其他手术"]),
+        creatable: true
+      },
+      { key: "traumaHistory", label: "外伤史", kind: "select", options: options(["否认外伤史", "有外伤史"]), creatable: true },
+      {
+        key: "transfusionHistory",
+        label: "输血史",
+        kind: "select",
+        options: options(["否认输血史", "有输血史", "不详"]),
+        creatable: true
+      },
+      {
+        key: "vaccinationHistory",
+        label: "预防接种史",
+        kind: "select",
+        options: options(["预防接种随社会进行", "按计划接种", "接种不全", "不详"]),
         creatable: true
       },
       {
         key: "medicationHistory",
         label: "用药史",
         kind: "multi",
-        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "中药治疗"]),
+        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗"]),
         creatable: true
       },
       {
         key: "allergyHistory",
         label: "过敏史",
         kind: "multi",
-        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "过敏原不详"]),
+        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
         creatable: true
       },
+      {
+        key: "personalHistory",
+        label: "个人史",
+        kind: "multi",
+        options: options([
+          "生长于原籍",
+          "否认长期外地居住史",
+          "无烟酒嗜好",
+          "少量吸烟",
+          "长期吸烟",
+          "少量饮酒",
+          "长期饮酒",
+          "否认特殊化学品接触史",
+          "否认放射性接触史",
+          "否认冶游史"
+        ]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "maritalHistory",
+        label: "婚育史",
+        kind: "multi",
+        options: options(["适龄结婚", "未婚", "已婚", "离异", "丧偶", "配偶体健", "子女体健", "婚育史无特殊"]),
+        creatable: true
+      },
+      {
+        key: "familyHistory",
+        label: "家族史",
+        kind: "multi",
+        options: options([
+          "家族史无特殊",
+          "否认传染病家族史",
+          "否认遗传病家族史",
+          "否认代谢性疾病家族史",
+          "否认糖尿病家族史",
+          "否认血友病家族史",
+          "否认肿瘤家族史",
+          "否认类似病史"
+        ]),
+        creatable: true
+      },
+      { key: "historySupplement", label: "病史补充原文（可选）", kind: "textarea", rows: 3, span: 2 },
       { key: "reviewOpinion", label: "检查材料回看意见", kind: "textarea", rows: 3 },
       { key: "nextStepRecommendation", label: "下一步处置建议", kind: "textarea", rows: 3, span: 2 },
       { key: "dispositionSuggestion", label: "建议门诊/住院", kind: "select", required: true, options: routeOptions },

@@ -52,7 +52,7 @@ public class PreAiEncounterService {
     private static final Map<String, Set<String>> STAGE_EDITORS = Map.of(
         "REGISTRATION", Set.of("admin", "frontdesk"),
         "INSPECTION", Set.of("admin", "inspection"),
-        "RECEPTION", Set.of("admin", "reception"),
+        "RECEPTION", Set.of("admin", "reception", "doctor"),
         "TCM", Set.of("admin", "tcm"),
         "DOCTOR", Set.of("admin", "doctor"),
         "SURGERY", Set.of("admin", "nurse", "nursing"),
@@ -61,7 +61,14 @@ public class PreAiEncounterService {
     private static final Map<String, Set<String>> ALLOWED_FIELDS = Map.of(
         "REGISTRATION", Set.of("patientName", "gender", "birthDate", "age", "phone", "identityType", "identityNumber", "address", "contactName", "contactRelation", "contactPhone", "visitDate", "patientSource", "registrationNote", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"),
         "INSPECTION", Set.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "factualConclusion"),
-        "RECEPTION", Set.of("chiefComplaint", "presentIllness", "symptomDuration", "symptomChanges", "previousTreatment", "pastHistory", "medicationHistory", "allergyHistory", "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"),
+        "RECEPTION", Set.of(
+            "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
+            "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
+            "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness",
+            "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory",
+            "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
+            "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"
+        ),
         "TCM", Set.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
         "DOCTOR", Set.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedOperationName", "plannedOperationSite", "plannedOperationPlan", "requiredAuxiliaryTaskIds", "routeOverrideReason"),
         "SURGERY", Set.of("actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings", "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff"),
@@ -340,12 +347,16 @@ public class PreAiEncounterService {
             "digitalRectalExam", "digitalExamFindings",
             "anoscopy", "anoscopyFindings"
         )), user);
-        importStageDraft(encounterId, "RECEPTION", mapped(record, Map.of(
-            "chiefComplaintText", "chiefComplaint",
-            "presentIllnessText", "presentIllness",
-            "pastHistory", "pastHistory",
-            "allergyHistory", "allergyHistory",
-            "admissionReason", "nextStepRecommendation"
+        importStageDraft(encounterId, "RECEPTION", mapped(record, Map.ofEntries(
+            Map.entry("chiefComplaintText", "chiefComplaint"),
+            Map.entry("presentIllnessText", "presentIllness"),
+            Map.entry("pastHistory", "pastHistory"),
+            Map.entry("operationHistory", "surgicalHistory"),
+            Map.entry("traumaTransfusion", "transfusionHistory"),
+            Map.entry("allergyHistory", "allergyHistory"),
+            Map.entry("personalHistory", "personalHistory"),
+            Map.entry("familyHistory", "familyHistory"),
+            Map.entry("admissionReason", "nextStepRecommendation")
         )), user);
         importStageDraft(encounterId, "TCM", mapped(record, Map.of(
             "tcmDisease", "tcmDisease",
@@ -658,10 +669,11 @@ public class PreAiEncounterService {
                 ObjectNode metric = objectMapper.valueToTree(item == null ? Map.of() : item);
                 if (text(metric, "value").isBlank()) continue;
                 ObjectNode clean = metrics.addObject();
-                for (String key : List.of("key", "name", "shortName", "value", "unit", "reference")) {
+                for (String key : List.of("key", "name", "shortName", "value", "unit", "reference", "severity")) {
                     String value = text(metric, key);
                     if (!value.isBlank()) clean.put(key, value);
                 }
+                if (metric.path("critical").asBoolean(false)) clean.put("critical", true);
             }
         }
         if (metrics.isEmpty()) throw badRequest("请至少填写一个检验指标");
@@ -729,9 +741,11 @@ public class PreAiEncounterService {
         ObjectNode workspace = workspace(encounterId, user);
         ArrayNode blockers = reviewBlockers(workspace);
         ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode maskedPreview = privacyService.maskWorkspace(workspace);
         result.set("workspace", workspace);
-        result.set("maskedPreview", privacyService.maskWorkspace(workspace));
+        result.set("maskedPreview", maskedPreview);
         result.set("blockers", blockers);
+        result.set("labSummary", labReviewSummary(maskedPreview));
         result.put("ready", blockers.isEmpty());
         return toMap(result);
     }
@@ -742,15 +756,48 @@ public class PreAiEncounterService {
         ObjectNode workspace = workspace(encounterId, user);
         ArrayNode blockers = reviewBlockers(workspace);
         if (!blockers.isEmpty()) throw badRequest("复核前仍有未完成内容：" + join(blockers));
+        ObjectNode labSummary = labReviewSummary(privacyService.maskWorkspace(workspace));
+        int criticalCount = labSummary.path("criticalCount").asInt(0);
+        boolean criticalAcknowledged = request != null && request.criticalAcknowledged();
+        if (criticalCount > 0 && !criticalAcknowledged) throw badRequest("存在危急值，医生必须显式确认已阅后才能完成复核");
         ObjectNode reviewData = objectMapper.createObjectNode();
         reviewData.put("reviewStatement", safe(request == null ? "" : request.statement()));
+        reviewData.put("criticalCount", criticalCount);
+        reviewData.put("criticalAcknowledged", criticalAcknowledged);
+        if (criticalAcknowledged) reviewData.put("criticalAcknowledgedAt", now());
         ObjectNode current = loadStage(encounterId, "REVIEW");
         upsertStage(encounterId, "REVIEW", "COMPLETED", current.path("version").asInt(0) + 1, reviewData, "", user, now());
         jdbcTemplate.update("""
             UPDATE pre_ai_encounters SET status = 'REVIEWED', current_stage = 'REVIEW', reviewed_at = ?, reviewed_by = ?, reviewed_by_role = ?, updated_at = ? WHERE id = ?
             """, now(), user.name(), user.role(), now(), encounterId);
-        audit(encounterId, "review.confirm", "REVIEW", user, "医生确认全部前置事实");
+        String auditDetail = criticalCount > 0 ? "医生确认全部前置事实，并已阅 " + criticalCount + " 项危急值" : "医生确认全部前置事实";
+        audit(encounterId, "review.confirm", "REVIEW", user, auditDetail);
         return toMap(workspace(encounterId, user));
+    }
+
+    private ObjectNode labReviewSummary(JsonNode maskedWorkspace) {
+        ObjectNode summary = objectMapper.createObjectNode();
+        ArrayNode abnormalMetrics = summary.putArray("abnormalMetrics");
+        int criticalCount = 0;
+        int abnormalCount = 0;
+        for (JsonNode report : maskedWorkspace.path("labReports")) {
+            for (JsonNode metric : report.path("metrics")) {
+                String severity = text(metric, "severity");
+                if ("NORMAL".equals(severity) || severity.isBlank()) continue;
+                abnormalCount++;
+                if ("CRITICAL".equals(severity)) criticalCount++;
+                ObjectNode item = abnormalMetrics.addObject();
+                item.put("reportName", text(report, "templateName"));
+                item.put("reportDate", text(report, "reportDate"));
+                for (String key : List.of("name", "shortName", "value", "unit", "reference", "abnormal", "severity")) {
+                    String value = text(metric, key);
+                    if (!value.isBlank()) item.put(key, value);
+                }
+            }
+        }
+        summary.put("abnormalCount", abnormalCount);
+        summary.put("criticalCount", criticalCount);
+        return summary;
     }
 
     @Transactional
@@ -1739,7 +1786,7 @@ public class PreAiEncounterService {
         String remark,
         List<Map<String, Object>> metrics
     ) {}
-    public record ReviewConfirmRequest(String statement) {}
+    public record ReviewConfirmRequest(String statement, boolean criticalAcknowledged) {}
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}
     public record AttachmentDownload(FileSystemResource resource, String fileName, String mimeType) {}

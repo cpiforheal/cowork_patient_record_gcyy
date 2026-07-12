@@ -73,6 +73,21 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates/record",
     "/templates/ai-document"
   ],
+  tcm: [
+    "/home/index",
+    "/patients",
+    "/patients/list",
+    "/patients/detail/:id",
+    "/encounters",
+    "/encounters/active",
+    "/tcm-pharmacy",
+    "/tcm-pharmacy/workbench",
+    "/tcm-pharmacy/display"
+  ],
+  tcmPharmacyOperator: ["/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  pharmacist: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  pharmacy: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  decoction: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
   doctor: [
     "/home/index",
     "/workbench/lab-report",
@@ -83,7 +98,10 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    "/tcm-pharmacy",
+    "/tcm-pharmacy/workbench",
+    "/tcm-pharmacy/display"
   ],
   nurse: [
     "/home/index",
@@ -177,13 +195,46 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     patientList: ["patient:read"],
     patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
   },
+  tcm: {
+    home: ["view"],
+    tcmPharmacyWorkbench: ["prescription:create", "prescription:submit", "pharmacy:read"],
+    tcmPharmacyDisplayMenu: ["display:read"]
+  },
+  tcmPharmacyOperator: {
+    tcmPharmacyWorkbench: [
+      "pharmacy:read",
+      "charge:confirm",
+      "review:execute",
+      "dispensing:execute",
+      "decoction:execute",
+      "pickup:execute"
+    ],
+    tcmPharmacyDisplayMenu: ["display:read", "announcement:play"]
+  },
+  pharmacist: {
+    home: ["view"],
+    tcmPharmacyWorkbench: ["charge:confirm", "review:execute", "dispensing:execute", "pickup:execute"],
+    tcmPharmacyDisplayMenu: ["display:read", "announcement:play"]
+  },
+  pharmacy: {
+    home: ["view"],
+    tcmPharmacyWorkbench: ["charge:confirm", "review:execute", "dispensing:execute", "pickup:execute"],
+    tcmPharmacyDisplayMenu: ["display:read", "announcement:play"]
+  },
+  decoction: {
+    home: ["view"],
+    tcmPharmacyWorkbench: ["decoction:execute", "pharmacy:read"],
+    tcmPharmacyDisplayMenu: ["display:read"]
+  },
   doctor: {
     home: ["view"],
     workbenchLabReport: ["patient:search", "field:edit", "document:upload"],
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:download"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:download"],
+    tcmPharmacyWorkbench: ["prescription:create", "prescription:submit", "pharmacy:read"],
+    tcmPharmacyDisplayMenu: ["display:read"]
   },
   nurse: {
     home: ["view"],

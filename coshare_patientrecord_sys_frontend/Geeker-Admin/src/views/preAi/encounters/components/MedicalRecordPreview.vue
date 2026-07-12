@@ -20,7 +20,50 @@
       <section v-for="section in sections" :key="section.key" class="document-section">
         <h3>{{ section.title }}</h3>
         <p v-if="section.note" class="document-section-note">{{ section.note }}</p>
-        <div v-if="section.rows.length" class="document-fields">
+        <div v-if="section.labReports?.length" class="lab-report-groups">
+          <article v-for="report in section.labReports" :key="report.key" class="lab-report-group">
+            <header>
+              <div>
+                <strong>{{ report.title }}</strong>
+                <span>{{ report.reportDate || "日期待填写" }}</span>
+              </div>
+              <el-tag :type="report.abnormalMetrics.length ? 'danger' : 'success'" size="small" effect="plain">
+                {{ report.abnormalMetrics.length ? `${report.abnormalMetrics.length} 项异常` : "未见异常" }}
+              </el-tag>
+            </header>
+            <div v-if="report.abnormalMetrics.length" class="lab-abnormal-list">
+              <div
+                v-for="metric in report.abnormalMetrics"
+                :key="metric.key"
+                :class="{ critical: metric.severity === 'CRITICAL' }"
+              >
+                <div>
+                  <strong>{{ metric.name }}</strong>
+                  <small v-if="metric.shortName">{{ metric.shortName }}</small>
+                </div>
+                <span class="lab-metric-value">{{ metric.value }}{{ metric.unit }}</span>
+                <span class="lab-reference">参考：{{ metric.reference || "未设置" }}</span>
+                <el-tag :type="metric.severity === 'CRITICAL' ? 'danger' : 'warning'" size="small" effect="dark">
+                  {{ metric.severity === "CRITICAL" ? "危急值" : metric.abnormal }}
+                </el-tag>
+              </div>
+            </div>
+            <el-collapse v-if="report.normalMetrics.length" class="lab-normal-collapse">
+              <el-collapse-item :title="`其余 ${report.normalMetrics.length} 项未见异常`">
+                <div class="lab-normal-list">
+                  <div v-for="metric in report.normalMetrics" :key="metric.key">
+                    <span
+                      >{{ metric.name }}<small v-if="metric.shortName">（{{ metric.shortName }}）</small></span
+                    >
+                    <strong>{{ metric.value }}{{ metric.unit }}</strong>
+                    <small>参考：{{ metric.reference || "未设置" }}</small>
+                  </div>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </article>
+        </div>
+        <div v-else-if="section.rows.length" class="document-fields">
           <div v-for="row in section.rows" :key="row.key" :class="{ wide: row.wide, abnormal: row.abnormal }">
             <strong>{{ row.label }}：</strong>
             <span>{{ row.value }}</span>
@@ -35,21 +78,7 @@
 </template>
 
 <script setup lang="ts">
-export interface DocumentPreviewRow {
-  key: string;
-  label: string;
-  value: string;
-  empty: boolean;
-  wide: boolean;
-  abnormal?: boolean;
-}
-
-export interface DocumentPreviewSection {
-  key: string;
-  title: string;
-  note?: string;
-  rows: DocumentPreviewRow[];
-}
+import type { DocumentPreviewSection } from "../previewTypes";
 
 defineProps<{
   caseToken: string;
@@ -154,6 +183,85 @@ defineProps<{
 .document-fields span {
   white-space: pre-wrap;
 }
+.lab-report-groups {
+  display: grid;
+  gap: 14px;
+}
+.lab-report-group {
+  overflow: hidden;
+  border: 1px solid #d9dde5;
+  border-radius: 10px;
+}
+.lab-report-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  background: #f7f9fb;
+}
+.lab-report-group > header > div {
+  display: grid;
+  gap: 2px;
+}
+.lab-report-group > header span,
+.lab-reference,
+.lab-abnormal-list small,
+.lab-normal-list small {
+  color: #777;
+  font-size: 12px;
+}
+.lab-abnormal-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+.lab-abnormal-list > div {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto minmax(120px, auto) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 8px;
+  background: var(--el-color-warning-light-9);
+}
+.lab-abnormal-list > div.critical {
+  border-color: var(--el-color-danger-light-3);
+  background: var(--el-color-danger-light-9);
+}
+.lab-abnormal-list > div > div {
+  display: grid;
+}
+.lab-metric-value {
+  color: var(--el-color-danger-dark-2);
+  font-weight: 700;
+}
+.lab-normal-collapse {
+  padding: 0 12px 8px;
+  border-top: none;
+}
+.lab-normal-collapse :deep(.el-collapse-item__header) {
+  height: 42px;
+  color: #667085;
+  font-size: 13px;
+}
+.lab-normal-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 16px;
+}
+.lab-normal-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  padding-bottom: 5px;
+  color: #667085;
+  border-bottom: 1px dotted #d8dce3;
+}
+.lab-normal-list > div > small {
+  grid-column: span 2;
+}
 .document-empty {
   margin: 0;
   color: #aaa;
@@ -176,8 +284,15 @@ defineProps<{
     padding: 24px 18px;
   }
   .document-meta,
-  .document-fields {
+  .document-fields,
+  .lab-normal-list {
     grid-template-columns: 1fr;
+  }
+  .lab-abnormal-list > div {
+    grid-template-columns: 1fr auto;
+  }
+  .lab-reference {
+    grid-column: 1;
   }
   .document-fields > div.wide {
     grid-column: span 1;

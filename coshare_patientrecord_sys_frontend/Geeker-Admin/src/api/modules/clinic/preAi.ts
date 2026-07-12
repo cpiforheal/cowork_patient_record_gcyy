@@ -139,6 +139,8 @@ export interface LabReportMetricSnapshot {
   value: string;
   unit?: string;
   reference?: string;
+  severity?: "NORMAL" | "ABNORMAL" | "CRITICAL";
+  critical?: boolean;
 }
 
 export interface LabReportSnapshot {
@@ -191,10 +193,27 @@ export interface PreAiWorkspace {
   currentUserRole: string;
 }
 
+export interface PreAiReviewLabMetric {
+  reportName: string;
+  reportDate: string;
+  name: string;
+  shortName?: string;
+  value: string;
+  unit?: string;
+  reference?: string;
+  abnormal: string;
+  severity: "ABNORMAL" | "CRITICAL";
+}
+
 export interface PreAiReviewPreview {
   workspace: PreAiWorkspace;
   maskedPreview: Record<string, any>;
   blockers: string[];
+  labSummary: {
+    abnormalCount: number;
+    criticalCount: number;
+    abnormalMetrics: PreAiReviewLabMetric[];
+  };
   ready: boolean;
 }
 
@@ -319,8 +338,11 @@ export const getPreAiReviewPreviewApi = async (encounterId: string) => {
   return clinicResponse(await parseClinicApiResponse<PreAiReviewPreview>(result));
 };
 
-export const confirmPreAiReviewApi = (encounterId: string, statement = "") =>
-  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review/confirm`, "POST", { statement });
+export const confirmPreAiReviewApi = (encounterId: string, statement = "", criticalAcknowledged = false) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review/confirm`, "POST", {
+    statement,
+    criticalAcknowledged
+  });
 
 export const generatePreAiExportApi = (encounterId: string) =>
   jsonRequest<{ export: PreAiExportVersion; workspace: PreAiWorkspace }>(

@@ -28,7 +28,8 @@ public class ClinicFrontendController {
         "/patients/**",
         "/system/**",
         "/templates/**",
-        "/encounters/**"
+        "/encounters/**",
+        "/tcm-pharmacy/**"
     })
     public ResponseEntity<FileSystemResource> index() {
         if (frontendDir.isBlank()) {

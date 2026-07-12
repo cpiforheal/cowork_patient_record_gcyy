@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
@@ -42,6 +43,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler({ MethodArgumentNotValidException.class, HttpMessageNotReadableException.class })
     public ResponseEntity<ApiResult<Void>> handleInvalidPayload(Exception error) {
         return ResponseEntity.badRequest().body(ApiResult.of(400, "请求参数格式不正确，请检查后重试", null));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResult<Void>> handleNoResource(NoResourceFoundException error) {
+        return ResponseEntity
+            .status(HttpStatus.NOT_FOUND)
+            .body(ApiResult.of(404, "请求的接口或资源不存在", null));
     }
 
     @ExceptionHandler(DataAccessException.class)

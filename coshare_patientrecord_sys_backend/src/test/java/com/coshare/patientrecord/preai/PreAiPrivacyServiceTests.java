@@ -29,6 +29,8 @@ class PreAiPrivacyServiceTests {
         assertFalse(masked.path("patient").has("identityNumber"));
         assertEquals("固始县城关镇", masked.path("patient").path("address").asText());
         assertEquals("便血3月", masked.path("stages").path("RECEPTION").path("chiefComplaint").asText());
+        assertEquals("否认输血史", masked.path("stages").path("RECEPTION").path("transfusionHistory").asText());
+        assertEquals("适龄结婚", masked.path("stages").path("RECEPTION").path("maritalHistory").path(0).asText());
         assertFalse(masked.toString().contains("411525199001011234"));
         assertFalse(masked.toString().contains("张医生"));
         assertFalse(masked.toString().contains("原始照片.jpg"));
@@ -94,8 +96,32 @@ class PreAiPrivacyServiceTests {
         String documentXml = unzipEntry(service.renderDocx(masked, workspace), "word/document.xml");
 
         assertEquals("偏高", masked.path("labReports").path(0).path("metrics").path(0).path("abnormal").asText());
+        assertEquals("ABNORMAL", masked.path("labReports").path(0).path("metrics").path(0).path("severity").asText());
         assertTrue(documentXml.contains("白细胞：12.510^9/L【异常·偏高】"));
         assertFalse(documentXml.contains("未填写指标"));
+    }
+
+    @Test
+    void keepsCriticalSeverityAndMarksItInDocx() throws Exception {
+        ObjectNode workspace = sampleWorkspace();
+        ObjectNode labTask = workspace.withArray("auxiliaryTasks").addObject();
+        labTask.put("taskType", "LAB");
+        labTask.put("status", "COMPLETED");
+        ObjectNode report = workspace.withArray("labReports").addObject();
+        report.put("templateName", "血常规");
+        report.put("reportDate", "2026-07-10");
+        ObjectNode critical = report.putArray("metrics").addObject();
+        critical.put("name", "血红蛋白");
+        critical.put("value", "45");
+        critical.put("unit", "g/L");
+        critical.put("reference", "110-160");
+        critical.put("critical", true);
+
+        ObjectNode masked = service.maskWorkspace(workspace);
+        String documentXml = unzipEntry(service.renderDocx(masked, workspace), "word/document.xml");
+
+        assertEquals("CRITICAL", masked.path("labReports").path(0).path("metrics").path(0).path("severity").asText());
+        assertTrue(documentXml.contains("血红蛋白：45g/L【危急值·偏低】"));
     }
 
     @Test
@@ -132,6 +158,10 @@ class PreAiPrivacyServiceTests {
         ObjectNode reception = objectMapper.createObjectNode();
         reception.put("chiefComplaint", "便血3月");
         reception.put("presentIllness", "周明华诉反复便血，联系电话13812345678。ZY20260710001");
+        reception.put("transfusionHistory", "否认输血史");
+        reception.putArray("personalHistory").add("生长于原籍").add("无烟酒嗜好");
+        reception.putArray("maritalHistory").add("适龄结婚").add("配偶及子女体健");
+        reception.putArray("familyHistory").add("否认遗传病家族史").add("否认肿瘤家族史");
         addStage(stages, "RECEPTION", "COMPLETED", reception);
         ObjectNode inspection = objectMapper.createObjectNode();
         inspection.put("factualConclusion", "截石位见肛缘肿物");

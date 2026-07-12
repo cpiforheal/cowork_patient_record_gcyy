@@ -297,6 +297,15 @@
                     label-position="top"
                     class="stage-form"
                   >
+                    <section v-if="selectedStageCode === 'RECEPTION'" class="history-template-toolbar">
+                      <div>
+                        <strong>病史模板化录入</strong>
+                        <small>先完成结构化选项，再生成现病史。生成仅在点击时执行，不会持续覆盖医生手工修订。</small>
+                      </div>
+                      <el-button type="primary" plain :disabled="!canEditSelectedStage" @click="generatePresentIllnessText">
+                        生成现病史原文
+                      </el-button>
+                    </section>
                     <div class="form-grid">
                       <el-form-item
                         v-for="field in visibleStageFields"
@@ -472,6 +481,7 @@
                 <DoctorReviewPanel
                   v-else
                   v-model:statement="reviewStatement"
+                  v-model:critical-acknowledged="criticalAcknowledged"
                   :preview="reviewPreview"
                   :sections="maskedSections"
                   :can-review="canReview"
@@ -659,10 +669,7 @@ import {
   type PreAiWorkspace
 } from "@/api/modules/clinic";
 import WorkflowSidebar, { type WorkflowCard } from "./components/WorkflowSidebar.vue";
-import MedicalRecordPreview, {
-  type DocumentPreviewRow,
-  type DocumentPreviewSection
-} from "./components/MedicalRecordPreview.vue";
+import MedicalRecordPreview from "./components/MedicalRecordPreview.vue";
 import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import {
@@ -674,6 +681,10 @@ import {
   stageStatusLabel,
   type PreAiFieldConfig
 } from "./fieldConfig";
+import { groupAttachments, isImageAttachment } from "./utils/attachment";
+import { buildPresentIllnessText, selectedText } from "./utils/historyTextGenerator";
+import { isLabMetricAbnormal, labMetricAbnormalLabel } from "./utils/labResult";
+import { buildDocumentPreviewSections, humanValue, nonEmptyEntries } from "./utils/previewBuilder";
 
 const userStore = useUserStore();
 const router = useRouter();
@@ -716,6 +727,11 @@ const stageForms = reactive<Record<PreAiStageCode, Record<string, any>>>({
 const auxForms = reactive<Record<string, { title: string; requiredBeforeExport: boolean; data: Record<string, any> }>>({});
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
+const criticalAcknowledged = ref(false);
+let workspaceRequestSequence = 0;
+let workspaceImageRequestSequence = 0;
+let timelineRequestSequence = 0;
+let reviewRequestSequence = 0;
 
 const createDialogVisible = ref(false);
 const createForm = reactive<Record<string, any>>({ visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00" });
@@ -760,7 +776,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "RECEPTION",
     title: "接诊评估",
     owner: "接诊室",
-    roles: ["admin", "reception"]
+    roles: ["admin", "reception", "doctor"]
   },
   {
     key: "AUX",
@@ -831,6 +847,7 @@ const canEditSelectedStage = computed(() => {
   if (!workspace.value || selectedStageCode.value === "REVIEW") return false;
   const submission = selectedStageSubmission.value;
   if (!selectedStage.value.roles.includes(currentRole.value)) return false;
+  if (selectedStageCode.value === "RECEPTION" && currentRole.value === "doctor") return true;
   return submission.status !== "COMPLETED" || currentRole.value === "admin";
 });
 const canReturnSelectedStage = computed(
@@ -850,25 +867,10 @@ const upstreamStages = computed(() => {
 const selectedStageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === selectedStageCode.value && !item.taskId) || []
 );
-const imageFilePattern = /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i;
-const isImageAttachment = (attachment: PreAiAttachment) =>
-  attachment.mimeType?.startsWith("image/") || imageFilePattern.test(attachment.fileName || "");
 const inspectionImageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item)) || []
 );
-const selectedAttachmentGroups = computed(() => {
-  const groups = new Map<string, { id: string; name: string; items: typeof selectedStageAttachments.value }>();
-  selectedStageAttachments.value.forEach(item => {
-    const id = item.batchId || item.id;
-    const current = groups.get(id) || { id, name: item.batchName || "独立上传", items: [] };
-    current.items.push(item);
-    groups.set(id, current);
-  });
-  return Array.from(groups.values()).map(group => ({
-    ...group,
-    items: group.items.sort((left, right) => (left.sequenceNo || 0) - (right.sequenceNo || 0))
-  }));
-});
+const selectedAttachmentGroups = computed(() => groupAttachments(selectedStageAttachments.value, true));
 const maskedSections = computed(() => {
   if (!reviewPreview.value) return [];
   const masked = reviewPreview.value.maskedPreview as Record<string, any>;
@@ -898,73 +900,16 @@ const maskedSections = computed(() => {
   if (masked.review) sections.push({ title: "医生复核信息", entries: nonEmptyEntries(masked.review) });
   return sections;
 });
-const documentPreviewSections = computed<DocumentPreviewSection[]>(() => {
-  if (!workspace.value) return [];
-  const sections: DocumentPreviewSection[] = [
-    previewStageSection("REGISTRATION", "患者基础信息", "身份信息仅用于院内协作，正式导出时自动脱敏。", ["identityNumber"]),
-    previewStageSection("RECEPTION", "主诉和现病情况"),
-    previewStageSection("INSPECTION", "专科检查事实", "原始图片不进入导出文档，仅呈现确认后的文字所见。")
-  ];
-  const auxiliaryRows: DocumentPreviewRow[] = workspace.value.labReports
-    .map(report => {
-      const values = report.metrics.map(metric => {
-        const abnormal = labMetricAbnormalLabel(metric);
-        return `${metric.name}${metric.shortName ? `（${metric.shortName}）` : ""}：${metric.value}${metric.unit || ""}${
-          abnormal ? `【${abnormal}】` : ""
-        }`;
-      });
-      return {
-        key: report.id,
-        label: `${report.templateName}｜${report.reportDate}`,
-        value: values.join("；"),
-        empty: !values.length,
-        wide: true,
-        abnormal: report.metrics.some(isLabMetricAbnormal)
-      };
-    })
-    .filter(row => !row.empty);
-  sections.push({
-    key: "AUX",
-    title: "化验室检验报告",
-    note: "仅展示化验报告模板中已经保存的真实结果。",
-    rows: auxiliaryRows
-  });
-  sections.push(previewStageSection("TCM", "中医四诊、病名、证候和治法"));
-  sections.push(previewStageSection("DOCTOR", "西医诊断与治疗方案"));
-  const surgeryData = stageForms.SURGERY;
-  const showSurgery =
-    workspace.value.encounter.treatmentPath === "SURGICAL" ||
-    Object.values(surgeryData).some(value => value !== undefined && value !== null && value !== "");
-  if (showSurgery) sections.push(previewStageSection("SURGERY", "实际手术情况"));
-  sections.push({
-    key: "REVIEW",
-    title: "医生复核信息",
-    rows: [
-      {
-        key: "reviewStatus",
-        label: "复核状态",
-        value: workspace.value.encounter.reviewedAt ? "已复核" : "待医生复核",
-        empty: !workspace.value.encounter.reviewedAt,
-        wide: false
-      },
-      {
-        key: "reviewedAt",
-        label: "复核时间",
-        value: workspace.value.encounter.reviewedAt || "________________",
-        empty: !workspace.value.encounter.reviewedAt,
-        wide: false
-      },
-      {
-        key: "reviewStatement",
-        label: "复核说明",
-        value: reviewStatement.value || stageForms.REVIEW.reviewStatement || "________________",
-        empty: !(reviewStatement.value || stageForms.REVIEW.reviewStatement),
-        wide: true
-      }
-    ]
-  });
-  return sections;
-});
+const documentPreviewSections = computed(() =>
+  workspace.value
+    ? buildDocumentPreviewSections({
+        workspace: workspace.value,
+        stageForms,
+        reviewStatement: reviewStatement.value,
+        stageByCode
+      })
+    : []
+);
 
 const deepCopy = <T,>(value: T): T => JSON.parse(JSON.stringify(value ?? {}));
 const stageSubmission = (code: PreAiStageCode) => workspace.value?.stages.find(item => item.stageCode === code);
@@ -989,38 +934,27 @@ const isCurrentWorkflowCard = (card: WorkflowCard) => {
   if (card.kind === "STAGE") return workspace.value.encounter.currentStage === card.stageCode;
   return Boolean(labTask.value?.requiredBeforeExport && labTask.value.status !== "COMPLETED");
 };
-const nonEmptyEntries = (value: Record<string, any> = {}) =>
-  Object.entries(value).filter(
-    ([, item]) => item !== undefined && item !== null && item !== "" && (!Array.isArray(item) || item.length)
-  );
-const parseReferenceRange = (reference = "") => {
-  const normalized = reference.replace(/[～—–至]/g, "-").replace(/\s+/g, "");
-  const range = normalized.match(/^(-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)$/);
-  if (range) return { min: Number(range[1]), max: Number(range[2]) };
-  const upper = normalized.match(/^(?:≤|<=|<)(-?\d+(?:\.\d+)?)$/);
-  if (upper) return { max: Number(upper[1]), exclusiveMax: normalized.startsWith("<") && !normalized.startsWith("<=") };
-  const lower = normalized.match(/^(?:≥|>=|>)(-?\d+(?:\.\d+)?)$/);
-  if (lower) return { min: Number(lower[1]), exclusiveMin: normalized.startsWith(">") && !normalized.startsWith(">=") };
-  return undefined;
-};
-const labMetricAbnormalLabel = (metric: { value: string; reference?: string }) => {
-  const value = String(metric.value || "").trim();
-  const reference = String(metric.reference || "").trim();
-  if (!value || !reference || value === "未查") return "";
-  const numericValue = Number(value.replace(/,/g, ""));
-  const range = parseReferenceRange(reference);
-  if (range && Number.isFinite(numericValue)) {
-    if (range.min !== undefined && (range.exclusiveMin ? numericValue <= range.min : numericValue < range.min)) return "偏低";
-    if (range.max !== undefined && (range.exclusiveMax ? numericValue >= range.max : numericValue > range.max)) return "偏高";
-    return "";
+const generatePresentIllnessText = async () => {
+  const form = stageForms.RECEPTION;
+  const chiefComplaint = selectedText(form.chiefComplaint);
+  if (!chiefComplaint) {
+    ElMessage.warning("请先选择主诉症状");
+    return;
   }
-  const normalQualitative = ["阴性", "-", "正常"];
-  if (normalQualitative.includes(reference) || reference === "阴性") return normalQualitative.includes(value) ? "" : "异常";
-  return "";
+  if (form.presentIllness?.trim()) {
+    try {
+      await ElMessageBox.confirm("现病史已有内容，重新生成会替换当前文本。是否继续？", "确认重新生成", {
+        confirmButtonText: "替换生成",
+        cancelButtonText: "保留原文",
+        type: "warning"
+      });
+    } catch {
+      return;
+    }
+  }
+  form.presentIllness = buildPresentIllnessText(form);
+  ElMessage.success("已生成现病史，可继续手工修订");
 };
-const isLabMetricAbnormal = (metric: { value: string; reference?: string }) => Boolean(labMetricAbnormalLabel(metric));
-const humanValue = (value: any) =>
-  Array.isArray(value) ? value.join("、") : typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
 const fieldOptions = (field: PreAiFieldConfig) => field.optionsFor?.(stageForms[selectedStageCode.value]) || field.options || [];
 const routeLabel = (route?: string) => (route === "OUTPATIENT" ? "门诊" : route === "INPATIENT" ? "住院" : "分支待确认");
 const treatmentPathLabel = (path?: string) =>
@@ -1059,45 +993,6 @@ const reviewFieldLabel = (key: string) => {
     key
   );
 };
-const formatPreviewValue = (key: string, value: any) => {
-  if (value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length)) return "________________";
-  if (["finalRoute", "dispositionSuggestion"].includes(key)) return routeLabel(String(value));
-  if (key === "treatmentPath") return treatmentPathLabel(String(value));
-  if (key === "examinationTypes" && Array.isArray(value)) {
-    const labels: Record<string, string> = {
-      VISUAL: "外观检查",
-      DIGITAL: "指检",
-      ANOSCOPY: "肛门镜/镜下检查",
-      OTHER: "其他检查"
-    };
-    return value.map(item => labels[item] || item).join("、");
-  }
-  return humanValue(value);
-};
-const previewStageSection = (
-  code: PreAiStageCode,
-  title: string,
-  note = "",
-  excludedKeys: string[] = []
-): DocumentPreviewSection => {
-  const form = stageForms[code];
-  const rows = stageByCode(code)
-    .fields.filter(field => !excludedKeys.includes(field.key))
-    .filter(field => !field.visible || field.visible(form))
-    .filter(field => {
-      const value = form[field.key];
-      return value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
-    })
-    .map(field => ({
-      key: `${code}-${field.key}`,
-      label: field.label,
-      value: formatPreviewValue(field.key, form[field.key]),
-      empty: false,
-      wide: field.span === 2 || field.kind === "textarea" || field.kind === "multi"
-    }));
-  return { key: code, title, note, rows };
-};
-
 const loadEncounterList = async () => {
   try {
     const { data } = await getPreAiPatientCasesApi();
@@ -1118,12 +1013,18 @@ const clearWorkspaceImageUrls = () => {
 };
 
 const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
+  const requestSequence = ++workspaceImageRequestSequence;
   clearWorkspaceImageUrls();
   const images = value.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item));
   await Promise.all(
     images.map(async attachment => {
       try {
-        workspaceImageUrls[attachment.id] = await getPreAiAttachmentObjectUrlApi(attachment);
+        const url = await getPreAiAttachmentObjectUrlApi(attachment);
+        if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        workspaceImageUrls[attachment.id] = url;
       } catch {
         // 单张检查图片失败时保留下载入口，不阻断工作区加载。
       }
@@ -1154,10 +1055,15 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
 };
 
 const selectEncounter = async (id: string) => {
+  if (id === selectedEncounterId.value && workspace.value?.encounter.id === id && !workspaceLoading.value) return;
+
+  const requestSequence = ++workspaceRequestSequence;
   selectedEncounterId.value = id;
   workspaceLoading.value = true;
   try {
     const { data } = await getPreAiWorkspaceApi(id);
+    if (requestSequence !== workspaceRequestSequence || selectedEncounterId.value !== id) return;
+
     hydrateWorkspace(data);
     selectedPatientCaseId.value = data.encounter.patientCaseId;
     selectedStageCode.value = data.encounter.currentStage || "REGISTRATION";
@@ -1166,9 +1072,9 @@ const selectEncounter = async (id: string) => {
     editorMode.value = "EDIT";
     reviewPreview.value = undefined;
   } catch (error: any) {
-    ElMessage.error(error.message || "前置病历加载失败");
+    if (requestSequence === workspaceRequestSequence) ElMessage.error(error.message || "前置病历加载失败");
   } finally {
-    workspaceLoading.value = false;
+    if (requestSequence === workspaceRequestSequence) workspaceLoading.value = false;
   }
 };
 
@@ -1201,25 +1107,34 @@ const showInspectionTimeline = async () => {
   inspectionView.value = "HISTORY";
   const patientCaseId = workspace.value?.encounter.patientCaseId;
   if (!patientCaseId) return;
+
+  const requestSequence = ++timelineRequestSequence;
   timelineLoading.value = true;
   clearTimelineImageUrls();
   try {
     const { data } = await getPreAiInspectionTimelineApi(patientCaseId);
+    if (requestSequence !== timelineRequestSequence || workspace.value?.encounter.patientCaseId !== patientCaseId) return;
+
     inspectionTimeline.value = data.nodes;
     const imageAttachments = data.nodes.flatMap(node => node.attachments).filter(item => item.mimeType?.startsWith("image/"));
     await Promise.all(
       imageAttachments.map(async attachment => {
         try {
-          timelineImageUrls[attachment.id] = await getPreAiAttachmentObjectUrlApi(attachment);
+          const url = await getPreAiAttachmentObjectUrlApi(attachment);
+          if (requestSequence !== timelineRequestSequence || workspace.value?.encounter.patientCaseId !== patientCaseId) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          timelineImageUrls[attachment.id] = url;
         } catch {
           // 单张历史图片加载失败不影响其余时间轴内容。
         }
       })
     );
   } catch (error: any) {
-    ElMessage.error(error.message || "检查室历史时间轴加载失败");
+    if (requestSequence === timelineRequestSequence) ElMessage.error(error.message || "检查室历史时间轴加载失败");
   } finally {
-    timelineLoading.value = false;
+    if (requestSequence === timelineRequestSequence) timelineLoading.value = false;
   }
 };
 
@@ -1241,16 +1156,7 @@ const openTimelineAttachment = async (attachment: PreAiAttachment) => {
   await downloadPreAiAttachmentApi(attachment);
 };
 
-const timelineAttachmentGroups = (attachments: PreAiAttachment[]) => {
-  const groups = new Map<string, { id: string; name: string; items: PreAiAttachment[] }>();
-  attachments.forEach(attachment => {
-    const id = attachment.batchId || attachment.id;
-    const group = groups.get(id) || { id, name: attachment.batchName || "独立上传", items: [] };
-    group.items.push(attachment);
-    groups.set(id, group);
-  });
-  return Array.from(groups.values());
-};
+const timelineAttachmentGroups = (attachments: PreAiAttachment[]) => groupAttachments(attachments);
 
 const paymentStatusLabel = (status?: string) =>
   ({ UNPAID: "未交", PARTIAL: "部分缴费", PAID: "已交", REFUNDED: "退费" })[status || ""] || "未记录";
@@ -1484,18 +1390,22 @@ const voidAttachment = async (attachmentId: string) => {
 };
 
 const loadReviewPreview = async () => {
-  if (!selectedEncounterId.value || !canReview.value) return;
+  const encounterId = selectedEncounterId.value;
+  if (!encounterId || !canReview.value) return;
+
+  const requestSequence = ++reviewRequestSequence;
   try {
-    const { data } = await getPreAiReviewPreviewApi(selectedEncounterId.value);
+    const { data } = await getPreAiReviewPreviewApi(encounterId);
+    if (requestSequence !== reviewRequestSequence || selectedEncounterId.value !== encounterId) return;
     reviewPreview.value = data;
   } catch (error: any) {
-    ElMessage.error(error.message || "脱敏预览加载失败");
+    if (requestSequence === reviewRequestSequence) ElMessage.error(error.message || "脱敏预览加载失败");
   }
 };
 
 const confirmReview = async () =>
   runAction(async () => {
-    const { data } = await confirmPreAiReviewApi(selectedEncounterId.value, reviewStatement.value);
+    const { data } = await confirmPreAiReviewApi(selectedEncounterId.value, reviewStatement.value, criticalAcknowledged.value);
     hydrateWorkspace(data);
     await loadEncounterList();
     await loadReviewPreview();
@@ -1533,6 +1443,10 @@ const runAction = async (action: () => Promise<void>) => {
 
 onMounted(loadEncounterList);
 onBeforeUnmount(() => {
+  workspaceRequestSequence += 1;
+  workspaceImageRequestSequence += 1;
+  timelineRequestSequence += 1;
+  reviewRequestSequence += 1;
   clearTimelineImageUrls();
   clearWorkspaceImageUrls();
 });
@@ -2063,6 +1977,26 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   border-top: 1px dashed var(--el-border-color);
 }
+.history-template-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 12px;
+  background: var(--el-color-primary-light-9);
+}
+.history-template-toolbar > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.history-template-toolbar small {
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
 .section-caption {
   color: var(--el-text-color-primary);
   font-size: 14px;
@@ -2238,7 +2172,8 @@ onBeforeUnmount(() => {
 @media (max-width: 680px) {
   .page-hero,
   .patient-banner,
-  .panel-heading {
+  .panel-heading,
+  .history-template-toolbar {
     flex-direction: column;
     align-items: stretch;
   }

@@ -46,14 +46,24 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="metric in report.metrics" :key="metric.key" :class="{ 'abnormal-metric': isMetricAbnormal(metric) }">
+              <tr
+                v-for="metric in report.metrics"
+                :key="metric.key"
+                :class="{
+                  'abnormal-metric': isMetricAbnormal(metric),
+                  'critical-metric': metric.severity === 'CRITICAL' || metric.critical
+                }"
+              >
                 <td>{{ metric.name }}</td>
                 <td>{{ metric.shortName }}</td>
                 <td>
                   <strong>{{ metric.value }}</strong>
-                  <el-tag v-if="isMetricAbnormal(metric)" type="danger" size="small" effect="dark">{{
-                    abnormalLabel(metric)
-                  }}</el-tag>
+                  <el-tag v-if="metric.severity === 'CRITICAL' || metric.critical" type="danger" size="small" effect="dark">
+                    危急值
+                  </el-tag>
+                  <el-tag v-else-if="isMetricAbnormal(metric)" type="warning" size="small" effect="dark">
+                    {{ abnormalLabel(metric) }}
+                  </el-tag>
                 </td>
                 <td>{{ metric.unit }}</td>
                 <td>{{ metric.reference }}</td>
@@ -192,6 +202,10 @@ defineEmits<{
   border: 1px solid #4b5563;
 }
 .lab-report-paper tr.abnormal-metric td {
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+}
+.lab-report-paper tr.critical-metric td {
   color: var(--el-color-danger-dark-2);
   background: var(--el-color-danger-light-9);
 }

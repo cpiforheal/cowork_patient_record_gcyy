@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -33,6 +34,9 @@ import org.springframework.http.HttpStatus;
 public class AuthSessionService {
 
     private static final Duration TOKEN_TTL = Duration.ofHours(12);
+    private static final String TCM_PHARMACY_ACCOUNT_ID = "tcm-pharmacy-operator";
+    private static final String TCM_PHARMACY_USERNAME = "tcmpharmacy";
+    private static final String TCM_PHARMACY_INITIAL_PASSWORD = "TcmPharmacy@2026!";
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOGIN_LOCK_TTL = Duration.ofMinutes(10);
 
@@ -47,6 +51,39 @@ public class AuthSessionService {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = passwordEncoder;
+    }
+
+    @PostConstruct
+    public void ensureTcmPharmacyOperatorAccount() {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM clinic_accounts WHERE id = ? OR LOWER(username) = ?",
+            Integer.class,
+            TCM_PHARMACY_ACCOUNT_ID,
+            TCM_PHARMACY_USERNAME
+        );
+        if (count != null && count > 0) return;
+
+        ObjectNode account = objectMapper.createObjectNode();
+        account.put("id", TCM_PHARMACY_ACCOUNT_ID);
+        account.put("username", TCM_PHARMACY_USERNAME);
+        account.put("passwordHash", passwordEncoder.encode(TCM_PHARMACY_INITIAL_PASSWORD));
+        account.put("currentPassword", TCM_PHARMACY_INITIAL_PASSWORD);
+        account.put("name", "中药房业务岗");
+        account.put("department", "中药房");
+        account.put("role", "tcmPharmacyOperator");
+        account.put("roleLabel", "中药房业务岗");
+        account.put("scope", "中药房收费、审方、调剂、代煎、叫号与领取闭环");
+        account.put("status", "启用");
+        account.put("createdAt", Instant.now().toString());
+        account.put("updatedAt", Instant.now().toString());
+        jdbcTemplate.update(
+            "INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)",
+            TCM_PHARMACY_ACCOUNT_ID,
+            TCM_PHARMACY_USERNAME,
+            "tcmPharmacyOperator",
+            "启用",
+            toJson(account)
+        );
     }
 
     public LoginResult login(LoginRequest request) {

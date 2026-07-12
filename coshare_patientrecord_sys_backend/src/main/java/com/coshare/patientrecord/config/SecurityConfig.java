@@ -28,6 +28,7 @@ public class SecurityConfig {
                     "/system/**",
                     "/templates/**",
                     "/encounters/**",
+                    "/tcm-pharmacy/**",
                     "/favicon.ico",
                     "/assets/**",
                     "/health",

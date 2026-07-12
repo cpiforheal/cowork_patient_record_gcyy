@@ -33,10 +33,80 @@
       :closable="false"
       title="前置资料已齐备，可确认事实并生成脱敏文档"
     />
+    <section v-if="preview?.labSummary?.abnormalCount" class="lab-risk-summary">
+      <header>
+        <div>
+          <strong>化验异常摘要</strong>
+          <small>复核前请优先确认异常及危急值</small>
+        </div>
+        <div>
+          <el-tag type="warning" effect="plain">异常 {{ preview.labSummary.abnormalCount }} 项</el-tag>
+          <el-tag v-if="preview.labSummary.criticalCount" type="danger" effect="dark">
+            危急值 {{ preview.labSummary.criticalCount }} 项
+          </el-tag>
+        </div>
+      </header>
+      <div class="lab-risk-list">
+        <article
+          v-for="(metric, index) in preview.labSummary.abnormalMetrics"
+          :key="`${metric.reportName}-${metric.name}-${index}`"
+          :class="{ critical: metric.severity === 'CRITICAL' }"
+        >
+          <div>
+            <strong>{{ metric.name }}</strong>
+            <small>{{ metric.reportName }} · {{ metric.reportDate }}</small>
+          </div>
+          <span>{{ metric.value }}{{ metric.unit || "" }}</span>
+          <small>参考：{{ metric.reference || "未设置" }}</small>
+          <el-tag :type="metric.severity === 'CRITICAL' ? 'danger' : 'warning'" size="small" effect="dark">
+            {{ metric.severity === "CRITICAL" ? "危急值" : metric.abnormal }}
+          </el-tag>
+        </article>
+      </div>
+      <el-checkbox
+        v-if="preview.labSummary.criticalCount && canReview"
+        :model-value="criticalAcknowledged"
+        class="critical-confirm"
+        @update:model-value="$emit('update:criticalAcknowledged', Boolean($event))"
+      >
+        我已逐项查看以上危急值，并确认进入后续临床处置
+      </el-checkbox>
+    </section>
     <div v-if="preview" class="masked-preview">
-      <section v-for="section in sections" :key="section.title">
+      <section v-for="section in sections" :key="section.title" :class="{ 'lab-review-section': isLabSection(section) }">
         <h4>{{ section.title }}</h4>
-        <div class="read-only-grid">
+        <template v-if="isLabSection(section)">
+          <div class="lab-report-meta">
+            <div v-for="entry in labMetaEntries(section)" :key="entry[0]">
+              <span>{{ fieldLabel(entry[0]) }}</span>
+              <strong>{{ humanValue(entry[1]) }}</strong>
+            </div>
+          </div>
+          <div v-if="labMetrics(section).length" class="lab-metric-list">
+            <article
+              v-for="(metric, index) in labMetrics(section)"
+              :key="`${metric.name || 'metric'}-${index}`"
+              :class="{
+                abnormal: Boolean(metric.abnormal),
+                critical: metric.severity === 'CRITICAL'
+              }"
+            >
+              <div class="metric-name">
+                <strong>{{ metric.name || "未命名指标" }}</strong>
+                <small v-if="metric.shortName">{{ metric.shortName }}</small>
+              </div>
+              <div class="metric-value">
+                <strong>{{ metric.value || "未填写" }}{{ metric.unit || "" }}</strong>
+                <small v-if="metric.reference">参考：{{ metric.reference }}</small>
+              </div>
+              <el-tag v-if="metric.severity === 'CRITICAL'" type="danger" size="small" effect="dark">危急值</el-tag>
+              <el-tag v-else-if="metric.abnormal" type="warning" size="small" effect="dark">{{ metric.abnormal }}</el-tag>
+              <el-tag v-else type="success" size="small" effect="plain">正常</el-tag>
+            </article>
+          </div>
+          <p v-else class="lab-empty">本报告暂无已填写指标</p>
+        </template>
+        <div v-else class="read-only-grid">
           <div v-for="entry in section.entries" :key="entry[0]">
             <span>{{ fieldLabel(entry[0]) }}</span>
             <p>{{ humanValue(entry[1]) }}</p>
@@ -57,8 +127,8 @@
       <el-button
         v-if="canReview && !['REVIEWED', 'EXPORTED'].includes(encounterStatus)"
         type="primary"
-        :disabled="!preview?.ready"
         :loading="loading"
+        :disabled="!preview?.ready || Boolean(preview?.labSummary?.criticalCount && !criticalAcknowledged)"
         @click="$emit('confirm')"
         >确认事实无误</el-button
       >
@@ -97,6 +167,7 @@ defineProps<{
   sections: MaskedReviewSection[];
   statement: string;
   canReview: boolean;
+  criticalAcknowledged: boolean;
   loading: boolean;
   encounterStatus: PreAiEncounterStatus;
   exports: PreAiExportVersion[];
@@ -104,12 +175,20 @@ defineProps<{
   humanValue: (value: any) => string;
 }>();
 
+const isLabSection = (section: MaskedReviewSection) => section.title.startsWith("化验报告");
+const labMetrics = (section: MaskedReviewSection) => {
+  const value = section.entries.find(([key]) => key === "metrics")?.[1];
+  return Array.isArray(value) ? (value as Array<Record<string, any>>) : [];
+};
+const labMetaEntries = (section: MaskedReviewSection) => section.entries.filter(([key]) => key !== "metrics");
+
 defineEmits<{
   refresh: [];
   confirm: [];
   generate: [];
   download: [version: PreAiExportVersion];
   "update:statement": [value: string];
+  "update:criticalAcknowledged": [value: boolean];
 }>();
 </script>
 
@@ -157,6 +236,64 @@ defineEmits<{
 .ready-alert {
   margin-bottom: 14px;
 }
+.lab-risk-summary {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  margin-top: 15px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 12px;
+  background: var(--el-color-warning-light-9);
+}
+.lab-risk-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lab-risk-summary > header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lab-risk-summary > header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.lab-risk-summary small {
+  color: var(--el-text-color-secondary);
+}
+.lab-risk-list {
+  display: grid;
+  gap: 7px;
+}
+.lab-risk-list article {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto minmax(130px, auto) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 9px;
+  background: var(--el-bg-color);
+}
+.lab-risk-list article.critical {
+  border-color: var(--el-color-danger-light-3);
+  background: var(--el-color-danger-light-9);
+}
+.lab-risk-list article > div {
+  display: grid;
+  gap: 2px;
+}
+.critical-confirm {
+  padding-top: 10px;
+  border-top: 1px solid var(--el-color-danger-light-5);
+}
+.critical-confirm :deep(.el-checkbox__label) {
+  color: var(--el-color-danger-dark-2);
+  font-weight: 700;
+  white-space: normal;
+}
 .masked-preview {
   display: grid;
   gap: 14px;
@@ -170,6 +307,60 @@ defineEmits<{
 .masked-preview h4 {
   margin: 0 0 10px;
   color: var(--el-color-primary);
+}
+.lab-review-section {
+  background: var(--el-fill-color-lighter);
+}
+.lab-report-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+.lab-report-meta > div {
+  display: grid;
+  gap: 4px;
+}
+.lab-report-meta span,
+.metric-value small,
+.metric-name small {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.lab-metric-list {
+  display: grid;
+  gap: 8px;
+}
+.lab-metric-list article {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(170px, auto) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+}
+.lab-metric-list article.abnormal {
+  border-color: var(--el-color-warning-light-5);
+  background: var(--el-color-warning-light-9);
+}
+.lab-metric-list article.critical {
+  border-color: var(--el-color-danger-light-3);
+  background: var(--el-color-danger-light-9);
+}
+.metric-name,
+.metric-value {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.metric-value {
+  text-align: right;
+}
+.lab-empty {
+  margin: 0;
+  color: var(--el-text-color-secondary);
 }
 .read-only-grid {
   display: grid;
@@ -235,8 +426,26 @@ defineEmits<{
   .review-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .read-only-grid {
+  .lab-risk-summary > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .lab-risk-list article {
+    grid-template-columns: 1fr auto;
+  }
+  .read-only-grid,
+  .lab-report-meta {
     grid-template-columns: 1fr;
+  }
+  .lab-metric-list article {
+    grid-template-columns: 1fr auto;
+  }
+  .metric-value {
+    text-align: left;
+  }
+  .lab-metric-list article :deep(.el-tag) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 }
 </style>

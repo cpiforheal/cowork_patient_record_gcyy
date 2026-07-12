@@ -19,6 +19,10 @@ export const roleToDepartment: Record<UserRole, string> = {
   ultrasound: "B超/放射",
   inspection: "检查室",
   tcm: "中医科",
+  tcmPharmacyOperator: "中药房",
+  pharmacist: "中药房",
+  pharmacy: "中药房",
+  decoction: "中药房代煎室",
   doctor: "门诊",
   nurse: "治疗室",
   nursing: "护理部",
@@ -144,6 +148,24 @@ const seedRoles = (): RoleRow[] => [
     editableSections: ["auxiliary", "preOpScreening", "documentScope"]
   },
   {
+    id: "tcmPharmacyOperator",
+    name: "中药房业务岗",
+    role: "tcmPharmacyOperator",
+    members: 1,
+    desc: "仅处理中药房收费确认、审方、调剂、代煎、叫号和领取闭环，不开放患者档案及系统设置。",
+    permissions: [
+      "pharmacy:read",
+      "charge:confirm",
+      "review:execute",
+      "dispensing:execute",
+      "decoction:execute",
+      "pickup:execute",
+      "display:read",
+      "announcement:play"
+    ],
+    editableSections: []
+  },
+  {
     id: "doctor",
     name: "医生",
     role: "doctor",
@@ -231,6 +253,19 @@ const seedAccounts = (): AccountRow[] => [
     status: "启用",
     createdAt: "2026-06-10 08:00:00",
     updatedAt: "2026-06-10 08:00:00"
+  },
+  {
+    id: "tcm-pharmacy-operator",
+    username: "tcmpharmacy",
+    password: "TcmPharmacy@2026!",
+    name: "中药房业务岗",
+    department: roleToDepartment.tcmPharmacyOperator,
+    role: "tcmPharmacyOperator",
+    roleLabel: roleLabel("tcmPharmacyOperator"),
+    scope: "中药房收费、审方、调剂、代煎、叫号与领取闭环",
+    status: "启用",
+    createdAt: "2026-07-12 10:00:00",
+    updatedAt: "2026-07-12 10:00:00"
   }
 ];
 
@@ -374,7 +409,9 @@ export const hydrateDb = (db: ClinicDb) => {
   db.archive ??= {};
   db.documents ??= {};
   const existingAccounts = db.accounts ?? seedAccounts();
-  db.accounts = existingAccounts;
+  const builtinAccounts = seedAccounts();
+  const existingAccountIds = new Set(existingAccounts.map(account => account.id));
+  db.accounts = [...existingAccounts, ...builtinAccounts.filter(account => !existingAccountIds.has(account.id))];
   const defaultRoles = seedRoles();
   const hasCompleteRoleBaseline = defaultRoles.every(defaultRole => db.roles?.some(role => role.role === defaultRole.role));
   if (!db.roles?.every(role => role.id && role.role && typeof role.members === "number") || !hasCompleteRoleBaseline) {
@@ -409,8 +446,8 @@ export const hydrateDb = (db: ClinicDb) => {
 
   const seedAdmin = seedAccounts()[0];
   const isBuiltinAdminAccount = (account: AccountRow) => account.id === "admin" || account.username === "admin";
-  const storedAdmin = existingAccounts.find(isBuiltinAdminAccount);
-  const storedBusinessAccounts = existingAccounts.filter(account => !isBuiltinAdminAccount(account));
+  const storedAdmin = db.accounts.find(isBuiltinAdminAccount);
+  const storedBusinessAccounts = db.accounts.filter(account => !isBuiltinAdminAccount(account));
   const adminAccount: AccountRow = {
     ...seedAdmin,
     ...storedAdmin,
