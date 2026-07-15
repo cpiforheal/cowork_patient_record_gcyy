@@ -26,6 +26,15 @@ export interface DocumentPreviewLabReport {
   normalMetrics: DocumentPreviewLabMetric[];
 }
 
+export interface DocumentPreviewImage {
+  id: string;
+  fileName: string;
+  description?: string;
+  capturedAt?: string;
+  uploader?: string;
+  url?: string;
+}
+
 export interface DocumentPreviewSection {
   key: string;
   title: string;

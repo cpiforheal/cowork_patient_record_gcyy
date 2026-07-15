@@ -149,8 +149,6 @@
 
                 <el-dropdown-item command="assistant" :icon="ChatDotRound">患者助手</el-dropdown-item>
 
-                <el-dropdown-item command="medicalRecord" :disabled="medicalRecordLoading">医生目标病历</el-dropdown-item>
-
                 <el-dropdown-item v-if="canUseRoleViewFilter" command="inspection">检查室视图</el-dropdown-item>
 
                 <el-dropdown-item v-if="canUseRoleViewFilter" command="lab">化验报告视图</el-dropdown-item>
@@ -198,37 +196,35 @@
         class="health-archive-summary screen-only"
       >
         <article>
-          <span>当前流转</span>
+          <span>当前状态</span>
 
           <strong>{{ activeLifecycleStage.title }}</strong>
 
-          <small>
-            {{ activeLifecycleStage.department }} · 生命周期 {{ lifecycleProgress.completed }}/{{ lifecycleProgress.total }} 环
-          </small>
+          <small>{{ activeLifecycleStage.department }} · {{ fieldValues.overallRiskLevel || "风险待评估" }}</small>
         </article>
 
         <article>
-          <span>下次随访</span>
+          <span>下一计划</span>
 
-          <strong>{{ fieldValues.nextFollowupAt || "待安排" }}</strong>
+          <strong>{{ fieldValues.nextFollowupAt || latestFollowupRecord?.nextDate || "待安排" }}</strong>
 
-          <small>{{ followupRecords.length }} 条复查记录</small>
+          <small>{{ followupPendingSummary }}</small>
         </article>
 
         <article>
-          <span>当前关注</span>
+          <span>重点关注</span>
 
           <strong>{{ archiveFocusSummary }}</strong>
 
-          <small>{{ fieldValues.relationshipRisk || fieldValues.patientConcerns || "暂无风险提示" }}</small>
+          <small>{{ archiveRiskSummary }}</small>
         </article>
 
         <article>
-          <span>主观反馈</span>
+          <span>患者反馈</span>
 
           <strong>{{ fieldValues.patientSatisfaction || "待反馈" }}</strong>
 
-          <small>{{ fieldValues.patientPainLevel || "疼痛程度待记录" }}</small>
+          <small>{{ archiveFeedbackSummary }}</small>
         </article>
       </section>
 
@@ -255,9 +251,7 @@
         :class="{ 'is-flow-mode': detailWorkspaceMode === 'flow' }"
       >
         <DetailWorkspaceNav
-          v-show="detailWorkspaceMode !== 'flow'"
           :model-value="detailWorkspaceMode"
-          :medical-record-missing-count="medicalRecordMissingItems.length"
           :attachment-count="currentAttachments.length"
           :timeline-count="patientTimelineEvents.length"
           @change="switchDetailWorkspace"
@@ -293,74 +287,6 @@
               @open-attachments="openWorkflowRolePreviewAttachments"
               @focus-field="focusWorkflowPreviewField"
             />
-
-            <section v-else-if="detailWorkspaceMode === 'medicalRecord'" key="medicalRecord" class="doctor-record-workbench">
-              <div class="doctor-record-hero">
-                <div>
-                  <span>核心协作病历</span>
-
-                  <h3>目标病历协作工作台</h3>
-
-                  <p>前台、检查、化验、护理和医生共同维护目标病历字段；健康管理档案保留为完整档案和备用入口。</p>
-                </div>
-
-                <div class="doctor-record-progress">
-                  <strong>{{ medicalRecordCompletionPercent }}%</strong>
-
-                  <span>
-                    已填 {{ medicalRecordCompletedCount }}/{{ medicalRecordTotalCount }} · 入文档
-
-                    {{ medicalRecordDynamicFieldCount }} · 辅助确认
-
-                    {{ medicalRecordFormOnlyFieldCount }}
-                  </span>
-
-                  <i><em :style="{ width: `${medicalRecordCompletionPercent}%` }"></em></i>
-                </div>
-              </div>
-
-              <MedicalRecordWorkbench
-                variant="inline"
-                :loading="medicalRecordLoading"
-                :template-status="medicalRecordTemplate"
-                :missing-items="medicalRecordMissingItems"
-                :unbound-fields="medicalRecordUnboundFields"
-                :field-sections="medicalRecordFieldSections"
-                v-model:active-sections="medicalRecordActiveSections"
-                :field-values="fieldValues"
-                :current-role="currentRole"
-                :can-generate="canGenerateMedicalRecord"
-                :lab-report-values="fieldValues"
-                :patient-name="fieldValues.patientName"
-                :patient-gender="fieldValues.gender"
-                :visit-no="fieldValues.visitNo || patientId"
-                :focused-role-key="focusedMedicalRecordRoleKey"
-                :focused-role-label="focusedMedicalRecordRoleLabel"
-                :focused-field-keys="focusedMedicalRecordFieldKeys"
-                :current-record="currentMedicalRecord"
-                :versions="medicalRecordVersions"
-                :completed-count="medicalRecordCompletedCount"
-                :total-count="medicalRecordTotalCount"
-                :can-manage-versions="canManageMedicalRecordVersions"
-                :is-textarea-field="isMedicalRecordTextareaField"
-                :is-field-missing="isMedicalRecordFieldMissing"
-                :field-assist-text="medicalRecordFieldAssistText"
-                :field-source-hint="medicalRecordArchiveSourceHint"
-                :is-select-field="isMedicalRecordSelectField"
-                :field-options="medicalRecordFieldOptions"
-                :is-date-field="isMedicalRecordDateField"
-                :status-label="medicalRecordStatusLabel"
-                :status-type="medicalRecordStatusType"
-                @update-field="updateMedicalRecordField"
-                @precheck="() => precheckMedicalRecord()"
-                @save-workspace="() => saveMedicalRecordWorkspace()"
-                @sync-from-archive="fillMedicalRecordBlanksFromArchive"
-                @generate="generateMedicalRecord"
-                @download="openCurrentMedicalRecord"
-                @finalize="finalizeMedicalRecord"
-                @select-version="selectMedicalRecordVersion"
-              />
-            </section>
 
             <AttachmentWorkbench
               v-else-if="detailWorkspaceMode === 'attachments'"
@@ -1756,7 +1682,6 @@ type PatientDetailMoreCommand =
   | "timeline"
   | "ai"
   | "assistant"
-  | "medicalRecord"
   | "inspection"
   | "lab"
   | "copy";
@@ -1775,7 +1700,7 @@ const medicalRecordFirstRoles = new Set<UserRole>([
   "quality"
 ]);
 
-const detailWorkspaceMode = ref<DetailWorkspaceMode>("flow");
+const detailWorkspaceMode = ref<DetailWorkspaceMode>("archive");
 
 const activeWorkflowRoleKey = ref("");
 
@@ -2724,6 +2649,18 @@ const latestFollowupRecord = computed(() =>
   [...followupRecords.value].reverse().find(record => record.date || record.recovery || record.advice)
 );
 
+const pendingFollowupCount = computed(
+  () => followupRecords.value.filter(record => record.completed !== "已完成" && record.completed !== "已关闭").length
+);
+
+const followupPendingSummary = computed(() =>
+  pendingFollowupCount.value
+    ? `${pendingFollowupCount.value} 项随访待完成 · 共 ${followupRecords.value.length} 条记录`
+    : followupRecords.value.length
+      ? `已记录 ${followupRecords.value.length} 次随访`
+      : "尚未建立随访计划"
+);
+
 const archiveFocusSummary = computed(
   () =>
     fieldValues.primaryConcern ||
@@ -2732,6 +2669,15 @@ const archiveFocusSummary = computed(
     fieldValues.recoverySummary ||
     "待补充关注点"
 );
+
+const archiveRiskSummary = computed(
+  () => fieldValues.relationshipRisk || fieldValues.patientConcerns || fieldValues.familyConflict || "暂无明确风险提示"
+);
+
+const archiveFeedbackSummary = computed(() => {
+  const feedback = [fieldValues.patientPainLevel, fieldValues.emotionStatus, fieldValues.treatmentIntent].filter(Boolean);
+  return feedback.length ? feedback.join(" · ") : "疼痛、情绪与治疗意向待评估";
+});
 
 const completedCountForSections = (sections: RecordSection[]) =>
   sections.reduce((count, section) => count + sectionCompletedCount(section), 0);
@@ -2977,18 +2923,6 @@ const canEditMedicalRecordField = (field: MedicalRecordTemplateField) => {
 };
 
 const medicalRecordEditableFields = computed(() => medicalRecordFields.value.filter(canEditMedicalRecordField));
-
-const medicalRecordDynamicFieldCount = computed(
-  () => medicalRecordFields.value.filter(field => (field.targetUse || "dynamic") === "dynamic").length
-);
-
-const medicalRecordFormOnlyFieldCount = computed(
-  () => medicalRecordFields.value.filter(field => field.targetUse === "formOnly").length
-);
-
-const medicalRecordCompletionPercent = computed(() =>
-  medicalRecordTotalCount.value ? Math.round((medicalRecordCompletedCount.value / medicalRecordTotalCount.value) * 100) : 0
-);
 
 const medicalRecordFieldOptions = (field: MedicalRecordTemplateField) => ensureArray(field.options);
 
@@ -4039,23 +3973,6 @@ const focusWorkflowStage = async (stage: WorkflowStageNode) => {
   scrollToSection(targetSectionKey);
 };
 
-const applyMedicalRecordRoleFocus = (preview?: WorkflowRolePreview) => {
-  if (!preview) return;
-
-  focusedMedicalRecordRoleKey.value = preview.key;
-  focusedMedicalRecordRoleLabel.value = preview.title;
-  focusedMedicalRecordFieldKeys.value = preview.focusFieldKeys;
-
-  const activeSections = new Set(medicalRecordActiveSections.value);
-  medicalRecordFields.value
-    .filter(field => preview.focusFieldKeys.includes(field.key))
-    .forEach(field => activeSections.add(field.section));
-
-  if (activeSections.size) medicalRecordActiveSections.value = Array.from(activeSections);
-};
-
-const activeWorkflowRolePreview = () => patientRolePreviews.value.find(preview => preview.key === activeWorkflowRoleKey.value);
-
 const openWorkflowRolePreviewEdit = async (preview: WorkflowRolePreview) => {
   if (preview.primaryTarget === "attachments") {
     await switchDetailWorkspace("attachments");
@@ -4069,19 +3986,7 @@ const openWorkflowRolePreviewEdit = async (preview: WorkflowRolePreview) => {
       recordSectionsByRule.value.some(section => section.key === sectionKey)
     );
     if (targetSectionKey) scrollToSection(targetSectionKey);
-    return;
   }
-
-  applyMedicalRecordRoleFocus(preview);
-
-  await switchDetailWorkspace("medicalRecord");
-
-  await nextTick();
-
-  const firstTarget = preview.focusFieldKeys
-    .map(fieldKey => document.getElementById(`medical-record-field-${fieldKey}`))
-    .find(Boolean);
-  firstTarget?.scrollIntoView({ behavior: "smooth", block: "center" });
 };
 
 const openWorkflowRolePreviewAttachments = async () => {
@@ -4089,25 +3994,6 @@ const openWorkflowRolePreviewAttachments = async () => {
 };
 
 const focusWorkflowPreviewField = async (fieldKey: string) => {
-  const medicalField = medicalRecordFields.value.find(field => field.key === fieldKey);
-
-  if (medicalField) {
-    applyMedicalRecordRoleFocus(activeWorkflowRolePreview());
-
-    await switchDetailWorkspace("medicalRecord");
-
-    const activeSections = new Set(medicalRecordActiveSections.value);
-    activeSections.add(medicalField.section);
-    medicalRecordActiveSections.value = Array.from(activeSections);
-
-    await nextTick();
-
-    const target = document.getElementById(`medical-record-field-${fieldKey}`);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
-
-    return;
-  }
-
   const archiveContext = findSearchFieldContext(fieldKey);
   if (!archiveContext) return;
 
@@ -4203,11 +4089,6 @@ const handleMoreAction = (command: PatientDetailMoreCommand) => {
 
   if (command === "assistant") {
     patientAssistantVisible.value = true;
-    return;
-  }
-
-  if (command === "medicalRecord") {
-    void openMedicalRecord();
     return;
   }
 
@@ -4410,12 +4291,6 @@ const loadMedicalRecordWorkspace = async () => {
   }
 };
 
-const openMedicalRecord = async () => {
-  detailWorkspaceMode.value = "medicalRecord";
-
-  await loadMedicalRecordWorkspace();
-};
-
 const precheckMedicalRecord = async (showMessage = true) => {
   if (!patientId.value) return false;
 
@@ -4598,8 +4473,6 @@ const downloadMedicalRecord = async () => {
   if (msg) ElMessage.success(msg);
 };
 
-const openCurrentMedicalRecord = async () => downloadMedicalRecord();
-
 const selectMedicalRecordVersion = (record: GeneratedMedicalRecord) => {
   currentMedicalRecord.value = record;
 };
@@ -4607,11 +4480,7 @@ const selectMedicalRecordVersion = (record: GeneratedMedicalRecord) => {
 const switchDetailWorkspace = async (mode: DetailWorkspaceMode) => {
   detailWorkspaceMode.value = mode;
 
-  if (mode === "medicalRecord") {
-    await loadMedicalRecordWorkspace();
-  } else if (mode === "timeline") {
-    await refreshAuditTimeline();
-  }
+  if (mode === "timeline") await refreshAuditTimeline();
 };
 
 const openRoleView = async (view: RoleViewKey) => {
@@ -5033,8 +4902,6 @@ const saveMyFieldsAndBack = async () => {
 };
 
 const saveActiveMode = () => {
-  if (detailWorkspaceMode.value === "medicalRecord") return saveMedicalRecordWorkspace();
-
   if (detailWorkspaceMode.value !== "archive") return Promise.resolve(false);
 
   return recordViewMode.value === "mine" ? saveMyFields() : saveCurrentSection();
@@ -5196,10 +5063,8 @@ watch(fieldValues, () => {
   if (isHydratingRecord.value || detailLoading.value || detailError.value) return;
 
   const hasEditableField =
-    detailWorkspaceMode.value === "medicalRecord"
-      ? medicalRecordEditableFields.value.length > 0
-      : detailWorkspaceMode.value === "archive" &&
-        (recordViewMode.value === "mine" ? myEditableFields.value.length > 0 : activeSection.value.fields.some(isEditable));
+    detailWorkspaceMode.value === "archive" &&
+    (recordViewMode.value === "mine" ? myEditableFields.value.length > 0 : activeSection.value.fields.some(isEditable));
 
   if (hasEditableField) debouncedAutoSave(autoSaveScheduleToken, patientId.value);
 });

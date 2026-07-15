@@ -17,7 +17,17 @@
     "menuMange": ["menu:update"],
     "aiConfig": ["ai:config:read", "ai:config:update"],
     "aiAssistantAnalysis": ["ai:usage:read", "ai:template:candidate"],
-    "systemLog": ["audit:read"]
+    "systemLog": ["audit:read"],
+    "clinicQueueWorkbench": [
+      "queue:read",
+      "queue:issue",
+      "queue:intervene",
+      "inspection:operate",
+      "reception:operate",
+      "room:control",
+      "audit:read"
+    ],
+    "clinicQueueDisplayMenu": ["display:read", "announcement:play"]
   },
   "msg": "成功"
 }

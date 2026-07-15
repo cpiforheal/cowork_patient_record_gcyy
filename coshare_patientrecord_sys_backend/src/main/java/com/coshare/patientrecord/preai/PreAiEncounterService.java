@@ -2,6 +2,7 @@ package com.coshare.patientrecord.preai;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
+import com.coshare.patientrecord.clinicqueue.ClinicQueueService;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
 import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
@@ -86,6 +87,7 @@ public class PreAiEncounterService {
     private final ClinicDatabaseService clinicDatabaseService;
     private final ClinicFileService fileService;
     private final PreAiPrivacyService privacyService;
+    private final ClinicQueueService clinicQueueService;
     private final Path generatedDir;
 
     public PreAiEncounterService(
@@ -94,6 +96,7 @@ public class PreAiEncounterService {
         ClinicDatabaseService clinicDatabaseService,
         ClinicFileService fileService,
         PreAiPrivacyService privacyService,
+        ClinicQueueService clinicQueueService,
         @Value("${clinic.generated-pre-ai-dir:${clinic.attachment-dir}/../generated-pre-ai}") String generatedDir
     ) {
         this.jdbcTemplate = jdbcTemplate;
@@ -101,6 +104,7 @@ public class PreAiEncounterService {
         this.clinicDatabaseService = clinicDatabaseService;
         this.fileService = fileService;
         this.privacyService = privacyService;
+        this.clinicQueueService = clinicQueueService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
 
@@ -538,6 +542,7 @@ public class PreAiEncounterService {
         if ("DOCTOR".equals(stage)) syncEncounterBranch(encounterId, data, encounter);
         upsertStage(encounterId, stage, "COMPLETED", current.path("version").asInt(0) + 1, data, "", user, now());
         syncDiagnoses(encounterId, stage, data);
+        if (Set.of("INSPECTION", "RECEPTION").contains(stage)) clinicQueueService.onClinicalStageCompleted(encounterId, stage, user);
         if ("DOCTOR".equals(stage)) applySurgeryBranch(encounterId, data, user);
         invalidateReview(encounterId, user, "阶段重新完成");
         audit(encounterId, "stage.complete", stage, user, "完成阶段并交接下一岗位");

@@ -10,7 +10,7 @@ import {
   type WorkflowStageRuntimeStatus
 } from "./usePatientWorkflowTasks";
 
-type RolePreviewTarget = "medicalRecord" | "archive" | "attachments";
+type RolePreviewTarget = "archive" | "attachments";
 
 export type WorkflowRolePreviewField = {
   key: string;
@@ -144,8 +144,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "contactName",
       "contactPhone"
     ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护基础信息"
+    primaryTarget: "archive",
+    primaryActionLabel: "进入健康管理档案维护基础信息"
   },
   {
     key: "inspection",
@@ -184,8 +184,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "ecgResult",
       "colonoscopy"
     ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护检查所见"
+    primaryTarget: "attachments",
+    primaryActionLabel: "进入检查与附件查看上游资料"
   },
   {
     key: "reception",
@@ -212,8 +212,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
     contextTitle: "检查室传出结果",
     contextArchiveFieldKeys: ["inspectionBriefNote", "lithotomyExam", "digitalExam", "anoscope", "ecgResult", "colonoscopy"],
     contextMedicalFieldKeys: ["specialExamFullText", "ecgResult", "colonoscopy"],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护接诊建议"
+    primaryTarget: "archive",
+    primaryActionLabel: "进入健康管理档案维护接诊关注"
   },
   {
     key: "lab",
@@ -269,8 +269,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "postprandialGlucose",
       "postprandialGlucoseStatus"
     ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护化验字段"
+    primaryTarget: "attachments",
+    primaryActionLabel: "进入检查与附件查看化验资料"
   },
   {
     key: "doctorDecision",
@@ -344,8 +344,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "comorbiditySyndrome"
     ],
     includeRoleOwnedMedicalFields: false,
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历汇总/医生工作台"
+    primaryTarget: "archive",
+    primaryActionLabel: "进入健康管理档案维护诊疗计划"
   },
   {
     key: "treatment",
@@ -371,8 +371,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "postOpFirstRecordAt",
       "postOpRoundsJson"
     ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护治疗记录"
+    primaryTarget: "archive",
+    primaryActionLabel: "进入健康管理档案维护治疗变化"
   },
   {
     key: "followup",
@@ -392,14 +392,14 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "dischargeAdvice",
       "tcmCareAdvice"
     ],
-    primaryTarget: "medicalRecord",
-    primaryActionLabel: "进入目标病历维护护理随访"
+    primaryTarget: "archive",
+    primaryActionLabel: "进入健康管理档案维护护理随访"
   },
   {
     key: "quality",
     title: "质控/归档",
     subtitle: "完整度、阻塞项和归档准备",
-    description: "检查必填缺失、附件证据、关键字段和归档准备度，完整档案仍作为兜底审核入口。",
+    description: "检查必填缺失、附件证据、关键字段和归档准备度，形成健康管理档案闭环。",
     roles: ["quality", "admin", "doctor"],
     sectionKeys: ["qualityCheck", "documentScope", "dip"],
     medicalSections: ["DIP", "签名与日期"],

@@ -1,18 +1,13 @@
 <template>
   <aside class="detail-side-nav" aria-label="患者详情模块">
-    <button type="button" :class="{ active: modelValue === 'flow' }" @click="selectMode('flow')">
-      <strong>流程视图</strong>
-      <span>岗位卡片与右侧预览</span>
-    </button>
-
-    <button type="button" :class="{ active: modelValue === 'medicalRecord' }" @click="selectMode('medicalRecord')">
-      <strong>医生目标病历</strong>
-      <span>{{ medicalRecordMissingCount ? `${medicalRecordMissingCount} 项待补` : "多岗位协作填写" }}</span>
-    </button>
-
     <button type="button" :class="{ active: modelValue === 'archive' }" @click="selectMode('archive')">
-      <strong>健康管理档案</strong>
-      <span>管理、随访、协作字段</span>
+      <strong>健康管理总览</strong>
+      <span>状态、变化与随访计划</span>
+    </button>
+
+    <button type="button" :class="{ active: modelValue === 'flow' }" @click="selectMode('flow')">
+      <strong>岗位工作任务</strong>
+      <span>待办、风险与协作处理</span>
     </button>
 
     <button type="button" :class="{ active: modelValue === 'attachments' }" @click="selectMode('attachments')">
@@ -28,17 +23,15 @@
 </template>
 
 <script setup lang="ts">
-export type DetailWorkspaceMode = "flow" | "medicalRecord" | "archive" | "attachments" | "timeline";
+export type DetailWorkspaceMode = "flow" | "archive" | "attachments" | "timeline";
 
 interface Props {
   modelValue: DetailWorkspaceMode;
-  medicalRecordMissingCount: number;
   attachmentCount: number;
   timelineCount: number;
 }
 
 withDefaults(defineProps<Props>(), {
-  medicalRecordMissingCount: 0,
   attachmentCount: 0,
   timelineCount: 0
 });

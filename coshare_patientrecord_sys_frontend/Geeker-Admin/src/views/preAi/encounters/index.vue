@@ -163,6 +163,7 @@
               :visit-date="workspace.encounter.patient.visitDate"
               :route-label="routeLabel(workspace.encounter.route)"
               :sections="documentPreviewSections"
+              :inspection-images="inspectionPreviewImages"
             />
 
             <div v-else key="edit" class="editor-mode-content">
@@ -633,7 +634,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/modules/user";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
 import {
   completePreAiStageApi,
@@ -687,6 +688,7 @@ import { isLabMetricAbnormal, labMetricAbnormalLabel } from "./utils/labResult";
 import { buildDocumentPreviewSections, humanValue, nonEmptyEntries } from "./utils/previewBuilder";
 
 const userStore = useUserStore();
+const route = useRoute();
 const router = useRouter();
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
 const canCreateEncounter = computed(() => ["admin", "frontdesk"].includes(currentRole.value));
@@ -870,6 +872,16 @@ const selectedStageAttachments = computed(
 const inspectionImageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item)) || []
 );
+const inspectionPreviewImages = computed(() =>
+  inspectionImageAttachments.value.map(attachment => ({
+    id: attachment.id,
+    fileName: attachment.fileName,
+    description: attachment.description,
+    capturedAt: attachment.capturedAt || attachment.createdAt,
+    uploader: attachment.uploader,
+    url: workspaceImageUrls[attachment.id]
+  }))
+);
 const selectedAttachmentGroups = computed(() => groupAttachments(selectedStageAttachments.value, true));
 const maskedSections = computed(() => {
   if (!reviewPreview.value) return [];
@@ -1001,6 +1013,11 @@ const loadEncounterList = async () => {
     if (selectedPatientCaseId.value && !patientCases.value.some(item => item.id === selectedPatientCaseId.value)) {
       selectedPatientCaseId.value = "";
       selectedEncounterId.value = "";
+    }
+
+    const requestedEncounterId = String(route.query.id || route.query.encounterId || "").trim();
+    if (requestedEncounterId && requestedEncounterId !== selectedEncounterId.value) {
+      await selectEncounter(requestedEncounterId);
     }
   } catch (error: any) {
     ElMessage.error(error.message || "患者列表加载失败");

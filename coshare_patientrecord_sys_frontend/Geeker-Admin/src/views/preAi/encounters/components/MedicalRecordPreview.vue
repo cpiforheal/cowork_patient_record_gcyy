@@ -17,6 +17,38 @@
           <span>就诊分支：{{ routeLabel }}</span>
         </div>
       </header>
+      <section v-if="previewInspectionImages.length" class="document-section inspection-image-section">
+        <div class="inspection-image-heading">
+          <div>
+            <h3>检查室原始图片</h3>
+            <p>保留检查室上传的一手影像资料，点击图片可放大核对。</p>
+          </div>
+          <el-tag effect="plain">共 {{ previewInspectionImages.length }} 张</el-tag>
+        </div>
+        <div class="inspection-image-grid">
+          <figure v-for="image in previewInspectionImages" :key="image.id">
+            <el-image
+              v-if="image.url"
+              :src="image.url"
+              :preview-src-list="inspectionImageUrls"
+              :initial-index="inspectionImageUrls.indexOf(image.url)"
+              fit="cover"
+              preview-teleported
+              hide-on-click-modal
+            >
+              <template #error>
+                <div class="inspection-image-fallback">图片加载失败</div>
+              </template>
+            </el-image>
+            <div v-else class="inspection-image-fallback">图片加载中或暂不可用</div>
+            <figcaption>
+              <strong :title="image.fileName">{{ image.fileName }}</strong>
+              <span>{{ image.description || "检查室原始资料" }}</span>
+              <small>{{ image.capturedAt || "采集时间未记录" }} · {{ image.uploader || "检查室" }}</small>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
       <section v-for="section in sections" :key="section.key" class="document-section">
         <h3>{{ section.title }}</h3>
         <p v-if="section.note" class="document-section-note">{{ section.note }}</p>
@@ -78,14 +110,21 @@
 </template>
 
 <script setup lang="ts">
-import type { DocumentPreviewSection } from "../previewTypes";
+import { computed } from "vue";
+import type { DocumentPreviewImage, DocumentPreviewSection } from "../previewTypes";
 
-defineProps<{
+const props = defineProps<{
   caseToken: string;
   visitDate?: string;
   routeLabel: string;
   sections: DocumentPreviewSection[];
+  inspectionImages?: DocumentPreviewImage[];
 }>();
+
+const previewInspectionImages = computed(() => props.inspectionImages || []);
+const inspectionImageUrls = computed(() =>
+  previewInspectionImages.value.map(image => image.url).filter((url): url is string => Boolean(url))
+);
 </script>
 
 <style scoped lang="scss">
@@ -140,6 +179,68 @@ defineProps<{
 }
 .document-section {
   padding-top: 21px;
+}
+.inspection-image-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.inspection-image-heading h3 {
+  margin-bottom: 5px;
+}
+.inspection-image-heading p {
+  margin: 0;
+  color: #777;
+  font-size: 12px;
+}
+.inspection-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.inspection-image-grid figure {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #d9dde5;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.inspection-image-grid :deep(.el-image),
+.inspection-image-fallback {
+  display: flex;
+  width: 100%;
+  height: 150px;
+  align-items: center;
+  justify-content: center;
+  color: #8a9099;
+  font-size: 12px;
+  background: #eef1f4;
+}
+.inspection-image-grid :deep(.el-image) {
+  cursor: zoom-in;
+}
+.inspection-image-grid figcaption {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px 10px;
+}
+.inspection-image-grid figcaption strong,
+.inspection-image-grid figcaption span,
+.inspection-image-grid figcaption small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspection-image-grid figcaption strong {
+  font-size: 13px;
+}
+.inspection-image-grid figcaption span,
+.inspection-image-grid figcaption small {
+  color: #777;
+  font-size: 11px;
 }
 .document-section h3 {
   margin: 0 0 12px;

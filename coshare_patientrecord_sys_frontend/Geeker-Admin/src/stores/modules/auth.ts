@@ -19,7 +19,11 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    "/tcm-pharmacy",
+    "/tcm-pharmacy/clinic-queue",
+    "/tcm-pharmacy/clinic-queue/workbench",
+    "/tcm-pharmacy/clinic-queue/display"
   ],
   inspection: [
     "/home/index",
@@ -32,7 +36,23 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    "/tcm-pharmacy",
+    "/tcm-pharmacy/clinic-queue",
+    "/tcm-pharmacy/clinic-queue/workbench",
+    "/tcm-pharmacy/clinic-queue/display"
+  ],
+  reception: [
+    "/home/index",
+    "/patients",
+    "/patients/list",
+    "/patients/detail/:id",
+    "/encounters",
+    "/encounters/active",
+    "/tcm-pharmacy",
+    "/tcm-pharmacy/clinic-queue",
+    "/tcm-pharmacy/clinic-queue/workbench",
+    "/tcm-pharmacy/clinic-queue/display"
   ],
   lab: [
     "/home/index",
@@ -81,13 +101,14 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters",
     "/encounters/active",
     "/tcm-pharmacy",
+    "/tcm-pharmacy/tcm",
     "/tcm-pharmacy/workbench",
     "/tcm-pharmacy/display"
   ],
-  tcmPharmacyOperator: ["/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
-  pharmacist: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
-  pharmacy: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
-  decoction: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  tcmPharmacyOperator: ["/tcm-pharmacy", "/tcm-pharmacy/tcm", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  pharmacist: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/tcm", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  pharmacy: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/tcm", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
+  decoction: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/tcm", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
   doctor: [
     "/home/index",
     "/workbench/lab-report",
@@ -100,8 +121,12 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates/record",
     "/templates/ai-document",
     "/tcm-pharmacy",
+    "/tcm-pharmacy/tcm",
     "/tcm-pharmacy/workbench",
-    "/tcm-pharmacy/display"
+    "/tcm-pharmacy/display",
+    "/tcm-pharmacy/clinic-queue",
+    "/tcm-pharmacy/clinic-queue/workbench",
+    "/tcm-pharmacy/clinic-queue/display"
   ],
   nurse: [
     "/home/index",
@@ -157,7 +182,9 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:create", "patient:read", "patient:update"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload", "document:download"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload", "document:download"],
+    clinicQueueWorkbench: ["queue:read", "queue:issue", "queue:intervene", "room:control", "audit:read"],
+    clinicQueueDisplayMenu: ["display:read", "announcement:play"]
   },
   inspection: {
     home: ["view"],
@@ -166,7 +193,17 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    clinicQueueWorkbench: ["queue:read", "inspection:operate", "room:control", "audit:read"],
+    clinicQueueDisplayMenu: ["display:read", "announcement:play"]
+  },
+  reception: {
+    home: ["view"],
+    encounterActive: ["patient:read", "field:read"],
+    patientList: ["patient:read"],
+    patientDetail: ["field:read", "field:edit", "document:read"],
+    clinicQueueWorkbench: ["queue:read", "reception:operate", "room:control", "audit:read"],
+    clinicQueueDisplayMenu: ["display:read", "announcement:play"]
   },
   lab: {
     home: ["view"],
@@ -234,7 +271,9 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     patientList: ["patient:read"],
     patientDetail: ["field:read", "field:edit", "document:read", "document:download"],
     tcmPharmacyWorkbench: ["prescription:create", "prescription:submit", "pharmacy:read"],
-    tcmPharmacyDisplayMenu: ["display:read"]
+    tcmPharmacyDisplayMenu: ["display:read"],
+    clinicQueueWorkbench: ["queue:read", "reception:operate", "room:control", "audit:read"],
+    clinicQueueDisplayMenu: ["display:read", "announcement:play"]
   },
   nurse: {
     home: ["view"],
@@ -279,7 +318,14 @@ const filterMenuByRole = (menuList: Menu.MenuOptions[], role = "frontdesk") => {
       .map(item => {
         const children = item.children ? walk(item.children) : [];
         if (allowSet.has(item.path) || children.length) {
-          return { ...item, children: children.length ? children : item.children?.filter(child => allowSet.has(child.path)) };
+          const nextItem = {
+            ...item,
+            children: children.length ? children : item.children?.filter(child => allowSet.has(child.path))
+          };
+          if (nextItem.redirect && !allowSet.has(nextItem.redirect)) {
+            nextItem.redirect = children[0]?.redirect || children[0]?.path || nextItem.path;
+          }
+          return nextItem;
         }
         return null;
       })

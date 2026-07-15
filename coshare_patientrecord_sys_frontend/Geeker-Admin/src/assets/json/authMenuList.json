@@ -299,7 +299,7 @@
     {
       "path": "/tcm-pharmacy",
       "name": "tcmPharmacy",
-      "redirect": "/tcm-pharmacy/workbench",
+      "redirect": "/tcm-pharmacy/clinic-queue/workbench",
       "meta": {
         "icon": "FirstAidKit",
         "title": "中药房",
@@ -311,32 +311,92 @@
       },
       "children": [
         {
-          "path": "/tcm-pharmacy/workbench",
-          "name": "tcmPharmacyWorkbench",
-          "component": "/tcmPharmacy/workbench/index",
+          "path": "/tcm-pharmacy/tcm",
+          "name": "tcmPharmacyBusiness",
+          "redirect": "/tcm-pharmacy/workbench",
           "meta": {
-            "icon": "List",
-            "title": "业务工作台",
+            "icon": "MedicineBox",
+            "title": "中药房业务",
             "isLink": "",
             "isHide": false,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
-          }
+          },
+          "children": [
+            {
+              "path": "/tcm-pharmacy/workbench",
+              "name": "tcmPharmacyWorkbench",
+              "component": "/tcmPharmacy/workbench/index",
+              "meta": {
+                "icon": "List",
+                "title": "业务工作台",
+                "isLink": "",
+                "isHide": false,
+                "isFull": false,
+                "isAffix": false,
+                "isKeepAlive": true
+              }
+            },
+            {
+              "path": "/tcm-pharmacy/display",
+              "name": "tcmPharmacyDisplayMenu",
+              "component": "/tcmPharmacy/display/index",
+              "meta": {
+                "icon": "Monitor",
+                "title": "取药展示大屏",
+                "isLink": "",
+                "isHide": false,
+                "isFull": true,
+                "isAffix": false,
+                "isKeepAlive": false
+              }
+            }
+          ]
         },
         {
-          "path": "/tcm-pharmacy/display",
-          "name": "tcmPharmacyDisplayMenu",
-          "component": "/tcmPharmacy/display/index",
+          "path": "/tcm-pharmacy/clinic-queue",
+          "name": "clinicQueueBusiness",
+          "redirect": "/tcm-pharmacy/clinic-queue/workbench",
           "meta": {
-            "icon": "Monitor",
-            "title": "取药展示大屏",
+            "icon": "Guide",
+            "title": "检查接诊叫号",
             "isLink": "",
             "isHide": false,
-            "isFull": true,
+            "isFull": false,
             "isAffix": false,
-            "isKeepAlive": false
-          }
+            "isKeepAlive": true
+          },
+          "children": [
+            {
+              "path": "/tcm-pharmacy/clinic-queue/workbench",
+              "name": "clinicQueueWorkbench",
+              "component": "/clinicQueue/workbench/index",
+              "meta": {
+                "icon": "Connection",
+                "title": "双队列工作台",
+                "isLink": "",
+                "isHide": false,
+                "isFull": false,
+                "isAffix": false,
+                "isKeepAlive": true
+              }
+            },
+            {
+              "path": "/tcm-pharmacy/clinic-queue/display",
+              "name": "clinicQueueDisplayMenu",
+              "component": "/clinicQueue/display/index",
+              "meta": {
+                "icon": "Monitor",
+                "title": "检查接诊大屏",
+                "isLink": "",
+                "isHide": false,
+                "isFull": true,
+                "isAffix": false,
+                "isKeepAlive": false
+              }
+            }
+          ]
         }
       ]
     },
