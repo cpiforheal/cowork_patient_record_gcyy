@@ -285,8 +285,8 @@ public class PreAiPrivacyService {
 
     private String buildDocumentXml(ObjectNode masked) {
         StringBuilder body = new StringBuilder();
-        body.append(paragraph("中医肛肠医院住院病历自动生成资料", "Title"));
-        body.append(paragraph("依据前置流程已填写、已选择的事实生成；未选择候选项不输出。", "Subtitle"));
+        body.append(paragraph("中医肛肠医院住院病历自动生成表", "Title"));
+        body.append(paragraph("前置事实版（仅输出已填写、已选择内容）", "Subtitle"));
 
         JsonNode metadata = masked.path("metadata");
         JsonNode patient = masked.path("patient");
@@ -519,7 +519,31 @@ public class PreAiPrivacyService {
         List<String> present = lines.stream().filter(line -> line != null && !line.isBlank() && !line.endsWith("：")).toList();
         if (present.isEmpty()) return;
         body.append(paragraph(title, "Heading1"));
-        present.forEach(line -> body.append(paragraph(line, "Normal")));
+        body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
+            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/></w:tblBorders></w:tblPr>"
+            + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
+        body.append(tableRow("项目", "内容", true, false));
+        for (String line : present) {
+            int separator = line.indexOf('：');
+            String label = separator < 0 ? "说明" : line.substring(0, separator);
+            String value = separator < 0 ? line : line.substring(separator + 1);
+            body.append(tableRow(label, value, false, line.contains("【异常") || line.contains("【危急值")));
+        }
+        body.append("</w:tbl>");
+    }
+
+    private String tableRow(String label, String value, boolean header, boolean abnormal) {
+        return "<w:tr>" + tableCell(label, 2100, header, false) + tableCell(value, 6972, header, abnormal) + "</w:tr>";
+    }
+
+    private String tableCell(String value, int width, boolean header, boolean abnormal) {
+        String shading = header ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E7E6E6\"/>" : "";
+        String style = header ? "TableHeader" : abnormal ? "Abnormal" : "TableText";
+        return "<w:tc><w:tcPr><w:tcW w:w=\"" + width + "\" w:type=\"dxa\"/>" + shading
+            + "<w:tcMar><w:top w:w=\"80\" w:type=\"dxa\"/><w:left w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"80\" w:type=\"dxa\"/><w:right w:w=\"100\" w:type=\"dxa\"/></w:tcMar>"
+            + "<w:vAlign w:val=\"center\"/></w:tcPr>" + paragraph(value, style) + "</w:tc>";
     }
 
     private String paragraph(String value, String style) {
@@ -566,6 +590,7 @@ public class PreAiPrivacyService {
             String raw = value.asText("");
             if ("finalRoute".equals(key)) return routeLabel(raw);
             if ("treatmentPath".equals(key)) return treatmentPathLabel(raw);
+            if ("examinationTypes".equals(key)) return examinationTypeLabel(raw);
             if ("status".equals(key)) return switch (raw) {
                 case "NOT_DONE" -> "未查";
                 case "COMPLETED" -> "已查";
@@ -574,7 +599,25 @@ public class PreAiPrivacyService {
                 default -> raw;
             };
         }
+        if ("examinationTypes".equals(key) && value != null && value.isArray()) {
+            return java.util.stream.StreamSupport.stream(value.spliterator(), false)
+                .map(JsonNode::asText)
+                .map(this::examinationTypeLabel)
+                .filter(item -> !item.isBlank())
+                .reduce((left, right) -> left + "、" + right)
+                .orElse("");
+        }
         return displayValue(value);
+    }
+
+    private String examinationTypeLabel(String value) {
+        return switch (safe(value)) {
+            case "VISUAL" -> "视诊";
+            case "DIGITAL" -> "指诊";
+            case "ANOSCOPY" -> "肛门镜";
+            case "OTHER" -> "其他";
+            default -> safe(value);
+        };
     }
 
     private String displayValue(JsonNode value) {
