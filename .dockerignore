@@ -1,0 +1,9 @@
+.git
+.idea
+**/node_modules
+**/dist
+**/target
+release
+runtime
+outputs
+*.log

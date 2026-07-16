@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import jakarta.annotation.PostConstruct;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -31,6 +32,7 @@ import org.springframework.http.HttpStatus;
 
 @Service
 @Profile("mysql")
+@DependsOn("clinicDatabaseRepository")
 public class AuthSessionService {
 
     private static final Duration TOKEN_TTL = Duration.ofHours(12);

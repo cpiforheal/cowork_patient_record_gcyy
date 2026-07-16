@@ -44,13 +44,6 @@ public class PreAiPrivacyService {
         "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedOperationName", "plannedOperationSite", "plannedOperationPlan"),
         "SURGERY", List.of("actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings", "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff")
     );
-    private static final Map<String, String> STAGE_LABELS = Map.of(
-        "INSPECTION", "专科检查事实",
-        "RECEPTION", "主诉和现病情况",
-        "TCM", "中医四诊、病名、证候和治法",
-        "DOCTOR", "西医诊断与治疗方案",
-        "SURGERY", "实际手术情况"
-    );
     private static final Map<String, String> FIELD_LABELS = buildFieldLabels();
 
     private final ObjectMapper objectMapper;
@@ -257,38 +250,63 @@ public class PreAiPrivacyService {
 
     private String buildDocumentXml(ObjectNode masked) {
         StringBuilder body = new StringBuilder();
-        body.append(paragraph("中医肛肠医院住院病历自动生成资料", "Title"));
-        body.append(paragraph("依据前置流程已填写、已选择的事实生成；未选择候选项不输出。", "Subtitle"));
+        body.append(paragraph("中医肛肠医院住院病历自动生成表", "Title"));
+        body.append(paragraph("前置事实版（仅输出已填写、已选择内容）", "Subtitle"));
 
         JsonNode metadata = masked.path("metadata");
-        addSection(body, "脱敏病例标识及就诊信息", List.of(
-            line("病例标识", text(metadata, "caseToken")),
-            line("就诊日期", text(metadata, "visitDate")),
-            line("就诊分支", text(metadata, "route")),
-            line("治疗路径", text(metadata, "treatmentPath"))
+        JsonNode stages = masked.path("stages");
+        JsonNode reception = stages.path("RECEPTION");
+        addTableSection(body, "病例信息", List.of(
+            row("医院名称", "中医肛肠医院"),
+            row("科室", "肛肠科"),
+            row("病例标识", text(metadata, "caseToken")),
+            row("就诊日期", text(metadata, "visitDate")),
+            row("入院方式", text(metadata, "route")),
+            row("治疗类别", text(metadata, "treatmentPath")),
+            row("建议就诊分支", displayFieldValue("dispositionSuggestion", reception.path("dispositionSuggestion")))
         ));
 
         JsonNode patient = masked.path("patient");
-        addSection(body, "患者基础信息", nodeLines(patient));
+        addTableSection(body, "一、基础信息", nodeRows(patient, List.of(
+            "patientName", "gender", "age", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "registrationNote"
+        )));
 
-        JsonNode stages = masked.path("stages");
-        for (String stageCode : List.of("RECEPTION", "INSPECTION")) {
-            if (stages.has(stageCode)) addSection(body, STAGE_LABELS.get(stageCode), nodeLines(stages.path(stageCode)));
-        }
+        addTableSection(body, "二、主诉", nodeRows(reception, List.of("chiefComplaint", "symptomDuration")));
+        addTableSection(body, "三、现病史", nodeRows(reception, List.of(
+            "presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures",
+            "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"
+        )));
+        addTableSection(body, "四、既往史 / 个人史 / 婚育史 / 家族史", nodeRows(reception, List.of(
+            "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory",
+            "personalHistory", "maritalHistory", "familyHistory", "historySupplement"
+        )));
+
+        JsonNode tcm = stages.path("TCM");
+        addTableSection(body, "五、中医四诊", nodeRows(tcm, List.of(
+            "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"
+        )));
+
+        JsonNode inspection = stages.path("INSPECTION");
+        addTableSection(body, "六、专科检查", nodeRows(inspection, List.of(
+            "examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "visualFindings", "digitalExamFindings",
+            "anoscopyFindings", "otherFindings", "factualConclusion"
+        )));
+
+        List<DocumentRow> auxiliaryRows = new java.util.ArrayList<>();
         if (masked.has("auxiliaryTasks")) {
-            body.append(paragraph("辅助检查结果", "Heading1"));
-            int index = 1;
             for (JsonNode task : masked.path("auxiliaryTasks")) {
-                body.append(paragraph(index++ + ". " + auxiliaryTaskLabel(text(task, "taskType")) + optionalSuffix(text(task, "title")), "Heading2"));
-                nodeLines(task).stream().filter(line -> !line.startsWith("检查类型：") && !line.startsWith("任务名称：")).forEach(line -> body.append(paragraph(line, "Normal")));
+                String taskLabel = auxiliaryTaskLabel(text(task, "taskType")) + optionalSuffix(text(task, "title"));
+                for (String key : List.of("project", "sampledAt", "reportedAt", "result", "abnormalItems", "conclusion", "examinedAt", "findings", "modality", "bodyPart")) {
+                    String value = displayValue(task.path(key));
+                    if (!value.isBlank()) auxiliaryRows.add(row(taskLabel + " / " + FIELD_LABELS.getOrDefault(key, key), value));
+                }
             }
         }
+        String recommendedExams = displayValue(reception.path("recommendedAuxiliaryExams"));
+        if (!recommendedExams.isBlank()) auxiliaryRows.add(row("流程建议 / 建议辅助检查", recommendedExams));
         if (masked.has("labReports")) {
-            body.append(paragraph("化验室检验报告", "Heading1"));
-            int index = 1;
             for (JsonNode report : masked.path("labReports")) {
-                String title = index++ + ". " + text(report, "templateName") + optionalSuffix(text(report, "reportDate"));
-                body.append(paragraph(title, "Heading2"));
+                String title = text(report, "templateName") + optionalSuffix(text(report, "reportDate"));
                 for (JsonNode metric : report.path("metrics")) {
                     String name = text(metric, "name");
                     String shortName = text(metric, "shortName");
@@ -300,16 +318,36 @@ public class PreAiPrivacyService {
                     String severity = text(metric, "severity");
                     String marker = "CRITICAL".equals(severity) ? "【危急值·" + (abnormal.isBlank() ? "异常" : abnormal) + "】"
                         : abnormal.isBlank() ? "" : "【异常·" + abnormal + "】";
-                    String line = label + "：" + value + unit + marker + (reference.isBlank() ? "" : "；参考范围：" + reference);
-                    body.append(paragraph(line, abnormal.isBlank() ? "Normal" : "Abnormal"));
+                    String result = value + unit + marker + (reference.isBlank() ? "" : "；参考范围：" + reference);
+                    auxiliaryRows.add(row(title + " / " + label, result, !abnormal.isBlank() || "CRITICAL".equals(severity)));
                 }
-                if (!text(report, "remark").isBlank()) body.append(paragraph("备注：" + text(report, "remark"), "Normal"));
+                if (!text(report, "remark").isBlank()) auxiliaryRows.add(row(title + " / 备注", text(report, "remark")));
             }
         }
-        for (String stageCode : List.of("TCM", "DOCTOR", "SURGERY")) {
-            if (stages.has(stageCode)) addSection(body, STAGE_LABELS.get(stageCode), nodeLines(stages.path(stageCode)));
-        }
-        addSection(body, "医生复核信息", nodeLines(masked.path("review")));
+        addTableSection(body, "七、辅助检查", auxiliaryRows);
+
+        JsonNode doctor = stages.path("DOCTOR");
+        List<DocumentRow> diagnoses = new java.util.ArrayList<>(nodeRows(tcm, List.of("tcmDisease", "primarySyndrome")));
+        diagnoses.addAll(nodeRows(doctor, List.of("primaryWesternDiagnosis", "diagnosisBasis")));
+        addTableSection(body, "八、中西医主诊断", diagnoses);
+        addTableSection(body, "九、次诊断（已选择）", nodeRows(doctor, List.of("secondaryWesternDiagnoses", "differentialDiagnoses")));
+        addTableSection(body, "十、合并病中医病名及证型", nodeRows(tcm, List.of("concurrentSyndrome")));
+
+        JsonNode surgery = stages.path("SURGERY");
+        List<DocumentRow> operations = new java.util.ArrayList<>(nodeRows(doctor, List.of(
+            "plannedOperationName", "plannedOperationSite", "plannedOperationPlan"
+        )));
+        operations.addAll(nodeRows(surgery, List.of(
+            "actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings",
+            "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff"
+        )));
+        addTableSection(body, "十一、手术 / 操作信息", operations);
+        addTableSection(body, "十二、DIP 病组与治疗路径", nodeRows(doctor, List.of(
+            "finalRoute", "treatmentPath", "treatmentPlan"
+        )));
+        List<DocumentRow> reviewRows = new java.util.ArrayList<>(nodeRows(masked.path("review"), List.of("reviewedAt", "reviewerRole", "statement")));
+        reviewRows.addAll(nodeRows(reception, List.of("reviewOpinion", "nextStepRecommendation")));
+        addTableSection(body, "医生复核", reviewRows);
 
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
             + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
@@ -318,23 +356,69 @@ public class PreAiPrivacyService {
             + "</w:body></w:document>";
     }
 
-    private List<String> nodeLines(JsonNode node) {
-        Map<String, String> lines = new LinkedHashMap<>();
+    private List<DocumentRow> nodeRows(JsonNode node, List<String> keys) {
         if (node == null || !node.isObject()) return List.of();
-        node.fields().forEachRemaining(entry -> {
-            if (isEmpty(entry.getValue())) return;
-            String label = FIELD_LABELS.getOrDefault(entry.getKey(), entry.getKey());
-            String value = displayValue(entry.getValue());
-            if (!value.isBlank()) lines.put(label, value);
-        });
-        return lines.entrySet().stream().map(entry -> line(entry.getKey(), entry.getValue())).toList();
+        List<DocumentRow> rows = new java.util.ArrayList<>();
+        for (String key : keys) {
+            String value = displayFieldValue(key, node.path(key));
+            if (!value.isBlank()) rows.add(row(FIELD_LABELS.getOrDefault(key, key), value));
+        }
+        return rows;
     }
 
-    private void addSection(StringBuilder body, String title, List<String> lines) {
-        List<String> present = lines.stream().filter(line -> line != null && !line.isBlank() && !line.endsWith("：")).toList();
+    private String displayFieldValue(String key, JsonNode value) {
+        String display = displayValue(value);
+        return switch (key) {
+            case "finalRoute", "dispositionSuggestion" -> routeLabel(display);
+            case "treatmentPath" -> treatmentPathLabel(display);
+            case "examinationTypes" -> java.util.stream.StreamSupport.stream(value.spliterator(), false)
+                .map(JsonNode::asText)
+                .map(item -> switch (item) {
+                    case "VISUAL" -> "视诊";
+                    case "DIGITAL" -> "指诊";
+                    case "ANOSCOPY" -> "肛门镜";
+                    case "OTHER" -> "其他";
+                    default -> item;
+                })
+                .filter(item -> !item.isBlank())
+                .reduce((left, right) -> left + "、" + right)
+                .orElse("");
+            default -> display;
+        };
+    }
+
+    private void addTableSection(StringBuilder body, String title, List<DocumentRow> rows) {
+        List<DocumentRow> present = rows.stream().filter(row -> row != null && !safe(row.value()).isBlank()).toList();
         if (present.isEmpty()) return;
         body.append(paragraph(title, "Heading1"));
-        present.forEach(line -> body.append(paragraph(line, "Normal")));
+        body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
+            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/></w:tblBorders></w:tblPr>"
+            + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
+        body.append(tableRow("项目", "内容", true, false));
+        present.forEach(row -> body.append(tableRow(row.label(), row.value(), false, row.abnormal())));
+        body.append("</w:tbl>");
+    }
+
+    private String tableRow(String label, String value, boolean header, boolean abnormal) {
+        return "<w:tr>" + tableCell(label, 2100, header, false) + tableCell(value, 6972, header, abnormal) + "</w:tr>";
+    }
+
+    private String tableCell(String value, int width, boolean header, boolean abnormal) {
+        String shading = header ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E7E6E6\"/>" : "";
+        String style = header ? "TableHeader" : abnormal ? "Abnormal" : "TableText";
+        return "<w:tc><w:tcPr><w:tcW w:w=\"" + width + "\" w:type=\"dxa\"/>" + shading
+            + "<w:tcMar><w:top w:w=\"80\" w:type=\"dxa\"/><w:left w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"80\" w:type=\"dxa\"/><w:right w:w=\"100\" w:type=\"dxa\"/></w:tcMar>"
+            + "<w:vAlign w:val=\"center\"/></w:tcPr>" + paragraph(value, style) + "</w:tc>";
+    }
+
+    private DocumentRow row(String label, String value) {
+        return row(label, value, false);
+    }
+
+    private DocumentRow row(String label, String value, boolean abnormal) {
+        return new DocumentRow(label, safe(value), abnormal);
     }
 
     private String paragraph(String value, String style) {
@@ -398,6 +482,7 @@ public class PreAiPrivacyService {
         }
         for (Map.Entry<String, String> entry : sensitive.entrySet()) {
             String value = entry.getValue();
+            if ("address".equals(entry.getKey()) && value.equals(coarseAddress(value))) continue;
             int minimum = Set.of("patientName", "contactName").contains(entry.getKey()) ? 2 : 5;
             if (value.length() >= minimum && documentXml.contains(xml(value))) {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "脱敏泄漏检查未通过：" + entry.getKey());
@@ -450,12 +535,13 @@ public class PreAiPrivacyService {
     private String stylesXml() {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
             + "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
-            + "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:rPr><w:rFonts w:eastAsia=\"宋体\"/><w:sz w:val=\"22\"/></w:rPr><w:pPr><w:spacing w:after=\"120\" w:line=\"360\" w:lineRule=\"auto\"/></w:pPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"280\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"36\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"300\"/></w:pPr><w:rPr><w:color w:val=\"666666\"/><w:sz w:val=\"19\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"260\" w:after=\"140\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"28\"/><w:color w:val=\"1F4E78\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"180\" w:after=\"100\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"24\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Abnormal\"><w:name w:val=\"Abnormal\"/><w:basedOn w:val=\"Normal\"/><w:rPr><w:b/><w:color w:val=\"C00000\"/></w:rPr><w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"FDE9E7\"/></w:pPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:rPr><w:rFonts w:ascii=\"SimSun\" w:hAnsi=\"SimSun\" w:eastAsia=\"宋体\"/><w:sz w:val=\"21\"/></w:rPr><w:pPr><w:spacing w:after=\"80\" w:line=\"320\" w:lineRule=\"auto\"/></w:pPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"120\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"32\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"180\"/></w:pPr><w:rPr><w:color w:val=\"595959\"/><w:sz w:val=\"18\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"220\" w:after=\"80\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"25\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableText\"><w:name w:val=\"Table Text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:sz w:val=\"20\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableHeader\"><w:name w:val=\"Table Header\"/><w:basedOn w:val=\"TableText\"/><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Abnormal\"><w:name w:val=\"Abnormal\"/><w:basedOn w:val=\"TableText\"/><w:rPr><w:b/><w:color w:val=\"C00000\"/></w:rPr></w:style>"
             + "</w:styles>";
     }
 
@@ -554,10 +640,6 @@ public class PreAiPrivacyService {
         if (value != null && !value.isBlank()) node.put(key, value);
     }
 
-    private String line(String label, String value) {
-        return safe(value).isBlank() ? "" : label + "：" + value;
-    }
-
     private String optionalSuffix(String value) {
         return safe(value).isBlank() ? "" : "｜" + value;
     }
@@ -575,6 +657,8 @@ public class PreAiPrivacyService {
     private String safe(String value) {
         return value == null ? "" : value.trim();
     }
+
+    private record DocumentRow(String label, String value, boolean abnormal) {}
 }
 
 

@@ -128,6 +128,10 @@
 
           <el-button v-else type="primary" @click="submitArchive">提交档案审核</el-button>
 
+          <el-button v-if="canGenerateMedicalRecord" :loading="medicalRecordLoading" @click="openMedicalRecord">
+            生成目标病历
+          </el-button>
+
           <el-button type="primary" :icon="Printer" @click="openPreviewThenPrint">打印/PDF</el-button>
 
           <el-dropdown trigger="click" @command="handleMoreAction">
@@ -4289,6 +4293,12 @@ const loadMedicalRecordWorkspace = async () => {
   } finally {
     medicalRecordLoading.value = false;
   }
+};
+
+const openMedicalRecord = async () => {
+  medicalRecordVisible.value = true;
+
+  await loadMedicalRecordWorkspace();
 };
 
 const precheckMedicalRecord = async (showMessage = true) => {

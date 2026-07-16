@@ -2,6 +2,7 @@ package com.coshare.patientrecord.preai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,9 +10,11 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 class PreAiPrivacyServiceTests {
 
@@ -45,9 +48,21 @@ class PreAiPrivacyServiceTests {
         String documentXml = unzipEntry(docx, "word/document.xml");
 
         assertTrue(docx.length > 1000);
-        assertTrue(documentXml.contains("中医肛肠医院住院病历自动生成资料"));
+        assertTrue(documentXml.contains("中医肛肠医院住院病历自动生成表"));
+        for (String heading : List.of(
+            "一、基础信息", "二、主诉", "三、现病史", "四、既往史 / 个人史 / 婚育史 / 家族史", "五、中医四诊", "六、专科检查",
+            "七、辅助检查", "八、中西医主诊断", "九、次诊断（已选择）", "十、合并病中医病名及证型", "十一、手术 / 操作信息", "十二、DIP 病组与治疗路径"
+        )) assertTrue(documentXml.contains(heading), heading);
+        assertTrue(documentXml.contains("<w:tbl>"));
         assertTrue(documentXml.contains("便血3月"));
         assertTrue(documentXml.contains("周xx"));
+        assertTrue(documentXml.contains("视诊、指诊"));
+        assertFalse(documentXml.contains("VISUAL"));
+        assertFalse(documentXml.contains("INPATIENT"));
+        assertFalse(documentXml.contains("SURGICAL"));
+        assertTrue(documentXml.contains("输血史"));
+        assertFalse(documentXml.contains("慢性病及重要既往史"));
+        assertFalse(documentXml.contains("□"));
         assertFalse(documentXml.contains("周明华"));
         assertFalse(documentXml.contains("13812345678"));
         assertFalse(documentXml.contains("411525199001011234"));
@@ -91,13 +106,21 @@ class PreAiPrivacyServiceTests {
         empty.put("name", "未填写指标");
         empty.put("value", "");
         empty.put("reference", "1-2");
+        ObjectNode negative = report.withArray("metrics").addObject();
+        negative.put("name", "艾滋病抗体");
+        negative.put("value", "阴性");
+        negative.put("reference", "阴性");
 
         ObjectNode masked = service.maskWorkspace(workspace);
         String documentXml = unzipEntry(service.renderDocx(masked, workspace), "word/document.xml");
 
         assertEquals("偏高", masked.path("labReports").path(0).path("metrics").path(0).path("abnormal").asText());
         assertEquals("ABNORMAL", masked.path("labReports").path(0).path("metrics").path(0).path("severity").asText());
-        assertTrue(documentXml.contains("白细胞：12.510^9/L【异常·偏高】"));
+        assertTrue(documentXml.contains("白细胞"));
+        assertTrue(documentXml.contains("12.510^9/L"));
+        assertTrue(documentXml.contains("【异常·偏高】"));
+        assertTrue(documentXml.contains("艾滋病抗体"));
+        assertTrue(documentXml.contains("阴性"));
         assertFalse(documentXml.contains("未填写指标"));
     }
 
@@ -121,7 +144,9 @@ class PreAiPrivacyServiceTests {
         String documentXml = unzipEntry(service.renderDocx(masked, workspace), "word/document.xml");
 
         assertEquals("CRITICAL", masked.path("labReports").path(0).path("metrics").path(0).path("severity").asText());
-        assertTrue(documentXml.contains("血红蛋白：45g/L【危急值·偏低】"));
+        assertTrue(documentXml.contains("血红蛋白"));
+        assertTrue(documentXml.contains("45g/L"));
+        assertTrue(documentXml.contains("【危急值·偏低】"));
     }
 
     @Test
@@ -129,6 +154,26 @@ class PreAiPrivacyServiceTests {
         assertEquals("欧阳xx", service.maskName("欧阳明"));
         assertEquals("已脱敏", service.maskPhone("12345"));
         assertEquals("已脱敏", service.coarseAddress("幸福路88号2单元"));
+    }
+
+    @Test
+    void rendersWhenRawAddressIsAlreadyCoarse() {
+        ObjectNode workspace = sampleWorkspace();
+        ((ObjectNode) workspace.path("encounter").path("patient")).put("address", "河南省信阳市");
+
+        ObjectNode masked = service.maskWorkspace(workspace);
+
+        assertEquals("河南省信阳市", masked.path("patient").path("address").asText());
+        assertTrue(service.renderDocx(masked, workspace).length > 1000);
+    }
+
+    @Test
+    void rejectsMaskedWorkspaceThatStillContainsDetailedAddress() {
+        ObjectNode workspace = sampleWorkspace();
+        ObjectNode masked = service.maskWorkspace(workspace);
+        ((ObjectNode) masked.path("patient")).put("address", "河南省固始县城关镇幸福路88号2单元");
+
+        assertThrows(ResponseStatusException.class, () -> service.renderDocx(masked, workspace));
     }
 
     private ObjectNode sampleWorkspace() {
@@ -164,11 +209,13 @@ class PreAiPrivacyServiceTests {
         reception.putArray("familyHistory").add("否认遗传病家族史").add("否认肿瘤家族史");
         addStage(stages, "RECEPTION", "COMPLETED", reception);
         ObjectNode inspection = objectMapper.createObjectNode();
+        inspection.putArray("examinationTypes").add("VISUAL").add("DIGITAL");
         inspection.put("factualConclusion", "截石位见肛缘肿物");
         addStage(stages, "INSPECTION", "COMPLETED", inspection);
         ObjectNode tcm = objectMapper.createObjectNode();
         tcm.put("tcmDisease", "痔病");
         tcm.put("primarySyndrome", "湿热下注证");
+        tcm.putArray("concurrentSyndrome").add("气虚");
         tcm.put("inspection", "面色尚可");
         tcm.put("inquiry", "便血色鲜");
         tcm.put("tongue", "舌红苔黄腻");
@@ -176,7 +223,10 @@ class PreAiPrivacyServiceTests {
         tcm.put("treatmentPrinciple", "清热利湿");
         addStage(stages, "TCM", "COMPLETED", tcm);
         ObjectNode doctor = objectMapper.createObjectNode();
+        doctor.put("finalRoute", "INPATIENT");
+        doctor.put("treatmentPath", "SURGICAL");
         doctor.put("primaryWesternDiagnosis", "混合痔");
+        doctor.putArray("secondaryWesternDiagnoses").add("直肠炎");
         doctor.put("treatmentPlan", "拟择期手术治疗");
         addStage(stages, "DOCTOR", "COMPLETED", doctor);
         ObjectNode surgery = objectMapper.createObjectNode();
@@ -187,7 +237,11 @@ class PreAiPrivacyServiceTests {
         surgery.put("postoperativeHandoff", "生命体征平稳，送回病房");
         addStage(stages, "SURGERY", "COMPLETED", surgery);
 
-        workspace.putArray("auxiliaryTasks");
+        ObjectNode ecgTask = workspace.putArray("auxiliaryTasks").addObject();
+        ecgTask.put("taskType", "ECG");
+        ecgTask.put("status", "COMPLETED");
+        ecgTask.put("title", "心电图");
+        ecgTask.putObject("data").put("result", "窦性心律");
         workspace.putArray("labReports");
         ObjectNode attachment = workspace.putArray("attachments").addObject();
         attachment.put("fileName", "周明华-原始照片.jpg");
