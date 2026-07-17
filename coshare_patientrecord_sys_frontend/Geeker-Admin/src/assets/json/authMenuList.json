@@ -351,6 +351,20 @@
           }
         },
         {
+          "path": "/inventory/packages",
+          "name": "inventoryPackages",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "CollectionTag",
+            "title": "使用套餐与自动扣减",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
           "path": "/inventory/controls",
           "name": "inventoryControls",
           "component": "/inventory/manage/index",

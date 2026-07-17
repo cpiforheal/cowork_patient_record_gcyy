@@ -108,6 +108,56 @@ export interface InventoryMovement {
   createdAt: string;
 }
 
+export type InventoryCareType = "outpatient" | "inpatient";
+export type InventoryPackageStatus = "draft" | "enabled" | "disabled";
+// The current automatic-consumption workflow is triggered once per visit.
+// Keep the type narrow until admission/day/procedure triggers are implemented.
+export type InventoryConsumptionMode = "per_visit";
+
+export interface InventoryPackageLine {
+  id?: string;
+  itemId: string;
+  quantity: number;
+  consumptionMode?: InventoryConsumptionMode;
+}
+
+export interface InventoryPackage {
+  id: string;
+  name: string;
+  department: string;
+  careType: InventoryCareType;
+  version?: number | string;
+  status: InventoryPackageStatus;
+  effectiveDate?: string;
+  operator?: string;
+  createdAt?: string;
+  lines: InventoryPackageLine[];
+}
+
+export interface InventoryConsumptionDetail {
+  id?: string;
+  itemId?: string;
+  quantity?: number;
+  batchId?: string;
+  errorMessage?: string;
+}
+
+export interface InventoryConsumptionEvent {
+  id: string;
+  encounterId: string;
+  caseToken?: string;
+  route: string;
+  department: string;
+  visitDate: string;
+  packageId?: string;
+  packageName?: string;
+  status: "pending" | "success" | "succeeded" | "failed" | "reversed";
+  errorMessage?: string;
+  operator?: string;
+  createdAt?: string;
+  details?: InventoryConsumptionDetail[];
+}
+
 export interface InventoryAuditLog {
   id: string;
   operator: string;
@@ -135,6 +185,8 @@ export interface InventoryDb {
   weeklyConsumptions: WeeklyConsumption[];
   counts: InventoryCount[];
   movements: InventoryMovement[];
+  packages: InventoryPackage[];
+  consumptionEvents: InventoryConsumptionEvent[];
   auditLogs: InventoryAuditLog[];
   summary: InventorySummary;
 }
@@ -205,6 +257,21 @@ export interface InventoryCountParams {
   reason: string;
 }
 
+export interface SaveInventoryPackageParams {
+  id?: string;
+  name: string;
+  department: string;
+  careType: InventoryCareType;
+  effectiveDate?: string;
+  lines: InventoryPackageLine[];
+  operator?: string;
+}
+
+export interface InventoryPackageActionParams {
+  id: string;
+  operator?: string;
+}
+
 const parseInventoryJson = async (result: Response) => {
   if (result.status === 401) {
     handleUnauthorizedResponse();
@@ -270,6 +337,14 @@ const normalizeDb = (db: InventoryDb): InventoryDb => ({
     differenceQuantity: normalizeNumber(row.differenceQuantity)
   })),
   movements: (db.movements ?? []).map(row => ({ ...row, quantity: normalizeNumber(row.quantity) })),
+  packages: (db.packages ?? []).map(row => ({
+    ...row,
+    lines: (row.lines ?? []).map(line => ({ ...line, quantity: normalizeNumber(line.quantity) }))
+  })),
+  consumptionEvents: (db.consumptionEvents ?? []).map(row => ({
+    ...row,
+    details: (row.details ?? []).map(detail => ({ ...detail, quantity: normalizeNumber(detail.quantity) }))
+  })),
   auditLogs: db.auditLogs ?? [],
   summary: {
     itemCount: normalizeNumber(db.summary?.itemCount),
@@ -338,3 +413,15 @@ export const returnOrScrapInventoryApi = async (params: ReturnOrScrapParams) =>
 
 export const countInventoryApi = async (params: InventoryCountParams) =>
   response(await postInventory("/counts", params), "盘点结果已记录");
+
+export const saveInventoryPackageApi = async (params: SaveInventoryPackageParams) =>
+  response(await postInventory("/packages", params), "使用套餐草稿已保存");
+
+export const enableInventoryPackageApi = async (params: InventoryPackageActionParams) =>
+  response(await postInventory("/packages/enable", params), "使用套餐已启用");
+
+export const disableInventoryPackageApi = async (params: InventoryPackageActionParams) =>
+  response(await postInventory("/packages/disable", params), "使用套餐已停用");
+
+export const retryInventoryConsumptionEventApi = async (params: InventoryPackageActionParams) =>
+  response(await postInventory("/consumption-events/retry", params), "自动消耗事件已重试");

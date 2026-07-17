@@ -5,13 +5,20 @@ import { getFlatMenuList, getShowMenuList, getAllBreadcrumbList } from "@/utils"
 import { useUserStore } from "@/stores/modules/user";
 
 const AI_DOCUMENT_MENU_PATHS = ["/templates", "/templates/ai-document"];
-const INVENTORY_STAFF_MENU_PATHS = ["/inventory", "/inventory/overview", "/inventory/requests", "/inventory/weekly"];
+const INVENTORY_STAFF_MENU_PATHS = [
+  "/inventory",
+  "/inventory/overview",
+  "/inventory/requests",
+  "/inventory/weekly",
+  "/inventory/packages"
+];
 const INVENTORY_QUALITY_MENU_PATHS = [
   "/inventory",
   "/inventory/overview",
   "/inventory/executive",
   "/inventory/requests",
   "/inventory/weekly",
+  "/inventory/packages",
   "/inventory/controls",
   "/inventory/trace"
 ];
@@ -190,13 +197,21 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates/ai-document",
     ...INVENTORY_STAFF_MENU_PATHS
   ],
-  manager: ["/home/index", ...AI_DOCUMENT_MENU_PATHS, "/inventory", "/inventory/overview", "/inventory/executive"]
+  manager: [
+    "/home/index",
+    ...AI_DOCUMENT_MENU_PATHS,
+    "/inventory",
+    "/inventory/overview",
+    "/inventory/executive",
+    "/inventory/packages"
+  ]
 };
 
 const INVENTORY_STAFF_BUTTONS = {
   inventoryOverview: ["inventory:read", "inventory:request", "inventory:receive"],
   inventoryRequests: ["inventory:read", "inventory:request", "inventory:receive"],
-  inventoryWeekly: ["inventory:read", "inventory:request"]
+  inventoryWeekly: ["inventory:read", "inventory:request"],
+  inventoryPackages: ["inventory:read"]
 };
 
 const INVENTORY_QUALITY_BUTTONS = {
@@ -205,7 +220,8 @@ const INVENTORY_QUALITY_BUTTONS = {
   inventoryRequests: ["inventory:read", "inventory:approve", "inventory:export"],
   inventoryWeekly: ["inventory:read", "inventory:count", "inventory:export"],
   inventoryControls: ["inventory:read", "inventory:count", "inventory:export"],
-  inventoryTrace: ["inventory:read", "inventory:export"]
+  inventoryTrace: ["inventory:read", "inventory:export"],
+  inventoryPackages: ["inventory:read", "inventory:approve"]
 };
 
 const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
@@ -346,6 +362,13 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     ...INVENTORY_QUALITY_BUTTONS,
     auditReview: ["audit:read", "quality:approve", "quality:reject"],
     auditLog: ["audit:read", "audit:export"]
+  },
+  manager: {
+    home: ["view"],
+    aiDocumentGenerator: ["document:generate"],
+    inventoryOverview: ["inventory:read"],
+    inventoryExecutive: ["inventory:read", "inventory:export"],
+    inventoryPackages: ["inventory:read"]
   }
 };
 

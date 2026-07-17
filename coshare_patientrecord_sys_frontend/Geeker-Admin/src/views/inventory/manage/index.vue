@@ -173,6 +173,21 @@
             />
           </template>
 
+          <template v-else-if="activeTab === 'packages'">
+            <PackagePanel
+              :packages="visiblePackages"
+              :events="visibleConsumptionEvents"
+              :items="db.items"
+              :department-options="departmentOptions"
+              :can-manage="canManagePackages"
+              :saving="saving"
+              @save="savePackage"
+              @enable="enablePackage"
+              @disable="disablePackage"
+              @retry="retryConsumptionEvent"
+            />
+          </template>
+
           <template v-else-if="activeTab === 'trace'">
             <TracePanel
               v-model:keyword="traceFilters.keyword"
@@ -424,12 +439,19 @@ import {
   returnOrScrapInventoryApi,
   saveInventoryItemApi,
   saveWeeklyConsumptionApi,
+  saveInventoryPackageApi,
+  enableInventoryPackageApi,
+  disableInventoryPackageApi,
+  retryInventoryConsumptionEventApi,
   voidInventoryRequestApi,
   type InventoryBatch,
   type InventoryDb,
   type InventoryItem,
   type InventoryRequest,
-  type ReturnOrScrapParams
+  type ReturnOrScrapParams,
+  type InventoryPackage,
+  type SaveInventoryPackageParams,
+  type InventoryConsumptionEvent
 } from "@/api/modules/inventory";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
@@ -441,6 +463,7 @@ import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
 import WeeklyPanel from "./components/WeeklyPanel.vue";
+import PackagePanel from "./components/PackagePanel.vue";
 import { createEmptyInventoryDb, useInventoryManage } from "./composables/useInventoryManage";
 import { exportCsv } from "./utils";
 
@@ -560,6 +583,7 @@ const tabRoutePathMap: Record<string, string> = {
   items: "/inventory/items",
   weekly: "/inventory/weekly",
   controls: "/inventory/controls",
+  packages: "/inventory/packages",
   trace: "/inventory/trace"
 };
 const tabRouteNameMap: Record<string, string> = {
@@ -570,6 +594,7 @@ const tabRouteNameMap: Record<string, string> = {
   items: "inventoryItems",
   weekly: "inventoryWeekly",
   controls: "inventoryControls",
+  packages: "inventoryPackages",
   trace: "inventoryTrace"
 };
 const routeTabMap: Record<string, string> = {
@@ -582,6 +607,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory/items": "items",
   "/inventory/weekly": "weekly",
   "/inventory/controls": "controls",
+  "/inventory/packages": "packages",
   "/inventory/trace": "trace"
 };
 const categoryOptions = ["医用耗材", "办公物资", "消毒用品", "检验用品", "护理用品", "低值易耗"];
@@ -598,6 +624,7 @@ const tabNavItems = [
   { tab: "items", title: "物资档案", desc: "字典与规则" },
   { tab: "weekly", title: "周消耗", desc: "用量与预计" },
   { tab: "controls", title: "盘点处置", desc: "退回与报废" },
+  { tab: "packages", title: "使用套餐", desc: "版本与自动扣减" },
   { tab: "trace", title: "追溯流水", desc: "导出与复核" }
 ] as const;
 const workflowSteps = [
@@ -764,6 +791,14 @@ const tabProfiles = {
     taskTitle: "补齐原因和处理人",
     taskDesc: "每次处置都留下可复核记录。"
   },
+  packages: {
+    kicker: "进销存管理 / 使用套餐",
+    title: "按就诊量自动扣减",
+    desc: "维护科室的门诊、住院标准用量，并查看自动消耗事件。",
+    taskLabel: "当前重点",
+    taskTitle: "先确认启用版本，再处理失败事件",
+    taskDesc: "套餐启用后才会参与自动计数，草稿不会影响库存。"
+  },
   trace: {
     kicker: "进销存管理 / 追溯报表",
     title: "追溯流水",
@@ -800,6 +835,7 @@ const tabAuthMap: Record<string, readonly string[]> = {
   items: ["inventory:issue"],
   weekly: ["inventory:request", "inventory:count"],
   controls: ["inventory:receive", "inventory:count"],
+  packages: ["inventory:read", "inventory:approve"],
   trace: ["inventory:export", "inventory:issue", "inventory:count"]
 };
 const canViewAllDepartments = computed(
@@ -807,8 +843,22 @@ const canViewAllDepartments = computed(
     userStore.userInfo.role === "admin" ||
     hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export"])
 );
+const canManagePackages = computed(
+  () => userStore.userInfo.role === "admin" || userStore.userInfo.role === "quality" || hasInventoryAuth("inventory:approve")
+);
 const belongsToCurrentDepartment = (department?: string) =>
   canViewAllDepartments.value || !currentDepartment.value || !department || department === currentDepartment.value;
+const canViewAllPackages = computed(() => ["admin", "quality", "manager"].includes(String(userStore.userInfo.role || "")));
+const visiblePackages = computed(() =>
+  db.value.packages.filter(
+    row => canViewAllPackages.value || !currentDepartment.value || row.department === currentDepartment.value
+  )
+);
+const visibleConsumptionEvents = computed(() =>
+  db.value.consumptionEvents.filter(
+    row => canViewAllPackages.value || !currentDepartment.value || row.department === currentDepartment.value
+  )
+);
 const requireInventoryAuth = (code: string, actionName: string) => {
   if (hasInventoryAuth(code)) return true;
   ElMessage.warning(`当前岗位暂无“${actionName}”权限，请由对应负责人处理`);
@@ -866,7 +916,8 @@ const departmentOptions = computed(() =>
       currentDepartment.value,
       ...db.value.requests.map(row => row.department),
       ...db.value.weeklyConsumptions.map(row => row.department),
-      ...db.value.movements.map(row => row.department)
+      ...db.value.movements.map(row => row.department),
+      ...db.value.packages.map(row => row.department)
     ])
   ).filter(Boolean)
 );
@@ -1305,6 +1356,22 @@ const currentTabStats = computed<TabStat[]>(() => {
         { label: "退回记录", value: traceRowsByType.value.return?.length || 0, desc: "科室退回" },
         { label: "报废记录", value: scrapRows.value.length, desc: "需重点说明", tone: "danger" }
       ];
+    case "packages":
+      return [
+        { label: "套餐版本", value: visiblePackages.value.length, desc: "全部草稿与历史" },
+        { label: "已启用", value: visiblePackages.value.filter(row => row.status === "enabled").length, desc: "参与自动扣减" },
+        {
+          label: "今日事件",
+          value: visibleConsumptionEvents.value.filter(row => row.visitDate?.slice(0, 10) === today()).length,
+          desc: "就诊触发记录"
+        },
+        {
+          label: "失败事件",
+          value: visibleConsumptionEvents.value.filter(row => row.status === "failed").length,
+          desc: "需要补处理",
+          tone: visibleConsumptionEvents.value.some(row => row.status === "failed") ? "danger" : undefined
+        }
+      ];
     case "trace":
       return [
         { label: "库存流水", value: traceRows.value.length, desc: "全部变动记录" },
@@ -1462,6 +1529,58 @@ const saveItem = async () => {
     db.value = (await saveInventoryItemApi({ ...itemForm, operator: operatorName.value })).data;
     ElMessage.success("物资档案已保存");
     itemDialogVisible.value = false;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const savePackage = async (payload: SaveInventoryPackageParams) => {
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "维护使用套餐")) return;
+  saving.value = true;
+  try {
+    db.value = (await saveInventoryPackageApi({ ...payload, operator: operatorName.value })).data;
+    ElMessage.success("使用套餐草稿已保存");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const enablePackage = async (row: InventoryPackage) => {
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "启用使用套餐")) return;
+  saving.value = true;
+  try {
+    db.value = (await enableInventoryPackageApi({ id: row.id, operator: operatorName.value })).data;
+    ElMessage.success("使用套餐已启用");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const disablePackage = async (row: InventoryPackage) => {
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "停用使用套餐")) return;
+  saving.value = true;
+  try {
+    db.value = (await disableInventoryPackageApi({ id: row.id, operator: operatorName.value })).data;
+    ElMessage.success("使用套餐已停用");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const retryConsumptionEvent = async (row: InventoryConsumptionEvent) => {
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "重试自动消耗")) return;
+  saving.value = true;
+  try {
+    db.value = (await retryInventoryConsumptionEventApi({ id: row.id, operator: operatorName.value })).data;
+    ElMessage.success("自动消耗事件已重试");
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {

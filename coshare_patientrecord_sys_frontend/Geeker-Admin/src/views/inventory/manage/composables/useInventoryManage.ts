@@ -70,6 +70,8 @@ export const createEmptyInventoryDb = (): InventoryDb => ({
   weeklyConsumptions: [],
   counts: [],
   movements: [],
+  packages: [],
+  consumptionEvents: [],
   auditLogs: [],
   summary: {
     itemCount: 0,

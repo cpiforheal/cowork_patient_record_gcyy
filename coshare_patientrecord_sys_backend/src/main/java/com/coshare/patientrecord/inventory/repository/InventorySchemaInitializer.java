@@ -149,6 +149,67 @@ class InventorySchemaInitializer {
               INDEX idx_inventory_audit_created (created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_packages (
+              id VARCHAR(64) PRIMARY KEY,
+              name VARCHAR(160) NOT NULL,
+              department VARCHAR(120) NOT NULL,
+              care_type VARCHAR(32) NOT NULL,
+              version_no INT NOT NULL DEFAULT 1,
+              status VARCHAR(32) NOT NULL DEFAULT 'draft',
+              effective_date VARCHAR(32),
+              operator_name VARCHAR(120),
+              raw_json JSON NOT NULL,
+              created_at VARCHAR(32),
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              INDEX idx_inventory_packages_scope (department, care_type, status),
+              INDEX idx_inventory_packages_effective (effective_date)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_package_lines (
+              id VARCHAR(64) PRIMARY KEY,
+              package_id VARCHAR(64) NOT NULL,
+              item_id VARCHAR(64) NOT NULL,
+              quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+              consumption_mode VARCHAR(32) NOT NULL DEFAULT 'per_visit',
+              raw_json JSON NOT NULL,
+              INDEX idx_inventory_package_lines_package (package_id),
+              INDEX idx_inventory_package_lines_item (item_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_consumption_events (
+              id VARCHAR(64) PRIMARY KEY,
+              encounter_id VARCHAR(120) NOT NULL,
+              case_token VARCHAR(160),
+              route VARCHAR(32) NOT NULL,
+              department VARCHAR(120),
+              visit_date VARCHAR(32),
+              package_id VARCHAR(64),
+              status VARCHAR(32) NOT NULL,
+              error_message VARCHAR(500),
+              operator_name VARCHAR(120),
+              created_at VARCHAR(32),
+              raw_json JSON NOT NULL,
+              UNIQUE KEY uk_inventory_consumption_encounter_route (encounter_id, route),
+              INDEX idx_inventory_consumption_date (visit_date),
+              INDEX idx_inventory_consumption_department (department),
+              INDEX idx_inventory_consumption_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_consumption_details (
+              id VARCHAR(64) PRIMARY KEY,
+              event_id VARCHAR(64) NOT NULL,
+              item_id VARCHAR(64) NOT NULL,
+              batch_id VARCHAR(64),
+              quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+              raw_json JSON NOT NULL,
+              INDEX idx_inventory_consumption_details_event (event_id),
+              INDEX idx_inventory_consumption_details_item (item_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """);
     }
 
     private void ensureWeeklyConsumptionUniqueKey() {
