@@ -657,6 +657,7 @@ public class PreAiPrivacyService {
         }
         for (Map.Entry<String, String> entry : sensitive.entrySet()) {
             String value = entry.getValue();
+            if ("address".equals(entry.getKey()) && value.equals(coarseAddress(value))) continue;
             int minimum = Set.of("patientName", "contactName").contains(entry.getKey()) ? 2 : 5;
             if (value.length() >= minimum && documentXml.contains(xml(value))) {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "脱敏泄漏检查未通过：" + entry.getKey());

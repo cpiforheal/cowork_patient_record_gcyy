@@ -7,7 +7,7 @@
         <h2>病历事实采集</h2>
       </div>
       <div class="hero-actions">
-        <el-button :icon="Refresh" @click="loadEncounterList">刷新</el-button>
+        <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>
         <el-button v-if="canImportLegacy" :icon="FolderOpened" @click="openLegacyDialog">导入进行中的旧患者</el-button>
         <el-button v-if="canCreateEncounter" type="primary" :icon="Plus" @click="createDialogVisible = true"
           >新建前置病历</el-button>
@@ -99,7 +99,9 @@
               <span class="patient-avatar">{{ (workspace.encounter.patient.patientName || "患").slice(0, 1) }}</span>
               <div>
                 <small>当前就诊患者</small>
-                <h3>{{ workspace.encounter.patient.patientName || "待补姓名" }}</h3>
+                <h3>
+                  {{ workspace.encounter.patient.patientName || "待补姓名" }}
+                </h3>
                 <p>
                   {{ workspace.encounter.caseToken }} · {{ workspace.encounter.patient.gender || "待补性别" }} ·
                   {{ workspace.encounter.patient.age || "待补年龄" }} ·
@@ -199,6 +201,40 @@
                     "
                   />
 
+                  <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section priority-image-section">
+                    <header class="upstream-image-heading">
+                      <div>
+                        <strong>检查影像优先核对</strong>
+                        <small>接诊前先核对检查室上传的一手影像，点击图片可查看原图。</small>
+                      </div>
+                      <el-tag :type="inspectionImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                        {{ inspectionImageAttachments.length ? `${inspectionImageAttachments.length} 张影像` : "暂无影像" }}
+                      </el-tag>
+                    </header>
+                    <div v-if="inspectionImageAttachments.length" class="upstream-image-grid">
+                      <button
+                        v-for="(attachment, index) in inspectionImageAttachments"
+                        :key="attachment.id"
+                        type="button"
+                        class="upstream-image-card"
+                        :class="{ featured: index === 0 }"
+                        @click="openWorkspaceAttachment(attachment)"
+                      >
+                        <img
+                          v-if="workspaceImageUrls[attachment.id]"
+                          :src="workspaceImageUrls[attachment.id]"
+                          :alt="attachment.fileName"
+                        />
+                        <span v-else>点击查看图片</span>
+                        <span class="upstream-image-caption">
+                          <strong :title="attachment.fileName">{{ attachment.fileName }}</strong>
+                          <small>{{ attachment.description || "检查室原始资料" }}</small>
+                        </span>
+                      </button>
+                    </div>
+                    <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
+                  </section>
+
                   <div v-if="selectedStageCode === 'INSPECTION'" class="inspection-view-tabs">
                     <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="showCurrentInspection">
                       本次检查
@@ -218,7 +254,9 @@
                       v-for="(node, index) in inspectionTimeline"
                       :key="node.encounterId"
                       class="timeline-node"
-                      :class="{ latest: index === inspectionTimeline.length - 1 }"
+                      :class="{
+                        latest: index === inspectionTimeline.length - 1
+                      }"
                     >
                       <i class="timeline-dot"></i>
                       <header>
@@ -304,21 +342,42 @@
                     v-if="upstreamStages.length && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
                     class="upstream-section"
                   >
-                    <div class="section-caption">上游只读事实</div>
-                    <el-collapse>
-                      <el-collapse-item
-                        v-for="item in upstreamStages"
-                        :key="item.stageCode"
-                        :title="stageByCode(item.stageCode).title"
-                      >
-                        <div class="read-only-grid">
-                          <div v-for="entry in nonEmptyEntries(item.data)" :key="entry[0]">
+                    <header class="upstream-heading">
+                      <div>
+                        <strong>前置岗位事实</strong>
+                        <small>关键结论直接展示，完整采集项按岗位展开核对。</small>
+                      </div>
+                      <el-tag type="info" effect="plain">{{ upstreamStages.length }} 个岗位</el-tag>
+                    </header>
+                    <div class="upstream-stage-list">
+                      <article v-for="item in upstreamStages" :key="item.stageCode" class="upstream-stage-card">
+                        <header>
+                          <div class="upstream-stage-title">
+                            <strong>{{ stageByCode(item.stageCode).title }}</strong>
+                            <small>{{ upstreamStageTime(item) }}</small>
+                          </div>
+                          <el-tag :type="stageStatusType(item.status)" size="small" effect="plain">
+                            {{ stageStatusLabel[item.status] }}
+                          </el-tag>
+                        </header>
+                        <div class="upstream-summary-grid">
+                          <div v-for="entry in upstreamSummaryEntries(item)" :key="entry[0]">
                             <span>{{ fieldLabel(item.stageCode, entry[0]) }}</span>
-                            <p>{{ humanValue(entry[1]) }}</p>
+                            <strong :title="humanValue(entry[1])">{{ humanValue(entry[1]) }}</strong>
                           </div>
                         </div>
-                      </el-collapse-item>
-                    </el-collapse>
+                        <el-collapse class="upstream-detail-collapse">
+                          <el-collapse-item :title="`查看全部 ${nonEmptyEntries(item.data).length} 项已采集事实`">
+                            <dl class="read-only-grid">
+                              <div v-for="entry in nonEmptyEntries(item.data)" :key="entry[0]">
+                                <dt>{{ fieldLabel(item.stageCode, entry[0]) }}</dt>
+                                <dd>{{ humanValue(entry[1]) }}</dd>
+                              </div>
+                            </dl>
+                          </el-collapse-item>
+                        </el-collapse>
+                      </article>
+                    </div>
                   </section>
 
                   <el-form
@@ -778,7 +837,12 @@ const workspace = ref<PreAiWorkspace>();
 const workspaceLoading = ref(false);
 const actionLoading = ref(false);
 const activeLabReportId = ref("");
-const attachmentUpload = reactive({ total: 0, success: 0, failed: 0, percent: 0 });
+const attachmentUpload = reactive({
+  total: 0,
+  success: 0,
+  failed: 0,
+  percent: 0
+});
 const selectedPanel = ref<"STAGE" | "AUX">("STAGE");
 const selectedStageCode = ref<PreAiStageCode>("REGISTRATION");
 const workflowSelected = ref(false);
@@ -821,13 +885,17 @@ const pendingWorkflowSelection = ref<{ encounterId: string; card: WorkflowCard }
 const readPendingWorkflowSelection = () => pendingWorkflowSelection.value;
 
 const createDialogVisible = ref(false);
-const createForm = reactive<Record<string, any>>({ visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00" });
+const createForm = reactive<Record<string, any>>({
+  visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00"
+});
 const legacyDialogVisible = ref(false);
 const selectedLegacyPatientId = ref("");
 const legacyPatients = ref<PatientRow[]>([]);
 const followUpDialogVisible = ref(false);
 const followUpPatientCase = ref<PreAiPatientCase>();
-const followUpForm = reactive<Record<string, any>>({ visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00" });
+const followUpForm = reactive<Record<string, any>>({
+  visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00"
+});
 
 const filteredPatientCases = computed(() => {
   const value = keyword.value.trim().toLowerCase();
@@ -873,7 +941,15 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     owner: "检验报告模板填写与交接",
     roles: ["admin", "doctor", "lab"]
   },
-  { key: "TCM", order: 5, kind: "STAGE", stageCode: "TCM", title: "中医辨证", owner: "中医岗位", roles: ["admin", "tcm"] },
+  {
+    key: "TCM",
+    order: 5,
+    kind: "STAGE",
+    stageCode: "TCM",
+    title: "中医辨证",
+    owner: "中医岗位",
+    roles: ["admin", "tcm"]
+  },
   {
     key: "DOCTOR",
     order: 6,
@@ -961,6 +1037,28 @@ const upstreamStages = computed(() => {
     return stageIndex >= 0 && stageIndex < index && nonEmptyEntries(item.data).length;
   });
 });
+const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
+  REGISTRATION: ["patientName", "gender", "age", "visitDate"],
+  INSPECTION: ["diseaseDirections", "examinationTypes", "factualConclusion"],
+  RECEPTION: ["chiefComplaint", "symptomDuration", "presentIllness"],
+  TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],
+  DOCTOR: ["primaryWesternDiagnosis", "treatmentPath", "treatmentPlan"],
+  SURGERY: ["actualOperationName", "operationDate", "intraoperativeFindings"]
+};
+const upstreamSummaryEntries = (item: PreAiWorkspace["stages"][number]) => {
+  const entries = nonEmptyEntries(item.data);
+  const entryMap = new Map(entries);
+  const priorityEntries = (upstreamPriorityKeys[item.stageCode] || [])
+    .filter(key => entryMap.has(key))
+    .map(key => [key, entryMap.get(key)] as [string, any]);
+  const prioritySet = new Set(priorityEntries.map(([key]) => key));
+  return [...priorityEntries, ...entries.filter(([key]) => !prioritySet.has(key))].slice(0, 3);
+};
+const upstreamStageTime = (item: PreAiWorkspace["stages"][number]) => {
+  const value = item.completedAt || item.updatedAt;
+  if (!value) return "更新时间未记录";
+  return `${item.completedAt ? "完成" : "更新"}于 ${value.replace("T", " ").slice(0, 16)}`;
+};
 const selectedStageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === selectedStageCode.value && !item.taskId) || []
 );
@@ -982,8 +1080,16 @@ const maskedSections = computed(() => {
   if (!reviewPreview.value) return [];
   const masked = reviewPreview.value.maskedPreview as Record<string, any>;
   const sections: Array<{ title: string; entries: Array<[string, any]> }> = [];
-  if (masked.metadata) sections.push({ title: "病例标识及就诊信息", entries: nonEmptyEntries(masked.metadata) });
-  if (masked.patient) sections.push({ title: "患者基础信息（已脱敏）", entries: nonEmptyEntries(masked.patient) });
+  if (masked.metadata)
+    sections.push({
+      title: "病例标识及就诊信息",
+      entries: nonEmptyEntries(masked.metadata)
+    });
+  if (masked.patient)
+    sections.push({
+      title: "患者基础信息（已脱敏）",
+      entries: nonEmptyEntries(masked.patient)
+    });
   const stageTitles: Record<string, string> = {
     RECEPTION: "主诉和现病情况",
     INSPECTION: "专科检查事实",
@@ -992,19 +1098,32 @@ const maskedSections = computed(() => {
     SURGERY: "实际手术情况"
   };
   Object.entries(masked.stages || {}).forEach(([key, value]) =>
-    sections.push({ title: stageTitles[key] || key, entries: nonEmptyEntries(value as Record<string, any>) })
+    sections.push({
+      title: stageTitles[key] || key,
+      entries: nonEmptyEntries(value as Record<string, any>)
+    })
   );
   if (Array.isArray(masked.auxiliaryTasks)) {
     masked.auxiliaryTasks.forEach((task: Record<string, any>, index: number) =>
-      sections.push({ title: `辅助检查 ${index + 1}`, entries: nonEmptyEntries(task) })
+      sections.push({
+        title: `辅助检查 ${index + 1}`,
+        entries: nonEmptyEntries(task)
+      })
     );
   }
   if (Array.isArray(masked.labReports)) {
     masked.labReports.forEach((report: Record<string, any>, index: number) =>
-      sections.push({ title: `化验报告 ${index + 1}`, entries: nonEmptyEntries(report) })
+      sections.push({
+        title: `化验报告 ${index + 1}`,
+        entries: nonEmptyEntries(report)
+      })
     );
   }
-  if (masked.review) sections.push({ title: "医生复核信息", entries: nonEmptyEntries(masked.review) });
+  if (masked.review)
+    sections.push({
+      title: "医生复核信息",
+      entries: nonEmptyEntries(masked.review)
+    });
   return sections;
 });
 const documentPreviewSections = computed(() =>
@@ -1333,7 +1452,11 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   });
   Object.keys(auxForms).forEach(key => delete auxForms[key]);
   value.auxiliaryTasks.forEach(task => {
-    auxForms[task.id] = { title: task.title, requiredBeforeExport: task.requiredBeforeExport, data: deepCopy(task.data) };
+    auxForms[task.id] = {
+      title: task.title,
+      requiredBeforeExport: task.requiredBeforeExport,
+      data: deepCopy(task.data)
+    };
   });
   if (!value.labReports.some(report => report.id === activeLabReportId.value)) {
     activeLabReportId.value = value.labReports[0]?.id || "";
@@ -1341,9 +1464,9 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   if (keepInspectionImagesVisible) void loadWorkspaceInspectionImages(value);
 };
 
-const selectEncounter = async (id: string) => {
-  if (id === selectedEncounterId.value && workspaceLoading.value) return;
-  if (id === selectedEncounterId.value && workspace.value?.encounter.id === id) return;
+const selectEncounter = async (id: string, preserveView = false) => {
+  if (!preserveView && id === selectedEncounterId.value && workspace.value?.encounter.id === id && !workspaceLoading.value)
+    return;
 
   const requestSequence = ++workspaceRequestSequence;
   workspaceAbortController?.abort();
@@ -1364,17 +1487,18 @@ const selectEncounter = async (id: string) => {
 
     hydrateWorkspace(data);
     workspaceLoaded = true;
-    selectedPatientCaseId.value = data.encounter.patientCaseId;
-    const pendingSelection = readPendingWorkflowSelection();
-    if (pendingSelection?.encounterId === id) {
-      activateWorkflowCard(pendingSelection.card);
-    } else {
-      selectedStageCode.value = data.encounter.currentStage || "REGISTRATION";
-      selectedPanel.value = "STAGE";
-      workflowSelected.value = false;
+    if (!preserveView) {
+      const pendingSelection = readPendingWorkflowSelection();
+      if (pendingSelection?.encounterId === id) {
+        activateWorkflowCard(pendingSelection.card);
+      } else {
+        selectedStageCode.value = data.encounter.currentStage || "REGISTRATION";
+        selectedPanel.value = "STAGE";
+        workflowSelected.value = false;
+      }
+      editorMode.value = "EDIT";
+      reviewPreview.value = undefined;
     }
-    editorMode.value = "EDIT";
-    reviewPreview.value = undefined;
   } catch (error: any) {
     if (error?.name !== "AbortError" && requestSequence === workspaceRequestSequence) {
       ElMessage.error(error.message || "前置病历加载失败");
@@ -1392,6 +1516,11 @@ const selectEncounter = async (id: string) => {
       }
     }
   }
+};
+
+const refreshWorkspace = async () => {
+  await loadEncounterList();
+  if (selectedEncounterId.value) await selectEncounter(selectedEncounterId.value, true);
 };
 
 const selectPatientCase = async (patientCase: PreAiPatientCase) => {
@@ -1701,7 +1830,9 @@ const importLegacyPatient = async () =>
   });
 
 const openLabWorkbench = () => {
-  const query: Record<string, string> = { encounterId: selectedEncounterId.value };
+  const query: Record<string, string> = {
+    encounterId: selectedEncounterId.value
+  };
   if (workspace.value?.encounter.sourcePatientId) query.patientId = workspace.value.encounter.sourcePatientId;
   router.push({ path: "/workbench/lab-report", query });
 };
@@ -1744,7 +1875,12 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
     : files.length > 1
       ? `批量附件-${timestamp}`
       : files[0].name;
-  Object.assign(attachmentUpload, { total: files.length, success: 0, failed: 0, percent: 0 });
+  Object.assign(attachmentUpload, {
+    total: files.length,
+    success: 0,
+    failed: 0,
+    percent: 0
+  });
   actionLoading.value = true;
   for (const [index, file] of files.entries()) {
     const allowed = file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
@@ -2521,6 +2657,98 @@ onBeforeUnmount(cleanupTransientResources);
 .primary-evidence-section .upstream-image-card > span {
   height: 180px;
 }
+.upstream-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+.upstream-heading,
+.upstream-image-heading,
+.upstream-stage-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.upstream-heading > div,
+.upstream-image-heading > div,
+.upstream-stage-title {
+  display: grid;
+  gap: 4px;
+}
+.upstream-heading small,
+.upstream-image-heading small,
+.upstream-stage-title small {
+  color: var(--el-text-color-secondary);
+}
+.upstream-stage-list {
+  display: grid;
+  gap: 12px;
+}
+.upstream-stage-card {
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: var(--el-bg-color);
+}
+.upstream-stage-card > header {
+  padding: 14px 16px 10px;
+}
+.upstream-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 16px 14px;
+}
+.upstream-summary-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+.upstream-summary-grid span,
+.read-only-grid dt {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.upstream-summary-grid strong {
+  overflow: hidden;
+  line-height: 1.55;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.upstream-detail-collapse {
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-bottom: 0;
+}
+.upstream-detail-collapse :deep(.el-collapse-item__header) {
+  height: 44px;
+  padding: 0 16px;
+  color: var(--el-color-primary);
+  font-size: 13px;
+}
+.read-only-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  padding: 2px 16px 16px;
+  margin: 0;
+}
+.read-only-grid > div {
+  min-width: 0;
+}
+.read-only-grid dt {
+  margin-bottom: 4px;
+}
+.read-only-grid dd {
+  margin: 0;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
 .upstream-image-section,
 .attachment-section {
   display: grid;
@@ -2530,6 +2758,11 @@ onBeforeUnmount(cleanupTransientResources);
   border: 1px solid var(--el-border-color-light);
   border-radius: 14px;
   background: var(--el-fill-color-lighter);
+}
+.priority-image-section {
+  margin-top: 16px;
+  border-color: var(--el-color-primary-light-7);
+  background: var(--el-color-primary-light-9);
 }
 .upstream-image-grid {
   display: grid;
@@ -2558,8 +2791,11 @@ onBeforeUnmount(cleanupTransientResources);
   transform: translateY(-2px);
   box-shadow: 0 8px 20px rgb(64 158 255 / 12%);
 }
+.upstream-image-card.featured {
+  grid-column: span 2;
+}
 .upstream-image-card img,
-.upstream-image-card > span {
+.upstream-image-card > span:not(.upstream-image-caption) {
   width: 100%;
   height: 120px;
   display: grid;
@@ -2568,6 +2804,21 @@ onBeforeUnmount(cleanupTransientResources);
   color: var(--el-text-color-secondary);
   border-radius: 8px;
   background: var(--el-fill-color);
+}
+.upstream-image-card.featured img,
+.upstream-image-card.featured > span:not(.upstream-image-caption) {
+  height: 240px;
+}
+.upstream-image-caption {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.upstream-image-caption strong,
+.upstream-image-caption small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .upstream-image-card small {
   overflow: hidden;
@@ -2707,8 +2958,16 @@ onBeforeUnmount(cleanupTransientResources);
     margin-left: 0;
   }
   .form-grid,
-  .read-only-grid {
+  .read-only-grid,
+  .upstream-summary-grid {
     grid-template-columns: 1fr;
+  }
+  .upstream-image-card.featured {
+    grid-column: span 1;
+  }
+  .upstream-image-card.featured img,
+  .upstream-image-card.featured > span:not(.upstream-image-caption) {
+    height: 180px;
   }
   .form-grid .span-2 {
     grid-column: span 1;

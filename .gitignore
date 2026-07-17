@@ -27,5 +27,6 @@ Thumbs.db
 *.local
 .env.local
 .env.*.local
+/.env
 
 coshare_patientrecord_sys_frontend/Geeker-Admin/package-lock.json

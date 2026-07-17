@@ -2,6 +2,7 @@ package com.coshare.patientrecord.preai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 class PreAiPrivacyServiceTests {
 
@@ -234,6 +236,26 @@ class PreAiPrivacyServiceTests {
     private void assertTableValue(String documentXml, String label, String value) {
         assertTrue(documentXml.contains(">" + label + "<"), label);
         assertTrue(documentXml.contains(">" + value + "<"), value);
+    }
+
+    @Test
+    void rendersWhenRawAddressIsAlreadyCoarse() {
+        ObjectNode workspace = sampleWorkspace();
+        ((ObjectNode) workspace.path("encounter").path("patient")).put("address", "河南省信阳市");
+
+        ObjectNode masked = service.maskWorkspace(workspace);
+
+        assertEquals("河南省信阳市", masked.path("patient").path("address").asText());
+        assertTrue(service.renderDocx(masked, workspace).length > 1000);
+    }
+
+    @Test
+    void rejectsMaskedWorkspaceThatStillContainsDetailedAddress() {
+        ObjectNode workspace = sampleWorkspace();
+        ObjectNode masked = service.maskWorkspace(workspace);
+        ((ObjectNode) masked.path("patient")).put("address", "河南省固始县城关镇幸福路88号2单元");
+
+        assertThrows(ResponseStatusException.class, () -> service.renderDocx(masked, workspace));
     }
 
     private ObjectNode sampleWorkspace() {

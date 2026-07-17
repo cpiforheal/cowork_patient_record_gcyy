@@ -119,7 +119,6 @@
                     allow-create
                     default-first-option
                     placeholder="选择结果"
-                    @change="markMetricTouched(metric.key)"
                   >
                     <el-option v-for="option in metric.options || []" :key="option" :label="option" :value="option" />
                   </el-select>
@@ -133,13 +132,7 @@
                     placeholder="填写数值"
                     @change="syncNumberValue(metric.key)"
                   />
-                  <el-input
-                    v-else
-                    v-model="formValues[metric.key]"
-                    :disabled="!canSaveActiveTemplate"
-                    placeholder="填写结果"
-                    @input="markMetricTouched(metric.key)"
-                  />
+                  <el-input v-else v-model="formValues[metric.key]" :disabled="!canSaveActiveTemplate" placeholder="填写结果" />
                   <small>参考：{{ metricReference(metric, patientGender) || "按报告单" }}</small>
                 </article>
               </div>
@@ -266,7 +259,6 @@ const reportDate = ref(today());
 const reportRemark = ref("");
 const formValues = reactive<Record<string, string>>({});
 const numericValues = reactive<Record<string, number | undefined>>({});
-const touchedMetricKeys = ref(new Set<string>());
 const ecgFiles = ref<UploadUserFile[]>([]);
 const previewRef = ref<HTMLElement>();
 
@@ -278,7 +270,6 @@ const canSaveActiveTemplate = computed(() =>
 );
 
 const resetTemplateValues = () => {
-  touchedMetricKeys.value = new Set<string>();
   Object.keys(formValues).forEach(key => delete formValues[key]);
   Object.keys(numericValues).forEach(key => delete numericValues[key]);
   activeTemplate.value.metrics.forEach(metric => {
@@ -294,7 +285,6 @@ const hydrateTemplateValues = () => {
     const storedValue = String(patientFieldValues.value[metricStorageKey(activeTemplate.value.id, metric.key)] || "").trim();
     if (!storedValue) return;
     formValues[metric.key] = storedValue;
-    touchedMetricKeys.value.add(metric.key);
     if (metric.input === "number") numericValues[metric.key] = Number(storedValue);
   });
 };
@@ -437,13 +427,8 @@ watch(() => route.query.patientId, loadPatientFromRoute);
 watch(() => route.query.encounterId, loadPatientFromRoute);
 
 const syncNumberValue = (key: string) => {
-  markMetricTouched(key);
   const value = numericValues[key];
   formValues[key] = value === undefined || value === null ? "" : String(value);
-};
-
-const markMetricTouched = (key: string) => {
-  touchedMetricKeys.value.add(key);
 };
 
 const reportSummary = () => {
@@ -527,9 +512,7 @@ const validateBeforeSave = () => {
   }
   if (
     activeTemplate.value.id !== "ecgImage" &&
-    activeTemplate.value.metrics.every(
-      metric => !touchedMetricKeys.value.has(metric.key) || !String(formValues[metric.key] || "").trim()
-    )
+    activeTemplate.value.metrics.every(metric => !String(formValues[metric.key] || "").trim())
   ) {
     return "请至少填写一个检验指标";
   }
@@ -610,7 +593,7 @@ const saveToArchive = async () => {
           unit: metric.unit || "",
           reference: metricReference(metric, patientGender.value) || ""
         }))
-        .filter(metric => metric.value && touchedMetricKeys.value.has(metric.key));
+        .filter(metric => metric.value);
       await savePreAiLabReportApi(encounterId, {
         templateId: activeTemplate.value.id,
         templateName: activeTemplate.value.name,
