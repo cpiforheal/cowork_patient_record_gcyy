@@ -1,7 +1,9 @@
 <template>
-  <el-icon class="collapse-icon" @click="changeCollapse">
-    <component :is="globalStore.isCollapse ? 'expand' : 'fold'"></component>
-  </el-icon>
+  <button class="collapse-button" type="button" aria-label="折叠或展开侧边栏" @click="changeCollapse">
+    <el-icon class="collapse-icon">
+      <component :is="globalStore.isCollapse ? 'expand' : 'fold'"></component>
+    </el-icon>
+  </button>
 </template>
 
 <script setup lang="ts">
@@ -12,10 +14,27 @@ const changeCollapse = () => globalStore.setGlobalState("isCollapse", !globalSto
 </script>
 
 <style scoped lang="scss">
-.collapse-icon {
+.collapse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   margin-right: 20px;
-  font-size: 22px;
+  padding: 0;
+  border: 0;
   color: var(--el-header-text-color);
+  background: transparent;
   cursor: pointer;
+}
+
+.collapse-icon {
+  font-size: 22px;
+}
+
+@media (max-width: 768px) {
+  .collapse-button {
+    display: none;
+  }
 }
 </style>

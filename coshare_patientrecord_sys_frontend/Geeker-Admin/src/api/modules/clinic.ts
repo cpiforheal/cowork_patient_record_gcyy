@@ -2,6 +2,8 @@ export type {
   AccountRow,
   AiDocumentBlock,
   AiDocumentGenerateResult,
+  AiDocumentTask,
+  AiDocumentTaskStatus,
   AiDocumentPreview,
   AiDocumentRequestPayload,
   AiDocumentTemplate,

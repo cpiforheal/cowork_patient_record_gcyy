@@ -96,14 +96,20 @@ Copy-Item -Path (Join-Path $frontendDist "*") -Destination $frontendReleaseDir -
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "check-pilot-host.ps1") -Destination (Join-Path $toolsReleaseDir "check-pilot-host.ps1")
 
 $runtimeEnv = @'
-# Runtime config for the pilot host.
-# MYSQL_PASSWORD must be changed to the actual database password before startup.
+# Runtime config for the production single-node host.
 SERVER_PORT=8080
+SPRING_PROFILES_ACTIVE=mysql,prod
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
-MYSQL_URL=jdbc:mysql://localhost:3306/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-MYSQL_USERNAME=root
-MYSQL_PASSWORD=CHANGE_ME_STRONG_PASSWORD
+MYSQL_URL=jdbc:mysql://db.internal.example:3306/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=VERIFY_IDENTITY
+MYSQL_RUNTIME_USERNAME=clinic_app
+MYSQL_RUNTIME_PASSWORD=CHANGE_ME_RUNTIME_PASSWORD
+MYSQL_MIGRATION_URL=jdbc:mysql://db.internal.example:3306/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=VERIFY_IDENTITY
+MYSQL_MIGRATION_USERNAME=clinic_migrator
+MYSQL_MIGRATION_PASSWORD=CHANGE_ME_MIGRATION_PASSWORD
+# Empty database only. Remove this value after the first administrator changes it.
+CLINIC_BOOTSTRAP_ADMIN_PASSWORD=
+AI_CONFIG_SECRET=
 CLINIC_ATTACHMENT_DIR=D:\hos_patient_record_runtime\attachments
 CLINIC_ATTACHMENT_MAX_SIZE_BYTES=52428800
 '@
@@ -154,12 +160,21 @@ New-Item -ItemType Directory -Force -Path $runtimeDir, $logsDir | Out-Null
 Read-RuntimeEnv -Path $configPath
 
 if (-not $env:SERVER_PORT) { $env:SERVER_PORT = "8080" }
-if (-not $env:MYSQL_PASSWORD -or $env:MYSQL_PASSWORD -eq "CHANGE_ME_STRONG_PASSWORD") {
-    throw "MYSQL_PASSWORD in config\runtime.env must be changed to the actual database password before startup."
+if (-not $env:MYSQL_RUNTIME_PASSWORD -or $env:MYSQL_RUNTIME_PASSWORD -like "CHANGE_ME*") {
+    throw "MYSQL_RUNTIME_PASSWORD in config\runtime.env must be set before startup."
+}
+if (-not $env:MYSQL_MIGRATION_PASSWORD -or $env:MYSQL_MIGRATION_PASSWORD -like "CHANGE_ME*") {
+    throw "MYSQL_MIGRATION_PASSWORD in config\runtime.env must be set before startup."
+}
+if ($env:MYSQL_RUNTIME_USERNAME -eq $env:MYSQL_MIGRATION_USERNAME) {
+    throw "Runtime and migration database users must be different."
+}
+if (-not $env:AI_CONFIG_SECRET) {
+    throw "AI_CONFIG_SECRET in config\runtime.env must be set before startup."
 }
 if (-not $env:CLINIC_ATTACHMENT_DIR) { $env:CLINIC_ATTACHMENT_DIR = Join-Path $runtimeDir "attachments" }
 $env:CLINIC_FRONTEND_DIR = $frontendDir
-$env:SPRING_PROFILES_ACTIVE = "mysql"
+if (-not $env:SPRING_PROFILES_ACTIVE) { $env:SPRING_PROFILES_ACTIVE = "mysql,prod" }
 
 New-Item -ItemType Directory -Force -Path $env:CLINIC_ATTACHMENT_DIR | Out-Null
 
@@ -257,12 +272,10 @@ pause
 '@
 Set-Content -Path (Join-Path $releaseDir "03-stop-system.bat") -Value $stopBat -Encoding ASCII
 
-$readmeTemplate = Join-Path $root "docs\pilot-package-readme.md"
+$readmeTemplate = Join-Path $root "docs\production-single-node-runbook.md"
 if (Test-Path $readmeTemplate) {
     Copy-Item -LiteralPath $readmeTemplate -Destination (Join-Path $releaseDir "README.md")
-}
-if (Test-Path (Join-Path $root "docs\pilot-deployment-checklist.md")) {
-    Copy-Item -LiteralPath (Join-Path $root "docs\pilot-deployment-checklist.md") -Destination (Join-Path $docsReleaseDir "pilot-deployment-checklist.md")
+    Copy-Item -LiteralPath $readmeTemplate -Destination (Join-Path $docsReleaseDir "production-single-node-runbook.md")
 }
 if (Test-Path (Join-Path $root "docs\inventory-operation-guide.md")) {
     Copy-Item -LiteralPath (Join-Path $root "docs\inventory-operation-guide.md") -Destination (Join-Path $docsReleaseDir "inventory-operation-guide.md")

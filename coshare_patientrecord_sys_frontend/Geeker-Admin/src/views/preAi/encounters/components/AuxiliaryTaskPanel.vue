@@ -231,7 +231,12 @@ const saveTask = async (task: PreAiAuxiliaryTask, complete: boolean) => {
     const { data } = await savePreAiAuxiliaryTaskApi(
       props.workspace.encounter.id,
       task.id,
-      { title: form.title, requiredBeforeExport: form.requiredBeforeExport, data: cleanData(task) },
+      {
+        title: form.title,
+        requiredBeforeExport: form.requiredBeforeExport,
+        data: cleanData(task),
+        expectedVersion: task.version
+      },
       complete
     );
     emit("updated", data);

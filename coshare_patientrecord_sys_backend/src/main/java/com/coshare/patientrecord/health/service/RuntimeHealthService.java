@@ -3,6 +3,8 @@ package com.coshare.patientrecord.health.service;
 import com.coshare.patientrecord.backup.entity.BackupConfig;
 import com.coshare.patientrecord.backup.repository.ClinicBackupRepository;
 import com.coshare.patientrecord.file.service.ClinicFileService;
+import com.coshare.patientrecord.ai.service.AiCallGuard;
+import com.coshare.patientrecord.ai.service.AiDocumentTaskService;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,6 +37,9 @@ public class RuntimeHealthService {
     private final String doubaoModel;
     private final String doubaoTtsApiKey;
     private final String doubaoTtsModel;
+    private final String aiConfigSecret;
+    private final AiCallGuard aiCallGuard;
+    private final ObjectProvider<AiDocumentTaskService> aiDocumentTaskService;
 
     public RuntimeHealthService(
         Environment environment,
@@ -46,7 +51,10 @@ public class RuntimeHealthService {
         @Value("${clinic.ai.doubao.api-key:}") String doubaoApiKey,
         @Value("${clinic.ai.doubao.model:}") String doubaoModel,
         @Value("${clinic.ai.doubao.tts.api-key:}") String doubaoTtsApiKey,
-        @Value("${clinic.ai.doubao.tts.model:}") String doubaoTtsModel
+        @Value("${clinic.ai.doubao.tts.model:}") String doubaoTtsModel,
+        @Value("${clinic.ai.config-secret:}") String aiConfigSecret,
+        AiCallGuard aiCallGuard,
+        ObjectProvider<AiDocumentTaskService> aiDocumentTaskService
     ) {
         this.environment = environment;
         this.databaseHealthService = databaseHealthService;
@@ -58,6 +66,9 @@ public class RuntimeHealthService {
         this.doubaoModel = doubaoModel == null ? "" : doubaoModel;
         this.doubaoTtsApiKey = doubaoTtsApiKey == null ? "" : doubaoTtsApiKey;
         this.doubaoTtsModel = doubaoTtsModel == null ? "" : doubaoTtsModel;
+        this.aiConfigSecret = aiConfigSecret == null ? "" : aiConfigSecret;
+        this.aiCallGuard = aiCallGuard;
+        this.aiDocumentTaskService = aiDocumentTaskService;
     }
 
     public Map<String, Object> summary() {
@@ -66,6 +77,7 @@ public class RuntimeHealthService {
         components.put("attachmentStorage", attachmentStorage());
         components.put("backup", backup());
         components.put("ai", ai());
+        components.put("taskQueue", taskQueue());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", overallStatus(components));
@@ -86,6 +98,7 @@ public class RuntimeHealthService {
             Map<String, Object> check = service.check();
             Map<String, Object> component = component("ok", "database reachable");
             component.put("durationMs", check.getOrDefault("durationMs", 0));
+            component.put("migrationVersion", check.getOrDefault("migrationVersion", "unknown"));
             return component;
         } catch (Exception error) {
             return component("down", "database unavailable");
@@ -122,6 +135,7 @@ public class RuntimeHealthService {
             Map<String, Object> latestRun = repository.latestRun();
             if (latestRun != null) {
                 component.put("latestRunStatus", latestRun.get("status"));
+                component.put("latestRunFinishedAt", latestRun.get("finishedAt"));
             }
             return component;
         } catch (Exception error) {
@@ -140,7 +154,22 @@ public class RuntimeHealthService {
 
         Map<String, Object> component = component(providers.isEmpty() ? "warn" : "ok", providers.isEmpty() ? "ai provider not configured" : "ai provider configured");
         component.put("configuredProviders", providers);
+        component.put("configSecretConfigured", !aiConfigSecret.isBlank());
+        component.put("runtime", aiCallGuard.metrics());
         return component;
+    }
+
+    private Map<String, Object> taskQueue() {
+        AiDocumentTaskService service = aiDocumentTaskService.getIfAvailable();
+        if (service == null) return component("disabled", "mysql profile inactive");
+        try {
+            Map<String, Object> metrics = service.metrics();
+            Map<String, Object> result = component("ok", "AI document task queue available");
+            result.putAll(metrics);
+            return result;
+        } catch (Exception error) {
+            return component("warn", "AI document task queue status unavailable");
+        }
     }
 
     private String backupMessage(BackupConfig config, boolean configured) {

@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.preai;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.common.exception.VersionConflictException;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
 import com.coshare.patientrecord.clinicqueue.ClinicQueueService;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
@@ -12,7 +13,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 @Profile("mysql")
@@ -166,202 +167,6 @@ public class PreAiEncounterService {
         this.privacyService = privacyService;
         this.clinicQueueService = clinicQueueService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_encounters (
-              id VARCHAR(64) PRIMARY KEY,
-              source_patient_id VARCHAR(64),
-              patient_case_id VARCHAR(64),
-              visit_no INT NOT NULL DEFAULT 1,
-              follow_up_of_encounter_id VARCHAR(64),
-              case_token VARCHAR(64) NOT NULL UNIQUE,
-              route VARCHAR(32),
-              treatment_path VARCHAR(32),
-              status VARCHAR(32) NOT NULL,
-              current_stage VARCHAR(32) NOT NULL,
-              patient_json JSON NOT NULL,
-              visit_meta_json JSON NULL,
-              legacy_reference_json JSON NULL,
-              duty_assignments_json JSON NULL,
-              reviewed_at VARCHAR(32),
-              reviewed_by VARCHAR(100),
-              reviewed_by_role VARCHAR(64),
-              created_at VARCHAR(32) NOT NULL,
-              updated_at VARCHAR(32) NOT NULL,
-              created_by VARCHAR(100),
-              created_by_role VARCHAR(64),
-              INDEX idx_pre_ai_encounter_source_patient (source_patient_id),
-              INDEX idx_pre_ai_encounter_patient_case (patient_case_id, visit_no),
-              INDEX idx_pre_ai_encounter_status (status),
-              INDEX idx_pre_ai_encounter_updated (updated_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        addColumnIfMissing("pre_ai_encounters", "patient_case_id", "VARCHAR(64)");
-        addColumnIfMissing("pre_ai_encounters", "visit_no", "INT NOT NULL DEFAULT 1");
-        addColumnIfMissing("pre_ai_encounters", "follow_up_of_encounter_id", "VARCHAR(64)");
-        addColumnIfMissing("pre_ai_encounters", "visit_meta_json", "JSON NULL");
-        addColumnIfMissing("pre_ai_encounters", "duty_assignments_json", "JSON NULL");
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_patient_cases (
-              id VARCHAR(64) PRIMARY KEY,
-              source_patient_id VARCHAR(64),
-              patient_json JSON NOT NULL,
-              created_at VARCHAR(32) NOT NULL,
-              updated_at VARCHAR(32) NOT NULL,
-              INDEX idx_pre_ai_patient_source (source_patient_id),
-              INDEX idx_pre_ai_patient_updated (updated_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_stage_submissions (
-              encounter_id VARCHAR(64) NOT NULL,
-              stage_code VARCHAR(32) NOT NULL,
-              status VARCHAR(32) NOT NULL,
-              version INT NOT NULL DEFAULT 0,
-              data_json JSON NOT NULL,
-              returned_reason VARCHAR(500),
-              submitted_by VARCHAR(100),
-              submitted_by_role VARCHAR(64),
-              completed_at VARCHAR(32),
-              updated_at VARCHAR(32) NOT NULL,
-              PRIMARY KEY (encounter_id, stage_code),
-              INDEX idx_pre_ai_stage_status (stage_code, status)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_auxiliary_tasks (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              task_type VARCHAR(32) NOT NULL,
-              title VARCHAR(255),
-              owner_role VARCHAR(64) NOT NULL,
-              required_before_export BOOLEAN NOT NULL DEFAULT FALSE,
-              status VARCHAR(32) NOT NULL,
-              data_json JSON NOT NULL,
-              version INT NOT NULL DEFAULT 0,
-              completed_at VARCHAR(32),
-              updated_at VARCHAR(32) NOT NULL,
-              updated_by VARCHAR(100),
-              updated_by_role VARCHAR(64),
-              completed_by VARCHAR(100),
-              completed_by_role VARCHAR(64),
-              created_at VARCHAR(32) NOT NULL,
-              created_by VARCHAR(100),
-              INDEX idx_pre_ai_aux_encounter (encounter_id),
-              INDEX idx_pre_ai_aux_owner_status (owner_role, status)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        addColumnIfMissing("pre_ai_auxiliary_tasks", "updated_by", "VARCHAR(100)");
-        addColumnIfMissing("pre_ai_auxiliary_tasks", "updated_by_role", "VARCHAR(64)");
-        addColumnIfMissing("pre_ai_auxiliary_tasks", "completed_by", "VARCHAR(100)");
-        addColumnIfMissing("pre_ai_auxiliary_tasks", "completed_by_role", "VARCHAR(64)");
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_attachments (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              stage_code VARCHAR(32),
-              task_id VARCHAR(64),
-              file_name VARCHAR(255),
-              storage_path VARCHAR(512) NOT NULL,
-              mime_type VARCHAR(128),
-              file_size BIGINT DEFAULT 0,
-              sha256 VARCHAR(128),
-              description VARCHAR(500),
-              captured_at VARCHAR(32),
-              uploader VARCHAR(100),
-              uploader_role VARCHAR(64),
-              batch_id VARCHAR(64),
-              batch_name VARCHAR(255),
-              relative_path VARCHAR(700),
-              sequence_no INT,
-              status VARCHAR(32) NOT NULL,
-              created_at VARCHAR(32) NOT NULL,
-              INDEX idx_pre_ai_attachment_encounter (encounter_id),
-              INDEX idx_pre_ai_attachment_task (task_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        addColumnIfMissing("pre_ai_attachments", "batch_id", "VARCHAR(64)");
-        addColumnIfMissing("pre_ai_attachments", "batch_name", "VARCHAR(255)");
-        addColumnIfMissing("pre_ai_attachments", "relative_path", "VARCHAR(700)");
-        addColumnIfMissing("pre_ai_attachments", "sequence_no", "INT");
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_lab_reports (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              template_id VARCHAR(100) NOT NULL,
-              template_name VARCHAR(255) NOT NULL,
-              report_date VARCHAR(32) NOT NULL,
-              remark VARCHAR(1000),
-              metrics_json JSON NOT NULL,
-              version INT NOT NULL DEFAULT 1,
-              status VARCHAR(32) NOT NULL,
-              saved_by VARCHAR(100),
-              saved_by_role VARCHAR(64),
-              saved_at VARCHAR(32) NOT NULL,
-              INDEX idx_pre_ai_lab_encounter (encounter_id, status),
-              INDEX idx_pre_ai_lab_template (encounter_id, template_id, report_date, version)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_diagnoses (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              diagnosis_type VARCHAR(64) NOT NULL,
-              diagnosis_text VARCHAR(1000) NOT NULL,
-              sort_no INT NOT NULL DEFAULT 0,
-              source_stage VARCHAR(32) NOT NULL,
-              updated_at VARCHAR(32) NOT NULL,
-              INDEX idx_pre_ai_diagnosis_encounter (encounter_id),
-              INDEX idx_pre_ai_diagnosis_type (diagnosis_type)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_audit_logs (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              action VARCHAR(100) NOT NULL,
-              stage_code VARCHAR(32),
-              operator VARCHAR(100),
-              operator_role VARCHAR(64),
-              detail VARCHAR(1000),
-              created_at VARCHAR(32) NOT NULL,
-              INDEX idx_pre_ai_audit_encounter (encounter_id, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_exports (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              version INT NOT NULL,
-              status VARCHAR(32) NOT NULL,
-              case_token VARCHAR(64) NOT NULL,
-              file_name VARCHAR(255) NOT NULL,
-              file_path VARCHAR(700) NOT NULL,
-              source_snapshot JSON NOT NULL,
-              masked_snapshot JSON NOT NULL,
-              generated_by VARCHAR(100),
-              generated_by_role VARCHAR(64),
-              generated_at VARCHAR(32) NOT NULL,
-              INDEX idx_pre_ai_export_encounter (encounter_id, version)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        addUniqueIndexIfMissing("pre_ai_exports", "uq_pre_ai_export_version", "encounter_id, version");
-        migratePatientCases();
-        jdbcTemplate.update("""
-            INSERT INTO pre_ai_auxiliary_tasks (
-              id, encounter_id, task_type, title, owner_role, required_before_export, status, data_json, version,
-              completed_at, updated_at, created_at, created_by
-            )
-            SELECT CONCAT('aux-lab-', REPLACE(UUID(), '-', '')), e.id, 'LAB', '化验室检验报告', 'lab', TRUE,
-                   'DRAFT', JSON_OBJECT(), 0, '', ?, ?, 'system'
-            FROM pre_ai_encounters e
-            WHERE NOT EXISTS (
-              SELECT 1 FROM pre_ai_auxiliary_tasks t WHERE t.encounter_id = e.id AND t.task_type = 'LAB'
-            )
-            """, now(), now());
     }
 
     @Transactional
@@ -613,7 +418,7 @@ public class PreAiEncounterService {
             }
         }
         if ("DOCTOR".equals(stage)) syncEncounterBranch(encounterId, data, encounter);
-        upsertStage(encounterId, stage, text(current, "status", "DRAFT"), current.path("version").asInt(0) + 1, data, "", user, "");
+        updateStageVersioned(encounterId, stage, text(current, "status", "DRAFT"), data, "", user, "", request == null ? null : request.expectedVersion());
         syncDiagnoses(encounterId, stage, data);
         invalidateReview(encounterId, user, "阶段内容发生修改");
         audit(encounterId, "stage.save", stage, user, "保存阶段草稿");
@@ -642,7 +447,7 @@ public class PreAiEncounterService {
             }
         }
         if ("DOCTOR".equals(stage)) syncEncounterBranch(encounterId, data, encounter);
-        upsertStage(encounterId, stage, "COMPLETED", current.path("version").asInt(0) + 1, data, "", user, now());
+        updateStageVersioned(encounterId, stage, "COMPLETED", data, "", user, now(), request == null ? null : request.expectedVersion());
         syncDiagnoses(encounterId, stage, data);
         if (Set.of("INSPECTION", "RECEPTION").contains(stage)) clinicQueueService.onClinicalStageCompleted(encounterId, stage, user);
         if ("DOCTOR".equals(stage)) applySurgeryBranch(encounterId, data, user);
@@ -662,7 +467,7 @@ public class PreAiEncounterService {
         if (reason.isBlank()) throw badRequest("退回原因不能为空");
         ObjectNode current = loadStage(encounterId, stage);
         if (!Set.of("COMPLETED", "SKIPPED").contains(text(current, "status"))) throw conflict("只有已完成或已跳过的阶段可以退回");
-        upsertStage(encounterId, stage, "RETURNED", current.path("version").asInt(0) + 1, safeObject(current.path("data")), reason, user, "");
+        updateStageVersioned(encounterId, stage, "RETURNED", safeObject(current.path("data")), reason, user, "", request == null ? null : request.expectedVersion());
         invalidateReview(encounterId, user, "医生退回阶段：" + reason);
         audit(encounterId, "stage.return", stage, user, reason);
         refreshProgress(encounterId);
@@ -704,18 +509,20 @@ public class PreAiEncounterService {
         ObjectNode data = sanitizeObject(request == null ? null : request.data(), AUX_FIELDS.get(taskType));
         if (complete) validateAuxiliaryTask(taskType, data);
         String status = complete ? "COMPLETED" : "DRAFT";
-        jdbcTemplate.update("""
+        int changed = jdbcTemplate.update("""
             UPDATE pre_ai_auxiliary_tasks
             SET title = ?, required_before_export = ?, status = ?, data_json = CAST(? AS JSON), version = version + 1,
                 completed_at = ?, updated_at = ?, updated_by = ?, updated_by_role = ?,
                 completed_by = ?, completed_by_role = ?
-            WHERE id = ? AND encounter_id = ?
+            WHERE id = ? AND encounter_id = ? AND version = ?
             """,
             request == null ? text(task, "title") : safe(request.title()),
             request == null ? task.path("requiredBeforeExport").asBoolean(false) : request.requiredBeforeExport(),
             status, toJson(data), complete ? now() : "", now(), user.name(), user.role(),
-            complete ? user.name() : "", complete ? user.role() : "", taskId, encounterId
+            complete ? user.name() : "", complete ? user.role() : "", taskId, encounterId,
+            requireExpectedVersion(request == null ? null : request.expectedVersion(), "辅助检查任务")
         );
+        if (changed != 1) throwVersionConflict("辅助检查任务", taskId, request == null ? null : request.expectedVersion(), loadAuxiliaryTask(encounterId, taskId));
         invalidateReview(encounterId, user, "辅助检查任务发生修改");
         audit(encounterId, complete ? "aux.complete" : "aux.save", null, user, taskType + "：" + text(task, "title"));
         refreshProgress(encounterId);
@@ -729,12 +536,14 @@ public class PreAiEncounterService {
         ObjectNode task = loadAuxiliaryTask(encounterId, taskId);
         String reason = safe(request == null ? "" : request.reason());
         if (reason.isBlank()) throw badRequest("退回原因不能为空");
-        jdbcTemplate.update("""
+        int changed = jdbcTemplate.update("""
             UPDATE pre_ai_auxiliary_tasks
             SET status = 'RETURNED', completed_at = '', completed_by = '', completed_by_role = '',
                 version = version + 1, updated_at = ?, updated_by = ?, updated_by_role = ?
-            WHERE id = ? AND encounter_id = ?
-            """, now(), user.name(), user.role(), taskId, encounterId);
+            WHERE id = ? AND encounter_id = ? AND version = ?
+            """, now(), user.name(), user.role(), taskId, encounterId,
+            requireExpectedVersion(request == null ? null : request.expectedVersion(), "辅助检查任务"));
+        if (changed != 1) throwVersionConflict("辅助检查任务", taskId, request == null ? null : request.expectedVersion(), loadAuxiliaryTask(encounterId, taskId));
         invalidateReview(encounterId, user, "辅助检查退回：" + reason);
         audit(encounterId, "aux.return", null, user, text(task, "taskType") + "：" + reason);
         refreshProgress(encounterId);
@@ -743,6 +552,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> uploadAttachment(String encounterId, AttachmentUploadRequest request, SessionUser user) throws IOException {
+        log.warn("Deprecated Base64 attachment upload used for encounter {}; migrate the client to multipart", encounterId);
         ObjectNode encounter = loadEncounter(encounterId);
         String stage = request == null ? "" : safe(request.stageCode()).toUpperCase(Locale.ROOT);
         String taskId = request == null ? "" : safe(request.taskId());
@@ -754,6 +564,37 @@ public class PreAiEncounterService {
         ClinicStoredFile stored = fileService.store(new ClinicFileUploadRequest(
             request.fileName(), request.contentDataUrl(), encounterId, user.department(), user.name(), user.role(), "pre-ai", "前置病历附件"
         ), user);
+        String id = "preatt-" + UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO pre_ai_attachments (
+              id, encounter_id, stage_code, task_id, file_name, storage_path, mime_type, file_size, sha256,
+              description, captured_at, uploader, uploader_role, batch_id, batch_name, relative_path, sequence_no, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+            """,
+            id, encounterId, stage, taskId, stored.fileName(), stored.storagePath(), stored.mimeType(), stored.size(), stored.sha256(),
+            safe(request.description()), safe(request.capturedAt()), user.name(), user.role(), safe(request.batchId()), safe(request.batchName()),
+            safe(request.relativePath()), request.sequenceNo(), now()
+        );
+        audit(encounterId, "attachment.upload", stage, user, "上传本阶段附件");
+        return toMap(workspace(encounterId, user));
+    }
+
+    @Transactional
+    public Map<String, Object> uploadAttachment(
+        String encounterId,
+        AttachmentUploadRequest request,
+        MultipartFile file,
+        SessionUser user
+    ) throws IOException {
+        ObjectNode encounter = loadEncounter(encounterId);
+        String stage = request == null ? "" : safe(request.stageCode()).toUpperCase(Locale.ROOT);
+        String taskId = request == null ? "" : safe(request.taskId());
+        if (!taskId.isBlank()) {
+            requireAuxEditor(encounter, loadAuxiliaryTask(encounterId, taskId), user);
+        } else {
+            requireStageEditor(encounter, normalizeStage(stage), user);
+        }
+        ClinicStoredFile stored = fileService.store(file, encounterId);
         String id = "preatt-" + UUID.randomUUID();
         jdbcTemplate.update("""
             INSERT INTO pre_ai_attachments (
@@ -796,10 +637,20 @@ public class PreAiEncounterService {
             }
         }
         if (metrics.isEmpty()) throw badRequest("请至少填写一个检验指标");
-        Integer version = jdbcTemplate.queryForObject("""
-            SELECT COALESCE(MAX(version), 0) + 1 FROM pre_ai_lab_reports
+        List<Integer> versions = jdbcTemplate.queryForList("""
+            SELECT version FROM pre_ai_lab_reports
             WHERE encounter_id = ? AND template_id = ? AND report_date = ?
+            ORDER BY version DESC LIMIT 1 FOR UPDATE
             """, Integer.class, encounterId, templateId, reportDate);
+        int currentVersion = versions.isEmpty() ? 0 : versions.get(0);
+        int expectedVersion = requireExpectedVersion(request == null ? null : request.expectedVersion(), "检验报告");
+        if (currentVersion != expectedVersion) {
+            throw new VersionConflictException("检验报告已被其他终端更新，请刷新后重新提交", Map.of(
+                "entity", "检验报告", "encounterId", encounterId, "templateId", templateId,
+                "reportDate", reportDate, "expectedVersion", expectedVersion, "currentVersion", currentVersion
+            ));
+        }
+        int version = currentVersion + 1;
         jdbcTemplate.update("""
             UPDATE pre_ai_lab_reports SET status = 'SUPERSEDED'
             WHERE encounter_id = ? AND template_id = ? AND report_date = ? AND status = 'ACTIVE'
@@ -811,7 +662,7 @@ public class PreAiEncounterService {
               status, saved_by, saved_by_role, saved_at
             ) VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 'ACTIVE', ?, ?, ?)
             """, id, encounterId, templateId, templateName, reportDate, safe(request.remark()), toJson(metrics),
-            version == null ? 1 : version, user.name(), user.role(), now());
+            version, user.name(), user.role(), now());
         invalidateReview(encounterId, user, "化验报告发生修改");
         audit(encounterId, "lab.report.save", null, user, templateName + "（" + reportDate + "）");
         refreshProgress(encounterId);
@@ -819,7 +670,7 @@ public class PreAiEncounterService {
     }
 
     @Transactional
-    public Map<String, Object> completeLab(String encounterId, SessionUser user) {
+    public Map<String, Object> completeLab(String encounterId, VersionRequest request, SessionUser user) {
         ObjectNode encounter = loadEncounter(encounterId);
         requireAuxTaskEditor(encounter, "LAB", user);
         ObjectNode task = ensureLabTask(encounterId, user.name());
@@ -827,11 +678,13 @@ public class PreAiEncounterService {
             "SELECT COUNT(*) FROM pre_ai_lab_reports WHERE encounter_id = ? AND status = 'ACTIVE'", Integer.class, encounterId
         );
         if (count == null || count == 0) throw badRequest("至少保存一份检验报告后才能完成交接");
-        jdbcTemplate.update("""
+        int changed = jdbcTemplate.update("""
             UPDATE pre_ai_auxiliary_tasks SET status = 'COMPLETED', required_before_export = TRUE,
                 completed_at = ?, completed_by = ?, completed_by_role = ?, version = version + 1,
-                updated_at = ?, updated_by = ?, updated_by_role = ? WHERE id = ?
-            """, now(), user.name(), user.role(), now(), user.name(), user.role(), text(task, "id"));
+                updated_at = ?, updated_by = ?, updated_by_role = ? WHERE id = ? AND version = ?
+            """, now(), user.name(), user.role(), now(), user.name(), user.role(), text(task, "id"),
+            requireExpectedVersion(request == null ? null : request.expectedVersion(), "化验室任务"));
+        if (changed != 1) throwVersionConflict("化验室任务", text(task, "id"), request == null ? null : request.expectedVersion(), loadAuxiliaryTask(encounterId, text(task, "id")));
         invalidateReview(encounterId, user, "化验室完成交接");
         audit(encounterId, "lab.complete", null, user, "化验报告已确认完成");
         refreshProgress(encounterId);
@@ -889,7 +742,7 @@ public class PreAiEncounterService {
         reviewData.put("criticalAcknowledged", criticalAcknowledged);
         if (criticalAcknowledged) reviewData.put("criticalAcknowledgedAt", now());
         ObjectNode current = loadStage(encounterId, "REVIEW");
-        upsertStage(encounterId, "REVIEW", "COMPLETED", current.path("version").asInt(0) + 1, reviewData, "", user, now());
+        updateStageVersioned(encounterId, "REVIEW", "COMPLETED", reviewData, "", user, now(), request == null ? null : request.expectedVersion());
         jdbcTemplate.update("""
             UPDATE pre_ai_encounters SET status = 'REVIEWED', current_stage = 'REVIEW', reviewed_at = ?, reviewed_by = ?, reviewed_by_role = ?, updated_at = ? WHERE id = ?
             """, now(), user.name(), user.role(), now(), encounterId);
@@ -1096,59 +949,6 @@ public class PreAiEncounterService {
             ) VALUES (?, ?, 'LAB', '化验室检验报告', 'lab', TRUE, 'DRAFT', JSON_OBJECT(), 0, '', ?, ?, ?, ?)
             """, id, encounterId, timestamp, safe(creator), timestamp, safe(creator));
         return loadAuxiliaryTask(encounterId, id);
-    }
-
-    private void addColumnIfMissing(String table, String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*) FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
-            """, Integer.class, table, column);
-        if (count == null || count == 0) jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-    }
-
-    private void addUniqueIndexIfMissing(String table, String index, String columns) {
-        Integer count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*) FROM information_schema.statistics
-            WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
-            """, Integer.class, table, index);
-        if (count == null || count == 0) jdbcTemplate.execute("ALTER TABLE " + table + " ADD UNIQUE INDEX " + index + " (" + columns + ")");
-    }
-
-    private void migratePatientCases() {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-            SELECT id, source_patient_id, patient_case_id, patient_json, created_at, updated_at
-            FROM pre_ai_encounters ORDER BY created_at, id
-            """);
-        Map<String, String> caseByGroup = new LinkedHashMap<>();
-        for (Map<String, Object> row : rows) {
-            String encounterId = safe(String.valueOf(row.get("id")));
-            String sourcePatientId = safe(String.valueOf(row.getOrDefault("source_patient_id", "")));
-            if ("null".equalsIgnoreCase(sourcePatientId)) sourcePatientId = "";
-            String existingCaseId = safe(String.valueOf(row.getOrDefault("patient_case_id", "")));
-            if ("null".equalsIgnoreCase(existingCaseId)) existingCaseId = "";
-            String group = sourcePatientId.isBlank() ? "encounter:" + encounterId : "source:" + sourcePatientId;
-            if (!existingCaseId.isBlank()) caseByGroup.putIfAbsent(group, existingCaseId);
-            String patientCaseId = caseByGroup.computeIfAbsent(group, ignored -> "pcase-" + UUID.randomUUID());
-            String patientJson = String.valueOf(row.getOrDefault("patient_json", "{}"));
-            String createdAt = safe(String.valueOf(row.getOrDefault("created_at", now())));
-            String updatedAt = safe(String.valueOf(row.getOrDefault("updated_at", createdAt)));
-            jdbcTemplate.update("""
-                INSERT IGNORE INTO pre_ai_patient_cases (id, source_patient_id, patient_json, created_at, updated_at)
-                VALUES (?, ?, CAST(? AS JSON), ?, ?)
-                """, patientCaseId, sourcePatientId, patientJson, createdAt, updatedAt);
-            if (existingCaseId.isBlank()) {
-                jdbcTemplate.update("UPDATE pre_ai_encounters SET patient_case_id = ? WHERE id = ?", patientCaseId, encounterId);
-            }
-        }
-        for (String patientCaseId : new LinkedHashSet<>(caseByGroup.values())) {
-            List<String> encounterIds = jdbcTemplate.query(
-                "SELECT id FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY created_at, id",
-                (rs, rowNum) -> rs.getString("id"), patientCaseId
-            );
-            for (int index = 0; index < encounterIds.size(); index++) {
-                jdbcTemplate.update("UPDATE pre_ai_encounters SET visit_no = ? WHERE id = ?", index + 1, encounterIds.get(index));
-            }
-        }
     }
 
     private void normalizeSurgeryConfirmation(ObjectNode encounter, ObjectNode data, SessionUser user) {
@@ -1602,6 +1402,34 @@ public class PreAiEncounterService {
               returned_reason = VALUES(returned_reason), submitted_by = VALUES(submitted_by), submitted_by_role = VALUES(submitted_by_role),
               completed_at = VALUES(completed_at), updated_at = VALUES(updated_at)
             """, encounterId, stage, status, version, toJson(data), reason, user.name(), user.role(), completedAt, now());
+    }
+
+    private void updateStageVersioned(String encounterId, String stage, String status, ObjectNode data, String reason,
+                                      SessionUser user, String completedAt, Integer expectedVersion) {
+        int expected = requireExpectedVersion(expectedVersion, "阶段记录");
+        int changed = jdbcTemplate.update("""
+            UPDATE pre_ai_stage_submissions
+            SET status = ?, version = version + 1, data_json = CAST(? AS JSON), returned_reason = ?,
+                submitted_by = ?, submitted_by_role = ?, completed_at = ?, updated_at = ?
+            WHERE encounter_id = ? AND stage_code = ? AND version = ?
+            """, status, toJson(data), reason, user.name(), user.role(), completedAt, now(), encounterId, stage, expected);
+        if (changed != 1) throwVersionConflict("阶段记录", stage, expectedVersion, loadStage(encounterId, stage));
+    }
+
+    private int requireExpectedVersion(Integer expectedVersion, String entity) {
+        if (expectedVersion == null || expectedVersion < 0) throw badRequest(entity + "缺少有效的 expectedVersion");
+        return expectedVersion;
+    }
+
+    private void throwVersionConflict(String entity, String id, Integer expectedVersion, ObjectNode current) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("entity", entity);
+        summary.put("id", id);
+        summary.put("expectedVersion", expectedVersion == null ? -1 : expectedVersion);
+        summary.put("currentVersion", current.path("version").asInt(0));
+        summary.put("status", text(current, "status"));
+        summary.put("updatedAt", text(current, "updatedAt"));
+        throw new VersionConflictException(entity + "已被其他终端更新，请刷新后重新提交", summary);
     }
 
     private ObjectNode loadEncounter(String encounterId) {
@@ -2095,10 +1923,10 @@ public class PreAiEncounterService {
 
     public record CreateEncounterRequest(Map<String, Object> patient) {}
     public record DutyAssignmentsRequest(List<Map<String, Object>> dutyAssignments) {}
-    public record StageSaveRequest(Map<String, Object> data) {}
-    public record ReturnStageRequest(String reason) {}
+    public record StageSaveRequest(Map<String, Object> data, Integer expectedVersion) {}
+    public record ReturnStageRequest(String reason, Integer expectedVersion) {}
     public record AuxiliaryTaskRequest(String taskType, String title, boolean requiredBeforeExport) {}
-    public record AuxiliaryTaskSaveRequest(String title, boolean requiredBeforeExport, Map<String, Object> data) {}
+    public record AuxiliaryTaskSaveRequest(String title, boolean requiredBeforeExport, Map<String, Object> data, Integer expectedVersion) {}
     public record AttachmentUploadRequest(
         String stageCode,
         String taskId,
@@ -2116,9 +1944,11 @@ public class PreAiEncounterService {
         String templateName,
         String reportDate,
         String remark,
-        List<Map<String, Object>> metrics
+        List<Map<String, Object>> metrics,
+        Integer expectedVersion
     ) {}
-    public record ReviewConfirmRequest(String statement, boolean criticalAcknowledged) {}
+    public record ReviewConfirmRequest(String statement, boolean criticalAcknowledged, Integer expectedVersion) {}
+    public record VersionRequest(Integer expectedVersion) {}
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}
     public record AttachmentDownload(FileSystemResource resource, String fileName, String mimeType) {}

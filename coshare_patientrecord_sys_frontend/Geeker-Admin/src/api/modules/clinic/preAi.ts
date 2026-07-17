@@ -317,17 +317,32 @@ export const savePreAiDutyAssignmentsApi = (encounterId: string, dutyAssignments
 export const importLegacyPreAiEncounterApi = (patientId: string) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/imports/${encodeURIComponent(patientId)}`, "POST");
 
-export const savePreAiStageApi = (encounterId: string, stageCode: PreAiStageCode, data: Record<string, any>) =>
-  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}`, "PUT", { data });
-
-export const completePreAiStageApi = (encounterId: string, stageCode: PreAiStageCode, data: Record<string, any>) =>
-  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/complete`, "POST", {
-    data
+export const savePreAiStageApi = (
+  encounterId: string,
+  stageCode: PreAiStageCode,
+  data: Record<string, any>,
+  expectedVersion: number
+) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}`, "PUT", {
+    data,
+    expectedVersion
   });
 
-export const returnPreAiStageApi = (encounterId: string, stageCode: PreAiStageCode, reason: string) =>
+export const completePreAiStageApi = (
+  encounterId: string,
+  stageCode: PreAiStageCode,
+  data: Record<string, any>,
+  expectedVersion: number
+) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/complete`, "POST", {
+    data,
+    expectedVersion
+  });
+
+export const returnPreAiStageApi = (encounterId: string, stageCode: PreAiStageCode, reason: string, expectedVersion: number) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/return`, "POST", {
-    reason
+    reason,
+    expectedVersion
   });
 
 export const createPreAiAuxiliaryTaskApi = (
@@ -338,7 +353,7 @@ export const createPreAiAuxiliaryTaskApi = (
 export const savePreAiAuxiliaryTaskApi = (
   encounterId: string,
   taskId: string,
-  payload: { title: string; requiredBeforeExport: boolean; data: Record<string, any> },
+  payload: { title: string; requiredBeforeExport: boolean; data: Record<string, any>; expectedVersion: number },
   complete = false
 ) =>
   jsonRequest<PreAiWorkspace>(
@@ -347,11 +362,11 @@ export const savePreAiAuxiliaryTaskApi = (
     payload
   );
 
-export const returnPreAiAuxiliaryTaskApi = (encounterId: string, taskId: string, reason: string) =>
+export const returnPreAiAuxiliaryTaskApi = (encounterId: string, taskId: string, reason: string, expectedVersion: number) =>
   jsonRequest<PreAiWorkspace>(
     `/pre-ai/encounters/${encodeURIComponent(encounterId)}/auxiliary-tasks/${encodeURIComponent(taskId)}/return`,
     "POST",
-    { reason }
+    { reason, expectedVersion }
   );
 
 export const uploadPreAiAttachmentApi = (
@@ -359,8 +374,7 @@ export const uploadPreAiAttachmentApi = (
   payload: {
     stageCode?: PreAiStageCode;
     taskId?: string;
-    fileName: string;
-    contentDataUrl: string;
+    file: File;
     description?: string;
     capturedAt?: string;
     batchId?: string;
@@ -368,7 +382,21 @@ export const uploadPreAiAttachmentApi = (
     relativePath?: string;
     sequenceNo?: number;
   }
-) => jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/attachments`, "POST", payload);
+) => {
+  const body = new FormData();
+  body.append("file", payload.file, payload.file.name);
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === "file" || value === undefined || value === null || value === "") continue;
+    body.append(key, String(value));
+  }
+  return clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/attachments`, {
+    method: "POST",
+    headers: authHeaders(),
+    body
+  })
+    .then(parseClinicApiResponse<PreAiWorkspace>)
+    .then(clinicResponse);
+};
 
 export const savePreAiLabReportApi = (
   encounterId: string,
@@ -378,11 +406,14 @@ export const savePreAiLabReportApi = (
     reportDate: string;
     remark?: string;
     metrics: LabReportMetricSnapshot[];
+    expectedVersion: number;
   }
 ) => jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports`, "POST", payload);
 
-export const completePreAiLabApi = (encounterId: string) =>
-  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab/complete`, "POST");
+export const completePreAiLabApi = (encounterId: string, expectedVersion: number) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab/complete`, "POST", {
+    expectedVersion
+  });
 
 export const voidPreAiAttachmentApi = (encounterId: string, attachmentId: string) =>
   jsonRequest<PreAiWorkspace>(
@@ -398,10 +429,16 @@ export const getPreAiReviewPreviewApi = async (encounterId: string, signal?: Abo
   return clinicResponse(await parseClinicApiResponse<PreAiReviewPreview>(result));
 };
 
-export const confirmPreAiReviewApi = (encounterId: string, statement = "", criticalAcknowledged = false) =>
+export const confirmPreAiReviewApi = (
+  encounterId: string,
+  statement = "",
+  criticalAcknowledged = false,
+  expectedVersion: number
+) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review/confirm`, "POST", {
     statement,
-    criticalAcknowledged
+    criticalAcknowledged,
+    expectedVersion
   });
 
 export const generatePreAiExportApi = (encounterId: string) =>

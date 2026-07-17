@@ -4,7 +4,9 @@ import com.coshare.patientrecord.auth.dto.LoginAccountOptions;
 import com.coshare.patientrecord.auth.dto.LoginOptions;
 import com.coshare.patientrecord.auth.dto.LoginRequest;
 import com.coshare.patientrecord.auth.dto.LoginResult;
+import com.coshare.patientrecord.auth.dto.NavigationResult;
 import com.coshare.patientrecord.auth.dto.PasswordChangeRequest;
+import com.coshare.patientrecord.auth.service.AuthNavigationService;
 import com.coshare.patientrecord.auth.service.AuthSessionService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.security.AuthPermission;
@@ -23,9 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthApiController {
 
     private final AuthSessionService authSessionService;
+    private final AuthNavigationService authNavigationService;
 
-    public AuthApiController(AuthSessionService authSessionService) {
+    public AuthApiController(AuthSessionService authSessionService, AuthNavigationService authNavigationService) {
         this.authSessionService = authSessionService;
+        this.authNavigationService = authNavigationService;
     }
 
     @PostMapping("/auth/login")
@@ -50,6 +54,11 @@ public class AuthApiController {
     public ApiResult<Map<String, Boolean>> logout(HttpServletRequest request) {
         authSessionService.logout(AuthTokenFilter.extractToken(request));
         return ApiResult.success(Map.of("ok", true));
+    }
+
+    @GetMapping("/auth/navigation")
+    public ApiResult<NavigationResult> navigation() {
+        return ApiResult.success(authNavigationService.navigationFor(AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/auth/password")

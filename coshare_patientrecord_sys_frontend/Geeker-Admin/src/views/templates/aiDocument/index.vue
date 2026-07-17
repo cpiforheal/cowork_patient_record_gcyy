@@ -60,6 +60,20 @@
           </div>
         </div>
 
+        <el-alert
+          v-else-if="currentTask?.status === 'FAILED'"
+          class="task-failure"
+          type="error"
+          :closable="false"
+          show-icon
+          title="AI 文稿生成失败"
+          :description="currentTask.errorMessage || '任务执行失败，请重试'"
+        >
+          <template #default>
+            <el-button type="primary" @click="retryTask">重试任务</el-button>
+          </template>
+        </el-alert>
+
         <el-empty v-else-if="!preview" description="粘贴内容后可先预检，也可以直接点击 AI生成DOCX" />
         <template v-else>
           <div class="preview-summary">
@@ -96,9 +110,12 @@ import { DocumentAdd, Download, Refresh, View } from "@element-plus/icons-vue";
 import {
   downloadAiDocumentApi,
   generateAiDocumentApi,
+  getAiDocumentTaskApi,
   getAiDocumentTemplatesApi,
   previewAiDocumentApi,
+  retryAiDocumentTaskApi,
   type AiDocumentPreview,
+  type AiDocumentTask,
   type AiDocumentTemplate,
   type GeneratedAiDocument
 } from "@/api/modules/clinic";
@@ -106,12 +123,14 @@ import {
 const templates = ref<AiDocumentTemplate[]>([]);
 const preview = ref<AiDocumentPreview | null>(null);
 const generatedDocument = ref<GeneratedAiDocument | null>(null);
+const currentTask = ref<AiDocumentTask | null>(null);
 const templateLoading = ref(false);
 const previewLoading = ref(false);
 const generateLoading = ref(false);
 const progressPercent = ref(0);
 const progressText = ref("正在读取粘贴内容...");
 let progressTimer: number | undefined;
+let pollingCancelled = false;
 
 const progressSteps = [
   "正在读取粘贴内容...",
@@ -197,26 +216,60 @@ const handleGenerate = async () => {
   startProgress();
   try {
     const { data } = await generateAiDocumentApi(payload());
-    progressPercent.value = 100;
-    progressText.value = "DOCX 文稿已生成";
-    generatedDocument.value = data.document;
-    preview.value = {
-      title: data.document.title,
-      docType: data.document.docType,
-      templateName: data.document.templateName,
-      paragraphCount: data.document.preview?.filter(item => item.type === "paragraph").length || 0,
-      headingCount: data.document.preview?.filter(item => item.type === "heading").length || 0,
-      listCount: data.document.preview?.filter(item => item.type === "list").length || 0,
-      tableCount: data.document.preview?.filter(item => item.type === "table").length || 0,
-      content: data.document.content || data.document.preview?.map(item => item.text).join("\n") || "",
-      blocks: data.document.preview || []
-    };
-    ElMessage.success("AI 文稿 DOCX 已生成");
+    currentTask.value = data;
+    await waitForTask(data.taskId);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "AI 文稿生成失败");
   } finally {
     stopProgress();
-    window.setTimeout(() => {
-      generateLoading.value = false;
-    }, 350);
+    generateLoading.value = false;
+  }
+};
+
+const waitForTask = async (taskId: string) => {
+  while (!pollingCancelled) {
+    const { data } = await getAiDocumentTaskApi(taskId);
+    currentTask.value = data;
+    if (data.status === "FAILED") throw new Error(data.errorMessage || "AI 文稿生成失败");
+    if (data.status === "SUCCEEDED" && data.result?.document) {
+      applyGeneratedDocument(data.result.document);
+      return;
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 1500));
+  }
+};
+
+const applyGeneratedDocument = (document: GeneratedAiDocument) => {
+  progressPercent.value = 100;
+  progressText.value = "DOCX 文稿已生成";
+  generatedDocument.value = document;
+  preview.value = {
+    title: document.title,
+    docType: document.docType,
+    templateName: document.templateName,
+    paragraphCount: document.preview?.filter(item => item.type === "paragraph").length || 0,
+    headingCount: document.preview?.filter(item => item.type === "heading").length || 0,
+    listCount: document.preview?.filter(item => item.type === "list").length || 0,
+    tableCount: document.preview?.filter(item => item.type === "table").length || 0,
+    content: document.content || document.preview?.map(item => item.text).join("\n") || "",
+    blocks: document.preview || []
+  };
+  ElMessage.success("AI 文稿 DOCX 已生成");
+};
+
+const retryTask = async () => {
+  if (!currentTask.value) return;
+  generateLoading.value = true;
+  startProgress();
+  try {
+    const { data } = await retryAiDocumentTaskApi(currentTask.value.taskId);
+    currentTask.value = data;
+    await waitForTask(data.taskId);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "AI 文稿重试失败");
+  } finally {
+    stopProgress();
+    generateLoading.value = false;
   }
 };
 
@@ -241,12 +294,19 @@ const resetForm = () => {
   form.content = "";
   preview.value = null;
   generatedDocument.value = null;
+  currentTask.value = null;
   progressPercent.value = 0;
   progressText.value = progressSteps[0];
 };
 
-onMounted(loadTemplates);
-onUnmounted(stopProgress);
+onMounted(() => {
+  pollingCancelled = false;
+  void loadTemplates();
+});
+onUnmounted(() => {
+  pollingCancelled = true;
+  stopProgress();
+});
 </script>
 
 <style scoped lang="scss">

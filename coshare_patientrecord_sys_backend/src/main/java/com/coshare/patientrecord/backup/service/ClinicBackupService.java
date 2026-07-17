@@ -2,12 +2,10 @@ package com.coshare.patientrecord.backup.service;
 
 import com.coshare.patientrecord.backup.repository.ClinicBackupRepository;
 import com.coshare.patientrecord.backup.entity.BackupConfig;
-import com.coshare.patientrecord.backup.repository.ClinicBackupSchemaInitializer;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
 import com.coshare.patientrecord.file.service.ClinicFileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.io.File;
@@ -55,7 +53,6 @@ public class ClinicBackupService {
     private static final String BACKUP_PREFIX = "clinic-backup-";
     private static final String BACKUP_SUFFIX = ".zip";
 
-    private final ClinicBackupSchemaInitializer schemaInitializer;
     private final ClinicBackupRepository backupRepository;
     private final ObjectMapper objectMapper;
     private final ClinicDatabaseService databaseService;
@@ -68,7 +65,6 @@ public class ClinicBackupService {
     private final String mysqlDataDir;
 
     public ClinicBackupService(
-        ClinicBackupSchemaInitializer schemaInitializer,
         ClinicBackupRepository backupRepository,
         ObjectMapper objectMapper,
         ClinicDatabaseService databaseService,
@@ -79,7 +75,6 @@ public class ClinicBackupService {
         @Value("${clinic.backup.mysqldump-path:}") String mysqlDumpPath,
         @Value("${clinic.mysql-data-dir:}") String mysqlDataDir
     ) {
-        this.schemaInitializer = schemaInitializer;
         this.backupRepository = backupRepository;
         this.objectMapper = objectMapper;
         this.databaseService = databaseService;
@@ -89,11 +84,6 @@ public class ClinicBackupService {
         this.datasourcePassword = datasourcePassword == null ? "" : datasourcePassword;
         this.mysqlDumpPath = mysqlDumpPath == null ? "" : mysqlDumpPath.trim();
         this.mysqlDataDir = mysqlDataDir == null ? "" : mysqlDataDir.trim();
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
     }
 
     public ObjectNode status() {
@@ -234,14 +224,22 @@ public class ClinicBackupService {
     private void writeDatabaseDump(Path target) throws IOException, InterruptedException {
         JdbcTarget jdbcTarget = parseJdbcTarget();
         String dumpExecutable = resolveMysqlDumpExecutable();
+        Path optionFile = null;
         List<String> command = new ArrayList<>();
         command.add(dumpExecutable);
+        if (!datasourcePassword.isBlank()) {
+            optionFile = Files.createTempFile(target.getParent(), ".mysqldump-", ".cnf");
+            String escapedPassword = datasourcePassword.replace("\\", "\\\\").replace("\"", "\\\"");
+            Files.writeString(optionFile, "[client]\npassword=\"" + escapedPassword + "\"\n", StandardCharsets.UTF_8);
+            optionFile.toFile().setReadable(false, false);
+            optionFile.toFile().setWritable(false, false);
+            optionFile.toFile().setReadable(true, true);
+            optionFile.toFile().setWritable(true, true);
+            command.add("--defaults-extra-file=" + optionFile.toAbsolutePath());
+        }
         command.add("--host=" + jdbcTarget.host());
         command.add("--port=" + jdbcTarget.port());
         command.add("--user=" + datasourceUsername);
-        if (!datasourcePassword.isBlank()) {
-            command.add("--password=" + datasourcePassword);
-        }
         command.add("--single-transaction");
         command.add("--quick");
         command.add("--default-character-set=utf8mb4");
@@ -251,11 +249,15 @@ public class ClinicBackupService {
         builder.redirectOutput(target.toFile());
         Path errorLog = target.resolveSibling("database-dump.err.log");
         builder.redirectError(errorLog.toFile());
-        Process process = builder.start();
-        int exitCode = process.waitFor();
-        if (exitCode != 0) {
-            String error = Files.exists(errorLog) ? Files.readString(errorLog, StandardCharsets.UTF_8) : "";
-            throw new IOException("mysqldump 执行失败：" + error.strip());
+        try {
+            Process process = builder.start();
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                String error = Files.exists(errorLog) ? Files.readString(errorLog, StandardCharsets.UTF_8) : "";
+                throw new IOException("mysqldump 执行失败：" + error.strip());
+            }
+        } finally {
+            if (optionFile != null) deleteIfExists(optionFile);
         }
         deleteIfExists(errorLog);
     }

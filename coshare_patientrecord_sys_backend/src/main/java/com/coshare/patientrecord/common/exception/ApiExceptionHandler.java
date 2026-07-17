@@ -3,6 +3,7 @@ package com.coshare.patientrecord.common.exception;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.common.observability.TraceIdFilter;
 import java.util.UUID;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -73,5 +74,12 @@ public class ApiExceptionHandler {
     private String requestId() {
         String requestId = MDC.get(TraceIdFilter.MDC_KEY);
         return requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId;
+    }
+
+    @ExceptionHandler(VersionConflictException.class)
+    public ResponseEntity<ApiResult<Map<String, Object>>> handleVersionConflict(VersionConflictException error) {
+        return ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .body(ApiResult.of(HttpStatus.CONFLICT.value(), error.getMessage(), error.current()));
     }
 }

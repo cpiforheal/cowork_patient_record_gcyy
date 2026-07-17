@@ -61,6 +61,7 @@ public class ClinicDbWriter {
         writeSimpleArray("clinic_dictionaries", writableDb.path("dictionaries"), List.of("id", "name", "department"));
         writeSimpleArray("clinic_template_field_rules", writableDb.path("templateFieldRules"), List.of("id", "sectionKey", "fieldKey", "fieldLabel", "department", "enabled", "sortNo"));
         writeSimpleArray("clinic_audit_logs", writableDb.path("auditLogs"), List.of("id", "time", "operator", "role", "patient", "patientId", "module", "action", "result"));
+        revokeSessionsForUnavailableAccounts();
 
         jdbcTemplate.update("INSERT INTO clinic_db_snapshots (payload_json) VALUES (?)", toJson(writableDb));
         return updateRevision();
@@ -215,6 +216,7 @@ public class ClinicDbWriter {
                     """,
                     id, text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
                     );
+                    revokeSessionsIfDisabled(account);
                 }
                 case "clinic_roles" -> jdbcTemplate.update("""
                     INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)
@@ -272,14 +274,13 @@ public class ClinicDbWriter {
         String id = text(account, "id");
         String incomingPasswordHash = text(account, "passwordHash");
         String incomingPassword = text(account, "password");
-        account.remove("password");
+        account.remove(List.of("password", "currentPassword"));
         if (!incomingPasswordHash.isBlank()) {
             account.put("passwordHash", isBcrypt(incomingPasswordHash) ? incomingPasswordHash : passwordEncoder.encode(incomingPasswordHash));
             return account;
         }
         if (!incomingPassword.isBlank()) {
             account.put("passwordHash", passwordEncoder.encode(incomingPassword));
-            account.put("currentPassword", incomingPassword);
             return account;
         }
         String existingPasswordHash = existingAccountPasswordHash(id);
@@ -295,7 +296,7 @@ public class ClinicDbWriter {
             "SELECT raw_json FROM clinic_accounts WHERE id = ? LIMIT 1",
             (resultSet, rowNum) -> {
                 JsonNode raw = readJson(resultSet, "raw_json");
-                return text(raw, "passwordHash", text(raw, "password"));
+                return text(raw, "passwordHash");
             },
             id
         );
@@ -322,7 +323,10 @@ public class ClinicDbWriter {
             (resultSet, rowNum) -> readJson(resultSet, "raw_json")
         );
         for (JsonNode account : accounts) {
-            ObjectNode secured = secureAccountRow(account);
+            ObjectNode secured = asObject(account).deepCopy();
+            secured.remove(List.of("password", "currentPassword"));
+            String passwordHash = text(secured, "passwordHash");
+            if (!passwordHash.isBlank() && !isBcrypt(passwordHash)) secured.remove("passwordHash");
             if (secured.equals(account)) continue;
             jdbcTemplate.update("UPDATE clinic_accounts SET raw_json = ? WHERE id = ?", toJson(secured), text(secured, "id"));
         }
@@ -509,6 +513,7 @@ public class ClinicDbWriter {
                     "INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)",
                     text(account, "id"), text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
                     );
+                    revokeSessionsIfDisabled(account);
                 }
                 case "clinic_roles" -> jdbcTemplate.update(
                     "INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)",
@@ -543,6 +548,27 @@ public class ClinicDbWriter {
                 default -> throw new IllegalArgumentException("Unsupported table: " + table + " " + columns);
             }
         }
+    }
+
+    private void revokeSessionsIfDisabled(ObjectNode account) {
+        if ("启用".equals(text(account, "status", "启用"))) return;
+        jdbcTemplate.update(
+            """
+            UPDATE clinic_auth_sessions
+            SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = 'account_disabled'
+            WHERE user_id = ? AND revoked_at IS NULL
+            """,
+            text(account, "id")
+        );
+    }
+
+    private void revokeSessionsForUnavailableAccounts() {
+        jdbcTemplate.update("""
+            UPDATE clinic_auth_sessions
+            SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = 'account_unavailable'
+            WHERE revoked_at IS NULL
+              AND user_id NOT IN (SELECT id FROM clinic_accounts WHERE status = '启用')
+            """);
     }
 
     private JsonNode readJson(ResultSet resultSet, String column) throws SQLException {

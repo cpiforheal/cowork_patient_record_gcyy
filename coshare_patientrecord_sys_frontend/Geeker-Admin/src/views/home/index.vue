@@ -258,7 +258,6 @@ const {
   backupStorageSummary,
   backupHealthItems
 } = useHomeDashboard({
-  currentRole,
   maintenanceStatus,
   backupStatus
 });

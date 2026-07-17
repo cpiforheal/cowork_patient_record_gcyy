@@ -21,7 +21,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @Profile("mysql")
@@ -141,16 +144,38 @@ public class PreAiEncounterController {
     }
 
     @PostMapping("/{encounterId}/lab/complete")
-    public ApiResult<Map<String, Object>> completeLab(@PathVariable String encounterId) {
-        return ApiResult.of(200, "化验室已完成并交接", service.completeLab(encounterId, AuthPermission.currentUserOrThrow()));
+    public ApiResult<Map<String, Object>> completeLab(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.VersionRequest request
+    ) {
+        return ApiResult.of(200, "化验室已完成并交接", service.completeLab(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
-    @PostMapping("/{encounterId}/attachments")
+    @PostMapping(path = "/{encounterId}/attachments", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ApiResult<Map<String, Object>> uploadAttachment(
         @PathVariable String encounterId,
         @RequestBody PreAiEncounterService.AttachmentUploadRequest request
     ) throws IOException {
         return ApiResult.of(200, "附件已上传", service.uploadAttachment(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping(path = "/{encounterId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<Map<String, Object>> uploadAttachmentMultipart(
+        @PathVariable String encounterId,
+        @RequestPart("file") MultipartFile file,
+        @RequestParam(defaultValue = "") String stageCode,
+        @RequestParam(defaultValue = "") String taskId,
+        @RequestParam(defaultValue = "") String description,
+        @RequestParam(defaultValue = "") String capturedAt,
+        @RequestParam(defaultValue = "") String batchId,
+        @RequestParam(defaultValue = "") String batchName,
+        @RequestParam(defaultValue = "") String relativePath,
+        @RequestParam(required = false) Integer sequenceNo
+    ) throws IOException {
+        PreAiEncounterService.AttachmentUploadRequest metadata = new PreAiEncounterService.AttachmentUploadRequest(
+            stageCode, taskId, file.getOriginalFilename(), null, description, capturedAt, batchId, batchName, relativePath, sequenceNo
+        );
+        return ApiResult.of(200, "附件已上传", service.uploadAttachment(encounterId, metadata, file, AuthPermission.currentUserOrThrow()));
     }
 
     @DeleteMapping("/{encounterId}/attachments/{attachmentId}")

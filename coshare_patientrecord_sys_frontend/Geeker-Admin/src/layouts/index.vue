@@ -117,9 +117,14 @@ watch(isDark, () => (font.color = isDark.value ? "rgba(255, 255, 255, .15)" : "r
 }
 
 @media (max-width: 768px) {
+  .layout {
+    min-width: 0;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
   .doubao-global-entry {
     right: 16px;
-    bottom: 18px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
     min-width: 0;
     padding: 10px;
 

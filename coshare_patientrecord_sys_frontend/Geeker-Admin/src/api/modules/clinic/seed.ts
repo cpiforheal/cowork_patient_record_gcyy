@@ -244,7 +244,6 @@ const seedAccounts = (): AccountRow[] => [
   {
     id: "admin",
     username: "admin",
-    password: "Init@Coshare2026!",
     name: roleLabel("admin"),
     department: roleToDepartment.admin,
     role: "admin",
@@ -253,19 +252,6 @@ const seedAccounts = (): AccountRow[] => [
     status: "启用",
     createdAt: "2026-06-10 08:00:00",
     updatedAt: "2026-06-10 08:00:00"
-  },
-  {
-    id: "tcm-pharmacy-operator",
-    username: "tcmpharmacy",
-    password: "TcmPharmacy@2026!",
-    name: "中药房业务岗",
-    department: roleToDepartment.tcmPharmacyOperator,
-    role: "tcmPharmacyOperator",
-    roleLabel: roleLabel("tcmPharmacyOperator"),
-    scope: "中药房收费、审方、调剂、代煎、叫号与领取闭环",
-    status: "启用",
-    createdAt: "2026-07-12 10:00:00",
-    updatedAt: "2026-07-12 10:00:00"
   }
 ];
 

@@ -59,6 +59,28 @@
       进入工作台
     </el-button>
   </div>
+
+  <el-dialog
+    v-model="forcePasswordVisible"
+    title="首次登录必须修改密码"
+    width="420px"
+    :show-close="false"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
+    <el-alert title="初始密码只能用于本次引导，修改后所有旧会话会立即失效。" type="warning" :closable="false" show-icon />
+    <el-form class="force-password-form" label-position="top">
+      <el-form-item label="新密码">
+        <el-input v-model="passwordChange.newPassword" type="password" show-password autocomplete="new-password" />
+      </el-form-item>
+      <el-form-item label="确认新密码">
+        <el-input v-model="passwordChange.confirmPassword" type="password" show-password autocomplete="new-password" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button type="primary" :loading="passwordChanging" @click="completeForcedPasswordChange">修改并进入系统</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -66,8 +88,14 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { HOME_URL } from "@/config";
 import { Login } from "@/api/interface";
-import { ElNotification } from "element-plus";
-import { getLoginAccountsApi, getLoginOptionsApi, loginApi, type LoginAccountOption } from "@/api/modules/login";
+import { ElMessage, ElNotification } from "element-plus";
+import {
+  changePasswordApi,
+  getLoginAccountsApi,
+  getLoginOptionsApi,
+  loginApi,
+  type LoginAccountOption
+} from "@/api/modules/login";
 import { useUserStore } from "@/stores/modules/user";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
@@ -90,6 +118,8 @@ const loginRules = reactive({
 const loading = ref(false);
 const departmentLoading = ref(false);
 const accountLoading = ref(false);
+const forcePasswordVisible = ref(false);
+const passwordChanging = ref(false);
 const accountOptions = ref<LoginAccountOption[]>([]);
 const departmentOptions = ref<string[]>([]);
 const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
@@ -97,6 +127,50 @@ const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
   username: "",
   password: ""
 });
+const passwordChange = reactive({ newPassword: "", confirmPassword: "" });
+
+const completeLogin = async (data: Login.ResLogin) => {
+  if (!data.userInfo) throw new Error("登录响应缺少用户信息");
+  userStore.setToken(data.access_token);
+  userStore.setUserInfo(data.userInfo);
+  await initDynamicRouter();
+  tabsStore.setTabs([]);
+  keepAliveStore.setKeepAliveName([]);
+  await router.replace({ path: HOME_URL });
+  ElNotification({
+    title: "登录成功",
+    message: `${data.userInfo.department || "当前科室"}：仅显示本岗位已授权的功能`,
+    type: "success",
+    duration: 3000
+  });
+};
+
+const completeForcedPasswordChange = async () => {
+  if (passwordChange.newPassword.length < 8) {
+    ElMessage.warning("新密码至少需要 8 位");
+    return;
+  }
+  if (passwordChange.newPassword !== passwordChange.confirmPassword) {
+    ElMessage.warning("两次输入的新密码不一致");
+    return;
+  }
+  passwordChanging.value = true;
+  try {
+    await changePasswordApi({ newPassword: passwordChange.newPassword });
+    const newPassword = passwordChange.newPassword;
+    userStore.setToken("");
+    const { data } = await loginApi({ username: loginForm.username.trim(), password: newPassword });
+    forcePasswordVisible.value = false;
+    passwordChange.newPassword = "";
+    passwordChange.confirmPassword = "";
+    loginForm.password = "";
+    await completeLogin(data);
+  } catch (error) {
+    ElNotification({ title: "密码修改失败", message: (error as Error).message, type: "error", duration: 4000 });
+  } finally {
+    passwordChanging.value = false;
+  }
+};
 
 const filteredAccountOptions = computed(() => accountOptions.value);
 
@@ -161,21 +235,14 @@ const login = (formEl: FormInstance | undefined) => {
     loading.value = true;
     try {
       const { data } = await loginApi({ username: loginForm.username.trim(), password: loginForm.password });
-      const profile = data.userInfo || { name: "管理员", role: "admin", department: "信息/院办" };
       userStore.setToken(data.access_token);
-      userStore.setUserInfo(profile);
-
-      await initDynamicRouter();
-      tabsStore.setTabs([]);
-      keepAliveStore.setKeepAliveName([]);
-      await router.replace({ path: HOME_URL });
-
-      ElNotification({
-        title: "登录成功",
-        message: `${profile.department}：只显示本岗位需要处理的功能`,
-        type: "success",
-        duration: 3000
-      });
+      if (!data.userInfo) throw new Error("登录响应缺少用户信息");
+      userStore.setUserInfo(data.userInfo);
+      if (data.mustChangePassword) {
+        forcePasswordVisible.value = true;
+        return;
+      }
+      await completeLogin(data);
     } catch (error) {
       ElNotification({
         title: "登录失败",
@@ -200,7 +267,7 @@ onMounted(() => {
   loadDepartments();
   document.onkeydown = (e: KeyboardEvent) => {
     if (e.code === "Enter" || e.code === "enter" || e.code === "NumpadEnter") {
-      if (loading.value) return;
+      if (loading.value || forcePasswordVisible.value) return;
       login(loginFormRef.value);
     }
   };
@@ -334,6 +401,10 @@ onBeforeUnmount(() => {
     box-shadow: 0 18px 34px rgb(38 168 118 / 28%);
     transform: translateY(-1px);
   }
+}
+
+.force-password-form {
+  margin-top: 18px;
 }
 
 @media screen and (width <= 600px) {

@@ -6,7 +6,7 @@ import type {
   AiAssistantLogListResult,
   AiAssistantRequest,
   AiAssistantResponse,
-  AiDocumentGenerateResult,
+  AiDocumentTask,
   AiDocumentPreview,
   AiDocumentRequestPayload,
   AiDocumentTemplateResult,
@@ -65,8 +65,25 @@ export const generateAiDocumentApi = async (payload: AiDocumentRequestPayload) =
     headers: clinicJsonHeaders(),
     body: JSON.stringify(payload)
   });
-  const data = await parseClinicApiResponse<AiDocumentGenerateResult>(result);
-  return clinicResponse(data, "DOCX 文稿已生成");
+  const data = await parseClinicApiResponse<AiDocumentTask>(result);
+  return clinicResponse(data, "AI 文稿任务已提交");
+};
+
+export const getAiDocumentTaskApi = async (taskId: string) => {
+  const result = await clinicFetch(`/ai-document/tasks/${encodeURIComponent(taskId)}`, {
+    headers: authHeaders()
+  });
+  const data = await parseClinicApiResponse<AiDocumentTask>(result);
+  return clinicResponse(data);
+};
+
+export const retryAiDocumentTaskApi = async (taskId: string) => {
+  const result = await clinicFetch(`/ai-document/tasks/${encodeURIComponent(taskId)}/retry`, {
+    method: "POST",
+    headers: clinicJsonHeaders()
+  });
+  const data = await parseClinicApiResponse<AiDocumentTask>(result);
+  return clinicResponse(data, "AI 文稿任务已重新提交");
 };
 
 export const downloadAiDocumentApi = async (generatedDocument: GeneratedAiDocument) => {

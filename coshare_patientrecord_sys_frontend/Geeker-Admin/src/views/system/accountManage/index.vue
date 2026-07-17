@@ -99,7 +99,7 @@
             <el-descriptions :column="1" border>
               <el-descriptions-item label="角色">{{ currentRoleLabel }}</el-descriptions-item>
               <el-descriptions-item label="科室">{{ accountForm.department || "未设置" }}</el-descriptions-item>
-              <el-descriptions-item label="当前密码">{{ accountForm.currentPassword || "未记录，请重置" }}</el-descriptions-item>
+              <el-descriptions-item label="密码状态">密码仅保存为不可逆哈希，管理员不可查看</el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ accountForm.createdAt || "保存后生成" }}</el-descriptions-item>
               <el-descriptions-item label="更新时间">{{ accountForm.updatedAt || "保存后生成" }}</el-descriptions-item>
             </el-descriptions>
@@ -179,7 +179,6 @@ const roleEnum = roles.map(item => ({ label: item.label, value: item.value }));
 const columns = reactive<ColumnProps<AccountRow>[]>([
   { type: "index", label: "#", width: 70 },
   { prop: "username", label: "账号", width: 130, search: { el: "input" } },
-  { prop: "currentPassword", label: "当前密码", width: 150 },
   { prop: "name", label: "姓名", width: 120, search: { el: "input" } },
   { prop: "department", label: "科室", width: 140 },
   { prop: "roleLabel", label: "角色", width: 130 },
@@ -286,8 +285,10 @@ const resetPasswordWithPrompt = async (row: Pick<AccountRow, "id" | "name">) => 
     operatorRole: operatorRole.value,
     password: result.value?.trim() || undefined
   });
-  if (accountForm.id === row.id) accountForm.currentPassword = data.temporaryPassword;
-  ElMessage.success(`密码已重置，当前密码：${data.temporaryPassword}`);
+  await ElMessageBox.alert(`临时密码：${data.temporaryPassword}`, "密码已重置（仅显示一次）", {
+    confirmButtonText: "我已记录",
+    type: "success"
+  });
   refresh();
 };
 

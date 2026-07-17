@@ -172,11 +172,14 @@ $runtimeEnv = @'
 SERVER_PORT=8848
 MYSQL_PORT=3307
 MYSQL_DATABASE=hos_refactor
-MYSQL_USERNAME=cowork
-MYSQL_PASSWORD=Cowork_2026!
-MYSQL_URL=jdbc:mysql://127.0.0.1:3307/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=Init@Coshare2026!
+MYSQL_ROOT_PASSWORD=CHANGE_ME_ROOT_PASSWORD
+MYSQL_USERNAME=clinic_app
+MYSQL_PASSWORD=CHANGE_ME_RUNTIME_PASSWORD
+MYSQL_MIGRATION_USERNAME=clinic_migrator
+MYSQL_MIGRATION_PASSWORD=CHANGE_ME_MIGRATION_PASSWORD
+MYSQL_URL=jdbc:mysql://127.0.0.1:3307/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=PREFERRED
+# Empty database only. Remove this value after the first administrator changes it.
+CLINIC_BOOTSTRAP_ADMIN_PASSWORD=
 CLINIC_ATTACHMENT_DIR=${PACKAGE_ROOT}\data\attachments
 CLINIC_FRONTEND_DIR=${PACKAGE_ROOT}\app\frontend
 CLINIC_BACKUP_MYSQLDUMP_PATH=${PACKAGE_ROOT}\runtime\mysql\bin\mysqldump.exe
@@ -221,7 +224,6 @@ $backendPidPath = Join-Path $dataDir "backend.pid"
 $mysqlPidPath = Join-Path $dataDir "mysql.pid"
 $mysqlSubstPath = Join-Path $dataDir "mysql-subst-drive.txt"
 $mysqlPackageRoot = $packageRoot.Path
-$adminPasswordHash = '$2a$10$8KJFlcFrqcIzXgrVGOzvzesgS1ehE.DQhr4YC9e8Xl4b21MX6qCfu'
 
 function Read-EnvFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -333,8 +335,10 @@ function Wait-Backend([int]$TimeoutSeconds = 120) {
 }
 
 function Invoke-Mysql([string]$User, [string]$Password, [string]$Sql, [string]$Database = "") {
-    $args = @("--host=127.0.0.1", "--port=$env:MYSQL_PORT", "--user=$User", "--default-character-set=utf8mb4", "--batch", "--skip-column-names")
-    if ($Password) { $args += "--password=$Password" }
+    $optionPath = Join-Path $mysqlPackageRoot ("data\mysql-client-" + [guid]::NewGuid().ToString("N") + ".cnf")
+    $optionContent = "[client]`nhost=127.0.0.1`nport=$env:MYSQL_PORT`nuser=$User`npassword=$Password`n"
+    [System.IO.File]::WriteAllText($optionPath, $optionContent, [System.Text.UTF8Encoding]::new($false))
+    $args = @("--defaults-extra-file=$optionPath", "--default-character-set=utf8mb4", "--batch", "--skip-column-names")
     if ($Database) { $args += "--database=$Database" }
 
     $sqlPath = Join-Path $mysqlPackageRoot ("data\mysql-command-" + [guid]::NewGuid().ToString("N") + ".sql")
@@ -352,7 +356,7 @@ function Invoke-Mysql([string]$User, [string]$Password, [string]$Sql, [string]$D
             Get-Content -LiteralPath $outPath
         }
     } finally {
-        Remove-Item -LiteralPath $sqlPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $sqlPath, $optionPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -390,6 +394,7 @@ pid-file=$mysqlPid
         throw "Port $env:MYSQL_PORT is already in use. Stop the existing service or change MYSQL_PORT in config\runtime.env."
     }
     if (-not (Test-Path -LiteralPath (Join-Path $mysqlDataDir "auto.cnf"))) {
+        $script:mysqlWasInitialized = $true
         Write-Host "[mysql] initializing data directory..."
         $init = Start-Process -FilePath $mysqld -ArgumentList @("--defaults-file=$mysqlConfig", "--initialize-insecure", "--console") -WorkingDirectory $mysqlPackageRoot -Wait -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $logsDir "mysql-init.out.log") -RedirectStandardError (Join-Path $logsDir "mysql-init.err.log")
         if ($init.ExitCode -ne 0) { throw "MySQL initialization failed. See logs\mysql-init.err.log" }
@@ -402,26 +407,34 @@ pid-file=$mysqlPid
 
 function Ensure-Database {
     $db = $env:MYSQL_DATABASE
-    $user = $env:MYSQL_USERNAME
-    $password = $env:MYSQL_PASSWORD
+    $runtimeUser = $env:MYSQL_USERNAME
+    $runtimePassword = $env:MYSQL_PASSWORD
+    $migrationUser = $env:MYSQL_MIGRATION_USERNAME
+    $migrationPassword = $env:MYSQL_MIGRATION_PASSWORD
+    $rootPassword = $env:MYSQL_ROOT_PASSWORD
+    if ($db -notmatch '^[A-Za-z0-9_]+$' -or $runtimeUser -notmatch '^[A-Za-z0-9_]+$' -or $migrationUser -notmatch '^[A-Za-z0-9_]+$') {
+        throw "Database and user names may only contain letters, numbers, and underscores."
+    }
+    $runtimePasswordSql = $runtimePassword.Replace("'", "''")
+    $migrationPasswordSql = $migrationPassword.Replace("'", "''")
+    $rootPasswordSql = $rootPassword.Replace("'", "''")
     $setupSql = @"
 CREATE DATABASE IF NOT EXISTS $db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$user'@'127.0.0.1' IDENTIFIED BY '$password';
-ALTER USER '$user'@'127.0.0.1' IDENTIFIED BY '$password';
-GRANT ALL PRIVILEGES ON $db.* TO '$user'@'127.0.0.1';
-GRANT RELOAD, FLUSH_TABLES ON *.* TO '$user'@'127.0.0.1';
-CREATE USER IF NOT EXISTS '$user'@'localhost' IDENTIFIED BY '$password';
-ALTER USER '$user'@'localhost' IDENTIFIED BY '$password';
-GRANT ALL PRIVILEGES ON $db.* TO '$user'@'localhost';
-GRANT RELOAD, FLUSH_TABLES ON *.* TO '$user'@'localhost';
+CREATE USER IF NOT EXISTS '$runtimeUser'@'127.0.0.1' IDENTIFIED BY '$runtimePasswordSql';
+ALTER USER '$runtimeUser'@'127.0.0.1' IDENTIFIED BY '$runtimePasswordSql';
+GRANT SELECT, INSERT, UPDATE, DELETE ON $db.* TO '$runtimeUser'@'127.0.0.1';
+CREATE USER IF NOT EXISTS '$migrationUser'@'127.0.0.1' IDENTIFIED BY '$migrationPasswordSql';
+ALTER USER '$migrationUser'@'127.0.0.1' IDENTIFIED BY '$migrationPasswordSql';
+GRANT ALL PRIVILEGES ON $db.* TO '$migrationUser'@'127.0.0.1';
 FLUSH PRIVILEGES;
 "@
     try {
-        Invoke-Mysql "root" "" $setupSql | Out-Null
+        Invoke-Mysql "root" $rootPassword $setupSql | Out-Null
     } catch {
-        Invoke-Mysql $user $password "SELECT 1;" $db | Out-Null
+        $firstSetupSql = "ALTER USER 'root'@'localhost' IDENTIFIED BY '$rootPasswordSql';`n" + $setupSql
+        Invoke-Mysql "root" "" $firstSetupSql | Out-Null
     }
-    Write-Host "[mysql] database and app user are ready"
+    Write-Host "[mysql] database, runtime user, and migration user are ready"
 }
 
 function Start-Backend {
@@ -437,8 +450,6 @@ function Start-Backend {
         "--server.port=$env:SERVER_PORT",
         "--spring.profiles.active=mysql",
         "--spring.datasource.url=$env:MYSQL_URL",
-        "--spring.datasource.username=$env:MYSQL_USERNAME",
-        "--spring.datasource.password=$env:MYSQL_PASSWORD",
         "--clinic.attachment-dir=$env:CLINIC_ATTACHMENT_DIR",
         "--clinic.frontend-dir=$env:CLINIC_FRONTEND_DIR",
         "--clinic.backup.mysqldump-path=$env:CLINIC_BACKUP_MYSQLDUMP_PATH",
@@ -452,49 +463,29 @@ function Start-Backend {
     Wait-Backend 120
 }
 
-function Ensure-AdminAccount {
-    $adminName = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("566h55CG5ZGY"))
-    $department = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("5L+h5oGvL+mZouWKng=="))
-    $enabled = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("5ZCv55So"))
-    $account = [ordered]@{
-        id = "admin";
-        username = $env:ADMIN_USERNAME;
-        name = $adminName;
-        role = "admin";
-        roleLabel = $adminName;
-        department = $department;
-        scope = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("57O757uf5YWo5bGA6YWN572u"));
-        status = $enabled;
-        createdAt = "2026-06-10 08:00:00";
-        updatedAt = "2026-06-10 08:00:00";
-        passwordHash = $adminPasswordHash;
-        currentPassword = $env:ADMIN_PASSWORD;
-    }
-    $json = ($account | ConvertTo-Json -Compress).Replace("'", "''")
-    $sql = @"
-SET NAMES utf8mb4;
-INSERT INTO clinic_accounts (id, username, role, status, raw_json)
-VALUES ('admin', '$($env:ADMIN_USERNAME)', 'admin', '$enabled', CAST('$json' AS JSON))
-ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status = VALUES(status);
-"@
-    Invoke-Mysql $env:MYSQL_USERNAME $env:MYSQL_PASSWORD $sql $env:MYSQL_DATABASE | Out-Null
-    Write-Host "[mysql] admin account ready: $env:ADMIN_USERNAME / $env:ADMIN_PASSWORD"
-}
-
 Read-EnvFile $configPath
 Read-EnvFile $aiSecretsPath
+foreach ($required in @("MYSQL_ROOT_PASSWORD", "MYSQL_PASSWORD", "MYSQL_MIGRATION_PASSWORD")) {
+    $value = [Environment]::GetEnvironmentVariable($required, "Process")
+    if (-not $value -or $value -like "CHANGE_ME*") { throw "$required must be set in config\runtime.env." }
+}
+if ($env:MYSQL_USERNAME -eq $env:MYSQL_MIGRATION_USERNAME) {
+    throw "Runtime and migration database users must be different."
+}
 Set-MysqlPaths
 New-Item -ItemType Directory -Force -Path $mysqlDataDir, $env:CLINIC_ATTACHMENT_DIR, $logsDir | Out-Null
 Start-Mysql
 Ensure-Database
+if ($script:mysqlWasInitialized -and -not $env:CLINIC_BOOTSTRAP_ADMIN_PASSWORD) {
+    throw "Set CLINIC_BOOTSTRAP_ADMIN_PASSWORD for the first startup, then remove it after changing the password."
+}
 Start-Backend
-Ensure-AdminAccount
 
 Write-Host ""
 Write-Host "System is ready." -ForegroundColor Green
 Write-Host "Open from this host: http://localhost:$env:SERVER_PORT/"
 Write-Host "Open from LAN:       http://HOST_IP:$env:SERVER_PORT/"
-Write-Host "Login:               $env:ADMIN_USERNAME / $env:ADMIN_PASSWORD"
+Write-Host "Login:               admin (use the one-time bootstrap password on first startup)"
 Write-Host "Logs:                $logsDir"
 '@
 Write-Utf8File -Path (Join-Path $toolsDir "start-clinic.ps1") -Content $startPs1
@@ -553,7 +544,11 @@ Get-Content -LiteralPath $configPath -Encoding UTF8 | ForEach-Object {
     }
 }
 $baseUrl = "http://127.0.0.1:$env:SERVER_PORT"
-$loginBody = @{ username = $env:ADMIN_USERNAME; password = $env:ADMIN_PASSWORD } | ConvertTo-Json
+$credential = Get-Credential -Message "Enter an administrator account to authorize this backup"
+$loginBody = @{
+    username = $credential.UserName
+    password = $credential.GetNetworkCredential().Password
+} | ConvertTo-Json
 $login = Invoke-RestMethod -Uri "$baseUrl/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
 $token = $login.data.access_token
 if (-not $token) { throw "Login failed; no access token returned." }
@@ -693,9 +688,16 @@ $sqlPath = Join-Path $extractDir "database.sql"
 if (-not (Test-Path -LiteralPath $sqlPath)) {
     throw "database.sql was not found in the backup zip."
 }
-$restoreArgs = @("--host=127.0.0.1", "--port=$env:MYSQL_PORT", "--user=$env:MYSQL_USERNAME", "--password=$env:MYSQL_PASSWORD", "--database=$env:MYSQL_DATABASE", "--default-character-set=utf8mb4")
-$restore = Start-Process -FilePath $mysql -ArgumentList $restoreArgs -WorkingDirectory $mysqlPackageRoot -Wait -PassThru -NoNewWindow -RedirectStandardInput $sqlPath -RedirectStandardOutput (Join-Path $logsDir "mysql-restore-command.out.log") -RedirectStandardError (Join-Path $logsDir "mysql-restore-command.err.log")
-if ($restore.ExitCode -ne 0) { throw "Database restore failed. See logs\mysql-restore-command.err.log" }
+$optionPath = Join-Path $extractDir "mysql-restore.cnf"
+$optionContent = "[client]`nhost=127.0.0.1`nport=$env:MYSQL_PORT`nuser=$env:MYSQL_MIGRATION_USERNAME`npassword=$env:MYSQL_MIGRATION_PASSWORD`ndatabase=$env:MYSQL_DATABASE`n"
+[System.IO.File]::WriteAllText($optionPath, $optionContent, [System.Text.UTF8Encoding]::new($false))
+try {
+    $restoreArgs = @("--defaults-extra-file=$optionPath", "--default-character-set=utf8mb4")
+    $restore = Start-Process -FilePath $mysql -ArgumentList $restoreArgs -WorkingDirectory $mysqlPackageRoot -Wait -PassThru -NoNewWindow -RedirectStandardInput $sqlPath -RedirectStandardOutput (Join-Path $logsDir "mysql-restore-command.out.log") -RedirectStandardError (Join-Path $logsDir "mysql-restore-command.err.log")
+    if ($restore.ExitCode -ne 0) { throw "Database restore failed. See logs\mysql-restore-command.err.log" }
+} finally {
+    Remove-Item -LiteralPath $optionPath -Force -ErrorAction SilentlyContinue
+}
 
 $attachmentSource = Join-Path $extractDir "attachments"
 if (Test-Path -LiteralPath $attachmentSource) {
@@ -748,7 +750,7 @@ pause
 '@
 Set-Content -LiteralPath (Join-Path $releaseDir "restore-from-backup.bat") -Value $restoreBat -Encoding ASCII
 
-$readme = @'
+$portableReadme = @'
 # 协和患者病历协同系统便携包
 
 ## 启动
@@ -761,9 +763,7 @@ http://目标主机IP:8848/
 
 初始管理员：
 
-```text
-admin / Init@Coshare2026!
-```
+首次启动前在 `config\runtime.env` 设置一次性 `CLINIC_BOOTSTRAP_ADMIN_PASSWORD`。登录账号为 `admin`，首次登录后必须立即改密并清空该配置。
 
 目标主机不需要安装 Java、MySQL、Node 或 pnpm；运行时已放在 `runtime` 目录。
 
@@ -793,11 +793,7 @@ D:\clinic-backup
 
 先确认当前数据已另行保留，然后双击 `restore-from-backup.bat`，输入备份 zip 路径，并按提示输入 `RESTORE`。恢复完成后再双击 `start.bat`。
 '@
-'@
-$readmeBase64 = @'
-IyDljY/lkozmgqPogIXnl4XljobljY/lkIzns7vnu5/kvr/mkLrljIUKCiMjIOWQr+WKqAoK5Zyo55uu5qCH5Li75py65Y+M5Ye7IHN0YXJ0LmJhdOOAguWQr+WKqOWujOaIkOWQju+8jOWQjOS4gOWGhee9keeUteiEkeiuv+mXru+8mgoKYAlleHQKaHR0cDovL+ebruagh+S4u+acuklQOjg4NDgvCmAKCuWIneWni+euoeeQhuWRmO+8mgoKYAlleHQKYWRtaW4gLyBJbml0QENvc2hhcmUyMDI2IQpgCgrnm67moIfkuLvmnLrkuI3pnIDopoHlronoo4UgSmF2YeOAgU15U1FM44CBTm9kZSDmiJYgcG5wbe+8m+i/kOihjOaXtuW3suaUvuWcqCANdW50aW1lIOebruW9leOAggoKIyMg5pWw5o2u55uu5b2VCgpgCWV4dApkYXRhXG15c3FsICAgICAgICAgTXlTUUwg5pWw5o2u5paH5Lu2CmRhdGFcYXR0YWNobWVudHMgICDns7vnu5/pmYTku7YKbG9ncyAgICAgICAgICAgICAgIOi/kOihjOaXpeW/lwpjb25maWdccnVudGltZS5lbnYg56uv5Y+j44CB5pWw5o2u5bqT5ZKM6Lev5b6E6YWN572uCmAKCiMjIOWkh+S7vQoK566h55CG5ZGY55m75b2V5ZCO77yM5Zyo6aaW6aG1IOeJqeeQhuWkh+S7veWhq+WGmeacjeWKoeWZqOacrOacuuWPr+WGmei3r+W+hO+8jOS+i+Wmgu+8mgoKYAlleHQKRDpcY2xpbmljLWJhY2t1cApcXDE5Mi4xNjguMS4xMFxjbGluaWMtYmFja3VwCmAKCuS/neWtmOWQjuezu+e7n+avj+WkqSAwMjowMCDoh6rliqjlpIfku73vvIzkuZ/lj6/ku6Xngrnlh7vnq4vljbPlpIfku73jgILlpIfku73kv53nlZnnrZbnlaXkuLrvvJrmnIDov5EgNyDlpKnlhajpg6jkv53nlZnjgIHmnIDov5EgNCDlkajmr4/lkaggMSDku73jgIHmnIDov5EgMTIg5pyI5q+P5pyIIDEg5Lu944CCCgrkuZ/lj6/ku6XlnKjnm67moIfkuLvmnLrlj4zlh7sgCGFja3VwLW5vdy5iYXQg5Li75Yqo6Kem5Y+R5LiA5qyh5aSH5Lu944CC6K+l6ISa5pys6KaB5rGC57O757uf5bey57uP5ZCv5Yqo77yM5LiU5bey5Zyo566h55CG5ZGY6aG16Z2i6YWN572u6L+H5aSH5Lu96Lev5b6E44CCCgojIyDmgaLlpI0KCuWFiOehruiupOW9k+WJjeaVsOaNruW3suWPpuihjOS/neeVme+8jOeEtuWQjuWPjOWHuyANZXN0b3JlLWZyb20tYmFja3VwLmJhdO+8jOi+k+WFpeWkh+S7vSB6aXAg6Lev5b6E77yM5bm25oyJ5o+Q56S66L6T5YWlIFJFU1RPUkXjgILmgaLlpI3lrozmiJDlkI7lho3lj4zlh7sgc3RhcnQuYmF044CC
-'@
-$readme = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($readmeBase64 -replace "\s", "")))
+$readme = $portableReadme
 Write-Utf8File -Path (Join-Path $releaseDir "README.md") -Content $readme
 
 Write-Step "Portable package is ready"

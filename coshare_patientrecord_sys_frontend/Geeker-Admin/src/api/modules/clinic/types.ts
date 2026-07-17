@@ -365,6 +365,20 @@ export interface AiDocumentGenerateResult {
   preview?: AiDocumentPreview;
 }
 
+export type AiDocumentTaskStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+
+export interface AiDocumentTask {
+  taskId: string;
+  status: AiDocumentTaskStatus;
+  errorMessage?: string;
+  attempt: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+  result?: AiDocumentGenerateResult;
+}
+
 export interface GeneratedMedicalRecord {
   id: string;
   patientId: string;
@@ -459,7 +473,6 @@ export interface AccountRow {
   id: string;
   username: string;
   password?: string;
-  currentPassword?: string;
   name: string;
   department: string;
   role: UserRole;

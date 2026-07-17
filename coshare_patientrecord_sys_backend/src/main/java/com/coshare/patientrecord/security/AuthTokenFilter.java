@@ -36,6 +36,7 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         return !path.equals("/health/db")
             && !path.equals("/auth/logout")
             && !path.equals("/auth/password")
+            && !path.equals("/auth/navigation")
             && !path.startsWith("/clinic-api/");
     }
 
@@ -55,6 +56,17 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         }
 
         SessionUser user = sessionUser.get();
+        String path = request.getRequestURI();
+        if (user.mustChangePassword() && !path.equals("/auth/password") && !path.equals("/auth/logout")) {
+            response.setStatus(HttpStatus.FORBIDDEN.value());
+            response.setContentType("application/json;charset=UTF-8");
+            var payload = new LinkedHashMap<String, Object>();
+            payload.put("code", 403);
+            payload.put("msg", "首次登录必须先修改密码");
+            payload.put("data", null);
+            objectMapper.writeValue(response.getWriter(), payload);
+            return;
+        }
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
             user,
             null,

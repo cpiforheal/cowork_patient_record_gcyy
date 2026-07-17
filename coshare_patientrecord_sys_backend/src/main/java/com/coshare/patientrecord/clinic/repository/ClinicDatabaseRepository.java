@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
@@ -22,7 +21,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class ClinicDatabaseRepository {
 
     private final ObjectMapper objectMapper;
-    private final ClinicSchemaInitializer schemaInitializer;
     private final ClinicDbReader dbReader;
     private final ClinicDbWriter dbWriter;
     private final ClinicTimelineBuilder timelineBuilder;
@@ -32,7 +30,6 @@ public class ClinicDatabaseRepository {
 
     public ClinicDatabaseRepository(
         ObjectMapper objectMapper,
-        ClinicSchemaInitializer schemaInitializer,
         ClinicDbReader dbReader,
         ClinicDbWriter dbWriter,
         ClinicTimelineBuilder timelineBuilder,
@@ -41,20 +38,12 @@ public class ClinicDatabaseRepository {
         ClinicDbMerger dbMerger
     ) {
         this.objectMapper = objectMapper;
-        this.schemaInitializer = schemaInitializer;
         this.dbReader = dbReader;
         this.dbWriter = dbWriter;
         this.timelineBuilder = timelineBuilder;
         this.maintenanceInspector = maintenanceInspector;
         this.visibilityPolicy = visibilityPolicy;
         this.dbMerger = dbMerger;
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
-        dbWriter.ensureRevision();
-        dbWriter.migrateLegacyAccountPasswords();
     }
 
     public ObjectNode readDb() {

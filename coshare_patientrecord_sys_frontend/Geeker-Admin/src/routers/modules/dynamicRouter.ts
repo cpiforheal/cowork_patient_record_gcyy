@@ -45,7 +45,7 @@ export const initDynamicRouter = async () => {
   const authStore = useAuthStore();
 
   try {
-    await Promise.all([authStore.getAuthMenuList(), authStore.getAuthButtonList()]);
+    await authStore.getNavigation();
 
     if (!authStore.authMenuListGet.length) {
       ElNotification({

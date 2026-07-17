@@ -136,6 +136,7 @@ export interface QueuePrintPayload {
 export interface QueuePrintTask {
   id: string;
   ticketId: string;
+  clientRequestId: string;
   terminalId: string;
   printerName: string;
   status: "PENDING" | "SUCCESS" | "FAILED";
@@ -143,6 +144,7 @@ export interface QueuePrintTask {
   reprintReason: string;
   attemptCount: number;
   payload: QueuePrintPayload;
+  executionToken: string;
   createdBy: string;
   createdAt: string;
   completedAt?: string;
@@ -239,16 +241,27 @@ export const registerQueuePrintTerminalApi = (payload: {
   agentVersion: string;
 }) => post<QueuePrintTerminal>("/clinic-queue/print-terminals/register", payload);
 
-export const createQueuePrintTaskApi = (ticketId: string, terminalId: string, reason = "") =>
-  post<QueuePrintTask>(`/clinic-queue/tickets/${encodeURIComponent(ticketId)}/print-tasks`, { terminalId, reason });
+export const createQueuePrintTaskApi = (
+  ticketId: string,
+  terminalId: string,
+  reason = "",
+  clientRequestId = crypto.randomUUID()
+) =>
+  post<QueuePrintTask>(`/clinic-queue/tickets/${encodeURIComponent(ticketId)}/print-tasks`, {
+    terminalId,
+    reason,
+    clientRequestId
+  });
 
 export const completeQueuePrintTaskApi = (
   id: string,
-  payload: { status: "SUCCESS" | "FAILED"; printerName: string; errorMessage?: string }
+  payload: { status: "SUCCESS" | "FAILED"; printerName: string; errorMessage?: string; executionToken: string }
 ) => post<QueuePrintTask>(`/clinic-queue/print-tasks/${encodeURIComponent(id)}/result`, payload);
 
 export const getQueuePrintTasksApi = async (ticketId: string) => {
-  const result = await clinicFetch(`/clinic-queue/tickets/${encodeURIComponent(ticketId)}/print-tasks`, { headers: authHeaders() });
+  const result = await clinicFetch(`/clinic-queue/tickets/${encodeURIComponent(ticketId)}/print-tasks`, {
+    headers: authHeaders()
+  });
   return clinicResponse(await parseClinicApiResponse<{ rows: QueuePrintTask[] }>(result));
 };
 

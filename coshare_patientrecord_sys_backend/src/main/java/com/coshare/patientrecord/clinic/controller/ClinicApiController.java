@@ -6,6 +6,7 @@ import com.coshare.patientrecord.ai.service.ClinicAiConfigService;
 import com.coshare.patientrecord.ai.service.ClinicAiDocumentService;
 import com.coshare.patientrecord.ai.service.ClinicAiSummaryService;
 import com.coshare.patientrecord.ai.service.ClinicDoubaoTtsService;
+import com.coshare.patientrecord.ai.service.AiDocumentTaskService;
 import com.coshare.patientrecord.ai.dto.AiAssistantRequest;
 import com.coshare.patientrecord.ai.dto.AiDocumentRequest;
 import com.coshare.patientrecord.ai.dto.AiSummaryRequest;
@@ -74,6 +75,7 @@ public class ClinicApiController {
     private final ClinicDoubaoTtsService doubaoTtsService;
     private final ClinicMedicalRecordService medicalRecordService;
     private final ClinicAiDocumentService aiDocumentService;
+    private final AiDocumentTaskService aiDocumentTaskService;
     private final ObjectMapper objectMapper;
 
     public ClinicApiController(
@@ -87,6 +89,7 @@ public class ClinicApiController {
         ClinicDoubaoTtsService doubaoTtsService,
         ClinicMedicalRecordService medicalRecordService,
         ClinicAiDocumentService aiDocumentService,
+        AiDocumentTaskService aiDocumentTaskService,
         ObjectMapper objectMapper
     ) {
         this.databaseService = databaseService;
@@ -99,6 +102,7 @@ public class ClinicApiController {
         this.doubaoTtsService = doubaoTtsService;
         this.medicalRecordService = medicalRecordService;
         this.aiDocumentService = aiDocumentService;
+        this.aiDocumentTaskService = aiDocumentTaskService;
         this.objectMapper = objectMapper;
     }
 
@@ -349,7 +353,17 @@ public class ClinicApiController {
 
     @PostMapping("/clinic-api/ai-document/generate")
     public ApiResult<Map<String, Object>> generateAiDocument(@RequestBody AiDocumentRequest request) {
-        return ApiResult.of(200, "AI文稿 docx 已生成", aiDocumentService.generate(request, AuthPermission.currentUserOrThrow()));
+        return ApiResult.of(202, "AI 文稿任务已提交", aiDocumentTaskService.submit(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/clinic-api/ai-document/tasks/{id}")
+    public ApiResult<Map<String, Object>> aiDocumentTask(@PathVariable String id) {
+        return ApiResult.success(aiDocumentTaskService.status(id, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/ai-document/tasks/{id}/retry")
+    public ApiResult<Map<String, Object>> retryAiDocumentTask(@PathVariable String id) {
+        return ApiResult.of(202, "AI 文稿任务已重新提交", aiDocumentTaskService.retry(id, AuthPermission.currentUserOrThrow()));
     }
 
     @GetMapping("/clinic-api/ai-document/download")

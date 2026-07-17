@@ -1601,7 +1601,8 @@ const saveSelectedStage = async () =>
     const { data } = await savePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
-      cleanStageForm(selectedStageCode.value)
+      cleanStageForm(selectedStageCode.value),
+      stageSubmission(selectedStageCode.value)?.version ?? 0
     );
     hydrateWorkspace(data);
     ElMessage.success("阶段草稿已保存");
@@ -1610,7 +1611,12 @@ const saveSelectedStage = async () =>
 const completeSelectedStage = async () =>
   runAction(async () => {
     const completedStage = selectedStageCode.value;
-    const { data } = await completePreAiStageApi(selectedEncounterId.value, completedStage, cleanStageForm(completedStage));
+    const { data } = await completePreAiStageApi(
+      selectedEncounterId.value,
+      completedStage,
+      cleanStageForm(completedStage),
+      stageSubmission(completedStage)?.version ?? 0
+    );
     hydrateWorkspace(data);
     await loadEncounterList();
     ElMessage.success(
@@ -1661,7 +1667,7 @@ const returnStage = async (code: PreAiStageCode) => {
       inputErrorMessage: "退回原因不能为空"
     });
     await runAction(async () => {
-      const { data } = await returnPreAiStageApi(selectedEncounterId.value, code, value);
+      const { data } = await returnPreAiStageApi(selectedEncounterId.value, code, value, stageSubmission(code)?.version ?? 0);
       hydrateWorkspace(data);
       await loadEncounterList();
       ElMessage.success("阶段已退回");
@@ -1720,7 +1726,7 @@ const openLabWorkbench = () => {
 
 const completeLab = async () =>
   runAction(async () => {
-    const { data } = await completePreAiLabApi(selectedEncounterId.value);
+    const { data } = await completePreAiLabApi(selectedEncounterId.value, labTask.value?.version ?? 0);
     hydrateWorkspace(data);
     await loadEncounterList();
     ElMessage.success("化验室已完成并交接");
@@ -1733,7 +1739,8 @@ const returnAuxTask = async (taskId: string) => {
       inputErrorMessage: "退回原因不能为空"
     });
     await runAction(async () => {
-      const { data } = await returnPreAiAuxiliaryTaskApi(selectedEncounterId.value, taskId, value);
+      const version = workspace.value?.auxiliaryTasks.find(task => task.id === taskId)?.version ?? 0;
+      const { data } = await returnPreAiAuxiliaryTaskApi(selectedEncounterId.value, taskId, value, version);
       hydrateWorkspace(data);
       await loadEncounterList();
       ElMessage.success("辅助任务已退回");
@@ -1768,8 +1775,7 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
       await uploadPreAiAttachmentApi(selectedEncounterId.value, {
         stageCode,
         taskId,
-        fileName: file.name,
-        contentDataUrl: await readAsDataUrl(file),
+        file,
         capturedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
         batchId,
         batchName,
@@ -1792,14 +1798,6 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
   }
   input.value = "";
 };
-
-const readAsDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("文件读取失败"));
-    reader.readAsDataURL(file);
-  });
 
 const voidAttachment = async (attachmentId: string) => {
   await ElMessageBox.confirm("作废后文件不再显示，但保留审计记录。", "作废附件", { type: "warning" });
@@ -1844,7 +1842,12 @@ const loadReviewPreview = async () => {
 
 const confirmReview = async () =>
   runAction(async () => {
-    const { data } = await confirmPreAiReviewApi(selectedEncounterId.value, reviewStatement.value, criticalAcknowledged.value);
+    const { data } = await confirmPreAiReviewApi(
+      selectedEncounterId.value,
+      reviewStatement.value,
+      criticalAcknowledged.value,
+      stageSubmission("REVIEW")?.version ?? 0
+    );
     hydrateWorkspace(data);
     await loadEncounterList();
     await loadReviewPreview();

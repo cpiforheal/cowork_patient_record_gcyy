@@ -27,6 +27,7 @@
     "build:dev": "pnpm validate && pnpm build-only:dev",
     "build:test": "pnpm validate && pnpm build-only:test",
     "build:pro": "pnpm validate && pnpm build-only:pro",
+    "test:e2e": "playwright test",
     "type:check": "vue-tsc --noEmit --skipLibCheck",
     "validate": "pnpm type:check && pnpm lint:eslint:check && pnpm lint:prettier:check",
     "preview": "pnpm build:dev && vite preview",
@@ -60,6 +61,7 @@
   "devDependencies": {
     "@commitlint/cli": "^18.4.3",
     "@commitlint/config-conventional": "^18.4.3",
+    "@playwright/test": "^1.61.1",
     "@types/nprogress": "^0.2.3",
     "@types/qs": "^6.9.15",
     "@types/sortablejs": "^1.15.8",
@@ -101,6 +103,7 @@
   "engines": {
     "node": ">=16.18.0"
   },
+  "packageManager": "pnpm@11.9.0",
   "browserslist": {
     "production": [
       "> 1%",

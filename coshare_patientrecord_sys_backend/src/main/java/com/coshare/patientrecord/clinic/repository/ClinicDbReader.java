@@ -68,7 +68,7 @@ public class ClinicDbReader {
         jdbcTemplate.query("SELECT raw_json FROM clinic_accounts ORDER BY username ASC", resultSet -> {
             JsonNode raw = readJson(resultSet, "raw_json");
             ObjectNode account = raw.isObject() ? (ObjectNode) raw.deepCopy() : objectMapper.createObjectNode();
-            account.remove(List.of("password", "passwordHash"));
+            account.remove(List.of("password", "passwordHash", "currentPassword"));
             rows.add(account);
         });
         return rows;

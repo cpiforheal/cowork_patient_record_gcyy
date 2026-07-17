@@ -7,7 +7,6 @@ import com.coshare.patientrecord.medicalrecord.dto.GenerateRequest;
 import com.coshare.patientrecord.medicalrecord.dto.VoidRequest;
 import com.coshare.patientrecord.medicalrecord.dto.WorkspaceSaveRequest;
 import com.coshare.patientrecord.medicalrecord.model.TargetField;
-import com.coshare.patientrecord.medicalrecord.repository.MedicalRecordSchemaInitializer;
 import com.coshare.patientrecord.medicalrecord.repository.MedicalRecordVersionRepository;
 import com.coshare.patientrecord.security.AuthPermission;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -15,7 +14,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -72,7 +70,6 @@ public class ClinicMedicalRecordService {
     private static final List<String> SCREENING_REVIEW_EDITORS = List.of("admin", "lab", "doctor", "nurse");
     private static final List<TargetField> TARGET_FIELDS = buildTargetFields();
 
-    private final MedicalRecordSchemaInitializer schemaInitializer;
     private final MedicalRecordVersionRepository versionRepository;
     private final ObjectMapper objectMapper;
     private final MedicalRecordTemplateRenderer templateRenderer;
@@ -80,24 +77,17 @@ public class ClinicMedicalRecordService {
     private final Path generatedDir;
 
     public ClinicMedicalRecordService(
-        MedicalRecordSchemaInitializer schemaInitializer,
         MedicalRecordVersionRepository versionRepository,
         ObjectMapper objectMapper,
         MedicalRecordTemplateRenderer templateRenderer,
         MedicalRecordSourceBuilder sourceBuilder,
         @Value("${clinic.generated-medical-record-dir:${clinic.attachment-dir}/../generated-medical-records}") String generatedDir
     ) {
-        this.schemaInitializer = schemaInitializer;
         this.versionRepository = versionRepository;
         this.objectMapper = objectMapper;
         this.templateRenderer = templateRenderer;
         this.sourceBuilder = sourceBuilder;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
     }
 
     public Map<String, Object> templateStatus(SessionUser user) {

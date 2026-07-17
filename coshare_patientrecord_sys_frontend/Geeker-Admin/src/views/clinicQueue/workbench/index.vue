@@ -677,13 +677,14 @@ async function executePrint(ticketId: string, reason = "") {
   const { data: task } = await createQueuePrintTaskApi(ticketId, printAgent.value.terminalId, reason);
   try {
     const result = await printQueueTicketLocally(task.payload);
-    await completeQueuePrintTaskApi(task.id, result);
+    await completeQueuePrintTaskApi(task.id, { ...result, executionToken: task.executionToken });
     return result;
   } catch (error: any) {
     await completeQueuePrintTaskApi(task.id, {
       status: "FAILED",
       printerName: printAgent.value.printerName,
-      errorMessage: error.message || "打印失败"
+      errorMessage: error.message || "打印失败",
+      executionToken: task.executionToken
     });
     throw error;
   }

@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
@@ -45,78 +44,6 @@ public class TcmPharmacyService {
     public TcmPharmacyService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS tcm_pharmacy_prescriptions (
-              id VARCHAR(64) PRIMARY KEY,
-              prescription_no VARCHAR(64) NOT NULL UNIQUE,
-              version_no INT NOT NULL DEFAULT 1,
-              patient_id VARCHAR(64) NOT NULL DEFAULT '',
-              patient_name VARCHAR(80) NOT NULL,
-              masked_name VARCHAR(80) NOT NULL,
-              visit_no VARCHAR(64) NOT NULL DEFAULT '',
-              doctor_name VARCHAR(80) NOT NULL,
-              dispense_type VARCHAR(32) NOT NULL,
-              prescription_status VARCHAR(32) NOT NULL,
-              charge_status VARCHAR(32) NOT NULL,
-              review_status VARCHAR(32) NOT NULL,
-              dispensing_status VARCHAR(32) NOT NULL,
-              decoction_status VARCHAR(32) NOT NULL,
-              pickup_status VARCHAR(32) NOT NULL,
-              pickup_no VARCHAR(32) NOT NULL DEFAULT '',
-              amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-              herb_count INT NOT NULL DEFAULT 0,
-              dose_count INT NOT NULL DEFAULT 1,
-              items_json LONGTEXT NOT NULL,
-              requirements_json LONGTEXT NOT NULL,
-              exception_reason VARCHAR(500) NOT NULL DEFAULT '',
-              created_by VARCHAR(80) NOT NULL,
-              updated_by VARCHAR(80) NOT NULL,
-              submitted_at DATETIME NULL,
-              charged_at DATETIME NULL,
-              reviewed_at DATETIME NULL,
-              ready_at DATETIME NULL,
-              collected_at DATETIME NULL,
-              created_at DATETIME NOT NULL,
-              updated_at DATETIME NOT NULL,
-              INDEX idx_tcm_status (prescription_status, updated_at),
-              INDEX idx_tcm_pickup (pickup_status, ready_at),
-              INDEX idx_tcm_patient (patient_id, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS tcm_pharmacy_audit_logs (
-              id VARCHAR(64) PRIMARY KEY,
-              prescription_id VARCHAR(64) NOT NULL,
-              action_code VARCHAR(64) NOT NULL,
-              from_status VARCHAR(64) NOT NULL DEFAULT '',
-              to_status VARCHAR(64) NOT NULL DEFAULT '',
-              operator_id VARCHAR(64) NOT NULL DEFAULT '',
-              operator_name VARCHAR(80) NOT NULL,
-              operator_role VARCHAR(40) NOT NULL,
-              detail VARCHAR(1000) NOT NULL DEFAULT '',
-              created_at DATETIME NOT NULL,
-              INDEX idx_tcm_audit (prescription_id, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS tcm_pharmacy_announcements (
-              id VARCHAR(64) PRIMARY KEY,
-              prescription_id VARCHAR(64) NOT NULL,
-              pickup_no VARCHAR(32) NOT NULL,
-              masked_name VARCHAR(80) NOT NULL,
-              content VARCHAR(500) NOT NULL,
-              status VARCHAR(24) NOT NULL,
-              play_count INT NOT NULL DEFAULT 0,
-              created_at DATETIME NOT NULL,
-              played_at DATETIME NULL,
-              INDEX idx_tcm_announcement (status, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        seedDemoIfEmpty();
     }
 
     public Map<String, Object> dashboard(SessionUser user) {

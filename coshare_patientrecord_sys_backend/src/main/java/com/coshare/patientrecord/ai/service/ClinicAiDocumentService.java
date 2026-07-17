@@ -4,7 +4,6 @@ import com.coshare.patientrecord.ai.dto.AiDocumentRequest;
 import com.coshare.patientrecord.ai.dto.DownloadFile;
 import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
 import com.coshare.patientrecord.ai.repository.ClinicAiDocumentRepository;
-import com.coshare.patientrecord.ai.repository.ClinicAiDocumentSchemaInitializer;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -12,7 +11,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -56,34 +54,29 @@ public class ClinicAiDocumentService {
         new DocTemplate("rectification", "整改方案", "整理为问题、措施和闭环要求")
     );
 
-    private final ClinicAiDocumentSchemaInitializer schemaInitializer;
     private final ClinicAiDocumentRepository documentRepository;
     private final ObjectMapper objectMapper;
     private final ClinicAiConfigService aiConfigService;
     private final SensitiveDataMasker sensitiveDataMasker;
+    private final AiCallGuard aiCallGuard;
     private final HttpClient httpClient;
     private final Path generatedDir;
 
     public ClinicAiDocumentService(
-        ClinicAiDocumentSchemaInitializer schemaInitializer,
         ClinicAiDocumentRepository documentRepository,
         ObjectMapper objectMapper,
         ClinicAiConfigService aiConfigService,
         SensitiveDataMasker sensitiveDataMasker,
+        AiCallGuard aiCallGuard,
         @Value("${clinic.generated-ai-document-dir:${clinic.attachment-dir}/../generated-ai-documents}") String generatedDir
     ) {
-        this.schemaInitializer = schemaInitializer;
         this.documentRepository = documentRepository;
         this.objectMapper = objectMapper;
         this.aiConfigService = aiConfigService;
         this.sensitiveDataMasker = sensitiveDataMasker;
+        this.aiCallGuard = aiCallGuard;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
     }
 
     public Map<String, Object> templates(SessionUser user) {
@@ -187,7 +180,9 @@ public class ClinicAiDocumentService {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
                 .build();
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = aiCallGuard.execute(
+                () -> httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+            );
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, buildUpstreamErrorMessage(response.statusCode(), response.body()));
             }

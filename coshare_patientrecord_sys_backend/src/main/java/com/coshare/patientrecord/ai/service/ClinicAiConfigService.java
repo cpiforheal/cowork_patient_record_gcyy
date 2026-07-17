@@ -4,13 +4,11 @@ import com.coshare.patientrecord.ai.entity.StoredAiConfig;
 import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
 import com.coshare.patientrecord.ai.model.EffectiveTtsConfig;
 import com.coshare.patientrecord.ai.repository.ClinicAiConfigRepository;
-import com.coshare.patientrecord.ai.repository.ClinicAiConfigSchemaInitializer;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -44,7 +42,6 @@ public class ClinicAiConfigService {
     private static final int GCM_TAG_BITS = 128;
     private static final int GCM_IV_BYTES = 12;
 
-    private final ClinicAiConfigSchemaInitializer schemaInitializer;
     private final ClinicAiConfigRepository configRepository;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -63,7 +60,6 @@ public class ClinicAiConfigService {
     private final byte[] encryptionKey;
 
     public ClinicAiConfigService(
-        ClinicAiConfigSchemaInitializer schemaInitializer,
         ClinicAiConfigRepository configRepository,
         ObjectMapper objectMapper,
         @Value("${clinic.ai.base-url:}") String defaultBaseUrl,
@@ -78,9 +74,9 @@ public class ClinicAiConfigService {
         @Value("${clinic.ai.doubao.tts.resource-id:}") String doubaoTtsDefaultResourceId,
         @Value("${clinic.ai.doubao.tts.voice-type:}") String doubaoTtsDefaultVoiceType,
         @Value("${clinic.ai.doubao.tts.speed-ratio:1.0}") double doubaoTtsDefaultSpeedRatio,
-        @Value("${clinic.ai.config-secret:}") String configSecret
+        @Value("${clinic.ai.config-secret:}") String configSecret,
+        @Value("${spring.profiles.active:}") String activeProfiles
     ) {
-        this.schemaInitializer = schemaInitializer;
         this.configRepository = configRepository;
         this.objectMapper = objectMapper;
         this.defaultBaseUrl = normalizeBaseUrl(defaultBaseUrl);
@@ -95,12 +91,7 @@ public class ClinicAiConfigService {
         this.doubaoTtsDefaultResourceId = safe(firstNonBlank(doubaoTtsDefaultResourceId, System.getenv("CLINIC_AI_DOUBAO_TTS_RESOURCE_ID")));
         this.doubaoTtsDefaultVoiceType = safe(firstNonBlank(doubaoTtsDefaultVoiceType, System.getenv("CLINIC_AI_DOUBAO_TTS_VOICE_TYPE")));
         this.doubaoTtsDefaultSpeedRatio = normalizeSpeedRatio(doubaoTtsDefaultSpeedRatio);
-        this.encryptionKey = deriveEncryptionKey(configSecret);
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
+        this.encryptionKey = deriveEncryptionKey(configSecret, activeProfiles);
     }
 
     public ObjectNode status() {
@@ -348,13 +339,20 @@ public class ClinicAiConfigService {
         return normalizeApiKey(defaults.apiKey());
     }
 
-    private byte[] deriveEncryptionKey(String configuredSecret) {
+    private byte[] deriveEncryptionKey(String configuredSecret, String activeProfiles) {
         String secret = safe(configuredSecret);
         if (secret.isBlank()) {
             secret = safe(System.getenv("AI_CONFIG_SECRET"));
         }
+        boolean production = java.util.Arrays.stream(safe(activeProfiles).toLowerCase(java.util.Locale.ROOT).split("[,;\\s]+"))
+            .anyMatch(profile -> profile.equals("prod") || profile.equals("production"));
+        if (secret.isBlank() && production) {
+            throw new IllegalStateException("Production startup requires AI_CONFIG_SECRET");
+        }
         if (secret.isBlank()) {
-            secret = safe(System.getProperty("user.name")) + "|" + safe(System.getProperty("user.dir")) + "|clinic-ai-config-v1";
+            byte[] temporarySecret = new byte[32];
+            secureRandom.nextBytes(temporarySecret);
+            return temporarySecret;
         }
         try {
             return MessageDigest.getInstance("SHA-256").digest(secret.getBytes(StandardCharsets.UTF_8));

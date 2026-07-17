@@ -47,6 +47,8 @@ export interface TabsState {
 /* AuthState */
 export interface AuthState {
   routeName: string;
+  navigationVersion: string;
+  shortcuts: Array<{ title: string; desc: string; icon: string; path: string }>;
   authButtonList: {
     [key: string]: string[];
   };

@@ -10,77 +10,99 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.security.SecureRandom;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.core.env.Environment;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
 @Service
 @Profile("mysql")
+@DependsOn("clinicDatabaseRepository")
 public class AuthSessionService {
 
     private static final Duration TOKEN_TTL = Duration.ofHours(12);
-    private static final String TCM_PHARMACY_ACCOUNT_ID = "tcm-pharmacy-operator";
-    private static final String TCM_PHARMACY_USERNAME = "tcmpharmacy";
-    private static final String TCM_PHARMACY_INITIAL_PASSWORD = "TcmPharmacy@2026!";
+    private static final Logger log = LoggerFactory.getLogger(AuthSessionService.class);
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOGIN_LOCK_TTL = Duration.ofMinutes(10);
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
+    private final Environment environment;
+    private final String bootstrapAdminPassword;
     private final SecureRandom secureRandom = new SecureRandom();
-    private final Map<String, SessionUser> sessions = new ConcurrentHashMap<>();
-    private final Map<String, LoginFailure> loginFailures = new ConcurrentHashMap<>();
 
-    public AuthSessionService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, PasswordEncoder passwordEncoder) {
+    public AuthSessionService(
+        JdbcTemplate jdbcTemplate,
+        ObjectMapper objectMapper,
+        PasswordEncoder passwordEncoder,
+        Environment environment,
+        @Value("${clinic.bootstrap.admin-password:}") String bootstrapAdminPassword
+    ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.passwordEncoder = passwordEncoder;
+        this.environment = environment;
+        this.bootstrapAdminPassword = bootstrapAdminPassword == null ? "" : bootstrapAdminPassword.trim();
     }
 
     @PostConstruct
-    public void ensureTcmPharmacyOperatorAccount() {
-        Integer count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM clinic_accounts WHERE id = ? OR LOWER(username) = ?",
-            Integer.class,
-            TCM_PHARMACY_ACCOUNT_ID,
-            TCM_PHARMACY_USERNAME
-        );
+    public void initializeAuthentication() {
+        ensureBootstrapAdministrator();
+    }
+
+    private void ensureBootstrapAdministrator() {
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_accounts", Integer.class);
         if (count != null && count > 0) return;
+        if (bootstrapAdminPassword.isBlank()) {
+            if (isProduction()) {
+                throw new IllegalStateException("空库首次启动必须配置 CLINIC_BOOTSTRAP_ADMIN_PASSWORD");
+            }
+            log.warn("Empty account database: set CLINIC_BOOTSTRAP_ADMIN_PASSWORD to create the one-time administrator");
+            return;
+        }
 
         ObjectNode account = objectMapper.createObjectNode();
-        account.put("id", TCM_PHARMACY_ACCOUNT_ID);
-        account.put("username", TCM_PHARMACY_USERNAME);
-        account.put("passwordHash", passwordEncoder.encode(TCM_PHARMACY_INITIAL_PASSWORD));
-        account.put("currentPassword", TCM_PHARMACY_INITIAL_PASSWORD);
-        account.put("name", "中药房业务岗");
-        account.put("department", "中药房");
-        account.put("role", "tcmPharmacyOperator");
-        account.put("roleLabel", "中药房业务岗");
-        account.put("scope", "中药房收费、审方、调剂、代煎、叫号与领取闭环");
+        account.put("id", "bootstrap-admin");
+        account.put("username", "admin");
+        account.put("passwordHash", passwordEncoder.encode(bootstrapAdminPassword));
+        account.put("mustChangePassword", true);
+        account.put("name", "首次启动管理员");
+        account.put("department", "信息科");
+        account.put("role", "admin");
+        account.put("roleLabel", "系统管理员");
+        account.put("scope", "首次启动引导账号；首次登录后必须修改密码");
         account.put("status", "启用");
         account.put("createdAt", Instant.now().toString());
         account.put("updatedAt", Instant.now().toString());
         jdbcTemplate.update(
             "INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)",
-            TCM_PHARMACY_ACCOUNT_ID,
-            TCM_PHARMACY_USERNAME,
-            "tcmPharmacyOperator",
+            "bootstrap-admin",
+            "admin",
+            "admin",
             "启用",
             toJson(account)
         );
@@ -91,7 +113,7 @@ public class AuthSessionService {
     }
 
     public LoginResult login(LoginRequest request, String remoteAddress) {
-        cleanupExpiredSessions();
+        cleanupAuthenticationState();
         String username = normalize(request.username());
         if (username.isBlank() || request.password() == null || request.password().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入账号和密码");
@@ -108,7 +130,7 @@ public class AuthSessionService {
             registerFailedLogin(failureKey);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "账号已停用，请联系管理员");
         }
-        String storedPassword = text(account, "passwordHash", text(account, "password"));
+        String storedPassword = text(account, "passwordHash");
         if (storedPassword.isBlank()) {
             registerFailedLogin(failureKey);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "账号未初始化密码，请联系管理员");
@@ -121,7 +143,7 @@ public class AuthSessionService {
             registerFailedLogin(failureKey);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "密码错误");
         }
-        loginFailures.remove(failureKey);
+        clearFailedLogin(failureKey);
 
         SessionUser user = new SessionUser(
             text(account, "id"),
@@ -130,31 +152,49 @@ public class AuthSessionService {
             text(account, "role", "frontdesk"),
             text(account, "roleLabel", text(account, "role", "frontdesk")),
             text(account, "department"),
+            account.path("mustChangePassword").asBoolean(false),
             Instant.now().plus(TOKEN_TTL)
         );
         String token = newToken();
-        sessions.put(token, user);
+        storeSession(token, user);
         return new LoginResult(token, Map.of(
             "name", user.name(),
             "role", user.role(),
             "roleLabel", user.roleLabel(),
             "department", user.department()
-        ));
+        ), account.path("mustChangePassword").asBoolean(false));
     }
 
     public Optional<SessionUser> authenticate(String token) {
         if (token == null || token.isBlank()) return Optional.empty();
-        SessionUser user = sessions.get(token);
-        if (user == null) return Optional.empty();
-        if (user.expiresAt().isBefore(Instant.now())) {
-            sessions.remove(token);
-            return Optional.empty();
-        }
-        return Optional.of(user);
+        List<SessionUser> users = jdbcTemplate.query(
+            """
+            SELECT user_id, username, display_name, role, role_label, department, must_change_password, expires_at
+            FROM clinic_auth_sessions
+            WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP(6)
+            LIMIT 1
+            """,
+            (resultSet, rowNum) -> new SessionUser(
+                resultSet.getString("user_id"),
+                resultSet.getString("username"),
+                resultSet.getString("display_name"),
+                resultSet.getString("role"),
+                resultSet.getString("role_label"),
+                resultSet.getString("department"),
+                resultSet.getBoolean("must_change_password"),
+                resultSet.getTimestamp("expires_at").toInstant()
+            ),
+            sha256(token)
+        );
+        return users.stream().findFirst();
     }
 
     public void logout(String token) {
-        if (token != null && !token.isBlank()) sessions.remove(token);
+        if (token == null || token.isBlank()) return;
+        jdbcTemplate.update(
+            "UPDATE clinic_auth_sessions SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = 'logout' WHERE token_hash = ? AND revoked_at IS NULL",
+            sha256(token)
+        );
     }
 
     @Transactional
@@ -162,28 +202,23 @@ public class AuthSessionService {
         if (user == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Login expired");
         }
-        String currentPassword = request.currentPassword() == null ? "" : request.currentPassword();
         String newPassword = request.newPassword() == null ? "" : request.newPassword().trim();
-        if (currentPassword.isBlank() || newPassword.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password and new password are required");
+        if (newPassword.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New password is required");
         }
-        if (newPassword.length() < 6) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New password must be at least 6 characters");
+        if (newPassword.length() < 8) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New password must be at least 8 characters");
         }
 
         JsonNode account = loadAccount(user.username())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found"));
-        String storedPassword = text(account, "passwordHash", text(account, "password"));
-        if (storedPassword.isBlank() || !isBcrypt(storedPassword) || !passwordEncoder.matches(currentPassword, storedPassword)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Current password is incorrect");
-        }
-
         ObjectNode updated = ((ObjectNode) account).deepCopy();
-        updated.remove("password");
+        updated.remove(List.of("password", "currentPassword"));
         updated.put("passwordHash", passwordEncoder.encode(newPassword));
-        updated.put("currentPassword", newPassword);
+        updated.put("mustChangePassword", false);
         updated.put("updatedAt", Instant.now().toString());
         jdbcTemplate.update("UPDATE clinic_accounts SET raw_json = ? WHERE id = ?", toJson(updated), text(updated, "id"));
+        revokeAllSessions(user.id(), "password_changed");
     }
 
     public LoginOptions loginOptions() {
@@ -261,26 +296,101 @@ public class AuthSessionService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    private void cleanupExpiredSessions() {
-        Instant now = Instant.now();
-        sessions.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
-        loginFailures.entrySet().removeIf(entry -> entry.getValue().isExpired(now));
+    private void cleanupAuthenticationState() {
+        jdbcTemplate.update(
+            "DELETE FROM clinic_auth_sessions WHERE expires_at < CURRENT_TIMESTAMP(6) OR revoked_at < DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 7 DAY)"
+        );
+        jdbcTemplate.update(
+            "DELETE FROM clinic_login_failures WHERE last_failed_at < DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 DAY)"
+        );
+    }
+
+    private void storeSession(String token, SessionUser user) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO clinic_auth_sessions (
+              token_hash, user_id, username, display_name, role, role_label, department, must_change_password, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            sha256(token), user.id(), user.username(), user.name(), user.role(), user.roleLabel(), user.department(),
+            user.mustChangePassword(),
+            Timestamp.from(user.expiresAt())
+        );
+    }
+
+    public void revokeAllSessions(String userId, String reason) {
+        if (userId == null || userId.isBlank()) return;
+        jdbcTemplate.update(
+            """
+            UPDATE clinic_auth_sessions
+            SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = ?
+            WHERE user_id = ? AND revoked_at IS NULL
+            """,
+            reason,
+            userId
+        );
     }
 
     private void rejectIfLocked(String failureKey) {
-        LoginFailure failure = loginFailures.get(failureKey);
-        if (failure != null && failure.isLocked(Instant.now())) {
+        List<Timestamp> values = jdbcTemplate.query(
+            "SELECT locked_until FROM clinic_login_failures WHERE failure_key_hash = ? AND locked_until IS NOT NULL",
+            (resultSet, rowNum) -> resultSet.getTimestamp("locked_until"),
+            sha256(failureKey)
+        );
+        if (!values.isEmpty() && values.get(0).toInstant().isAfter(Instant.now())) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "登录失败次数过多，请稍后再试");
         }
     }
 
     private void registerFailedLogin(String failureKey) {
         Instant now = Instant.now();
-        loginFailures.compute(failureKey, (key, existing) -> {
-            int attempts = existing == null || existing.isExpired(now) ? 1 : existing.attempts() + 1;
-            Instant lockedUntil = attempts >= MAX_FAILED_ATTEMPTS ? now.plus(LOGIN_LOCK_TTL) : null;
-            return new LoginFailure(attempts, lockedUntil, now);
-        });
+        List<LoginFailure> existingRows = jdbcTemplate.query(
+            "SELECT attempts, locked_until, last_failed_at FROM clinic_login_failures WHERE failure_key_hash = ?",
+            (resultSet, rowNum) -> new LoginFailure(
+                resultSet.getInt("attempts"),
+                instant(resultSet.getTimestamp("locked_until")),
+                resultSet.getTimestamp("last_failed_at").toInstant()
+            ),
+            sha256(failureKey)
+        );
+        LoginFailure existing = existingRows.stream().findFirst().orElse(null);
+        int attempts = existing == null || existing.isExpired(now) ? 1 : existing.attempts() + 1;
+        Instant lockedUntil = attempts >= MAX_FAILED_ATTEMPTS ? now.plus(LOGIN_LOCK_TTL) : null;
+        int separator = failureKey.indexOf('|');
+        String username = separator < 0 ? failureKey : failureKey.substring(0, separator);
+        String remoteAddress = separator < 0 ? "" : failureKey.substring(separator + 1);
+        jdbcTemplate.update(
+            """
+            INSERT INTO clinic_login_failures (
+              failure_key_hash, username, remote_address, attempts, locked_until, last_failed_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE attempts = VALUES(attempts), locked_until = VALUES(locked_until),
+              last_failed_at = VALUES(last_failed_at), remote_address = VALUES(remote_address)
+            """,
+            sha256(failureKey), username, remoteAddress, attempts,
+            lockedUntil == null ? null : Timestamp.from(lockedUntil), Timestamp.from(now)
+        );
+    }
+
+    private void clearFailedLogin(String failureKey) {
+        jdbcTemplate.update("DELETE FROM clinic_login_failures WHERE failure_key_hash = ?", sha256(failureKey));
+    }
+
+    private Instant instant(Timestamp value) {
+        return value == null ? null : value.toInstant();
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private boolean isProduction() {
+        return Arrays.stream(environment.getActiveProfiles())
+            .anyMatch(profile -> "prod".equalsIgnoreCase(profile) || "production".equalsIgnoreCase(profile));
     }
 
     private boolean isBcrypt(String value) {
@@ -309,10 +419,6 @@ public class AuthSessionService {
     }
 
     private record LoginFailure(int attempts, Instant lockedUntil, Instant lastFailedAt) {
-        boolean isLocked(Instant now) {
-            return lockedUntil != null && lockedUntil.isAfter(now);
-        }
-
         boolean isExpired(Instant now) {
             return lockedUntil != null && lockedUntil.isBefore(now)
                 || lockedUntil == null && lastFailedAt.plus(LOGIN_LOCK_TTL).isBefore(now);

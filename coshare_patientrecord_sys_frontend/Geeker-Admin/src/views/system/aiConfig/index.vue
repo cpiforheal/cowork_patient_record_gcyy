@@ -506,7 +506,7 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-@import "@/styles/var.scss";
+@use "@/styles/var.scss" as *;
 
 .ai-config-page {
   display: grid;

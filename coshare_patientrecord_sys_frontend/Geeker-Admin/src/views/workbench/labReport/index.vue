@@ -596,6 +596,11 @@ const saveToArchive = async () => {
       });
     }
     if (selectedPatient.value.preAiEncounterId && activeTemplate.value.id !== "ecgImage") {
+      const encounterId = selectedPatient.value.preAiEncounterId;
+      const { data: workspace } = await getPreAiWorkspaceApi(encounterId);
+      const expectedVersion = workspace.labReports
+        .filter(report => report.templateId === activeTemplate.value.id && report.reportDate === reportDate.value)
+        .reduce((version, report) => Math.max(version, report.version), 0);
       const metrics = activeTemplate.value.metrics
         .map(metric => ({
           key: metric.key,
@@ -606,12 +611,13 @@ const saveToArchive = async () => {
           reference: metricReference(metric, patientGender.value) || ""
         }))
         .filter(metric => metric.value && touchedMetricKeys.value.has(metric.key));
-      await savePreAiLabReportApi(selectedPatient.value.preAiEncounterId, {
+      await savePreAiLabReportApi(encounterId, {
         templateId: activeTemplate.value.id,
         templateName: activeTemplate.value.name,
         reportDate: reportDate.value,
         remark: reportRemark.value,
-        metrics
+        metrics,
+        expectedVersion
       });
     }
     ElMessage.success(

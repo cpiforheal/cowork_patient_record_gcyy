@@ -3,10 +3,9 @@ package com.coshare.patientrecord.clinicqueue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
-
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.flywaydb.core.Flyway;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -16,9 +15,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 
+@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ClinicQueueServiceMySqlIntegrationTests {
+
+    @Container
+    private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4")
+        .withDatabaseName("clinic_queue_test")
+        .withUsername("clinic_test")
+        .withPassword("clinic_test_password");
 
     private static final SessionUser ADMIN = new SessionUser(
         "test-admin",
@@ -27,6 +36,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
         "admin",
         "管理员",
         "测试科室",
+        false,
         Instant.now().plusSeconds(3600)
     );
 
@@ -35,35 +45,16 @@ class ClinicQueueServiceMySqlIntegrationTests {
 
     @BeforeAll
     void initializeDatabase() {
-        String url = System.getenv("CLINIC_QUEUE_TEST_MYSQL_URL");
-        assumeTrue(url != null && !url.isBlank(), "未配置 CLINIC_QUEUE_TEST_MYSQL_URL，跳过 MySQL 集成测试");
-
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        dataSource.setUrl(url);
-        dataSource.setUsername(System.getenv().getOrDefault("CLINIC_QUEUE_TEST_MYSQL_USERNAME", "root"));
-        dataSource.setPassword(System.getenv().getOrDefault("CLINIC_QUEUE_TEST_MYSQL_PASSWORD", "root"));
+        dataSource.setUrl(MYSQL.getJdbcUrl());
+        dataSource.setUsername(MYSQL.getUsername());
+        dataSource.setPassword(MYSQL.getPassword());
         jdbcTemplate = new JdbcTemplate(dataSource);
 
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_encounters (
-              id VARCHAR(64) PRIMARY KEY,
-              source_patient_id VARCHAR(64),
-              visit_no INT NOT NULL DEFAULT 1,
-              patient_json JSON NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS pre_ai_stage_submissions (
-              encounter_id VARCHAR(64) NOT NULL,
-              stage_code VARCHAR(32) NOT NULL,
-              status VARCHAR(32) NOT NULL,
-              PRIMARY KEY (encounter_id, stage_code)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
 
         service = new ClinicQueueService(jdbcTemplate, new ObjectMapper());
-        service.initializeSchema();
     }
 
     @BeforeEach
@@ -71,6 +62,8 @@ class ClinicQueueServiceMySqlIntegrationTests {
         jdbcTemplate.update("DELETE FROM clinic_queue_audit_logs");
         jdbcTemplate.update("DELETE FROM clinic_queue_emergencies");
         jdbcTemplate.update("DELETE FROM clinic_queue_announcements");
+        jdbcTemplate.update("DELETE FROM clinic_queue_print_tasks");
+        jdbcTemplate.update("DELETE FROM clinic_queue_print_terminals");
         jdbcTemplate.update("DELETE FROM clinic_queue_tasks");
         jdbcTemplate.update("DELETE FROM clinic_queue_tickets");
         jdbcTemplate.update("DELETE FROM pre_ai_stage_submissions");
@@ -178,14 +171,50 @@ class ClinicQueueServiceMySqlIntegrationTests {
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_emergencies WHERE room_code = 'INSPECTION_ROOM' AND status = 'ENDED'"));
     }
 
+    @Test
+    void printCreationAndCompletionAreIdempotent() {
+        String encounterId = insertEncounter("钱八", 1);
+        Map<String, Object> workspace = service.issue(new ClinicQueueService.IssueRequest(encounterId, "FIRST_VISIT"), ADMIN);
+        @SuppressWarnings("unchecked")
+        String ticketId = String.valueOf(((Map<String, Object>) workspace.get("ticket")).get("id"));
+        service.registerPrintTerminal(
+            new ClinicQueueService.PrintTerminalRequest("terminal-1", "测试终端", "printer-1", "1.0"),
+            ADMIN
+        );
+
+        ClinicQueueService.PrintTaskRequest request =
+            new ClinicQueueService.PrintTaskRequest("terminal-1", "", "client-request-1");
+        Map<String, Object> first = service.createPrintTask(ticketId, request, ADMIN);
+        Map<String, Object> duplicate = service.createPrintTask(ticketId, request, ADMIN);
+        assertEquals(first.get("id"), duplicate.get("id"));
+        assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_print_tasks"));
+
+        String executionToken = String.valueOf(first.get("executionToken"));
+        ClinicQueueService.PrintResultRequest result =
+            new ClinicQueueService.PrintResultRequest("SUCCESS", "printer-1", "", executionToken);
+        Map<String, Object> completed = service.completePrintTask(String.valueOf(first.get("id")), result, ADMIN);
+        Map<String, Object> repeated = service.completePrintTask(String.valueOf(first.get("id")), result, ADMIN);
+        assertEquals("SUCCESS", completed.get("status"));
+        assertEquals(completed, repeated);
+        assertEquals(1, count("SELECT attempt_count FROM clinic_queue_print_tasks WHERE id = ?", first.get("id")));
+        assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_audit_logs WHERE action_code = 'PRINT_SUCCESS'"));
+    }
+
     private String insertEncounter(String patientName, int visitNo) {
         String id = "enc-" + UUID.randomUUID();
         jdbcTemplate.update(
-            "INSERT INTO pre_ai_encounters (id, source_patient_id, visit_no, patient_json) VALUES (?, ?, ?, ?)",
+            """
+            INSERT INTO pre_ai_encounters (
+              id, source_patient_id, visit_no, case_token, status, current_stage, patient_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'IN_PROGRESS', 'FRONT_DESK', ?, ?, ?)
+            """,
             id,
             "patient-" + UUID.randomUUID(),
             visitNo,
-            "{\"patientName\":\"" + patientName + "\"}"
+            "case-" + UUID.randomUUID(),
+            "{\"patientName\":\"" + patientName + "\"}",
+            "2026-07-17 12:00:00",
+            "2026-07-17 12:00:00"
         );
         return id;
     }

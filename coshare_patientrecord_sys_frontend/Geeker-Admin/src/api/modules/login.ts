@@ -1,6 +1,4 @@
 import { Login, ResultData } from "@/api/interface/index";
-import authMenuList from "@/assets/json/authMenuList.json";
-import authButtonList from "@/assets/json/authButtonList.json";
 import { authHeaders } from "./authToken";
 
 const AUTH_API_BASE_URL = import.meta.env.VITE_AUTH_API_BASE_URL || "/auth";
@@ -25,6 +23,20 @@ export interface LoginAccountOption {
 export interface LoginOptions {
   departments: string[];
   accounts: LoginAccountOption[];
+}
+
+export interface NavigationShortcut {
+  title: string;
+  desc: string;
+  icon: string;
+  path: string;
+}
+
+export interface NavigationResult {
+  version: string;
+  menus: Menu.MenuOptions[];
+  buttonPermissions: Login.ResAuthButtons;
+  shortcuts: NavigationShortcut[];
 }
 
 export const loginApi = (params: Login.ReqLoginForm) => {
@@ -67,12 +79,12 @@ export const getLoginAccountsApi = (department: string) => {
     });
 };
 
-export const getAuthMenuListApi = () => {
-  return Promise.resolve(authMenuList as unknown as ResultData<Menu.MenuOptions[]>);
-};
-
-export const getAuthButtonListApi = () => {
-  return Promise.resolve(authButtonList as unknown as ResultData<Login.ResAuthButtons>);
+export const getAuthNavigationApi = () => {
+  return fetch(`${AUTH_API_BASE_URL}/navigation`, { headers: authHeaders() }).then(async response => {
+    const payload = await readJsonResult<NavigationResult>(response);
+    if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "导航权限加载失败");
+    return payload;
+  });
 };
 
 export const logoutApi = () => {
@@ -86,7 +98,7 @@ export const logoutApi = () => {
   });
 };
 
-export const changePasswordApi = (params: { currentPassword: string; newPassword: string }) => {
+export const changePasswordApi = (params: { newPassword: string }) => {
   return fetch(`${AUTH_API_BASE_URL}/password`, {
     method: "POST",
     headers: {

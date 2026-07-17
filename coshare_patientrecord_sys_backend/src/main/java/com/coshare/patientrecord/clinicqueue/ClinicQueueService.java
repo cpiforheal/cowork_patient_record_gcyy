@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -52,170 +51,6 @@ public class ClinicQueueService {
     public ClinicQueueService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_tickets (
-              id VARCHAR(64) PRIMARY KEY,
-              encounter_id VARCHAR(64) NOT NULL,
-              business_date DATE NOT NULL,
-              public_no VARCHAR(16) NOT NULL,
-              visit_type VARCHAR(24) NOT NULL,
-              patient_id VARCHAR(64) NOT NULL DEFAULT '',
-              patient_name VARCHAR(80) NOT NULL,
-              masked_name VARCHAR(80) NOT NULL,
-              overall_status VARCHAR(32) NOT NULL,
-              version INT NOT NULL DEFAULT 0,
-              created_by VARCHAR(100) NOT NULL,
-              created_by_role VARCHAR(64) NOT NULL,
-              created_at DATETIME NOT NULL,
-              updated_at DATETIME NOT NULL,
-              completed_at DATETIME NULL,
-              UNIQUE KEY uq_clinic_queue_encounter (encounter_id),
-              UNIQUE KEY uq_clinic_queue_public_no (business_date, public_no),
-              INDEX idx_clinic_queue_status (business_date, overall_status, updated_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_tasks (
-              id VARCHAR(64) PRIMARY KEY,
-              ticket_id VARCHAR(64) NOT NULL,
-              stage_code VARCHAR(32) NOT NULL,
-              room_code VARCHAR(32) NOT NULL,
-              status VARCHAR(32) NOT NULL,
-              version INT NOT NULL DEFAULT 0,
-              queue_entered_at DATETIME NULL,
-              called_at DATETIME NULL,
-              arrived_at DATETIME NULL,
-              service_started_at DATETIME NULL,
-              completed_at DATETIME NULL,
-              interrupted_from_status VARCHAR(32) NOT NULL DEFAULT '',
-              priority_locked BOOLEAN NOT NULL DEFAULT FALSE,
-              priority_reason VARCHAR(500) NOT NULL DEFAULT '',
-              recall_count INT NOT NULL DEFAULT 0,
-              exception_reason VARCHAR(500) NOT NULL DEFAULT '',
-              updated_by VARCHAR(100) NOT NULL DEFAULT '',
-              updated_at DATETIME NOT NULL,
-              UNIQUE KEY uq_clinic_queue_task_stage (ticket_id, stage_code),
-              INDEX idx_clinic_queue_task_dispatch (stage_code, status, priority_locked, queue_entered_at),
-              INDEX idx_clinic_queue_task_room (room_code, status, updated_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_rooms (
-              room_code VARCHAR(32) PRIMARY KEY,
-              room_name VARCHAR(80) NOT NULL,
-              stage_code VARCHAR(32) NOT NULL,
-              status VARCHAR(32) NOT NULL,
-              pause_reason VARCHAR(500) NOT NULL DEFAULT '',
-              follow_up_streak INT NOT NULL DEFAULT 0,
-              version INT NOT NULL DEFAULT 0,
-              updated_by VARCHAR(100) NOT NULL DEFAULT '',
-              updated_at DATETIME NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_announcements (
-              id VARCHAR(64) PRIMARY KEY,
-              ticket_id VARCHAR(64) NOT NULL,
-              task_id VARCHAR(64) NOT NULL,
-              public_no VARCHAR(16) NOT NULL,
-              stage_code VARCHAR(32) NOT NULL,
-              room_name VARCHAR(80) NOT NULL,
-              content VARCHAR(500) NOT NULL,
-              status VARCHAR(24) NOT NULL,
-              play_count INT NOT NULL DEFAULT 0,
-              created_at DATETIME NOT NULL,
-              expires_at DATETIME NOT NULL,
-              played_at DATETIME NULL,
-              INDEX idx_clinic_queue_announcement (status, created_at),
-              INDEX idx_clinic_queue_announcement_expiry (status, expires_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_emergencies (
-              id VARCHAR(64) PRIMARY KEY,
-              room_code VARCHAR(32) NOT NULL,
-              status VARCHAR(24) NOT NULL,
-              reason VARCHAR(500) NOT NULL,
-              started_by VARCHAR(100) NOT NULL,
-              started_by_role VARCHAR(64) NOT NULL,
-              started_at DATETIME NOT NULL,
-              ended_by VARCHAR(100) NOT NULL DEFAULT '',
-              ended_at DATETIME NULL,
-              INDEX idx_clinic_queue_emergency (room_code, status, started_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_audit_logs (
-              id VARCHAR(64) PRIMARY KEY,
-              ticket_id VARCHAR(64) NOT NULL DEFAULT '',
-              task_id VARCHAR(64) NOT NULL DEFAULT '',
-              room_code VARCHAR(32) NOT NULL DEFAULT '',
-              action_code VARCHAR(64) NOT NULL,
-              from_status VARCHAR(64) NOT NULL DEFAULT '',
-              to_status VARCHAR(64) NOT NULL DEFAULT '',
-              operator_id VARCHAR(64) NOT NULL DEFAULT '',
-              operator_name VARCHAR(100) NOT NULL,
-              operator_role VARCHAR(64) NOT NULL,
-              detail VARCHAR(1000) NOT NULL DEFAULT '',
-              created_at DATETIME NOT NULL,
-              INDEX idx_clinic_queue_audit_ticket (ticket_id, created_at),
-              INDEX idx_clinic_queue_audit_room (room_code, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_print_templates (
-              template_code VARCHAR(64) PRIMARY KEY,
-              config_json JSON NOT NULL,
-              updated_by VARCHAR(100) NOT NULL,
-              updated_at DATETIME NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_print_terminals (
-              terminal_id VARCHAR(80) PRIMARY KEY,
-              terminal_name VARCHAR(120) NOT NULL,
-              printer_name VARCHAR(200) NOT NULL DEFAULT '',
-              agent_version VARCHAR(40) NOT NULL DEFAULT '',
-              status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
-              last_seen_at DATETIME NOT NULL,
-              registered_by VARCHAR(100) NOT NULL,
-              updated_at DATETIME NOT NULL,
-              INDEX idx_clinic_queue_print_terminal_status (status, last_seen_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS clinic_queue_print_tasks (
-              id VARCHAR(64) PRIMARY KEY,
-              ticket_id VARCHAR(64) NOT NULL,
-              terminal_id VARCHAR(80) NOT NULL,
-              printer_name VARCHAR(200) NOT NULL DEFAULT '',
-              status VARCHAR(24) NOT NULL,
-              print_type VARCHAR(24) NOT NULL,
-              reprint_reason VARCHAR(500) NOT NULL DEFAULT '',
-              attempt_count INT NOT NULL DEFAULT 0,
-              payload_json JSON NOT NULL,
-              execution_token VARCHAR(80) NOT NULL,
-              error_message VARCHAR(1000) NOT NULL DEFAULT '',
-              created_by VARCHAR(100) NOT NULL,
-              created_by_role VARCHAR(64) NOT NULL,
-              created_at DATETIME NOT NULL,
-              started_at DATETIME NULL,
-              completed_at DATETIME NULL,
-              updated_at DATETIME NOT NULL,
-              UNIQUE KEY uq_clinic_queue_print_token (execution_token),
-              INDEX idx_clinic_queue_print_ticket (ticket_id, created_at),
-              INDEX idx_clinic_queue_print_terminal (terminal_id, status, created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """);
-        addColumnIfMissing("clinic_queue_announcements", "expires_at", "DATETIME NULL");
-        jdbcTemplate.update("UPDATE clinic_queue_announcements SET expires_at = DATE_ADD(created_at, INTERVAL 2 MINUTE) WHERE expires_at IS NULL");
-        seedPrintTemplate();
-        seedRoom("INSPECTION_ROOM", "检查室", INSPECTION);
-        seedRoom("RECEPTION_ROOM", "接诊室", RECEPTION);
     }
 
     @Transactional
@@ -508,8 +343,17 @@ public class ClinicQueueService {
         return printTerminal(terminalId);
     }
 
+    @Transactional
     public Map<String, Object> createPrintTask(String ticketId, PrintTaskRequest request, SessionUser user) {
         requireRole(user, ISSUE_ROLES, "仅前台或管理员可打印排队票");
+        String clientRequestId = required(request == null ? "" : request.clientRequestId(), "客户端请求编号");
+        Map<String, Object> existing = printTaskByClientRequestId(clientRequestId);
+        if (existing != null) {
+            if (!ticketId.equals(String.valueOf(existing.get("ticketId")))) {
+                throw conflict("客户端请求编号已用于其他打印任务");
+            }
+            return existing;
+        }
         ObjectNode ticket = loadTicket(ticketId);
         String terminalId = required(request == null ? "" : request.terminalId(), "打印终端");
         Map<String, Object> terminal = printTerminal(terminalId);
@@ -526,31 +370,51 @@ public class ClinicQueueService {
         ObjectNode payload = buildPrintPayload(id, text(ticket, "publicNo"), text(ticket, "maskedName"),
             visitTypeLabel(text(ticket, "visitType")), terminal, reprint, false);
         payload.put("executionToken", token);
-        jdbcTemplate.update("""
-            INSERT INTO clinic_queue_print_tasks (
-              id, ticket_id, terminal_id, printer_name, status, print_type, reprint_reason, attempt_count,
-              payload_json, execution_token, created_by, created_by_role, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'PENDING', ?, ?, 0, CAST(? AS JSON), ?, ?, ?, ?, ?)
-            """, id, ticketId, terminalId, String.valueOf(terminal.getOrDefault("printerName", "")),
-            reprint ? "REPRINT" : "INITIAL", reason, payload.toString(), token, user.name(), user.role(), timestamp, timestamp);
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO clinic_queue_print_tasks (
+                  id, ticket_id, client_request_id, terminal_id, printer_name, status, print_type, reprint_reason, attempt_count,
+                  payload_json, execution_token, created_by, created_by_role, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, 0, CAST(? AS JSON), ?, ?, ?, ?, ?)
+                """, id, ticketId, clientRequestId, terminalId, String.valueOf(terminal.getOrDefault("printerName", "")),
+                reprint ? "REPRINT" : "INITIAL", reason, payload.toString(), token, user.name(), user.role(), timestamp, timestamp);
+        } catch (DuplicateKeyException duplicate) {
+            Map<String, Object> duplicateTask = printTaskByClientRequestId(clientRequestId);
+            if (duplicateTask != null && ticketId.equals(String.valueOf(duplicateTask.get("ticketId")))) return duplicateTask;
+            throw conflict("客户端请求编号已存在，请刷新打印记录");
+        }
         audit(ticketId, "", "", reprint ? "TICKET_REPRINT_REQUESTED" : "TICKET_PRINT_REQUESTED", "", "PENDING", user,
             (reprint ? "补打" : "打印") + "排队票，终端：" + terminalId + (reason.isBlank() ? "" : "，原因：" + reason));
         return printTask(id);
     }
 
+    @Transactional
     public Map<String, Object> completePrintTask(String id, PrintResultRequest request, SessionUser user) {
         requireRole(user, ISSUE_ROLES, "仅前台或管理员可确认打印结果");
         Map<String, Object> task = printTask(id);
+        String executionToken = required(request == null ? "" : request.executionToken(), "打印执行令牌");
+        if (!executionToken.equals(String.valueOf(task.get("executionToken")))) throw conflict("打印执行令牌无效");
         String status = safe(request == null ? "" : request.status()).toUpperCase(Locale.ROOT);
         if (!Set.of("SUCCESS", "FAILED").contains(status)) throw badRequest("打印结果必须为 SUCCESS 或 FAILED");
+        String currentStatus = String.valueOf(task.get("status"));
+        if (Set.of("SUCCESS", "FAILED").contains(currentStatus)) return task;
+        if (!"PENDING".equals(currentStatus)) throw conflict("仅待打印任务可提交执行结果");
         String printerName = safe(request == null ? "" : request.printerName());
         String error = safe(request == null ? "" : request.errorMessage());
         String timestamp = now();
-        jdbcTemplate.update("""
+        int changed = jdbcTemplate.update("""
             UPDATE clinic_queue_print_tasks SET status = ?, printer_name = ?, error_message = ?,
               attempt_count = attempt_count + 1, started_at = COALESCE(started_at, ?), completed_at = ?, updated_at = ?
-            WHERE id = ?
-            """, status, printerName, error, timestamp, timestamp, timestamp, id);
+            WHERE id = ? AND execution_token = ? AND status = 'PENDING'
+            """, status, printerName, error, timestamp, timestamp, timestamp, id, executionToken);
+        if (changed != 1) {
+            Map<String, Object> concurrentResult = printTask(id);
+            if (executionToken.equals(String.valueOf(concurrentResult.get("executionToken")))
+                && Set.of("SUCCESS", "FAILED").contains(String.valueOf(concurrentResult.get("status")))) {
+                return concurrentResult;
+            }
+            throw conflict("打印任务状态已变化，请刷新后重试");
+        }
         audit(String.valueOf(task.get("ticketId")), "", "", "PRINT_" + status, "PENDING", status, user,
             status.equals("SUCCESS") ? "排队票打印成功：" + printerName : "排队票打印失败：" + error);
         return printTask(id);
@@ -992,10 +856,19 @@ public class ClinicQueueService {
         return objectMapper.convertValue(rows.get(0), Map.class);
     }
 
+    private Map<String, Object> printTaskByClientRequestId(String clientRequestId) {
+        List<ObjectNode> rows = jdbcTemplate.query(
+            "SELECT * FROM clinic_queue_print_tasks WHERE client_request_id = ? LIMIT 1",
+            (rs, rowNum) -> readPrintTask(rs), clientRequestId
+        );
+        return rows.isEmpty() ? null : objectMapper.convertValue(rows.get(0), Map.class);
+    }
+
     private ObjectNode readPrintTask(ResultSet rs) throws SQLException {
         ObjectNode row = objectMapper.createObjectNode();
         row.put("id", rs.getString("id"));
         row.put("ticketId", rs.getString("ticket_id"));
+        row.put("clientRequestId", rs.getString("client_request_id"));
         row.put("terminalId", rs.getString("terminal_id"));
         row.put("printerName", rs.getString("printer_name"));
         row.put("status", rs.getString("status"));
@@ -1003,6 +876,7 @@ public class ClinicQueueService {
         row.put("reprintReason", rs.getString("reprint_reason"));
         row.put("attemptCount", rs.getInt("attempt_count"));
         row.set("payload", readJson(rs.getString("payload_json")));
+        row.put("executionToken", rs.getString("execution_token"));
         row.put("createdBy", rs.getString("created_by"));
         row.put("createdAt", rs.getString("created_at"));
         putNullable(row, "completedAt", rs.getString("completed_at"));
@@ -1200,16 +1074,6 @@ public class ClinicQueueService {
         return "FOLLOW_UP".equals(visitType) ? "复诊" : "初诊";
     }
 
-    private void addColumnIfMissing(String table, String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
-            """, Integer.class, table, column);
-        if (count != null && count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-        }
-    }
-
     private String required(String value, String label) {
         String normalized = safe(value);
         if (normalized.isBlank()) throw badRequest(label + "不能为空");
@@ -1239,8 +1103,8 @@ public class ClinicQueueService {
                                        boolean showFirstStage, boolean showIssuedAt, boolean showNotice,
                                        String notice, String secondaryNotice) {}
     public record PrintTerminalRequest(String terminalId, String terminalName, String printerName, String agentVersion) {}
-    public record PrintTaskRequest(String terminalId, String reason) {}
-    public record PrintResultRequest(String status, String printerName, String errorMessage) {}
+    public record PrintTaskRequest(String terminalId, String reason, String clientRequestId) {}
+    public record PrintResultRequest(String status, String printerName, String errorMessage, String executionToken) {}
     record EncounterPatient(String encounterId, String patientId, String patientName, int visitNo) {}
     public record Candidate(String taskId, String ticketId, String visitType, LocalDateTime enteredAt, boolean priorityLocked, String reason) {
         Candidate withReason(String nextReason) {
