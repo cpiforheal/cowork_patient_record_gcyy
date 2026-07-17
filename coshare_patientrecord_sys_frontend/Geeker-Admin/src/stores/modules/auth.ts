@@ -5,6 +5,16 @@ import { getFlatMenuList, getShowMenuList, getAllBreadcrumbList } from "@/utils"
 import { useUserStore } from "@/stores/modules/user";
 
 const AI_DOCUMENT_MENU_PATHS = ["/templates", "/templates/ai-document"];
+const INVENTORY_STAFF_MENU_PATHS = ["/inventory", "/inventory/overview", "/inventory/requests", "/inventory/weekly"];
+const INVENTORY_QUALITY_MENU_PATHS = [
+  "/inventory",
+  "/inventory/overview",
+  "/inventory/executive",
+  "/inventory/requests",
+  "/inventory/weekly",
+  "/inventory/controls",
+  "/inventory/trace"
+];
 
 const ROLE_MENU_PATHS: Record<string, string[]> = {
   admin: ["*"],
@@ -20,6 +30,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates",
     "/templates/record",
     "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS,
     "/tcm-pharmacy",
     "/tcm-pharmacy/clinic-queue",
     "/tcm-pharmacy/clinic-queue/workbench",
@@ -37,6 +48,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates",
     "/templates/record",
     "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS,
     "/tcm-pharmacy",
     "/tcm-pharmacy/clinic-queue",
     "/tcm-pharmacy/clinic-queue/workbench",
@@ -65,7 +77,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
   ],
   ecg: [
     "/home/index",
@@ -78,7 +91,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
   ],
   ultrasound: [
     "/home/index",
@@ -91,7 +105,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
   ],
   tcm: [
     "/home/index",
@@ -120,6 +135,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates",
     "/templates/record",
     "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS,
     "/tcm-pharmacy",
     "/tcm-pharmacy/tcm",
     "/tcm-pharmacy/workbench",
@@ -139,7 +155,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
   ],
   quality: [
     "/home/index",
@@ -152,6 +169,7 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/templates",
     "/templates/record",
     "/templates/ai-document",
+    ...INVENTORY_QUALITY_MENU_PATHS,
     "/documents",
     "/documents/recycle",
     "/audit",
@@ -169,9 +187,25 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
     "/encounters/active",
     "/templates",
     "/templates/record",
-    "/templates/ai-document"
+    "/templates/ai-document",
+    ...INVENTORY_STAFF_MENU_PATHS
   ],
-  manager: ["/home/index", ...AI_DOCUMENT_MENU_PATHS]
+  manager: ["/home/index", ...AI_DOCUMENT_MENU_PATHS, "/inventory", "/inventory/overview", "/inventory/executive"]
+};
+
+const INVENTORY_STAFF_BUTTONS = {
+  inventoryOverview: ["inventory:read", "inventory:request", "inventory:receive"],
+  inventoryRequests: ["inventory:read", "inventory:request", "inventory:receive"],
+  inventoryWeekly: ["inventory:read", "inventory:request"]
+};
+
+const INVENTORY_QUALITY_BUTTONS = {
+  inventoryOverview: ["inventory:read", "inventory:approve", "inventory:count", "inventory:export"],
+  inventoryExecutive: ["inventory:read", "inventory:approve", "inventory:count", "inventory:export"],
+  inventoryRequests: ["inventory:read", "inventory:approve", "inventory:export"],
+  inventoryWeekly: ["inventory:read", "inventory:count", "inventory:export"],
+  inventoryControls: ["inventory:read", "inventory:count", "inventory:export"],
+  inventoryTrace: ["inventory:read", "inventory:export"]
 };
 
 const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
@@ -183,6 +217,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     recordTemplate: ["field:read"],
     patientList: ["patient:create", "patient:read", "patient:update"],
     patientDetail: ["field:read", "field:edit", "document:read", "document:upload", "document:download"],
+    ...INVENTORY_STAFF_BUTTONS,
     clinicQueueWorkbench: ["queue:read", "queue:issue", "queue:intervene", "room:control", "audit:read"],
     clinicQueueDisplayMenu: ["display:read", "announcement:play"]
   },
@@ -194,6 +229,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
     patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS,
     clinicQueueWorkbench: ["queue:read", "inspection:operate", "room:control", "audit:read"],
     clinicQueueDisplayMenu: ["display:read", "announcement:play"]
   },
@@ -212,7 +248,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   ecg: {
     home: ["view"],
@@ -221,7 +258,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   ultrasound: {
     home: ["view"],
@@ -230,7 +268,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   tcm: {
     home: ["view"],
@@ -270,6 +309,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
     patientDetail: ["field:read", "field:edit", "document:read", "document:download"],
+    ...INVENTORY_STAFF_BUTTONS,
     tcmPharmacyWorkbench: ["prescription:create", "prescription:submit", "pharmacy:read"],
     tcmPharmacyDisplayMenu: ["display:read"],
     clinicQueueWorkbench: ["queue:read", "reception:operate", "room:control", "audit:read"],
@@ -282,7 +322,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   nursing: {
     home: ["view"],
@@ -291,7 +332,8 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     encounterActive: ["patient:read", "field:read"],
     recordTemplate: ["field:read"],
     patientList: ["patient:read"],
-    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"]
+    patientDetail: ["field:read", "field:edit", "document:read", "document:upload"],
+    ...INVENTORY_STAFF_BUTTONS
   },
   quality: {
     home: ["view"],
@@ -301,6 +343,7 @@ const ROLE_BUTTONS: Record<string, Record<string, string[]>> = {
     patientList: ["patient:read"],
     patientDetail: ["field:read", "document:read", "document:void", "document:download"],
     documentRecycle: ["document:restore", "document:read"],
+    ...INVENTORY_QUALITY_BUTTONS,
     auditReview: ["audit:read", "quality:approve", "quality:reject"],
     auditLog: ["audit:read", "audit:export"]
   }
