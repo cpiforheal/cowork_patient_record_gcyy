@@ -51,7 +51,8 @@ class PreAiPrivacyServiceTests {
         assertTrue(documentXml.contains("中医肛肠医院住院病历自动生成表"));
         for (String heading : List.of(
             "一、基础信息", "二、主诉", "三、现病史", "四、既往史 / 个人史 / 婚育史 / 家族史", "五、中医四诊", "六、专科检查",
-            "七、辅助检查", "八、中西医主诊断", "九、次诊断（已选择）", "十、合并病中医病名及证型", "十一、手术 / 操作信息", "十二、DIP 病组与治疗路径"
+            "七、辅助检查", "八、中西医主诊断", "九、次诊断（已选择）", "十、合并病中医病名及证型", "十一、手术 / 操作信息", "十二、DIP 病组与治疗路径",
+            "十三、查房时序", "十四、自动生成文书范围", "十五、质控校验"
         )) assertTrue(documentXml.contains(heading), heading);
         assertTrue(documentXml.contains("<w:tbl>"));
         assertTrue(documentXml.contains("便血3月"));
@@ -69,6 +70,27 @@ class PreAiPrivacyServiceTests {
         assertFalse(documentXml.contains("幸福路88号"));
         assertFalse(documentXml.contains("原始照片.jpg"));
         assertFalse(documentXml.contains("张医生"));
+    }
+
+    @Test
+    void keepsTemplateSectionsWhenTheirFactsAreEmpty() throws Exception {
+        ObjectNode workspace = objectMapper.createObjectNode();
+        ObjectNode encounter = workspace.putObject("encounter");
+        encounter.put("caseToken", "CASE-EMPTY");
+        encounter.put("route", "OUTPATIENT");
+        encounter.put("treatmentPath", "CONSERVATIVE");
+        encounter.putObject("patient");
+        workspace.putArray("stages");
+        workspace.putArray("auxiliaryTasks");
+        workspace.putArray("labReports");
+
+        String documentXml = unzipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/document.xml");
+
+        assertTrue(documentXml.contains("一、基础信息"));
+        assertTrue(documentXml.contains("七、辅助检查"));
+        assertTrue(documentXml.contains("十五、质控校验"));
+        assertFalse(documentXml.contains("VISUAL"));
+        assertFalse(documentXml.contains("未填写指标"));
     }
 
     @Test

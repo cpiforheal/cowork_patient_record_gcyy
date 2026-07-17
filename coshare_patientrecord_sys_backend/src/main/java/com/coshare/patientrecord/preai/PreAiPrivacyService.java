@@ -256,38 +256,42 @@ public class PreAiPrivacyService {
         JsonNode metadata = masked.path("metadata");
         JsonNode stages = masked.path("stages");
         JsonNode reception = stages.path("RECEPTION");
-        addTableSection(body, "病例信息", List.of(
+        addFixedTableSection(body, "病例信息", List.of(
             row("医院名称", "中医肛肠医院"),
             row("科室", "肛肠科"),
-            row("病例标识", text(metadata, "caseToken")),
-            row("就诊日期", text(metadata, "visitDate")),
-            row("入院方式", text(metadata, "route")),
-            row("治疗类别", text(metadata, "treatmentPath")),
+            row("病案号", text(metadata, "caseToken")),
+            row("入院次数", ""),
+            row("病区", ""),
+            row("床号", ""),
+            row("住院号", ""),
+            row("入院日期", text(metadata, "visitDate")),
+            row("出院日期", ""),
+            row("住院天数", ""),
             row("建议就诊分支", displayFieldValue("dispositionSuggestion", reception.path("dispositionSuggestion")))
         ));
 
         JsonNode patient = masked.path("patient");
-        addTableSection(body, "一、基础信息", nodeRows(patient, List.of(
+        addFixedTableSection(body, "一、基础信息", fixedNodeRows(patient, List.of(
             "patientName", "gender", "age", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "registrationNote"
         )));
 
-        addTableSection(body, "二、主诉", nodeRows(reception, List.of("chiefComplaint", "symptomDuration")));
-        addTableSection(body, "三、现病史", nodeRows(reception, List.of(
+        addFixedTableSection(body, "二、主诉", fixedNodeRows(reception, List.of("chiefComplaint", "symptomDuration")));
+        addFixedTableSection(body, "三、现病史", fixedNodeRows(reception, List.of(
             "presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures",
             "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"
         )));
-        addTableSection(body, "四、既往史 / 个人史 / 婚育史 / 家族史", nodeRows(reception, List.of(
+        addFixedTableSection(body, "四、既往史 / 个人史 / 婚育史 / 家族史", fixedNodeRows(reception, List.of(
             "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory",
             "personalHistory", "maritalHistory", "familyHistory", "historySupplement"
         )));
 
         JsonNode tcm = stages.path("TCM");
-        addTableSection(body, "五、中医四诊", nodeRows(tcm, List.of(
+        addFixedTableSection(body, "五、中医四诊", fixedNodeRows(tcm, List.of(
             "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"
         )));
 
         JsonNode inspection = stages.path("INSPECTION");
-        addTableSection(body, "六、专科检查", nodeRows(inspection, List.of(
+        addFixedTableSection(body, "六、专科检查", fixedNodeRows(inspection, List.of(
             "examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "visualFindings", "digitalExamFindings",
             "anoscopyFindings", "otherFindings", "factualConclusion"
         )));
@@ -324,30 +328,44 @@ public class PreAiPrivacyService {
                 if (!text(report, "remark").isBlank()) auxiliaryRows.add(row(title + " / 备注", text(report, "remark")));
             }
         }
-        addTableSection(body, "七、辅助检查", auxiliaryRows);
+        auxiliaryRows.addAll(List.of(
+            row("血常规", ""), row("尿常规", ""), row("生化/糖化", ""), row("凝血功能", ""),
+            row("术前八项", ""), row("无痛电子肠镜", ""), row("心电图", ""), row("胸片/DR", ""), row("生命体征", "")
+        ));
+        addFixedTableSection(body, "七、辅助检查", auxiliaryRows);
 
         JsonNode doctor = stages.path("DOCTOR");
-        List<DocumentRow> diagnoses = new java.util.ArrayList<>(nodeRows(tcm, List.of("tcmDisease", "primarySyndrome")));
-        diagnoses.addAll(nodeRows(doctor, List.of("primaryWesternDiagnosis", "diagnosisBasis")));
-        addTableSection(body, "八、中西医主诊断", diagnoses);
-        addTableSection(body, "九、次诊断（已选择）", nodeRows(doctor, List.of("secondaryWesternDiagnoses", "differentialDiagnoses")));
-        addTableSection(body, "十、合并病中医病名及证型", nodeRows(tcm, List.of("concurrentSyndrome")));
+        List<DocumentRow> diagnoses = new java.util.ArrayList<>(fixedNodeRows(tcm, List.of("tcmDisease", "primarySyndrome")));
+        diagnoses.addAll(fixedNodeRows(doctor, List.of("primaryWesternDiagnosis", "diagnosisBasis")));
+        addFixedTableSection(body, "八、中西医主诊断", diagnoses);
+        addFixedTableSection(body, "九、次诊断（已选择）", fixedNodeRows(doctor, List.of("secondaryWesternDiagnoses", "differentialDiagnoses")));
+        addFixedTableSection(body, "十、合并病中医病名及证型", fixedNodeRows(tcm, List.of("concurrentSyndrome")));
 
         JsonNode surgery = stages.path("SURGERY");
-        List<DocumentRow> operations = new java.util.ArrayList<>(nodeRows(doctor, List.of(
+        List<DocumentRow> operations = new java.util.ArrayList<>(fixedNodeRows(doctor, List.of(
             "plannedOperationName", "plannedOperationSite", "plannedOperationPlan"
         )));
-        operations.addAll(nodeRows(surgery, List.of(
+        operations.addAll(fixedNodeRows(surgery, List.of(
             "actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings",
             "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff"
         )));
-        addTableSection(body, "十一、手术 / 操作信息", operations);
-        addTableSection(body, "十二、DIP 病组与治疗路径", nodeRows(doctor, List.of(
+        addFixedTableSection(body, "十一、手术 / 操作信息", operations);
+        addFixedTableSection(body, "十二、DIP 病组与治疗路径", fixedNodeRows(doctor, List.of(
             "finalRoute", "treatmentPath", "treatmentPlan"
         )));
         List<DocumentRow> reviewRows = new java.util.ArrayList<>(nodeRows(masked.path("review"), List.of("reviewedAt", "reviewerRole", "statement")));
         reviewRows.addAll(nodeRows(reception, List.of("reviewOpinion", "nextStepRecommendation")));
-        addTableSection(body, "医生复核", reviewRows);
+        List<DocumentRow> roundRows = new java.util.ArrayList<>();
+        roundRows.add(row("查房时序", "按入院、术前、术后及出院节点记录查房事实；本节仅保留已填写记录。"));
+        roundRows.addAll(reviewRows);
+        addFixedTableSection(body, "十三、查房时序", roundRows);
+        addFixedTableSection(body, "十四、自动生成文书范围", List.of(
+            row("生成范围", "基于已完成岗位事实生成前置病历；未选择的候选项不写入文档。")
+        ));
+        addFixedTableSection(body, "十五、质控校验", List.of(
+            row("质控项目", "基础信息、主诉现病史、检查检验、诊断及手术信息按流程完成并经医生复核。")
+        ));
+        addFixedTableSection(body, "医生复核", reviewRows);
 
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
             + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
@@ -364,6 +382,15 @@ public class PreAiPrivacyService {
             if (!value.isBlank()) rows.add(row(FIELD_LABELS.getOrDefault(key, key), value));
         }
         return rows;
+    }
+
+    private List<DocumentRow> fixedNodeRows(JsonNode node, List<String> keys) {
+        if (node == null || !node.isObject()) {
+            return keys.stream().map(key -> row(FIELD_LABELS.getOrDefault(key, key), "")).toList();
+        }
+        return keys.stream()
+            .map(key -> row(FIELD_LABELS.getOrDefault(key, key), displayFieldValue(key, node.path(key))))
+            .toList();
     }
 
     private String displayFieldValue(String key, JsonNode value) {
@@ -398,6 +425,18 @@ public class PreAiPrivacyService {
             + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
         body.append(tableRow("项目", "内容", true, false));
         present.forEach(row -> body.append(tableRow(row.label(), row.value(), false, row.abnormal())));
+        body.append("</w:tbl>");
+    }
+
+    private void addFixedTableSection(StringBuilder body, String title, List<DocumentRow> rows) {
+        body.append(paragraph(title, "Heading1"));
+        body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
+            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/></w:tblBorders></w:tblPr>"
+            + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
+        body.append(tableRow("项目", "内容", true, false));
+        rows.stream().filter(java.util.Objects::nonNull).forEach(item -> body.append(tableRow(item.label(), item.value(), false, item.abnormal())));
         body.append("</w:tbl>");
     }
 
@@ -610,7 +649,7 @@ public class PreAiPrivacyService {
             {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
             {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
-            {"presentIllness", "现病史最终文本"}, {"pastHistory", "慢性病及重要既往史"}, {"surgicalHistory", "手术史"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
+            {"presentIllness", "现病史最终文本"}, {"pastHistory", "既往史"}, {"surgicalHistory", "手术史"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
             {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
             {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
             {"dispositionSuggestion", "建议就诊分支"}, {"recommendedAuxiliaryExams", "建议辅助检查"},
