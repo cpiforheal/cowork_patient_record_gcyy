@@ -122,23 +122,56 @@
       placeholder="复核说明（选填）"
       @update:model-value="$emit('update:statement', String($event))"
     />
-    <footer class="panel-actions">
-      <div></div>
+    <section class="review-status" :class="{ confirmed: reviewConfirmed }">
+      <div>
+        <strong>{{ reviewConfirmed ? "最终医生复核已确认" : "最终医生复核尚未确认" }}</strong>
+        <small>
+          {{
+            reviewConfirmed
+              ? "现在可以生成目标病历模板或脱敏前置资料。"
+              : "请先点击“确认事实无误”，确认成功后两个生成入口将自动启用。"
+          }}
+        </small>
+      </div>
+      <el-tag :type="reviewConfirmed ? 'success' : 'warning'" effect="dark">
+        {{ reviewConfirmed ? "已确认" : "待确认" }}
+      </el-tag>
+    </section>
+    <footer v-if="canReview" class="panel-actions review-actions">
       <el-button
-        v-if="canReview && !['REVIEWED', 'EXPORTED'].includes(encounterStatus)"
+        v-if="!reviewConfirmed"
         type="primary"
         :loading="loading"
         :disabled="!preview?.ready || Boolean(preview?.labSummary?.criticalCount && !criticalAcknowledged)"
         @click="$emit('confirm')"
         >确认事实无误</el-button
       >
-      <el-button
-        v-if="canReview && ['REVIEWED', 'EXPORTED'].includes(encounterStatus)"
-        type="success"
-        :loading="loading"
-        @click="$emit('generate')"
-        >生成脱敏 DOCX</el-button
-      >
+      <div v-else></div>
+      <div class="generate-actions">
+        <el-tooltip :disabled="targetGenerationAvailable" :content="targetGenerationDisabledReason" placement="top">
+          <span>
+            <el-button
+              type="primary"
+              :loading="loading"
+              :disabled="!targetGenerationAvailable"
+              @click="$emit('generateTarget')"
+              >生成目标病历模板</el-button
+            >
+          </span>
+        </el-tooltip>
+        <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核" placement="top">
+          <span>
+            <el-button
+              type="success"
+              plain
+              :loading="loading"
+              :disabled="!reviewConfirmed"
+              @click="$emit('generate')"
+              >生成脱敏前置资料</el-button
+            >
+          </span>
+        </el-tooltip>
+      </div>
     </footer>
     <section v-if="exports.length" class="export-list">
       <div class="section-caption">历史导出版本（新版本不覆盖旧文件）</div>
@@ -154,6 +187,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { Refresh } from "@element-plus/icons-vue";
 import type { PreAiEncounterStatus, PreAiExportVersion, PreAiReviewPreview } from "@/api/modules/clinic";
 
@@ -162,11 +196,12 @@ export interface MaskedReviewSection {
   entries: Array<[string, any]>;
 }
 
-defineProps<{
+const props = defineProps<{
   preview?: PreAiReviewPreview;
   sections: MaskedReviewSection[];
   statement: string;
   canReview: boolean;
+  canGenerateTarget: boolean;
   criticalAcknowledged: boolean;
   loading: boolean;
   encounterStatus: PreAiEncounterStatus;
@@ -174,6 +209,14 @@ defineProps<{
   fieldLabel: (key: string) => string;
   humanValue: (value: any) => string;
 }>();
+
+const reviewConfirmed = computed(() => ["REVIEWED", "EXPORTED"].includes(props.encounterStatus));
+const targetGenerationAvailable = computed(() => reviewConfirmed.value && props.canGenerateTarget);
+const targetGenerationDisabledReason = computed(() => {
+  if (!reviewConfirmed.value) return "请先完成最终医生复核";
+  if (!props.canGenerateTarget) return "当前前置病例尚未关联患者档案，暂不能生成目标病历";
+  return "";
+});
 
 const isLabSection = (section: MaskedReviewSection) => section.title.startsWith("化验报告");
 const labMetrics = (section: MaskedReviewSection) => {
@@ -186,6 +229,7 @@ defineEmits<{
   refresh: [];
   confirm: [];
   generate: [];
+  generateTarget: [];
   download: [version: PreAiExportVersion];
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
@@ -193,6 +237,44 @@ defineEmits<{
 </script>
 
 <style scoped lang="scss">
+.review-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 10px;
+  background: var(--el-color-warning-light-9);
+
+  > div {
+    display: grid;
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+  }
+
+  small {
+    color: var(--el-text-color-secondary);
+    line-height: 1.6;
+  }
+
+  &.confirmed {
+    border-color: var(--el-color-success-light-5);
+    background: var(--el-color-success-light-9);
+  }
+}
+.review-actions {
+  align-items: center;
+}
+.generate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
 .panel-heading {
   display: flex;
   align-items: flex-start;

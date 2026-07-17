@@ -10,8 +10,7 @@
         <el-button :icon="Refresh" @click="loadEncounterList">刷新</el-button>
         <el-button v-if="canImportLegacy" :icon="FolderOpened" @click="openLegacyDialog">导入进行中的旧患者</el-button>
         <el-button v-if="canCreateEncounter" type="primary" :icon="Plus" @click="createDialogVisible = true"
-          >新建前置病历</el-button
-        >
+          >新建前置病历</el-button>
       </div>
     </header>
 
@@ -272,6 +271,35 @@
                     </article>
                   </section>
 
+                  <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section primary-evidence-section">
+                    <div class="primary-evidence-heading">
+                      <div>
+                        <span class="section-caption">接诊首要复核资料</span>
+                        <strong>检查室原始图片</strong>
+                        <small>先核对一手图片，再结合检查事实完成接诊评估。</small>
+                      </div>
+                      <el-tag effect="plain">{{ inspectionImageAttachments.length }} 张</el-tag>
+                    </div>
+                    <div v-if="inspectionImageAttachments.length" class="upstream-image-grid">
+                      <button
+                        v-for="attachment in inspectionImageAttachments"
+                        :key="attachment.id"
+                        type="button"
+                        class="upstream-image-card"
+                        @click="openWorkspaceAttachment(attachment)"
+                      >
+                        <img
+                          v-if="workspaceImageUrls[attachment.id]"
+                          :src="workspaceImageUrls[attachment.id]"
+                          :alt="attachment.fileName"
+                        />
+                        <span v-else>点击查看图片</span>
+                        <small>{{ attachment.fileName }}</small>
+                      </button>
+                    </div>
+                    <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
+                  </section>
+
                   <section
                     v-if="upstreamStages.length && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
                     class="upstream-section"
@@ -312,7 +340,7 @@
                           :field="field"
                           :form="stageForms[selectedStageCode]"
                           :generated-text="generatedTemplateText(field, stageForms[selectedStageCode])"
-                          :source-hash="templateSourceHash(field)"
+                          :source-hash="templateSourceHash(field, stageForms[selectedStageCode])"
                           :disabled="isStageFieldDisabled(field)"
                           @patch="value => patchStageForm(selectedStageCode, value)"
                         />
@@ -386,28 +414,6 @@
                     @save="saveDutyAssignments"
                   />
 
-                  <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section">
-                    <div class="section-caption">检查室原始图片</div>
-                    <div v-if="inspectionImageAttachments.length" class="upstream-image-grid">
-                      <button
-                        v-for="attachment in inspectionImageAttachments"
-                        :key="attachment.id"
-                        type="button"
-                        class="upstream-image-card"
-                        @click="openWorkspaceAttachment(attachment)"
-                      >
-                        <img
-                          v-if="workspaceImageUrls[attachment.id]"
-                          :src="workspaceImageUrls[attachment.id]"
-                          :alt="attachment.fileName"
-                        />
-                        <span v-else>点击查看图片</span>
-                        <small>{{ attachment.fileName }}</small>
-                      </button>
-                    </div>
-                    <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
-                  </section>
-
                   <section
                     v-if="
                       (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT') &&
@@ -475,32 +481,16 @@
                     v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
                     class="panel-actions sticky-actions"
                   >
-                    <template v-if="queueHandoffMessage">
-                      <div class="queue-handoff-result">
-                        <span class="queue-handoff-mark">✓</span>
-                        <div>
-                          <strong>{{ queueHandoffTitle }}</strong>
-                          <small>{{ queueHandoffMessage }}</small>
-                        </div>
-                      </div>
-                      <el-button type="primary" @click="returnToQueueWorkbench">返回叫号台处理下一位</el-button>
-                    </template>
-                    <template v-else>
-                      <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
-                        >退回修改</el-button
-                      >
-                      <div></div>
-                      <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
-                        >保存草稿</el-button
-                      >
-                      <el-button
-                        v-if="canEditSelectedStage"
-                        type="primary"
-                        :loading="actionLoading"
-                        @click="completeSelectedStage"
-                        >完成并交接</el-button
-                      >
-                    </template>
+                    <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
+                      >退回修改</el-button
+                    >
+                    <div></div>
+                    <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
+                      >保存草稿</el-button
+                    >
+                    <el-button v-if="canEditSelectedStage" type="primary" :loading="actionLoading" @click="completeSelectedStage"
+                      >完成并交接</el-button
+                    >
                   </footer>
                 </template>
 
@@ -511,6 +501,7 @@
                   :preview="reviewPreview"
                   :sections="maskedSections"
                   :can-review="canReview"
+                  :can-generate-target="Boolean(workspace.encounter.sourcePatientId)"
                   :loading="actionLoading"
                   :encounter-status="workspace.encounter.status"
                   :exports="workspace.exports"
@@ -519,6 +510,7 @@
                   @refresh="loadReviewPreview"
                   @confirm="confirmReview"
                   @generate="generateExport"
+                  @generate-target="generateTargetMedicalRecord"
                   @download="downloadPreAiExportApi"
                 />
               </section>
@@ -672,6 +664,7 @@ import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus
 import { useUserStore } from "@/stores/modules/user";
 import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
+import { downloadMedicalRecordApi, generateMedicalRecordApi } from "@/api/modules/clinic/medicalRecord";
 import {
   completePreAiStageApi,
   completePreAiLabApi,
@@ -960,13 +953,6 @@ const canReturnSelectedStage = computed(
     ["COMPLETED", "SKIPPED"].includes(selectedStageSubmission.value?.status || "") &&
     selectedStageCode.value !== "REVIEW"
 );
-const queueHandoffTitle = computed(() => (selectedStageCode.value === "INSPECTION" ? "检查阶段已完成" : "接诊阶段已完成"));
-const queueHandoffMessage = computed(() => {
-  if (!workspace.value || selectedStageSubmission.value?.status !== "COMPLETED") return "";
-  if (selectedStageCode.value === "INSPECTION") return "患者已自动沿用当前号码进入接诊候诊队列。";
-  if (selectedStageCode.value === "RECEPTION") return "本次检查与接诊排队流程已闭环，患者已退出候诊队列。";
-  return "";
-});
 const upstreamStages = computed(() => {
   if (!workspace.value) return [];
   const index = preAiStages.findIndex(stage => stage.code === selectedStageCode.value);
@@ -1108,7 +1094,7 @@ const selectedStageTemplateSourceHash = computed(() => {
   }
   return stableSourceHash([source]);
 });
-const templateSourceHash = (field: PreAiFieldConfig) => {
+const templateSourceHash = (field: PreAiFieldConfig, _form: Record<string, any>) => {
   if (field.kind !== "template-text" || !field.sourceHashKey) return "";
   return selectedStageTemplateSourceHash.value;
 };
@@ -1217,20 +1203,20 @@ const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
   const requestController = new AbortController();
   workspaceImageAbortController = requestController;
   const request = runWithConcurrency(images, 4, async attachment => {
-    if (workspaceImageUrls[attachment.id]) return;
-    try {
-      const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
-      if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
-        URL.revokeObjectURL(url);
-        return;
+      if (workspaceImageUrls[attachment.id]) return;
+      try {
+        const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
+        if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        workspaceImageUrls[attachment.id] = url;
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          // 单张检查图片失败时保留下载入口，不阻断工作区加载。
+        }
       }
-      workspaceImageUrls[attachment.id] = url;
-    } catch (error: any) {
-      if (error?.name !== "AbortError") {
-        // 单张检查图片失败时保留下载入口，不阻断工作区加载。
-      }
-    }
-  });
+    });
   workspaceImageLoadPromise = request;
   try {
     await request;
@@ -1252,7 +1238,12 @@ const workspaceTimelineSourceKey = (value: PreAiWorkspace) => {
     .map(attachment => `${attachment.id}:${attachment.downloadUrl}:${attachment.fileSize}`)
     .sort()
     .join("|");
-  return [value.encounter.patientCaseId, inspectionStage?.version || 0, inspectionStage?.updatedAt || "", attachments].join("::");
+  return [
+    value.encounter.patientCaseId,
+    inspectionStage?.version || 0,
+    inspectionStage?.updatedAt || "",
+    attachments
+  ].join("::");
 };
 
 const cancelTimelineLoad = () => {
@@ -1610,25 +1601,16 @@ const saveSelectedStage = async () =>
 
 const completeSelectedStage = async () =>
   runAction(async () => {
-    const completedStage = selectedStageCode.value;
     const { data } = await completePreAiStageApi(
       selectedEncounterId.value,
-      completedStage,
-      cleanStageForm(completedStage),
-      stageSubmission(completedStage)?.version ?? 0
+      selectedStageCode.value,
+      cleanStageForm(selectedStageCode.value),
+      stageSubmission(selectedStageCode.value)?.version ?? 0
     );
     hydrateWorkspace(data);
     await loadEncounterList();
-    ElMessage.success(
-      completedStage === "INSPECTION"
-        ? "检查已完成，患者已自动进入接诊候诊"
-        : completedStage === "RECEPTION"
-          ? "接诊已完成，排队流程已闭环"
-          : "本阶段已完成并交接"
-    );
+    ElMessage.success("本阶段已完成并交接");
   });
-
-const returnToQueueWorkbench = () => router.push("/tcm-pharmacy/clinic-queue/workbench");
 
 const hasFormValue = (value: any, field?: PreAiFieldConfig) => {
   if (value === undefined || value === null || value === "") return false;
@@ -1834,7 +1816,11 @@ const loadReviewPreview = async () => {
     }
   } finally {
     if (reviewAbortController === requestController) reviewAbortController = undefined;
-    if (reviewRequestSequence === requestSequence && reviewRequestInFlightEncounterId === encounterId && !reviewAbortController) {
+    if (
+      reviewRequestSequence === requestSequence &&
+      reviewRequestInFlightEncounterId === encounterId &&
+      !reviewAbortController
+    ) {
       reviewRequestInFlightEncounterId = "";
     }
   }
@@ -1852,6 +1838,15 @@ const confirmReview = async () =>
     await loadEncounterList();
     await loadReviewPreview();
     ElMessage.success("医生复核已确认，现在可以生成脱敏 DOCX");
+  });
+
+const generateTargetMedicalRecord = async () =>
+  runAction(async () => {
+    const patientId = workspace.value?.encounter.sourcePatientId;
+    if (!patientId) throw new Error("当前前置病例尚未关联患者档案，不能生成目标病历");
+    const { data } = await generateMedicalRecordApi(patientId);
+    await downloadMedicalRecordApi(data.record);
+    ElMessage.success("目标病历模板已生成并下载");
   });
 
 const generateExport = async () =>
@@ -1894,8 +1889,23 @@ const cleanupTransientResources = () => {
   cancelReviewRequest();
 };
 
+const refreshActiveWorkspace = async () => {
+  const encounterId = selectedEncounterId.value;
+  if (!encounterId) return;
+  try {
+    const { data } = await getPreAiWorkspaceApi(encounterId);
+    if (selectedEncounterId.value !== encounterId) return;
+    hydrateWorkspace(data);
+    await loadEncounterList();
+  } catch (error: any) {
+    ElMessage.error(error.message || "前置病历刷新失败");
+  }
+};
+
 onMounted(loadEncounterList);
-onActivated(() => {
+onActivated(async () => {
+  if (!workspace.value) return;
+  await refreshActiveWorkspace();
   if (!workspace.value) return;
   syncWorkspaceImageContext(workspace.value);
   syncTimelineContext(workspace.value);
@@ -1994,37 +2004,6 @@ onBeforeUnmount(cleanupTransientResources);
 }
 .panel-actions > div {
   flex: 1 1 auto;
-}
-.queue-handoff-result {
-  display: flex;
-  min-width: min(100%, 420px);
-  align-items: center;
-  gap: 12px;
-}
-.queue-handoff-result strong,
-.queue-handoff-result small {
-  display: block;
-}
-.queue-handoff-result strong {
-  color: var(--el-color-success-dark-2);
-  font-size: 15px;
-}
-.queue-handoff-result small {
-  margin-top: 3px;
-  color: var(--el-text-color-secondary);
-  line-height: 1.5;
-}
-.queue-handoff-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  place-items: center;
-  border-radius: 50%;
-  color: #ffffff;
-  background: var(--el-color-success);
-  font-size: 20px;
-  font-weight: 800;
 }
 .workspace-shell {
   position: relative;
@@ -2512,6 +2491,36 @@ onBeforeUnmount(cleanupTransientResources);
   font-size: 14px;
   font-weight: 700;
 }
+.primary-evidence-section {
+  margin-top: 0;
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+}
+.primary-evidence-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.primary-evidence-heading > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.primary-evidence-heading strong {
+  font-size: 17px;
+}
+.primary-evidence-heading small {
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+.primary-evidence-section .upstream-image-grid {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+.primary-evidence-section .upstream-image-card img,
+.primary-evidence-section .upstream-image-card > span {
+  height: 180px;
+}
 .upstream-image-section,
 .attachment-section {
   display: grid;
@@ -2759,10 +2768,6 @@ onBeforeUnmount(cleanupTransientResources);
   }
   .sticky-actions > div {
     display: none;
-  }
-  .sticky-actions > .queue-handoff-result {
-    display: flex;
-    flex: 1 1 100%;
   }
   .sticky-actions :deep(.el-button) {
     width: auto;

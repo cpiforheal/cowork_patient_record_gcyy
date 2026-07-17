@@ -8,8 +8,20 @@ export const nonEmptyEntries = (value: Record<string, any> = {}) =>
     ([, item]) => item !== undefined && item !== null && item !== "" && (!Array.isArray(item) || item.length)
   );
 
-export const humanValue = (value: any) =>
-  Array.isArray(value) ? value.join("、") : typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
+export const humanValue = (value: any): string => {
+  if (Array.isArray(value)) return value.map(humanValue).filter(Boolean).join("、");
+  if (value && typeof value === "object") {
+    if ("value" in value || "unit" in value || "status" in value) {
+      const measurement = `${value.value ?? ""}${value.unit ?? ""}`.trim();
+      return [measurement, value.status && value.status !== "正常" ? value.status : ""].filter(Boolean).join(" · ");
+    }
+    return Object.entries(value)
+      .filter(([, item]) => item !== undefined && item !== null && item !== "")
+      .map(([key, item]) => `${key}：${humanValue(item)}`)
+      .join("；");
+  }
+  return String(value ?? "");
+};
 
 export const buildLabPreviewReports = (reports: LabReportSnapshot[]): DocumentPreviewLabReport[] =>
   reports

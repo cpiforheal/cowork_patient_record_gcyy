@@ -50,8 +50,13 @@
         </div>
       </section>
       <section v-for="section in sections" :key="section.key" class="document-section">
-        <h3>{{ section.title }}</h3>
-        <p v-if="section.note" class="document-section-note">{{ section.note }}</p>
+        <div class="document-section-heading">
+          <div>
+            <h3>{{ section.title }}</h3>
+            <p v-if="section.note" class="document-section-note">{{ section.note }}</p>
+          </div>
+          <el-tag v-if="section.rows.length" effect="plain" size="small">{{ section.rows.length }} 项事实</el-tag>
+        </div>
         <div v-if="section.labReports?.length" class="lab-report-groups">
           <article v-for="report in section.labReports" :key="report.key" class="lab-report-group">
             <header>
@@ -95,13 +100,33 @@
             </el-collapse>
           </article>
         </div>
-        <div v-else-if="section.rows.length" class="document-fields">
-          <div v-for="row in section.rows" :key="row.key" :class="{ wide: row.wide, abnormal: row.abnormal }">
-            <strong>{{ row.label }}：</strong>
-            <span>{{ row.value }}</span>
-            <el-tag v-if="row.abnormal" type="danger" size="small" effect="dark">异常</el-tag>
+        <template v-else-if="section.rows.length">
+          <div class="document-fields summary-fields">
+            <div
+              v-for="row in summaryRows(section)"
+              :key="row.key"
+              :class="{ wide: row.wide, abnormal: row.abnormal }"
+            >
+              <strong>{{ row.label }}：</strong>
+              <span>{{ row.value }}</span>
+              <el-tag v-if="row.abnormal" type="danger" size="small" effect="dark">异常</el-tag>
+            </div>
           </div>
-        </div>
+          <details v-if="detailRows(section).length" class="section-details">
+            <summary>展开其余 {{ detailRows(section).length }} 项事实</summary>
+            <div class="document-fields detail-fields">
+              <div
+                v-for="row in detailRows(section)"
+                :key="row.key"
+                :class="{ wide: row.wide, abnormal: row.abnormal }"
+              >
+                <strong>{{ row.label }}：</strong>
+                <span>{{ row.value }}</span>
+                <el-tag v-if="row.abnormal" type="danger" size="small" effect="dark">异常</el-tag>
+              </div>
+            </div>
+          </details>
+        </template>
         <p v-else class="document-empty">本节暂无已维护内容</p>
       </section>
       <footer class="document-footer">各岗位维护事实 · 医生统一复核 · 导出自动脱敏</footer>
@@ -125,6 +150,11 @@ const previewInspectionImages = computed(() => props.inspectionImages || []);
 const inspectionImageUrls = computed(() =>
   previewInspectionImages.value.map(image => image.url).filter((url): url is string => Boolean(url))
 );
+const summaryRows = (section: DocumentPreviewSection) => section.rows.filter(row => row.abnormal).concat(section.rows.filter(row => !row.abnormal)).slice(0, 4);
+const detailRows = (section: DocumentPreviewSection) => {
+  const summaryKeys = new Set(summaryRows(section).map(row => row.key));
+  return section.rows.filter(row => !summaryKeys.has(row.key));
+};
 </script>
 
 <style scoped lang="scss">
@@ -242,8 +272,15 @@ const inspectionImageUrls = computed(() =>
   color: #777;
   font-size: 11px;
 }
+.document-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
 .document-section h3 {
-  margin: 0 0 12px;
+  margin: 0;
   padding-left: 10px;
   color: #1f4e78;
   font-family: "SimHei", "黑体", sans-serif;
@@ -322,7 +359,7 @@ const inspectionImageUrls = computed(() =>
   color: #667085;
 }
 .document-section-note {
-  margin: -3px 0 12px;
+  margin: 6px 0 0;
   color: #777;
   font-size: 12px;
 }
@@ -354,6 +391,22 @@ const inspectionImageUrls = computed(() =>
 }
 .document-fields span {
   white-space: pre-wrap;
+}
+.section-details {
+  margin-top: 12px;
+  border-top: 1px solid #e3e6eb;
+}
+.section-details summary {
+  padding: 11px 2px;
+  color: #52606d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.detail-fields {
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 8px;
 }
 .lab-report-groups {
   display: grid;
