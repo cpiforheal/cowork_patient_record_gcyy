@@ -41,7 +41,7 @@ public class ClinicFileService {
     public ClinicFileService(
         @Value("${clinic.attachment-dir}") String attachmentDir,
         @Value("${clinic.attachment.max-size-bytes:52428800}") long maxSizeBytes,
-        @Value("${clinic.attachment.allowed-mime-types:image/jpeg,image/png,image/webp,image/bmp,image/gif,application/pdf}") String allowedMimeTypes,
+        @Value("${clinic.attachment.allowed-mime-types:image/jpeg,image/png,image/webp,image/bmp,image/gif,application/pdf,text/html}") String allowedMimeTypes,
         @Value("${clinic.attachment.max-concurrent-uploads:4}") int maxConcurrentUploads
     ) {
         this.attachmentDir = Path.of(attachmentDir).toAbsolutePath().normalize();
@@ -103,7 +103,7 @@ public class ClinicFileService {
             } catch (Exception error) {
                 throw new IOException("Failed to initialize file digest", error);
             }
-            byte[] header = new byte[16];
+            byte[] header = new byte[4096];
             int headerLength = 0;
             long size = 0;
             try (var output = Files.newOutputStream(temp)) {
@@ -245,6 +245,8 @@ public class ClinicFileService {
             && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P') return "image/webp";
         if (length >= 2 && header[0] == 'B' && header[1] == 'M') return "image/bmp";
         if (length >= 5 && header[0] == '%' && header[1] == 'P' && header[2] == 'D' && header[3] == 'F' && header[4] == '-') return "application/pdf";
+        String text = new String(header, 0, length, StandardCharsets.UTF_8).stripLeading().toLowerCase(Locale.ROOT);
+        if (text.startsWith("<!doctype html") || text.startsWith("<html") || text.startsWith("<html ")) return "text/html";
         return null;
     }
 
@@ -256,6 +258,7 @@ public class ClinicFileService {
         if (lower.endsWith(".webp")) return "image/webp";
         if (lower.endsWith(".bmp")) return "image/bmp";
         if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";
         return null;
     }
 
