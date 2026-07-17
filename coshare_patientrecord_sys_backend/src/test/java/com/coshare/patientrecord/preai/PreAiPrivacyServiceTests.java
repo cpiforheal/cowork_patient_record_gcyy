@@ -9,7 +9,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -91,6 +96,34 @@ class PreAiPrivacyServiceTests {
         assertTrue(documentXml.contains("十五、质控校验"));
         assertFalse(documentXml.contains("VISUAL"));
         assertFalse(documentXml.contains("未填写指标"));
+    }
+
+    @Test
+    void embedsReceptionImagesInDocxWhenAvailable() throws Exception {
+        ObjectNode workspace = sampleWorkspace();
+        Path directory = Files.createTempDirectory("pre-ai-image-test");
+        Field field = PreAiPrivacyService.class.getDeclaredField("attachmentDirectory");
+        field.setAccessible(true);
+        Object previousDirectory = field.get(service);
+        try {
+            Files.write(directory.resolve("image.png"), Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            ));
+            field.set(service, directory.toString());
+            ObjectNode attachment = workspace.withArray("attachments").addObject();
+            attachment.put("stageCode", "INSPECTION");
+            attachment.put("mimeType", "image/png");
+            attachment.put("storagePath", "image.png");
+
+            String documentXml = unzipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/document.xml");
+            assertTrue(documentXml.contains("接诊/检查图片"));
+            assertTrue(documentXml.contains("rIdImage1"));
+            assertTrue(hasZipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/media/image1.png"));
+        } finally {
+            field.set(service, previousDirectory);
+            Files.deleteIfExists(directory.resolve("image.png"));
+            Files.deleteIfExists(directory);
+        }
     }
 
     @Test
@@ -289,6 +322,16 @@ class PreAiPrivacyServiceTests {
             }
         }
         return "";
+    }
+
+    private boolean hasZipEntry(byte[] bytes, String entryName) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (entryName.equals(entry.getName())) return true;
+            }
+        }
+        return false;
     }
 }
 

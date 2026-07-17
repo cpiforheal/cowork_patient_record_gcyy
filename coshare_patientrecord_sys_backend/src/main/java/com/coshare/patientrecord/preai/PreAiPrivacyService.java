@@ -5,7 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -16,6 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -47,6 +51,8 @@ public class PreAiPrivacyService {
     private static final Map<String, String> FIELD_LABELS = buildFieldLabels();
 
     private final ObjectMapper objectMapper;
+    @Value("${clinic.attachment-dir:${java.io.tmpdir}/clinic-attachments}")
+    private String attachmentDirectory;
 
     public PreAiPrivacyService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -145,7 +151,8 @@ public class PreAiPrivacyService {
     }
 
     public byte[] renderDocx(ObjectNode maskedWorkspace, ObjectNode rawWorkspace) {
-        String documentXml = buildDocumentXml(maskedWorkspace);
+        List<EmbeddedImage> images = loadEmbeddedImages(rawWorkspace);
+        String documentXml = buildDocumentXml(maskedWorkspace, images);
         assertNoLeak(documentXml, rawWorkspace);
         try (ByteArrayOutputStream output = new ByteArrayOutputStream();
              ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
@@ -156,7 +163,11 @@ public class PreAiPrivacyService {
             addEntry(zip, "word/document.xml", documentXml);
             addEntry(zip, "word/styles.xml", stylesXml());
             addEntry(zip, "word/settings.xml", settingsXml());
-            addEntry(zip, "word/_rels/document.xml.rels", documentRelationshipsXml());
+            for (int index = 0; index < images.size(); index++) {
+                EmbeddedImage image = images.get(index);
+                addEntry(zip, "word/media/image" + (index + 1) + image.extension(), image.bytes());
+            }
+            addEntry(zip, "word/_rels/document.xml.rels", documentRelationshipsXml(images));
             zip.finish();
             return output.toByteArray();
         } catch (Exception error) {
@@ -249,9 +260,21 @@ public class PreAiPrivacyService {
     }
 
     private String buildDocumentXml(ObjectNode masked) {
+        return buildDocumentXml(masked, List.of());
+    }
+
+    private String buildDocumentXml(ObjectNode masked, List<EmbeddedImage> images) {
         StringBuilder body = new StringBuilder();
         body.append(paragraph("中医肛肠医院住院病历自动生成表", "Title"));
-        body.append(paragraph("前置事实版（仅输出已填写、已选择内容）", "Subtitle"));
+        body.append(paragraph("前置事实版｜固定项目保留原版结构，右栏仅显示已填写、已选择事实", "Subtitle"));
+        if (!images.isEmpty()) {
+            body.append(paragraph("接诊/检查图片", "Heading1"));
+            for (int index = 0; index < images.size(); index++) {
+                EmbeddedImage image = images.get(index);
+                body.append(paragraph("图片 " + (index + 1) + "（接诊现场资料）", "ImageCaption"));
+                body.append(imageDrawing(index + 1, image));
+            }
+        }
 
         JsonNode metadata = masked.path("metadata");
         JsonNode stages = masked.path("stages");
@@ -368,7 +391,7 @@ public class PreAiPrivacyService {
         addFixedTableSection(body, "医生复核", reviewRows);
 
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-            + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
+            + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><w:body>"
             + body
             + "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/></w:sectPr>"
             + "</w:body></w:document>";
@@ -419,11 +442,11 @@ public class PreAiPrivacyService {
         if (present.isEmpty()) return;
         body.append(paragraph(title, "Heading1"));
         body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
-            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
-            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
-            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/></w:tblBorders></w:tblPr>"
+            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
+            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
+            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/></w:tblBorders></w:tblPr>"
             + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
-        body.append(tableRow("项目", "内容", true, false));
+        body.append(tableRow("项目（固定）", "动态事实（已填写）", true, false));
         present.forEach(row -> body.append(tableRow(row.label(), row.value(), false, row.abnormal())));
         body.append("</w:tbl>");
     }
@@ -431,21 +454,23 @@ public class PreAiPrivacyService {
     private void addFixedTableSection(StringBuilder body, String title, List<DocumentRow> rows) {
         body.append(paragraph(title, "Heading1"));
         body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
-            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
-            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
-            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"B7B7B7\"/></w:tblBorders></w:tblPr>"
+            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
+            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
+            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/></w:tblBorders></w:tblPr>"
             + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
-        body.append(tableRow("项目", "内容", true, false));
+        body.append(tableRow("项目（固定）", "动态事实（已填写）", true, false));
         rows.stream().filter(java.util.Objects::nonNull).forEach(item -> body.append(tableRow(item.label(), item.value(), false, item.abnormal())));
         body.append("</w:tbl>");
     }
 
     private String tableRow(String label, String value, boolean header, boolean abnormal) {
-        return "<w:tr>" + tableCell(label, 2100, header, false) + tableCell(value, 6972, header, abnormal) + "</w:tr>";
+        return "<w:tr>" + tableCell(label, 2100, header, false, true) + tableCell(value, 6972, header, abnormal, false) + "</w:tr>";
     }
 
-    private String tableCell(String value, int width, boolean header, boolean abnormal) {
-        String shading = header ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E7E6E6\"/>" : "";
+    private String tableCell(String value, int width, boolean header, boolean abnormal, boolean labelCell) {
+        String shading = header
+            ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"CFE4F3\"/>"
+            : "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + (labelCell ? "EEF4FA" : "EDF7F2") + "\"/>";
         String style = header ? "TableHeader" : abnormal ? "Abnormal" : "TableText";
         return "<w:tc><w:tcPr><w:tcW w:w=\"" + width + "\" w:type=\"dxa\"/>" + shading
             + "<w:tcMar><w:top w:w=\"80\" w:type=\"dxa\"/><w:left w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"80\" w:type=\"dxa\"/><w:right w:w=\"100\" w:type=\"dxa\"/></w:tcMar>"
@@ -542,11 +567,19 @@ public class PreAiPrivacyService {
         zip.closeEntry();
     }
 
+    private void addEntry(ZipOutputStream zip, String name, byte[] content) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(content);
+        zip.closeEntry();
+    }
+
     private String contentTypesXml() {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
             + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
             + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
             + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+            + "<Default Extension=\"png\" ContentType=\"image/png\"/>"
+            + "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"
             + "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
             + "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
             + "<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/>"
@@ -565,21 +598,64 @@ public class PreAiPrivacyService {
     }
 
     private String documentRelationshipsXml() {
+        return documentRelationshipsXml(List.of());
+    }
+
+    private String documentRelationshipsXml(List<EmbeddedImage> images) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
             + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
             + "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/>"
+            + imageRelationships(images)
             + "</Relationships>";
+    }
+
+    private String imageRelationships(List<EmbeddedImage> images) {
+        StringBuilder result = new StringBuilder();
+        for (int index = 0; index < images.size(); index++) {
+            result.append("<Relationship Id=\"rIdImage").append(index + 1)
+                .append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image")
+                .append(index + 1).append(images.get(index).extension()).append("\"/>");
+        }
+        return result.toString();
+    }
+
+    private List<EmbeddedImage> loadEmbeddedImages(ObjectNode rawWorkspace) {
+        List<EmbeddedImage> images = new java.util.ArrayList<>();
+        Path root = Path.of(safe(attachmentDirectory)).toAbsolutePath().normalize();
+        for (JsonNode attachment : rawWorkspace.path("attachments")) {
+            String stage = text(attachment, "stageCode");
+            String mimeType = text(attachment, "mimeType").toLowerCase(java.util.Locale.ROOT);
+            if (!("INSPECTION".equals(stage) || "RECEPTION".equals(stage)) || !(mimeType.contains("png") || mimeType.contains("jpeg") || mimeType.contains("jpg"))) continue;
+            String storagePath = text(attachment, "storagePath");
+            if (storagePath.isBlank()) continue;
+            Path target = root.resolve(storagePath).normalize();
+            if (!target.startsWith(root) || !Files.isRegularFile(target)) continue;
+            try {
+                byte[] bytes = Files.readAllBytes(target);
+                if (bytes.length == 0 || bytes.length > 8 * 1024 * 1024) continue;
+                images.add(new EmbeddedImage(mimeType, bytes));
+                if (images.size() == 4) break;
+            } catch (IOException ignored) {
+                // Missing images must not block export of the clinical facts.
+            }
+        }
+        return images;
+    }
+
+    private String imageDrawing(int index, EmbeddedImage image) {
+        return "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"5486400\" cy=\"3200400\"/><wp:docPr id=\"" + index + "\" name=\"接诊图片" + index + "\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"" + index + "\" name=\"image" + index + image.extension() + "\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rIdImage" + index + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"5486400\" cy=\"3200400\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>";
     }
 
     private String stylesXml() {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
             + "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
-            + "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:rPr><w:rFonts w:ascii=\"SimSun\" w:hAnsi=\"SimSun\" w:eastAsia=\"宋体\"/><w:sz w:val=\"21\"/></w:rPr><w:pPr><w:spacing w:after=\"80\" w:line=\"320\" w:lineRule=\"auto\"/></w:pPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"120\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"32\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"180\"/></w:pPr><w:rPr><w:color w:val=\"595959\"/><w:sz w:val=\"18\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"220\" w:after=\"80\"/><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"25\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"TableText\"><w:name w:val=\"Table Text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:sz w:val=\"20\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"TableHeader\"><w:name w:val=\"Table Header\"/><w:basedOn w:val=\"TableText\"/><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:rPr><w:rFonts w:ascii=\"Microsoft YaHei\" w:hAnsi=\"Microsoft YaHei\" w:eastAsia=\"微软雅黑\"/><w:sz w:val=\"22\"/></w:rPr><w:pPr><w:spacing w:after=\"100\" w:line=\"330\" w:lineRule=\"auto\"/></w:pPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"140\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"微软雅黑\"/><w:sz w:val=\"36\"/><w:color w:val=\"17324D\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"220\"/></w:pPr><w:rPr><w:color w:val=\"397D83\"/><w:sz w:val=\"20\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"280\" w:after=\"100\"/><w:shd w:val=\"clear\" w:fill=\"E6F3F4\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"14\" w:color=\"4D9EA8\"/></w:pBdr><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"微软雅黑\"/><w:sz w:val=\"28\"/><w:color w:val=\"176B87\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"ImageCaption\"><w:name w:val=\"Image Caption\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"80\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"397D83\"/><w:sz w:val=\"20\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableText\"><w:name w:val=\"Table Text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"320\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:sz w:val=\"22\"/><w:color w:val=\"24445C\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableHeader\"><w:name w:val=\"Table Header\"/><w:basedOn w:val=\"TableText\"/><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"17324D\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"Abnormal\"><w:name w:val=\"Abnormal\"/><w:basedOn w:val=\"TableText\"/><w:rPr><w:b/><w:color w:val=\"C00000\"/></w:rPr></w:style>"
             + "</w:styles>";
     }
@@ -698,6 +774,12 @@ public class PreAiPrivacyService {
     }
 
     private record DocumentRow(String label, String value, boolean abnormal) {}
+
+    private record EmbeddedImage(String mimeType, byte[] bytes) {
+        private String extension() {
+            return mimeType.contains("png") ? ".png" : ".jpg";
+        }
+    }
 }
 
 
