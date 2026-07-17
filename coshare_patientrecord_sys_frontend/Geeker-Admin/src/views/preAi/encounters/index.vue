@@ -145,7 +145,7 @@
                 type="button"
                 class="mode-pill preview"
                 :class="{ active: editorMode === 'PREVIEW' }"
-                @click="editorMode = 'PREVIEW'"
+                @click="openPreviewMode"
               >
                 模板预览态
               </button>
@@ -201,7 +201,7 @@
                   />
 
                   <div v-if="selectedStageCode === 'INSPECTION'" class="inspection-view-tabs">
-                    <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="inspectionView = 'CURRENT'">
+                    <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="showCurrentInspection">
                       本次检查
                     </button>
                     <button type="button" :class="{ active: inspectionView === 'HISTORY' }" @click="showInspectionTimeline">
@@ -298,15 +298,6 @@
                     label-position="top"
                     class="stage-form"
                   >
-                    <section v-if="selectedStageCode === 'RECEPTION'" class="history-template-toolbar">
-                      <div>
-                        <strong>病史模板化录入</strong>
-                        <small>先完成结构化选项，再生成现病史。生成仅在点击时执行，不会持续覆盖医生手工修订。</small>
-                      </div>
-                      <el-button type="primary" plain :disabled="!canEditSelectedStage" @click="generatePresentIllnessText">
-                        生成现病史原文
-                      </el-button>
-                    </section>
                     <div class="form-grid">
                       <el-form-item
                         v-for="field in visibleStageFields"
@@ -315,12 +306,22 @@
                         :required="field.required"
                         :class="{ 'span-2': field.span === 2 }"
                       >
+                        <StructuredField
+                          v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          :field="field"
+                          :form="stageForms[selectedStageCode]"
+                          :generated-text="generatedTemplateText(field, stageForms[selectedStageCode])"
+                          :source-hash="templateSourceHash(field)"
+                          :disabled="isStageFieldDisabled(field)"
+                          @patch="value => patchStageForm(selectedStageCode, value)"
+                        />
                         <el-input
-                          v-if="field.kind === 'input' || field.kind === 'number'"
+                          v-else-if="field.kind === 'input' || field.kind === 'number'"
                           v-model="stageForms[selectedStageCode][field.key]"
                           :type="field.kind === 'number' ? 'number' : 'text'"
                           :placeholder="field.placeholder"
-                          :disabled="!canEditSelectedStage"
+                          :disabled="isStageFieldDisabled(field)"
                         />
                         <el-input
                           v-else-if="field.kind === 'textarea'"
@@ -328,7 +329,7 @@
                           type="textarea"
                           :rows="field.rows || 3"
                           :placeholder="field.placeholder"
-                          :disabled="!canEditSelectedStage"
+                          :disabled="isStageFieldDisabled(field)"
                         />
                         <el-select
                           v-else-if="field.kind === 'select'"
@@ -338,7 +339,7 @@
                           :allow-create="field.creatable"
                           default-first-option
                           :placeholder="field.placeholder || `请选择${field.label}`"
-                          :disabled="!canEditSelectedStage"
+                          :disabled="isStageFieldDisabled(field)"
                         >
                           <el-option
                             v-for="option in fieldOptions(field)"
@@ -356,7 +357,7 @@
                           :allow-create="field.creatable || !fieldOptions(field).length"
                           default-first-option
                           :placeholder="field.placeholder || `请选择或输入${field.label}`"
-                          :disabled="!canEditSelectedStage"
+                          :disabled="isStageFieldDisabled(field)"
                         >
                           <el-option
                             v-for="option in fieldOptions(field)"
@@ -371,11 +372,19 @@
                           :type="field.kind === 'date' ? 'date' : 'datetime'"
                           :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
                           :placeholder="`请选择${field.label}`"
-                          :disabled="!canEditSelectedStage"
+                          :disabled="isStageFieldDisabled(field)"
                         />
                       </el-form-item>
                     </div>
                   </el-form>
+
+                  <DutyAssignmentPanel
+                    v-if="selectedStageCode === 'REGISTRATION'"
+                    :assignments="workspace.dutyAssignments || []"
+                    :disabled="!canMaintainDuties"
+                    :saving="actionLoading"
+                    @save="saveDutyAssignments"
+                  />
 
                   <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section">
                     <div class="section-caption">检查室原始图片</div>
@@ -466,16 +475,32 @@
                     v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
                     class="panel-actions sticky-actions"
                   >
-                    <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
-                      >退回修改</el-button
-                    >
-                    <div></div>
-                    <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
-                      >保存草稿</el-button
-                    >
-                    <el-button v-if="canEditSelectedStage" type="primary" :loading="actionLoading" @click="completeSelectedStage"
-                      >完成并交接</el-button
-                    >
+                    <template v-if="queueHandoffMessage">
+                      <div class="queue-handoff-result">
+                        <span class="queue-handoff-mark">✓</span>
+                        <div>
+                          <strong>{{ queueHandoffTitle }}</strong>
+                          <small>{{ queueHandoffMessage }}</small>
+                        </div>
+                      </div>
+                      <el-button type="primary" @click="returnToQueueWorkbench">返回叫号台处理下一位</el-button>
+                    </template>
+                    <template v-else>
+                      <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
+                        >退回修改</el-button
+                      >
+                      <div></div>
+                      <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
+                        >保存草稿</el-button
+                      >
+                      <el-button
+                        v-if="canEditSelectedStage"
+                        type="primary"
+                        :loading="actionLoading"
+                        @click="completeSelectedStage"
+                        >完成并交接</el-button
+                      >
+                    </template>
                   </footer>
                 </template>
 
@@ -498,24 +523,35 @@
                 />
               </section>
 
-              <LabReportPanel
-                v-else
-                v-model:active-report-id="activeLabReportId"
-                :workspace="workspace"
-                :lab-task="labTask"
-                :legacy-tasks="legacyAuxiliaryTasks"
-                :can-open-workbench="canOpenLabWorkbench"
-                :can-review="canReview"
-                :can-complete="canCompleteLab"
-                :loading="actionLoading"
-                :task-label="auxiliaryTaskLabel"
-                :human-value="humanValue"
-                :abnormal-label="labMetricAbnormalLabel"
-                :is-metric-abnormal="isLabMetricAbnormal"
-                @open-workbench="openLabWorkbench"
-                @return-task="returnAuxTask"
-                @complete="completeLab"
-              />
+              <section v-else class="auxiliary-stack">
+                <AuxiliaryTaskPanel
+                  :workspace="workspace"
+                  :current-role="currentRole"
+                  :current-user-id="currentUserId"
+                  :current-user-name="currentUserName"
+                  :loading="actionLoading"
+                  :can-return="canReview"
+                  @updated="hydrateWorkspace"
+                  @return-task="returnAuxTask"
+                />
+                <LabReportPanel
+                  v-model:active-report-id="activeLabReportId"
+                  :workspace="workspace"
+                  :lab-task="labTask"
+                  :legacy-tasks="legacyAuxiliaryTasks"
+                  :can-open-workbench="canOpenLabWorkbench"
+                  :can-review="canReview"
+                  :can-complete="canCompleteLab"
+                  :loading="actionLoading"
+                  :task-label="auxiliaryTaskLabel"
+                  :human-value="humanValue"
+                  :abnormal-label="labMetricAbnormalLabel"
+                  :is-metric-abnormal="isLabMetricAbnormal"
+                  @open-workbench="openLabWorkbench"
+                  @return-task="returnAuxTask"
+                  @complete="completeLab"
+                />
+              </section>
             </div>
           </Transition>
         </template>
@@ -630,7 +666,7 @@
 </template>
 
 <script setup lang="ts" name="preAiEncounters">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/modules/user";
@@ -654,12 +690,15 @@ import {
   importLegacyPreAiEncounterApi,
   returnPreAiAuxiliaryTaskApi,
   returnPreAiStageApi,
+  savePreAiDutyAssignmentsApi,
   savePreAiStageApi,
   uploadPreAiAttachmentApi,
   voidPreAiAttachmentApi,
   type PatientRow,
   type InspectionTimelineNode,
   type PreAiAttachment,
+  type PreAiDutyAssignment,
+  type PreAiDutyCode,
   type PreAiEncounterStatus,
   type PreAiEncounterSummary,
   type PreAiExportVersion,
@@ -673,6 +712,9 @@ import WorkflowSidebar, { type WorkflowCard } from "./components/WorkflowSidebar
 import MedicalRecordPreview from "./components/MedicalRecordPreview.vue";
 import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
+import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
+import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
+import StructuredField from "./components/StructuredField.vue";
 import {
   auxiliaryTaskFields,
   auxiliaryTaskLabel,
@@ -683,19 +725,55 @@ import {
   type PreAiFieldConfig
 } from "./fieldConfig";
 import { groupAttachments, isImageAttachment } from "./utils/attachment";
-import { buildPresentIllnessText, selectedText } from "./utils/historyTextGenerator";
 import { isLabMetricAbnormal, labMetricAbnormalLabel } from "./utils/labResult";
 import { buildDocumentPreviewSections, humanValue, nonEmptyEntries } from "./utils/previewBuilder";
+import {
+  buildChiefComplaintText,
+  buildColonoscopyConclusion,
+  buildDiagnosisBasis,
+  buildHandoffText,
+  buildInspectionConclusion,
+  buildPresentIllnessText,
+  buildProcedureSteps,
+  buildSurgeryFindings,
+  buildSyndromeBasis,
+  buildTreatmentPlan,
+  stableSourceHash
+} from "./utils/templateTextGenerator";
 
 const userStore = useUserStore();
 const route = useRoute();
 const router = useRouter();
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
+const currentUser = computed(() => userStore.userInfo as typeof userStore.userInfo & { id?: string; username?: string });
+const currentUserId = computed(() => String(currentUser.value.id || ""));
+const currentUserName = computed(() => String(currentUser.value.name || currentUser.value.username || ""));
+const hasAssignedDuty = (...duties: PreAiDutyCode[]) =>
+  (workspace.value?.dutyAssignments || []).some(
+    item =>
+      duties.includes(item.dutyCode) &&
+      ((Boolean(currentUserId.value) &&
+        (item.responsibleUserId === currentUserId.value || item.participantUserIds?.includes(currentUserId.value))) ||
+        (Boolean(currentUserName.value) &&
+          (item.responsibleUserName === currentUserName.value || item.participantUserNames?.includes(currentUserName.value))))
+  );
 const canCreateEncounter = computed(() => ["admin", "frontdesk"].includes(currentRole.value));
 const canImportLegacy = computed(() => ["admin", "frontdesk", "doctor"].includes(currentRole.value));
-const canReview = computed(() => ["admin", "doctor"].includes(currentRole.value));
-const canOpenLabWorkbench = computed(() => ["admin", "doctor", "lab"].includes(currentRole.value));
-const canCompleteLab = computed(() => ["admin", "doctor", "lab"].includes(currentRole.value));
+const canReview = computed(
+  () => ["admin", "doctor"].includes(currentRole.value) || hasAssignedDuty("FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR")
+);
+const canOpenLabWorkbench = computed(
+  () => ["admin", "doctor", "lab"].includes(currentRole.value) || hasAssignedDuty("LAB_STAFF", "ATTENDING_DOCTOR")
+);
+const canCompleteLab = computed(
+  () => ["admin", "doctor", "lab"].includes(currentRole.value) || hasAssignedDuty("LAB_STAFF", "ATTENDING_DOCTOR")
+);
+const canMaintainDuties = computed(
+  () =>
+    ["admin", "frontdesk", "doctor"].includes(currentRole.value) ||
+    hasAssignedDuty("FRONT_DESK", "ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR")
+);
+const canConfirmSurgery = computed(() => ["admin", "doctor"].includes(currentRole.value) || hasAssignedDuty("SURGEON"));
 
 const encounters = ref<PreAiEncounterSummary[]>([]);
 const patientCases = ref<PreAiPatientCase[]>([]);
@@ -734,6 +812,20 @@ let workspaceRequestSequence = 0;
 let workspaceImageRequestSequence = 0;
 let timelineRequestSequence = 0;
 let reviewRequestSequence = 0;
+let workspaceAbortController: AbortController | undefined;
+let workspaceImageAbortController: AbortController | undefined;
+let timelineAbortController: AbortController | undefined;
+let reviewAbortController: AbortController | undefined;
+let workspaceImageEncounterId = "";
+let workspaceImageAttachmentKey = "";
+let workspaceImageLoadPromise: Promise<void> | undefined;
+let timelinePatientCaseId = "";
+let timelineSourceKey = "";
+let timelineLoaded = false;
+let timelineLoadPromise: Promise<void> | undefined;
+let reviewRequestInFlightEncounterId = "";
+const pendingWorkflowSelection = ref<{ encounterId: string; card: WorkflowCard }>();
+const readPendingWorkflowSelection = () => pendingWorkflowSelection.value;
 
 const createDialogVisible = ref(false);
 const createForm = reactive<Record<string, any>>({ visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00" });
@@ -845,11 +937,21 @@ const activeWorkflowTitle = computed(() =>
 const activeWorkflowOwner = computed(() =>
   selectedPanel.value === "AUX" ? "责任岗位：化验室" : `责任岗位：${stageByCode(selectedStageCode.value).owner}`
 );
+const stageDutyCodes: Partial<Record<PreAiStageCode, PreAiDutyCode[]>> = {
+  REGISTRATION: ["FRONT_DESK"],
+  INSPECTION: ["INSPECTION_DOCTOR"],
+  RECEPTION: ["RECEPTION_DOCTOR", "ATTENDING_DOCTOR"],
+  TCM: ["TCM_DOCTOR"],
+  DOCTOR: ["ATTENDING_DOCTOR"],
+  SURGERY: ["SURGEON", "OPERATING_ROOM_NURSE"],
+  REVIEW: ["FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR"]
+};
 const canEditSelectedStage = computed(() => {
   if (!workspace.value || selectedStageCode.value === "REVIEW") return false;
   const submission = selectedStageSubmission.value;
-  if (!selectedStage.value.roles.includes(currentRole.value)) return false;
-  if (selectedStageCode.value === "RECEPTION" && currentRole.value === "doctor") return true;
+  const roleAllowed = selectedStage.value.roles.includes(currentRole.value);
+  const dutyAllowed = hasAssignedDuty(...(stageDutyCodes[selectedStageCode.value] || []));
+  if (!roleAllowed && !dutyAllowed) return false;
   return submission.status !== "COMPLETED" || currentRole.value === "admin";
 });
 const canReturnSelectedStage = computed(
@@ -858,6 +960,13 @@ const canReturnSelectedStage = computed(
     ["COMPLETED", "SKIPPED"].includes(selectedStageSubmission.value?.status || "") &&
     selectedStageCode.value !== "REVIEW"
 );
+const queueHandoffTitle = computed(() => (selectedStageCode.value === "INSPECTION" ? "检查阶段已完成" : "接诊阶段已完成"));
+const queueHandoffMessage = computed(() => {
+  if (!workspace.value || selectedStageSubmission.value?.status !== "COMPLETED") return "";
+  if (selectedStageCode.value === "INSPECTION") return "患者已自动沿用当前号码进入接诊候诊队列。";
+  if (selectedStageCode.value === "RECEPTION") return "本次检查与接诊排队流程已闭环，患者已退出候诊队列。";
+  return "";
+});
 const upstreamStages = computed(() => {
   if (!workspace.value) return [];
   const index = preAiStages.findIndex(stage => stage.code === selectedStageCode.value);
@@ -924,6 +1033,18 @@ const documentPreviewSections = computed(() =>
 );
 
 const deepCopy = <T,>(value: T): T => JSON.parse(JSON.stringify(value ?? {}));
+const runWithConcurrency = async <T,>(items: T[], limit: number, worker: (item: T) => Promise<void>) => {
+  let cursor = 0;
+  const workerCount = Math.min(Math.max(limit, 1), items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const item = items[cursor++];
+        await worker(item);
+      }
+    })
+  );
+};
 const stageSubmission = (code: PreAiStageCode) => workspace.value?.stages.find(item => item.stageCode === code);
 const workflowCardStatus = (card: WorkflowCard): PreAiStageStatus => {
   if (card.kind === "STAGE" && card.stageCode) return stageSubmission(card.stageCode)?.status || "DRAFT";
@@ -946,27 +1067,55 @@ const isCurrentWorkflowCard = (card: WorkflowCard) => {
   if (card.kind === "STAGE") return workspace.value.encounter.currentStage === card.stageCode;
   return Boolean(labTask.value?.requiredBeforeExport && labTask.value.status !== "COMPLETED");
 };
-const generatePresentIllnessText = async () => {
-  const form = stageForms.RECEPTION;
-  const chiefComplaint = selectedText(form.chiefComplaint);
-  if (!chiefComplaint) {
-    ElMessage.warning("请先选择主诉症状");
-    return;
+const generatedTemplateText = (field: PreAiFieldConfig, form: Record<string, any>) => {
+  switch (field.templateGenerator) {
+    case "chiefComplaint":
+      return buildChiefComplaintText(form);
+    case "presentIllness":
+      return buildPresentIllnessText(form);
+    case "inspectionConclusion":
+      return buildInspectionConclusion(form);
+    case "syndromeBasis":
+      return buildSyndromeBasis(form);
+    case "diagnosisBasis":
+      return buildDiagnosisBasis(form);
+    case "treatmentPlan":
+      return buildTreatmentPlan(form);
+    case "surgeryFindings":
+      return buildSurgeryFindings(form);
+    case "procedureSteps":
+      return buildProcedureSteps(form);
+    case "handoff":
+      return buildHandoffText(form);
+    case "colonoscopyConclusion":
+      return buildColonoscopyConclusion(form);
+    default:
+      return "";
   }
-  if (form.presentIllness?.trim()) {
-    try {
-      await ElMessageBox.confirm("现病史已有内容，重新生成会替换当前文本。是否继续？", "确认重新生成", {
-        confirmButtonText: "替换生成",
-        cancelButtonText: "保留原文",
-        type: "warning"
-      });
-    } catch {
-      return;
+};
+const selectedStageTemplateSourceHash = computed(() => {
+  const code = selectedStageCode.value;
+  const source = deepCopy(stageForms[code]);
+  for (const templateField of stageByCode(code).fields.filter(item => item.kind === "template-text")) {
+    for (const key of [
+      templateField.key,
+      templateField.overrideKey,
+      templateField.sourceHashKey,
+      templateField.confirmedKey
+    ].filter(Boolean) as string[]) {
+      delete source[key];
     }
   }
-  form.presentIllness = buildPresentIllnessText(form);
-  ElMessage.success("已生成现病史，可继续手工修订");
+  return stableSourceHash([source]);
+});
+const templateSourceHash = (field: PreAiFieldConfig) => {
+  if (field.kind !== "template-text" || !field.sourceHashKey) return "";
+  return selectedStageTemplateSourceHash.value;
 };
+const patchStageForm = (code: PreAiStageCode, value: Record<string, any>) => Object.assign(stageForms[code], value);
+const isStageFieldDisabled = (field: PreAiFieldConfig) =>
+  !canEditSelectedStage.value ||
+  (selectedStageCode.value === "SURGERY" && field.key === "physicianConfirmed" && !canConfirmSurgery.value);
 const fieldOptions = (field: PreAiFieldConfig) => field.optionsFor?.(stageForms[selectedStageCode.value]) || field.options || [];
 const routeLabel = (route?: string) => (route === "OUTPATIENT" ? "门诊" : route === "INPATIENT" ? "住院" : "分支待确认");
 const treatmentPathLabel = (path?: string) =>
@@ -1029,34 +1178,163 @@ const clearWorkspaceImageUrls = () => {
   Object.keys(workspaceImageUrls).forEach(key => delete workspaceImageUrls[key]);
 };
 
-const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
-  const requestSequence = ++workspaceImageRequestSequence;
+const workspaceInspectionImages = (value: PreAiWorkspace) =>
+  value.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item));
+
+const workspaceInspectionImageKey = (value: PreAiWorkspace) =>
+  workspaceInspectionImages(value)
+    .map(item => `${item.id}:${item.downloadUrl}`)
+    .sort()
+    .join("|");
+
+const resetWorkspaceImageContext = () => {
+  workspaceImageAbortController?.abort();
+  workspaceImageAbortController = undefined;
+  workspaceImageLoadPromise = undefined;
+  workspaceImageRequestSequence += 1;
+  workspaceImageEncounterId = "";
+  workspaceImageAttachmentKey = "";
   clearWorkspaceImageUrls();
-  const images = value.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item));
-  await Promise.all(
-    images.map(async attachment => {
-      try {
-        const url = await getPreAiAttachmentObjectUrlApi(attachment);
-        if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        workspaceImageUrls[attachment.id] = url;
-      } catch {
+};
+
+const syncWorkspaceImageContext = (value: PreAiWorkspace) => {
+  const encounterId = value.encounter.id;
+  const attachmentKey = workspaceInspectionImageKey(value);
+  if (workspaceImageEncounterId === encounterId && workspaceImageAttachmentKey === attachmentKey) return;
+
+  resetWorkspaceImageContext();
+  workspaceImageEncounterId = encounterId;
+  workspaceImageAttachmentKey = attachmentKey;
+};
+
+const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
+  syncWorkspaceImageContext(value);
+  const images = workspaceInspectionImages(value);
+  if (!images.length || images.every(attachment => Boolean(workspaceImageUrls[attachment.id]))) return;
+  if (workspaceImageLoadPromise) return workspaceImageLoadPromise;
+
+  const requestSequence = ++workspaceImageRequestSequence;
+  const requestController = new AbortController();
+  workspaceImageAbortController = requestController;
+  const request = runWithConcurrency(images, 4, async attachment => {
+    if (workspaceImageUrls[attachment.id]) return;
+    try {
+      const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
+      if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      workspaceImageUrls[attachment.id] = url;
+    } catch (error: any) {
+      if (error?.name !== "AbortError") {
         // 单张检查图片失败时保留下载入口，不阻断工作区加载。
       }
-    })
-  );
+    }
+  });
+  workspaceImageLoadPromise = request;
+  try {
+    await request;
+  } finally {
+    if (workspaceImageAbortController === requestController) workspaceImageAbortController = undefined;
+    if (workspaceImageLoadPromise === request) workspaceImageLoadPromise = undefined;
+  }
+};
+
+const clearTimelineImageUrls = () => {
+  Object.values(timelineImageUrls).forEach(url => URL.revokeObjectURL(url));
+  Object.keys(timelineImageUrls).forEach(key => delete timelineImageUrls[key]);
+};
+
+const workspaceTimelineSourceKey = (value: PreAiWorkspace) => {
+  const inspectionStage = value.stages.find(stage => stage.stageCode === "INSPECTION");
+  const attachments = value.attachments
+    .filter(attachment => attachment.stageCode === "INSPECTION")
+    .map(attachment => `${attachment.id}:${attachment.downloadUrl}:${attachment.fileSize}`)
+    .sort()
+    .join("|");
+  return [value.encounter.patientCaseId, inspectionStage?.version || 0, inspectionStage?.updatedAt || "", attachments].join("::");
+};
+
+const cancelTimelineLoad = () => {
+  timelineAbortController?.abort();
+  timelineAbortController = undefined;
+  timelineLoadPromise = undefined;
+  timelineRequestSequence += 1;
+  timelineLoading.value = false;
+};
+
+const resetTimelineContext = () => {
+  cancelTimelineLoad();
+  timelinePatientCaseId = "";
+  timelineSourceKey = "";
+  timelineLoaded = false;
+  inspectionTimeline.value = [];
+  clearTimelineImageUrls();
+};
+
+const syncTimelineContext = (value: PreAiWorkspace) => {
+  const patientCaseId = value.encounter.patientCaseId;
+  const sourceKey = workspaceTimelineSourceKey(value);
+  if (timelinePatientCaseId === patientCaseId && timelineSourceKey === sourceKey) return;
+
+  resetTimelineContext();
+  timelinePatientCaseId = patientCaseId;
+  timelineSourceKey = sourceKey;
+};
+
+const showCurrentInspection = () => {
+  inspectionView.value = "CURRENT";
+  if (timelineLoadPromise || timelineAbortController) cancelTimelineLoad();
+};
+
+const cancelReviewRequest = () => {
+  reviewAbortController?.abort();
+  reviewAbortController = undefined;
+  reviewRequestInFlightEncounterId = "";
+  reviewRequestSequence += 1;
 };
 
 const hydrateWorkspace = (value: PreAiWorkspace) => {
+  const keepInspectionImagesVisible =
+    workspace.value?.encounter.id === value.encounter.id &&
+    (editorMode.value === "PREVIEW" ||
+      (workflowSelected.value && selectedPanel.value === "STAGE" && selectedStageCode.value === "RECEPTION"));
+  syncWorkspaceImageContext(value);
+  syncTimelineContext(value);
   workspace.value = value;
-  void loadWorkspaceInspectionImages(value);
   value.stages.forEach(stage => {
     const normalized = deepCopy(stage.data);
+    if (stage.stageCode === "DOCTOR") {
+      if (!normalized.plannedPrimaryOperation && normalized.plannedOperationName) {
+        normalized.plannedPrimaryOperation = normalized.plannedOperationName;
+      }
+      if (!Array.isArray(normalized.secondaryDiagnosisItems) && Array.isArray(normalized.secondaryWesternDiagnoses)) {
+        normalized.secondaryDiagnosisItems = normalized.secondaryWesternDiagnoses.map((name: string) => ({
+          name,
+          category: "LOCAL"
+        }));
+      }
+    }
+    if (stage.stageCode === "SURGERY" && !normalized.actualPrimaryOperation && normalized.actualOperationName) {
+      normalized.actualPrimaryOperation = normalized.actualOperationName;
+    }
     stageByCode(stage.stageCode).fields.forEach(field => {
-      if (field.kind === "multi" && normalized[field.key] && !Array.isArray(normalized[field.key])) {
-        normalized[field.key] = [String(normalized[field.key])];
+      const value = normalized[field.key];
+      if (field.kind === "multi" && value !== undefined && value !== null && value !== "" && !Array.isArray(value)) {
+        normalized[field.key] = [String(value)];
+      }
+      if ((field.kind === "multi" || field.kind === "repeatable") && !Array.isArray(normalized[field.key])) {
+        normalized[field.key] = [];
+      }
+      if (field.kind === "measurement") {
+        if (value === undefined || value === null || value === "") {
+          normalized[field.key] = { value: "", unit: field.unitOptions?.[0] || "", status: "" };
+        } else if (typeof value !== "object" || Array.isArray(value)) {
+          normalized[field.key] = { value, unit: field.unitOptions?.[0] || "", status: "" };
+        }
+      }
+      if (field.kind === "template-text" && field.overrideKey && normalized[field.overrideKey] !== undefined) {
+        normalized[field.key] = normalized[field.overrideKey];
       }
     });
     Object.keys(stageForms[stage.stageCode]).forEach(key => delete stageForms[stage.stageCode][key]);
@@ -1069,29 +1347,59 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   if (!value.labReports.some(report => report.id === activeLabReportId.value)) {
     activeLabReportId.value = value.labReports[0]?.id || "";
   }
+  if (keepInspectionImagesVisible) void loadWorkspaceInspectionImages(value);
 };
 
 const selectEncounter = async (id: string) => {
-  if (id === selectedEncounterId.value && workspace.value?.encounter.id === id && !workspaceLoading.value) return;
+  if (id === selectedEncounterId.value && workspaceLoading.value) return;
+  if (id === selectedEncounterId.value && workspace.value?.encounter.id === id) return;
 
   const requestSequence = ++workspaceRequestSequence;
+  workspaceAbortController?.abort();
+  if (workspace.value?.encounter.id !== id) {
+    resetWorkspaceImageContext();
+    resetTimelineContext();
+    cancelReviewRequest();
+  }
+  const requestController = new AbortController();
+  workspaceAbortController = requestController;
+  pendingWorkflowSelection.value = undefined;
   selectedEncounterId.value = id;
   workspaceLoading.value = true;
+  let workspaceLoaded = false;
   try {
-    const { data } = await getPreAiWorkspaceApi(id);
+    const { data } = await getPreAiWorkspaceApi(id, requestController.signal);
     if (requestSequence !== workspaceRequestSequence || selectedEncounterId.value !== id) return;
 
     hydrateWorkspace(data);
+    workspaceLoaded = true;
     selectedPatientCaseId.value = data.encounter.patientCaseId;
-    selectedStageCode.value = data.encounter.currentStage || "REGISTRATION";
-    selectedPanel.value = "STAGE";
-    workflowSelected.value = false;
+    const pendingSelection = readPendingWorkflowSelection();
+    if (pendingSelection?.encounterId === id) {
+      activateWorkflowCard(pendingSelection.card);
+    } else {
+      selectedStageCode.value = data.encounter.currentStage || "REGISTRATION";
+      selectedPanel.value = "STAGE";
+      workflowSelected.value = false;
+    }
     editorMode.value = "EDIT";
     reviewPreview.value = undefined;
   } catch (error: any) {
-    if (requestSequence === workspaceRequestSequence) ElMessage.error(error.message || "前置病历加载失败");
+    if (error?.name !== "AbortError" && requestSequence === workspaceRequestSequence) {
+      ElMessage.error(error.message || "前置病历加载失败");
+    }
   } finally {
-    if (requestSequence === workspaceRequestSequence) workspaceLoading.value = false;
+    if (requestSequence === workspaceRequestSequence) {
+      workspaceLoading.value = false;
+      if (workspaceAbortController === requestController) workspaceAbortController = undefined;
+      const pendingSelection = readPendingWorkflowSelection();
+      if (pendingSelection?.encounterId === id) {
+        pendingWorkflowSelection.value = undefined;
+        if (workspaceLoaded && pendingSelection.card.kind === "STAGE" && pendingSelection.card.stageCode === "REVIEW") {
+          await loadReviewPreview();
+        }
+      }
+    }
   }
 };
 
@@ -1106,53 +1414,113 @@ const togglePatientDrawer = () => {
   patientDrawerOpen.value = !patientDrawerOpen.value;
 };
 
+const activateWorkflowCard = (card: WorkflowCard) => {
+  if (card.kind !== "STAGE" || card.stageCode !== "REVIEW") cancelReviewRequest();
+  showCurrentInspection();
+  if (card.kind === "AUX") {
+    selectedPanel.value = "AUX";
+  } else if (card.stageCode) {
+    selectedStageCode.value = card.stageCode;
+    selectedPanel.value = "STAGE";
+  }
+  workflowSelected.value = true;
+  editorMode.value = "EDIT";
+  if (card.kind === "STAGE" && card.stageCode === "RECEPTION" && workspace.value) {
+    void loadWorkspaceInspectionImages(workspace.value);
+  }
+};
+
+const openPreviewMode = () => {
+  editorMode.value = "PREVIEW";
+  if (workspace.value) void loadWorkspaceInspectionImages(workspace.value);
+};
+
 const selectStage = async (code: PreAiStageCode) => {
+  const wasActive = workflowSelected.value && selectedPanel.value === "STAGE" && selectedStageCode.value === code;
+  if (code !== "REVIEW") cancelReviewRequest();
   selectedStageCode.value = code;
-  inspectionView.value = "CURRENT";
+  showCurrentInspection();
   selectedPanel.value = "STAGE";
   workflowSelected.value = true;
   editorMode.value = "EDIT";
-  if (code === "REVIEW") await loadReviewPreview();
-};
-
-const clearTimelineImageUrls = () => {
-  Object.values(timelineImageUrls).forEach(url => URL.revokeObjectURL(url));
-  Object.keys(timelineImageUrls).forEach(key => delete timelineImageUrls[key]);
+  if (code === "RECEPTION" && workspace.value) void loadWorkspaceInspectionImages(workspace.value);
+  if (code === "REVIEW" && (!wasActive || !reviewPreview.value)) await loadReviewPreview();
 };
 
 const showInspectionTimeline = async () => {
   inspectionView.value = "HISTORY";
-  const patientCaseId = workspace.value?.encounter.patientCaseId;
-  if (!patientCaseId) return;
+  const currentWorkspace = workspace.value;
+  if (!currentWorkspace) return;
 
+  syncTimelineContext(currentWorkspace);
+  if (timelineLoaded) return;
+  if (timelineLoadPromise) return timelineLoadPromise;
+
+  const patientCaseId = currentWorkspace.encounter.patientCaseId;
+  const sourceKey = timelineSourceKey;
   const requestSequence = ++timelineRequestSequence;
+  const requestController = new AbortController();
+  timelineAbortController = requestController;
   timelineLoading.value = true;
-  clearTimelineImageUrls();
-  try {
-    const { data } = await getPreAiInspectionTimelineApi(patientCaseId);
-    if (requestSequence !== timelineRequestSequence || workspace.value?.encounter.patientCaseId !== patientCaseId) return;
 
-    inspectionTimeline.value = data.nodes;
-    const imageAttachments = data.nodes.flatMap(node => node.attachments).filter(item => item.mimeType?.startsWith("image/"));
-    await Promise.all(
-      imageAttachments.map(async attachment => {
+  let request!: Promise<void>;
+  const isCurrentRequest = () =>
+    timelineLoadPromise === request &&
+    timelineAbortController === requestController &&
+    requestSequence === timelineRequestSequence &&
+    timelinePatientCaseId === patientCaseId &&
+    timelineSourceKey === sourceKey &&
+    workspace.value?.encounter.patientCaseId === patientCaseId;
+
+  request = (async () => {
+    try {
+      const { data } = await getPreAiInspectionTimelineApi(patientCaseId, requestController.signal);
+      if (!isCurrentRequest()) return;
+
+      inspectionTimeline.value = data.nodes;
+      const imageAttachments = Array.from(
+        new Map(
+          data.nodes
+            .flatMap(node => node.attachments)
+            .filter(item => item.mimeType?.startsWith("image/"))
+            .map(attachment => [attachment.id, attachment])
+        ).values()
+      );
+      const attachmentIds = new Set(imageAttachments.map(attachment => attachment.id));
+      for (const [attachmentId, url] of Object.entries(timelineImageUrls)) {
+        if (attachmentIds.has(attachmentId)) continue;
+        URL.revokeObjectURL(url);
+        delete timelineImageUrls[attachmentId];
+      }
+
+      await runWithConcurrency(imageAttachments, 4, async attachment => {
+        if (timelineImageUrls[attachment.id]) return;
         try {
-          const url = await getPreAiAttachmentObjectUrlApi(attachment);
-          if (requestSequence !== timelineRequestSequence || workspace.value?.encounter.patientCaseId !== patientCaseId) {
+          const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
+          if (!isCurrentRequest()) {
             URL.revokeObjectURL(url);
             return;
           }
           timelineImageUrls[attachment.id] = url;
-        } catch {
-          // 单张历史图片加载失败不影响其余时间轴内容。
+        } catch (error: any) {
+          if (error?.name !== "AbortError") {
+            // 单张历史图片加载失败时保留下载入口，不阻断其余时间轴内容。
+          }
         }
-      })
-    );
-  } catch (error: any) {
-    if (requestSequence === timelineRequestSequence) ElMessage.error(error.message || "检查室历史时间轴加载失败");
-  } finally {
-    if (requestSequence === timelineRequestSequence) timelineLoading.value = false;
-  }
+      });
+      if (isCurrentRequest()) timelineLoaded = true;
+    } catch (error: any) {
+      if (error?.name !== "AbortError" && isCurrentRequest()) {
+        ElMessage.error(error.message || "检查室历史时间轴加载失败");
+      }
+    } finally {
+      if (timelineAbortController === requestController) timelineAbortController = undefined;
+      if (timelineLoadPromise === request) timelineLoadPromise = undefined;
+      if (requestSequence === timelineRequestSequence) timelineLoading.value = false;
+    }
+  })();
+  timelineLoadPromise = request;
+  return request;
 };
 
 const openWorkspaceAttachment = async (attachment: PreAiAttachment) => {
@@ -1206,13 +1574,26 @@ const createFollowUp = async () => {
 };
 
 const selectWorkflowCard = async (card: WorkflowCard) => {
-  if (card.kind === "AUX") {
-    selectedPanel.value = "AUX";
-    workflowSelected.value = true;
-    editorMode.value = "EDIT";
+  const alreadyActive = isWorkflowCardActive(card);
+  if (
+    alreadyActive &&
+    !workspaceLoading.value &&
+    editorMode.value === "EDIT" &&
+    (card.kind !== "STAGE" || card.stageCode !== "INSPECTION" || inspectionView.value === "CURRENT") &&
+    (card.kind !== "STAGE" || card.stageCode !== "REVIEW" || Boolean(reviewPreview.value))
+  ) {
     return;
   }
-  if (card.stageCode) await selectStage(card.stageCode);
+  activateWorkflowCard(card);
+  if (workspaceLoading.value) {
+    pendingWorkflowSelection.value = {
+      encounterId: selectedEncounterId.value,
+      card: { ...card }
+    };
+    return;
+  }
+  pendingWorkflowSelection.value = undefined;
+  if (card.kind === "STAGE" && card.stageCode === "REVIEW") await selectStage(card.stageCode);
 };
 
 const saveSelectedStage = async () =>
@@ -1228,27 +1609,50 @@ const saveSelectedStage = async () =>
 
 const completeSelectedStage = async () =>
   runAction(async () => {
-    const { data } = await completePreAiStageApi(
-      selectedEncounterId.value,
-      selectedStageCode.value,
-      cleanStageForm(selectedStageCode.value)
-    );
+    const completedStage = selectedStageCode.value;
+    const { data } = await completePreAiStageApi(selectedEncounterId.value, completedStage, cleanStageForm(completedStage));
     hydrateWorkspace(data);
     await loadEncounterList();
-    ElMessage.success("本阶段已完成并交接");
+    ElMessage.success(
+      completedStage === "INSPECTION"
+        ? "检查已完成，患者已自动进入接诊候诊"
+        : completedStage === "RECEPTION"
+          ? "接诊已完成，排队流程已闭环"
+          : "本阶段已完成并交接"
+    );
   });
 
+const returnToQueueWorkbench = () => router.push("/tcm-pharmacy/clinic-queue/workbench");
+
+const hasFormValue = (value: any, field?: PreAiFieldConfig) => {
+  if (value === undefined || value === null || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (field?.kind === "measurement" && typeof value === "object") {
+    return value.value !== undefined && value.value !== null && value.value !== "";
+  }
+  return true;
+};
 const cleanStageForm = (code: PreAiStageCode) => {
   const fields = stageByCode(code).fields;
   const result: Record<string, any> = {};
   fields.forEach(field => {
     if (field.visible && !field.visible(stageForms[code])) return;
     const value = stageForms[code][field.key];
-    if (value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length))
-      result[field.key] = value;
+    if (hasFormValue(value, field)) result[field.key] = value;
+    for (const key of [field.overrideKey, field.sourceHashKey, field.confirmedKey].filter(Boolean) as string[]) {
+      const metadataValue = stageForms[code][key];
+      if (metadataValue !== undefined && metadataValue !== null && metadataValue !== "") result[key] = metadataValue;
+    }
   });
   return result;
 };
+
+const saveDutyAssignments = async (assignments: PreAiDutyAssignment[]) =>
+  runAction(async () => {
+    const { data } = await savePreAiDutyAssignmentsApi(selectedEncounterId.value, assignments);
+    hydrateWorkspace(data);
+    ElMessage.success("本病例岗位安排已保存");
+  });
 
 const returnStage = async (code: PreAiStageCode) => {
   try {
@@ -1324,7 +1728,7 @@ const completeLab = async () =>
 
 const returnAuxTask = async (taskId: string) => {
   try {
-    const { value } = await ElMessageBox.prompt("请填写退回原因", "退回化验室", {
+    const { value } = await ElMessageBox.prompt("请填写退回原因", "退回辅助任务", {
       inputPattern: /\S+/,
       inputErrorMessage: "退回原因不能为空"
     });
@@ -1332,7 +1736,7 @@ const returnAuxTask = async (taskId: string) => {
       const { data } = await returnPreAiAuxiliaryTaskApi(selectedEncounterId.value, taskId, value);
       hydrateWorkspace(data);
       await loadEncounterList();
-      ElMessage.success("化验室已退回");
+      ElMessage.success("辅助任务已退回");
     });
   } catch (error: any) {
     if (error !== "cancel" && error !== "close") ElMessage.error(error.message || "退回失败");
@@ -1409,14 +1813,32 @@ const voidAttachment = async (attachmentId: string) => {
 const loadReviewPreview = async () => {
   const encounterId = selectedEncounterId.value;
   if (!encounterId || !canReview.value) return;
+  if (reviewRequestInFlightEncounterId === encounterId) return;
+  if (reviewAbortController) cancelReviewRequest();
 
   const requestSequence = ++reviewRequestSequence;
+  const requestController = new AbortController();
+  reviewAbortController = requestController;
+  reviewRequestInFlightEncounterId = encounterId;
   try {
-    const { data } = await getPreAiReviewPreviewApi(encounterId);
-    if (requestSequence !== reviewRequestSequence || selectedEncounterId.value !== encounterId) return;
+    const { data } = await getPreAiReviewPreviewApi(encounterId, requestController.signal);
+    if (
+      requestSequence !== reviewRequestSequence ||
+      reviewAbortController !== requestController ||
+      selectedEncounterId.value !== encounterId
+    ) {
+      return;
+    }
     reviewPreview.value = data;
   } catch (error: any) {
-    if (requestSequence === reviewRequestSequence) ElMessage.error(error.message || "脱敏预览加载失败");
+    if (error?.name !== "AbortError" && requestSequence === reviewRequestSequence) {
+      ElMessage.error(error.message || "脱敏预览加载失败");
+    }
+  } finally {
+    if (reviewAbortController === requestController) reviewAbortController = undefined;
+    if (reviewRequestSequence === requestSequence && reviewRequestInFlightEncounterId === encounterId && !reviewAbortController) {
+      reviewRequestInFlightEncounterId = "";
+    }
   }
 };
 
@@ -1458,15 +1880,48 @@ const runAction = async (action: () => Promise<void>) => {
   }
 };
 
-onMounted(loadEncounterList);
-onBeforeUnmount(() => {
+const cleanupTransientResources = () => {
+  workspaceAbortController?.abort();
+  workspaceAbortController = undefined;
   workspaceRequestSequence += 1;
-  workspaceImageRequestSequence += 1;
-  timelineRequestSequence += 1;
-  reviewRequestSequence += 1;
-  clearTimelineImageUrls();
-  clearWorkspaceImageUrls();
+  workspaceLoading.value = false;
+  pendingWorkflowSelection.value = undefined;
+  resetWorkspaceImageContext();
+  resetTimelineContext();
+  cancelReviewRequest();
+};
+
+onMounted(loadEncounterList);
+onActivated(() => {
+  if (!workspace.value) return;
+  syncWorkspaceImageContext(workspace.value);
+  syncTimelineContext(workspace.value);
+  if (
+    editorMode.value === "PREVIEW" ||
+    (workflowSelected.value && selectedPanel.value === "STAGE" && selectedStageCode.value === "RECEPTION")
+  ) {
+    void loadWorkspaceInspectionImages(workspace.value);
+  }
+  if (
+    workflowSelected.value &&
+    editorMode.value === "EDIT" &&
+    selectedPanel.value === "STAGE" &&
+    selectedStageCode.value === "INSPECTION" &&
+    inspectionView.value === "HISTORY"
+  ) {
+    void showInspectionTimeline();
+  }
+  if (
+    workflowSelected.value &&
+    editorMode.value === "EDIT" &&
+    selectedPanel.value === "STAGE" &&
+    selectedStageCode.value === "REVIEW"
+  ) {
+    void loadReviewPreview();
+  }
 });
+onDeactivated(cleanupTransientResources);
+onBeforeUnmount(cleanupTransientResources);
 </script>
 
 <style scoped lang="scss">
@@ -1536,6 +1991,37 @@ onBeforeUnmount(() => {
 }
 .panel-actions > div {
   flex: 1 1 auto;
+}
+.queue-handoff-result {
+  display: flex;
+  min-width: min(100%, 420px);
+  align-items: center;
+  gap: 12px;
+}
+.queue-handoff-result strong,
+.queue-handoff-result small {
+  display: block;
+}
+.queue-handoff-result strong {
+  color: var(--el-color-success-dark-2);
+  font-size: 15px;
+}
+.queue-handoff-result small {
+  margin-top: 3px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+.queue-handoff-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  background: var(--el-color-success);
+  font-size: 20px;
+  font-weight: 800;
 }
 .workspace-shell {
   position: relative;
@@ -1825,6 +2311,10 @@ onBeforeUnmount(() => {
 }
 .editor-mode-content {
   min-width: 0;
+}
+.auxiliary-stack {
+  display: grid;
+  gap: 16px;
 }
 .workspace-mode-enter-active,
 .workspace-mode-leave-active {
@@ -2266,6 +2756,10 @@ onBeforeUnmount(() => {
   }
   .sticky-actions > div {
     display: none;
+  }
+  .sticky-actions > .queue-handoff-result {
+    display: flex;
+    flex: 1 1 100%;
   }
   .sticky-actions :deep(.el-button) {
     width: auto;

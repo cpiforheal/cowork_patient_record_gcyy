@@ -1,4 +1,5 @@
 import { authHeaders, handleUnauthorizedResponse } from "@/api/modules/authToken";
+import { getLoginOptionsApi, type LoginAccountOption } from "@/api/modules/login";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 
 export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "TCM" | "DOCTOR" | "SURGERY" | "REVIEW";
@@ -6,7 +7,28 @@ export type PreAiStageStatus = "DRAFT" | "COMPLETED" | "RETURNED" | "SKIPPED";
 export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED";
 export type PreAiEncounterRoute = "" | "OUTPATIENT" | "INPATIENT";
 export type PreAiTreatmentPath = "" | "CONSERVATIVE" | "SURGICAL";
-export type PreAiAuxiliaryTaskType = "LAB" | "ECG" | "IMAGING";
+export type PreAiAuxiliaryTaskType = "LAB" | "ECG" | "IMAGING" | "VITAL_SIGNS" | "COLONOSCOPY";
+export type PreAiDutyCode =
+  | "FRONT_DESK"
+  | "RECEPTION_DOCTOR"
+  | "TCM_DOCTOR"
+  | "INSPECTION_DOCTOR"
+  | "LAB_STAFF"
+  | "BASIC_NURSING"
+  | "ATTENDING_DOCTOR"
+  | "SURGEON"
+  | "OPERATING_ROOM_NURSE"
+  | "FINAL_REVIEW_DOCTOR";
+
+export interface PreAiDutyAssignment {
+  dutyCode: PreAiDutyCode;
+  responsibleUserId?: string;
+  responsibleUserName?: string;
+  participantUserIds?: string[];
+  participantUserNames?: string[];
+}
+
+export interface PreAiDutyUserOption extends LoginAccountOption {}
 
 export interface PreAiEncounterSummary {
   id: string;
@@ -35,6 +57,7 @@ export interface PreAiEncounter extends Omit<
   patient: Record<string, any>;
   visitMeta?: VisitMeta;
   legacyReference?: Record<string, any>;
+  dutyAssignments?: PreAiDutyAssignment[];
   reviewedAt?: string;
   reviewedBy?: string;
   reviewedByRole?: string;
@@ -108,6 +131,10 @@ export interface PreAiAuxiliaryTask {
   version: number;
   completedAt?: string;
   updatedAt: string;
+  updatedBy?: string;
+  updatedByRole?: string;
+  completedBy?: string;
+  completedByRole?: string;
   createdAt: string;
   createdBy: string;
 }
@@ -183,6 +210,7 @@ export interface PreAiAuditLog {
 
 export interface PreAiWorkspace {
   encounter: PreAiEncounter;
+  dutyAssignments: PreAiDutyAssignment[];
   stages: PreAiStageSubmission[];
   auxiliaryTasks: PreAiAuxiliaryTask[];
   labReports: LabReportSnapshot[];
@@ -236,18 +264,42 @@ export const getPreAiPatientCasesApi = async () => {
   return clinicResponse(await parseClinicApiResponse<{ list: PreAiPatientCase[] }>(result));
 };
 
+let dutyUserOptionsCache: PreAiDutyUserOption[] | undefined;
+let dutyUserOptionsRequest: Promise<PreAiDutyUserOption[]> | undefined;
+
+export const getPreAiDutyUserOptionsApi = async () => {
+  if (!dutyUserOptionsCache) {
+    dutyUserOptionsRequest ||= getLoginOptionsApi()
+      .then(({ data }) => data.accounts || [])
+      .then(accounts => {
+        dutyUserOptionsCache = accounts;
+        return accounts;
+      })
+      .catch(error => {
+        dutyUserOptionsRequest = undefined;
+        throw error;
+      });
+    await dutyUserOptionsRequest;
+  }
+  return clinicResponse({ list: dutyUserOptionsCache || [] });
+};
+
 export const createPreAiFollowUpApi = (patientCaseId: string, payload: FollowUpEncounterCreateRequest) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/encounters`, "POST", payload);
 
-export const getPreAiInspectionTimelineApi = async (patientCaseId: string) => {
+export const getPreAiInspectionTimelineApi = async (patientCaseId: string, signal?: AbortSignal) => {
   const result = await clinicFetch(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/inspection-timeline`, {
-    headers: authHeaders()
+    headers: authHeaders(),
+    signal
   });
   return clinicResponse(await parseClinicApiResponse<{ patientCaseId: string; nodes: InspectionTimelineNode[] }>(result));
 };
 
-export const getPreAiWorkspaceApi = async (encounterId: string) => {
-  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}`, { headers: authHeaders() });
+export const getPreAiWorkspaceApi = async (encounterId: string, signal?: AbortSignal) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}`, {
+    headers: authHeaders(),
+    signal
+  });
   return clinicResponse(await parseClinicApiResponse<PreAiWorkspace>(result));
 };
 
@@ -256,6 +308,11 @@ export const createPreAiEncounterApi = (patient: Record<string, any>) =>
 
 export const savePreAiVisitMetaApi = (encounterId: string, visitMeta: VisitMeta) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/visit-meta`, "PUT", { visitMeta });
+
+export const savePreAiDutyAssignmentsApi = (encounterId: string, dutyAssignments: PreAiDutyAssignment[]) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/duty-assignments`, "PUT", {
+    dutyAssignments
+  });
 
 export const importLegacyPreAiEncounterApi = (patientId: string) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/imports/${encodeURIComponent(patientId)}`, "POST");
@@ -333,8 +390,11 @@ export const voidPreAiAttachmentApi = (encounterId: string, attachmentId: string
     "DELETE"
   );
 
-export const getPreAiReviewPreviewApi = async (encounterId: string) => {
-  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review`, { headers: authHeaders() });
+export const getPreAiReviewPreviewApi = async (encounterId: string, signal?: AbortSignal) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review`, {
+    headers: authHeaders(),
+    signal
+  });
   return clinicResponse(await parseClinicApiResponse<PreAiReviewPreview>(result));
 };
 
@@ -385,8 +445,8 @@ export const downloadPreAiExportApi = (version: PreAiExportVersion) =>
 export const downloadPreAiAttachmentApi = (attachment: PreAiAttachment) =>
   downloadAuthenticatedFile(attachment.downloadUrl, attachment.fileName);
 
-export const getPreAiAttachmentObjectUrlApi = async (attachment: PreAiAttachment) => {
-  const result = await clinicFetch(normalizePreAiDownloadPath(attachment.downloadUrl), { headers: authHeaders() });
+export const getPreAiAttachmentObjectUrlApi = async (attachment: PreAiAttachment, signal?: AbortSignal) => {
+  const result = await clinicFetch(normalizePreAiDownloadPath(attachment.downloadUrl), { headers: authHeaders(), signal });
   if (result.status === 401) handleUnauthorizedResponse();
   if (!result.ok) throw new Error((await result.text()) || "图片加载失败");
   return URL.createObjectURL(await result.blob());

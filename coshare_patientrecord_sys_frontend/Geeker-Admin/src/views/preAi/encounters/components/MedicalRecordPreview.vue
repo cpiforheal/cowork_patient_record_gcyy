@@ -250,6 +250,77 @@ const inspectionImageUrls = computed(() =>
   font-size: 17px;
   border-left: 4px solid #1f4e78;
 }
+.inspection-image-section {
+  padding: 18px;
+  margin-top: 22px;
+  border: 1px solid #bfd7ec;
+  border-radius: 12px;
+  background: #f6fbff;
+}
+.inspection-image-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.inspection-image-heading h3 {
+  margin-bottom: 6px;
+}
+.inspection-image-heading p {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.inspection-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.inspection-image-card {
+  display: grid;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #d8e3ed;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.inspection-image-card:hover {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 8px 20px rgb(31 78 120 / 12%);
+}
+.inspection-image-card img,
+.inspection-image-card > span {
+  width: 100%;
+  height: 132px;
+  object-fit: cover;
+  background: #edf3f8;
+}
+.inspection-image-card > span {
+  display: grid;
+  place-items: center;
+  color: #667085;
+  font-size: 12px;
+}
+.inspection-image-card strong,
+.inspection-image-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspection-image-card strong {
+  padding: 9px 10px 2px;
+  font-size: 13px;
+}
+.inspection-image-card small {
+  padding: 0 10px 9px;
+  color: #667085;
+}
 .document-section-note {
   margin: -3px 0 12px;
   color: #777;
@@ -386,7 +457,8 @@ const inspectionImageUrls = computed(() =>
   }
   .document-meta,
   .document-fields,
-  .lab-normal-list {
+  .lab-normal-list,
+  .inspection-image-grid {
     grid-template-columns: 1fr;
   }
   .lab-abnormal-list > div {

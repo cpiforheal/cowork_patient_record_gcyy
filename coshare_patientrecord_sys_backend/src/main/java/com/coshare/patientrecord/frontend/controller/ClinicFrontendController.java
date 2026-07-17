@@ -29,6 +29,7 @@ public class ClinicFrontendController {
         "/system/**",
         "/templates/**",
         "/encounters/**",
+        "/pre-ai/**",
         "/tcm-pharmacy/**"
     })
     public ResponseEntity<FileSystemResource> index() {

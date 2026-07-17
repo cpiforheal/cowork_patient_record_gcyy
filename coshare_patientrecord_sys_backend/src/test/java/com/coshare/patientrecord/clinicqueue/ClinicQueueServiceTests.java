@@ -71,6 +71,22 @@ class ClinicQueueServiceTests {
         assertEquals("按入队时间先后", selected.reason());
     }
 
+    @Test
+    void waitingAndExceptionRecoveryKeepOverallStageInSync() {
+        assertEquals("WAITING_INSPECTION", ClinicQueueService.overallStatusFor("INSPECTION", "WAITING"));
+        assertEquals("WAITING_INSPECTION", ClinicQueueService.overallStatusFor("INSPECTION", "MISSED"));
+        assertEquals("WAITING_RECEPTION", ClinicQueueService.overallStatusFor("RECEPTION", "TEMPORARILY_AWAY"));
+        assertEquals("RECEPTION_CALLED", ClinicQueueService.overallStatusFor("RECEPTION", "CALLED"));
+        assertEquals("ON_HOLD", ClinicQueueService.overallStatusFor("INSPECTION", "INTERRUPTED"));
+    }
+
+    @Test
+    void supplementaryInspectionCompletionReactivatesHeldReceptionTask() {
+        assertEquals(true, ClinicQueueService.shouldActivateReceptionAfterInspection("INACTIVE"));
+        assertEquals(true, ClinicQueueService.shouldActivateReceptionAfterInspection("ON_HOLD"));
+        assertEquals(false, ClinicQueueService.shouldActivateReceptionAfterInspection("COMPLETED"));
+    }
+
     private ClinicQueueService.Candidate candidate(String id, String visitType, long waitingMinutes, boolean locked) {
         return new ClinicQueueService.Candidate(
             id,

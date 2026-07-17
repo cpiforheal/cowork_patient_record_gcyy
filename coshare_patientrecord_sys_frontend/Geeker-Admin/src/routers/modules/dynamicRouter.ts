@@ -1,11 +1,18 @@
 import router from "@/routers/index";
+import type { Component } from "vue";
 import { RouteRecordRaw } from "vue-router";
 import { ElNotification } from "element-plus";
 import { useAuthStore } from "@/stores/modules/auth";
 import { notFoundRouter } from "@/routers/modules/staticRouter";
 
-// 引入 views 文件夹下所有 vue 文件
-const modules = import.meta.glob("@/views/**/*.vue");
+// 通过目录相对路径收集视图，规避 Windows 中文路径下 Vite 将别名 glob 生成为错误绝对导入的问题。
+const relativeModules = import.meta.glob("../../views/**/*.vue");
+const modules: Record<string, () => Promise<Component>> = Object.fromEntries(
+  Object.entries(relativeModules).map(([path, loader]) => [
+    `/src/views/${path.replace(/^\.\.\/\.\.\/views\//, "")}`,
+    loader as () => Promise<Component>
+  ])
+);
 const NOT_FOUND_ROUTE_NAME = "notFound";
 
 const resolveViewComponent = (componentPath: string) => {

@@ -1,6 +1,28 @@
 import type { PreAiAuxiliaryTaskType, PreAiStageCode } from "@/api/modules/clinic";
 
-export type PreAiFieldKind = "input" | "textarea" | "select" | "multi" | "date" | "datetime" | "number";
+export type PreAiFieldKind =
+  | "input"
+  | "textarea"
+  | "select"
+  | "multi"
+  | "date"
+  | "datetime"
+  | "number"
+  | "measurement"
+  | "repeatable"
+  | "template-text";
+
+export type PreAiTemplateGenerator =
+  | "chiefComplaint"
+  | "presentIllness"
+  | "inspectionConclusion"
+  | "syndromeBasis"
+  | "diagnosisBasis"
+  | "treatmentPlan"
+  | "surgeryFindings"
+  | "procedureSteps"
+  | "handoff"
+  | "colonoscopyConclusion";
 
 export interface PreAiFieldConfig {
   key: string;
@@ -8,12 +30,20 @@ export interface PreAiFieldConfig {
   kind: PreAiFieldKind;
   required?: boolean;
   placeholder?: string;
-  options?: Array<{ label: string; value: string }>;
-  optionsFor?: (form: Record<string, any>) => Array<{ label: string; value: string }>;
+  options?: Array<{ label: string; value: any }>;
+  optionsFor?: (form: Record<string, any>) => Array<{ label: string; value: any }>;
   creatable?: boolean;
   visible?: (form: Record<string, any>) => boolean;
   rows?: number;
   span?: 1 | 2;
+  fields?: PreAiFieldConfig[];
+  unitOptions?: string[];
+  abnormalOptions?: Array<{ label: string; value: string }>;
+  templateGenerator?: PreAiTemplateGenerator;
+  overrideKey?: string;
+  sourceHashKey?: string;
+  confirmedKey?: string;
+  addLabel?: string;
 }
 
 export interface PreAiStageConfig {
@@ -44,6 +74,18 @@ const examinationOptions = [
 ];
 
 const options = (values: string[]) => values.map(value => ({ label: value, value }));
+const abnormalOptions = options(["正常", "偏高", "偏低", "异常", "危急值", "未判断"]);
+const surgeryOptions = options([
+  "混合痔外剥内扎术",
+  "内痔套扎术",
+  "肛瘘切除术",
+  "肛裂切除术",
+  "肛周脓肿根治术",
+  "直肠黏膜悬吊术",
+  "直肠前突修补术",
+  "经肛直肠息肉切除术",
+  "结肠镜下息肉切除术（无痛）"
+]);
 const diseaseOptions = options([
   "痔",
   "肛裂",
@@ -106,6 +148,28 @@ const selectedDiseaseOptions = (form: Record<string, any>, dictionary: Record<st
 const hasExam = (form: Record<string, any>, type: string) =>
   Array.isArray(form.examinationTypes) && form.examinationTypes.includes(type);
 
+const syndromesByTcmDisease: Record<string, string[]> = {
+  痔病: ["湿热下注", "血热肠燥", "气虚下陷", "气滞血瘀"],
+  肛裂: ["血热肠燥", "阴虚津亏", "气滞血瘀"],
+  肛漏: ["湿热下注", "正虚邪恋", "阴虚毒恋"],
+  脱肛: ["脾虚气陷", "肾气不固"],
+  肛痈: ["火毒蕴结", "热毒炽盛", "正虚邪恋"],
+  息肉痔: ["湿热下注", "气滞血瘀", "脾虚痰湿"],
+  便秘: ["血热肠燥", "阴虚津亏", "气虚下陷"],
+  泄泻: ["脾虚痰湿", "湿热下注"],
+  胃痛: ["气滞血瘀", "脾虚痰湿"],
+  虚劳: ["气虚下陷", "阴虚津亏", "脾虚气陷"]
+};
+
+const tcmDiseaseByWestern: Record<string, string[]> = {
+  高血压: ["眩晕", "头痛"],
+  糖尿病: ["消渴"],
+  冠心病: ["胸痹", "心痛"],
+  慢性胃炎: ["胃痛", "痞满"],
+  便秘: ["便秘"],
+  直肠炎: ["肠澼", "泄泻"]
+};
+
 export const preAiStages: PreAiStageConfig[] = [
   {
     code: "REGISTRATION",
@@ -138,7 +202,61 @@ export const preAiStages: PreAiStageConfig[] = [
       { key: "contactRelation", label: "联系人关系", kind: "input" },
       { key: "contactPhone", label: "联系人电话", kind: "input" },
       { key: "visitDate", label: "就诊时间", kind: "datetime", required: true },
-      { key: "patientSource", label: "患者来源", kind: "input" },
+      {
+        key: "nationality",
+        label: "民族",
+        kind: "select",
+        options: options(["汉族", "回族", "藏族", "彝族", "苗族", "壮族", "其他"]),
+        creatable: true
+      },
+      {
+        key: "nativePlace",
+        label: "籍贯",
+        kind: "select",
+        options: options(["甘肃省", "陕西省", "四川省", "青海省", "宁夏回族自治区", "其他"]),
+        creatable: true
+      },
+      {
+        key: "birthplace",
+        label: "出生地",
+        kind: "select",
+        options: options(["甘肃省", "陕西省", "四川省", "青海省", "宁夏回族自治区", "其他"]),
+        creatable: true
+      },
+      { key: "maritalStatus", label: "婚姻状态", kind: "select", options: options(["未婚", "已婚", "离异", "丧偶", "未说明"]) },
+      {
+        key: "admissionMethod",
+        label: "入院方式",
+        kind: "select",
+        options: options(["门诊", "急诊", "转院", "其他"]),
+        creatable: true
+      },
+      {
+        key: "insuranceType",
+        label: "参保险种",
+        kind: "select",
+        options: options(["职工医保", "城乡居民医保", "商业保险", "异地医保", "自费", "其他"]),
+        creatable: true
+      },
+      {
+        key: "paymentMethod",
+        label: "付费方式",
+        kind: "select",
+        options: options(["医保结算", "现金", "银行卡", "移动支付", "其他"]),
+        creatable: true
+      },
+      {
+        key: "patientSource",
+        label: "患者来源",
+        kind: "select",
+        options: options(["门诊转入", "急诊转入", "复诊", "院内转科", "外院转入", "体检发现", "其他"]),
+        creatable: true
+      },
+      { key: "medicalRecordNo", label: "病案号", kind: "input" },
+      { key: "inpatientNo", label: "住院号", kind: "input" },
+      { key: "ward", label: "病区", kind: "input" },
+      { key: "bedNo", label: "床号", kind: "input" },
+      { key: "admissionCount", label: "第几次入院", kind: "number" },
       { key: "registrationNote", label: "登记备注", kind: "textarea", rows: 3, span: 2 }
     ]
   },
@@ -167,8 +285,23 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2
       },
       { key: "examinationTypes", label: "已完成检查", kind: "multi", required: true, options: examinationOptions, span: 2 },
-      { key: "lesionLocation", label: "病变位置", kind: "input" },
-      { key: "clockPosition", label: "方向/钟点位", kind: "input" },
+      {
+        key: "lesionLocation",
+        label: "病变位置",
+        kind: "select",
+        options: options(["肛缘", "肛管", "齿状线", "直肠下段", "会阴部", "骶尾部", "其他"]),
+        creatable: true
+      },
+      {
+        key: "clockPosition",
+        label: "方向/钟点位",
+        kind: "multi",
+        options: options(["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"]),
+        creatable: true
+      },
+      { key: "lesionSize", label: "病灶大小", kind: "measurement", unitOptions: ["mm", "cm"], abnormalOptions },
+      { key: "lesionExtent", label: "病灶范围", kind: "measurement", unitOptions: ["mm", "cm"], abnormalOptions },
+      { key: "lesionDepth", label: "病灶深度", kind: "measurement", unitOptions: ["mm", "cm"], abnormalOptions },
       {
         key: "visualFindings",
         label: "外观所见",
@@ -204,7 +337,18 @@ export const preAiStages: PreAiStageConfig[] = [
         visible: form => hasExam(form, "OTHER"),
         span: 2
       },
-      { key: "factualConclusion", label: "检查事实结论", kind: "textarea", required: true, rows: 4, span: 2 }
+      {
+        key: "factualConclusion",
+        label: "检查事实结论",
+        kind: "template-text",
+        required: true,
+        rows: 4,
+        span: 2,
+        templateGenerator: "inspectionConclusion",
+        overrideKey: "factualConclusionOverride",
+        sourceHashKey: "factualConclusionSourceHash",
+        confirmedKey: "factualConclusionConfirmed"
+      }
     ]
   },
   {
@@ -236,6 +380,14 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2
       },
       { key: "symptomDuration", label: "主要症状病程", kind: "input", placeholder: "如：1年、3月余、20年前开始" },
+      {
+        key: "chiefComplaintText",
+        label: "主诉预览",
+        kind: "template-text",
+        required: true,
+        span: 2,
+        templateGenerator: "chiefComplaint"
+      },
       {
         key: "onsetTrigger",
         label: "起病诱因",
@@ -351,27 +503,66 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       {
         key: "presentIllness",
-        label: "现病史最终文本（医生可修改）",
-        kind: "textarea",
+        label: "现病史自动生成与医生修订",
+        kind: "template-text",
         required: true,
         rows: 6,
-        placeholder: "可由上方结构化事实生成，也可由接诊人员或医生直接修订。",
-        span: 2
+        span: 2,
+        templateGenerator: "presentIllness",
+        overrideKey: "presentIllnessOverride",
+        sourceHashKey: "presentIllnessSourceHash",
+        confirmedKey: "presentIllnessConfirmed"
       },
       {
-        key: "pastHistory",
-        label: "慢性病及重要既往史",
-        kind: "multi",
-        options: options(["否认慢性病史", "高血压", "糖尿病", "冠心病", "脑血管病", "慢性胃炎", "传染病史", "其他慢性病"]),
-        creatable: true,
-        span: 2
+        key: "chronicDiseaseItems",
+        label: "慢性病史明细",
+        kind: "repeatable",
+        addLabel: "添加慢性病",
+        span: 2,
+        fields: [
+          {
+            key: "disease",
+            label: "疾病",
+            kind: "select",
+            options: options(["高血压", "糖尿病", "冠心病", "脑血管病", "慢性胃炎", "慢性肾病", "其他"]),
+            creatable: true,
+            required: true
+          },
+          { key: "duration", label: "病程", kind: "input" },
+          {
+            key: "treatment",
+            label: "治疗情况",
+            kind: "select",
+            options: options(["未治疗", "规律治疗", "间断治疗", "治疗不详", "其他"]),
+            creatable: true
+          },
+          {
+            key: "control",
+            label: "控制情况",
+            kind: "select",
+            options: options(["控制良好", "控制一般", "控制不佳", "不详"]),
+            creatable: true
+          }
+        ]
       },
       {
-        key: "surgicalHistory",
-        label: "手术史",
-        kind: "multi",
-        options: options(["否认手术史", "既往肛肠手术", "既往腹部手术", "其他手术"]),
-        creatable: true
+        key: "surgicalHistoryItems",
+        label: "手术史明细",
+        kind: "repeatable",
+        addLabel: "添加既往手术",
+        span: 2,
+        fields: [
+          { key: "year", label: "年份", kind: "number" },
+          { key: "operationName", label: "手术名称", kind: "input", required: true },
+          { key: "site", label: "部位", kind: "input" },
+          {
+            key: "result",
+            label: "结果",
+            kind: "select",
+            options: options(["恢复良好", "症状缓解", "症状复发", "遗留并发症", "不详"]),
+            creatable: true
+          }
+        ]
       },
       { key: "traumaHistory", label: "外伤史", kind: "select", options: options(["否认外伤史", "有外伤史"]), creatable: true },
       {
@@ -392,7 +583,7 @@ export const preAiStages: PreAiStageConfig[] = [
         key: "medicationHistory",
         label: "用药史",
         kind: "multi",
-        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗"]),
+        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗", "其他"]),
         creatable: true
       },
       {
@@ -444,15 +635,29 @@ export const preAiStages: PreAiStageConfig[] = [
         ]),
         creatable: true
       },
-      { key: "historySupplement", label: "病史补充原文（可选）", kind: "textarea", rows: 3, span: 2 },
-      { key: "reviewOpinion", label: "检查材料回看意见", kind: "textarea", rows: 3 },
-      { key: "nextStepRecommendation", label: "下一步处置建议", kind: "textarea", rows: 3, span: 2 },
+      { key: "historySupplement", label: "病史补充", kind: "textarea", rows: 3, span: 2 },
+      { key: "specialCircumstances", label: "其他特殊情况", kind: "textarea", rows: 3, span: 2 },
+      {
+        key: "reviewOpinion",
+        label: "检查材料回看意见",
+        kind: "select",
+        options: options(["无补充", "与检查一致", "需复查", "需补充检查", "存在异常需处理", "其他"]),
+        creatable: true
+      },
+      {
+        key: "nextStepRecommendation",
+        label: "下一步处置建议",
+        kind: "multi",
+        options: options(["门诊处理", "住院治疗", "完善化验", "心电", "影像", "肠镜", "手术评估", "保守治疗", "其他"]),
+        creatable: true,
+        span: 2
+      },
       { key: "dispositionSuggestion", label: "建议门诊/住院", kind: "select", required: true, options: routeOptions },
       {
         key: "recommendedAuxiliaryExams",
         label: "建议辅助检查",
         kind: "multi",
-        options: options(["化验室检验"]),
+        options: options(["化验", "心电", "影像", "肠镜"]),
         creatable: true
       }
     ]
@@ -462,8 +667,8 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "中医岗位",
     shortTitle: "中医",
     owner: "中医",
-    roles: ["admin", "tcm"],
-    description: "记录辨证事实，不自动生成方剂和长篇病程。",
+    roles: ["admin", "tcm", "doctor"],
+    description: "四诊、舌脉和证型均需中医师逐项确认；合并病按疾病逐条辨证。",
     fields: [
       {
         key: "tcmDisease",
@@ -478,20 +683,7 @@ export const preAiStages: PreAiStageConfig[] = [
         label: "主证",
         kind: "select",
         required: true,
-        options: options([
-          "湿热下注",
-          "血热肠燥",
-          "气虚下陷",
-          "气滞血瘀",
-          "阴虚津亏",
-          "正虚邪恋",
-          "阴虚毒恋",
-          "脾虚气陷",
-          "肾气不固",
-          "火毒蕴结",
-          "热毒炽盛",
-          "脾虚痰湿"
-        ]),
+        optionsFor: form => options(syndromesByTcmDisease[form.tcmDisease] || []),
         creatable: true
       },
       {
@@ -559,15 +751,69 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["弦数", "濡数", "细弱", "沉细", "涩", "弦细"]),
         creatable: true
       },
-      { key: "syndromeBasis", label: "辨证依据", kind: "textarea", rows: 4, span: 2 },
+      {
+        key: "syndromeBasis",
+        label: "辨证依据自动生成与修订",
+        kind: "template-text",
+        rows: 4,
+        span: 2,
+        templateGenerator: "syndromeBasis",
+        overrideKey: "syndromeBasisOverride",
+        sourceHashKey: "syndromeBasisSourceHash",
+        confirmedKey: "syndromeBasisConfirmed"
+      },
       {
         key: "treatmentPrinciple",
         label: "治法治则",
         kind: "multi",
         required: true,
-        options: options(["健脾祛湿", "益气托毒", "活血化瘀", "清热利湿", "润肠通便", "消肿止痛"]),
+        options: options(["健脾祛湿", "益气托毒", "活血化瘀", "清热利湿", "润肠通便", "消肿止痛", "益气升提", "养阴生津"]),
         creatable: true,
         span: 2
+      },
+      {
+        key: "comorbidTcmItems",
+        label: "合并病中医辨证明细",
+        kind: "repeatable",
+        addLabel: "添加合并症辨证",
+        span: 2,
+        fields: [
+          {
+            key: "westernComorbidity",
+            label: "西医合并症",
+            kind: "select",
+            options: options(["高血压", "糖尿病", "冠心病", "慢性胃炎", "便秘", "直肠炎", "其他"]),
+            creatable: true,
+            required: true
+          },
+          {
+            key: "includedInTcm",
+            label: "是否纳入中医辨证",
+            kind: "select",
+            options: [
+              { label: "是", value: true },
+              { label: "否", value: false }
+            ],
+            required: true
+          },
+          {
+            key: "tcmDisease",
+            label: "中医病名",
+            kind: "select",
+            optionsFor: form => options(tcmDiseaseByWestern[form.westernComorbidity] || []),
+            creatable: true,
+            visible: form => form.includedInTcm === true
+          },
+          {
+            key: "syndrome",
+            label: "证型",
+            kind: "select",
+            optionsFor: form => options(syndromesByTcmDisease[form.tcmDisease] || []),
+            creatable: true,
+            visible: form => form.includedInTcm === true
+          },
+          { key: "note", label: "补充说明", kind: "input" }
+        ]
       }
     ]
   },
@@ -575,73 +821,208 @@ export const preAiStages: PreAiStageConfig[] = [
     code: "DOCTOR",
     title: "医生诊断与治疗方案",
     shortTitle: "医生",
-    owner: "医生",
+    owner: "主管医生",
     roles: ["admin", "doctor"],
-    description: "医生确认最终分支，填写西医诊断与真实治疗计划。",
+    description: "医生确认最终分支、西医诊断、诊断依据和真实治疗计划。",
     fields: [
       { key: "finalRoute", label: "最终门诊/住院分支", kind: "select", required: true, options: routeOptions },
-      { key: "routeOverrideReason", label: "更改接诊建议的原因", kind: "input", span: 2 },
       {
         key: "primaryWesternDiagnosis",
         label: "西医主诊断",
         kind: "select",
         required: true,
-        options: options(["混合痔", "肛瘘", "肛裂", "直肠黏膜脱垂", "直肠息肉", "结肠息肉", "直肠前突", "肛周脓肿"]),
+        options: options(["混合痔", "内痔", "外痔", "肛裂", "肛瘘", "肛周脓肿", "直肠脱垂", "直肠前突", "直肠息肉", "其他"]),
+        creatable: true
+      },
+      {
+        key: "secondaryDiagnosisItems",
+        label: "西医次诊断与合并症",
+        kind: "repeatable",
+        addLabel: "添加次诊断",
+        span: 2,
+        fields: [
+          {
+            key: "name",
+            label: "诊断名称",
+            kind: "select",
+            options: options([
+              "肛裂",
+              "肛瘘",
+              "肛周脓肿",
+              "直肠息肉",
+              "直肠炎",
+              "高血压",
+              "糖尿病",
+              "冠心病",
+              "肛门松弛",
+              "其他"
+            ]),
+            creatable: true,
+            required: true
+          },
+          {
+            key: "category",
+            label: "分类",
+            kind: "select",
+            options: [
+              { label: "局部次诊断", value: "LOCAL" },
+              { label: "全身合并症", value: "COMORBIDITY" }
+            ],
+            required: true
+          }
+        ]
+      },
+      {
+        key: "diagnosisEvidence",
+        label: "诊断依据来源",
+        kind: "multi",
+        options: options(["主诉符合", "专科检查支持", "肛门镜支持", "化验支持", "肠镜支持", "影像支持", "既往病史支持", "其他"]),
         creatable: true,
         span: 2
       },
       {
-        key: "secondaryWesternDiagnoses",
-        label: "西医次诊断",
+        key: "diagnosisBasis",
+        label: "诊断依据自动生成与修订",
+        kind: "template-text",
+        rows: 3,
+        span: 2,
+        templateGenerator: "diagnosisBasis",
+        overrideKey: "diagnosisBasisOverride",
+        sourceHashKey: "diagnosisBasisSourceHash",
+        confirmedKey: "diagnosisBasisConfirmed"
+      },
+      {
+        key: "differentialDiagnoses",
+        label: "待排/鉴别诊断",
         kind: "multi",
-        options: options([
-          "肛乳头肥大",
-          "直肠炎",
-          "肛门湿疹",
-          "血栓外痔",
-          "内痔",
-          "便秘",
-          "慢性胃炎",
-          "肠易激综合征",
-          "高血压",
-          "糖尿病",
-          "冠心病",
-          "肛门松弛"
-        ]),
+        optionsFor: form =>
+          options(
+            form.primaryWesternDiagnosis === "混合痔"
+              ? ["直肠息肉", "直肠癌", "肛裂"]
+              : form.primaryWesternDiagnosis === "肛瘘"
+                ? ["肛周脓肿", "藏毛窦", "化脓性汗腺炎"]
+                : form.primaryWesternDiagnosis === "肛裂"
+                  ? ["肛周感染", "克罗恩病相关溃疡", "肛管肿瘤"]
+                  : ["直肠癌", "炎症性肠病", "其他"]
+          ),
         creatable: true,
-        placeholder: "可直接输入后回车添加",
         span: 2
       },
-      { key: "diagnosisBasis", label: "诊断依据", kind: "textarea", rows: 3, span: 2 },
-      { key: "differentialDiagnoses", label: "待排/鉴别诊断", kind: "textarea", rows: 3, span: 2 },
       { key: "treatmentPath", label: "治疗方式", kind: "select", required: true, options: treatmentOptions },
-      { key: "treatmentPlan", label: "治疗方案", kind: "textarea", required: true, rows: 4, span: 2 },
       {
-        key: "plannedOperationName",
-        label: "拟行手术名称",
+        key: "treatmentMeasures",
+        label: "主要措施",
         kind: "multi",
-        options: options([
-          "混合痔外剥内扎术",
-          "内痔套扎术",
-          "肛瘘切除术",
-          "肛裂切除术",
-          "肛周脓肿根治术",
-          "直肠黏膜悬吊术",
-          "直肠前突修补术",
-          "经肛直肠息肉切除术",
-          "结肠镜下息肉切除术（无痛）"
-        ]),
+        options: options(["饮食及排便指导", "中药内服", "中药熏洗", "局部换药", "止痛", "抗感染", "补液", "手术治疗", "其他"]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "medicationDirections",
+        label: "用药方向",
+        kind: "multi",
+        options: options(["清热利湿", "活血化瘀", "润肠通便", "抗感染", "止血", "止痛", "调节肠道菌群", "其他"]),
+        creatable: true
+      },
+      {
+        key: "examPlans",
+        label: "检查安排",
+        kind: "multi",
+        options: options(["血常规", "尿常规", "生化", "凝血", "术前八项", "心电", "影像", "肠镜", "病理", "其他"]),
+        creatable: true
+      },
+      {
+        key: "surgeryArrangements",
+        label: "手术安排",
+        kind: "multi",
+        options: options(["暂不手术", "择期手术", "急诊手术", "完善术前检查后手术", "其他"]),
+        creatable: true,
+        visible: form => form.treatmentPath === "SURGICAL"
+      },
+      {
+        key: "observationFocus",
+        label: "观察重点",
+        kind: "multi",
+        options: options(["便血", "疼痛", "脱出", "排便", "体温", "创面渗血", "尿潴留", "其他"]),
+        creatable: true
+      },
+      { key: "admissionSeverity", label: "入院病情", kind: "select", options: options(["一般", "急", "危", "重"]) },
+      { key: "treatmentCategory", label: "治疗类别", kind: "select", options: options(["中医", "西医", "中西医结合"]) },
+      {
+        key: "treatmentPlan",
+        label: "治疗方案自动生成与修订",
+        kind: "template-text",
+        required: true,
+        rows: 4,
+        span: 2,
+        templateGenerator: "treatmentPlan",
+        overrideKey: "treatmentPlanOverride",
+        sourceHashKey: "treatmentPlanSourceHash",
+        confirmedKey: "treatmentPlanConfirmed"
+      },
+      {
+        key: "plannedPrimaryOperation",
+        label: "拟行主术式",
+        kind: "select",
+        options: surgeryOptions,
         creatable: true,
         required: true,
+        visible: form => form.treatmentPath === "SURGICAL"
+      },
+      {
+        key: "plannedSecondaryOperations",
+        label: "拟行次术式/附加操作",
+        kind: "multi",
+        options: surgeryOptions,
+        creatable: true,
+        visible: form => form.treatmentPath === "SURGICAL"
+      },
+      {
+        key: "operationIndications",
+        label: "手术指征",
+        kind: "multi",
+        options: options([
+          "症状反复",
+          "保守治疗无效",
+          "出血明显",
+          "疼痛明显",
+          "脱出影响生活",
+          "存在感染",
+          "存在梗阻风险",
+          "病理性质待明确",
+          "其他"
+        ]),
+        creatable: true,
         visible: form => form.treatmentPath === "SURGICAL",
         span: 2
       },
-      { key: "plannedOperationSite", label: "拟手术部位", kind: "input", visible: form => form.treatmentPath === "SURGICAL" },
       {
-        key: "plannedOperationPlan",
-        label: "手术计划",
-        kind: "textarea",
-        rows: 3,
+        key: "plannedOperationSite",
+        label: "拟手术部位",
+        kind: "select",
+        options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "其他"]),
+        creatable: true,
+        visible: form => form.treatmentPath === "SURGICAL"
+      },
+      {
+        key: "recommendedAnesthesia",
+        label: "麻醉建议",
+        kind: "select",
+        options: options(["局麻", "骶麻", "硬膜外麻醉", "腰麻", "静脉麻醉", "全麻"]),
+        creatable: true,
+        visible: form => form.treatmentPath === "SURGICAL"
+      },
+      {
+        key: "operationGrade",
+        label: "手术等级",
+        kind: "select",
+        options: options(["一级", "二级", "三级", "四级", "待确认"]),
+        visible: form => form.treatmentPath === "SURGICAL"
+      },
+      {
+        key: "specialOperationPlan",
+        label: "特殊计划（可选）",
+        kind: "input",
         visible: form => form.treatmentPath === "SURGICAL",
         span: 2
       }
@@ -656,28 +1037,30 @@ export const preAiStages: PreAiStageConfig[] = [
     description: "只登记实际发生的手术和术中结果。门诊及非手术患者会自动跳过。",
     fields: [
       {
-        key: "actualOperationName",
-        label: "实际手术名称",
-        kind: "multi",
+        key: "actualPrimaryOperation",
+        label: "实际主术式",
+        kind: "select",
         required: true,
-        options: options([
-          "混合痔外剥内扎术",
-          "内痔套扎术",
-          "肛瘘切除术",
-          "肛裂切除术",
-          "肛周脓肿根治术",
-          "直肠黏膜悬吊术",
-          "直肠前突修补术",
-          "经肛直肠息肉切除术",
-          "结肠镜下息肉切除术（无痛）"
-        ]),
-        creatable: true,
-        span: 2
+        options: surgeryOptions,
+        creatable: true
+      },
+      {
+        key: "actualSecondaryOperations",
+        label: "实际次术式及附加操作",
+        kind: "multi",
+        options: surgeryOptions,
+        creatable: true
       },
       { key: "operationDate", label: "手术日期", kind: "date", required: true },
       { key: "operationStartTime", label: "开始时间", kind: "datetime" },
       { key: "operationEndTime", label: "结束时间", kind: "datetime" },
-      { key: "operationSite", label: "手术部位", kind: "input" },
+      {
+        key: "operationSite",
+        label: "手术部位",
+        kind: "select",
+        options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "其他"]),
+        creatable: true
+      },
       {
         key: "anesthesiaMethod",
         label: "麻醉方式",
@@ -685,8 +1068,64 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["局麻", "骶麻", "硬膜外麻醉", "静脉麻醉（无痛肠镜）"]),
         creatable: true
       },
-      { key: "intraoperativeFindings", label: "术中所见", kind: "textarea", required: true, rows: 4, span: 2 },
-      { key: "procedurePerformed", label: "实际实施步骤", kind: "textarea", required: true, rows: 4, span: 2 },
+      {
+        key: "intraoperativeFindingOptions",
+        label: "术中所见模板短语",
+        kind: "multi",
+        options: options([
+          "病灶位置与术前检查一致",
+          "局部组织充血水肿",
+          "病灶边界清楚",
+          "未见活动性大出血",
+          "括约肌结构可辨",
+          "未见明显异常占位",
+          "其他"
+        ]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "intraoperativeFindings",
+        label: "术中所见自动生成与修订",
+        kind: "template-text",
+        required: true,
+        rows: 4,
+        span: 2,
+        templateGenerator: "surgeryFindings",
+        overrideKey: "intraoperativeFindingsOverride",
+        sourceHashKey: "intraoperativeFindingsSourceHash",
+        confirmedKey: "intraoperativeFindingsConfirmed"
+      },
+      {
+        key: "procedureStepOptions",
+        label: "实际实施步骤模板短语",
+        kind: "multi",
+        options: options([
+          "常规消毒铺巾",
+          "麻醉满意后开始手术",
+          "显露并确认病灶",
+          "按计划完成主术式",
+          "完成附加操作",
+          "彻底止血",
+          "清点器械敷料无误",
+          "创面覆盖敷料",
+          "其他"
+        ]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "procedurePerformed",
+        label: "实际实施步骤自动生成与修订",
+        kind: "template-text",
+        required: true,
+        rows: 4,
+        span: 2,
+        templateGenerator: "procedureSteps",
+        overrideKey: "procedurePerformedOverride",
+        sourceHashKey: "procedurePerformedSourceHash",
+        confirmedKey: "procedurePerformedConfirmed"
+      },
       {
         key: "specimenPathology",
         label: "标本/病理送检",
@@ -694,11 +1133,19 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["未送检", "标本已送病理", "组织已送病理", "息肉已送病理"]),
         creatable: true
       },
+      { key: "bloodLossMeasurement", label: "术中出血量", kind: "measurement", unitOptions: ["mL"], abnormalOptions },
       {
-        key: "bloodLossDrainDressing",
-        label: "出血、引流和敷料",
+        key: "drainageOptions",
+        label: "引流",
         kind: "multi",
-        options: options(["术中出血少", "已彻底止血", "留置引流", "未留置引流", "敷料包扎固定", "油纱填塞"]),
+        options: options(["未留置引流", "留置引流条", "留置引流管", "其他"]),
+        creatable: true
+      },
+      {
+        key: "dressingOptions",
+        label: "敷料",
+        kind: "multi",
+        options: options(["敷料包扎固定", "油纱填塞", "纱布覆盖", "其他"]),
         creatable: true
       },
       {
@@ -715,7 +1162,47 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["返回病房", "留观室观察", "转上级医院", "其他"]),
         creatable: true
       },
-      { key: "postoperativeHandoff", label: "术后交接说明", kind: "textarea", required: true, rows: 3, span: 2 }
+      {
+        key: "postoperativeHandoffOptions",
+        label: "术后交接状态",
+        kind: "multi",
+        options: options([
+          "生命体征平稳",
+          "意识清楚",
+          "创面敷料固定",
+          "引流通畅",
+          "标本已交接",
+          "医嘱已交接",
+          "返回病房",
+          "留观",
+          "其他"
+        ]),
+        creatable: true,
+        span: 2
+      },
+      {
+        key: "postoperativeHandoff",
+        label: "术后交接自动生成与修订",
+        kind: "template-text",
+        required: true,
+        rows: 3,
+        span: 2,
+        templateGenerator: "handoff",
+        overrideKey: "postoperativeHandoffOverride",
+        sourceHashKey: "postoperativeHandoffSourceHash",
+        confirmedKey: "postoperativeHandoffConfirmed"
+      },
+      {
+        key: "physicianConfirmed",
+        label: "手术医生确认",
+        kind: "select",
+        required: true,
+        options: [
+          { label: "尚未确认", value: false as any },
+          { label: "已由手术医生确认", value: true as any }
+        ],
+        span: 2
+      }
     ]
   },
   {
@@ -731,24 +1218,194 @@ export const preAiStages: PreAiStageConfig[] = [
 
 export const auxiliaryTaskFields: Record<PreAiAuxiliaryTaskType, PreAiFieldConfig[]> = {
   LAB: [
-    { key: "project", label: "检验项目", kind: "input", required: true },
+    {
+      key: "project",
+      label: "检验项目/检验组",
+      kind: "select",
+      required: true,
+      options: options(["血常规", "尿常规", "生化", "凝血", "术前八项", "血型及Rh", "其他"]),
+      creatable: true
+    },
     { key: "sampledAt", label: "采样时间", kind: "datetime" },
     { key: "reportedAt", label: "报告时间", kind: "datetime" },
     { key: "result", label: "检验结果", kind: "textarea", required: true, rows: 4, span: 2 },
     { key: "abnormalItems", label: "异常项", kind: "textarea", rows: 3 },
-    { key: "conclusion", label: "结论", kind: "textarea", required: true, rows: 3 }
+    { key: "conclusion", label: "结论", kind: "textarea", required: true, rows: 3 },
+    { key: "rawReport", label: "原始报告全文（兜底）", kind: "textarea", rows: 3, span: 2 }
   ],
   ECG: [
     { key: "examinedAt", label: "检查时间", kind: "datetime", required: true },
-    { key: "findings", label: "主要表现", kind: "textarea", required: true, rows: 4, span: 2 },
-    { key: "conclusion", label: "结论", kind: "textarea", required: true, rows: 3, span: 2 }
+    {
+      key: "findings",
+      label: "主要表现",
+      kind: "multi",
+      required: true,
+      options: options(["窦性心律", "心率正常", "心动过速", "心动过缓", "ST-T改变", "房性早搏", "室性早搏", "传导阻滞", "其他"]),
+      creatable: true,
+      span: 2
+    },
+    {
+      key: "conclusion",
+      label: "结论",
+      kind: "select",
+      required: true,
+      options: options(["正常心电图", "大致正常心电图", "异常心电图", "建议复查", "建议心内科会诊", "其他"]),
+      creatable: true,
+      span: 2
+    },
+    { key: "rawReport", label: "原始报告全文（兜底）", kind: "textarea", rows: 3, span: 2 }
   ],
   IMAGING: [
-    { key: "modality", label: "检查类型", kind: "input", required: true },
-    { key: "bodyPart", label: "检查部位", kind: "input", required: true },
+    {
+      key: "modality",
+      label: "检查类型",
+      kind: "select",
+      required: true,
+      options: options(["超声", "X线", "CT", "MRI", "其他"]),
+      creatable: true
+    },
+    {
+      key: "bodyPart",
+      label: "检查部位",
+      kind: "select",
+      required: true,
+      options: options(["胸部", "腹部", "盆腔", "肝胆胰脾", "泌尿系", "肛周", "其他"]),
+      creatable: true
+    },
     { key: "examinedAt", label: "检查时间", kind: "datetime" },
-    { key: "findings", label: "主要表现", kind: "textarea", required: true, rows: 4, span: 2 },
-    { key: "conclusion", label: "结论", kind: "textarea", required: true, rows: 3, span: 2 }
+    {
+      key: "findings",
+      label: "主要表现",
+      kind: "multi",
+      required: true,
+      options: options(["未见明显异常", "炎症表现", "占位性病变", "积液", "结石", "淋巴结增大", "其他"]),
+      creatable: true,
+      span: 2
+    },
+    {
+      key: "conclusion",
+      label: "结论",
+      kind: "select",
+      required: true,
+      options: options(["未见明显异常", "异常，建议结合临床", "建议复查", "建议进一步检查", "其他"]),
+      creatable: true,
+      span: 2
+    },
+    { key: "rawReport", label: "原始报告全文（兜底）", kind: "textarea", rows: 3, span: 2 }
+  ],
+  VITAL_SIGNS: [
+    { key: "measuredAt", label: "测量时间", kind: "datetime", required: true },
+    { key: "systolicBp", label: "收缩压", kind: "measurement", required: true, unitOptions: ["mmHg"], abnormalOptions },
+    { key: "diastolicBp", label: "舒张压", kind: "measurement", required: true, unitOptions: ["mmHg"], abnormalOptions },
+    { key: "temperature", label: "体温", kind: "measurement", required: true, unitOptions: ["℃"], abnormalOptions },
+    { key: "pulse", label: "脉搏", kind: "measurement", required: true, unitOptions: ["次/分"], abnormalOptions },
+    { key: "respiration", label: "呼吸", kind: "measurement", required: true, unitOptions: ["次/分"], abnormalOptions },
+    {
+      key: "nursingConditions",
+      label: "特殊护理情况",
+      kind: "multi",
+      options: options(["无需特殊护理", "跌倒风险", "压疮风险", "疼痛护理", "术前准备", "术后观察", "其他"]),
+      creatable: true,
+      span: 2
+    },
+    { key: "note", label: "异常补充", kind: "textarea", rows: 2, span: 2 }
+  ],
+  COLONOSCOPY: [
+    {
+      key: "status",
+      label: "肠镜状态",
+      kind: "select",
+      required: true,
+      options: [
+        { label: "未查", value: "NOT_DONE" },
+        { label: "已查", value: "COMPLETED" },
+        { label: "患者拒绝", value: "REFUSED" },
+        { label: "暂缓", value: "DEFERRED" }
+      ]
+    },
+    { key: "examinedAt", label: "检查时间", kind: "datetime", visible: form => form.status === "COMPLETED", required: true },
+    {
+      key: "scope",
+      label: "检查范围",
+      kind: "select",
+      options: options(["直肠", "直乙结肠", "全结肠", "回盲部", "其他"]),
+      creatable: true,
+      visible: form => form.status === "COMPLETED",
+      required: true
+    },
+    {
+      key: "findings",
+      label: "肠镜所见",
+      kind: "multi",
+      options: options(["未见明显异常", "直肠炎", "结肠炎", "息肉", "溃疡", "憩室", "占位", "其他"]),
+      creatable: true,
+      visible: form => form.status === "COMPLETED",
+      required: true,
+      span: 2
+    },
+    {
+      key: "lesionLocation",
+      label: "病变部位",
+      kind: "multi",
+      options: options(["直肠", "乙状结肠", "降结肠", "横结肠", "升结肠", "回盲部", "其他"]),
+      creatable: true,
+      visible: form => form.status === "COMPLETED"
+    },
+    { key: "lesionCount", label: "数量", kind: "number", visible: form => form.status === "COMPLETED" },
+    {
+      key: "lesionSize",
+      label: "大小",
+      kind: "measurement",
+      unitOptions: ["mm", "cm"],
+      abnormalOptions,
+      visible: form => form.status === "COMPLETED"
+    },
+    {
+      key: "lesionMorphology",
+      label: "形态",
+      kind: "multi",
+      options: options(["有蒂", "亚蒂", "广基", "扁平", "表面光滑", "表面充血", "易出血", "其他"]),
+      creatable: true,
+      visible: form => form.status === "COMPLETED"
+    },
+    {
+      key: "biopsyPerformed",
+      label: "活检",
+      kind: "select",
+      options: options(["未活检", "已活检"]),
+      visible: form => form.status === "COMPLETED"
+    },
+    {
+      key: "resectionPerformed",
+      label: "切除",
+      kind: "select",
+      options: options(["未切除", "已切除", "部分切除"]),
+      visible: form => form.status === "COMPLETED"
+    },
+    {
+      key: "pathologySubmitted",
+      label: "送病理",
+      kind: "select",
+      options: options(["未送病理", "已送病理"]),
+      visible: form => form.status === "COMPLETED"
+    },
+    {
+      key: "conclusion",
+      label: "肠镜结论",
+      kind: "template-text",
+      templateGenerator: "colonoscopyConclusion",
+      visible: form => form.status === "COMPLETED",
+      required: true,
+      span: 2
+    },
+    {
+      key: "abnormalDescription",
+      label: "异常特殊描述（可选）",
+      kind: "textarea",
+      rows: 3,
+      visible: form => form.status === "COMPLETED",
+      span: 2
+    }
   ]
 };
 
@@ -772,5 +1429,7 @@ export const encounterStatusLabel: Record<string, string> = {
 export const auxiliaryTaskLabel: Record<PreAiAuxiliaryTaskType, string> = {
   LAB: "检验",
   ECG: "心电",
-  IMAGING: "影像"
+  IMAGING: "影像",
+  VITAL_SIGNS: "生命体征",
+  COLONOSCOPY: "肠镜"
 };

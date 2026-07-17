@@ -2,67 +2,102 @@
   <main class="display-shell" :class="{ offline }">
     <header class="display-header">
       <div class="header-primary">
-        <img class="brand-logo" src="@/assets/images/logo.jpg" alt="医院标识" />
-        <strong class="brand-title">固始中医肛肠医院</strong>
-        <span class="header-divider"></span>
-        <strong class="system-title">检查接诊排队</strong>
-        <span class="header-divider"></span>
-        <strong class="clock-time">{{ clock }}</strong>
+        <span class="medical-mark"><i></i><i></i></span>
+        <div class="brand-copy">
+          <strong class="brand-title">门诊候诊叫号</strong>
+          <span>OUTPATIENT QUEUE DISPLAY</span>
+        </div>
       </div>
-      <span class="date-text">{{ dateText }}</span>
+      <div class="header-status">
+        <div class="date-clock">
+          <span>{{ dateText }}</span
+          ><strong>{{ clock }}</strong>
+        </div>
+        <span class="header-divider"></span>
+        <div class="health-chip">
+          <b>✓</b><span>{{ offline ? "连接恢复中" : "数据正常" }}</span>
+        </div>
+        <span class="header-divider"></span>
+        <button v-if="audioBlocked" class="header-audio" type="button" :disabled="audioEnabling" @click.stop="enableAudio">
+          <b>♪</b><span>{{ audioEnabling ? "开启中" : "开启语音" }}</span>
+        </button>
+        <div v-else class="health-chip audio"><b>♪</b><span>语音已开启</span></div>
+      </div>
     </header>
 
+    <div class="stage-flow-bar">
+      <span><b>01</b>检查室</span><i><em>检查完成 · 同号流转</em></i
+      ><span><b>02</b>接诊室</span>
+    </div>
+
     <section class="display-content">
-      <article v-for="panel in panels" :key="panel.stage" class="room-board" :class="roomClass(panel.room.room.status)">
+      <article
+        v-for="panel in panels"
+        :key="panel.stage"
+        class="room-board"
+        :class="[
+          roomClass(panel.room.room.status),
+          panel.stage === 'INSPECTION' ? 'inspection-board' : 'reception-board',
+          panel.room.calling.length ? 'has-calling' : 'is-idle'
+        ]"
+      >
         <div class="board-title">
-          <div>
-            <span class="section-seal">{{ panel.stage === "INSPECTION" ? "检" : "诊" }}</span>
-            <div>
-              <b>{{ panel.room.room.roomName }}</b>
-              <span>{{ roomStatusLabel(panel.room.room.status) }}</span>
-            </div>
+          <div class="room-identity">
+            <span class="stage-index">{{ panel.stage === "INSPECTION" ? "01" : "02" }}</span>
+            <b>{{ panel.room.room.roomName }}</b>
+            <span class="room-status-pill">{{ roomStatusLabel(panel.room.room.status) }}</span>
           </div>
-          <strong>{{ panel.room.waiting.length }}</strong>
+          <div class="waiting-count">
+            <span>等候</span><strong>{{ panel.room.waiting.length }}</strong
+            ><span>人</span>
+          </div>
         </div>
 
         <section class="calling-section">
-          <span class="section-caption">{{ panel.stage === "INSPECTION" ? "检查候诊区" : "接诊候诊区" }}</span>
-          <div class="room-focus-card">
-            <i>{{ panel.stage === "INSPECTION" ? "检" : "诊" }}</i>
-            <strong>{{ panel.stage === "INSPECTION" ? "请等候检查叫号" : "请等候接诊叫号" }}</strong>
-            <p>{{ roomEmptyText(panel.room.room.status) }}</p>
-            <span>叫号时将弹窗提示并语音播报</span>
+          <div class="section-caption">当前叫号</div>
+          <div class="room-focus-card" :class="{ empty: !panel.room.calling.length }">
+            <template v-if="panel.room.calling[0]">
+              <strong class="focus-number">{{ panel.room.calling[0].publicNo }}</strong>
+              <div class="focus-guidance">
+                <small>请前往</small>
+                <p>{{ panel.room.room.roomName }}</p>
+              </div>
+            </template>
+            <template v-else
+              ><strong class="empty-state-title">{{ roomEmptyText(panel.room.room.status) }}</strong></template
+            >
           </div>
         </section>
 
         <section class="waiting-section">
           <div class="waiting-head">
-            <span>等待号码</span>
-            <em>请留意屏幕并保持安静</em>
+            <span>接下来</span><em>{{ panel.room.waiting.length }} 人等候</em>
           </div>
           <transition-group v-if="panel.room.waiting.length" name="queue-list" tag="div" class="waiting-grid">
-            <div v-for="row in panel.room.waiting.slice(0, 12)" :key="row.id" class="waiting-item">
-              <strong>{{ row.publicNo }}</strong>
-              <span :class="row.visitType === 'FOLLOW_UP' ? 'follow-up' : 'first-visit'">
+            <div
+              v-for="(row, index) in panel.room.waiting.slice(0, 6)"
+              :key="row.id"
+              class="waiting-item"
+              :class="{ next: index === 0 }"
+            >
+              <div class="waiting-number">
+                <small v-if="index === 0">下一位</small>
+                <strong>{{ row.publicNo }}</strong>
+              </div>
+              <span class="visit-tag" :class="row.visitType === 'FOLLOW_UP' ? 'follow-up' : 'first-visit'">
                 {{ visitTypeLabel(row.visitType) }}
               </span>
             </div>
           </transition-group>
-          <div v-else class="waiting-empty">暂无等待患者</div>
+          <div v-else class="waiting-empty">当前暂无等候号码</div>
         </section>
       </article>
     </section>
 
     <footer class="display-footer">
-      <div class="footer-mark"><span>同号流转</span>检查完成后自动进入接诊队列</div>
+      <div class="footer-guide">请留意屏幕及语音播报</div>
       <div class="status">
-        <span :class="offline ? 'bad' : 'good'"></span>
-        {{ offline ? "连接中断，正在自动重连" : `更新于 ${lastUpdated}` }}
-        <button v-if="audioBlocked" class="audio-enable-button" type="button" :disabled="audioEnabling" @click.stop="enableAudio">
-          {{ audioEnabling ? "正在开启…" : "开启叫号语音" }}
-        </button>
-        <b v-else class="audio-enabled-text">✓ 叫号语音已开启</b>
-        <em v-if="audioMessage" class="audio-message">{{ audioMessage }}</em>
+        <span :class="offline ? 'bad' : 'good'"></span>{{ offline ? "连接中断，正在自动重连" : `最后更新 ${lastUpdated}` }}
       </div>
     </footer>
 
@@ -192,7 +227,7 @@ function roomEmptyText(status: QueueRoom["status"]) {
   if (status === "MANUAL_PAUSED") return "房间临时暂停叫号";
   if (status === "CLOSED") return "房间当前已停诊";
   if (status === "OFFLINE") return "房间终端暂时离线";
-  return "请留意下一次叫号";
+  return "当前暂无叫号";
 }
 
 async function refresh() {
@@ -401,409 +436,737 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
+/* 2026 门诊候诊导视：医疗蓝用于当前状态，薄荷绿用于流程与舒缓背景 */
 .display-shell {
-  --paper-bg: #f6faf8;
-  --paper-card: #fbfdfc;
-  --paper-soft: #f0f7f4;
-  --paper-active: #e5f2ed;
-  --ink: #29453f;
-  --ink-muted: #789089;
-  --green: #5a9b81;
-  --green-soft: #79b79e;
-  --line: #e1eee9;
-  min-height: 100vh;
+  --mint: #c6f8dd;
+  --blue: #0bb1ea;
+  --blue-deep: #087fa9;
+  --navy: #0a3d55;
+  --muted: #617d89;
+  --line: #d5e7eb;
+  --soft-blue: #f1faff;
+  --soft-mint: #f1fbf5;
+  box-sizing: border-box;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: clamp(64px, 9dvh, 96px) clamp(38px, 5dvh, 52px) minmax(0, 1fr) clamp(44px, 6dvh, 68px);
   overflow: hidden;
-  color: var(--ink);
-  background: var(--paper-bg);
+  color: var(--navy);
+  background:
+    radial-gradient(circle at 4% 0%, rgba(198, 248, 221, 0.34), transparent 26%),
+    linear-gradient(180deg, #f7fbfc 0%, #f2f8f9 100%);
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
-
 .display-header {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 104px;
-  padding: 14px 42px;
+  justify-content: space-between;
+  padding: 0 40px;
   border-bottom: 1px solid var(--line);
-  background: var(--paper-card);
+  color: var(--navy);
+  background: rgba(255, 255, 255, 0.94);
 }
-
-.header-primary {
+.display-header::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--mint) 0 42%, var(--blue) 100%);
+  content: "";
+}
+.header-primary,
+.header-status,
+.health-chip,
+.header-audio,
+.date-clock {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 18px;
 }
-
-.brand-logo {
-  width: 62px;
-  height: 62px;
-  padding: 3px;
-  object-fit: cover;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #ffffff;
+.header-primary {
+  gap: 16px;
 }
-
+.medical-mark {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: var(--blue);
+  box-shadow: 0 8px 18px rgba(11, 177, 234, 0.16);
+}
+.medical-mark::after {
+  position: absolute;
+  inset: 6px -6px -6px 6px;
+  z-index: -1;
+  border-radius: 15px;
+  background: rgba(198, 248, 221, 0.84);
+  content: "";
+}
+.medical-mark i {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  border-radius: 3px;
+  background: #fff;
+  transform: translate(-50%, -50%);
+}
+.medical-mark i:first-child {
+  width: 29px;
+  height: 9px;
+}
+.medical-mark i:last-child {
+  width: 9px;
+  height: 29px;
+}
+.brand-copy {
+  display: grid;
+  gap: 2px;
+}
 .brand-title {
-  font-size: 29px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  font-size: clamp(30px, 2.3vw, 40px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
 }
-
-.system-title {
-  color: var(--green);
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+.brand-copy span {
+  color: #8096a0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
 }
-
+.header-status {
+  gap: 16px;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+.date-clock {
+  gap: 14px;
+}
+.date-clock strong {
+  color: var(--navy);
+  font-size: 25px;
+  font-variant-numeric: tabular-nums;
+}
 .header-divider {
   width: 1px;
-  height: 38px;
-  margin: 0 4px;
-  background: #d9eae3;
+  height: 32px;
+  background: var(--line);
 }
-
-.clock-time {
-  color: var(--green);
-  font-size: 38px;
+.health-chip,
+.header-audio {
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid #dcebef;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: #f8fbfc;
+}
+.health-chip b,
+.header-audio b {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--blue-deep);
+  background: rgba(11, 177, 234, 0.1);
+  font-size: 14px;
+}
+.header-audio {
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
-  line-height: 1;
 }
-
-.date-text {
-  position: absolute;
-  right: 42px;
-  bottom: 14px;
-  color: var(--ink-muted);
+.header-audio:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.stage-flow-bar {
+  display: grid;
+  grid-template-columns: 1fr minmax(240px, 0.7fr) 1fr;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 32px 0;
+}
+.stage-flow-bar > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--navy);
+  font-size: 17px;
+  font-weight: 800;
+}
+.stage-flow-bar > span:last-child {
+  justify-content: flex-end;
+}
+.stage-flow-bar b {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--mint);
   font-size: 13px;
-  letter-spacing: 0.04em;
 }
-
+.stage-flow-bar i {
+  position: relative;
+  height: 1px;
+  background: #a9d7c0;
+  font-style: normal;
+}
+.stage-flow-bar i::after {
+  position: absolute;
+  top: -4px;
+  right: -1px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 8px solid #69ae8a;
+  content: "";
+}
+.stage-flow-bar em {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  padding: 0 8px;
+  color: #5f7e70;
+  background: #fff;
+  font-size: 12px;
+  font-style: normal;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
 .display-content {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px;
+  gap: 24px;
   min-height: 0;
-  padding: 24px 42px;
+  padding: 12px 32px 22px;
+  overflow: hidden;
 }
-
 .room-board {
+  --stage-accent: var(--blue);
+  --stage-soft: rgba(11, 177, 234, 0.045);
+  --stage-index-bg: #e9f8fc;
+  --stage-index-color: var(--blue-deep);
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(250px, 0.9fr) minmax(230px, 1.1fr);
+  grid-template-rows: clamp(64px, 14%, 100px) minmax(0, 36%) minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--paper-card);
-  box-shadow: 0 8px 24px rgba(55, 104, 86, 0.05);
-
-  &.paused .board-title {
-    background: #fff8e8;
-  }
-
-  &.emergency .board-title {
-    color: #9c4338;
-    background: #fff0ed;
-  }
-
-  &.closed {
-    filter: saturate(0.55);
-  }
+  border: 1px solid #cfe2e7;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 12px 34px rgba(32, 92, 112, 0.06);
 }
-
+.room-board.is-idle {
+  grid-template-rows: clamp(64px, 14%, 100px) minmax(0, 36%) minmax(0, 1fr);
+}
+.room-board.reception-board {
+  --stage-accent: #55b98b;
+  --stage-soft: rgba(198, 248, 221, 0.16);
+  --stage-index-bg: rgba(198, 248, 221, 0.5);
+  --stage-index-color: #287f60;
+}
+.room-board.paused {
+  border-color: #e2c57d;
+}
+.room-board.emergency {
+  border-color: #e59a94;
+}
+.room-board.closed {
+  border-color: #d8e0e3;
+  background: #fafcfc;
+}
 .board-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 78px;
-  padding: 0 24px;
+  padding: 0 26px;
   border-bottom: 1px solid var(--line);
-  background: var(--paper-soft);
-
-  > div {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-  }
-
-  > div > div {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  b {
-    color: #244f41;
-    font-size: clamp(30px, 2.6vw, 42px);
-    font-weight: 750;
-    letter-spacing: 0.12em;
-    text-shadow: 0 2px 0 rgba(255, 255, 255, 0.85);
-  }
-
-  span:not(.section-seal) {
-    color: var(--ink-muted);
-    font-size: 12px;
-  }
-
-  > strong {
-    color: var(--green);
-    font-size: 32px;
-    font-variant-numeric: tabular-nums;
-
-    &::after {
-      content: " 人等待";
-      color: var(--ink-muted);
-      font-size: 13px;
-      font-weight: 400;
-    }
-  }
+  background: var(--stage-soft);
 }
-
-.section-seal {
+.room-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+.stage-index {
   display: grid;
-  width: 54px;
-  height: 54px;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
   place-items: center;
-  border: 1px solid #cce3da;
-  border-radius: 15px;
-  color: #ffffff;
-  background: linear-gradient(145deg, #4f9277, #79b79e);
-  box-shadow: 0 8px 18px rgba(79, 146, 119, 0.18);
-  font:
-    29px "STSong",
-    "SimSun",
-    serif;
+  border-radius: 10px;
+  color: var(--stage-index-color);
+  background: var(--stage-index-bg);
+  font-size: 20px;
+  font-weight: 800;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
-
+.room-identity > b {
+  overflow: hidden;
+  font-size: clamp(31px, 2.4vw, 42px);
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-status-pill {
+  color: #748a93;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.room-board.paused .room-status-pill {
+  border-color: #edd79e;
+  color: #8a6408;
+  background: #fff8e7;
+}
+.room-board.emergency .room-status-pill {
+  border-color: #efb9b5;
+  color: #a8443d;
+  background: #fff0ee;
+}
+.room-board.closed .room-status-pill {
+  border-color: #d5dfe2;
+  color: #6f8088;
+  background: #f0f4f5;
+}
+.waiting-count {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 700;
+}
+.waiting-count strong {
+  color: var(--navy);
+  font-size: 38px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
 .calling-section {
-  position: relative;
-  display: grid;
-  place-items: center;
-  padding: 36px 24px 24px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdfc 100%);
-}
-
-.section-caption {
-  position: absolute;
-  top: 16px;
-  left: 24px;
-  color: var(--ink-muted);
-  font-size: 13px;
-  letter-spacing: 0.12em;
-}
-
-.room-focus-card {
-  width: min(500px, 94%);
-  padding: 24px 30px 22px;
-  border: 1px solid #c8e2d7;
-  border-radius: 20px;
-  background: linear-gradient(145deg, #ffffff, var(--paper-active));
-  text-align: center;
-  box-shadow: 0 14px 34px rgba(70, 132, 106, 0.1);
-
-  i {
-    display: grid;
-    width: 72px;
-    height: 72px;
-    margin: 0 auto;
-    place-items: center;
-    border-radius: 22px;
-    color: #ffffff;
-    background: linear-gradient(145deg, #4f9277, #79b79e);
-    box-shadow: 0 10px 22px rgba(79, 146, 119, 0.2);
-    font:
-      normal 38px "STSong",
-      "SimSun",
-      serif;
-  }
-
-  strong {
-    display: block;
-    margin-top: 16px;
-    color: #315f50;
-    font-size: clamp(25px, 2.3vw, 36px);
-    letter-spacing: 0.1em;
-  }
-
-  p {
-    margin: 10px 0 0;
-    color: var(--ink);
-    font-size: 17px;
-  }
-
-  span {
-    display: block;
-    margin-top: 12px;
-    color: var(--ink-muted);
-    font-size: 13px;
-    letter-spacing: 0.05em;
-  }
-}
-
-.waiting-section {
+  display: flex;
   min-height: 0;
-  padding: 18px 22px 22px;
+  flex-direction: column;
+  padding: 16px 24px 18px;
+  border-bottom: 1px solid var(--line);
 }
-
+.section-caption,
 .waiting-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e7f1ed;
-
-  span {
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-  }
-
-  em {
-    color: var(--ink-muted);
-    font-size: 12px;
-    font-style: normal;
-  }
+  color: var(--navy);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
-
-.waiting-grid {
+.section-caption {
+  padding-left: 10px;
+  border-left: 4px solid var(--stage-accent);
+}
+.waiting-head {
+  padding-left: 10px;
+  border-left: 4px solid #c8d9df;
+}
+.waiting-head em {
+  color: #879ca5;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 600;
+}
+.room-focus-card {
+  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  max-height: calc(100% - 45px);
-  overflow: auto;
-  padding-top: 12px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(116, 169, 147, 0.24) transparent;
+  flex: 1;
+  grid-template-columns: minmax(0, 1.3fr) minmax(170px, 0.7fr);
+  align-items: center;
+  margin-top: 8px;
+  padding: 10px 20px;
+  background: transparent;
 }
-
+.focus-number {
+  display: block;
+  justify-self: center;
+  color: var(--blue-deep);
+  font-size: clamp(64px, 6vw, 92px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+.focus-guidance {
+  min-width: 0;
+  display: flex;
+  align-self: stretch;
+  flex-direction: column;
+  justify-content: center;
+  padding-left: 24px;
+  border-left: 1px solid #d8e7eb;
+}
+.focus-guidance small {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 700;
+}
+.focus-guidance p {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: clamp(28px, 2.25vw, 38px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-guidance span {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 16px;
+}
+.room-focus-card.empty {
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  margin-top: 4px;
+  padding: 0;
+  background: transparent;
+}
+.empty-state-title {
+  color: #78919b;
+  font-size: clamp(24px, 2vw, 30px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.waiting-section {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px 22px;
+}
+.waiting-head {
+  margin-bottom: 12px;
+}
+.waiting-grid {
+  min-height: 0;
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(70px, 1fr));
+  gap: 12px;
+  overflow: hidden;
+}
 .waiting-item {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
-  min-height: 58px;
-  padding: 8px 12px;
-  border: 1px solid #e5f0ec;
-  border-radius: 12px;
-  background: #ffffff;
-
-  strong {
-    color: #568f79;
-    font-size: clamp(22px, 2vw, 31px);
-    font-variant-numeric: tabular-nums;
-  }
-
-  span {
-    padding: 4px 7px;
-    border-radius: 7px;
-    font-size: 11px;
-  }
-
-  .first-visit {
-    color: #658078;
-    background: #edf6f2;
-  }
-
-  .follow-up {
-    color: #926f32;
-    background: #fff4d9;
-  }
+  padding: 10px 15px;
+  overflow: hidden;
+  border-bottom: 1px solid #e0ebee;
+  background: #fff;
 }
-
+.waiting-item.next {
+  background: rgba(198, 248, 221, 0.2);
+}
+.waiting-number {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.waiting-number small {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--blue-deep);
+  background: rgba(11, 177, 234, 0.1);
+  font-size: 12px;
+  font-weight: 800;
+}
+.waiting-item strong {
+  overflow: hidden;
+  color: var(--navy);
+  font-size: clamp(27px, 2.25vw, 38px);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.visit-tag {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.waiting-item .first-visit {
+  color: var(--blue-deep);
+  background: #eaf8fd;
+}
+.waiting-item .follow-up {
+  color: #287f60;
+  background: #edf8f2;
+}
 .waiting-empty {
+  min-height: 0;
   display: grid;
-  height: calc(100% - 45px);
-  min-height: 120px;
+  flex: 1;
   place-items: center;
-  color: rgba(105, 132, 123, 0.62);
-  font-size: 17px;
+  color: #8ca3ac;
+  font-size: 19px;
 }
-
 .display-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 54px;
-  padding: 0 42px;
-  border-top: 1px solid var(--line);
-  color: var(--ink-muted);
-  background: #ffffff;
+  padding: 0 40px;
+  border-top: 1px solid #dbe8eb;
+  background: #f9fbfc;
 }
-
-.footer-mark {
-  font-family: "STSong", "SimSun", serif;
-  letter-spacing: 0.08em;
-
-  span {
-    margin-right: 10px;
-    color: var(--green);
-  }
+.footer-guide {
+  color: #617b87;
+  font-size: 15px;
+  font-weight: 600;
 }
-
 .status {
   display: flex;
   align-items: center;
   gap: 9px;
-
-  span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+.status > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.status .good {
+  background: #35b98d;
+  box-shadow: 0 0 0 5px rgba(53, 185, 141, 0.1);
+}
+.status .bad {
+  background: #e35f54;
+}
+.calling-overlay {
+  background: rgba(5, 52, 76, 0.62);
+  backdrop-filter: blur(8px);
+}
+.calling-card {
+  border: 3px solid var(--blue);
+  border-radius: 30px;
+  background: linear-gradient(145deg, #fff, var(--soft-mint));
+  box-shadow: 0 30px 100px rgba(2, 49, 75, 0.25);
+}
+.calling-card em {
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue));
+}
+.calling-card p {
+  color: var(--blue-deep);
+}
+.calling-card .calling-seal {
+  color: var(--blue-deep);
+  border-color: var(--line);
+}
+@media (max-width: 1280px) {
+  .display-header {
+    padding: 0 24px;
   }
-
-  .good {
-    background: #82bca5;
+  .header-status {
+    gap: 12px;
   }
-
-  .bad {
-    background: #cf6a5e;
+  .display-content {
+    gap: 14px;
+    padding: 8px 18px 14px;
   }
-
-  b {
-    margin-left: 14px;
-    color: var(--green);
-    font-weight: 500;
+  .room-board {
+    grid-template-rows: clamp(60px, 14%, 82px) minmax(0, 35%) minmax(0, 1fr);
+    border-radius: 16px;
+  }
+  .board-title {
+    padding: 0 18px;
+  }
+  .room-identity {
+    gap: 9px;
+  }
+  .stage-index {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    font-size: 16px;
+  }
+  .room-identity > b {
+    font-size: clamp(25px, 2.5vw, 34px);
+  }
+  .waiting-count {
+    gap: 4px;
+    font-size: 14px;
+  }
+  .waiting-count strong {
+    font-size: 30px;
+  }
+  .calling-section,
+  .waiting-section {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+  .room-focus-card {
+    grid-template-columns: minmax(0, 1.2fr) minmax(125px, 0.8fr);
+    padding: 6px 10px;
+  }
+  .focus-number {
+    font-size: clamp(48px, 5.5vw, 70px);
+  }
+  .focus-guidance {
+    padding-left: 14px;
+  }
+  .focus-guidance p {
+    font-size: clamp(22px, 2.25vw, 30px);
+  }
+  .waiting-grid {
+    gap: 8px;
+  }
+  .waiting-item {
+    padding: 8px 10px;
+  }
+  .waiting-item strong {
+    font-size: clamp(22px, 2.25vw, 30px);
+  }
+  .display-footer {
+    padding-right: 24px;
+    padding-left: 24px;
   }
 }
-
-.audio-enable-button {
-  min-width: 132px;
-  padding: 9px 17px;
-  border: 0;
-  border-radius: 999px;
-  color: #ffffff;
-  background: #4f9277;
-  box-shadow: 0 5px 14px rgba(79, 146, 119, 0.22);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 650;
-
-  &:active {
-    transform: translateY(1px);
+@media (max-width: 800px) {
+  .display-shell {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    grid-template-rows: auto auto auto auto;
+    overflow: auto;
   }
-
-  &:disabled {
-    cursor: wait;
-    opacity: 0.72;
+  .display-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
   }
-}
-
-.audio-enabled-text {
-  color: #3d8067 !important;
-  font-weight: 650 !important;
-}
-
-.audio-message {
-  color: var(--ink-muted);
-  font-size: 12px;
-  font-style: normal;
+  .header-status {
+    width: 100%;
+    justify-content: space-between;
+    font-size: 14px;
+  }
+  .health-chip span,
+  .header-audio span,
+  .brand-copy span {
+    display: none;
+  }
+  .brand-title {
+    font-size: 28px;
+  }
+  .medical-mark {
+    width: 48px;
+    height: 48px;
+  }
+  .date-clock > span,
+  .header-divider {
+    display: none;
+  }
+  .display-content {
+    grid-template-columns: 1fr;
+    padding: 14px;
+    overflow: visible;
+  }
+  .room-board {
+    min-height: 790px;
+    grid-template-rows: 92px 260px minmax(400px, 1fr);
+    border-radius: 14px;
+  }
+  .board-title {
+    padding: 0 16px;
+  }
+  .stage-index {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+    border-radius: 11px;
+    font-size: 17px;
+  }
+  .room-identity {
+    gap: 9px;
+  }
+  .room-identity > b {
+    font-size: 28px;
+  }
+  .room-status-pill {
+    padding: 5px 9px;
+    font-size: 12px;
+  }
+  .waiting-count {
+    gap: 4px;
+    font-size: 14px;
+  }
+  .waiting-count strong {
+    font-size: 30px;
+  }
+  .calling-section,
+  .waiting-section {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+  .room-focus-card {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    text-align: center;
+  }
+  .focus-guidance {
+    align-items: center;
+    padding: 12px 0 0;
+    border-top: 1px solid #cbe7ef;
+    border-left: 0;
+  }
+  .focus-guidance p {
+    font-size: 28px;
+  }
+  .waiting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(78px, 1fr));
+  }
+  .waiting-number {
+    gap: 5px;
+  }
+  .waiting-number small {
+    display: none;
+  }
+  .waiting-item strong {
+    font-size: 27px;
+  }
+  .visit-tag {
+    margin-left: 5px;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  .display-footer {
+    min-height: 100px;
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 18px;
+  }
+  .footer-guide {
+    width: 100%;
+    text-align: left;
+  }
+  .status {
+    font-size: 14px;
+  }
 }
 
 .calling-overlay {
@@ -812,74 +1175,142 @@ onBeforeUnmount(() => {
   z-index: 20;
   display: grid;
   place-items: center;
-  background: rgba(56, 91, 79, 0.46);
 }
-
 .calling-card {
   position: relative;
   width: min(780px, 78vw);
-  padding: 68px 50px 62px;
-  border: 1px solid #c4dfd4;
-  border-radius: 24px;
-  background: #ffffff;
-  box-shadow: 0 24px 70px rgba(48, 91, 75, 0.12);
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: clamp(42px, 7vmin, 68px) clamp(24px, 5vmin, 50px) clamp(34px, 6vmin, 62px);
+  overflow: auto;
   text-align: center;
+}
+.calling-card .calling-seal {
+  position: absolute;
+  top: 24px;
+  left: 28px;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 12px;
+  font-size: 26px;
+}
+.calling-card em {
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+.calling-card p {
+  margin: 0;
+  font-size: clamp(50px, 9vmin, 78px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+.calling-card strong {
+  display: block;
+  margin-top: 18px;
+  font-size: clamp(30px, 5.5vmin, 48px);
+  letter-spacing: 0.14em;
+}
+.calling-card h2 {
+  margin: 30px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: clamp(18px, 3vmin, 27px);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+}
 
-  .calling-seal {
-    position: absolute;
-    top: 24px;
-    left: 28px;
-    display: grid;
-    width: 46px;
-    height: 46px;
-    place-items: center;
-    border: 1px solid #bdddd0;
+@media (max-height: 760px) and (min-width: 801px) {
+  .display-shell {
+    grid-template-rows: clamp(58px, 8dvh, 72px) 34px minmax(0, 1fr) clamp(38px, 5dvh, 48px);
+  }
+  .display-header {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+  .medical-mark {
+    width: 42px;
+    height: 42px;
     border-radius: 12px;
-    color: var(--green);
-    font:
-      26px "STSong",
-      "SimSun",
-      serif;
   }
-
-  em {
-    display: inline-block;
-    margin-bottom: 12px;
-    padding: 7px 18px;
-    border-radius: 999px;
-    color: #ffffff;
-    background: #4f9277;
-    font-size: 18px;
-    font-style: normal;
-    font-weight: 600;
-    letter-spacing: 0.12em;
+  .brand-title {
+    font-size: clamp(24px, 2vw, 31px);
   }
-
-  p {
-    margin: 0;
-    color: #4f9277;
-    font-size: 78px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.08em;
+  .date-clock strong {
+    font-size: 21px;
   }
-
-  strong {
-    display: block;
-    margin-top: 18px;
-    font-size: 48px;
-    letter-spacing: 0.14em;
+  .health-chip,
+  .header-audio {
+    padding: 5px 9px;
   }
-
-  h2 {
-    margin: 30px 0 0;
-    padding-top: 24px;
-    border-top: 1px solid var(--line);
-    color: var(--ink-muted);
-    font-size: 27px;
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    line-height: 1.6;
+  .stage-flow-bar {
+    padding: 3px 24px 0;
+  }
+  .stage-flow-bar b {
+    width: 25px;
+    height: 25px;
+  }
+  .stage-flow-bar em {
+    top: -16px;
+  }
+  .display-content {
+    gap: 12px;
+    padding: 6px 18px 10px;
+  }
+  .room-board,
+  .room-board.is-idle {
+    grid-template-rows: minmax(54px, 13%) minmax(0, 34%) minmax(0, 1fr);
+  }
+  .calling-section,
+  .waiting-section {
+    padding-top: 9px;
+    padding-bottom: 10px;
+  }
+  .section-caption,
+  .waiting-head {
+    font-size: 16px;
+  }
+  .waiting-head {
+    margin-bottom: 6px;
+  }
+  .room-focus-card {
+    margin-top: 3px;
+  }
+  .focus-number {
+    font-size: clamp(43px, 5vw, 62px);
+  }
+  .focus-guidance small,
+  .focus-guidance span {
+    font-size: 12px;
+  }
+  .waiting-grid {
+    grid-template-rows: repeat(2, minmax(48px, 1fr));
+    gap: 5px;
+  }
+  .waiting-item {
+    padding: 5px 8px;
+  }
+  .waiting-item strong {
+    font-size: clamp(20px, 2vw, 27px);
+  }
+  .visit-tag {
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+  .display-footer,
+  .status {
+    font-size: 13px;
   }
 }
 
@@ -902,7 +1333,7 @@ onBeforeUnmount(() => {
 }
 
 .offline::after {
-  content: "网络连接异常，正在自动恢复";
+  content: "数据连接异常 · 当前信息可能未更新";
   position: fixed;
   top: 0;
   left: 50%;
@@ -912,55 +1343,5 @@ onBeforeUnmount(() => {
   border-radius: 0 0 8px 8px;
   color: #ffffff;
   background: #9b4038;
-}
-
-@media (max-width: 1280px) {
-  .display-shell {
-    overflow: auto;
-  }
-
-  .display-header,
-  .display-footer {
-    padding-right: 24px;
-    padding-left: 24px;
-  }
-
-  .display-content {
-    grid-template-columns: 1fr;
-    padding: 20px 24px;
-  }
-
-  .room-board {
-    min-height: 680px;
-  }
-}
-
-@media (max-width: 800px) {
-  .brand-title,
-  .system-title,
-  .date-text {
-    display: none;
-  }
-
-  .header-primary {
-    gap: 12px;
-  }
-
-  .clock-time {
-    font-size: 30px;
-  }
-
-  .waiting-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .display-footer {
-    align-items: flex-start;
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-    padding-top: 8px;
-    padding-bottom: 8px;
-  }
 }
 </style>

@@ -62,6 +62,14 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "来访及交费参考信息已保存", service.updateVisitMeta(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PutMapping("/{encounterId}/duty-assignments")
+    public ApiResult<Map<String, Object>> saveDutyAssignments(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.DutyAssignmentsRequest request
+    ) {
+        return ApiResult.of(200, "病例岗位安排已保存", service.saveDutyAssignments(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PutMapping("/{encounterId}/stages/{stageCode}")
     public ApiResult<Map<String, Object>> saveStage(
         @PathVariable String encounterId,
@@ -206,5 +214,4 @@ public class PreAiEncounterController {
             .body(download.resource());
     }
 }
-
 

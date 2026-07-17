@@ -30,7 +30,7 @@ const manualChunks = (id: string) => {
 
 // @see: https://vitejs.dev/config/
 export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
-  const root = process.cwd();
+  const root = resolve(__dirname);
   const env = loadEnv(mode, root);
   const viteEnv = wrapperEnv(env);
 

@@ -10,6 +10,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   admin: ["*"],
   frontdesk: [
     "/home/index",
+    "/pre-ai",
+    "/pre-ai/encounters",
     "/workbench/upload",
     "/workbench/lab-report",
     "/patients",
@@ -27,6 +29,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   ],
   inspection: [
     "/home/index",
+    "/pre-ai",
+    "/pre-ai/encounters",
     "/workbench/upload",
     "/workbench/lab-report",
     "/patients",
@@ -44,6 +48,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   ],
   reception: [
     "/home/index",
+    "/pre-ai",
+    "/pre-ai/encounters",
     "/patients",
     "/patients/list",
     "/patients/detail/:id",
@@ -111,6 +117,8 @@ const ROLE_MENU_PATHS: Record<string, string[]> = {
   decoction: ["/home/index", "/tcm-pharmacy", "/tcm-pharmacy/tcm", "/tcm-pharmacy/workbench", "/tcm-pharmacy/display"],
   doctor: [
     "/home/index",
+    "/pre-ai",
+    "/pre-ai/encounters",
     "/workbench/lab-report",
     "/patients",
     "/patients/list",

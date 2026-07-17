@@ -35,6 +35,47 @@ public class ClinicQueueController {
         return ApiResult.of(200, "排队号码已生成", service.issue(request, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/print-template")
+    public ApiResult<Map<String, Object>> printTemplate() {
+        return ApiResult.success(service.printTemplate(AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/print-template")
+    public ApiResult<Map<String, Object>> savePrintTemplate(@RequestBody ClinicQueueService.PrintTemplateRequest request) {
+        return ApiResult.of(200, "票据模板已保存", service.savePrintTemplate(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/print-template/test-payload")
+    public ApiResult<Map<String, Object>> testPrintPayload(@RequestBody ClinicQueueService.PrintTaskRequest request) {
+        return ApiResult.success(service.testPrintPayload(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/print-terminals/register")
+    public ApiResult<Map<String, Object>> registerPrintTerminal(@RequestBody ClinicQueueService.PrintTerminalRequest request) {
+        return ApiResult.of(200, "打印终端已登记", service.registerPrintTerminal(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/tickets/{ticketId}/print-tasks")
+    public ApiResult<Map<String, Object>> createPrintTask(
+        @PathVariable String ticketId,
+        @RequestBody ClinicQueueService.PrintTaskRequest request
+    ) {
+        return ApiResult.of(200, "打印任务已创建", service.createPrintTask(ticketId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/print-tasks/{id}/result")
+    public ApiResult<Map<String, Object>> completePrintTask(
+        @PathVariable String id,
+        @RequestBody ClinicQueueService.PrintResultRequest request
+    ) {
+        return ApiResult.of(200, "打印结果已记录", service.completePrintTask(id, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/tickets/{ticketId}/print-tasks")
+    public ApiResult<Map<String, Object>> printTasks(@PathVariable String ticketId) {
+        return ApiResult.success(service.printTasks(ticketId, AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/tickets/{ticketId}")
     public ApiResult<Map<String, Object>> workspace(@PathVariable String ticketId) {
         return ApiResult.success(service.workspace(ticketId, AuthPermission.currentUserOrThrow()));

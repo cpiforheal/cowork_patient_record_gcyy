@@ -317,7 +317,7 @@ function Test-PidFileProcess([string]$Path, [string]$ProcessName) {
 function Test-BackendReady {
     try {
         $health = Invoke-RestMethod -Uri "http://127.0.0.1:$env:SERVER_PORT/health" -Method Get -TimeoutSec 3
-        return ($health.status -eq "ok" -and $health.service -eq "coshare-patientrecord-backend")
+        return ($health.status -in @("ok", "degraded") -and $health.service -eq "coshare-patientrecord-backend")
     } catch {
         return $false
     }
