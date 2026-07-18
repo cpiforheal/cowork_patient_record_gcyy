@@ -23,7 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.17.1";
+    public static final String VERSION = "2026.07.18.1";
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
 
     private final List<NavigationMenu> menus = buildMenus();
@@ -34,6 +34,7 @@ public class AuthNavigationService {
         shortcut("科室资料上传", "定位患者后上传资料", "UploadFilled", "/workbench/upload"),
         shortcut("检验报告录入", "录入并复核检验结果", "Memo", "/workbench/lab-report"),
         shortcut("文书生成", "生成并下载临床文书", "DocumentAdd", "/templates/ai-document"),
+        shortcut("进销存管理", "科室申领、库存与自动扣减", "Box", "/inventory/overview"),
         shortcut("中药房工作台", "收费、审方、调剂和取药", "MedicineBox", "/tcm-pharmacy/workbench"),
         shortcut("检查接诊叫号", "管理检查与接诊双队列", "Guide", "/tcm-pharmacy/clinic-queue/workbench"),
         shortcut("档案审核", "退回整改或通过归档", "Tickets", "/audit/review"),
@@ -99,6 +100,17 @@ public class AuthNavigationService {
             redirect("/workbench/legacy", "workbenchLegacy", "/workbench/upload?tab=legacy", "旧共享病历导入", "FolderOpened", true)
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "FirstAidKit",
+            group("/inventory", "inventory", "/inventory/overview", "进销存管理", "Box",
+                page("/inventory/overview", "inventoryOverview", "/inventory/manage/index", "进销存主控台", "Monitor", false, false, false),
+                page("/inventory/executive", "inventoryExecutive", "/inventory/manage/index", "领导驾驶舱", "TrendCharts", false, false, false),
+                page("/inventory/requests", "inventoryRequests", "/inventory/manage/index", "科室申领审批", "Tickets", false, false, false),
+                page("/inventory/stock", "inventoryStock", "/inventory/manage/index", "库存与批次", "Box", false, false, false),
+                page("/inventory/items", "inventoryItems", "/inventory/manage/index", "物资档案", "Goods", false, false, false),
+                page("/inventory/weekly", "inventoryWeekly", "/inventory/manage/index", "周消耗预估", "DataLine", false, false, false),
+                page("/inventory/packages", "inventoryPackages", "/inventory/manage/index", "使用套餐与自动扣减", "CollectionTag", false, false, false),
+                page("/inventory/controls", "inventoryControls", "/inventory/manage/index", "盘点与控制", "SetUp", false, false, false),
+                page("/inventory/trace", "inventoryTrace", "/inventory/manage/index", "全链路追溯", "Search", false, false, false)
+            ),
             page("/tcm-pharmacy/workbench", "tcmPharmacyWorkbench", "/tcmPharmacy/workbench/index", "中药房工作台", "MedicineBox", false, false, false),
             page("/tcm-pharmacy/display", "tcmPharmacyDisplayMenu", "/tcmPharmacy/display/index", "取药展示大屏", "Monitor", true, true, false),
             page("/tcm-pharmacy/clinic-queue/workbench", "clinicQueueWorkbench", "/clinicQueue/workbench/index", "检查接诊叫号", "Guide", false, false, false),
@@ -168,7 +180,16 @@ public class AuthNavigationService {
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read,charge:confirm,review:execute,dispensing:execute,decoction:execute,pickup:execute",
             "tcmPharmacyDisplayMenu=display:read,announcement:play",
             "clinicQueueWorkbench=queue:read,queue:issue,queue:intervene,inspection:operate,reception:operate,room:control,audit:read",
-            "clinicQueueDisplayMenu=display:read,announcement:play"
+            "clinicQueueDisplayMenu=display:read,announcement:play",
+            "inventoryOverview=inventory:read,inventory:request,inventory:receive,inventory:approve,inventory:count,inventory:export",
+            "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
+            "inventoryRequests=inventory:read,inventory:request,inventory:receive,inventory:approve,inventory:export",
+            "inventoryStock=inventory:read,inventory:count,inventory:export",
+            "inventoryItems=inventory:read,inventory:approve",
+            "inventoryWeekly=inventory:read,inventory:request,inventory:count,inventory:export",
+            "inventoryPackages=inventory:read,inventory:approve",
+            "inventoryControls=inventory:read,inventory:count,inventory:export",
+            "inventoryTrace=inventory:read,inventory:export"
         );
         result.put("admin", new RolePolicy(Set.of("*"), allButtons));
 
@@ -177,34 +198,56 @@ public class AuthNavigationService {
         Set<String> preAi = paths("/pre-ai/encounters");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
+        Set<String> inventoryStaff = paths(
+            "/inventory/overview", "/inventory/requests", "/inventory/weekly", "/inventory/packages"
+        );
+        Set<String> inventoryQuality = paths(
+            "/inventory/overview", "/inventory/executive", "/inventory/requests", "/inventory/weekly",
+            "/inventory/packages", "/inventory/controls", "/inventory/trace"
+        );
+        Map<String, List<String>> inventoryStaffButtons = permissions(
+            "inventoryOverview=inventory:read,inventory:request,inventory:receive",
+            "inventoryRequests=inventory:read,inventory:request,inventory:receive",
+            "inventoryWeekly=inventory:read,inventory:request",
+            "inventoryPackages=inventory:read"
+        );
+        Map<String, List<String>> inventoryQualityButtons = permissions(
+            "inventoryOverview=inventory:read,inventory:approve,inventory:count,inventory:export",
+            "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
+            "inventoryRequests=inventory:read,inventory:approve,inventory:export",
+            "inventoryWeekly=inventory:read,inventory:count,inventory:export",
+            "inventoryPackages=inventory:read,inventory:approve",
+            "inventoryControls=inventory:read,inventory:count,inventory:export",
+            "inventoryTrace=inventory:read,inventory:export"
+        );
 
-        result.put("frontdesk", role(union(patientFlow, materials, preAi, clinicQueue), permissions(
+        result.put("frontdesk", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff), mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
             "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:create,patient:read,patient:update",
             "patientDetail=field:read,field:edit,document:read,document:upload,document:download",
             "clinicQueueWorkbench=queue:read,queue:issue,queue:intervene,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
-        )));
-        result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue), permissions(
+        ), inventoryStaffButtons)));
+        result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff), mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
             "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload",
             "clinicQueueWorkbench=queue:read,inspection:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
-        )));
+        ), inventoryStaffButtons)));
         result.put("reception", role(union(patientFlow, preAi, clinicQueue), permissions(
             "home=view", "encounterActive=patient:read,field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         )));
 
-        Map<String, List<String>> diagnosticButtons = permissions(
+        Map<String, List<String>> diagnosticButtons = mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:upload",
             "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload"
-        );
-        result.put("lab", role(union(patientFlow, materials), diagnosticButtons));
-        result.put("ecg", role(union(patientFlow, materials), diagnosticButtons));
-        result.put("ultrasound", role(union(patientFlow, materials), diagnosticButtons));
-        result.put("nurse", role(union(patientFlow, materials), diagnosticButtons));
-        result.put("nursing", role(union(patientFlow, materials), diagnosticButtons));
+        ), inventoryStaffButtons);
+        result.put("lab", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
+        result.put("ecg", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
+        result.put("ultrasound", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
+        result.put("nurse", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
+        result.put("nursing", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
 
         result.put("tcm", role(union(patientFlow, tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
@@ -223,21 +266,25 @@ public class AuthNavigationService {
             "home=view", "tcmPharmacyWorkbench=decoction:execute,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
         )));
 
-        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record", "/templates/ai-document"), tcmPharmacy, clinicQueue), permissions(
+        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record", "/templates/ai-document"), tcmPharmacy, clinicQueue, inventoryStaff), mergePermissions(permissions(
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "encounterActive=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
-        )));
-        result.put("quality", role(union(patientFlow, paths(
+        ), inventoryStaffButtons)));
+        result.put("quality", role(union(patientFlow, inventoryQuality, paths(
             "/workbench/lab-report", "/templates/record", "/templates/ai-document", "/documents/recycle", "/audit/review", "/audit/log"
-        )), permissions(
+        )), mergePermissions(permissions(
             "home=view", "workbenchLabReport=patient:search,field:read,document:read", "encounterActive=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,document:read,document:void,document:download",
             "documentRecycle=document:restore,document:read", "auditReview=audit:read,quality:approve,quality:reject", "auditLog=audit:read,audit:export"
-        )));
-        result.put("manager", role(paths("/home/index", "/templates/record", "/templates/ai-document"), permissions(
-            "home=view", "recordTemplate=field:read"
+        ), inventoryQualityButtons)));
+        result.put("manager", role(paths(
+            "/home/index", "/templates/record", "/templates/ai-document",
+            "/inventory/overview", "/inventory/executive", "/inventory/packages"
+        ), permissions(
+            "home=view", "recordTemplate=field:read", "inventoryOverview=inventory:read",
+            "inventoryExecutive=inventory:read,inventory:export", "inventoryPackages=inventory:read"
         )));
         return Map.copyOf(result);
     }
@@ -256,6 +303,13 @@ public class AuthNavigationService {
                 .toList();
             result.put(routeName, values);
         }
+        return Map.copyOf(result);
+    }
+
+    @SafeVarargs
+    private static Map<String, List<String>> mergePermissions(Map<String, List<String>>... groups) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        for (Map<String, List<String>> group : groups) result.putAll(group);
         return Map.copyOf(result);
     }
 

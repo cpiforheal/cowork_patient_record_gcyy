@@ -29,6 +29,7 @@ public class SecurityConfig {
                     "/templates/**",
                     "/encounters/**",
                     "/pre-ai/**",
+                    "/inventory/**",
                     "/tcm-pharmacy/**",
                     "/favicon.ico",
                     "/assets/**",
@@ -37,7 +38,14 @@ public class SecurityConfig {
                     "/auth/options",
                     "/auth/options/accounts"
                 ).permitAll()
-                .requestMatchers("/health/db", "/auth/logout", "/auth/password", "/auth/navigation", "/clinic-api/**").authenticated()
+                .requestMatchers(
+                    "/health/db",
+                    "/auth/logout",
+                    "/auth/password",
+                    "/auth/navigation",
+                    "/clinic-api/**",
+                    "/inventory-api/**"
+                ).authenticated()
                 .anyRequest().authenticated()
             )
             .httpBasic(httpBasic -> httpBasic.disable())

@@ -253,6 +253,148 @@
       ]
     },
     {
+      "path": "/inventory",
+      "name": "inventory",
+      "redirect": "/inventory/overview",
+      "meta": {
+        "icon": "Box",
+        "title": "进销存管理",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/inventory/overview",
+          "name": "inventoryOverview",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Monitor",
+            "title": "进销存主控台",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/executive",
+          "name": "inventoryExecutive",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "TrendCharts",
+            "title": "领导驾驶舱",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/requests",
+          "name": "inventoryRequests",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Tickets",
+            "title": "科室申领审批",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/stock",
+          "name": "inventoryStock",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Box",
+            "title": "库存与批次",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/items",
+          "name": "inventoryItems",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Goods",
+            "title": "物资档案",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/weekly",
+          "name": "inventoryWeekly",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "DataLine",
+            "title": "周消耗预估",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/packages",
+          "name": "inventoryPackages",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "CollectionTag",
+            "title": "使用套餐与自动扣减",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/controls",
+          "name": "inventoryControls",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Checked",
+            "title": "盘点退回报损",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/trace",
+          "name": "inventoryTrace",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "DocumentChecked",
+            "title": "追溯报表",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        }
+      ]
+    },
+    {
       "path": "/audit",
       "name": "audit",
       "redirect": "/audit/log",

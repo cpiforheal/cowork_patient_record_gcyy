@@ -7,6 +7,7 @@ import com.coshare.patientrecord.clinicqueue.ClinicQueueService;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
 import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
+import com.coshare.patientrecord.inventory.service.InventoryPackageService;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -40,6 +41,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -149,6 +152,7 @@ public class PreAiEncounterService {
     private final ClinicFileService fileService;
     private final PreAiPrivacyService privacyService;
     private final ClinicQueueService clinicQueueService;
+    private final InventoryPackageService inventoryPackageService;
     private final Path generatedDir;
 
     public PreAiEncounterService(
@@ -158,6 +162,7 @@ public class PreAiEncounterService {
         ClinicFileService fileService,
         PreAiPrivacyService privacyService,
         ClinicQueueService clinicQueueService,
+        InventoryPackageService inventoryPackageService,
         @Value("${clinic.generated-pre-ai-dir:${clinic.attachment-dir}/../generated-pre-ai}") String generatedDir
     ) {
         this.jdbcTemplate = jdbcTemplate;
@@ -166,6 +171,7 @@ public class PreAiEncounterService {
         this.fileService = fileService;
         this.privacyService = privacyService;
         this.clinicQueueService = clinicQueueService;
+        this.inventoryPackageService = inventoryPackageService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
 
@@ -748,6 +754,19 @@ public class PreAiEncounterService {
             """, now(), user.name(), user.role(), now(), encounterId);
         String auditDetail = criticalCount > 0 ? "医生确认全部前置事实，并已阅 " + criticalCount + " 项危急值" : "医生确认全部前置事实";
         audit(encounterId, "review.confirm", "REVIEW", user, auditDetail);
+        String caseToken = text(encounter, "caseToken");
+        String route = text(encounter, "route");
+        String visitDate = text(encounter.path("patient"), "visitDate");
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    inventoryPackageService.consumeEncounter(encounterId, caseToken, route, user.department(), visitDate, user);
+                } catch (Exception error) {
+                    log.warn("Inventory consumption skipped encounterId={} department={}", encounterId, user.department(), error);
+                }
+            }
+        });
         return toMap(workspace(encounterId, user));
     }
 

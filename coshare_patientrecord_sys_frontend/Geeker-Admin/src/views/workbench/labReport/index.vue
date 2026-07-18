@@ -10,27 +10,33 @@
 
     <section class="patient-strip">
       <div class="search-row">
-        <el-input
-          v-model="keyword"
+        <el-select
+          v-model="selectedPatientKey"
           size="large"
+          filterable
           clearable
-          placeholder="输入患者姓名、门诊/住院号或手机号后四位"
-          @keyup.enter="searchPatients"
-        />
-        <el-button type="primary" size="large" :icon="Search" :loading="searching" @click="searchPatients">查找患者</el-button>
-      </div>
-
-      <div v-if="matchedPatients.length" class="patient-results">
-        <button
-          v-for="patient in matchedPatients"
-          :key="patient.id"
-          :class="{ active: selectedPatient?.id === patient.id }"
-          @click="selectPatient(patient)"
+          class="patient-picker"
+          :loading="searching"
+          placeholder="搜索今日患者姓名、门诊/住院号后选择"
+          @focus="loadTodayPatients"
+          @change="handlePatientSelection"
+          @clear="clearPatientSelection"
         >
-          <strong>{{ patient.name }}</strong>
-          <span>{{ patient.visitNo }} · {{ patient.visitType }} · {{ patient.visitDate }}</span>
-          <el-tag :type="patient.riskType || 'info'" effect="plain">{{ patient.status }}</el-tag>
-        </button>
+          <el-option
+            v-for="patient in matchedPatients"
+            :key="patientPickerKey(patient)"
+            :label="`${patient.name} ${patient.visitNo} ${patient.visitDate}`"
+            :value="patientPickerKey(patient)"
+          >
+            <div class="patient-option">
+              <strong>{{ patient.name }}</strong>
+              <span>{{ patient.visitNo }} · {{ patient.visitType }} · {{ patient.visitDate || "今日" }}</span>
+            </div>
+          </el-option>
+        </el-select>
+        <el-button type="primary" plain size="large" :icon="Search" :loading="searching" @click="refreshTodayPatients">
+          刷新患者
+        </el-button>
       </div>
 
       <el-alert
@@ -232,6 +238,7 @@ import { roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { labReportTemplates, labTemplateById, metricReference, metricStorageKey, type LabTemplateId } from "./templates";
 import { buildLabReportSummary } from "./summary";
+import type { PreAiEncounterSummary } from "@/api/modules/clinic/preAi";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -247,8 +254,9 @@ type LabPatientCandidate = PatientRow & {
   preAiGender?: string;
 };
 
-const keyword = ref("");
 const searching = ref(false);
+const selectedPatientKey = ref("");
+const todayPatientsLoaded = ref(false);
 const saving = ref(false);
 const matchedPatients = ref<LabPatientCandidate[]>([]);
 const selectedPatient = ref<LabPatientCandidate | null>(null);
@@ -261,6 +269,39 @@ const formValues = reactive<Record<string, string>>({});
 const numericValues = reactive<Record<string, number | undefined>>({});
 const ecgFiles = ref<UploadUserFile[]>([]);
 const previewRef = ref<HTMLElement>();
+
+const patientPickerKey = (patient: LabPatientCandidate) =>
+  patient.preAiEncounterId ? `encounter:${patient.preAiEncounterId}` : `patient:${patient.legacyPatientId || patient.id}`;
+
+const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounterSummary[]) => {
+  const candidates = new Map<string, LabPatientCandidate>();
+  legacyPatients.forEach(patient => candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id }));
+  encounters.forEach(encounter => {
+    const linkedKey = encounter.sourcePatientId ? `legacy:${encounter.sourcePatientId}` : "";
+    if (linkedKey && candidates.has(linkedKey)) {
+      Object.assign(candidates.get(linkedKey)!, { preAiEncounterId: encounter.id, preAiGender: encounter.gender });
+      return;
+    }
+    candidates.set(`preai:${encounter.id}`, {
+      id: `preai:${encounter.id}`,
+      name: encounter.patientName,
+      visitNo: encounter.caseToken,
+      visitDate: encounter.visitDate,
+      visitType: encounter.route === "INPATIENT" ? "住院" : "门诊",
+      doctor: "",
+      currentStage: encounter.currentStage,
+      completedCount: 0,
+      progressPercent: 0,
+      status: encounter.status,
+      riskType: "info",
+      createdAt: encounter.createdAt,
+      updatedAt: encounter.updatedAt,
+      preAiEncounterId: encounter.id,
+      preAiGender: encounter.gender
+    });
+  });
+  return Array.from(candidates.values());
+};
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
 const canSaveActiveTemplate = computed(() =>
@@ -291,56 +332,52 @@ const hydrateTemplateValues = () => {
 
 watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
 
-const searchPatients = async () => {
+const loadTodayPatients = async () => {
+  if (todayPatientsLoaded.value || searching.value) return;
   searching.value = true;
   try {
+    const currentDate = today();
     const [{ data }, { data: preAiData }] = await Promise.all([
-      getPatientListApi({ pageNum: 1, pageSize: 5000 }),
+      getPatientListApi({
+        pageNum: 1,
+        pageSize: 5000,
+        visitDateFrom: `${currentDate} 00:00:00`,
+        visitDateTo: `${currentDate} 23:59:59`
+      }),
       getPreAiEncountersApi()
     ]);
-    const candidates = new Map<string, LabPatientCandidate>();
-    data.list.forEach(patient => candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id }));
-    preAiData.list.forEach(encounter => {
-      const linkedKey = encounter.sourcePatientId ? `legacy:${encounter.sourcePatientId}` : "";
-      if (linkedKey && candidates.has(linkedKey)) {
-        Object.assign(candidates.get(linkedKey)!, { preAiEncounterId: encounter.id, preAiGender: encounter.gender });
-        return;
-      }
-      candidates.set(`preai:${encounter.id}`, {
-        id: `preai:${encounter.id}`,
-        name: encounter.patientName,
-        visitNo: encounter.caseToken,
-        visitDate: encounter.visitDate,
-        visitType: encounter.route === "INPATIENT" ? "住院" : "门诊",
-        doctor: "",
-        currentStage: encounter.currentStage,
-        completedCount: 0,
-        progressPercent: 0,
-        status: encounter.status,
-        riskType: "info",
-        createdAt: encounter.createdAt,
-        updatedAt: encounter.updatedAt,
-        preAiEncounterId: encounter.id,
-        preAiGender: encounter.gender
-      });
-    });
-    const normalized = keyword.value.trim().toLowerCase();
-    matchedPatients.value = Array.from(candidates.values()).filter(patient => {
-      if (!normalized) return true;
-      return (
-        patient.name.toLowerCase().includes(normalized) ||
-        patient.visitNo.toLowerCase().includes(normalized) ||
-        patient.doctor.toLowerCase().includes(normalized)
-      );
-    });
-    if (!matchedPatients.value.length) ElMessage.warning("没有找到匹配患者");
+    const todayEncounters = preAiData.list.filter(encounter => encounter.visitDate?.startsWith(currentDate));
+    matchedPatients.value = mergeCandidates(data.list, todayEncounters);
+    todayPatientsLoaded.value = true;
+  } catch {
+    matchedPatients.value = [];
+    ElMessage.warning("今日患者列表加载失败，可点击刷新重试");
   } finally {
     searching.value = false;
   }
 };
 
+const refreshTodayPatients = async () => {
+  todayPatientsLoaded.value = false;
+  await loadTodayPatients();
+};
+
+const handlePatientSelection = async (key?: string) => {
+  const patient = matchedPatients.value.find(item => patientPickerKey(item) === key);
+  if (patient) await selectPatient(patient);
+};
+
+const clearPatientSelection = () => {
+  selectedPatient.value = null;
+  selectedPatientKey.value = "";
+  patientGender.value = "";
+  patientFieldValues.value = {};
+  resetTemplateValues();
+};
+
 const selectPatient = async (patient: LabPatientCandidate) => {
   selectedPatient.value = patient;
+  selectedPatientKey.value = patientPickerKey(patient);
   patientGender.value = patient.preAiGender || "";
   patientFieldValues.value = {};
   if (!patient.legacyPatientId) {
@@ -401,8 +438,8 @@ const loadPatientFromRoute = async () => {
         }
       }
       selectedPatient.value = candidate;
+      selectedPatientKey.value = patientPickerKey(candidate);
       matchedPatients.value = [candidate];
-      keyword.value = `${candidate.name} ${candidate.visitNo}`;
       patientGender.value = candidate.preAiGender || "";
       hydrateTemplateValues();
       return;
@@ -410,8 +447,8 @@ const loadPatientFromRoute = async () => {
     const { data } = await getPatientDetailApi(routePatientId);
     const candidate: LabPatientCandidate = { ...data.patient, legacyPatientId: data.patient.id };
     selectedPatient.value = candidate;
+    selectedPatientKey.value = patientPickerKey(candidate);
     matchedPatients.value = [candidate];
-    keyword.value = `${data.patient.name} ${data.patient.visitNo}`;
     patientGender.value = data.fieldValues.gender || "";
     patientFieldValues.value = data.fieldValues || {};
     hydrateTemplateValues();
@@ -422,7 +459,10 @@ const loadPatientFromRoute = async () => {
   }
 };
 
-onMounted(loadPatientFromRoute);
+onMounted(async () => {
+  await loadTodayPatients();
+  await loadPatientFromRoute();
+});
 watch(() => route.query.patientId, loadPatientFromRoute);
 watch(() => route.query.encounterId, loadPatientFromRoute);
 
@@ -675,26 +715,19 @@ const printPreview = async () => {
   gap: 10px;
 }
 
-.patient-results {
-  display: grid;
-  gap: 8px;
+.patient-picker {
+  width: 100%;
+}
 
-  button {
-    display: grid;
-    grid-template-columns: 110px minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-    padding: 10px 12px;
-    text-align: left;
-    cursor: pointer;
-    background: #ffffff;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 6px;
+.patient-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 
-    &.active {
-      background: var(--el-color-primary-light-9);
-      border-color: var(--el-color-primary-light-5);
-    }
+  span {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
   }
 }
 
@@ -909,7 +942,6 @@ const printPreview = async () => {
   }
 
   .search-row,
-  .patient-results button,
   .metric-row,
   .report-paper .patient-line {
     grid-template-columns: 1fr;
