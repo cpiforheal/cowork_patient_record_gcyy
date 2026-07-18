@@ -53,6 +53,14 @@
             :disabled="disabled"
             @update:model-value="value => patchRow(rowIndex, child.key, value)"
           />
+          <CreatableSelect
+            v-else-if="child.kind === 'select' && child.creatable"
+            :model-value="row[child.key]"
+            :options="childOptions(child, row)"
+            :placeholder="child.placeholder || `请选择或直接输入${child.label}`"
+            :disabled="disabled"
+            @update:model-value="value => patchRow(rowIndex, child.key, value)"
+          />
           <el-select
             v-else-if="child.kind === 'select' || child.kind === 'multi'"
             :model-value="row[child.key]"
@@ -131,6 +139,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { PreAiFieldConfig } from "../fieldConfig";
+import CreatableSelect from "./CreatableSelect.vue";
 
 const props = defineProps<{
   field: PreAiFieldConfig;

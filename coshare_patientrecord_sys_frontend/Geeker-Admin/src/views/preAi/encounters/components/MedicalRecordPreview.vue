@@ -102,11 +102,7 @@
         </div>
         <template v-else-if="section.rows.length">
           <div class="document-fields summary-fields">
-            <div
-              v-for="row in summaryRows(section)"
-              :key="row.key"
-              :class="{ wide: row.wide, abnormal: row.abnormal }"
-            >
+            <div v-for="row in summaryRows(section)" :key="row.key" :class="{ wide: row.wide, abnormal: row.abnormal }">
               <strong>{{ row.label }}：</strong>
               <span>{{ row.value }}</span>
               <el-tag v-if="row.abnormal" type="danger" size="small" effect="dark">异常</el-tag>
@@ -115,11 +111,7 @@
           <details v-if="detailRows(section).length" class="section-details">
             <summary>展开其余 {{ detailRows(section).length }} 项事实</summary>
             <div class="document-fields detail-fields">
-              <div
-                v-for="row in detailRows(section)"
-                :key="row.key"
-                :class="{ wide: row.wide, abnormal: row.abnormal }"
-              >
+              <div v-for="row in detailRows(section)" :key="row.key" :class="{ wide: row.wide, abnormal: row.abnormal }">
                 <strong>{{ row.label }}：</strong>
                 <span>{{ row.value }}</span>
                 <el-tag v-if="row.abnormal" type="danger" size="small" effect="dark">异常</el-tag>
@@ -150,7 +142,11 @@ const previewInspectionImages = computed(() => props.inspectionImages || []);
 const inspectionImageUrls = computed(() =>
   previewInspectionImages.value.map(image => image.url).filter((url): url is string => Boolean(url))
 );
-const summaryRows = (section: DocumentPreviewSection) => section.rows.filter(row => row.abnormal).concat(section.rows.filter(row => !row.abnormal)).slice(0, 4);
+const summaryRows = (section: DocumentPreviewSection) =>
+  section.rows
+    .filter(row => row.abnormal)
+    .concat(section.rows.filter(row => !row.abnormal))
+    .slice(0, 4);
 const detailRows = (section: DocumentPreviewSection) => {
   const summaryKeys = new Set(summaryRows(section).map(row => row.key));
   return section.rows.filter(row => !summaryKeys.has(row.key));

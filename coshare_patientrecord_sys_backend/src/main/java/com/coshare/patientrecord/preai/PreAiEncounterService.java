@@ -36,6 +36,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -185,6 +186,150 @@ public class PreAiEncounterService {
     }
 
     @Transactional
+    public Map<String, Object> registerAndIssue(RegisterAndIssueRequest request, SessionUser user) {
+        requireRole(user, "admin", "frontdesk");
+        String clientRequestId = validateRegistrationRequestId(request == null ? "" : request.clientRequestId());
+
+        List<String> existing = jdbcTemplate.query(
+            "SELECT id FROM pre_ai_encounters WHERE registration_request_id = ? LIMIT 1",
+            (rs, rowNum) -> rs.getString("id"), clientRequestId
+        );
+        if (!existing.isEmpty()) return registerAndIssueResult(existing.get(0), user);
+
+        ObjectNode patient = sanitizeStageData("REGISTRATION", request.patient());
+        validateStage("REGISTRATION", patient, null);
+        String patientCaseId = createPatientCase(patient, "");
+        ObjectNode created;
+        try {
+            created = createEncounterInternal(
+                patient, "", patientCaseId, 1, "", objectMapper.createObjectNode(), objectMapper.createObjectNode(), user, clientRequestId
+            );
+        } catch (DuplicateKeyException duplicate) {
+            List<String> concurrent = jdbcTemplate.query(
+                "SELECT id FROM pre_ai_encounters WHERE registration_request_id = ? LIMIT 1",
+                (rs, rowNum) -> rs.getString("id"), clientRequestId
+            );
+            if (concurrent.isEmpty()) throw duplicate;
+            jdbcTemplate.update("DELETE FROM pre_ai_patient_cases WHERE id = ? AND NOT EXISTS (SELECT 1 FROM pre_ai_encounters WHERE patient_case_id = ?)", patientCaseId, patientCaseId);
+            return registerAndIssueResult(concurrent.get(0), user);
+        }
+
+        String encounterId = text(created.path("encounter"), "id");
+        updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(), 0);
+        audit(encounterId, "registration.complete-and-issue", "REGISTRATION", user, "就诊登记完成并生成检查接诊号码");
+        refreshProgress(encounterId);
+        return registerAndIssueResult(encounterId, user);
+    }
+
+    @Transactional
+    public Map<String, Object> createFollowUpAndIssue(String patientCaseId, FollowUpRegisterAndIssueRequest request, SessionUser user) {
+        requireRole(user, "admin", "frontdesk");
+        String clientRequestId = validateRegistrationRequestId(request == null ? "" : request.clientRequestId());
+        List<ObjectNode> existing = jdbcTemplate.query(
+            "SELECT * FROM pre_ai_encounters WHERE registration_request_id = ? LIMIT 1",
+            (rs, rowNum) -> readEncounter(rs), clientRequestId
+        );
+        if (!existing.isEmpty()) {
+            if (!safe(patientCaseId).equals(text(existing.get(0), "patientCaseId"))) {
+                throw conflict("登记请求标识已用于其他患者");
+            }
+            return registerAndIssueResult(text(existing.get(0), "id"), user);
+        }
+
+        lockPatientCase(patientCaseId);
+        ObjectNode patientCase = loadPatientCase(patientCaseId);
+        ObjectNode patient = safeObject(patientCase.path("patient"));
+        String visitDate = safe(request == null ? "" : request.visitDate());
+        patient.put("visitDate", visitDate.isBlank() ? LocalDate.now().toString() : visitDate);
+        validateStage("REGISTRATION", patient, null);
+        List<ObjectNode> previous = jdbcTemplate.query(
+            "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY visit_no DESC, created_at DESC LIMIT 1",
+            (rs, rowNum) -> readEncounter(rs), patientCaseId
+        );
+        int visitNo = previous.isEmpty() ? 1 : previous.get(0).path("visitNo").asInt(0) + 1;
+        String previousEncounterId = previous.isEmpty() ? "" : text(previous.get(0), "id");
+        ObjectNode visitMeta = sanitizeVisitMeta(request == null ? null : request.visitMeta());
+        ObjectNode created;
+        try {
+            created = createEncounterInternal(
+                patient,
+                text(patientCase, "sourcePatientId"),
+                patientCaseId,
+                visitNo,
+                previousEncounterId,
+                objectMapper.createObjectNode(),
+                visitMeta,
+                user,
+                clientRequestId
+            );
+        } catch (DuplicateKeyException duplicate) {
+            List<String> concurrent = jdbcTemplate.query(
+                "SELECT id FROM pre_ai_encounters WHERE registration_request_id = ? LIMIT 1",
+                (rs, rowNum) -> rs.getString("id"), clientRequestId
+            );
+            if (concurrent.isEmpty()) throw duplicate;
+            return registerAndIssueResult(concurrent.get(0), user);
+        }
+        String encounterId = text(created.path("encounter"), "id");
+        updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(), 0);
+        jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", toJson(patient), now(), patientCaseId);
+        audit(encounterId, "encounter.followup.register-and-issue", "REGISTRATION", user,
+            "创建第 " + visitNo + " 次来访、完成登记并生成检查接诊号码");
+        refreshProgress(encounterId);
+        return registerAndIssueResult(encounterId, user);
+    }
+
+    @Transactional
+    public Map<String, Object> registerExistingAndIssue(String encounterId, ExistingRegisterAndIssueRequest request, SessionUser user) {
+        requireRole(user, "admin", "frontdesk");
+        String clientRequestId = validateRegistrationRequestId(request == null ? "" : request.clientRequestId());
+        ObjectNode encounter = loadEncounter(encounterId);
+        if ("CANCELLED".equals(text(encounter, "status"))) throw conflict("就诊记录已取消，无法发号");
+
+        List<ObjectNode> requestOwner = jdbcTemplate.query(
+            "SELECT * FROM pre_ai_encounters WHERE registration_request_id = ? LIMIT 1",
+            (rs, rowNum) -> readEncounter(rs), clientRequestId
+        );
+        if (!requestOwner.isEmpty() && !encounterId.equals(text(requestOwner.get(0), "id"))) {
+            throw conflict("登记请求标识已用于其他就诊记录");
+        }
+
+        ObjectNode registration = loadStage(encounterId, "REGISTRATION");
+        if (!"COMPLETED".equals(text(registration, "status"))) {
+            if (!Set.of("DRAFT", "RETURNED").contains(text(registration, "status"))) {
+                throw conflict("当前登记状态不允许补登记发号");
+            }
+            ObjectNode patient = sanitizeStageData(
+                "REGISTRATION",
+                request == null || request.patient() == null
+                    ? objectMapper.convertValue(encounter.path("patient"), new TypeReference<Map<String, Object>>() {})
+                    : request.patient()
+            );
+            validateStage("REGISTRATION", patient, null);
+            int changed = jdbcTemplate.update("""
+                UPDATE pre_ai_encounters
+                SET patient_json = CAST(? AS JSON), registration_request_id = NULLIF(?, ''), updated_at = ?
+                WHERE id = ? AND (registration_request_id IS NULL OR registration_request_id = '' OR registration_request_id = ?)
+                """, toJson(patient), clientRequestId, now(), encounterId, clientRequestId);
+            if (changed != 1) throw conflict("该复诊正在由其他终端补登记，请刷新后重试");
+            updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(),
+                request == null ? null : request.expectedVersion());
+            jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?",
+                toJson(patient), now(), text(encounter, "patientCaseId"));
+            audit(encounterId, "registration.recover-and-issue", "REGISTRATION", user, "补全存量复诊登记并生成检查接诊号码");
+            refreshProgress(encounterId);
+        }
+        return registerAndIssueResult(encounterId, user);
+    }
+
+    private Map<String, Object> registerAndIssueResult(String encounterId, SessionUser user) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("encounterWorkspace", toMap(workspace(encounterId, user)));
+        result.put("queueWorkspace", clinicQueueService.issue(new ClinicQueueService.IssueRequest(encounterId, ""), user));
+        return result;
+    }
+
+    @Transactional
     public Map<String, Object> importLegacy(String patientId, SessionUser user) {
         requireRole(user, "admin", "frontdesk", "doctor");
         String sourcePatientId = safe(patientId);
@@ -299,6 +444,37 @@ public class PreAiEncounterService {
         return Map.of("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
     }
 
+    public Map<String, Object> encounterHistory(String patientCaseId, SessionUser user) {
+        requireReadRole(user);
+        loadPatientCase(patientCaseId);
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY visit_no DESC, created_at DESC, id DESC",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                ObjectNode encounter = readEncounter(rs);
+                String encounterId = text(encounter, "id");
+                ObjectNode summary = encounterSummary(encounter);
+                summary.put("visitType", encounter.path("visitNo").asInt(1) <= 1 ? "INITIAL" : "FOLLOW_UP");
+                summary.put("previousEncounterId", text(encounter, "followUpOfEncounterId"));
+                ObjectNode statuses = stageStatusMap(encounterId);
+                ArrayNode completedStages = summary.putArray("completedStages");
+                statuses.fields().forEachRemaining(entry -> {
+                    if ("COMPLETED".equals(entry.getValue().asText())) completedStages.add(entry.getKey());
+                });
+                summary.put("completedStageCount", completedStages.size());
+                JsonNode visitMeta = encounter.path("visitMeta");
+                summary.put("visitReason", text(visitMeta, "visitReason"));
+                summary.put("description", text(visitMeta, "description"));
+                rows.add(summary);
+            },
+            patientCaseId
+        );
+        return Map.of(
+            "patientCaseId", patientCaseId,
+            "encounters", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {})
+        );
+    }
+
     @Transactional
     public Map<String, Object> createFollowUp(String patientCaseId, FollowUpEncounterCreateRequest request, SessionUser user) {
         requireRole(user, "admin", "frontdesk");
@@ -328,6 +504,21 @@ public class PreAiEncounterService {
         jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", toJson(patient), now(), patientCaseId);
         audit(text(workspace.path("encounter"), "id"), "encounter.followup.create", "REGISTRATION", user, "创建第 " + visitNo + " 次来访子病历");
         return toMap(workspace);
+    }
+
+    private String validateRegistrationRequestId(String value) {
+        String clientRequestId = safe(value);
+        if (clientRequestId.isBlank()) throw badRequest("缺少登记请求标识");
+        if (clientRequestId.length() > 64) throw badRequest("登记请求标识不能超过 64 个字符");
+        return clientRequestId;
+    }
+
+    private void lockPatientCase(String patientCaseId) {
+        List<String> rows = jdbcTemplate.query(
+            "SELECT id FROM pre_ai_patient_cases WHERE id = ? FOR UPDATE",
+            (rs, rowNum) -> rs.getString("id"), safe(patientCaseId)
+        );
+        if (rows.isEmpty()) throw notFound("患者主档案不存在");
     }
 
     @Transactional
@@ -371,8 +562,20 @@ public class PreAiEncounterService {
         return Map.of("patientCaseId", patientCaseId, "nodes", objectMapper.convertValue(nodes, new TypeReference<List<Map<String, Object>>>() {}));
     }
 
+    public Map<String, Object> getWorkspace(String encounterId, boolean readOnly, String patientCaseId, SessionUser user) {
+        ObjectNode result = workspace(encounterId, user);
+        if (readOnly) {
+            String actualPatientCaseId = text(result.path("encounter"), "patientCaseId");
+            if (safe(patientCaseId).isBlank() || !actualPatientCaseId.equals(safe(patientCaseId))) {
+                throw forbidden("历史病历不属于当前患者主档案");
+            }
+            result.put("readOnly", true);
+        }
+        return toMap(result);
+    }
+
     public Map<String, Object> getWorkspace(String encounterId, SessionUser user) {
-        return toMap(workspace(encounterId, user));
+        return getWorkspace(encounterId, false, "", user);
     }
 
     @Transactional
@@ -455,12 +658,16 @@ public class PreAiEncounterService {
         if ("DOCTOR".equals(stage)) syncEncounterBranch(encounterId, data, encounter);
         updateStageVersioned(encounterId, stage, "COMPLETED", data, "", user, now(), request == null ? null : request.expectedVersion());
         syncDiagnoses(encounterId, stage, data);
-        if (Set.of("INSPECTION", "RECEPTION").contains(stage)) clinicQueueService.onClinicalStageCompleted(encounterId, stage, user);
+        Map<String, Object> queueHandoff = Set.of("INSPECTION", "RECEPTION").contains(stage)
+            ? clinicQueueService.onClinicalStageCompleted(encounterId, stage, user)
+            : Map.of();
         if ("DOCTOR".equals(stage)) applySurgeryBranch(encounterId, data, user);
         invalidateReview(encounterId, user, "阶段重新完成");
         audit(encounterId, "stage.complete", stage, user, "完成阶段并交接下一岗位");
         refreshProgress(encounterId);
-        return toMap(workspace(encounterId, user));
+        Map<String, Object> result = toMap(workspace(encounterId, user));
+        if (!queueHandoff.isEmpty()) result.put("queueHandoff", queueHandoff);
+        return result;
     }
 
     @Transactional
@@ -723,10 +930,14 @@ public class PreAiEncounterService {
         ArrayNode blockers = reviewBlockers(workspace);
         ObjectNode result = objectMapper.createObjectNode();
         ObjectNode maskedPreview = privacyService.maskWorkspace(workspace);
+        ObjectNode documentView = privacyService.buildDocumentView(maskedPreview);
         result.set("workspace", workspace);
         result.set("maskedPreview", maskedPreview);
         result.set("blockers", blockers);
         result.set("labSummary", labReviewSummary(maskedPreview));
+        result.put("templateVersion", privacyService.templateVersion());
+        result.put("effectiveFieldCount", documentView.path("effectiveFieldCount").asInt());
+        result.set("documentSections", documentView.path("sections"));
         result.put("ready", blockers.isEmpty());
         return toMap(result);
     }
@@ -839,10 +1050,10 @@ public class PreAiEncounterService {
             phase = "database-version";
             jdbcTemplate.update("""
                 INSERT INTO pre_ai_exports (
-                  id, encounter_id, version, status, case_token, file_name, file_path, source_snapshot, masked_snapshot,
+                  id, encounter_id, version, status, template_version, case_token, file_name, file_path, source_snapshot, masked_snapshot,
                   generated_by, generated_by_role, generated_at
-                ) VALUES (?, ?, ?, 'GENERATED', ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?, ?, ?)
-                """, exportId, encounterId, version, caseToken, fileName, target.toString(), toJson(workspace), toJson(masked), user.name(), user.role(), now());
+                ) VALUES (?, ?, ?, 'GENERATED', ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?, ?, ?)
+                """, exportId, encounterId, version, privacyService.templateVersion(), caseToken, fileName, target.toString(), toJson(workspace), toJson(masked), user.name(), user.role(), now());
 
             phase = "file-move";
             try {
@@ -893,6 +1104,20 @@ public class PreAiEncounterService {
         ObjectNode visitMeta,
         SessionUser user
     ) {
+        return createEncounterInternal(patient, sourcePatientId, patientCaseId, visitNo, followUpOfEncounterId, legacyReference, visitMeta, user, "");
+    }
+
+    private ObjectNode createEncounterInternal(
+        ObjectNode patient,
+        String sourcePatientId,
+        String patientCaseId,
+        int visitNo,
+        String followUpOfEncounterId,
+        ObjectNode legacyReference,
+        ObjectNode visitMeta,
+        SessionUser user,
+        String registrationRequestId
+    ) {
         String id = "preai-" + UUID.randomUUID();
         String caseToken = nextCaseToken();
         String timestamp = now();
@@ -900,10 +1125,10 @@ public class PreAiEncounterService {
             INSERT INTO pre_ai_encounters (
               id, source_patient_id, patient_case_id, visit_no, follow_up_of_encounter_id, case_token, route, treatment_path,
               status, current_stage, patient_json, visit_meta_json, legacy_reference_json, duty_assignments_json, reviewed_at, reviewed_by,
-              reviewed_by_role, created_at, updated_at, created_by, created_by_role
-            ) VALUES (?, ?, ?, ?, ?, ?, '', '', 'IN_PROGRESS', 'REGISTRATION', CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), JSON_ARRAY(), '', '', '', ?, ?, ?, ?)
+              reviewed_by_role, registration_request_id, created_at, updated_at, created_by, created_by_role
+            ) VALUES (?, ?, ?, ?, ?, ?, '', '', 'IN_PROGRESS', 'REGISTRATION', CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), JSON_ARRAY(), '', '', '', NULLIF(?, ''), ?, ?, ?, ?)
             """, id, sourcePatientId, patientCaseId, visitNo, followUpOfEncounterId, caseToken, toJson(patient), toJson(visitMeta),
-            toJson(legacyReference), timestamp, timestamp, user.name(), user.role());
+            toJson(legacyReference), safe(registrationRequestId), timestamp, timestamp, user.name(), user.role());
         for (String stage : STAGE_ORDER) {
             ObjectNode data = "REGISTRATION".equals(stage) ? patient : objectMapper.createObjectNode();
             upsertStage(id, stage, "DRAFT", 0, data, "", user, "");
@@ -1538,6 +1763,7 @@ public class PreAiEncounterService {
         row.put("reviewedAt", safe(rs.getString("reviewed_at")));
         row.put("reviewedBy", safe(rs.getString("reviewed_by")));
         row.put("reviewedByRole", safe(rs.getString("reviewed_by_role")));
+        row.put("registrationRequestId", safe(rs.getString("registration_request_id")));
         row.put("createdAt", rs.getString("created_at"));
         row.put("updatedAt", rs.getString("updated_at"));
         row.put("createdBy", safe(rs.getString("created_by")));
@@ -1679,6 +1905,8 @@ public class PreAiEncounterService {
         row.put("encounterId", rs.getString("encounter_id"));
         row.put("version", rs.getInt("version"));
         row.put("status", rs.getString("status"));
+        String templateVersion = safe(rs.getString("template_version"));
+        row.put("templateVersion", templateVersion.isBlank() ? "legacy-pre-ai-export-v1" : templateVersion);
         row.put("caseToken", rs.getString("case_token"));
         row.put("fileName", rs.getString("file_name"));
         row.put("filePath", rs.getString("file_path"));
@@ -1941,6 +2169,7 @@ public class PreAiEncounterService {
     }
 
     public record CreateEncounterRequest(Map<String, Object> patient) {}
+    public record RegisterAndIssueRequest(Map<String, Object> patient, String clientRequestId) {}
     public record DutyAssignmentsRequest(List<Map<String, Object>> dutyAssignments) {}
     public record StageSaveRequest(Map<String, Object> data, Integer expectedVersion) {}
     public record ReturnStageRequest(String reason, Integer expectedVersion) {}
@@ -1969,6 +2198,8 @@ public class PreAiEncounterService {
     public record ReviewConfirmRequest(String statement, boolean criticalAcknowledged, Integer expectedVersion) {}
     public record VersionRequest(Integer expectedVersion) {}
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
+    public record FollowUpRegisterAndIssueRequest(String visitDate, Map<String, Object> visitMeta, String clientRequestId) {}
+    public record ExistingRegisterAndIssueRequest(Map<String, Object> patient, String clientRequestId, Integer expectedVersion) {}
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}
     public record AttachmentDownload(FileSystemResource resource, String fileName, String mimeType) {}
     public record ExportDownload(FileSystemResource resource, String fileName) {}

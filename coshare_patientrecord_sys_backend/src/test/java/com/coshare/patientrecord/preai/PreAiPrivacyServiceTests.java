@@ -54,11 +54,19 @@ class PreAiPrivacyServiceTests {
 
         assertTrue(docx.length > 1000);
         assertTrue(documentXml.contains("中医肛肠医院住院病历自动生成表"));
-        for (String heading : List.of(
-            "一、基础信息", "二、主诉", "三、现病史", "四、既往史 / 个人史 / 婚育史 / 家族史", "五、中医四诊", "六、专科检查",
-            "七、辅助检查", "八、中西医主诊断", "九、次诊断（已选择）", "十、合并病中医病名及证型", "十一、手术 / 操作信息", "十二、DIP 病组与治疗路径",
-            "十三、查房时序", "十四、自动生成文书范围", "十五、质控校验"
-        )) assertTrue(documentXml.contains(heading), heading);
+        List<String> headings = List.of(
+            "一、基础信息", "二、主诉", "三、现病史", "四、既往史 / 个人史 / 婚育史 / 家族史", "五、中医四诊与辨证", "六、专科检查",
+            "七、辅助检查", "八、中西医主诊断", "九、次诊断（已选择）", "十、合并病中医病名及证型", "十一、手术 / 操作信息", "十二、DIP 病组与治疗路径"
+        );
+        int previous = -1;
+        for (String heading : headings) {
+            int current = documentXml.indexOf(heading);
+            assertTrue(current > previous, heading);
+            previous = current;
+        }
+        assertFalse(documentXml.contains("十三、"));
+        assertFalse(documentXml.contains("十四、"));
+        assertFalse(documentXml.contains("十五、"));
         assertTrue(documentXml.contains("<w:tbl>"));
         assertTrue(documentXml.contains("便血3月"));
         assertTrue(documentXml.contains("周xx"));
@@ -93,7 +101,8 @@ class PreAiPrivacyServiceTests {
 
         assertTrue(documentXml.contains("一、基础信息"));
         assertTrue(documentXml.contains("七、辅助检查"));
-        assertTrue(documentXml.contains("十五、质控校验"));
+        assertTrue(documentXml.contains("十二、DIP 病组与治疗路径"));
+        assertFalse(documentXml.contains("十三、"));
         assertFalse(documentXml.contains("VISUAL"));
         assertFalse(documentXml.contains("未填写指标"));
     }
@@ -116,8 +125,10 @@ class PreAiPrivacyServiceTests {
             attachment.put("storagePath", "image.png");
 
             String documentXml = unzipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/document.xml");
-            assertTrue(documentXml.contains("接诊/检查图片"));
+            assertTrue(documentXml.contains("专科检查图片"));
             assertTrue(documentXml.contains("rIdImage1"));
+            assertTrue(documentXml.indexOf("六、专科检查") < documentXml.indexOf("专科检查图片"));
+            assertTrue(documentXml.indexOf("专科检查图片") < documentXml.indexOf("七、辅助检查"));
             assertTrue(hasZipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/media/image1.png"));
         } finally {
             field.set(service, previousDirectory);
@@ -202,6 +213,51 @@ class PreAiPrivacyServiceTests {
         assertTrue(documentXml.contains("血红蛋白"));
         assertTrue(documentXml.contains("45g/L"));
         assertTrue(documentXml.contains("【危急值·偏低】"));
+    }
+
+    @Test
+    void documentViewContainsTwelveSectionsAndOnlyEffectiveRows() {
+        ObjectNode workspace = sampleWorkspace();
+        ((ObjectNode) workspace.path("stages").path(1).path("data")).put("historySupplement", "未填写");
+
+        ObjectNode view = service.buildDocumentView(service.maskWorkspace(workspace));
+
+        assertEquals(PreAiPrivacyService.TEMPLATE_VERSION, view.path("templateVersion").asText());
+        assertEquals(12, view.path("sections").size());
+        assertTrue(view.path("effectiveFieldCount").asInt() > 0);
+        assertFalse(view.path("sections").toString().contains("未填写"));
+        for (var section : view.path("sections")) {
+            for (var row : section.path("rows")) assertFalse(row.path("value").asText().isBlank());
+        }
+    }
+
+    @Test
+    void docxUsesDistinctFixedAndDynamicStyles() throws Exception {
+        byte[] docx = service.renderDocx(service.maskWorkspace(sampleWorkspace()), sampleWorkspace());
+        String stylesXml = unzipEntry(docx, "word/styles.xml");
+        String documentXml = unzipEntry(docx, "word/document.xml");
+
+        assertTrue(stylesXml.contains("w:styleId=\"TableLabel\""));
+        assertTrue(stylesXml.contains("w:styleId=\"TableText\""));
+        assertTrue(stylesXml.contains("w:sz w:val=\"19\""));
+        assertTrue(stylesXml.contains("w:sz w:val=\"21\""));
+        assertTrue(documentXml.contains("w:fill=\"F2F2F2\""));
+        assertTrue(documentXml.contains("w:fill=\"FFFFFF\""));
+    }
+
+    @Test
+    void versionedReferenceTemplateContainsStableSectionAndRowMarkers() throws Exception {
+        byte[] template;
+        try (var input = getClass().getResourceAsStream("/pre-ai-templates/pre-ai-final-template-v2.docx")) {
+            assertTrue(input != null);
+            template = input.readAllBytes();
+        }
+        String documentXml = unzipEntry(template, "word/document.xml");
+
+        for (int section = 1; section <= 12; section++) {
+            assertTrue(documentXml.contains("PREAI_S%02d".formatted(section)));
+        }
+        assertTrue(documentXml.contains("PREAI_S01_R001"));
     }
 
     @Test

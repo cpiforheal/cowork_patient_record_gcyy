@@ -30,6 +30,11 @@ public class ClinicQueueController {
         return ApiResult.success(service.dashboard(keyword, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/eligible-encounters")
+    public ApiResult<Map<String, Object>> eligibleEncounters() {
+        return ApiResult.success(service.eligibleEncounters(AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/tickets")
     public ApiResult<Map<String, Object>> issue(@RequestBody ClinicQueueService.IssueRequest request) {
         return ApiResult.of(200, "排队号码已生成", service.issue(request, AuthPermission.currentUserOrThrow()));

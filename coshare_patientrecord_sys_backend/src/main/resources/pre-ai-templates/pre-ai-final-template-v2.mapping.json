@@ -1,0 +1,32 @@
+{
+  "templateVersion": "pre-ai-final-template-v2-20260718",
+  "resource": "pre-ai-final-template-v2.docx",
+  "source": "自动生成报表完整版只准复制.doc",
+  "markerStrategy": {
+    "section": "PREAI_S{sectionNumber:00}",
+    "row": "PREAI_S{sectionNumber:00}_R{rowNumber:000}",
+    "description": "DOCX 书签是稳定结构标记；运行时字段映射使用 sectionCode/fieldId，不依赖 Word 对普通文本的拆分方式。"
+  },
+  "sections": [
+    { "code": "01", "bookmark": "PREAI_S01", "title": "一、基础信息" },
+    { "code": "02", "bookmark": "PREAI_S02", "title": "二、主诉" },
+    { "code": "03", "bookmark": "PREAI_S03", "title": "三、现病史" },
+    { "code": "04", "bookmark": "PREAI_S04", "title": "四、既往史 / 个人史 / 婚育史 / 家族史" },
+    { "code": "05", "bookmark": "PREAI_S05", "title": "五、中医四诊与辨证" },
+    { "code": "06", "bookmark": "PREAI_S06", "title": "六、专科检查" },
+    { "code": "07", "bookmark": "PREAI_S07", "title": "七、辅助检查" },
+    { "code": "08", "bookmark": "PREAI_S08", "title": "八、中西医主诊断" },
+    { "code": "09", "bookmark": "PREAI_S09", "title": "九、次诊断（已选择）" },
+    { "code": "10", "bookmark": "PREAI_S10", "title": "十、合并病中医病名及证型" },
+    { "code": "11", "bookmark": "PREAI_S11", "title": "十一、手术 / 操作信息" },
+    { "code": "12", "bookmark": "PREAI_S12", "title": "十二、DIP 病组与治疗路径" }
+  ],
+  "renderRules": {
+    "keepAllSectionHeadings": true,
+    "removeEmptyRows": true,
+    "removeUncheckedOptions": true,
+    "joinSelectedOptionsWith": "、",
+    "inspectionImagesSection": "06",
+    "reviewMetadataPlacement": "footer"
+  }
+}

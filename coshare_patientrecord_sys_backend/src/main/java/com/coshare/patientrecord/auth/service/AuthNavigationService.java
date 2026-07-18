@@ -184,8 +184,8 @@ public class AuthNavigationService {
             "inventoryOverview=inventory:read,inventory:request,inventory:receive,inventory:approve,inventory:count,inventory:export",
             "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
             "inventoryRequests=inventory:read,inventory:request,inventory:receive,inventory:approve,inventory:export",
-            "inventoryStock=inventory:read,inventory:count,inventory:export",
-            "inventoryItems=inventory:read,inventory:approve",
+            "inventoryStock=inventory:read,inventory:issue,inventory:count,inventory:export",
+            "inventoryItems=inventory:read,inventory:issue,inventory:export",
             "inventoryWeekly=inventory:read,inventory:request,inventory:count,inventory:export",
             "inventoryPackages=inventory:read,inventory:approve",
             "inventoryControls=inventory:read,inventory:count,inventory:export",
@@ -202,7 +202,7 @@ public class AuthNavigationService {
             "/inventory/overview", "/inventory/requests", "/inventory/weekly", "/inventory/packages"
         );
         Set<String> inventoryQuality = paths(
-            "/inventory/overview", "/inventory/executive", "/inventory/requests", "/inventory/weekly",
+            "/inventory/overview", "/inventory/executive", "/inventory/requests", "/inventory/stock", "/inventory/items", "/inventory/weekly",
             "/inventory/packages", "/inventory/controls", "/inventory/trace"
         );
         Map<String, List<String>> inventoryStaffButtons = permissions(
@@ -215,6 +215,8 @@ public class AuthNavigationService {
             "inventoryOverview=inventory:read,inventory:approve,inventory:count,inventory:export",
             "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
             "inventoryRequests=inventory:read,inventory:approve,inventory:export",
+            "inventoryStock=inventory:read,inventory:issue,inventory:count,inventory:export",
+            "inventoryItems=inventory:read,inventory:issue,inventory:export",
             "inventoryWeekly=inventory:read,inventory:count,inventory:export",
             "inventoryPackages=inventory:read,inventory:approve",
             "inventoryControls=inventory:read,inventory:count,inventory:export",
@@ -281,10 +283,10 @@ public class AuthNavigationService {
         ), inventoryQualityButtons)));
         result.put("manager", role(paths(
             "/home/index", "/templates/record", "/templates/ai-document",
-            "/inventory/overview", "/inventory/executive", "/inventory/packages"
+            "/inventory/overview", "/inventory/executive", "/inventory/items", "/inventory/packages"
         ), permissions(
             "home=view", "recordTemplate=field:read", "inventoryOverview=inventory:read",
-            "inventoryExecutive=inventory:read,inventory:export", "inventoryPackages=inventory:read"
+            "inventoryExecutive=inventory:read,inventory:export", "inventoryItems=inventory:read", "inventoryPackages=inventory:read"
         )));
         return Map.copyOf(result);
     }

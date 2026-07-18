@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">INSPECTION & RECEPTION QUEUE</p>
         <h1>检查室与接诊室排队叫号</h1>
-        <p>前台一次发号、检查完成自动转接诊、复诊加权与初诊防饥饿、房间级急症暂停。</p>
+        <p>登记与发号一次完成；先检查、后接诊，全流程沿用同一号码。</p>
       </div>
       <div class="hero-actions">
         <el-tag :type="printAgentOnline ? 'success' : 'danger'" effect="dark">
@@ -12,11 +12,24 @@
         </el-tag>
         <el-button v-if="canIssue" plain size="large" @click="openPrinterSetup">打印设置</el-button>
         <el-button v-if="role === 'admin'" plain size="large" @click="openTemplateSetup">票据模板</el-button>
-        <el-button v-if="canIssue" type="primary" size="large" @click="openIssue">前台发号</el-button>
+        <el-button v-if="canIssue" type="primary" size="large" @click="openRegistration">就诊登记并发号</el-button>
+        <el-button v-if="canIssue" plain size="large" @click="openIssue">为已有就诊发号</el-button>
         <el-button size="large" @click="router.push('/tcm-pharmacy/clinic-queue/display')">打开双区大屏</el-button>
-        <el-button size="large" plain :loading="loading" @click="load">刷新</el-button>
+        <el-button size="large" plain :loading="loading" @click="load()">刷新</el-button>
       </div>
     </header>
+
+    <section v-if="issuanceNotice" class="issuance-notice">
+      <el-alert
+        :title="issuanceNotice.message"
+        :type="issuanceNotice.printPending ? 'warning' : 'success'"
+        :closable="false"
+        show-icon
+      />
+      <el-button v-if="issuanceNotice.printPending" :disabled="!printAgentOnline" @click="reprintNoticeTicket">
+        补打 {{ issuanceNotice.publicNo }}
+      </el-button>
+    </section>
 
     <section class="metric-grid">
       <article v-for="metric in metrics" :key="metric.label" class="metric-card">
@@ -46,7 +59,8 @@
           <el-button
             v-if="canOperate(room.stageCode)"
             type="primary"
-            :disabled="Boolean(operationPending) || room.status !== 'ACTIVE'"
+            :disabled="Boolean(operationPending) || room.status !== 'ACTIVE' || stageActiveCount(room.stageCode) > 0"
+            :title="stageActiveCount(room.stageCode) > 0 ? '请先完成、暂离或中断当前患者' : ''"
             @click="callNext(room.stageCode)"
           >
             叫下一位
@@ -76,14 +90,14 @@
             <p class="eyebrow">TODAY QUEUE</p>
             <h2>今日排队单</h2>
           </div>
-          <el-input v-model="keyword" clearable placeholder="号码 / 患者 / 就诊ID" @keyup.enter="load" />
+          <el-input v-model="keyword" clearable placeholder="号码 / 患者 / 就诊ID" @keyup.enter="load()" />
         </div>
         <div v-loading="loading" class="ticket-list">
           <button
-            v-for="ticket in dashboard.tickets"
+            v-for="ticket in visibleTickets"
             :key="ticket.id"
             class="ticket-card"
-            :class="{ active: selectedId === ticket.id }"
+            :class="{ active: selectedId === ticket.id, 'new-reception': newReceptionIds.has(ticket.id) }"
             @click="select(ticket.id)"
           >
             <div class="ticket-no">
@@ -92,12 +106,23 @@
             </div>
             <div class="ticket-main">
               <strong>{{ ticket.patientName }}</strong
-              ><span>{{ ticket.encounterId }}</span
+              ><span>第 {{ ticket.visitNo || (ticket.visitType === "FOLLOW_UP" ? 2 : 1) }} 次就诊</span
+              ><span v-if="ticket.visitReason" class="visit-reason">{{ ticket.visitReason }}</span
               ><small>{{ ticket.updatedAt }}</small>
             </div>
-            <el-tag :type="statusType(ticket.overallStatus)">{{ overallLabel(ticket.overallStatus) }}</el-tag>
+            <div class="ticket-status">
+              <el-tag v-if="newReceptionIds.has(ticket.id)" type="danger" effect="dark">新转入</el-tag>
+              <el-tag v-if="ticketRecommendation(ticket.id)" type="success" effect="plain">
+                推荐第 {{ ticketRecommendation(ticket.id)?.recommendedRank }} 位 ·
+                {{ ticketRecommendation(ticket.id)?.waitMinutes }} 分钟
+              </el-tag>
+              <small v-if="ticketRecommendation(ticket.id)?.priorityReason" class="priority-hint">
+                {{ ticketRecommendation(ticket.id)?.priorityReason }}
+              </small>
+              <el-tag :type="statusType(ticket.overallStatus)">{{ overallLabel(ticket.overallStatus) }}</el-tag>
+            </div>
           </button>
-          <el-empty v-if="!dashboard.tickets.length && !loading" description="今日暂无排队单" />
+          <el-empty v-if="!visibleTickets.length && !loading" description="当前岗位暂无待办排队单" />
         </div>
       </div>
 
@@ -107,10 +132,15 @@
             <div>
               <p class="eyebrow">QUEUE DETAIL</p>
               <h2>{{ workspace.ticket.publicNo }} · {{ workspace.ticket.patientName }}</h2>
+              <p class="visit-context">
+                {{ visitTypeLabel(workspace.ticket.visitType) }} · 第
+                {{ workspace.ticket.visitNo || (workspace.ticket.visitType === "FOLLOW_UP" ? 2 : 1) }} 次就诊
+                <template v-if="workspace.ticket.visitReason"> · {{ workspace.ticket.visitReason }}</template>
+              </p>
             </div>
             <div class="detail-actions">
               <el-button v-if="canIssue" :disabled="!printAgentOnline" @click="reprintCurrentTicket">补打票据</el-button>
-              <el-button @click="openEncounter(workspace.ticket.encounterId)">进入病历工作台</el-button>
+              <el-button @click="openEncounter(workspace.ticket.encounterId, activeWorkspaceStage)">进入当前环节</el-button>
             </div>
           </div>
           <div class="stage-grid">
@@ -131,8 +161,14 @@
               <div class="time-list">
                 <span>入队：{{ task.queueEnteredAt || "未激活" }}</span
                 ><span>叫号：{{ task.calledAt || "-" }}</span
-                ><span>开始：{{ task.serviceStartedAt || "-" }}</span>
+                ><span>开始：{{ task.serviceStartedAt || "-" }}</span
+                ><span v-if="task.queueEnteredAt && !['COMPLETED', 'CANCELLED'].includes(task.status)">
+                  已等待：{{ waitingDuration(task.queueEnteredAt) }}
+                </span>
               </div>
+              <p v-if="task.stageCode === 'RECEPTION' && task.queueEnteredAt" class="handoff-summary">
+                上一环节完成：{{ task.queueEnteredAt }} · 号码 {{ workspace.ticket.publicNo }} 保持不变
+              </p>
               <p v-if="task.priorityReason" class="reason">优先原因：{{ task.priorityReason }}</p>
               <p v-if="task.exceptionReason" class="reason danger">异常：{{ task.exceptionReason }}</p>
               <p
@@ -142,6 +178,13 @@
                 请进入病历工作台完成{{ stageLabel(task.stageCode) }}临床阶段；提交完成后，队列会自动流转。
               </p>
               <div v-if="canOperate(task.stageCode) || canFrontdeskIntervene" class="task-actions">
+                <el-button
+                  v-if="canOperate(task.stageCode) && !['INACTIVE', 'COMPLETED', 'CANCELLED'].includes(task.status)"
+                  type="primary"
+                  plain
+                  @click="openEncounter(workspace.ticket.encounterId, task.stageCode)"
+                  >进入{{ stageLabel(task.stageCode) }}表单</el-button
+                >
                 <el-button
                   v-if="['WAITING', 'MISSED'].includes(task.status) && canOperate(task.stageCode)"
                   type="primary"
@@ -252,7 +295,8 @@
                 v-if="canOperate('RECEPTION')"
                 type="primary"
                 :loading="operationPending === 'call-next:RECEPTION'"
-                :disabled="Boolean(operationPending)"
+                :disabled="Boolean(operationPending) || stageActiveCount('RECEPTION') > 0"
+                :title="stageActiveCount('RECEPTION') > 0 ? '请先完成、暂离或中断当前患者' : ''"
                 @click="callNext('RECEPTION')"
                 >叫下一位</el-button
               >
@@ -277,27 +321,37 @@
       </aside>
     </section>
 
-    <el-dialog v-model="issueVisible" title="前台发号" width="760px">
+    <el-dialog v-model="registrationVisible" title="就诊登记并发号" width="820px" destroy-on-close>
+      <el-form label-position="top">
+        <RegistrationFormFields :fields="registrationFields" :form="registrationForm" @patch="patchRegistrationForm" />
+        <el-alert
+          title="一次提交完成患者保存、登记、发号和检查候诊；打印失败不会撤销号码，可稍后补打。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="registrationVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="registerAndIssue">登记并发号</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="issueVisible" title="为已有就诊发号" width="760px">
       <el-form label-position="top">
         <el-form-item label="选择当日就诊记录">
-          <el-select
-            v-model="issueForm.encounterId"
-            filterable
-            placeholder="患者姓名 / 就诊ID"
-            style="width: 100%"
-            @change="syncIssueVisitType"
-          >
+          <el-select v-model="issueForm.encounterId" filterable placeholder="患者姓名 / 就诊ID" style="width: 100%">
             <el-option
               v-for="item in encounters"
-              :key="item.id"
-              :value="item.id"
-              :label="`${item.patientName} · 第${item.visitNo}次 · ${item.id}`"
+              :key="item.encounterId"
+              :value="item.encounterId"
+              :label="`${item.patientName} · ${visitTypeLabel(item.visitType)} · 第 ${item.visitNo} 次 · ${item.visitDate || '时间待补'}${item.visitReason ? ` · ${item.visitReason}` : ''}`"
             />
           </el-select>
         </el-form-item>
         <el-alert
           :title="
-            selectedIssueEncounter?.visitNo && selectedIssueEncounter.visitNo > 1
+            selectedIssueEncounter?.visitType === 'FOLLOW_UP'
               ? '系统已识别为后续来诊，本轮按复诊排队。'
               : '首次来诊按初诊排队；后续周期新建的复诊病历会自动按复诊排队。'
           "
@@ -305,23 +359,51 @@
           :closable="false"
           show-icon
         />
-        <el-form-item label="本轮排队类型">
-          <el-radio-group v-model="issueForm.visitType">
-            <el-radio-button value="FIRST_VISIT">初诊</el-radio-button>
-            <el-radio-button value="FOLLOW_UP">复诊</el-radio-button>
-          </el-radio-group>
-          <div class="issue-type-hint">通常无需手工修改；仅患者本轮就诊性质与系统识别不一致时调整。</div>
-        </el-form-item>
-        <el-alert
-          title="若该就诊记录已经发过号，系统只返回原号码，不会自动补打；可在右侧排队单详情点击“补打票据”。"
-          type="warning"
-          :closable="false"
-        />
+        <el-alert title="这里只显示当日、登记已完成、未取消且尚未发号的就诊记录。" type="info" :closable="false" />
+        <el-empty v-if="!encounters.length" :image-size="56" description="暂无已完成登记且可直接发号的记录" />
+        <section v-if="blockedEncounters.length" class="blocked-encounters">
+          <div class="blocked-heading">
+            <strong>登记未完成的复诊</strong>
+            <small>补齐登记后会在同一操作中完成发号，不再返回空下拉框。</small>
+          </div>
+          <article v-for="item in blockedEncounters" :key="item.encounterId">
+            <div>
+              <strong>{{ item.patientName }} · {{ visitTypeLabel(item.visitType) }} · 第 {{ item.visitNo }} 次</strong>
+              <span
+                >{{ item.visitDate || "来访时间待补"
+                }}<template v-if="item.visitReason"> · {{ item.visitReason }}</template></span
+              >
+              <small>{{ item.blockReason }}</small>
+            </div>
+            <el-button type="primary" plain @click="openRecovery(item)">补登记并发号</el-button>
+          </article>
+        </section>
       </el-form>
       <template #footer
         ><el-button @click="issueVisible = false">取消</el-button
         ><el-button type="primary" :loading="submitting" @click="issueTicket">确认发号</el-button></template
       >
+    </el-dialog>
+
+    <el-dialog
+      v-model="recoveryVisible"
+      :title="`补登记并发号 · ${recoveryEncounter?.patientName || ''}`"
+      width="820px"
+      destroy-on-close
+    >
+      <el-form label-position="top">
+        <RegistrationFormFields :fields="registrationFields" :form="recoveryForm" @patch="patchRecoveryForm" />
+        <el-alert
+          :title="recoveryEncounter?.blockReason || '补全登记后将直接生成号码并进入检查候诊。'"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="recoveryVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="recoverAndIssue">完成登记并发号</el-button>
+      </template>
     </el-dialog>
 
     <el-dialog v-model="printerSetupVisible" title="本机热敏打印设置" width="620px">
@@ -413,15 +495,22 @@
 </template>
 
 <script setup lang="ts" name="clinicQueueWorkbench">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStore } from "@/stores/modules/user";
-import { getPreAiEncountersApi, type PreAiEncounterSummary } from "@/api/modules/clinic/preAi";
+import {
+  getPreAiWorkspaceApi,
+  registerAndIssueExistingPreAiEncounterApi,
+  registerAndIssuePreAiEncounterApi
+} from "@/api/modules/clinic/preAi";
+import RegistrationFormFields from "@/views/preAi/encounters/components/RegistrationFormFields.vue";
+import { preAiStages } from "@/views/preAi/encounters/fieldConfig";
 import {
   callNextQueueApi,
   completeQueuePrintTaskApi,
   createQueuePrintTaskApi,
+  getEligibleQueueEncountersApi,
   getQueueDashboardApi,
   getQueuePrintTemplateApi,
   getQueueTestPrintPayloadApi,
@@ -432,6 +521,8 @@ import {
   runQueueRoomActionApi,
   runQueueTaskActionApi,
   type QueueDashboard,
+  type QueueDisplayRow,
+  type EligibleQueueEncounter,
   type QueueRoom,
   type QueueStage,
   type QueueTask,
@@ -454,15 +545,29 @@ const role = computed(() => userStore.userInfo.role || "frontdesk");
 const loading = ref(false);
 const submitting = ref(false);
 const operationPending = ref("");
+const registrationVisible = ref(false);
+const registrationRequestId = ref("");
+const registrationForm = reactive<Record<string, any>>({});
+const registrationFields = preAiStages.find(stage => stage.code === "REGISTRATION")?.fields || [];
+const issuanceNotice = ref<{ ticketId: string; publicNo: string; message: string; printPending: boolean }>();
+const newReceptionIds = reactive(new Set<string>());
+const knownReceptionIds = new Set<string>();
+let receptionSnapshotReady = false;
+let pollingTimer: ReturnType<typeof setInterval> | undefined;
 let dashboardRequestSeq = 0;
 let workspaceRequestSeq = 0;
 const keyword = ref("");
 const selectedId = ref("");
 const workspace = ref<QueueWorkspace>();
-const encounters = ref<PreAiEncounterSummary[]>([]);
+const encounters = ref<EligibleQueueEncounter[]>([]);
+const blockedEncounters = ref<EligibleQueueEncounter[]>([]);
 const issueVisible = ref(false);
 const issueForm = reactive<{ encounterId: string; visitType: QueueVisitType }>({ encounterId: "", visitType: "FIRST_VISIT" });
-const selectedIssueEncounter = computed(() => encounters.value.find(item => item.id === issueForm.encounterId));
+const selectedIssueEncounter = computed(() => encounters.value.find(item => item.encounterId === issueForm.encounterId));
+const recoveryVisible = ref(false);
+const recoveryEncounter = ref<EligibleQueueEncounter>();
+const recoveryRequestId = ref("");
+const recoveryForm = reactive<Record<string, any>>({});
 const printAgent = ref<LocalPrintAgentStatus>();
 const printAgentOnline = computed(() => printAgent.value?.status === "ok" && Boolean(printAgent.value.terminalId));
 const printerSetupVisible = ref(false);
@@ -495,6 +600,7 @@ const dashboard = reactive<QueueDashboard>({
     completedToday: 0,
     exceptions: 0
   },
+  recommendedByStage: { INSPECTION: [], RECEPTION: [] },
   currentUserRole: "",
   serverTime: ""
 });
@@ -502,11 +608,54 @@ const dashboard = reactive<QueueDashboard>({
 const canIssue = computed(() => ["admin", "frontdesk"].includes(role.value));
 const canFrontdeskIntervene = computed(() => ["admin", "frontdesk"].includes(role.value));
 const canContinueNextClinicalStage = computed(() => ["admin", "tcm"].includes(role.value));
+type TicketRecommendation = QueueDisplayRow & { stageCode: QueueStage };
+const recommendationByTicket = computed(() => {
+  const values = new Map<string, TicketRecommendation>();
+  (["INSPECTION", "RECEPTION"] as QueueStage[]).forEach(stageCode => {
+    (dashboard.recommendedByStage?.[stageCode] || []).forEach(item => {
+      if (item.ticketId) values.set(item.ticketId, { ...item, stageCode });
+    });
+  });
+  return values;
+});
+const ticketRecommendation = (ticketId: string) => recommendationByTicket.value.get(ticketId);
+const visibleTickets = computed(() => {
+  let rows = dashboard.tickets;
+  if (["admin", "frontdesk"].includes(role.value)) rows = dashboard.tickets;
+  if (role.value === "inspection") {
+    rows = dashboard.tickets.filter(
+      ticket => ticket.overallStatus.startsWith("INSPECTION") || ticket.overallStatus === "WAITING_INSPECTION"
+    );
+  }
+  if (["reception", "doctor"].includes(role.value)) {
+    rows = dashboard.tickets.filter(
+      ticket => ticket.overallStatus.startsWith("RECEPTION") || ticket.overallStatus === "WAITING_RECEPTION"
+    );
+  }
+  return [...rows].sort((left, right) => {
+    const leftRecommendation = ticketRecommendation(left.id);
+    const rightRecommendation = ticketRecommendation(right.id);
+    if (leftRecommendation && rightRecommendation) {
+      if (leftRecommendation.stageCode !== rightRecommendation.stageCode) {
+        return leftRecommendation.stageCode === "INSPECTION" ? -1 : 1;
+      }
+      return (leftRecommendation.recommendedRank || 999) - (rightRecommendation.recommendedRank || 999);
+    }
+    if (leftRecommendation) return -1;
+    if (rightRecommendation) return 1;
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
+});
+const activeWorkspaceStage = computed<QueueStage | undefined>(() => {
+  const task = workspace.value?.tasks.find(item => !["INACTIVE", "COMPLETED", "CANCELLED"].includes(item.status));
+  return task?.stageCode;
+});
 const metrics = computed(() => [
   { label: "待检查", value: dashboard.counts.inspectionWaiting, note: `办理中 ${dashboard.counts.inspectionActive}` },
   { label: "待接诊", value: dashboard.counts.receptionWaiting, note: `办理中 ${dashboard.counts.receptionActive}` },
   { label: "今日完成", value: dashboard.counts.completedToday, note: "双阶段闭环" },
-  { label: "异常待处理", value: dashboard.counts.exceptions, note: "过号 / 暂离 / 挂起 / 中断" }
+  { label: "异常待处理", value: dashboard.counts.exceptions, note: "过号 / 暂离 / 挂起 / 中断" },
+  { label: "新转入接诊", value: newReceptionIds.size, note: "本页停留期间新转入" }
 ]);
 
 function canOperate(stage: QueueStage) {
@@ -517,6 +666,9 @@ function canOperate(stage: QueueStage) {
 }
 function canControlRoom(stage: QueueStage) {
   return canFrontdeskIntervene.value || canOperate(stage);
+}
+function stageActiveCount(stage: QueueStage) {
+  return stage === "INSPECTION" ? dashboard.counts.inspectionActive : dashboard.counts.receptionActive;
 }
 function isRoomPending(room: QueueRoom) {
   return operationPending.value === `call-next:${room.stageCode}` || operationPending.value.startsWith(`room:${room.roomCode}:`);
@@ -557,6 +709,36 @@ function actionSuccessMessage(action: string) {
     )[action] || "操作成功"
   );
 }
+function currentLocalDateTime() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(
+    now.getMinutes()
+  )}:00`;
+}
+function createClientRequestId() {
+  return globalThis.crypto?.randomUUID?.() || `registration-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function patchRegistrationForm(key: string, value: any) {
+  registrationForm[key] = value;
+}
+function openRegistration() {
+  Object.keys(registrationForm).forEach(key => delete registrationForm[key]);
+  registrationForm.visitDate = currentLocalDateTime();
+  registrationRequestId.value = createClientRequestId();
+  registrationVisible.value = true;
+}
+function updateReceptionTransitions(tickets: QueueDashboard["tickets"]) {
+  const currentIds = new Set(tickets.filter(ticket => ticket.overallStatus === "WAITING_RECEPTION").map(ticket => ticket.id));
+  if (receptionSnapshotReady) {
+    currentIds.forEach(id => {
+      if (!knownReceptionIds.has(id)) newReceptionIds.add(id);
+    });
+  }
+  knownReceptionIds.clear();
+  currentIds.forEach(id => knownReceptionIds.add(id));
+  receptionSnapshotReady = true;
+}
 async function refreshAfterFailure() {
   try {
     await load();
@@ -564,29 +746,32 @@ async function refreshAfterFailure() {
     ElMessage.warning("最新队列状态刷新失败，请稍后手动刷新");
   }
 }
-async function load() {
+async function load(silent = false) {
   const requestSeq = ++dashboardRequestSeq;
   ++workspaceRequestSeq;
-  loading.value = true;
+  if (!silent) loading.value = true;
   try {
     const { data } = await getQueueDashboardApi(keyword.value);
     if (requestSeq !== dashboardRequestSeq) return;
+    updateReceptionTransitions(data.tickets);
     Object.assign(dashboard, data);
-    if (selectedId.value && dashboard.tickets.some(item => item.id === selectedId.value)) await select(selectedId.value);
-    else if (dashboard.tickets[0]) await select(dashboard.tickets[0].id);
+    if (selectedId.value && visibleTickets.value.some(item => item.id === selectedId.value))
+      await select(selectedId.value, false);
+    else if (visibleTickets.value[0]) await select(visibleTickets.value[0].id, false);
     else {
       selectedId.value = "";
       workspace.value = undefined;
       ++workspaceRequestSeq;
     }
   } catch (error: any) {
-    if (requestSeq === dashboardRequestSeq) ElMessage.error(error?.message || "队列数据加载失败，请稍后重试");
+    if (requestSeq === dashboardRequestSeq && !silent) ElMessage.error(error?.message || "队列数据加载失败，请稍后重试");
   } finally {
-    if (requestSeq === dashboardRequestSeq) loading.value = false;
+    if (requestSeq === dashboardRequestSeq && !silent) loading.value = false;
   }
 }
-async function select(id: string) {
+async function select(id: string, acknowledge = true) {
   selectedId.value = id;
+  if (acknowledge) newReceptionIds.delete(id);
   const requestSeq = ++workspaceRequestSeq;
   try {
     const { data } = await getQueueWorkspaceApi(id);
@@ -599,14 +784,54 @@ async function select(id: string) {
   }
 }
 async function openIssue() {
-  encounters.value = (await getPreAiEncountersApi()).data.list.filter(item => item.status !== "CANCELLED");
+  const { data } = await getEligibleQueueEncountersApi();
+  encounters.value = data.list;
+  blockedEncounters.value = data.blocked || [];
   issueForm.encounterId = "";
   issueForm.visitType = "FIRST_VISIT";
   issueVisible.value = true;
 }
-function syncIssueVisitType() {
-  issueForm.visitType =
-    selectedIssueEncounter.value?.visitNo && selectedIssueEncounter.value.visitNo > 1 ? "FOLLOW_UP" : "FIRST_VISIT";
+
+function patchRecoveryForm(key: string, value: any) {
+  recoveryForm[key] = value;
+}
+
+async function openRecovery(encounter: EligibleQueueEncounter) {
+  submitting.value = true;
+  try {
+    const { data } = await getPreAiWorkspaceApi(encounter.encounterId);
+    Object.keys(recoveryForm).forEach(key => delete recoveryForm[key]);
+    Object.assign(recoveryForm, data.encounter.patient);
+    recoveryEncounter.value = encounter;
+    recoveryRequestId.value = createClientRequestId();
+    recoveryVisible.value = true;
+  } catch (error: any) {
+    ElMessage.error(error?.message || "复诊登记信息加载失败");
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function recoverAndIssue() {
+  if (!recoveryEncounter.value) return;
+  submitting.value = true;
+  try {
+    recoveryRequestId.value ||= createClientRequestId();
+    const { data } = await registerAndIssueExistingPreAiEncounterApi(
+      recoveryEncounter.value.encounterId,
+      { ...recoveryForm },
+      recoveryRequestId.value,
+      recoveryEncounter.value.registrationVersion
+    );
+    recoveryVisible.value = false;
+    issueVisible.value = false;
+    recoveryRequestId.value = "";
+    await finishIssuance(data.queueWorkspace, "复诊已补登记并发号");
+  } catch (error: any) {
+    ElMessage.error(error?.message || "补登记并发号失败");
+  } finally {
+    submitting.value = false;
+  }
 }
 async function refreshPrintAgent(silent = true) {
   try {
@@ -703,29 +928,67 @@ async function reprintCurrentTicket() {
     ElMessage.error(`补打失败：${error.message || error}`);
   }
 }
+async function reprintNoticeTicket() {
+  if (!issuanceNotice.value) return;
+  try {
+    await executePrint(issuanceNotice.value.ticketId, "登记出票补打");
+    issuanceNotice.value = {
+      ...issuanceNotice.value,
+      message: `${issuanceNotice.value.publicNo} 已补打成功。`,
+      printPending: false
+    };
+    ElMessage.success("票据已补打");
+  } catch (error: any) {
+    ElMessage.error(`补打失败：${error.message || error}`);
+  }
+}
+async function finishIssuance(data: QueueWorkspace, prefix: string) {
+  selectedId.value = data.ticket.id;
+  let printPending = false;
+  let message = `${prefix}：${data.ticket.publicNo}`;
+  if (data.newlyIssued === false) {
+    printPending = true;
+    message = `该就诊已发号，继续使用原号码 ${data.ticket.publicNo}；如票据遗失请补打。`;
+  } else if (printAgentOnline.value) {
+    try {
+      await executePrint(data.ticket.id);
+      message = `${prefix}并已打印：${data.ticket.publicNo}`;
+    } catch (error: any) {
+      printPending = true;
+      message = `${prefix}：${data.ticket.publicNo}；打印失败，可稍后补打（${error.message || error}）。`;
+    }
+  } else {
+    printPending = true;
+    message = `${prefix}：${data.ticket.publicNo}；本机打印服务离线，号码仍然有效，可稍后补打。`;
+  }
+  issuanceNotice.value = { ticketId: data.ticket.id, publicNo: data.ticket.publicNo, message, printPending };
+  printPending ? ElMessage.warning(message) : ElMessage.success(message);
+  await load();
+}
+async function registerAndIssue() {
+  const missing = registrationFields.find(field => field.required && !String(registrationForm[field.key] ?? "").trim());
+  if (missing) return ElMessage.warning(`请填写${missing.label}`);
+  registrationRequestId.value ||= createClientRequestId();
+  submitting.value = true;
+  try {
+    const { data } = await registerAndIssuePreAiEncounterApi({ ...registrationForm }, registrationRequestId.value);
+    registrationVisible.value = false;
+    registrationRequestId.value = "";
+    await finishIssuance(data.queueWorkspace, "登记成功，已发号");
+  } catch (error: any) {
+    ElMessage.error(error?.message || "登记并发号失败，请核对信息后重试");
+  } finally {
+    submitting.value = false;
+  }
+}
 async function issueTicket() {
   if (!issueForm.encounterId) return ElMessage.warning("请选择就诊记录");
   submitting.value = true;
   try {
+    issueForm.visitType = selectedIssueEncounter.value?.visitType || "FIRST_VISIT";
     const { data } = await issueQueueTicketApi(issueForm.encounterId, issueForm.visitType);
     issueVisible.value = false;
-    selectedId.value = data.ticket.id;
-    if (data.newlyIssued === false) {
-      ElMessage.warning(`该患者本轮已有号码 ${data.ticket.publicNo}，未重复打印；如票据遗失请点击“补打票据”并填写原因`);
-      await load();
-      return;
-    }
-    if (printAgentOnline.value) {
-      try {
-        await executePrint(data.ticket.id);
-        ElMessage.success(`已发号并打印：${data.ticket.publicNo}`);
-      } catch (error: any) {
-        ElMessage.warning(`已发号 ${data.ticket.publicNo}，但打印失败：${error.message || error}`);
-      }
-    } else {
-      ElMessage.warning(`已发号 ${data.ticket.publicNo}，当前电脑未连接本机打印服务，可在安装打印服务后补打`);
-    }
-    await load();
+    await finishIssuance(data, "已发号");
   } finally {
     submitting.value = false;
   }
@@ -784,7 +1047,7 @@ async function taskAction(task: QueueTask, action: string, requireReason = false
           confirmButtonText: "进入病历工作台",
           cancelButtonText: "留在排队台"
         });
-        if (workspace.value) openEncounter(workspace.value.ticket.encounterId);
+        if (workspace.value) openEncounter(workspace.value.ticket.encounterId, task.stageCode);
       } catch {
         // 用户选择继续留在排队工作台。
       }
@@ -822,8 +1085,15 @@ async function roomAction(room: QueueRoom, action: string) {
     operationPending.value = "";
   }
 }
-function openEncounter(encounterId: string) {
-  router.push(`/pre-ai/encounters?id=${encodeURIComponent(encounterId)}`);
+function openEncounter(encounterId: string, stage?: QueueStage) {
+  router.push({ path: "/pre-ai/encounters", query: { id: encounterId, ...(stage ? { stage } : {}) } });
+}
+function waitingDuration(value: string) {
+  const enteredAt = new Date(value.replace(" ", "T")).getTime();
+  if (!Number.isFinite(enteredAt)) return "-";
+  const minutes = Math.max(0, Math.floor((Date.now() - enteredAt) / 60000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
 }
 function visitTypeLabel(value: QueueVisitType) {
   return value === "FOLLOW_UP" ? "复诊" : "初诊";
@@ -899,8 +1169,26 @@ function taskStatusType(value: string) {
         ? "danger"
         : "primary";
 }
+function shouldPausePolling() {
+  return (
+    document.visibilityState !== "visible" ||
+    Boolean(operationPending.value) ||
+    submitting.value ||
+    registrationVisible.value ||
+    issueVisible.value ||
+    printerSetupVisible.value ||
+    templateVisible.value
+  );
+}
+function handleVisibilityChange() {
+  if (document.visibilityState === "visible" && !shouldPausePolling()) void load(true);
+}
 onMounted(async () => {
   await Promise.all([load(), refreshPrintAgent()]);
+  pollingTimer = setInterval(() => {
+    if (!shouldPausePolling()) void load(true);
+  }, 5000);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
   if (printAgent.value?.terminalId) {
     try {
       await registerQueuePrintTerminalApi({
@@ -913,6 +1201,10 @@ onMounted(async () => {
       // 终端心跳登记失败不影响队列查看，实际打印时仍会再次校验。
     }
   }
+});
+onBeforeUnmount(() => {
+  if (pollingTimer) clearInterval(pollingTimer);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
 });
 </script>
 
@@ -967,9 +1259,18 @@ onMounted(async () => {
 .hero-panel .eyebrow {
   color: #bfe5d6;
 }
+.issuance-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.issuance-notice .el-alert {
+  flex: 1;
+}
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 16px;
   margin: 18px 0;
 }
@@ -1036,6 +1337,10 @@ onMounted(async () => {
 .detail-heading h2 {
   margin: 4px 0;
 }
+.visit-context {
+  margin: 2px 0 0;
+  color: #5f766f;
+}
 .ticket-list {
   display: grid;
   gap: 10px;
@@ -1061,6 +1366,57 @@ onMounted(async () => {
   border-color: #79b79e;
   background: #edf7f3;
 }
+.ticket-card.new-reception {
+  border-color: #ef8d73;
+  box-shadow: 0 0 0 3px rgb(239 141 115 / 16%);
+  animation: reception-highlight 1.4s ease-in-out 2;
+}
+.ticket-status {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+.priority-hint {
+  max-width: 180px;
+  color: #397663;
+  text-align: right;
+}
+.blocked-encounters {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e1eee9;
+}
+.blocked-heading {
+  display: grid;
+  gap: 4px;
+}
+.blocked-heading small,
+.blocked-encounters article span,
+.blocked-encounters article small {
+  color: #789089;
+}
+.blocked-encounters article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #f0d7a7;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+.blocked-encounters article > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+@keyframes reception-highlight {
+  50% {
+    background: #fff2ed;
+  }
+}
 .ticket-no b {
   display: block;
   font-size: 27px;
@@ -1075,6 +1431,13 @@ onMounted(async () => {
 .ticket-main strong {
   display: block;
   font-size: 17px;
+}
+.ticket-main .visit-reason {
+  max-width: 340px;
+  overflow: hidden;
+  color: #425d55;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stage-grid {
   display: grid;
@@ -1107,6 +1470,14 @@ onMounted(async () => {
 .reason.danger {
   background: #fff0ed;
   color: #b64d45;
+}
+.handoff-summary {
+  margin: 10px 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #edf7f3;
+  color: #397663;
+  font-size: 13px;
 }
 .audit-panel {
   margin-top: 20px;

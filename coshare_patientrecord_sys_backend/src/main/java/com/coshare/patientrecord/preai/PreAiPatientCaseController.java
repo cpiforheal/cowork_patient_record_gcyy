@@ -36,10 +36,22 @@ public class PreAiPatientCaseController {
         return ApiResult.of(200, "复诊子病历已创建", service.createFollowUp(patientCaseId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/{patientCaseId}/encounters/register-and-issue")
+    public ApiResult<Map<String, Object>> createFollowUpAndIssue(
+        @PathVariable String patientCaseId,
+        @RequestBody PreAiEncounterService.FollowUpRegisterAndIssueRequest request
+    ) {
+        return ApiResult.of(200, "复诊登记和发号已完成",
+            service.createFollowUpAndIssue(patientCaseId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/{patientCaseId}/encounters/history")
+    public ApiResult<Map<String, Object>> encounterHistory(@PathVariable String patientCaseId) {
+        return ApiResult.success(service.encounterHistory(patientCaseId, AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/{patientCaseId}/inspection-timeline")
     public ApiResult<Map<String, Object>> inspectionTimeline(@PathVariable String patientCaseId) {
         return ApiResult.success(service.inspectionTimeline(patientCaseId, AuthPermission.currentUserOrThrow()));
     }
 }
-
-

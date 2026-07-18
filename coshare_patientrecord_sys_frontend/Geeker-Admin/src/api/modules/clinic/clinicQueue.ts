@@ -22,6 +22,8 @@ export interface QueueTicket {
   businessDate: string;
   publicNo: string;
   visitType: QueueVisitType;
+  visitNo?: number;
+  visitReason?: string;
   patientId: string;
   patientName: string;
   maskedName: string;
@@ -169,20 +171,46 @@ export interface QueueWorkspace {
   issueMessage?: string;
 }
 
+export interface EligibleQueueEncounter {
+  encounterId: string;
+  caseToken: string;
+  patientName: string;
+  visitDate: string;
+  visitNo: number;
+  visitType: QueueVisitType;
+  visitReason: string;
+  registrationStatus: string;
+  registrationVersion: number;
+  eligible: boolean;
+  blockReason: string;
+  updatedAt: string;
+}
+
+export interface EligibleQueueEncounterResponse {
+  list: EligibleQueueEncounter[];
+  blocked: EligibleQueueEncounter[];
+}
+
 export interface QueueDashboard {
   tickets: QueueTicket[];
   rooms: QueueRoom[];
   counts: QueueCounts;
+  recommendedByStage: Record<QueueStage, QueueDisplayRow[]>;
   currentUserRole: string;
   serverTime: string;
 }
 
 export interface QueueDisplayRow {
   id: string;
+  ticketId?: string;
   publicNo: string;
   visitType: QueueVisitType;
   status: QueueTaskStatus;
   calledAt?: string;
+  recommendedRank?: number;
+  priorityReason?: string;
+  waitMinutes?: number;
+  stageEnteredAt?: string;
   updatedAt: string;
 }
 
@@ -213,6 +241,11 @@ export const getQueueDashboardApi = async (keyword = "") => {
   const query = keyword ? `?keyword=${encodeURIComponent(keyword)}` : "";
   const result = await clinicFetch(`/clinic-queue/dashboard${query}`, { headers: authHeaders() });
   return clinicResponse(await parseClinicApiResponse<QueueDashboard>(result));
+};
+
+export const getEligibleQueueEncountersApi = async () => {
+  const result = await clinicFetch("/clinic-queue/eligible-encounters", { headers: authHeaders() });
+  return clinicResponse(await parseClinicApiResponse<EligibleQueueEncounterResponse>(result));
 };
 
 export const issueQueueTicketApi = (encounterId: string, visitType: QueueVisitType) =>

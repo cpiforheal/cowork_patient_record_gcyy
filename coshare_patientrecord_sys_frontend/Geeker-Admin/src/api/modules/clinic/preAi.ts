@@ -1,6 +1,7 @@
 import { authHeaders, handleUnauthorizedResponse } from "@/api/modules/authToken";
 import { getLoginOptionsApi, type LoginAccountOption } from "@/api/modules/login";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
+import type { QueueWorkspace } from "./clinicQueue";
 
 export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "TCM" | "DOCTOR" | "SURGERY" | "REVIEW";
 export type PreAiStageStatus = "DRAFT" | "COMPLETED" | "RETURNED" | "SKIPPED";
@@ -48,6 +49,15 @@ export interface PreAiEncounterSummary {
   createdAt: string;
   updatedAt: string;
   stageStatuses: Partial<Record<PreAiStageCode, PreAiStageStatus>>;
+}
+
+export interface PreAiEncounterHistoryItem extends PreAiEncounterSummary {
+  visitType: "INITIAL" | "FOLLOW_UP";
+  previousEncounterId?: string;
+  completedStages: PreAiStageCode[];
+  completedStageCount: number;
+  visitReason?: string;
+  description?: string;
 }
 
 export interface PreAiEncounter extends Omit<
@@ -104,6 +114,10 @@ export interface InspectionTimelineNode {
 export interface FollowUpEncounterCreateRequest {
   visitDate: string;
   visitMeta: VisitMeta;
+}
+
+export interface FollowUpRegisterAndIssueRequest extends FollowUpEncounterCreateRequest {
+  clientRequestId: string;
 }
 
 export interface PreAiStageSubmission {
@@ -190,6 +204,7 @@ export interface PreAiExportVersion {
   encounterId: string;
   version: number;
   status: string;
+  templateVersion?: string;
   caseToken: string;
   fileName: string;
   generatedBy: string;
@@ -219,6 +234,22 @@ export interface PreAiWorkspace {
   auditLogs: PreAiAuditLog[];
   exports: PreAiExportVersion[];
   currentUserRole: string;
+  readOnly?: boolean;
+  queueHandoff?: QueueHandoff;
+}
+
+export interface QueueHandoff {
+  ticketId: string;
+  publicNo: string;
+  fromStage: "INSPECTION" | "RECEPTION";
+  nextStage?: "RECEPTION";
+  nextStatus: string;
+  transferredAt: string;
+}
+
+export interface RegisterAndIssueResult {
+  encounterWorkspace: PreAiWorkspace;
+  queueWorkspace: QueueWorkspace;
 }
 
 export interface PreAiReviewLabMetric {
@@ -243,6 +274,24 @@ export interface PreAiReviewPreview {
     abnormalMetrics: PreAiReviewLabMetric[];
   };
   ready: boolean;
+  templateVersion?: string;
+  effectiveFieldCount?: number;
+  documentSections?: PreAiDocumentSection[];
+}
+
+export interface PreAiDocumentRow {
+  id: string;
+  label: string;
+  value: string;
+  contentType: "TEXT" | "LIST" | "MEASUREMENT" | "IMAGE";
+  severity: "NORMAL" | "ABNORMAL" | "CRITICAL";
+  emphasis?: boolean;
+}
+
+export interface PreAiDocumentSection {
+  code: string;
+  title: string;
+  rows: PreAiDocumentRow[];
 }
 
 const jsonRequest = async <T>(path: string, method: "POST" | "PUT" | "DELETE", body?: unknown) => {
@@ -287,6 +336,21 @@ export const getPreAiDutyUserOptionsApi = async () => {
 export const createPreAiFollowUpApi = (patientCaseId: string, payload: FollowUpEncounterCreateRequest) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/encounters`, "POST", payload);
 
+export const registerAndIssuePreAiFollowUpApi = (patientCaseId: string, payload: FollowUpRegisterAndIssueRequest) =>
+  jsonRequest<RegisterAndIssueResult>(
+    `/pre-ai/patients/${encodeURIComponent(patientCaseId)}/encounters/register-and-issue`,
+    "POST",
+    payload
+  );
+
+export const getPreAiEncounterHistoryApi = async (patientCaseId: string, signal?: AbortSignal) => {
+  const result = await clinicFetch(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/encounters/history`, {
+    headers: authHeaders(),
+    signal
+  });
+  return clinicResponse(await parseClinicApiResponse<{ patientCaseId: string; encounters: PreAiEncounterHistoryItem[] }>(result));
+};
+
 export const getPreAiInspectionTimelineApi = async (patientCaseId: string, signal?: AbortSignal) => {
   const result = await clinicFetch(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/inspection-timeline`, {
     headers: authHeaders(),
@@ -303,8 +367,32 @@ export const getPreAiWorkspaceApi = async (encounterId: string, signal?: AbortSi
   return clinicResponse(await parseClinicApiResponse<PreAiWorkspace>(result));
 };
 
+export const getPreAiReadOnlyWorkspaceApi = async (encounterId: string, patientCaseId: string, signal?: AbortSignal) => {
+  const query = new URLSearchParams({ readOnly: "true", patientCaseId });
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}?${query}`, {
+    headers: authHeaders(),
+    signal
+  });
+  return clinicResponse(await parseClinicApiResponse<PreAiWorkspace>(result));
+};
+
 export const createPreAiEncounterApi = (patient: Record<string, any>) =>
   jsonRequest<PreAiWorkspace>("/pre-ai/encounters", "POST", { patient });
+
+export const registerAndIssuePreAiEncounterApi = (patient: Record<string, any>, clientRequestId: string) =>
+  jsonRequest<RegisterAndIssueResult>("/pre-ai/encounters/register-and-issue", "POST", { patient, clientRequestId });
+
+export const registerAndIssueExistingPreAiEncounterApi = (
+  encounterId: string,
+  patient: Record<string, any>,
+  clientRequestId: string,
+  expectedVersion?: number
+) =>
+  jsonRequest<RegisterAndIssueResult>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/register-and-issue`, "POST", {
+    patient,
+    clientRequestId,
+    expectedVersion
+  });
 
 export const savePreAiVisitMetaApi = (encounterId: string, visitMeta: VisitMeta) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/visit-meta`, "PUT", { visitMeta });

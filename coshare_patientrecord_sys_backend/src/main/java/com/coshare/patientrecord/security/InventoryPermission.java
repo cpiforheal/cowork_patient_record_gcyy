@@ -40,7 +40,11 @@ public final class InventoryPermission {
     }
 
     public static SessionUser requireStockKeeper() {
-        return requireAdmin();
+        SessionUser user = currentUserOrThrow();
+        if (!APPROVER_ROLES.contains(user.role())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无物资档案及库存维护权限");
+        }
+        return user;
     }
 
     public static SessionUser requireStaff() {
