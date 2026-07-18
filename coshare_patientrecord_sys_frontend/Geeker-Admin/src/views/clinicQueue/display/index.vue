@@ -2,7 +2,7 @@
   <main class="display-shell" :class="{ offline }">
     <header class="display-header">
       <div class="header-primary">
-        <span class="medical-mark"><i></i><i></i></span>
+        <img class="brand-logo" src="@/assets/images/logo.jpg" alt="医院标识" />
         <div class="brand-copy">
           <strong class="brand-title">门诊候诊叫号</strong>
           <span>OUTPATIENT QUEUE DISPLAY</span>
@@ -41,9 +41,33 @@
           panel.room.calling.length ? 'has-calling' : 'is-idle'
         ]"
       >
+        <div class="board-decoration" aria-hidden="true">
+          <svg class="colon-mascot" viewBox="0 0 96 96" fill="none">
+            <path
+              d="M29 18c-9 0-16 7-16 16v25c0 11 8 19 19 19h25c12 0 21-9 21-21V35c0-9-7-16-16-16H35c-6 0-10 4-10 10v24c0 6 4 10 10 10h17c6 0 10-4 10-10V38c0-4-3-7-7-7s-7 3-7 7v10"
+            />
+            <circle cx="34" cy="35" r="2.2" />
+            <circle cx="43" cy="35" r="2.2" />
+            <path d="M34 42c3 3 7 3 10 0" />
+            <path class="mascot-spark" d="m75 13 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" />
+          </svg>
+        </div>
         <div class="board-title">
           <div class="room-identity">
             <span class="stage-index">{{ panel.stage === "INSPECTION" ? "01" : "02" }}</span>
+            <span class="room-medical-icon" :class="panel.stage === 'INSPECTION' ? 'inspection-icon' : 'reception-icon'">
+              <svg v-if="panel.stage === 'INSPECTION'" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <rect x="9" y="7" width="25" height="32" rx="5" />
+                <path d="M17 7.5V5h9v2.5M15 17h13M15 23h8" />
+                <circle cx="31" cy="31" r="7" />
+                <path d="m36 36 5 5" />
+              </svg>
+              <svg v-else viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <path d="M12 8v10c0 7 5 12 12 12s12-5 12-12V8" />
+                <path d="M8 8h8M32 8h8M24 30v3c0 5 4 9 9 9s9-4 9-9v-2" />
+                <circle cx="42" cy="27" r="4" />
+              </svg>
+            </span>
             <b>{{ panel.room.room.roomName }}</b>
             <span class="room-status-pill">{{ roomStatusLabel(panel.room.room.status) }}</span>
           </div>
@@ -436,7 +460,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-/* 2026 门诊候诊导视：医疗蓝用于当前状态，薄荷绿用于流程与舒缓背景 */
+/* 2026 门诊候诊导视：楷体信息层级、医疗蓝绿双区与轻量肠道健康漫画点缀 */
 .display-shell {
   --mint: #c6f8dd;
   --blue: #0bb1ea;
@@ -455,9 +479,12 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: var(--navy);
   background:
-    radial-gradient(circle at 4% 0%, rgba(198, 248, 221, 0.34), transparent 26%),
-    linear-gradient(180deg, #f7fbfc 0%, #f2f8f9 100%);
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    radial-gradient(circle at 5% 3%, rgba(198, 248, 221, 0.68), transparent 25%),
+    radial-gradient(circle at 96% 90%, rgba(151, 220, 246, 0.3), transparent 28%),
+    radial-gradient(circle at 85% 8%, rgba(255, 224, 181, 0.2), transparent 17%),
+    linear-gradient(155deg, #f9fdfb 0%, #f1fbff 50%, #f4fbf7 100%);
+  font-family: "KaiTi", "STKaiti", "楷体", "FangSong", serif;
+  font-weight: 400;
 }
 .display-header {
   position: relative;
@@ -489,36 +516,17 @@ onBeforeUnmount(() => {
 .header-primary {
   gap: 16px;
 }
-.medical-mark {
-  position: relative;
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
-  background: var(--blue);
-  box-shadow: 0 8px 18px rgba(11, 177, 234, 0.16);
-}
-.medical-mark::after {
-  position: absolute;
-  inset: 6px -6px -6px 6px;
-  z-index: -1;
-  border-radius: 15px;
-  background: rgba(198, 248, 221, 0.84);
-  content: "";
-}
-.medical-mark i {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  border-radius: 3px;
+.brand-logo {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.96);
+  border-radius: 18px;
   background: #fff;
-  transform: translate(-50%, -50%);
-}
-.medical-mark i:first-child {
-  width: 29px;
-  height: 9px;
-}
-.medical-mark i:last-child {
-  width: 9px;
-  height: 29px;
+  box-shadow:
+    0 0 0 1px rgba(11, 177, 234, 0.15),
+    0 9px 22px rgba(8, 127, 169, 0.16);
 }
 .brand-copy {
   display: grid;
@@ -651,14 +659,19 @@ onBeforeUnmount(() => {
   --stage-soft: rgba(11, 177, 234, 0.045);
   --stage-index-bg: #e9f8fc;
   --stage-index-color: var(--blue-deep);
+  position: relative;
   min-height: 0;
   display: grid;
   grid-template-rows: clamp(64px, 14%, 100px) minmax(0, 36%) minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #cfe2e7;
-  border-radius: 20px;
-  background: #ffffff;
-  box-shadow: 0 12px 34px rgba(32, 92, 112, 0.06);
+  border-color: color-mix(in srgb, var(--stage-accent) 25%, #dce8eb);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 15px 40px rgba(32, 92, 112, 0.09);
+  box-shadow:
+    0 15px 40px rgba(32, 92, 112, 0.09),
+    inset 0 4px 0 color-mix(in srgb, var(--stage-accent) 62%, transparent);
 }
 .room-board.is-idle {
   grid-template-rows: clamp(64px, 14%, 100px) minmax(0, 36%) minmax(0, 1fr);
@@ -668,6 +681,41 @@ onBeforeUnmount(() => {
   --stage-soft: rgba(198, 248, 221, 0.16);
   --stage-index-bg: rgba(198, 248, 221, 0.5);
   --stage-index-color: #287f60;
+}
+.board-decoration {
+  position: absolute;
+  right: 14px;
+  bottom: 8px;
+  z-index: 0;
+  width: clamp(76px, 6.5vw, 108px);
+  color: var(--stage-accent);
+  opacity: 0.13;
+  pointer-events: none;
+  transform: rotate(-4deg);
+}
+.colon-mascot {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  stroke: currentColor;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.colon-mascot circle {
+  fill: currentColor;
+  stroke: none;
+}
+.colon-mascot .mascot-spark {
+  fill: #f4c96b;
+  fill: color-mix(in srgb, var(--stage-accent) 42%, #ffd36a);
+  stroke: none;
+}
+.board-title,
+.calling-section,
+.waiting-section {
+  position: relative;
+  z-index: 1;
 }
 .room-board.paused {
   border-color: #e2c57d;
@@ -686,12 +734,37 @@ onBeforeUnmount(() => {
   padding: 0 26px;
   border-bottom: 1px solid var(--line);
   background: var(--stage-soft);
+  background:
+    radial-gradient(circle at 92% 22%, color-mix(in srgb, var(--stage-accent) 13%, transparent), transparent 25%),
+    linear-gradient(90deg, var(--stage-soft), rgba(255, 255, 255, 0.72));
 }
 .room-identity {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 14px;
+}
+.room-medical-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 1px solid #d6e7eb;
+  border-color: color-mix(in srgb, var(--stage-accent) 28%, #dce8eb);
+  border-radius: 50%;
+  color: var(--stage-index-color);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 5px 13px rgba(32, 92, 112, 0.08);
+  box-shadow: 0 5px 13px color-mix(in srgb, var(--stage-accent) 12%, transparent);
+}
+.room-medical-icon svg {
+  width: 29px;
+  height: 29px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .stage-index {
   display: grid;
@@ -787,9 +860,16 @@ onBeforeUnmount(() => {
   flex: 1;
   grid-template-columns: minmax(0, 1.3fr) minmax(170px, 0.7fr);
   align-items: center;
-  margin-top: 8px;
+  margin-top: 10px;
   padding: 10px 20px;
-  background: transparent;
+  border: 1px solid #dce9ec;
+  border-color: color-mix(in srgb, var(--stage-accent) 17%, #e3ecef);
+  border-radius: 17px;
+  background: #f9fcfd;
+  background:
+    radial-gradient(circle at 12% 20%, color-mix(in srgb, var(--stage-accent) 10%, transparent), transparent 30%),
+    linear-gradient(135deg, #fff, color-mix(in srgb, var(--stage-accent) 5%, #fff));
+  box-shadow: 0 7px 18px rgba(32, 92, 112, 0.045);
 }
 .focus-number {
   display: block;
@@ -836,7 +916,9 @@ onBeforeUnmount(() => {
   place-items: center;
   margin-top: 4px;
   padding: 0;
-  background: transparent;
+  border-style: dashed;
+  background: #f9fcfd;
+  background: color-mix(in srgb, var(--stage-accent) 3%, #fff);
 }
 .empty-state-title {
   color: #78919b;
@@ -869,11 +951,18 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: 10px 15px;
   overflow: hidden;
-  border-bottom: 1px solid #e0ebee;
-  background: #fff;
+  border: 1px solid #deeaed;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 12px rgba(32, 92, 112, 0.035);
 }
 .waiting-item.next {
-  background: rgba(198, 248, 221, 0.2);
+  border-color: #b8dfe7;
+  border-color: color-mix(in srgb, var(--stage-accent) 30%, #dce8eb);
+  background: #eef9f5;
+  background: color-mix(in srgb, var(--stage-accent) 9%, #fff);
+  box-shadow: 0 6px 16px rgba(32, 92, 112, 0.07);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--stage-accent) 10%, transparent);
 }
 .waiting-number {
   min-width: 0;
@@ -1070,9 +1159,11 @@ onBeforeUnmount(() => {
   .brand-title {
     font-size: 28px;
   }
-  .medical-mark {
+  .brand-logo {
     width: 48px;
     height: 48px;
+    flex-basis: 48px;
+    border-radius: 15px;
   }
   .date-clock > span,
   .header-divider {
@@ -1239,9 +1330,10 @@ onBeforeUnmount(() => {
     padding-right: 24px;
     padding-left: 24px;
   }
-  .medical-mark {
+  .brand-logo {
     width: 42px;
     height: 42px;
+    flex-basis: 42px;
     border-radius: 12px;
   }
   .brand-title {
@@ -1343,5 +1435,14 @@ onBeforeUnmount(() => {
   border-radius: 0 0 8px 8px;
   color: #ffffff;
   background: #9b4038;
+}
+
+/* 大屏统一使用楷体常规字重，避免粗体在远距离观看时挤压笔画。 */
+.display-shell,
+.display-shell button {
+  font-family: "KaiTi", "STKaiti", "楷体", "FangSong", serif;
+}
+.display-shell * {
+  font-weight: 400 !important;
 }
 </style>
