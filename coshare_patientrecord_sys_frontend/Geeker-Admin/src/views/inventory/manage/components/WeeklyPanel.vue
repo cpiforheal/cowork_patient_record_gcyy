@@ -2,18 +2,19 @@
   <section class="panel">
     <div class="panel-head">
       <div>
-        <h2>科室周消耗</h2>
-        <p>记录本周实际消耗、剩余数量和下周预计领用，用于 P1 趋势与异常管理。</p>
+        <h2>科室周计划</h2>
+        <p>系统按实际耗用、当前结存和安全库存生成建议，人工只确认调整量与异常原因。</p>
       </div>
-      <el-button v-if="canCreate" type="primary" :icon="Plus" @click="$emit('create')">新增周消耗</el-button>
+      <el-button v-if="canCreate" type="primary" :icon="Plus" @click="$emit('create')">确认周计划</el-button>
     </div>
     <el-table :data="rows" border>
       <el-table-column prop="weekNo" label="周次" width="130" />
       <el-table-column prop="department" label="科室" width="120" />
       <el-table-column prop="itemName" label="物资" min-width="150" />
-      <el-table-column prop="consumedQuantity" label="本周消耗" width="110" />
+      <el-table-column prop="actualConsumedQuantity" label="实际耗用" width="110" />
       <el-table-column prop="remainingQuantity" label="科室剩余" width="110" />
-      <el-table-column prop="nextWeekQuantity" label="下周预计" width="110" />
+      <el-table-column prop="suggestedQuantity" label="系统建议" width="110" />
+      <el-table-column prop="adjustedQuantity" label="最终调整" width="110" />
       <el-table-column prop="owner" label="负责人" width="110" />
       <el-table-column prop="abnormalReason" label="异常说明" min-width="220" />
       <el-table-column prop="confirmedAt" label="确认时间" width="160" />

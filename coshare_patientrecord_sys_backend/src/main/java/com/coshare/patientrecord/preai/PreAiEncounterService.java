@@ -8,7 +8,7 @@ import com.coshare.patientrecord.clinicqueue.ClinicQueueService;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
 import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
-import com.coshare.patientrecord.inventory.service.InventoryPackageService;
+import com.coshare.patientrecord.inventory.service.InventoryStageConsumptionService;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -43,8 +43,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -55,6 +53,7 @@ public class PreAiEncounterService {
     private static final Logger log = LoggerFactory.getLogger(PreAiEncounterService.class);
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW");
+    private static final Set<String> INVENTORY_CONSUMPTION_STAGES = Set.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "nursing", "lab", "ecg", "ultrasound", "quality", "manager");
     private static final Set<String> DUTY_CODES = Set.of(
         "FRONT_DESK", "RECEPTION_DOCTOR", "TCM_DOCTOR", "INSPECTION_DOCTOR", "LAB_STAFF",
@@ -146,7 +145,7 @@ public class PreAiEncounterService {
     private final ClinicFileService fileService;
     private final PreAiPrivacyService privacyService;
     private final ClinicQueueService clinicQueueService;
-    private final InventoryPackageService inventoryPackageService;
+    private final InventoryStageConsumptionService inventoryStageConsumptionService;
     private final AuthNavigationService navigationService;
     private final Path generatedDir;
 
@@ -157,7 +156,7 @@ public class PreAiEncounterService {
         ClinicFileService fileService,
         PreAiPrivacyService privacyService,
         ClinicQueueService clinicQueueService,
-        InventoryPackageService inventoryPackageService,
+        InventoryStageConsumptionService inventoryStageConsumptionService,
         AuthNavigationService navigationService,
         @Value("${clinic.generated-pre-ai-dir:${clinic.attachment-dir}/../generated-pre-ai}") String generatedDir
     ) {
@@ -167,7 +166,7 @@ public class PreAiEncounterService {
         this.fileService = fileService;
         this.privacyService = privacyService;
         this.clinicQueueService = clinicQueueService;
-        this.inventoryPackageService = inventoryPackageService;
+        this.inventoryStageConsumptionService = inventoryStageConsumptionService;
         this.navigationService = navigationService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
@@ -621,8 +620,8 @@ public class PreAiEncounterService {
         ObjectNode encounter = loadEncounter(encounterId);
         requireStageEditor(encounter, stage, user);
         ObjectNode current = loadStage(encounterId, stage);
-        if ("COMPLETED".equals(text(current, "status")) && !"admin".equals(user.role())) {
-            throw conflict("该阶段已完成，需由医生退回后才能修改");
+        if ("COMPLETED".equals(text(current, "status"))) {
+            throw conflict("该阶段已完成，需进入纠错模式并填写原因后才能修改");
         }
         ObjectNode data = sanitizeStageData(stage, request == null ? null : request.data());
         if ("SURGERY".equals(stage)) normalizeSurgeryConfirmation(encounter, data, user);
@@ -755,6 +754,9 @@ public class PreAiEncounterService {
         if ("DOCTOR".equals(stage)) syncEncounterBranch(encounterId, data, encounter);
         updateStageVersioned(encounterId, stage, "COMPLETED", data, reason, user, now(), request == null ? null : request.expectedVersion());
         syncDiagnoses(encounterId, stage, data);
+        long correctedVersion = loadStage(encounterId, stage).path("version").asLong();
+        enqueueInventoryReversal(encounter, stage, correctedVersion, user, reason);
+        enqueueInventoryConsumption(encounter, stage, correctedVersion, user);
         invalidateReview(encounterId, user, "已完成阶段纠错：" + reason);
         auditCorrection(encounterId, stage, user, reason, before, data);
         refreshProgress(encounterId);
@@ -770,6 +772,9 @@ public class PreAiEncounterService {
         requireStageEditor(encounter, stage, user);
         assertPreviousStages(encounterId, stage, encounter);
         ObjectNode current = loadStage(encounterId, stage);
+        if ("COMPLETED".equals(text(current, "status"))) {
+            throw conflict("该阶段已经完成；如需变更，请使用纠错模式并填写原因");
+        }
         ObjectNode data = request != null && request.data() != null
             ? sanitizeStageData(stage, request.data())
             : safeObject(current.path("data"));
@@ -785,6 +790,7 @@ public class PreAiEncounterService {
         if ("DOCTOR".equals(stage)) syncEncounterBranch(encounterId, data, encounter);
         updateStageVersioned(encounterId, stage, "COMPLETED", data, "", user, now(), request == null ? null : request.expectedVersion());
         syncDiagnoses(encounterId, stage, data);
+        enqueueInventoryConsumption(encounter, stage, loadStage(encounterId, stage).path("version").asLong(), user);
         Map<String, Object> queueHandoff = Set.of("INSPECTION", "RECEPTION").contains(stage)
             ? clinicQueueService.onClinicalStageCompleted(encounterId, stage, user)
             : Map.of();
@@ -809,6 +815,7 @@ public class PreAiEncounterService {
         ObjectNode current = loadStage(encounterId, stage);
         if (!Set.of("COMPLETED", "SKIPPED").contains(text(current, "status"))) throw conflict("只有已完成或已跳过的阶段可以退回");
         updateStageVersioned(encounterId, stage, "RETURNED", safeObject(current.path("data")), reason, user, "", request == null ? null : request.expectedVersion());
+        enqueueInventoryReversal(encounter, stage, loadStage(encounterId, stage).path("version").asLong(), user, reason);
         invalidateReview(encounterId, user, "医生退回阶段：" + reason);
         audit(encounterId, "stage.return", stage, user, reason);
         refreshProgress(encounterId);
@@ -1104,20 +1111,49 @@ public class PreAiEncounterService {
             """, now(), user.name(), user.role(), now(), encounterId);
         String auditDetail = criticalCount > 0 ? "医生确认全部前置事实，并已阅 " + criticalCount + " 项危急值" : "医生确认全部前置事实";
         audit(encounterId, "review.confirm", "REVIEW", user, auditDetail);
-        String caseToken = text(encounter, "caseToken");
-        String route = text(encounter, "route");
-        String visitDate = text(encounter.path("patient"), "visitDate");
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    inventoryPackageService.consumeEncounter(encounterId, caseToken, route, user.department(), visitDate, user);
-                } catch (Exception error) {
-                    log.warn("Inventory consumption skipped encounterId={} department={}", encounterId, user.department(), error);
-                }
-            }
-        });
         return toMap(workspace(encounterId, user));
+    }
+
+    private void enqueueInventoryConsumption(ObjectNode encounter, String stage, long completionVersion, SessionUser user) {
+        if (!INVENTORY_CONSUMPTION_STAGES.contains(stage)) return;
+        inventoryStageConsumptionService.enqueueStageCompletion(
+            text(encounter, "id"),
+            stage,
+            completionVersion,
+            text(encounter, "owningDepartmentId"),
+            text(encounter, "caseToken"),
+            text(encounter, "route"),
+            parseVisitDate(text(encounter.path("patient"), "visitDate")),
+            user.name()
+        );
+    }
+
+    private void enqueueInventoryReversal(
+        ObjectNode encounter,
+        String stage,
+        long completionVersion,
+        SessionUser user,
+        String reason
+    ) {
+        if (!INVENTORY_CONSUMPTION_STAGES.contains(stage)) return;
+        inventoryStageConsumptionService.enqueueStageReversal(
+            text(encounter, "id"),
+            stage,
+            completionVersion,
+            text(encounter, "owningDepartmentId"),
+            user.name(),
+            reason
+        );
+    }
+
+    private LocalDate parseVisitDate(String value) {
+        String normalized = safe(value);
+        if (normalized.length() >= 10) normalized = normalized.substring(0, 10);
+        try {
+            return normalized.isBlank() ? LocalDate.now() : LocalDate.parse(normalized);
+        } catch (RuntimeException ignored) {
+            return LocalDate.now();
+        }
     }
 
     private ObjectNode labReviewSummary(JsonNode maskedWorkspace) {

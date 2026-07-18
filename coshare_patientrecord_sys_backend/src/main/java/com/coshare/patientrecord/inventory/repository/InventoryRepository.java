@@ -62,10 +62,11 @@ public class InventoryRepository {
         if (isInventoryManager(user)) {
             return db;
         }
+        String departmentId = user.activeDepartmentId();
         String department = user.department();
-        db.set("requests", filterByDepartment(db.path("requests"), department));
-        db.set("weeklyConsumptions", filterByDepartment(db.path("weeklyConsumptions"), department));
-        db.set("movements", filterByDepartment(db.path("movements"), department));
+        db.set("requests", filterByDepartment(db.path("requests"), departmentId, department));
+        db.set("weeklyConsumptions", filterByDepartment(db.path("weeklyConsumptions"), departmentId, department));
+        db.set("movements", filterByDepartment(db.path("movements"), departmentId, department));
         db.set("batches", objectMapper.createArrayNode());
         db.set("counts", objectMapper.createArrayNode());
         db.set("auditLogs", objectMapper.createArrayNode());
@@ -73,13 +74,17 @@ public class InventoryRepository {
         return db;
     }
 
-    private ArrayNode filterByDepartment(JsonNode rows, String department) {
+    private ArrayNode filterByDepartment(JsonNode rows, String departmentId, String department) {
         ArrayNode filtered = objectMapper.createArrayNode();
-        if (rows == null || !rows.isArray() || department == null || department.isBlank()) {
+        if (rows == null || !rows.isArray()) {
             return filtered;
         }
         for (JsonNode row : rows) {
-            if (department.equals(text(row, "department"))) {
+            String rowDepartmentId = text(row, "departmentId");
+            boolean stableIdMatches = departmentId != null && !departmentId.isBlank() && departmentId.equals(rowDepartmentId);
+            boolean legacyNameMatches = rowDepartmentId.isBlank()
+                && department != null && !department.isBlank() && department.equals(text(row, "department"));
+            if (stableIdMatches || legacyNameMatches) {
                 filtered.add(row);
             }
         }
@@ -499,6 +504,7 @@ public class InventoryRepository {
     }
 
     public void applyUserDepartment(ObjectNode row, SessionUser user) {
+        row.put("departmentId", user.activeDepartmentId());
         row.put("department", user.department());
     }
 
@@ -507,6 +513,10 @@ public class InventoryRepository {
     }
 
     public boolean sameDepartment(SessionUser user, JsonNode row) {
+        String rowDepartmentId = text(row, "departmentId");
+        if (!rowDepartmentId.isBlank()) {
+            return user.activeDepartmentId() != null && user.activeDepartmentId().equals(rowDepartmentId);
+        }
         String department = user.department();
         return department != null && department.equals(text(row, "department"));
     }

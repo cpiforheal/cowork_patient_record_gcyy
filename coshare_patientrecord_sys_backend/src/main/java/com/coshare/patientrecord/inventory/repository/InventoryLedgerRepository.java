@@ -332,8 +332,64 @@ public class InventoryLedgerRepository {
     }
 
     public ArrayNode readBalances(String departmentId, String itemId) {
+        return readBalances(departmentId, itemId, false);
+    }
+
+    public ArrayNode readWeeklySuggestions(String departmentId) {
+        String locationId = departmentLocation(departmentId);
+        return queryJson(
+            """
+            SELECT CONCAT(DATE_FORMAT(CURRENT_DATE, '%x-W%v'), ':', ?, ':', i.id) id,
+                   ? departmentId, ? departmentName, i.id itemId, i.name itemName, i.unit,
+                   COALESCE(consumption.actual_quantity, 0) actualConsumption,
+                   COALESCE(balance.available_quantity, 0) availableQuantity,
+                   COALESCE(i.safety_stock, 0) safetyQuantity,
+                   GREATEST(
+                     COALESCE(consumption.actual_quantity, 0) + COALESCE(i.safety_stock, 0)
+                       - COALESCE(balance.available_quantity, 0),
+                     0
+                   ) suggestedQuantity,
+                   CASE
+                     WHEN COALESCE(balance.available_quantity, 0) < COALESCE(i.safety_stock, 0)
+                       THEN '当前结存低于安全库存'
+                     WHEN COALESCE(consumption.actual_quantity, 0) > 0
+                       THEN '按本周实际耗用、当前结存和安全库存计算'
+                     ELSE '本周暂无实际耗用'
+                   END reason
+            FROM inventory_items i
+            LEFT JOIN (
+              SELECT item_id,
+                     SUM(CASE WHEN movement_type = 'CONSUMPTION' THEN quantity
+                              WHEN movement_type = 'CONSUMPTION_REVERSAL' THEN -quantity ELSE 0 END) actual_quantity
+              FROM inventory_ledger_movements
+              WHERE department_id = ?
+                AND DATE_FORMAT(occurred_at, '%x-W%v') = DATE_FORMAT(CURRENT_DATE, '%x-W%v')
+              GROUP BY item_id
+            ) consumption ON consumption.item_id = i.id
+            LEFT JOIN (
+              SELECT item_id, SUM(quantity - reserved_quantity) available_quantity
+              FROM inventory_batch_balances
+              WHERE location_id = ?
+              GROUP BY item_id
+            ) balance ON balance.item_id = i.id
+            WHERE i.enabled = TRUE
+            ORDER BY suggestedQuantity DESC, actualConsumption DESC, i.name
+            """,
+            departmentId,
+            departmentId,
+            departmentName(departmentId),
+            departmentId,
+            locationId
+        );
+    }
+
+    public ArrayNode readWorkbenchBalances(String departmentId, String itemId) {
+        return readBalances(departmentId, itemId, true);
+    }
+
+    private ArrayNode readBalances(String departmentId, String itemId, boolean includeCentral) {
         StringBuilder sql = new StringBuilder("""
-            SELECT l.id locationId, l.location_type locationType, l.department_id departmentId,
+            SELECT l.id locationId, l.name locationName, l.location_type locationType, l.department_id departmentId,
                    l.department_name_snapshot department, l.opening_confirmed openingConfirmed,
                    b.item_id itemId, i.name itemName, i.unit, b.batch_id batchId,
                    ib.batch_no batchNo, ib.expiry_date expiryDate,
@@ -347,7 +403,7 @@ public class InventoryLedgerRepository {
             """);
         java.util.ArrayList<Object> args = new java.util.ArrayList<>();
         if (departmentId != null && !departmentId.isBlank()) {
-            sql.append(" AND l.department_id = ?");
+            sql.append(includeCentral ? " AND (l.department_id = ? OR l.location_type = 'CENTRAL')" : " AND l.department_id = ?");
             args.add(departmentId);
         }
         if (itemId != null && !itemId.isBlank()) {

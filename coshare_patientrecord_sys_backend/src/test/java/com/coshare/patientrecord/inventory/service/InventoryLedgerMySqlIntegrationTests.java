@@ -9,6 +9,7 @@ import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
 import com.coshare.patientrecord.inventory.service.builder.InventorySummaryBuilder;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -39,7 +40,7 @@ class InventoryLedgerMySqlIntegrationTests {
     private static final String DEPARTMENT_LOCATION = "loc-dept-inventory-test";
     private static final SessionUser ADMIN = new SessionUser(
         "inventory-admin", "inventory-admin", "库存管理员", "admin", "管理员",
-        DEPARTMENT_NAME, false, Instant.now().plusSeconds(3600)
+        DEPARTMENT_ID, DEPARTMENT_NAME, false, Instant.now().plusSeconds(3600)
     );
 
     private JdbcTemplate jdbc;
@@ -104,8 +105,8 @@ class InventoryLedgerMySqlIntegrationTests {
         jdbc.update("DELETE FROM inventory_locations");
         jdbc.update("DELETE FROM clinic_departments WHERE id = ?", DEPARTMENT_ID);
         jdbc.update(
-            "INSERT INTO clinic_departments (id, name, raw_json) VALUES (?, ?, JSON_OBJECT('status', 'active'))",
-            DEPARTMENT_ID, DEPARTMENT_NAME
+            "INSERT INTO clinic_departments (id, code, name, status, raw_json) VALUES (?, ?, ?, 'ACTIVE', JSON_OBJECT('status', 'ACTIVE'))",
+            DEPARTMENT_ID, "DEPT-INVENTORY-TEST", DEPARTMENT_NAME
         );
         jdbc.update(
             """
@@ -208,6 +209,62 @@ class InventoryLedgerMySqlIntegrationTests {
         assertBalance(DEPARTMENT_LOCATION, "batch-late", "5.00", "0.00");
         assertEquals(1, count("SELECT COUNT(*) FROM inventory_consumption_events WHERE event_kind = 'REVERSAL'"));
         assertEquals(2, count("SELECT COUNT(*) FROM inventory_ledger_movements WHERE movement_type = 'CONSUMPTION_REVERSAL'"));
+    }
+
+    @Test
+    void correctionCancelsPendingConsumptionBeforeEnqueuingTheNewVersion() {
+        seedItemAndBatch("item-correction", "batch-correction", "2026-10-01", new BigDecimal("5"), DEPARTMENT_LOCATION);
+        seedPackage("package-correction", "DOCTOR", "item-correction", new BigDecimal("2"));
+
+        ObjectNode stale = consumptionService.enqueueStageCompletion(
+            "encounter-correction", "DOCTOR", 3, DEPARTMENT_ID, "case-correction",
+            "outpatient", LocalDate.now(), ADMIN.name()
+        );
+        ObjectNode cancellation = consumptionService.enqueueStageReversal(
+            "encounter-correction", "DOCTOR", 4, DEPARTMENT_ID, ADMIN.name(), "Replace a pending consumption during correction"
+        );
+
+        assertEquals(stale.path("id").asText(), cancellation.path("id").asText());
+        assertEquals("CANCELLED", jdbc.queryForObject(
+            "SELECT status FROM inventory_stage_consumption_commands WHERE id = ?", String.class, stale.path("id").asText()
+        ));
+        assertEquals(0, count("SELECT COUNT(*) FROM inventory_stage_consumption_commands WHERE command_type = 'REVERSAL'"));
+
+        ObjectNode corrected = consumptionService.enqueueStageCompletion(
+            "encounter-correction", "DOCTOR", 4, DEPARTMENT_ID, "case-correction",
+            "outpatient", LocalDate.now(), ADMIN.name()
+        );
+        consumptionService.processCommand(corrected.path("id").asText());
+
+        assertBalance(DEPARTMENT_LOCATION, "batch-correction", "3.00", "0.00");
+        assertEquals(1, count("SELECT COUNT(*) FROM inventory_consumption_events WHERE event_kind = 'CONSUMPTION'"));
+    }
+
+    @Test
+    void weeklySuggestionUsesLedgerConsumptionCurrentBalanceAndSafetyStock() {
+        seedItemAndBatch("item-weekly", "batch-weekly", "2026-10-01", new BigDecimal("5"), DEPARTMENT_LOCATION);
+        jdbc.update("UPDATE inventory_items SET safety_stock = 3 WHERE id = 'item-weekly'");
+        seedPackage("package-weekly", "DOCTOR", "item-weekly", new BigDecimal("2"));
+        ObjectNode command = consumptionService.enqueueStageCompletion(
+            "encounter-weekly", "DOCTOR", 1, DEPARTMENT_ID, "case-weekly",
+            "outpatient", LocalDate.now(), ADMIN.name()
+        );
+        consumptionService.processCommand(command.path("id").asText());
+
+        ArrayNode rows = ledger.readWeeklySuggestions(DEPARTMENT_ID);
+        ObjectNode suggestion = null;
+        for (JsonNode row : rows) {
+            if ("item-weekly".equals(row.path("itemId").asText())) {
+                suggestion = (ObjectNode) row;
+                break;
+            }
+        }
+        assertTrue(suggestion != null);
+
+        assertEquals(0, new BigDecimal("2").compareTo(suggestion.path("actualConsumption").decimalValue()));
+        assertEquals(0, new BigDecimal("3").compareTo(suggestion.path("availableQuantity").decimalValue()));
+        assertEquals(0, new BigDecimal("3").compareTo(suggestion.path("safetyQuantity").decimalValue()));
+        assertEquals(0, new BigDecimal("2").compareTo(suggestion.path("suggestedQuantity").decimalValue()));
     }
 
     @Test

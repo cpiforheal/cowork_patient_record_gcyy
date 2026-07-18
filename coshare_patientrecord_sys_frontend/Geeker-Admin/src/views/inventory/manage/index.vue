@@ -361,7 +361,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="weeklyDialogVisible" title="新增周消耗确认" width="640px" destroy-on-close>
+    <el-dialog v-model="weeklyDialogVisible" title="确认周计划" width="640px" destroy-on-close>
       <el-form ref="weeklyFormRef" :model="weeklyForm" :rules="weeklyFormRules" label-width="112px" status-icon>
         <el-form-item label="周次" prop="weekNo">
           <el-date-picker v-model="weeklyForm.weekNo" value-format="YYYY-[W]ww" type="week" format="YYYY 第 ww 周" />
@@ -378,27 +378,20 @@
         </el-form-item>
         <div v-if="selectedWeeklyItem" class="weekly-assist">
           <div>
-            <span>当前库存</span>
-            <strong>{{ weeklyItemStock }} {{ selectedWeeklyItem.unit }}</strong>
+            <span>实际耗用</span>
+            <strong>{{ selectedWeeklySuggestion?.actualConsumption || 0 }} {{ selectedWeeklyItem.unit }}</strong>
           </div>
           <div>
-            <span>本周已发放</span>
-            <strong>{{ weeklyIssuedThisWeek }} {{ selectedWeeklyItem.unit }}</strong>
+            <span>科室结存</span>
+            <strong>{{ selectedWeeklySuggestion?.availableQuantity ?? weeklyItemStock }} {{ selectedWeeklyItem.unit }}</strong>
           </div>
           <div>
-            <span>上次剩余</span>
-            <strong>{{ weeklyLastRecord ? `${weeklyLastRecord.remainingQuantity} ${selectedWeeklyItem.unit}` : "暂无" }}</strong>
+            <span>系统建议</span>
+            <strong>{{ selectedWeeklySuggestion?.suggestedQuantity || 0 }} {{ selectedWeeklyItem.unit }}</strong>
           </div>
-          <el-button size="small" plain @click="applyWeeklySuggestion">带入建议</el-button>
         </div>
-        <el-form-item label="本周消耗">
-          <el-input-number v-model="weeklyForm.consumedQuantity" :min="0" :precision="2" />
-        </el-form-item>
-        <el-form-item label="科室剩余">
-          <el-input-number v-model="weeklyForm.remainingQuantity" :min="0" :precision="2" />
-        </el-form-item>
-        <el-form-item label="下周预计">
-          <el-input-number v-model="weeklyForm.nextWeekQuantity" :min="0" :precision="2" />
+        <el-form-item label="最终调整量">
+          <el-input-number v-model="weeklyForm.adjustedQuantity" :min="0" :precision="2" />
         </el-form-item>
         <el-form-item label="负责人">
           <el-input v-model="weeklyForm.owner" />
@@ -409,7 +402,7 @@
       </el-form>
       <template #footer>
         <el-button @click="weeklyDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveWeekly">确认消耗</el-button>
+        <el-button type="primary" :loading="saving" @click="saveWeekly">确认计划</el-button>
       </template>
     </el-dialog>
 
@@ -572,9 +565,7 @@ const weeklyForm = reactive({
   weekNo: "",
   department: "",
   itemId: "",
-  consumedQuantity: 0,
-  remainingQuantity: 0,
-  nextWeekQuantity: 0,
+  adjustedQuantity: 0,
   owner: "",
   abnormalReason: "",
   operator: ""
@@ -665,7 +656,7 @@ const tabNavItems = [
   { tab: "requests", title: "申领审批", desc: "申请到签收" },
   { tab: "stock", title: "库存看板", desc: "批次与效期" },
   { tab: "items", title: "物资档案", desc: "字典与规则" },
-  { tab: "weekly", title: "周消耗", desc: "用量与预计" },
+  { tab: "weekly", title: "周计划", desc: "自动建议与调整" },
   { tab: "controls", title: "盘点处置", desc: "退回与报废" },
   { tab: "packages", title: "使用套餐", desc: "版本与自动扣减" },
   { tab: "trace", title: "追溯流水", desc: "导出与复核" }
@@ -676,7 +667,7 @@ const workflowSteps = [
   { title: "科室提交申领", desc: "填写用途、数量、负责人和周期", action: "request", auth: ["inventory:request"] },
   { title: "审核与发放", desc: "负责人审核，仓库按批次发放", action: "requests", auth: ["inventory:approve", "inventory:issue"] },
   { title: "科室签收确认", desc: "发放后由领取人确认闭环", action: "requests", auth: ["inventory:receive"] },
-  { title: "周消耗填报", desc: "记录本周使用和下周预计", action: "weekly", auth: ["inventory:request"] },
+  { title: "周计划确认", desc: "复核自动建议并填写异常调整", action: "weekly", auth: ["inventory:request"] },
   { title: "盘点与追溯", desc: "差异、退回、报废全部留痕", action: "controls", auth: ["inventory:count"] }
 ] as const;
 
@@ -824,7 +815,7 @@ const tabProfiles = {
 const itemMap = computed(() => new Map(db.value.items.map(item => [item.id, item])));
 const itemName = (itemId?: string) => itemMap.value.get(itemId || "")?.name || itemId || "-";
 const itemUnit = (itemId?: string) => itemMap.value.get(itemId || "")?.unit || "";
-const inventoryCapabilities = computed(() => new Set((authStore as unknown as { capabilities?: string[] }).capabilities || []));
+const inventoryCapabilities = computed(() => new Set(authStore.capabilities || []));
 const hasInventoryAuth = (code: string) => inventoryCapabilities.value.has(code);
 const hasAnyInventoryAuth = (codes: readonly string[]) => codes.some(code => hasInventoryAuth(code));
 const hasInventoryAuthForTab = (tab: string, code: string) =>
@@ -999,36 +990,11 @@ const filteredTraceRows = computed(() =>
 );
 const selectedWeeklyItem = computed(() => itemMap.value.get(weeklyForm.itemId));
 const weeklyItemStock = computed(() => stockByItem.value[weeklyForm.itemId] || 0);
-const weeklyLastRecord = computed(
-  () =>
-    weeklyRows.value
-      .filter(
-        row => row.department === weeklyForm.department && row.itemId === weeklyForm.itemId && row.weekNo !== weeklyForm.weekNo
-      )
-      .sort((a, b) => String(b.weekNo || "").localeCompare(String(a.weekNo || "")))[0]
+const selectedWeeklySuggestion = computed(() =>
+  inventoryWorkbench.value?.weeklySuggestions?.find(
+    row => row.itemId === weeklyForm.itemId && row.departmentName === weeklyForm.department
+  )
 );
-const weeklyIssuedThisWeek = computed(() =>
-  traceRows.value
-    .filter(
-      row =>
-        row.type === "issue" &&
-        row.itemId === weeklyForm.itemId &&
-        row.department === weeklyForm.department &&
-        String(row.createdAt || "").slice(0, 10) >= today().slice(0, 8) + "01"
-    )
-    .reduce((sum, row) => sum + Number(row.quantity || 0), 0)
-);
-const applyWeeklySuggestion = () => {
-  if (!selectedWeeklyItem.value) return;
-  if (weeklyLastRecord.value) {
-    weeklyForm.remainingQuantity = Number(weeklyLastRecord.value.remainingQuantity || 0);
-    weeklyForm.nextWeekQuantity = Number(weeklyLastRecord.value.nextWeekQuantity || 0);
-    if (!weeklyForm.owner) weeklyForm.owner = weeklyLastRecord.value.owner || operatorName.value;
-    return;
-  }
-  if (!weeklyForm.nextWeekQuantity) weeklyForm.nextWeekQuantity = weeklyIssuedThisWeek.value;
-  if (!weeklyForm.owner) weeklyForm.owner = operatorName.value;
-};
 
 const executiveUrgentCount = computed(() => expiredRows.value.length + scrapRows.value.filter(row => !row.reason).length);
 const executiveAttentionCount = computed(
@@ -1211,7 +1177,7 @@ const currentTabActions = computed(() => {
       stock: [{ label: "入库", action: "inbound", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
       items: [{ label: "新增物资", action: "item", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
       weekly: [
-        { label: "新增周消耗", action: "weekly", auth: "inventory:request", buttonProps: { type: "primary", icon: Plus } }
+        { label: "确认周计划", action: "weekly", auth: "inventory:request", buttonProps: { type: "primary", icon: Plus } }
       ],
       controls: [{ label: "新增盘点", action: "count", auth: "inventory:count", buttonProps: { type: "primary", icon: Plus } }],
       trace: [
@@ -1488,12 +1454,7 @@ watch(
   () => {
     if (!weeklyForm.department || !weeklyForm.itemId) return;
     if (!weeklyForm.owner) weeklyForm.owner = operatorName.value;
-    if (!weeklyForm.remainingQuantity && weeklyLastRecord.value) {
-      weeklyForm.remainingQuantity = Number(weeklyLastRecord.value.remainingQuantity || 0);
-    }
-    if (!weeklyForm.nextWeekQuantity) {
-      weeklyForm.nextWeekQuantity = Number(weeklyLastRecord.value?.nextWeekQuantity || weeklyIssuedThisWeek.value || 0);
-    }
+    weeklyForm.adjustedQuantity = Number(selectedWeeklySuggestion.value?.suggestedQuantity || 0);
   }
 );
 
@@ -1870,14 +1831,12 @@ const voidRequest = async (row: InventoryRequest) => {
 };
 
 const openWeeklyDialog = () => {
-  if (!requireInventoryAuth("inventory:request", "填报周消耗")) return;
+  if (!requireInventoryAuth("inventory:request", "确认周计划")) return;
   Object.assign(weeklyForm, {
     weekNo: currentWeekNo(),
     department: currentDepartment.value,
     itemId: "",
-    consumedQuantity: 0,
-    remainingQuantity: 0,
-    nextWeekQuantity: 0,
+    adjustedQuantity: 0,
     owner: operatorName.value,
     abnormalReason: "",
     operator: operatorName.value
@@ -1887,12 +1846,12 @@ const openWeeklyDialog = () => {
 };
 
 const saveWeekly = async () => {
-  if (!requireInventoryAuth("inventory:request", "确认周消耗")) return;
+  if (!requireInventoryAuth("inventory:request", "确认周计划")) return;
   if (!(await weeklyFormRef.value?.validate().catch(() => false))) return;
   saving.value = true;
   try {
     db.value = (await saveWeeklyConsumptionApi({ ...weeklyForm, operator: operatorName.value })).data;
-    ElMessage.success("周消耗已确认");
+    ElMessage.success("周计划已确认");
     weeklyDialogVisible.value = false;
   } catch (error) {
     ElMessage.error((error as Error).message);

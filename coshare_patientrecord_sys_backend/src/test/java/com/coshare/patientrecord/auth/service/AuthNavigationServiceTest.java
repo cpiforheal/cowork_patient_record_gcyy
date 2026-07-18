@@ -69,6 +69,16 @@ class AuthNavigationServiceTest {
         NavigationResult quality = service.navigationFor(user("quality"));
         assertThat(quality.capabilities()).doesNotContain("user:create", "preai:review");
         assertThat(quality.buttonPermissions()).doesNotContainKey("accountManage");
+
+        SessionUser manager = user("manager");
+        assertThat(service.hasCapability(manager, "inventory:read")).isTrue();
+        assertThat(service.hasCapability(manager, "inventory:export")).isTrue();
+        assertThat(service.hasCapability(manager, "inventory:issue")).isFalse();
+        assertThat(service.hasCapability(manager, "inventory:count")).isFalse();
+        assertThat(service.hasCapability(manager, "inventory:receive")).isFalse();
+
+        SessionUser qualityUser = user("quality");
+        assertThat(service.hasCapability(qualityUser, "inventory:receive")).isTrue();
     }
 
     @Test

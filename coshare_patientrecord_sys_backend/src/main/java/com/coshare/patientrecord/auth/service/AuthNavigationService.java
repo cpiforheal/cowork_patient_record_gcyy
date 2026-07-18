@@ -152,6 +152,15 @@ public class AuthNavigationService {
         return AUXILIARY_EDITORS.getOrDefault(normalizedTask, Set.of()).contains(normalizedRole);
     }
 
+    public boolean hasCapability(SessionUser user, String capability) {
+        if (user == null || capability == null || capability.isBlank()) return false;
+        RolePolicy policy = policies.get(normalizeRole(user.role()));
+        if (policy == null) return false;
+        return policy.buttonPermissions().values().stream()
+            .flatMap(List::stream)
+            .anyMatch(capability::equals);
+    }
+
     private Map<String, StagePermission> stagePermissions(String role) {
         Map<String, StagePermission> result = new LinkedHashMap<>();
         for (String stage : STAGES) {
@@ -346,14 +355,14 @@ public class AuthNavigationService {
             "inventoryPackages=inventory:read"
         );
         Map<String, List<String>> inventoryQualityButtons = permissions(
-            "inventoryOverview=inventory:read,inventory:approve,inventory:count,inventory:export",
+            "inventoryOverview=inventory:read,inventory:receive,inventory:approve,inventory:count,inventory:export",
             "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
-            "inventoryRequests=inventory:read,inventory:approve,inventory:export",
+            "inventoryRequests=inventory:read,inventory:receive,inventory:approve,inventory:export",
             "inventoryStock=inventory:read,inventory:issue,inventory:count,inventory:export",
             "inventoryItems=inventory:read,inventory:issue,inventory:export",
             "inventoryWeekly=inventory:read,inventory:count,inventory:export",
             "inventoryPackages=inventory:read,inventory:approve",
-            "inventoryControls=inventory:read,inventory:count,inventory:export",
+            "inventoryControls=inventory:read,inventory:receive,inventory:count,inventory:export",
             "inventoryTrace=inventory:read,inventory:export"
         );
 

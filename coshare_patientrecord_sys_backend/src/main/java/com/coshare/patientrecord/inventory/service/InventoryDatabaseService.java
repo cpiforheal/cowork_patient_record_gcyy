@@ -61,8 +61,8 @@ public class InventoryDatabaseService {
             db.set("packages", packageService.readPackages());
             db.set("consumptionEvents", packageService.readConsumptionEvents());
         } else {
-            db.set("packages", filterByDepartment(packageService.readPackages(), user.department()));
-            db.set("consumptionEvents", filterByDepartment(packageService.readConsumptionEvents(), user.department()));
+            db.set("packages", filterByDepartment(packageService.readPackages(), user.activeDepartmentId(), user.department()));
+            db.set("consumptionEvents", filterByDepartment(packageService.readConsumptionEvents(), user.activeDepartmentId(), user.department()));
         }
         return db;
     }
@@ -156,8 +156,9 @@ public class InventoryDatabaseService {
         ObjectNode result = JsonNodeFactory.instance.objectNode();
         result.put("departmentId", departmentId);
         result.put("department", ledgerRepository.departmentName(departmentId));
-        result.set("balances", ledgerRepository.readBalances(departmentId, null));
+        result.set("balances", ledgerRepository.readWorkbenchBalances(departmentId, null));
         result.set("exceptions", ledgerRepository.readExceptions(departmentId, "OPEN"));
+        result.set("weeklySuggestions", ledgerRepository.readWeeklySuggestions(departmentId));
         result.set("opening", ledgerRepository.openingState(departmentId));
         result.set("flow", ledgerRepository.queryJson(
             """
@@ -232,14 +233,21 @@ public class InventoryDatabaseService {
             && requestedDepartmentId != null && !requestedDepartmentId.isBlank()) {
             return ledgerRepository.resolveDepartmentId(requestedDepartmentId, requestedDepartmentId);
         }
+        if (user.activeDepartmentId() != null && !user.activeDepartmentId().isBlank()) {
+            return ledgerRepository.resolveDepartmentId(user.activeDepartmentId(), user.department());
+        }
         return ledgerRepository.resolveDepartmentId("", user.department());
     }
 
-    private ArrayNode filterByDepartment(JsonNode rows, String department) {
+    private ArrayNode filterByDepartment(JsonNode rows, String departmentId, String department) {
         ArrayNode filtered = JsonNodeFactory.instance.arrayNode();
         if (rows != null && rows.isArray()) {
             for (JsonNode row : rows) {
-                if (department != null && department.equals(repository.text(row, "department"))) filtered.add(row);
+                String rowDepartmentId = repository.text(row, "departmentId");
+                boolean stableIdMatches = departmentId != null && !departmentId.isBlank() && departmentId.equals(rowDepartmentId);
+                boolean legacyNameMatches = rowDepartmentId.isBlank()
+                    && department != null && department.equals(repository.text(row, "department"));
+                if (stableIdMatches || legacyNameMatches) filtered.add(row);
             }
         }
         return filtered;

@@ -76,8 +76,11 @@ export interface WeeklyConsumption {
   department: string;
   itemId: string;
   consumedQuantity: number;
+  actualConsumedQuantity?: number;
   remainingQuantity: number;
   nextWeekQuantity: number;
+  suggestedQuantity?: number;
+  adjustedQuantity?: number;
   owner: string;
   abnormalReason: string;
   confirmedAt: string;
@@ -308,6 +311,7 @@ type InventoryWorkbenchApi = {
   exceptions?: InventoryExceptionApi[];
   opening?: { confirmed?: boolean };
   flow?: { status?: string; count?: number }[];
+  weeklySuggestions?: InventoryWeeklySuggestion[];
 };
 
 type InventoryLocationBalanceApi = Partial<InventoryLocationBalance> & {
@@ -401,9 +405,10 @@ export interface WeeklyConsumptionParams {
   weekNo: string;
   department: string;
   itemId: string;
-  consumedQuantity: number;
-  remainingQuantity: number;
-  nextWeekQuantity: number;
+  consumedQuantity?: number;
+  remainingQuantity?: number;
+  nextWeekQuantity?: number;
+  adjustedQuantity?: number;
   owner: string;
   abnormalReason?: string;
   operator?: string;
@@ -735,7 +740,8 @@ export const getInventoryWorkbenchApi = async (params: InventoryQueryParams = {}
       : undefined,
     departmentAvailable: balances.some(row => row.locationType === "department")
       ? balances.filter(row => row.locationType === "department").reduce((sum, row) => sum + row.availableQuantity, 0)
-      : undefined
+      : undefined,
+    weeklySuggestions: raw.weeklySuggestions || []
   });
 };
 

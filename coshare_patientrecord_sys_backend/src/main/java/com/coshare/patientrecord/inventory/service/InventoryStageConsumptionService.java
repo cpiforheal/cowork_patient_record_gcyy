@@ -115,7 +115,7 @@ public class InventoryStageConsumptionService {
             """
             SELECT id FROM inventory_stage_consumption_commands
             WHERE status IN ('PENDING', 'RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP(3))
-            ORDER BY created_at LIMIT 1
+            ORDER BY created_at, CASE WHEN command_type = 'REVERSAL' THEN 0 ELSE 1 END, id LIMIT 1
             """,
             (rs, rowNum) -> rs.getString(1)
         );

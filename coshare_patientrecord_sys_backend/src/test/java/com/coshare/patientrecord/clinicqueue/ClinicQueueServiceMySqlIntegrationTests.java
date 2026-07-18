@@ -73,6 +73,29 @@ class ClinicQueueServiceMySqlIntegrationTests {
         jdbcTemplate = new JdbcTemplate(dataSource);
 
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        jdbcTemplate.update(
+            """
+            INSERT INTO clinic_departments (id, code, name, status, raw_json)
+            VALUES ('dept-test', 'DEPT-TEST', '测试科室', 'ACTIVE', JSON_OBJECT('status', 'ACTIVE'))
+            ON DUPLICATE KEY UPDATE name = VALUES(name), status = 'ACTIVE'
+            """
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO clinic_accounts (id, username, role, status, raw_json)
+            VALUES ('test-admin', 'test-admin', 'admin', 'ACTIVE',
+                    JSON_OBJECT('id', 'test-admin', 'username', 'test-admin', 'name', '测试管理员',
+                                'role', 'admin', 'status', 'ACTIVE'))
+            ON DUPLICATE KEY UPDATE role = 'admin', status = 'ACTIVE'
+            """
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO clinic_account_departments (account_id, department_id, is_primary, status)
+            VALUES ('test-admin', 'dept-test', TRUE, 'ACTIVE')
+            ON DUPLICATE KEY UPDATE is_primary = TRUE, status = 'ACTIVE'
+            """
+        );
 
         ObjectMapper objectMapper = new ObjectMapper();
         service = new ClinicQueueService(jdbcTemplate, objectMapper);
@@ -396,8 +419,9 @@ class ClinicQueueServiceMySqlIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO pre_ai_encounters (
-              id, source_patient_id, visit_no, case_token, status, current_stage, patient_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'IN_PROGRESS', 'FRONT_DESK', ?, ?, ?)
+              id, source_patient_id, owning_department_id, owning_department_name_snapshot,
+              visit_no, case_token, status, current_stage, patient_json, created_at, updated_at
+            ) VALUES (?, ?, 'dept-test', '测试科室', ?, ?, 'IN_PROGRESS', 'FRONT_DESK', ?, ?, ?)
             """,
             id,
             "patient-" + UUID.randomUUID(),

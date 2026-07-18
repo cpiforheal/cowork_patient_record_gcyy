@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,10 +43,15 @@ public class InventoryPackageService {
     public ArrayNode readPackages() {
         ArrayNode packages = objectMapper.createArrayNode();
         jdbcTemplate.query(
-            "SELECT raw_json FROM inventory_packages ORDER BY department ASC, care_type ASC, version_no DESC, created_at DESC",
+            """
+            SELECT id, name, department, department_id, care_type, trigger_stage, version_no, status,
+                   effective_date, operator_name, created_at, raw_json
+            FROM inventory_packages
+            ORDER BY department ASC, care_type ASC, trigger_stage ASC, version_no DESC, created_at DESC
+            """,
             resultSet -> {
                 while (resultSet.next()) {
-                    ObjectNode row = readObject(resultSet.getString("raw_json"));
+                    ObjectNode row = packageRow(resultSet);
                     row.set("lines", readPackageLines(row.path("id").asText()));
                     packages.add(row);
                 }
@@ -57,10 +64,16 @@ public class InventoryPackageService {
     public ArrayNode readConsumptionEvents() {
         ArrayNode events = objectMapper.createArrayNode();
         jdbcTemplate.query(
-            "SELECT raw_json FROM inventory_consumption_events ORDER BY created_at DESC, id DESC",
+            """
+            SELECT id, command_id, encounter_id, case_token, route, department, department_id,
+                   trigger_stage, completion_version, visit_date, package_id, status, error_message,
+                   event_kind, reversal_of_event_id, operator_name, created_at, raw_json
+            FROM inventory_consumption_events
+            ORDER BY created_at DESC, id DESC
+            """,
             resultSet -> {
                 while (resultSet.next()) {
-                    ObjectNode row = readObject(resultSet.getString("raw_json"));
+                    ObjectNode row = consumptionEventRow(resultSet);
                     row.set("details", readConsumptionDetails(row.path("id").asText()));
                     events.add(row);
                 }
@@ -68,6 +81,49 @@ public class InventoryPackageService {
             }
         );
         return events;
+    }
+
+    private ObjectNode packageRow(ResultSet resultSet) throws SQLException {
+        ObjectNode row = readObject(resultSet.getString("raw_json"));
+        putText(row, "id", resultSet.getString("id"));
+        putText(row, "name", resultSet.getString("name"));
+        putText(row, "department", resultSet.getString("department"));
+        putText(row, "departmentId", resultSet.getString("department_id"));
+        putText(row, "careType", resultSet.getString("care_type"));
+        putText(row, "triggerStage", resultSet.getString("trigger_stage"));
+        row.put("version", resultSet.getInt("version_no"));
+        putText(row, "status", resultSet.getString("status"));
+        putText(row, "effectiveDate", resultSet.getString("effective_date"));
+        putText(row, "operator", resultSet.getString("operator_name"));
+        putText(row, "createdAt", resultSet.getString("created_at"));
+        return row;
+    }
+
+    private ObjectNode consumptionEventRow(ResultSet resultSet) throws SQLException {
+        ObjectNode row = readObject(resultSet.getString("raw_json"));
+        putText(row, "id", resultSet.getString("id"));
+        putText(row, "commandId", resultSet.getString("command_id"));
+        putText(row, "encounterId", resultSet.getString("encounter_id"));
+        putText(row, "caseToken", resultSet.getString("case_token"));
+        putText(row, "route", resultSet.getString("route"));
+        putText(row, "department", resultSet.getString("department"));
+        putText(row, "departmentId", resultSet.getString("department_id"));
+        putText(row, "triggerStage", resultSet.getString("trigger_stage"));
+        long completionVersion = resultSet.getLong("completion_version");
+        if (!resultSet.wasNull()) row.put("completionVersion", completionVersion);
+        putText(row, "visitDate", resultSet.getString("visit_date"));
+        putText(row, "packageId", resultSet.getString("package_id"));
+        putText(row, "status", resultSet.getString("status"));
+        putText(row, "errorMessage", resultSet.getString("error_message"));
+        putText(row, "eventKind", resultSet.getString("event_kind"));
+        putText(row, "reversalOfEventId", resultSet.getString("reversal_of_event_id"));
+        putText(row, "operator", resultSet.getString("operator_name"));
+        putText(row, "createdAt", resultSet.getString("created_at"));
+        return row;
+    }
+
+    private void putText(ObjectNode row, String field, String value) {
+        if (value != null) row.put(field, value);
     }
 
     @Transactional
