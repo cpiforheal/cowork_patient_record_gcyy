@@ -27,6 +27,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class PreAiPrivacyService {
 
+    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v2-20260718";
+
     private static final Pattern MOBILE_PATTERN = Pattern.compile("(?<!\\d)(1[3-9]\\d{9})(?!\\d)");
     private static final Pattern ID_CARD_PATTERN = Pattern.compile("(?<!\\d)\\d{6}(?:19|20)\\d{2}\\d{7}[0-9Xx](?![0-9Xx])");
     private static final Pattern COUNTY_ADDRESS = Pattern.compile("([^省市]{1,12}(?:县|区).{0,16}?(?:乡|镇|街道|村))");
@@ -35,18 +37,18 @@ public class PreAiPrivacyService {
         "identityNumber", "idNumber", "idCard", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
-        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "factualConclusion"),
+        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "biopsyPerformed", "factualConclusion"),
         "RECEPTION", List.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
             "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness",
-            "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory",
+            "pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory",
             "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
             "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"
         ),
-        "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
-        "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedOperationName", "plannedOperationSite", "plannedOperationPlan"),
-        "SURGERY", List.of("actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings", "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff")
+        "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "comorbidTcmItems", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
+        "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "secondaryDiagnosisItems", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"),
+        "SURGERY", List.of("actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindingOptions", "intraoperativeFindings", "procedureStepOptions", "procedurePerformed", "pathologySubmitted", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoffOptions", "postoperativeHandoff")
     );
     private static final Map<String, String> FIELD_LABELS = buildFieldLabels();
 
@@ -78,6 +80,14 @@ public class PreAiPrivacyService {
         putIfPresent(maskedPatient, "patientName", maskName(rawPatientName));
         putIfPresent(maskedPatient, "gender", text(patient, "gender"));
         putIfPresent(maskedPatient, "age", patientAge(patient));
+        putIfPresent(maskedPatient, "nationality", text(patient, "nationality"));
+        putIfPresent(maskedPatient, "maritalStatus", text(patient, "maritalStatus"));
+        putIfPresent(maskedPatient, "nativePlace", coarseAddress(text(patient, "nativePlace")));
+        putIfPresent(maskedPatient, "birthplace", coarseAddress(text(patient, "birthplace")));
+        putIfPresent(maskedPatient, "admissionMethod", text(patient, "admissionMethod"));
+        putIfPresent(maskedPatient, "admissionSeverity", text(patient, "admissionSeverity"));
+        putIfPresent(maskedPatient, "insuranceType", text(patient, "insuranceType"));
+        putIfPresent(maskedPatient, "paymentMethod", text(patient, "paymentMethod"));
         putIfPresent(maskedPatient, "phone", maskPhone(text(patient, "phone")));
         putIfPresent(maskedPatient, "address", coarseAddress(rawAddress));
         putIfPresent(maskedPatient, "contactName", maskName(rawContactName));
@@ -259,161 +269,167 @@ public class PreAiPrivacyService {
         return result;
     }
 
+    public String templateVersion() {
+        return TEMPLATE_VERSION;
+    }
+
+    public ObjectNode buildDocumentView(ObjectNode masked) {
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("templateVersion", TEMPLATE_VERSION);
+        ArrayNode sections = result.putArray("sections");
+        JsonNode metadata = masked.path("metadata");
+        JsonNode patient = masked.path("patient");
+        JsonNode stages = masked.path("stages");
+        JsonNode reception = stages.path("RECEPTION");
+        JsonNode tcm = stages.path("TCM");
+        JsonNode inspection = stages.path("INSPECTION");
+        JsonNode doctor = stages.path("DOCTOR");
+        JsonNode surgery = stages.path("SURGERY");
+
+        ObjectNode basic = addSection(sections, "01", "一、基础信息");
+        addViewRow(basic, "caseToken", "病案标识", metadata.path("caseToken"), false, "NORMAL");
+        addViewRow(basic, "visitDate", "就诊日期", metadata.path("visitDate"), false, "NORMAL");
+        addViewRow(basic, "route", "就诊分支", metadata.path("route"), false, "NORMAL");
+        addNodeRows(basic, patient, List.of("patientName", "gender", "age", "nationality", "maritalStatus", "nativePlace", "birthplace", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "admissionMethod", "admissionSeverity", "insuranceType", "paymentMethod", "registrationNote"), Set.of());
+
+        ObjectNode complaint = addSection(sections, "02", "二、主诉");
+        addNodeRows(complaint, reception, List.of("chiefComplaint", "symptomDuration"), Set.of("chiefComplaint"));
+
+        ObjectNode present = addSection(sections, "03", "三、现病史");
+        addNodeRows(present, reception, List.of("presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"), Set.of("presentIllness"));
+
+        ObjectNode history = addSection(sections, "04", "四、既往史 / 个人史 / 婚育史 / 家族史");
+        addNodeRows(history, reception, List.of("pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement"), Set.of());
+
+        ObjectNode tcmSection = addSection(sections, "05", "五、中医四诊与辨证");
+        addNodeRows(tcmSection, tcm, List.of("inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"), Set.of("tcmDisease", "primarySyndrome"));
+
+        ObjectNode inspectionSection = addSection(sections, "06", "六、专科检查");
+        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "biopsyPerformed", "factualConclusion"), Set.of("factualConclusion"));
+
+        ObjectNode auxiliary = addSection(sections, "07", "七、辅助检查");
+        addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
+        int taskIndex = 0;
+        for (JsonNode task : masked.path("auxiliaryTasks")) {
+            String taskLabel = auxiliaryTaskLabel(text(task, "taskType")) + optionalSuffix(text(task, "title"));
+            for (String key : List.of("project", "sampledAt", "reportedAt", "result", "abnormalItems", "conclusion", "examinedAt", "findings", "modality", "bodyPart")) {
+                addViewRow(auxiliary, "task-" + taskIndex + "-" + key, taskLabel + " / " + FIELD_LABELS.getOrDefault(key, key), task.path(key), false, "NORMAL");
+            }
+            taskIndex++;
+        }
+        int reportIndex = 0;
+        for (JsonNode report : masked.path("labReports")) {
+            String reportTitle = text(report, "templateName") + optionalSuffix(text(report, "reportDate"));
+            int metricIndex = 0;
+            for (JsonNode metric : report.path("metrics")) {
+                String label = text(metric, "name") + (text(metric, "shortName").isBlank() ? "" : "（" + text(metric, "shortName") + "）");
+                String abnormal = text(metric, "abnormal");
+                String severity = text(metric, "severity");
+                if (severity.isBlank()) severity = "NORMAL";
+                String marker = "CRITICAL".equals(severity) ? "【危急值·" + (abnormal.isBlank() ? "异常" : abnormal) + "】" : abnormal.isBlank() ? "" : "【异常·" + abnormal + "】";
+                String value = text(metric, "value") + text(metric, "unit") + marker + (text(metric, "reference").isBlank() ? "" : "；参考范围：" + text(metric, "reference"));
+                addViewTextRow(auxiliary, "lab-" + reportIndex + "-" + metricIndex, reportTitle + " / " + label, value, "MEASUREMENT", true, severity);
+                metricIndex++;
+            }
+            addViewRow(auxiliary, "lab-" + reportIndex + "-remark", reportTitle + " / 备注", report.path("remark"), false, "NORMAL");
+            reportIndex++;
+        }
+
+        ObjectNode primaryDiagnosis = addSection(sections, "08", "八、中西医主诊断");
+        addNodeRows(primaryDiagnosis, tcm, List.of("tcmDisease", "primarySyndrome"), Set.of("tcmDisease", "primarySyndrome"));
+        addNodeRows(primaryDiagnosis, doctor, List.of("primaryWesternDiagnosis", "diagnosisBasis"), Set.of("primaryWesternDiagnosis"));
+
+        ObjectNode secondaryDiagnosis = addSection(sections, "09", "九、次诊断（已选择）");
+        addNodeRows(secondaryDiagnosis, doctor, List.of("secondaryDiagnosisItems", "secondaryWesternDiagnoses", "differentialDiagnoses"), Set.of());
+
+        ObjectNode comorbid = addSection(sections, "10", "十、合并病中医病名及证型");
+        addNodeRows(comorbid, tcm, List.of("comorbidTcmItems", "concurrentSyndrome"), Set.of());
+
+        ObjectNode operation = addSection(sections, "11", "十一、手术 / 操作信息");
+        addNodeRows(operation, doctor, List.of("plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"), Set.of("plannedPrimaryOperation", "plannedOperationName"));
+        addNodeRows(operation, surgery, List.of("actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindingOptions", "intraoperativeFindings", "procedureStepOptions", "procedurePerformed", "pathologySubmitted", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoffOptions", "postoperativeHandoff"), Set.of("actualPrimaryOperation", "actualOperationName", "complications"));
+
+        ObjectNode dip = addSection(sections, "12", "十二、DIP 病组与治疗路径");
+        addNodeRows(dip, doctor, List.of("finalRoute", "treatmentPath", "treatmentPlan"), Set.of());
+
+        int effectiveFieldCount = 0;
+        for (JsonNode section : sections) effectiveFieldCount += section.path("rows").size();
+        result.put("effectiveFieldCount", effectiveFieldCount);
+        ObjectNode footer = result.putObject("reviewFooter");
+        footer.put("reviewedAt", text(masked.path("review"), "reviewedAt"));
+        footer.put("reviewerRole", text(masked.path("review"), "reviewerRole"));
+        footer.put("statement", text(masked.path("review"), "statement"));
+        footer.put("generationScope", "仅呈现已填写、已选择且完成交接的前置事实；空字段和未选候选项已剔除。");
+        return result;
+    }
+
+    private ObjectNode addSection(ArrayNode sections, String code, String title) {
+        ObjectNode section = sections.addObject();
+        section.put("code", code);
+        section.put("title", title);
+        section.putArray("rows");
+        return section;
+    }
+
+    private void addNodeRows(ObjectNode section, JsonNode source, List<String> keys, Set<String> emphasizedKeys) {
+        for (String key : keys) {
+            addViewRow(section, key, FIELD_LABELS.getOrDefault(key, key), source.path(key), emphasizedKeys.contains(key), "NORMAL");
+        }
+    }
+
+    private void addViewRow(ObjectNode section, String id, String label, JsonNode value, boolean emphasis, String severity) {
+        String display = displayFieldValue(id, value);
+        if (display.isBlank()) return;
+        String contentType = value.isArray() ? "LIST" : value.isObject() && value.has("value") ? "MEASUREMENT" : "TEXT";
+        addViewTextRow(section, id, label, display, contentType, emphasis, severity);
+    }
+
+    private void addViewTextRow(ObjectNode section, String id, String label, String value, boolean emphasis, String severity) {
+        addViewTextRow(section, id, label, value, "TEXT", emphasis, severity);
+    }
+
+    private void addViewTextRow(ObjectNode section, String id, String label, String value, String contentType, boolean emphasis, String severity) {
+        if (safe(value).isBlank()) return;
+        ObjectNode row = ((ArrayNode) section.path("rows")).addObject();
+        row.put("id", id);
+        row.put("label", label);
+        row.put("value", safe(value));
+        row.put("contentType", Set.of("LIST", "MEASUREMENT", "IMAGE").contains(contentType) ? contentType : "TEXT");
+        row.put("severity", Set.of("ABNORMAL", "CRITICAL").contains(severity) ? severity : "NORMAL");
+        row.put("emphasis", emphasis);
+    }
+
     private String buildDocumentXml(ObjectNode masked) {
         return buildDocumentXml(masked, List.of());
     }
 
     private String buildDocumentXml(ObjectNode masked, List<EmbeddedImage> images) {
+        ObjectNode view = buildDocumentView(masked);
         StringBuilder body = new StringBuilder();
         body.append(paragraph("中医肛肠医院住院病历自动生成表", "Title"));
-        body.append(paragraph("前置事实版｜固定项目保留原版结构，右栏仅显示已填写、已选择事实", "Subtitle"));
-        if (!images.isEmpty()) {
-            body.append(paragraph("接诊/检查图片", "Heading1"));
-            for (int index = 0; index < images.size(); index++) {
-                EmbeddedImage image = images.get(index);
-                body.append(paragraph("图片 " + (index + 1) + "（接诊现场资料）", "ImageCaption"));
-                body.append(imageDrawing(index + 1, image));
+        body.append(paragraph("前置事实版｜" + view.path("effectiveFieldCount").asInt() + " 项有效信息｜模板 " + TEMPLATE_VERSION, "Subtitle"));
+        for (JsonNode section : view.path("sections")) {
+            body.append(paragraph(text(section, "title"), "Heading1"));
+            List<DocumentRow> rows = new java.util.ArrayList<>();
+            for (JsonNode item : section.path("rows")) {
+                rows.add(row(text(item, "label"), text(item, "value"), item.path("emphasis").asBoolean(false) || !"NORMAL".equals(text(item, "severity"))));
             }
-        }
-
-        JsonNode metadata = masked.path("metadata");
-        JsonNode stages = masked.path("stages");
-        JsonNode reception = stages.path("RECEPTION");
-        addFixedTableSection(body, "病例信息", List.of(
-            row("医院名称", "中医肛肠医院"),
-            row("科室", "肛肠科"),
-            row("病案号", text(metadata, "caseToken")),
-            row("入院次数", ""),
-            row("病区", ""),
-            row("床号", ""),
-            row("住院号", ""),
-            row("入院日期", text(metadata, "visitDate")),
-            row("出院日期", ""),
-            row("住院天数", ""),
-            row("建议就诊分支", displayFieldValue("dispositionSuggestion", reception.path("dispositionSuggestion")))
-        ));
-
-        JsonNode patient = masked.path("patient");
-        addFixedTableSection(body, "一、基础信息", fixedNodeRows(patient, List.of(
-            "patientName", "gender", "age", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "registrationNote"
-        )));
-
-        addFixedTableSection(body, "二、主诉", fixedNodeRows(reception, List.of("chiefComplaint", "symptomDuration")));
-        addFixedTableSection(body, "三、现病史", fixedNodeRows(reception, List.of(
-            "presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures",
-            "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"
-        )));
-        addFixedTableSection(body, "四、既往史 / 个人史 / 婚育史 / 家族史", fixedNodeRows(reception, List.of(
-            "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory",
-            "personalHistory", "maritalHistory", "familyHistory", "historySupplement"
-        )));
-
-        JsonNode tcm = stages.path("TCM");
-        addFixedTableSection(body, "五、中医四诊", fixedNodeRows(tcm, List.of(
-            "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"
-        )));
-
-        JsonNode inspection = stages.path("INSPECTION");
-        addFixedTableSection(body, "六、专科检查", fixedNodeRows(inspection, List.of(
-            "examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "visualFindings", "digitalExamFindings",
-            "anoscopyFindings", "otherFindings", "factualConclusion"
-        )));
-
-        List<DocumentRow> auxiliaryRows = new java.util.ArrayList<>();
-        if (masked.has("auxiliaryTasks")) {
-            for (JsonNode task : masked.path("auxiliaryTasks")) {
-                String taskLabel = auxiliaryTaskLabel(text(task, "taskType")) + optionalSuffix(text(task, "title"));
-                for (String key : List.of("project", "sampledAt", "reportedAt", "result", "abnormalItems", "conclusion", "examinedAt", "findings", "modality", "bodyPart")) {
-                    String value = displayValue(task.path(key));
-                    if (!value.isBlank()) auxiliaryRows.add(row(taskLabel + " / " + FIELD_LABELS.getOrDefault(key, key), value));
+            if (!rows.isEmpty()) addTable(body, rows);
+            if ("06".equals(text(section, "code")) && !images.isEmpty()) {
+                for (int index = 0; index < images.size(); index++) {
+                    body.append(paragraph("专科检查图片 " + (index + 1), "ImageCaption"));
+                    body.append(imageDrawing(index + 1, images.get(index)));
                 }
             }
         }
-        String recommendedExams = displayValue(reception.path("recommendedAuxiliaryExams"));
-        if (!recommendedExams.isBlank()) auxiliaryRows.add(row("流程建议 / 建议辅助检查", recommendedExams));
-        if (masked.has("labReports")) {
-            for (JsonNode report : masked.path("labReports")) {
-                String title = text(report, "templateName") + optionalSuffix(text(report, "reportDate"));
-                for (JsonNode metric : report.path("metrics")) {
-                    String name = text(metric, "name");
-                    String shortName = text(metric, "shortName");
-                    String value = text(metric, "value");
-                    String unit = text(metric, "unit");
-                    String reference = text(metric, "reference");
-                    String label = name + (shortName.isBlank() ? "" : "（" + shortName + "）");
-                    String abnormal = text(metric, "abnormal");
-                    String severity = text(metric, "severity");
-                    String marker = "CRITICAL".equals(severity) ? "【危急值·" + (abnormal.isBlank() ? "异常" : abnormal) + "】"
-                        : abnormal.isBlank() ? "" : "【异常·" + abnormal + "】";
-                    String result = value + unit + marker + (reference.isBlank() ? "" : "；参考范围：" + reference);
-                    auxiliaryRows.add(row(title + " / " + label, result, !abnormal.isBlank() || "CRITICAL".equals(severity)));
-                }
-                if (!text(report, "remark").isBlank()) auxiliaryRows.add(row(title + " / 备注", text(report, "remark")));
-            }
-        }
-        auxiliaryRows.addAll(List.of(
-            row("血常规", ""), row("尿常规", ""), row("生化/糖化", ""), row("凝血功能", ""),
-            row("术前八项", ""), row("无痛电子肠镜", ""), row("心电图", ""), row("胸片/DR", ""), row("生命体征", "")
-        ));
-        addFixedTableSection(body, "七、辅助检查", auxiliaryRows);
-
-        JsonNode doctor = stages.path("DOCTOR");
-        List<DocumentRow> diagnoses = new java.util.ArrayList<>(fixedNodeRows(tcm, List.of("tcmDisease", "primarySyndrome")));
-        diagnoses.addAll(fixedNodeRows(doctor, List.of("primaryWesternDiagnosis", "diagnosisBasis")));
-        addFixedTableSection(body, "八、中西医主诊断", diagnoses);
-        addFixedTableSection(body, "九、次诊断（已选择）", fixedNodeRows(doctor, List.of("secondaryWesternDiagnoses", "differentialDiagnoses")));
-        addFixedTableSection(body, "十、合并病中医病名及证型", fixedNodeRows(tcm, List.of("concurrentSyndrome")));
-
-        JsonNode surgery = stages.path("SURGERY");
-        List<DocumentRow> operations = new java.util.ArrayList<>(fixedNodeRows(doctor, List.of(
-            "plannedOperationName", "plannedOperationSite", "plannedOperationPlan"
-        )));
-        operations.addAll(fixedNodeRows(surgery, List.of(
-            "actualOperationName", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindings",
-            "procedurePerformed", "specimenPathology", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoff"
-        )));
-        addFixedTableSection(body, "十一、手术 / 操作信息", operations);
-        addFixedTableSection(body, "十二、DIP 病组与治疗路径", fixedNodeRows(doctor, List.of(
-            "finalRoute", "treatmentPath", "treatmentPlan"
-        )));
-        List<DocumentRow> reviewRows = new java.util.ArrayList<>(nodeRows(masked.path("review"), List.of("reviewedAt", "reviewerRole", "statement")));
-        reviewRows.addAll(nodeRows(reception, List.of("reviewOpinion", "nextStepRecommendation")));
-        List<DocumentRow> roundRows = new java.util.ArrayList<>();
-        roundRows.add(row("查房时序", "按入院、术前、术后及出院节点记录查房事实；本节仅保留已填写记录。"));
-        roundRows.addAll(reviewRows);
-        addFixedTableSection(body, "十三、查房时序", roundRows);
-        addFixedTableSection(body, "十四、自动生成文书范围", List.of(
-            row("生成范围", "基于已完成岗位事实生成前置病历；未选择的候选项不写入文档。")
-        ));
-        addFixedTableSection(body, "十五、质控校验", List.of(
-            row("质控项目", "基础信息、主诉现病史、检查检验、诊断及手术信息按流程完成并经医生复核。")
-        ));
-        addFixedTableSection(body, "医生复核", reviewRows);
-
+        JsonNode footer = view.path("reviewFooter");
+        body.append(paragraph("医生复核：" + text(footer, "reviewerRole") + optionalSuffix(text(footer, "reviewedAt")), "ReviewFooter"));
+        body.append(paragraph(text(footer, "generationScope"), "ReviewFooter"));
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
             + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><w:body>"
             + body
             + "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/></w:sectPr>"
             + "</w:body></w:document>";
-    }
-
-    private List<DocumentRow> nodeRows(JsonNode node, List<String> keys) {
-        if (node == null || !node.isObject()) return List.of();
-        List<DocumentRow> rows = new java.util.ArrayList<>();
-        for (String key : keys) {
-            String value = displayFieldValue(key, node.path(key));
-            if (!value.isBlank()) rows.add(row(FIELD_LABELS.getOrDefault(key, key), value));
-        }
-        return rows;
-    }
-
-    private List<DocumentRow> fixedNodeRows(JsonNode node, List<String> keys) {
-        if (node == null || !node.isObject()) {
-            return keys.stream().map(key -> row(FIELD_LABELS.getOrDefault(key, key), "")).toList();
-        }
-        return keys.stream()
-            .map(key -> row(FIELD_LABELS.getOrDefault(key, key), displayFieldValue(key, node.path(key))))
-            .toList();
     }
 
     private String displayFieldValue(String key, JsonNode value) {
@@ -437,29 +453,14 @@ public class PreAiPrivacyService {
         };
     }
 
-    private void addTableSection(StringBuilder body, String title, List<DocumentRow> rows) {
-        List<DocumentRow> present = rows.stream().filter(row -> row != null && !safe(row.value()).isBlank()).toList();
-        if (present.isEmpty()) return;
-        body.append(paragraph(title, "Heading1"));
+    private void addTable(StringBuilder body, List<DocumentRow> rows) {
         body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
-            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
-            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
-            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/></w:tblBorders></w:tblPr>"
+            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"808080\"/>"
+            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"BFBFBF\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"BFBFBF\"/></w:tblBorders></w:tblPr>"
             + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
-        body.append(tableRow("项目（固定）", "动态事实（已填写）", true, false));
-        present.forEach(row -> body.append(tableRow(row.label(), row.value(), false, row.abnormal())));
-        body.append("</w:tbl>");
-    }
-
-    private void addFixedTableSection(StringBuilder body, String title, List<DocumentRow> rows) {
-        body.append(paragraph(title, "Heading1"));
-        body.append("<w:tbl><w:tblPr><w:tblW w:w=\"9072\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"
-            + "<w:tblBorders><w:top w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:left w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
-            + "<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/><w:right w:val=\"single\" w:sz=\"6\" w:color=\"6D9FB5\"/>"
-            + "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"A9C8D3\"/></w:tblBorders></w:tblPr>"
-            + "<w:tblGrid><w:gridCol w:w=\"2100\"/><w:gridCol w:w=\"6972\"/></w:tblGrid>");
-        body.append(tableRow("项目（固定）", "动态事实（已填写）", true, false));
-        rows.stream().filter(java.util.Objects::nonNull).forEach(item -> body.append(tableRow(item.label(), item.value(), false, item.abnormal())));
+        body.append(tableRow("固定字段", "有效填写信息", true, false));
+        rows.stream().filter(java.util.Objects::nonNull).forEach(row -> body.append(tableRow(row.label(), row.value(), false, row.abnormal())));
         body.append("</w:tbl>");
     }
 
@@ -469,9 +470,9 @@ public class PreAiPrivacyService {
 
     private String tableCell(String value, int width, boolean header, boolean abnormal, boolean labelCell) {
         String shading = header
-            ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"CFE4F3\"/>"
-            : "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + (labelCell ? "EEF4FA" : "EDF7F2") + "\"/>";
-        String style = header ? "TableHeader" : abnormal ? "Abnormal" : "TableText";
+            ? "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"D9D9D9\"/>"
+            : "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + (labelCell ? "F2F2F2" : "FFFFFF") + "\"/>";
+        String style = header ? "TableHeader" : labelCell ? "TableLabel" : abnormal ? "Abnormal" : "TableText";
         return "<w:tc><w:tcPr><w:tcW w:w=\"" + width + "\" w:type=\"dxa\"/>" + shading
             + "<w:tcMar><w:top w:w=\"80\" w:type=\"dxa\"/><w:left w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"80\" w:type=\"dxa\"/><w:right w:w=\"100\" w:type=\"dxa\"/></w:tcMar>"
             + "<w:vAlign w:val=\"center\"/></w:tcPr>" + paragraph(value, style) + "</w:tc>";
@@ -528,13 +529,28 @@ public class PreAiPrivacyService {
         if (value == null || value.isNull()) return "";
         if (value.isArray()) {
             return java.util.stream.StreamSupport.stream(value.spliterator(), false)
-                .map(item -> item.isTextual() ? item.asText() : item.toString())
-                .filter(item -> !item.isBlank())
-                .reduce((left, right) -> left + "、" + right)
+                .map(this::displayValue)
+                .filter(item -> !isPlaceholder(item))
+                .reduce((left, right) -> left + (left.contains("：") || right.contains("：") ? "；" : "、") + right)
                 .orElse("");
         }
-        if (value.isObject()) return value.toString();
-        return value.asText("");
+        if (value.isObject()) {
+            List<String> parts = new java.util.ArrayList<>();
+            value.fields().forEachRemaining(entry -> {
+                String display = displayValue(entry.getValue());
+                if (isPlaceholder(display)) return;
+                String label = FIELD_LABELS.getOrDefault(entry.getKey(), entry.getKey());
+                parts.add(label + "：" + display);
+            });
+            return String.join("，", parts);
+        }
+        if (value.isBoolean()) return value.asBoolean() ? "是" : "否";
+        String display = value.asText("").trim();
+        return isPlaceholder(display) ? "" : display;
+    }
+
+    private boolean isPlaceholder(String value) {
+        return safe(value).isBlank() || Set.of("未填写", "未选择", "请选择", "请选择...", "null").contains(safe(value));
     }
 
     private void assertNoLeak(String documentXml, ObjectNode rawWorkspace) {
@@ -649,14 +665,16 @@ public class PreAiPrivacyService {
     private String stylesXml() {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
             + "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
-            + "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:rPr><w:rFonts w:ascii=\"Microsoft YaHei\" w:hAnsi=\"Microsoft YaHei\" w:eastAsia=\"微软雅黑\"/><w:sz w:val=\"22\"/></w:rPr><w:pPr><w:spacing w:after=\"100\" w:line=\"330\" w:lineRule=\"auto\"/></w:pPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"140\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"微软雅黑\"/><w:sz w:val=\"36\"/><w:color w:val=\"17324D\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"220\"/></w:pPr><w:rPr><w:color w:val=\"397D83\"/><w:sz w:val=\"20\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"280\" w:after=\"100\"/><w:shd w:val=\"clear\" w:fill=\"E6F3F4\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"14\" w:color=\"4D9EA8\"/></w:pBdr><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"微软雅黑\"/><w:sz w:val=\"28\"/><w:color w:val=\"176B87\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"ImageCaption\"><w:name w:val=\"Image Caption\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"80\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"397D83\"/><w:sz w:val=\"20\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"TableText\"><w:name w:val=\"Table Text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"320\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:sz w:val=\"22\"/><w:color w:val=\"24445C\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"TableHeader\"><w:name w:val=\"Table Header\"/><w:basedOn w:val=\"TableText\"/><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"17324D\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"Abnormal\"><w:name w:val=\"Abnormal\"/><w:basedOn w:val=\"TableText\"/><w:rPr><w:b/><w:color w:val=\"C00000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:rPr><w:rFonts w:ascii=\"SimSun\" w:hAnsi=\"SimSun\" w:eastAsia=\"宋体\"/><w:sz w:val=\"21\"/></w:rPr><w:pPr><w:spacing w:after=\"100\" w:line=\"320\" w:lineRule=\"auto\"/></w:pPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"140\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"28\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"200\"/></w:pPr><w:rPr><w:color w:val=\"666666\"/><w:sz w:val=\"19\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"90\"/><w:shd w:val=\"clear\" w:fill=\"E7E6E6\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"8\" w:color=\"808080\"/></w:pBdr><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"22\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"ImageCaption\"><w:name w:val=\"Image Caption\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"80\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"19\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableText\"><w:name w:val=\"Table Text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:rFonts w:eastAsia=\"宋体\"/><w:sz w:val=\"21\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableLabel\"><w:name w:val=\"Table Label\"/><w:basedOn w:val=\"TableText\"/><w:rPr><w:rFonts w:eastAsia=\"宋体\"/><w:sz w:val=\"19\"/><w:color w:val=\"666666\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"TableHeader\"><w:name w:val=\"Table Header\"/><w:basedOn w:val=\"TableText\"/><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"000000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"Abnormal\"><w:name w:val=\"Abnormal\"/><w:basedOn w:val=\"TableText\"/><w:rPr><w:b/><w:color w:val=\"000000\"/></w:rPr></w:style>"
+            + "<w:style w:type=\"paragraph\" w:styleId=\"ReviewFooter\"><w:name w:val=\"Review Footer\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:before=\"80\" w:after=\"0\"/></w:pPr><w:rPr><w:sz w:val=\"18\"/><w:color w:val=\"666666\"/></w:rPr></w:style>"
             + "</w:styles>";
     }
 
@@ -718,24 +736,29 @@ public class PreAiPrivacyService {
     private static Map<String, String> buildFieldLabels() {
         Map<String, String> labels = new LinkedHashMap<>();
         String[][] values = {
-            {"patientName", "姓名"}, {"gender", "性别"}, {"age", "年龄"}, {"phone", "联系电话"}, {"address", "地址"},
+            {"patientName", "姓名"}, {"gender", "性别"}, {"age", "年龄"}, {"nationality", "民族"}, {"maritalStatus", "婚姻状况"},
+            {"nativePlace", "籍贯"}, {"birthplace", "出生地"}, {"phone", "联系电话"}, {"address", "地址"},
             {"contactName", "联系人"}, {"contactRelation", "联系人关系"}, {"contactPhone", "联系人电话"}, {"patientSource", "患者来源"}, {"registrationNote", "登记备注"},
-            {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"}, {"visualFindings", "外观所见"},
+            {"admissionMethod", "入院方式"}, {"admissionSeverity", "入院病情"}, {"insuranceType", "医保类型"}, {"paymentMethod", "付费方式"},
+            {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"},
+            {"lesionCount", "病灶数量"}, {"lesionSize", "病灶大小"}, {"lesionDepth", "病灶深度"}, {"lesionExtent", "累及范围"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
             {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"factualConclusion", "检查事实结论"},
             {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
             {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
-            {"presentIllness", "现病史最终文本"}, {"pastHistory", "既往史"}, {"surgicalHistory", "手术史"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
+            {"presentIllness", "现病史最终文本"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
             {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
             {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
             {"dispositionSuggestion", "建议就诊分支"}, {"recommendedAuxiliaryExams", "建议辅助检查"},
-            {"tcmDisease", "中医病名"}, {"primarySyndrome", "主证"}, {"concurrentSyndrome", "兼证"}, {"inspection", "望诊"}, {"auscultationOlfaction", "闻诊"}, {"inquiry", "问诊"}, {"palpation", "切诊"},
+            {"tcmDisease", "中医病名"}, {"primarySyndrome", "主证"}, {"concurrentSyndrome", "兼证"}, {"comorbidTcmItems", "合并病中医辨证"}, {"inspection", "望诊"}, {"auscultationOlfaction", "闻诊"}, {"inquiry", "问诊"}, {"palpation", "切诊"},
             {"tongue", "舌象"}, {"pulse", "脉象"}, {"syndromeBasis", "辨证依据"}, {"treatmentPrinciple", "治法治则"},
-            {"finalRoute", "最终就诊分支"}, {"primaryWesternDiagnosis", "西医主诊断"}, {"secondaryWesternDiagnoses", "西医次诊断"}, {"diagnosisBasis", "诊断依据"}, {"differentialDiagnoses", "待排/鉴别诊断"},
-            {"treatmentPath", "治疗方式"}, {"treatmentPlan", "治疗方案"}, {"plannedOperationName", "拟行手术"}, {"plannedOperationSite", "拟手术部位"}, {"plannedOperationPlan", "手术计划"},
-            {"actualOperationName", "实际手术名称"}, {"operationDate", "手术日期"}, {"operationStartTime", "开始时间"}, {"operationEndTime", "结束时间"}, {"operationSite", "手术部位"},
-            {"anesthesiaMethod", "麻醉方式"}, {"intraoperativeFindings", "术中所见"}, {"procedurePerformed", "实际实施步骤"}, {"specimenPathology", "标本/病理送检"}, {"bloodLossDrainDressing", "出血、引流及敷料"},
-            {"complications", "异常或并发症"}, {"postoperativeDestination", "术后去向"}, {"postoperativeHandoff", "术后交接"},
+            {"finalRoute", "最终就诊分支"}, {"primaryWesternDiagnosis", "西医主诊断"}, {"secondaryWesternDiagnoses", "西医次诊断"}, {"secondaryDiagnosisItems", "西医次诊断与合并症"}, {"diagnosisBasis", "诊断依据"}, {"differentialDiagnoses", "待排/鉴别诊断"},
+            {"treatmentPath", "治疗方式"}, {"treatmentPlan", "治疗方案"}, {"plannedPrimaryOperation", "拟行主术式"}, {"plannedOperationName", "拟行手术"}, {"plannedSecondaryOperations", "拟行次术式/附加操作"}, {"plannedOperationSite", "拟手术部位"}, {"operationIndications", "手术适应证"}, {"recommendedAnesthesia", "建议麻醉方式"}, {"operationGrade", "手术级别"}, {"specialOperationPlan", "特殊手术计划"}, {"surgeryArrangements", "手术安排"},
+            {"actualPrimaryOperation", "实际主术式"}, {"actualOperationName", "实际手术名称"}, {"actualSecondaryOperations", "实际次术式/附加操作"}, {"operationDate", "手术日期"}, {"operationStartTime", "开始时间"}, {"operationEndTime", "结束时间"}, {"operationSite", "手术部位"},
+            {"anesthesiaMethod", "麻醉方式"}, {"intraoperativeFindingOptions", "术中所见要点"}, {"intraoperativeFindings", "术中所见"}, {"procedureStepOptions", "实际实施步骤要点"}, {"procedurePerformed", "实际实施步骤"}, {"pathologySubmitted", "是否送病理"}, {"specimenPathology", "标本/病理送检"}, {"bloodLossMeasurement", "术中出血量"}, {"drainageOptions", "引流"}, {"dressingOptions", "敷料"}, {"bloodLossDrainDressing", "出血、引流及敷料"},
+            {"complications", "异常或并发症"}, {"postoperativeDestination", "术后去向"}, {"postoperativeHandoffOptions", "术后交接状态"}, {"postoperativeHandoff", "术后交接"},
+            {"disease", "疾病"}, {"duration", "病程"}, {"treatment", "治疗情况"}, {"control", "控制情况"}, {"year", "年份"}, {"operationName", "手术名称"}, {"site", "部位"},
+            {"westernComorbidity", "西医合并症"}, {"includedInTcm", "纳入中医辨证"}, {"syndrome", "证型"}, {"note", "补充说明"}, {"name", "诊断名称"}, {"category", "分类"},
             {"taskType", "检查类型"}, {"title", "任务名称"}, {"project", "项目"}, {"sampledAt", "采样时间"}, {"reportedAt", "报告时间"}, {"result", "结果"}, {"abnormalItems", "异常项"},
             {"conclusion", "结论"}, {"examinedAt", "检查时间"}, {"findings", "主要表现"}, {"modality", "检查方式"}, {"bodyPart", "检查部位"},
             {"reviewedAt", "复核时间"}, {"reviewerRole", "复核岗位"}, {"statement", "说明"}

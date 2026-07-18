@@ -14,8 +14,8 @@
         <strong>{{ preview?.blockers?.length || 0 }}</strong>
       </div>
       <div>
-        <span>有效章节</span>
-        <strong>{{ sections.length }}</strong>
+        <span>有效字段</span>
+        <strong>{{ preview?.effectiveFieldCount || 0 }}</strong>
       </div>
       <div>
         <span>历史导出</span>
@@ -73,45 +73,28 @@
       </el-checkbox>
     </section>
     <div v-if="preview" class="masked-preview">
-      <section v-for="section in sections" :key="section.title" :class="{ 'lab-review-section': isLabSection(section) }">
+      <div class="template-meta">
+        <span>12 章标准模板</span>
+        <small>{{ preview.templateVersion || "当前版本" }}</small>
+      </div>
+      <section v-for="section in sections" :key="section.code">
         <h4>{{ section.title }}</h4>
-        <template v-if="isLabSection(section)">
-          <div class="lab-report-meta">
-            <div v-for="entry in labMetaEntries(section)" :key="entry[0]">
-              <span>{{ fieldLabel(entry[0]) }}</span>
-              <strong>{{ humanValue(entry[1]) }}</strong>
-            </div>
-          </div>
-          <div v-if="labMetrics(section).length" class="lab-metric-list">
-            <article
-              v-for="(metric, index) in labMetrics(section)"
-              :key="`${metric.name || 'metric'}-${index}`"
-              :class="{
-                abnormal: Boolean(metric.abnormal),
-                critical: metric.severity === 'CRITICAL'
-              }"
-            >
-              <div class="metric-name">
-                <strong>{{ metric.name || "未命名指标" }}</strong>
-                <small v-if="metric.shortName">{{ metric.shortName }}</small>
-              </div>
-              <div class="metric-value">
-                <strong>{{ metric.value || "未填写" }}{{ metric.unit || "" }}</strong>
-                <small v-if="metric.reference">参考：{{ metric.reference }}</small>
-              </div>
-              <el-tag v-if="metric.severity === 'CRITICAL'" type="danger" size="small" effect="dark">危急值</el-tag>
-              <el-tag v-else-if="metric.abnormal" type="warning" size="small" effect="dark">{{ metric.abnormal }}</el-tag>
-              <el-tag v-else type="success" size="small" effect="plain">正常</el-tag>
-            </article>
-          </div>
-          <p v-else class="lab-empty">本报告暂无已填写指标</p>
-        </template>
-        <div v-else class="read-only-grid">
-          <div v-for="entry in section.entries" :key="entry[0]">
-            <span>{{ fieldLabel(entry[0]) }}</span>
-            <p>{{ humanValue(entry[1]) }}</p>
+        <div v-if="section.rows.length" class="document-grid">
+          <div
+            v-for="row in section.rows"
+            :key="row.id"
+            class="document-row"
+            :class="{
+              emphasized: row.emphasis,
+              abnormal: row.severity === 'ABNORMAL',
+              critical: row.severity === 'CRITICAL'
+            }"
+          >
+            <span>{{ row.label }}</span>
+            <p>{{ row.value }}</p>
           </div>
         </div>
+        <p v-else class="section-empty">本节无有效内容</p>
       </section>
     </div>
     <el-input
@@ -150,23 +133,14 @@
       <div class="generate-actions">
         <el-tooltip :disabled="targetGenerationAvailable" :content="targetGenerationDisabledReason" placement="top">
           <span>
-            <el-button
-              type="primary"
-              :loading="loading"
-              :disabled="!targetGenerationAvailable"
-              @click="$emit('generateTarget')"
+            <el-button type="primary" :loading="loading" :disabled="!targetGenerationAvailable" @click="$emit('generateTarget')"
               >生成目标病历模板</el-button
             >
           </span>
         </el-tooltip>
         <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核" placement="top">
           <span>
-            <el-button
-              type="success"
-              plain
-              :loading="loading"
-              :disabled="!reviewConfirmed"
-              @click="$emit('generate')"
+            <el-button type="success" plain :loading="loading" :disabled="!reviewConfirmed" @click="$emit('generate')"
               >生成脱敏前置资料</el-button
             >
           </span>
@@ -178,7 +152,10 @@
       <div v-for="version in exports" :key="version.id" class="export-row">
         <div>
           <strong>{{ version.fileName }}</strong
-          ><small>{{ version.generatedAt }} · {{ version.generatedByRole || "医生" }}</small>
+          ><small
+            >{{ version.generatedAt }} · {{ version.generatedByRole || "医生" }} ·
+            {{ version.templateVersion || "旧版模板" }}</small
+          >
         </div>
         <el-button type="primary" plain @click="$emit('download', version)">下载</el-button>
       </div>
@@ -189,16 +166,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Refresh } from "@element-plus/icons-vue";
-import type { PreAiEncounterStatus, PreAiExportVersion, PreAiReviewPreview } from "@/api/modules/clinic";
-
-export interface MaskedReviewSection {
-  title: string;
-  entries: Array<[string, any]>;
-}
+import type { PreAiDocumentSection, PreAiEncounterStatus, PreAiExportVersion, PreAiReviewPreview } from "@/api/modules/clinic";
 
 const props = defineProps<{
   preview?: PreAiReviewPreview;
-  sections: MaskedReviewSection[];
+  sections: PreAiDocumentSection[];
   statement: string;
   canReview: boolean;
   canGenerateTarget: boolean;
@@ -206,8 +178,6 @@ const props = defineProps<{
   loading: boolean;
   encounterStatus: PreAiEncounterStatus;
   exports: PreAiExportVersion[];
-  fieldLabel: (key: string) => string;
-  humanValue: (value: any) => string;
 }>();
 
 const reviewConfirmed = computed(() => ["REVIEWED", "EXPORTED"].includes(props.encounterStatus));
@@ -217,13 +187,6 @@ const targetGenerationDisabledReason = computed(() => {
   if (!props.canGenerateTarget) return "当前前置病例尚未关联患者档案，暂不能生成目标病历";
   return "";
 });
-
-const isLabSection = (section: MaskedReviewSection) => section.title.startsWith("化验报告");
-const labMetrics = (section: MaskedReviewSection) => {
-  const value = section.entries.find(([key]) => key === "metrics")?.[1];
-  return Array.isArray(value) ? (value as Array<Record<string, any>>) : [];
-};
-const labMetaEntries = (section: MaskedReviewSection) => section.entries.filter(([key]) => key !== "metrics");
 
 defineEmits<{
   refresh: [];
@@ -381,14 +344,72 @@ defineEmits<{
   gap: 14px;
   margin-top: 15px;
 }
+.template-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-regular);
+}
+.template-meta small {
+  color: var(--el-text-color-secondary);
+}
 .masked-preview section {
-  padding: 14px;
+  overflow: hidden;
   border: 1px solid var(--el-border-color-light);
   border-radius: 12px;
 }
 .masked-preview h4 {
-  margin: 0 0 10px;
-  color: var(--el-color-primary);
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--el-border-color-light);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+}
+.document-grid {
+  display: grid;
+}
+.document-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 24%) minmax(0, 1fr);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.document-row:last-child {
+  border-bottom: 0;
+}
+.document-row > span {
+  padding: 10px 14px;
+  background: var(--el-fill-color-lighter);
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.document-row > p {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.document-row.emphasized > p,
+.document-row.abnormal > p,
+.document-row.critical > p {
+  font-weight: 700;
+}
+.document-row.abnormal,
+.document-row.critical {
+  box-shadow: inset 3px 0 0 var(--el-text-color-primary);
+}
+.section-empty {
+  margin: 0;
+  padding: 11px 14px;
+  color: var(--el-text-color-placeholder);
+  font-size: 13px;
 }
 .lab-review-section {
   background: var(--el-fill-color-lighter);
@@ -518,6 +539,15 @@ defineEmits<{
   .read-only-grid,
   .lab-report-meta {
     grid-template-columns: 1fr;
+  }
+  .document-row {
+    grid-template-columns: 1fr;
+  }
+  .document-row > span {
+    padding-bottom: 4px;
+  }
+  .document-row > p {
+    padding-top: 4px;
   }
   .lab-metric-list article {
     grid-template-columns: 1fr auto;

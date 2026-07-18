@@ -62,8 +62,18 @@
 
 ### 3.1 访问入口
 
-- 前端进销存首页：`/inventory/overview`
-- 前端套餐页：`/inventory/packages`
+当前前端共有九个物资路由，均复用统一的进销存工作台：
+
+- `/inventory/overview`：进销存主控台
+- `/inventory/executive`：领导驾驶舱
+- `/inventory/requests`：科室申领审批
+- `/inventory/stock`：库存与批次
+- `/inventory/items`：物资档案
+- `/inventory/weekly`：周消耗预估
+- `/inventory/packages`：使用套餐与自动扣减
+- `/inventory/controls`：盘点与控制
+- `/inventory/trace`：全链路追溯
+
 - 后端进销存 API 前缀：`/inventory-api`
 - 健康检查：`/health`
 
@@ -79,7 +89,7 @@ Docker 环境默认地址：`http://localhost:18080`。异地部署时将 `local
 | `InventoryStockWorkflow` | 物资档案、入库、发放、退回、盘点 |
 | `InventoryRequestWorkflow` | 科室申领、审批、发放、签收 |
 | `InventoryRepository` | 库存查询、批次锁定、流水和审计写入 |
-| `InventorySchemaInitializer` | MySQL 启动时创建进销存表 |
+| Flyway `V8__inventory_packages_and_consumption_events.sql` | 创建并升级套餐和自动消耗相关表；运行期服务不执行 DDL |
 | `PreAiEncounterService` | 医生最终复核提交后注册自动扣减回调 |
 
 ### 3.3 数据表
@@ -101,7 +111,7 @@ Docker 环境默认地址：`http://localhost:18080`。异地部署时将 `local
 - `inventory_consumption_events`：一次就诊的自动扣减事件，唯一键为 `encounter_id + route`。
 - `inventory_consumption_details`：事件对应的具体物资和批次分配。
 
-表会在 MySQL profile 应用启动时自动初始化。异地首次启动后应检查四张新增表是否存在。
+表结构由 Flyway 管控。当前完整结构以 `V1` 为基线，物资套餐和自动消耗相关升级位于 `V8`；应用启动时只校验迁移版本，不再通过库存服务执行建表或 `ALTER TABLE`。异地部署应先使用迁移账号完成升级，再使用无 DDL 权限的业务账号启动应用。
 
 ## 4. PRD
 
@@ -120,13 +130,13 @@ Docker 环境默认地址：`http://localhost:18080`。异地部署时将 `local
 
 | 角色 | 当前权限 |
 | --- | --- |
-| `admin` | 全院查看；维护套餐；启用/停用；失败事件重试；库存管理权限 |
-| `quality` | 全院查看；维护套餐；启用/停用；失败事件重试；质控复核 |
-| `manager` | 全院只读查看套餐和消耗事件，不开放写操作 |
-| 其他科室人员 | 只查看本科室套餐和消耗事件；按原有角色使用申领等功能 |
+| `admin` | 全院查看；维护物资档案、库存与套餐；启用/停用；失败事件重试 |
+| `quality` | 全院查看；维护物资档案、库存与套餐；启用/停用；失败事件重试；质控复核 |
+| `manager` | 可查看物资档案、驾驶舱、套餐和消耗事件；所有物资档案及库存操作只读 |
+| 其他科室人员 | 不显示物资档案和库存维护入口；按角色使用本科室申领、签收、周消耗等已授权功能 |
 | 医生 | 通过病历最终复核触发自动扣减，不需要额外点击扣减按钮 |
 
-说明：当前 HTTP 的套餐写入、启停、手工消耗和失败重试接口要求 `admin` 或 `quality` 的审批权限。医生的自动扣减由病历复核服务内部调用，不依赖医生直接访问库存写接口。
+说明：物资档案新增/编辑、入库以及套餐写入、启停、手工消耗和失败重试接口均由后端强制要求 `admin` 或 `quality`。`manager` 即使直接访问 `/inventory/items` 也只能读取，不能通过直接请求绕过页面权限。医生的自动扣减由病历复核服务内部调用，不依赖医生直接访问库存写接口。
 
 ### 4.3 套餐状态机
 
@@ -594,7 +604,7 @@ docker compose up -d app
 - [ ] 补货后管理员/质控可以重试并成功闭环。
 - [ ] 库存流水、消耗明细、审计日志能够关联到事件。
 - [ ] `manager` 只能查看，不能维护套餐或重试事件。
-- [ ] 异地部署后四张新增表自动创建。
+- [ ] 异地部署后 Flyway 迁移到 `V8`，四张新增表存在且业务运行账号无 DDL 权限。
 - [ ] 压测后通过 SQL 对账，无重复事件、超卖或孤立明细。
 
 ## 11. 后续迭代建议

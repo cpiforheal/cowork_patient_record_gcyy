@@ -38,6 +38,16 @@
       </button>
     </section>
 
+    <el-alert
+      v-if="activeTab === 'items' && !hasInventoryAuth('inventory:issue')"
+      class="inventory-readonly-alert"
+      title="物资档案当前为只读模式"
+      description="您可以查看物资名称、规格和预警信息；新增、编辑及入库操作仅向管理员和质控人员开放。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
+
     <nav class="module-switcher" aria-label="进销存二级功能">
       <button
         v-for="item in visibleTabNavItems"
@@ -831,8 +841,8 @@ const tabAuthMap: Record<string, readonly string[]> = {
   ],
   executive: ["inventory:export"],
   requests: ["inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
-  stock: ["inventory:issue", "inventory:export"],
-  items: ["inventory:issue"],
+  stock: ["inventory:read"],
+  items: ["inventory:read"],
   weekly: ["inventory:request", "inventory:count"],
   controls: ["inventory:receive", "inventory:count"],
   packages: ["inventory:read", "inventory:approve"],

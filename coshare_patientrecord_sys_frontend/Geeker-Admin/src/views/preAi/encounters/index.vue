@@ -9,12 +9,25 @@
       <div class="hero-actions">
         <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>
         <el-button v-if="canImportLegacy" :icon="FolderOpened" @click="openLegacyDialog">导入进行中的旧患者</el-button>
-        <el-button v-if="canCreateEncounter" type="primary" :icon="Plus" @click="createDialogVisible = true"
-          >新建前置病历</el-button>
+        <el-button v-if="canCreateEncounter" type="primary" :icon="Plus" @click="openCreateDialog">就诊登记并发号</el-button>
       </div>
     </header>
+    <el-alert
+      v-if="handoffNotice"
+      class="handoff-notice"
+      type="success"
+      :closable="true"
+      show-icon
+      :title="handoffNotice"
+      @close="handoffNotice = ''"
+    />
 
-    <section class="workspace-shell">
+    <section
+      ref="workspaceShellRef"
+      class="workspace-shell"
+      :class="{ 'with-history': historyPanelOpen && workspace }"
+      :style="historyPaneStyle"
+    >
       <button
         v-if="patientDrawerOpen"
         type="button"
@@ -128,6 +141,14 @@
             </div>
           </section>
 
+          <section v-if="encounterHistory.length > 1" class="history-entry-bar">
+            <div>
+              <strong>本次为第 {{ workspace.encounter.visitNo }} 次就诊</strong>
+              <small>可在右侧只读回查初诊、上次或其他历次病历，当前未保存内容不会受影响。</small>
+            </div>
+            <el-button type="primary" plain @click="openHistoricalComparison">查看历次病历</el-button>
+          </section>
+
           <div class="workspace-modebar">
             <div>
               <span>{{ activeWorkflowTitle }}</span>
@@ -211,27 +232,11 @@
                         {{ inspectionImageAttachments.length ? `${inspectionImageAttachments.length} 张影像` : "暂无影像" }}
                       </el-tag>
                     </header>
-                    <div v-if="inspectionImageAttachments.length" class="upstream-image-grid">
-                      <button
-                        v-for="(attachment, index) in inspectionImageAttachments"
-                        :key="attachment.id"
-                        type="button"
-                        class="upstream-image-card"
-                        :class="{ featured: index === 0 }"
-                        @click="openWorkspaceAttachment(attachment)"
-                      >
-                        <img
-                          v-if="workspaceImageUrls[attachment.id]"
-                          :src="workspaceImageUrls[attachment.id]"
-                          :alt="attachment.fileName"
-                        />
-                        <span v-else>点击查看图片</span>
-                        <span class="upstream-image-caption">
-                          <strong :title="attachment.fileName">{{ attachment.fileName }}</strong>
-                          <small>{{ attachment.description || "检查室原始资料" }}</small>
-                        </span>
-                      </button>
-                    </div>
+                    <AttachmentPreviewGallery
+                      v-if="inspectionImageAttachments.length"
+                      :attachments="inspectionImageAttachments"
+                      @download="downloadPreAiAttachmentApi"
+                    />
                     <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
                   </section>
 
@@ -281,23 +286,7 @@
                           class="timeline-attachment-group"
                         >
                           <strong>{{ group.name }}</strong>
-                          <div class="timeline-images">
-                            <button
-                              v-for="attachment in group.items"
-                              :key="attachment.id"
-                              type="button"
-                              class="timeline-image"
-                              @click="openTimelineAttachment(attachment)"
-                            >
-                              <img
-                                v-if="timelineImageUrls[attachment.id]"
-                                :src="timelineImageUrls[attachment.id]"
-                                :alt="attachment.fileName"
-                              />
-                              <span v-else>{{ attachment.mimeType?.startsWith("image/") ? "加载图片" : "查看文件" }}</span>
-                              <small>{{ attachment.fileName }}</small>
-                            </button>
-                          </div>
+                          <AttachmentPreviewGallery :attachments="group.items" compact @download="downloadPreAiAttachmentApi" />
                         </section>
                       </div>
                       <details v-if="hasVisitMeta(node.visitMeta)" class="visit-meta-summary">
@@ -318,23 +307,11 @@
                       </div>
                       <el-tag effect="plain">{{ inspectionImageAttachments.length }} 张</el-tag>
                     </div>
-                    <div v-if="inspectionImageAttachments.length" class="upstream-image-grid">
-                      <button
-                        v-for="attachment in inspectionImageAttachments"
-                        :key="attachment.id"
-                        type="button"
-                        class="upstream-image-card"
-                        @click="openWorkspaceAttachment(attachment)"
-                      >
-                        <img
-                          v-if="workspaceImageUrls[attachment.id]"
-                          :src="workspaceImageUrls[attachment.id]"
-                          :alt="attachment.fileName"
-                        />
-                        <span v-else>点击查看图片</span>
-                        <small>{{ attachment.fileName }}</small>
-                      </button>
-                    </div>
+                    <AttachmentPreviewGallery
+                      v-if="inspectionImageAttachments.length"
+                      :attachments="inspectionImageAttachments"
+                      @download="downloadPreAiAttachmentApi"
+                    />
                     <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
                   </section>
 
@@ -399,7 +376,7 @@
                           :field="field"
                           :form="stageForms[selectedStageCode]"
                           :generated-text="generatedTemplateText(field, stageForms[selectedStageCode])"
-                          :source-hash="templateSourceHash(field, stageForms[selectedStageCode])"
+                          :source-hash="templateSourceHash(field)"
                           :disabled="isStageFieldDisabled(field)"
                           @patch="value => patchStageForm(selectedStageCode, value)"
                         />
@@ -418,12 +395,18 @@
                           :placeholder="field.placeholder"
                           :disabled="isStageFieldDisabled(field)"
                         />
+                        <CreatableSelect
+                          v-else-if="field.kind === 'select' && field.creatable"
+                          v-model="stageForms[selectedStageCode][field.key]"
+                          :options="fieldOptions(field)"
+                          :placeholder="field.placeholder || `请选择或直接输入${field.label}`"
+                          :disabled="isStageFieldDisabled(field)"
+                        />
                         <el-select
                           v-else-if="field.kind === 'select'"
                           v-model="stageForms[selectedStageCode][field.key]"
                           clearable
                           filterable
-                          :allow-create="field.creatable"
                           default-first-option
                           :placeholder="field.placeholder || `请选择${field.label}`"
                           :disabled="isStageFieldDisabled(field)"
@@ -564,8 +547,6 @@
                   :loading="actionLoading"
                   :encounter-status="workspace.encounter.status"
                   :exports="workspace.exports"
-                  :field-label="reviewFieldLabel"
-                  :human-value="humanValue"
                   @refresh="loadReviewPreview"
                   @confirm="confirmReview"
                   @generate="generateExport"
@@ -607,40 +588,51 @@
           </Transition>
         </template>
       </main>
+
+      <div
+        v-if="historyPanelOpen && workspace"
+        class="history-resizer"
+        role="separator"
+        aria-label="调整当前病历与历史病历宽度"
+        aria-orientation="vertical"
+        :aria-valuemin="historyMinWidth"
+        :aria-valuemax="historyMaxWidth"
+        :aria-valuenow="Math.round(historyPaneWidth)"
+        tabindex="0"
+        @pointerdown="startHistoryResize"
+        @keydown="adjustHistoryPaneByKeyboard"
+        @dblclick="resetHistoryPaneRatio"
+      >
+        <span aria-hidden="true"></span>
+      </div>
+
+      <EncounterHistoryPanel
+        v-if="historyPanelOpen && workspace"
+        :history="encounterHistory"
+        :current-encounter-id="workspace.encounter.id"
+        :selected-encounter-id="historicalEncounterId"
+        :workspace="historicalWorkspace"
+        :loading="historyLoading"
+        :field-label="fieldLabel"
+        @select="loadHistoricalWorkspace"
+        @close="historyPanelOpen = false"
+        @download="downloadPreAiAttachmentApi"
+      />
     </section>
 
-    <el-dialog v-model="createDialogVisible" title="新建前置病历" width="760px" destroy-on-close>
+    <el-dialog v-model="createDialogVisible" title="就诊登记并发号" width="760px" destroy-on-close>
       <el-form label-position="top">
-        <div class="form-grid dialog-grid">
-          <el-form-item
-            v-for="field in registrationFields"
-            :key="field.key"
-            :label="field.label"
-            :required="field.required"
-            :class="{ 'span-2': field.span === 2 }"
-          >
-            <el-input v-if="field.kind === 'input'" v-model="createForm[field.key]" :placeholder="field.placeholder" />
-            <el-input
-              v-else-if="field.kind === 'textarea'"
-              v-model="createForm[field.key]"
-              type="textarea"
-              :rows="field.rows || 3"
-            />
-            <el-select v-else-if="field.kind === 'select'" v-model="createForm[field.key]" clearable filterable>
-              <el-option v-for="option in field.options || []" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
-            <el-date-picker
-              v-else
-              v-model="createForm[field.key]"
-              :type="field.kind === 'date' ? 'date' : 'datetime'"
-              :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
-            />
-          </el-form-item>
-        </div>
+        <RegistrationFormFields :fields="registrationFields" :form="createForm" @patch="patchCreateForm" />
+        <el-alert
+          title="提交后会完成前台登记、生成号码并进入检查候诊；检查完成后沿用原号码自动转入接诊。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
       </el-form>
       <template #footer>
         <el-button @click="createDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="actionLoading" @click="createEncounter">创建</el-button>
+        <el-button type="primary" :loading="actionLoading" @click="createEncounter">登记并发号</el-button>
       </template>
     </el-dialog>
 
@@ -649,7 +641,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="只复制患者基础身份信息；检查、诊断、图片、化验和复核状态均从空白开始。"
+        title="提交后将创建复诊、完成登记并直接发号；检查、诊断、图片、化验和复核状态仍从空白开始。"
       />
       <el-form label-position="top" class="follow-up-form">
         <div class="form-grid dialog-grid">
@@ -686,7 +678,7 @@
       </el-form>
       <template #footer>
         <el-button @click="followUpDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="actionLoading" @click="createFollowUp">创建复诊子病历</el-button>
+        <el-button type="primary" :loading="actionLoading" @click="createFollowUp">创建复诊并发号</el-button>
       </template>
     </el-dialog>
 
@@ -724,20 +716,23 @@ import { useUserStore } from "@/stores/modules/user";
 import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
 import { downloadMedicalRecordApi, generateMedicalRecordApi } from "@/api/modules/clinic/medicalRecord";
+import { completeQueuePrintTaskApi, createQueuePrintTaskApi } from "@/api/modules/clinic/clinicQueue";
 import {
   completePreAiStageApi,
   completePreAiLabApi,
   confirmPreAiReviewApi,
-  createPreAiEncounterApi,
-  createPreAiFollowUpApi,
+  registerAndIssuePreAiEncounterApi,
+  registerAndIssuePreAiFollowUpApi,
   downloadPreAiAttachmentApi,
   downloadPreAiExportApi,
   generatePreAiExportApi,
   getPreAiAttachmentObjectUrlApi,
+  getPreAiEncounterHistoryApi,
   getPreAiInspectionTimelineApi,
   getPreAiPatientCasesApi,
   getPatientListApi,
   getPreAiReviewPreviewApi,
+  getPreAiReadOnlyWorkspaceApi,
   getPreAiWorkspaceApi,
   importLegacyPreAiEncounterApi,
   returnPreAiAuxiliaryTaskApi,
@@ -752,6 +747,7 @@ import {
   type PreAiDutyAssignment,
   type PreAiDutyCode,
   type PreAiEncounterStatus,
+  type PreAiEncounterHistoryItem,
   type PreAiEncounterSummary,
   type PreAiExportVersion,
   type PreAiPatientCase,
@@ -767,8 +763,12 @@ import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
 import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
 import StructuredField from "./components/StructuredField.vue";
+import CreatableSelect from "./components/CreatableSelect.vue";
+import RegistrationFormFields from "./components/RegistrationFormFields.vue";
+import EncounterHistoryPanel from "./components/EncounterHistoryPanel.vue";
+import AttachmentPreviewGallery from "./components/AttachmentPreviewGallery.vue";
+import { getLocalPrintAgentStatus, printQueueTicketLocally } from "../../clinicQueue/printAgent";
 import {
-  auxiliaryTaskFields,
   auxiliaryTaskLabel,
   encounterStatusLabel,
   preAiStages,
@@ -835,6 +835,35 @@ const patientDrawerOpen = ref(false);
 const selectedEncounterId = ref("");
 const workspace = ref<PreAiWorkspace>();
 const workspaceLoading = ref(false);
+const encounterHistory = ref<PreAiEncounterHistoryItem[]>([]);
+const historicalWorkspace = ref<PreAiWorkspace>();
+const historicalEncounterId = ref("");
+const historyPanelOpen = ref(false);
+const historyLoading = ref(false);
+const workspaceShellRef = ref<HTMLElement>();
+const historyShellWidth = ref(0);
+const HISTORY_PANE_RATIO_KEY = "pre-ai-history-pane-ratio";
+const DEFAULT_HISTORY_PANE_RATIO = 0.38;
+const historyMinWidth = 360;
+const readHistoryPaneRatio = () => {
+  try {
+    const saved = Number(globalThis.localStorage?.getItem(HISTORY_PANE_RATIO_KEY));
+    return Number.isFinite(saved) && saved >= 0.2 && saved <= 0.65 ? saved : DEFAULT_HISTORY_PANE_RATIO;
+  } catch {
+    return DEFAULT_HISTORY_PANE_RATIO;
+  }
+};
+const historyPaneRatio = ref(readHistoryPaneRatio());
+const historyAvailableWidth = computed(() => Math.max(880, historyShellWidth.value - 250 - 8 - 42));
+const historyMaxWidth = computed(() => Math.max(historyMinWidth, historyAvailableWidth.value - 520));
+const historyPaneWidth = computed(() =>
+  Math.min(historyMaxWidth.value, Math.max(historyMinWidth, historyAvailableWidth.value * historyPaneRatio.value))
+);
+const historyPaneStyle = computed(() => ({
+  "--history-pane-width": `${Math.round(historyPaneWidth.value)}px`
+}));
+let historyResizeObserver: ResizeObserver | undefined;
+let stopHistoryPointerResize: (() => void) | undefined;
 const actionLoading = ref(false);
 const activeLabReportId = ref("");
 const attachmentUpload = reactive({
@@ -850,7 +879,6 @@ const editorMode = ref<"EDIT" | "PREVIEW">("EDIT");
 const inspectionView = ref<"CURRENT" | "HISTORY">("CURRENT");
 const inspectionTimeline = ref<InspectionTimelineNode[]>([]);
 const timelineLoading = ref(false);
-const timelineImageUrls = reactive<Record<string, string>>({});
 const workspaceImageUrls = reactive<Record<string, string>>({});
 const stageForms = reactive<Record<PreAiStageCode, Record<string, any>>>({
   REGISTRATION: {},
@@ -869,10 +897,12 @@ let workspaceRequestSequence = 0;
 let workspaceImageRequestSequence = 0;
 let timelineRequestSequence = 0;
 let reviewRequestSequence = 0;
+let historyRequestSequence = 0;
 let workspaceAbortController: AbortController | undefined;
 let workspaceImageAbortController: AbortController | undefined;
 let timelineAbortController: AbortController | undefined;
 let reviewAbortController: AbortController | undefined;
+let historyAbortController: AbortController | undefined;
 let workspaceImageEncounterId = "";
 let workspaceImageAttachmentKey = "";
 let workspaceImageLoadPromise: Promise<void> | undefined;
@@ -884,17 +914,38 @@ let reviewRequestInFlightEncounterId = "";
 const pendingWorkflowSelection = ref<{ encounterId: string; card: WorkflowCard }>();
 const readPendingWorkflowSelection = () => pendingWorkflowSelection.value;
 
+const currentLocalDateTime = () => {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(
+    now.getMinutes()
+  )}:00`;
+};
+
+const createClientRequestId = () =>
+  globalThis.crypto?.randomUUID?.() || `registration-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
 const createDialogVisible = ref(false);
+const createRequestId = ref("");
+const handoffNotice = ref("");
 const createForm = reactive<Record<string, any>>({
-  visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00"
+  visitDate: currentLocalDateTime()
 });
+const patchCreateForm = (key: string, value: any) => {
+  createForm[key] = value;
+};
+const openCreateDialog = () => {
+  createRequestId.value = createClientRequestId();
+  createDialogVisible.value = true;
+};
 const legacyDialogVisible = ref(false);
 const selectedLegacyPatientId = ref("");
 const legacyPatients = ref<PatientRow[]>([]);
 const followUpDialogVisible = ref(false);
 const followUpPatientCase = ref<PreAiPatientCase>();
+const followUpRequestId = ref("");
 const followUpForm = reactive<Record<string, any>>({
-  visitDate: new Date().toISOString().slice(0, 10) + " 08:00:00"
+  visitDate: currentLocalDateTime()
 });
 
 const filteredPatientCases = computed(() => {
@@ -1077,54 +1128,7 @@ const inspectionPreviewImages = computed(() =>
 );
 const selectedAttachmentGroups = computed(() => groupAttachments(selectedStageAttachments.value, true));
 const maskedSections = computed(() => {
-  if (!reviewPreview.value) return [];
-  const masked = reviewPreview.value.maskedPreview as Record<string, any>;
-  const sections: Array<{ title: string; entries: Array<[string, any]> }> = [];
-  if (masked.metadata)
-    sections.push({
-      title: "病例标识及就诊信息",
-      entries: nonEmptyEntries(masked.metadata)
-    });
-  if (masked.patient)
-    sections.push({
-      title: "患者基础信息（已脱敏）",
-      entries: nonEmptyEntries(masked.patient)
-    });
-  const stageTitles: Record<string, string> = {
-    RECEPTION: "主诉和现病情况",
-    INSPECTION: "专科检查事实",
-    TCM: "中医四诊和辨证",
-    DOCTOR: "西医诊断与治疗方案",
-    SURGERY: "实际手术情况"
-  };
-  Object.entries(masked.stages || {}).forEach(([key, value]) =>
-    sections.push({
-      title: stageTitles[key] || key,
-      entries: nonEmptyEntries(value as Record<string, any>)
-    })
-  );
-  if (Array.isArray(masked.auxiliaryTasks)) {
-    masked.auxiliaryTasks.forEach((task: Record<string, any>, index: number) =>
-      sections.push({
-        title: `辅助检查 ${index + 1}`,
-        entries: nonEmptyEntries(task)
-      })
-    );
-  }
-  if (Array.isArray(masked.labReports)) {
-    masked.labReports.forEach((report: Record<string, any>, index: number) =>
-      sections.push({
-        title: `化验报告 ${index + 1}`,
-        entries: nonEmptyEntries(report)
-      })
-    );
-  }
-  if (masked.review)
-    sections.push({
-      title: "医生复核信息",
-      entries: nonEmptyEntries(masked.review)
-    });
-  return sections;
+  return reviewPreview.value?.documentSections || [];
 });
 const documentPreviewSections = computed(() =>
   workspace.value
@@ -1213,7 +1217,7 @@ const selectedStageTemplateSourceHash = computed(() => {
   }
   return stableSourceHash([source]);
 });
-const templateSourceHash = (field: PreAiFieldConfig, _form: Record<string, any>) => {
+const templateSourceHash = (field: PreAiFieldConfig) => {
   if (field.kind !== "template-text" || !field.sourceHashKey) return "";
   return selectedStageTemplateSourceHash.value;
 };
@@ -1233,32 +1237,6 @@ const encounterStatusType = (status: PreAiEncounterStatus) =>
   status === "EXPORTED" ? "success" : status === "REVIEWED" ? "success" : status === "PENDING_REVIEW" ? "warning" : "info";
 const fieldLabel = (stageCode: PreAiStageCode, key: string) =>
   stageByCode(stageCode).fields.find(field => field.key === key)?.label || key;
-const reviewFieldLabel = (key: string) => {
-  for (const stage of preAiStages) {
-    const field = stage.fields.find(item => item.key === key);
-    if (field) return field.label;
-  }
-  const auxField = Object.values(auxiliaryTaskFields)
-    .flat()
-    .find(item => item.key === key);
-  return (
-    auxField?.label ||
-    (
-      {
-        caseToken: "病例标识",
-        visitDate: "就诊日期",
-        route: "就诊分支",
-        treatmentPath: "治疗路径",
-        generatedAt: "生成时间",
-        reviewerRole: "复核岗位",
-        statement: "说明",
-        taskType: "检查类型",
-        title: "任务名称"
-      } as Record<string, string>
-    )[key] ||
-    key
-  );
-};
 const loadEncounterList = async () => {
   try {
     const { data } = await getPreAiPatientCasesApi();
@@ -1272,6 +1250,10 @@ const loadEncounterList = async () => {
     const requestedEncounterId = String(route.query.id || route.query.encounterId || "").trim();
     if (requestedEncounterId && requestedEncounterId !== selectedEncounterId.value) {
       await selectEncounter(requestedEncounterId);
+    }
+    const requestedStage = String(route.query.stage || "").trim() as PreAiStageCode;
+    if (requestedEncounterId && ["INSPECTION", "RECEPTION"].includes(requestedStage) && workspace.value) {
+      await selectStage(requestedStage);
     }
   } catch (error: any) {
     ElMessage.error(error.message || "患者列表加载失败");
@@ -1322,20 +1304,20 @@ const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
   const requestController = new AbortController();
   workspaceImageAbortController = requestController;
   const request = runWithConcurrency(images, 4, async attachment => {
-      if (workspaceImageUrls[attachment.id]) return;
-      try {
-        const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
-        if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        workspaceImageUrls[attachment.id] = url;
-      } catch (error: any) {
-        if (error?.name !== "AbortError") {
-          // 单张检查图片失败时保留下载入口，不阻断工作区加载。
-        }
+    if (workspaceImageUrls[attachment.id]) return;
+    try {
+      const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
+      if (requestSequence !== workspaceImageRequestSequence || workspace.value?.encounter.id !== value.encounter.id) {
+        URL.revokeObjectURL(url);
+        return;
       }
-    });
+      workspaceImageUrls[attachment.id] = url;
+    } catch (error: any) {
+      if (error?.name !== "AbortError") {
+        // 单张检查图片失败时保留下载入口，不阻断工作区加载。
+      }
+    }
+  });
   workspaceImageLoadPromise = request;
   try {
     await request;
@@ -1345,11 +1327,6 @@ const loadWorkspaceInspectionImages = async (value: PreAiWorkspace) => {
   }
 };
 
-const clearTimelineImageUrls = () => {
-  Object.values(timelineImageUrls).forEach(url => URL.revokeObjectURL(url));
-  Object.keys(timelineImageUrls).forEach(key => delete timelineImageUrls[key]);
-};
-
 const workspaceTimelineSourceKey = (value: PreAiWorkspace) => {
   const inspectionStage = value.stages.find(stage => stage.stageCode === "INSPECTION");
   const attachments = value.attachments
@@ -1357,12 +1334,7 @@ const workspaceTimelineSourceKey = (value: PreAiWorkspace) => {
     .map(attachment => `${attachment.id}:${attachment.downloadUrl}:${attachment.fileSize}`)
     .sort()
     .join("|");
-  return [
-    value.encounter.patientCaseId,
-    inspectionStage?.version || 0,
-    inspectionStage?.updatedAt || "",
-    attachments
-  ].join("::");
+  return [value.encounter.patientCaseId, inspectionStage?.version || 0, inspectionStage?.updatedAt || "", attachments].join("::");
 };
 
 const cancelTimelineLoad = () => {
@@ -1379,7 +1351,6 @@ const resetTimelineContext = () => {
   timelineSourceKey = "";
   timelineLoaded = false;
   inspectionTimeline.value = [];
-  clearTimelineImageUrls();
 };
 
 const syncTimelineContext = (value: PreAiWorkspace) => {
@@ -1464,6 +1435,105 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   if (keepInspectionImagesVisible) void loadWorkspaceInspectionImages(value);
 };
 
+const resetHistoricalComparison = () => {
+  historyAbortController?.abort();
+  historyAbortController = undefined;
+  historyRequestSequence += 1;
+  historyLoading.value = false;
+  encounterHistory.value = [];
+  historicalWorkspace.value = undefined;
+  historicalEncounterId.value = "";
+  historyPanelOpen.value = false;
+};
+
+const loadHistoricalWorkspace = async (encounterId: string) => {
+  const currentWorkspace = workspace.value;
+  if (!currentWorkspace || !encounterId || encounterId === currentWorkspace.encounter.id) return;
+  const patientCaseId = currentWorkspace.encounter.patientCaseId;
+  const requestSequence = ++historyRequestSequence;
+  historyAbortController?.abort();
+  const requestController = new AbortController();
+  historyAbortController = requestController;
+  historicalEncounterId.value = encounterId;
+  historyLoading.value = true;
+  try {
+    const { data } = await getPreAiReadOnlyWorkspaceApi(encounterId, patientCaseId, requestController.signal);
+    if (
+      requestSequence !== historyRequestSequence ||
+      workspace.value?.encounter.patientCaseId !== patientCaseId ||
+      historicalEncounterId.value !== encounterId
+    )
+      return;
+    historicalWorkspace.value = data;
+  } catch (error: any) {
+    if (error?.name !== "AbortError" && requestSequence === historyRequestSequence) {
+      historicalWorkspace.value = undefined;
+      ElMessage.error(error.message || "历史病历加载失败");
+    }
+  } finally {
+    if (requestSequence === historyRequestSequence) {
+      historyLoading.value = false;
+      if (historyAbortController === requestController) historyAbortController = undefined;
+    }
+  }
+};
+
+const loadEncounterHistory = async (patientCaseId: string, currentEncounterId: string, autoOpen = false) => {
+  const requestSequence = ++historyRequestSequence;
+  historyAbortController?.abort();
+  const requestController = new AbortController();
+  historyAbortController = requestController;
+  historyLoading.value = true;
+  try {
+    const { data } = await getPreAiEncounterHistoryApi(patientCaseId, requestController.signal);
+    if (
+      requestSequence !== historyRequestSequence ||
+      workspace.value?.encounter.patientCaseId !== patientCaseId ||
+      workspace.value?.encounter.id !== currentEncounterId
+    )
+      return;
+    encounterHistory.value = data.encounters;
+    const current = data.encounters.find(item => item.id === currentEncounterId);
+    const otherEncounters = data.encounters.filter(item => item.id !== currentEncounterId);
+    const earlierEncounters = otherEncounters.filter(item => item.visitNo < (current?.visitNo || 1));
+    const preferred =
+      earlierEncounters.find(item => item.id === current?.previousEncounterId) || earlierEncounters[0] || otherEncounters[0];
+    if (!preferred) {
+      historicalEncounterId.value = "";
+      historicalWorkspace.value = undefined;
+      historyPanelOpen.value = false;
+      return;
+    }
+    if (autoOpen) historyPanelOpen.value = true;
+    if (autoOpen || historyPanelOpen.value) await loadHistoricalWorkspace(preferred.id);
+  } catch (error: any) {
+    if (error?.name !== "AbortError" && requestSequence === historyRequestSequence) {
+      ElMessage.error(error.message || "历次病历列表加载失败");
+    }
+  } finally {
+    if (requestSequence === historyRequestSequence) {
+      historyLoading.value = false;
+      if (historyAbortController === requestController) historyAbortController = undefined;
+    }
+  }
+};
+
+const openHistoricalComparison = async () => {
+  if (!workspace.value) return;
+  historyPanelOpen.value = true;
+  const current = workspace.value.encounter;
+  const existing = encounterHistory.value.find(item => item.id === current.id);
+  if (!existing) {
+    await loadEncounterHistory(current.patientCaseId, current.id, true);
+    return;
+  }
+  const otherEncounters = encounterHistory.value.filter(item => item.id !== current.id);
+  const earlierEncounters = otherEncounters.filter(item => item.visitNo < current.visitNo);
+  const preferred =
+    earlierEncounters.find(item => item.id === current.followUpOfEncounterId) || earlierEncounters[0] || otherEncounters[0];
+  if (preferred) await loadHistoricalWorkspace(preferred.id);
+};
+
 const selectEncounter = async (id: string, preserveView = false) => {
   if (!preserveView && id === selectedEncounterId.value && workspace.value?.encounter.id === id && !workspaceLoading.value)
     return;
@@ -1474,6 +1544,7 @@ const selectEncounter = async (id: string, preserveView = false) => {
     resetWorkspaceImageContext();
     resetTimelineContext();
     cancelReviewRequest();
+    resetHistoricalComparison();
   }
   const requestController = new AbortController();
   workspaceAbortController = requestController;
@@ -1486,6 +1557,10 @@ const selectEncounter = async (id: string, preserveView = false) => {
     if (requestSequence !== workspaceRequestSequence || selectedEncounterId.value !== id) return;
 
     hydrateWorkspace(data);
+    selectedPatientCaseId.value = data.encounter.patientCaseId;
+    if (!preserveView || encounterHistory.value.every(item => item.patientCaseId !== data.encounter.patientCaseId)) {
+      await loadEncounterHistory(data.encounter.patientCaseId, data.encounter.id, false);
+    }
     workspaceLoaded = true;
     if (!preserveView) {
       const pendingSelection = readPendingWorkflowSelection();
@@ -1598,36 +1673,6 @@ const showInspectionTimeline = async () => {
       if (!isCurrentRequest()) return;
 
       inspectionTimeline.value = data.nodes;
-      const imageAttachments = Array.from(
-        new Map(
-          data.nodes
-            .flatMap(node => node.attachments)
-            .filter(item => item.mimeType?.startsWith("image/"))
-            .map(attachment => [attachment.id, attachment])
-        ).values()
-      );
-      const attachmentIds = new Set(imageAttachments.map(attachment => attachment.id));
-      for (const [attachmentId, url] of Object.entries(timelineImageUrls)) {
-        if (attachmentIds.has(attachmentId)) continue;
-        URL.revokeObjectURL(url);
-        delete timelineImageUrls[attachmentId];
-      }
-
-      await runWithConcurrency(imageAttachments, 4, async attachment => {
-        if (timelineImageUrls[attachment.id]) return;
-        try {
-          const url = await getPreAiAttachmentObjectUrlApi(attachment, requestController.signal);
-          if (!isCurrentRequest()) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-          timelineImageUrls[attachment.id] = url;
-        } catch (error: any) {
-          if (error?.name !== "AbortError") {
-            // 单张历史图片加载失败时保留下载入口，不阻断其余时间轴内容。
-          }
-        }
-      });
       if (isCurrentRequest()) timelineLoaded = true;
     } catch (error: any) {
       if (error?.name !== "AbortError" && isCurrentRequest()) {
@@ -1643,34 +1688,67 @@ const showInspectionTimeline = async () => {
   return request;
 };
 
-const openWorkspaceAttachment = async (attachment: PreAiAttachment) => {
-  const url = workspaceImageUrls[attachment.id];
-  if (url) {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  await downloadPreAiAttachmentApi(attachment);
-};
-
-const openTimelineAttachment = async (attachment: PreAiAttachment) => {
-  const url = timelineImageUrls[attachment.id];
-  if (url) {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  await downloadPreAiAttachmentApi(attachment);
-};
-
 const timelineAttachmentGroups = (attachments: PreAiAttachment[]) => groupAttachments(attachments);
 
 const paymentStatusLabel = (status?: string) =>
   ({ UNPAID: "未交", PARTIAL: "部分缴费", PAID: "已交", REFUNDED: "退费" })[status || ""] || "未记录";
 const hasVisitMeta = (visitMeta: Record<string, any> = {}) => nonEmptyEntries(visitMeta).length > 0;
 
+const persistHistoryPaneRatio = () => {
+  try {
+    globalThis.localStorage?.setItem(HISTORY_PANE_RATIO_KEY, historyPaneRatio.value.toFixed(4));
+  } catch {
+    // 浏览器禁止本地存储时仍保持当前会话内的拖动比例。
+  }
+};
+
+const setHistoryPaneWidth = (width: number) => {
+  const bounded = Math.min(historyMaxWidth.value, Math.max(historyMinWidth, width));
+  historyPaneRatio.value = bounded / historyAvailableWidth.value;
+  persistHistoryPaneRatio();
+};
+
+const resetHistoryPaneRatio = () => {
+  historyPaneRatio.value = DEFAULT_HISTORY_PANE_RATIO;
+  persistHistoryPaneRatio();
+};
+
+const startHistoryResize = (event: PointerEvent) => {
+  if (globalThis.innerWidth < 1100 || !workspaceShellRef.value) return;
+  event.preventDefault();
+  stopHistoryPointerResize?.();
+  const shellRect = workspaceShellRef.value.getBoundingClientRect();
+  const onMove = (moveEvent: PointerEvent) => setHistoryPaneWidth(shellRect.right - moveEvent.clientX);
+  const onStop = () => {
+    globalThis.removeEventListener("pointermove", onMove);
+    globalThis.removeEventListener("pointerup", onStop);
+    globalThis.removeEventListener("pointercancel", onStop);
+    document.body.classList.remove("history-pane-resizing");
+    stopHistoryPointerResize = undefined;
+  };
+  document.body.classList.add("history-pane-resizing");
+  globalThis.addEventListener("pointermove", onMove);
+  globalThis.addEventListener("pointerup", onStop, { once: true });
+  globalThis.addEventListener("pointercancel", onStop, { once: true });
+  stopHistoryPointerResize = onStop;
+};
+
+const adjustHistoryPaneByKeyboard = (event: KeyboardEvent) => {
+  if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === "Home") {
+    resetHistoryPaneRatio();
+    return;
+  }
+  const step = event.shiftKey ? 64 : 24;
+  setHistoryPaneWidth(historyPaneWidth.value + (event.key === "ArrowLeft" ? step : -step));
+};
+
 const openFollowUpDialog = (patientCase: PreAiPatientCase) => {
   followUpPatientCase.value = patientCase;
+  followUpRequestId.value = createClientRequestId();
   Object.keys(followUpForm).forEach(key => delete followUpForm[key]);
-  followUpForm.visitDate = new Date().toISOString().slice(0, 10) + " 08:00:00";
+  followUpForm.visitDate = currentLocalDateTime();
   followUpDialogVisible.value = true;
 };
 
@@ -1681,15 +1759,29 @@ const createFollowUp = async () => {
   }
   await runAction(async () => {
     const { visitDate, ...visitMeta } = deepCopy(followUpForm);
-    const { data } = await createPreAiFollowUpApi(followUpPatientCase.value!.id, { visitDate, visitMeta });
+    followUpRequestId.value ||= createClientRequestId();
+    const { data } = await registerAndIssuePreAiFollowUpApi(followUpPatientCase.value!.id, {
+      visitDate,
+      visitMeta,
+      clientRequestId: followUpRequestId.value
+    });
+    const encounterWorkspace = data.encounterWorkspace;
+    const queueWorkspace = data.queueWorkspace;
     followUpDialogVisible.value = false;
+    followUpRequestId.value = "";
     await loadEncounterList();
-    selectedPatientCaseId.value = data.encounter.patientCaseId;
-    selectedEncounterId.value = data.encounter.id;
-    hydrateWorkspace(data);
-    workflowSelected.value = false;
+    selectedPatientCaseId.value = encounterWorkspace.encounter.patientCaseId;
+    selectedEncounterId.value = encounterWorkspace.encounter.id;
+    hydrateWorkspace(encounterWorkspace);
+    await loadEncounterHistory(encounterWorkspace.encounter.patientCaseId, encounterWorkspace.encounter.id, true);
+    selectedStageCode.value = "INSPECTION";
+    workflowSelected.value = true;
     editorMode.value = "EDIT";
-    ElMessage.success("复诊子病历已创建，请从岗位卡片开始办理");
+    const printed = queueWorkspace.newlyIssued === false ? false : await printIssuedQueueTicket(queueWorkspace.ticket.id);
+    handoffNotice.value = `${queueWorkspace.ticket.publicNo} 复诊已登记并发号，当前进入检查候诊；${
+      printed ? "票据已打印。" : "打印不可用或未成功，请到叫号工作台补打。"
+    }`;
+    ElMessage.success(handoffNotice.value);
   });
 };
 
@@ -1738,7 +1830,15 @@ const completeSelectedStage = async () =>
     );
     hydrateWorkspace(data);
     await loadEncounterList();
-    ElMessage.success("本阶段已完成并交接");
+    if (data.queueHandoff?.nextStage === "RECEPTION") {
+      handoffNotice.value = `检查已完成，${data.queueHandoff.publicNo} 已转入接诊候诊，号码保持不变。`;
+      ElMessage.success(handoffNotice.value);
+    } else if (data.queueHandoff?.fromStage === "RECEPTION") {
+      handoffNotice.value = `${data.queueHandoff.publicNo} 接诊已完成，排队票据已自动关闭。`;
+      ElMessage.success(handoffNotice.value);
+    } else {
+      ElMessage.success("本阶段已完成并交接");
+    }
   });
 
 const hasFormValue = (value: any, field?: PreAiFieldConfig) => {
@@ -1790,19 +1890,50 @@ const returnStage = async (code: PreAiStageCode) => {
 
 const createEncounter = async () =>
   runAction(async () => {
-    const { data } = await createPreAiEncounterApi(deepCopy(createForm));
+    createRequestId.value ||= createClientRequestId();
+    const { data } = await registerAndIssuePreAiEncounterApi(deepCopy(createForm), createRequestId.value);
+    const encounterWorkspace = data.encounterWorkspace;
+    const queueWorkspace = data.queueWorkspace;
     createDialogVisible.value = false;
     Object.keys(createForm).forEach(key => delete createForm[key]);
-    createForm.visitDate = new Date().toISOString().slice(0, 10) + " 08:00:00";
+    createForm.visitDate = currentLocalDateTime();
+    createRequestId.value = "";
     await loadEncounterList();
-    selectedPatientCaseId.value = data.encounter.patientCaseId;
-    selectedEncounterId.value = data.encounter.id;
-    hydrateWorkspace(data);
-    selectedStageCode.value = "REGISTRATION";
-    workflowSelected.value = false;
+    selectedPatientCaseId.value = encounterWorkspace.encounter.patientCaseId;
+    selectedEncounterId.value = encounterWorkspace.encounter.id;
+    hydrateWorkspace(encounterWorkspace);
+    selectedStageCode.value = "INSPECTION";
+    workflowSelected.value = true;
     editorMode.value = "EDIT";
-    ElMessage.success("前置病历已创建");
+    const printed = queueWorkspace.newlyIssued === false ? false : await printIssuedQueueTicket(queueWorkspace.ticket.id);
+    handoffNotice.value = `${queueWorkspace.ticket.publicNo} 已发号，当前进入检查候诊；${
+      printed ? "票据已打印。" : "打印不可用或未成功，请到叫号工作台补打。"
+    }`;
+    ElMessage.success(handoffNotice.value);
   });
+
+const printIssuedQueueTicket = async (ticketId: string) => {
+  try {
+    const agent = await getLocalPrintAgentStatus();
+    if (agent.status !== "ok" || !agent.terminalId) return false;
+    const { data: task } = await createQueuePrintTaskApi(ticketId, agent.terminalId);
+    try {
+      const result = await printQueueTicketLocally(task.payload);
+      await completeQueuePrintTaskApi(task.id, { ...result, executionToken: task.executionToken });
+      return true;
+    } catch (error: any) {
+      await completeQueuePrintTaskApi(task.id, {
+        status: "FAILED",
+        printerName: agent.printerName,
+        errorMessage: error?.message || "打印失败",
+        executionToken: task.executionToken
+      });
+      return false;
+    }
+  } catch {
+    return false;
+  }
+};
 
 const openLegacyDialog = async () => {
   legacyDialogVisible.value = true;
@@ -1867,6 +1998,8 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
   const input = event.target as HTMLInputElement;
   const files = Array.from(input.files || []);
   if (!files.length) return;
+  const encounterId = selectedEncounterId.value;
+  const stageDraft = stageCode ? deepCopy(stageForms[stageCode]) : undefined;
   const timestamp = Date.now();
   const folderName = files[0]?.webkitRelativePath?.split("/")[0] || "";
   const batchId = `pre-att-${timestamp}`;
@@ -1890,7 +2023,7 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
       continue;
     }
     try {
-      await uploadPreAiAttachmentApi(selectedEncounterId.value, {
+      await uploadPreAiAttachmentApi(encounterId, {
         stageCode,
         taskId,
         file,
@@ -1907,8 +2040,14 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
     attachmentUpload.percent = Math.round(((index + 1) / files.length) * 100);
   }
   try {
-    const { data } = await getPreAiWorkspaceApi(selectedEncounterId.value);
-    hydrateWorkspace(data);
+    const { data } = await getPreAiWorkspaceApi(encounterId);
+    if (selectedEncounterId.value === encounterId) {
+      hydrateWorkspace(data);
+      if (stageCode && stageDraft) {
+        Object.keys(stageForms[stageCode]).forEach(key => delete stageForms[stageCode][key]);
+        Object.assign(stageForms[stageCode], stageDraft);
+      }
+    }
     if (attachmentUpload.success) ElMessage.success(`已上传 ${attachmentUpload.success} 个附件；外部 DOCX 不会包含原图`);
     if (attachmentUpload.failed) ElMessage.warning(`${attachmentUpload.failed} 个文件因格式、大小或上传异常未成功`);
   } finally {
@@ -1952,11 +2091,7 @@ const loadReviewPreview = async () => {
     }
   } finally {
     if (reviewAbortController === requestController) reviewAbortController = undefined;
-    if (
-      reviewRequestSequence === requestSequence &&
-      reviewRequestInFlightEncounterId === encounterId &&
-      !reviewAbortController
-    ) {
+    if (reviewRequestSequence === requestSequence && reviewRequestInFlightEncounterId === encounterId && !reviewAbortController) {
       reviewRequestInFlightEncounterId = "";
     }
   }
@@ -2023,6 +2158,10 @@ const cleanupTransientResources = () => {
   resetWorkspaceImageContext();
   resetTimelineContext();
   cancelReviewRequest();
+  historyAbortController?.abort();
+  historyAbortController = undefined;
+  historyRequestSequence += 1;
+  historyLoading.value = false;
 };
 
 const refreshActiveWorkspace = async () => {
@@ -2038,7 +2177,16 @@ const refreshActiveWorkspace = async () => {
   }
 };
 
-onMounted(loadEncounterList);
+onMounted(() => {
+  if (workspaceShellRef.value) {
+    historyShellWidth.value = workspaceShellRef.value.clientWidth;
+    historyResizeObserver = new ResizeObserver(entries => {
+      historyShellWidth.value = entries[0]?.contentRect.width || workspaceShellRef.value?.clientWidth || 0;
+    });
+    historyResizeObserver.observe(workspaceShellRef.value);
+  }
+  void loadEncounterList();
+});
 onActivated(async () => {
   if (!workspace.value) return;
   await refreshActiveWorkspace();
@@ -2071,6 +2219,11 @@ onActivated(async () => {
 });
 onDeactivated(cleanupTransientResources);
 onBeforeUnmount(cleanupTransientResources);
+onBeforeUnmount(() => {
+  stopHistoryPointerResize?.();
+  historyResizeObserver?.disconnect();
+  historyResizeObserver = undefined;
+});
 </script>
 
 <style scoped lang="scss">
@@ -2079,6 +2232,9 @@ onBeforeUnmount(cleanupTransientResources);
   flex-direction: column;
   gap: 14px;
   min-height: calc(100vh - 120px);
+}
+.handoff-notice {
+  margin: 12px 0;
 }
 .page-hero,
 .patient-banner,
@@ -2149,6 +2305,70 @@ onBeforeUnmount(cleanupTransientResources);
   padding-left: 64px;
   flex: 1;
   min-height: 650px;
+}
+.workspace-shell.with-history {
+  grid-template-columns: 250px minmax(520px, 1fr) 8px minmax(360px, var(--history-pane-width, 410px));
+}
+.history-resizer {
+  position: sticky;
+  top: 12px;
+  align-self: stretch;
+  min-height: 240px;
+  cursor: col-resize;
+  border-radius: 999px;
+  touch-action: none;
+  transition: background-color 0.16s ease;
+}
+.history-resizer::before {
+  position: absolute;
+  top: 0;
+  right: -7px;
+  bottom: 0;
+  left: -7px;
+  content: "";
+}
+.history-resizer span {
+  position: sticky;
+  top: 45%;
+  display: block;
+  width: 4px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: var(--el-border-color);
+  transition:
+    background-color 0.16s ease,
+    transform 0.16s ease;
+}
+.history-resizer:hover,
+.history-resizer:focus-visible {
+  background: var(--el-color-primary-light-9);
+  outline: 2px solid var(--el-color-primary-light-5);
+  outline-offset: 2px;
+}
+.history-resizer:hover span,
+.history-resizer:focus-visible span,
+:global(body.history-pane-resizing) .history-resizer span {
+  background: var(--el-color-primary);
+  transform: scaleY(1.15);
+}
+.history-entry-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 12px;
+  background: var(--el-color-primary-light-9);
+}
+.history-entry-bar > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.history-entry-bar small {
+  color: var(--el-text-color-secondary);
 }
 .encounter-sidebar {
   position: absolute;
@@ -2935,6 +3155,17 @@ onBeforeUnmount(cleanupTransientResources);
   .workspace-shell {
     grid-template-columns: 225px minmax(0, 1fr);
   }
+  .workspace-shell.with-history {
+    grid-template-columns: 225px minmax(0, 1fr);
+  }
+  .history-resizer {
+    display: none;
+  }
+  .workspace-shell.with-history :deep(.history-panel) {
+    grid-column: 1 / -1;
+    position: static;
+    max-height: 680px;
+  }
   .page-hero {
     align-items: flex-start;
   }
@@ -2943,7 +3174,8 @@ onBeforeUnmount(cleanupTransientResources);
   .page-hero,
   .patient-banner,
   .panel-heading,
-  .history-template-toolbar {
+  .history-template-toolbar,
+  .history-entry-bar {
     flex-direction: column;
     align-items: stretch;
   }

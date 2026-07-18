@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.clinicqueue;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -63,7 +64,7 @@ public class ClinicQueueService {
         if (!existing.isEmpty()) return issueResult(String.valueOf(existing.get(0).get("id")), user, false);
 
         EncounterPatient encounter = loadEncounterPatient(encounterId);
-        String visitType = normalizeVisitType(request == null ? "" : request.visitType(), encounter.visitNo());
+        String visitType = encounter.visitNo() > 1 ? "FOLLOW_UP" : "FIRST_VISIT";
         LocalDate businessDate = LocalDate.now();
         String id = "cqt-" + UUID.randomUUID();
         String inspectionTaskId = "cqtask-" + UUID.randomUUID();
@@ -113,20 +114,67 @@ public class ClinicQueueService {
         String like = "%" + normalizedKeyword + "%";
         ArrayNode tickets = objectMapper.createArrayNode();
         String sql = """
-            SELECT q.* FROM clinic_queue_tickets q
+            SELECT q.*, e.visit_no AS encounter_visit_no,
+                   JSON_UNQUOTE(JSON_EXTRACT(e.visit_meta_json, '$.visitReason')) AS encounter_visit_reason
+            FROM clinic_queue_tickets q
+            LEFT JOIN pre_ai_encounters e ON e.id = q.encounter_id
             WHERE q.business_date = CURDATE()
               AND (? = '' OR q.public_no LIKE ? OR q.patient_name LIKE ? OR q.encounter_id LIKE ?)
             ORDER BY q.created_at DESC LIMIT 300
             """;
-        jdbcTemplate.query(sql, (RowCallbackHandler) rs -> tickets.add(readTicket(rs)), normalizedKeyword, like, like, like);
+        jdbcTemplate.query(sql, (RowCallbackHandler) rs -> tickets.add(readTicketWithEncounter(rs)), normalizedKeyword, like, like, like);
         ArrayNode rooms = objectMapper.createArrayNode();
         jdbcTemplate.query("SELECT * FROM clinic_queue_rooms ORDER BY stage_code", (RowCallbackHandler) rs -> rooms.add(readRoom(rs)));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("tickets", plain(tickets));
         result.put("rooms", plain(rooms));
         result.put("counts", counts());
+        Map<String, Object> recommendedByStage = new LinkedHashMap<>();
+        recommendedByStage.put(INSPECTION, recommendedWaiting(INSPECTION, true));
+        recommendedByStage.put(RECEPTION, recommendedWaiting(RECEPTION, true));
+        result.put("recommendedByStage", recommendedByStage);
         result.put("currentUserRole", user.role());
         result.put("serverTime", now());
+        return result;
+    }
+
+    public Map<String, Object> eligibleEncounters(SessionUser user) {
+        requireRole(user, ISSUE_ROLES, "仅前台或管理员可查看待发号就诊");
+        ArrayNode rows = objectMapper.createArrayNode();
+        ArrayNode blocked = objectMapper.createArrayNode();
+        jdbcTemplate.query("""
+            SELECT e.id, e.case_token, e.visit_no, e.patient_json, e.visit_meta_json, e.updated_at,
+                   COALESCE(s.status, 'DRAFT') AS registration_status, COALESCE(s.version, 0) AS registration_version
+            FROM pre_ai_encounters e
+            LEFT JOIN pre_ai_stage_submissions s ON s.encounter_id = e.id AND s.stage_code = 'REGISTRATION'
+            LEFT JOIN clinic_queue_tickets q ON q.encounter_id = e.id
+            WHERE e.status <> 'CANCELLED'
+              AND q.id IS NULL
+              AND DATE(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.visitDate')), ''), e.created_at)) = CURDATE()
+            ORDER BY CASE WHEN s.status = 'COMPLETED' THEN 0 ELSE 1 END, e.updated_at DESC
+            LIMIT 300
+            """, (RowCallbackHandler) rs -> {
+                JsonNode patient = readJson(rs.getString("patient_json"));
+                JsonNode visitMeta = readJson(rs.getString("visit_meta_json"));
+                String registrationStatus = safe(rs.getString("registration_status"));
+                boolean eligible = "COMPLETED".equals(registrationStatus);
+                ObjectNode row = (eligible ? rows : blocked).addObject();
+                row.put("encounterId", rs.getString("id"));
+                row.put("caseToken", rs.getString("case_token"));
+                row.put("patientName", text(patient, "patientName"));
+                row.put("visitDate", text(patient, "visitDate"));
+                row.put("visitNo", rs.getInt("visit_no"));
+                row.put("visitType", rs.getInt("visit_no") > 1 ? "FOLLOW_UP" : "FIRST_VISIT");
+                row.put("visitReason", text(visitMeta, "visitReason"));
+                row.put("registrationStatus", registrationStatus);
+                row.put("registrationVersion", rs.getInt("registration_version"));
+                row.put("eligible", eligible);
+                row.put("blockReason", eligible ? "" : registrationBlockReason(registrationStatus));
+                row.put("updatedAt", rs.getString("updated_at"));
+            });
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", plain(rows));
+        result.put("blocked", plain(blocked));
         return result;
     }
 
@@ -149,10 +197,20 @@ public class ClinicQueueService {
     public Map<String, Object> callNext(String stageCode, SessionUser user) {
         String stage = normalizeStage(stageCode);
         requireStageRole(stage, user);
-        ObjectNode room = loadRoomByStage(stage);
+        ObjectNode room = loadRoomByStageForUpdate(stage);
         ensureRoomActive(room);
-        List<Candidate> candidates = waitingCandidates(stage);
-        Candidate selected = chooseCandidate(candidates, room.path("followUpStreak").asInt(0), LocalDateTime.now());
+        Integer activePatients = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM clinic_queue_tasks t
+            JOIN clinic_queue_tickets q ON q.id = t.ticket_id
+            WHERE q.business_date = CURDATE() AND t.stage_code = ?
+              AND t.status IN ('CALLED', 'ARRIVED', 'IN_SERVICE', 'INTERRUPTED')
+            """, Integer.class, stage);
+        if (activePatients != null && activePatients > 0) {
+            throw conflict("当前房间已有办理中的患者，请先完成、暂离或中断当前患者");
+        }
+        List<Candidate> candidates = waitingCandidates(stage, true);
+        List<Candidate> ranked = rankCandidates(candidates, room.path("followUpStreak").asInt(0), LocalDateTime.now());
+        Candidate selected = ranked.isEmpty() ? null : ranked.get(0);
         if (selected == null) throw conflict("当前没有可叫号患者");
         callTaskInternal(selected.taskId(), user, "系统推荐：" + selected.reason());
         return workspace(selected.ticketId(), user);
@@ -247,18 +305,32 @@ public class ClinicQueueService {
     }
 
     @Transactional
-    public void onClinicalStageCompleted(String encounterId, String stageCode, SessionUser user) {
+    public Map<String, Object> onClinicalStageCompleted(String encounterId, String stageCode, SessionUser user) {
         String stage = normalizeStage(stageCode);
-        if (!STAGES.contains(stage)) return;
+        if (!STAGES.contains(stage)) return Map.of();
         List<String> tickets = jdbcTemplate.query(
             "SELECT id FROM clinic_queue_tickets WHERE encounter_id = ? LIMIT 1",
             (rs, rowNum) -> rs.getString("id"), encounterId
         );
-        if (tickets.isEmpty()) return;
+        if (tickets.isEmpty()) return Map.of();
         ObjectNode task = loadTaskByTicketStage(tickets.get(0), stage);
-        if ("COMPLETED".equals(text(task, "status"))) return;
+        if ("COMPLETED".equals(text(task, "status"))) return queueHandoff(tickets.get(0), stage);
         if (Set.of("CANCELLED").contains(text(task, "status"))) throw conflict("排队任务已取消，无法完成临床交接");
         completeTaskAndAdvance(task, user, "临床阶段完成，自动同步排队状态");
+        return queueHandoff(tickets.get(0), stage);
+    }
+
+    private Map<String, Object> queueHandoff(String ticketId, String completedStage) {
+        ObjectNode ticket = loadTicket(ticketId);
+        ObjectNode reception = loadTaskByTicketStage(ticketId, RECEPTION);
+        Map<String, Object> handoff = new LinkedHashMap<>();
+        handoff.put("ticketId", ticketId);
+        handoff.put("publicNo", text(ticket, "publicNo"));
+        handoff.put("fromStage", completedStage);
+        if (INSPECTION.equals(completedStage)) handoff.put("nextStage", RECEPTION);
+        handoff.put("nextStatus", INSPECTION.equals(completedStage) ? text(reception, "status") : text(ticket, "overallStatus"));
+        handoff.put("transferredAt", INSPECTION.equals(completedStage) ? text(reception, "queueEnteredAt") : text(reception, "completedAt"));
+        return handoff;
     }
 
     public Map<String, Object> displaySnapshot(SessionUser user) {
@@ -603,12 +675,17 @@ public class ClinicQueueService {
     }
 
     private List<Candidate> waitingCandidates(String stage) {
-        return jdbcTemplate.query("""
+        return waitingCandidates(stage, false);
+    }
+
+    private List<Candidate> waitingCandidates(String stage, boolean lock) {
+        String sql = """
             SELECT t.id AS task_id, t.ticket_id, q.visit_type, t.queue_entered_at, t.priority_locked
             FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id
             WHERE t.stage_code = ? AND t.status = 'WAITING' AND q.business_date = CURDATE()
             ORDER BY t.queue_entered_at ASC
-            """, (rs, rowNum) -> new Candidate(
+            """ + (lock ? " FOR UPDATE" : "");
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new Candidate(
                 rs.getString("task_id"), rs.getString("ticket_id"), rs.getString("visit_type"),
                 rs.getTimestamp("queue_entered_at").toLocalDateTime(), rs.getBoolean("priority_locked"), ""
             ), stage);
@@ -635,6 +712,21 @@ public class ClinicQueueService {
         return candidates.get(0).withReason("按入队时间先后");
     }
 
+    static List<Candidate> rankCandidates(List<Candidate> source, int followUpStreak, LocalDateTime now) {
+        if (source == null || source.isEmpty()) return List.of();
+        List<Candidate> remaining = new ArrayList<>(source);
+        List<Candidate> ranked = new ArrayList<>(source.size());
+        int simulatedStreak = Math.max(0, followUpStreak);
+        while (!remaining.isEmpty()) {
+            Candidate selected = chooseCandidate(remaining, simulatedStreak, now);
+            if (selected == null) break;
+            ranked.add(selected);
+            remaining.removeIf(item -> item.taskId().equals(selected.taskId()));
+            simulatedStreak = "FOLLOW_UP".equals(selected.visitType()) ? simulatedStreak + 1 : 0;
+        }
+        return ranked;
+    }
+
     private static long waitedMinutes(Candidate candidate, LocalDateTime now) {
         return Math.max(0, Duration.between(candidate.enteredAt(), now).toMinutes());
     }
@@ -642,28 +734,59 @@ public class ClinicQueueService {
     private Map<String, Object> displayRoom(String stage) {
         ObjectNode room = loadRoomByStage(stage);
         ArrayNode calling = objectMapper.createArrayNode();
-        ArrayNode waiting = objectMapper.createArrayNode();
         jdbcTemplate.query("""
             SELECT t.id, t.status, t.called_at, t.updated_at, q.public_no, q.visit_type
             FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id
             WHERE t.stage_code = ? AND q.business_date = CURDATE() AND t.status IN ('CALLED', 'ARRIVED', 'IN_SERVICE')
             ORDER BY t.updated_at DESC LIMIT 3
             """, (RowCallbackHandler) rs -> calling.add(readDisplayTask(rs)), stage);
-        jdbcTemplate.query("""
-            SELECT t.id, t.status, t.called_at, t.updated_at, q.public_no, q.visit_type
-            FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id
-            WHERE t.stage_code = ? AND q.business_date = CURDATE() AND t.status = 'WAITING'
-            ORDER BY t.priority_locked DESC, t.queue_entered_at ASC LIMIT 10
-            """, (RowCallbackHandler) rs -> waiting.add(readDisplayTask(rs)), stage);
-        return Map.of("room", plain(room), "calling", plain(calling), "waiting", plain(waiting));
+        List<Map<String, Object>> waiting = recommendedWaiting(stage, false);
+        if (waiting.size() > 10) waiting = waiting.subList(0, 10);
+        return Map.of("room", plain(room), "calling", plain(calling), "waiting", waiting);
+    }
+
+    private List<Map<String, Object>> recommendedWaiting(String stage, boolean includeReason) {
+        ObjectNode room = loadRoomByStage(stage);
+        LocalDateTime current = LocalDateTime.now();
+        List<Candidate> ranked = rankCandidates(waitingCandidates(stage), room.path("followUpStreak").asInt(0), current);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (int index = 0; index < ranked.size(); index++) {
+            Candidate candidate = ranked.get(index);
+            List<ObjectNode> displayRows = jdbcTemplate.query("""
+                SELECT t.id, t.status, t.called_at, t.updated_at, q.public_no, q.visit_type
+                FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id
+                WHERE t.id = ? LIMIT 1
+                """, (rs, rowNum) -> readDisplayTask(rs), candidate.taskId());
+            if (displayRows.isEmpty()) continue;
+            ObjectNode row = displayRows.get(0);
+            row.put("ticketId", candidate.ticketId());
+            row.put("recommendedRank", index + 1);
+            row.put("waitMinutes", waitedMinutes(candidate, current));
+            row.put("stageEnteredAt", candidate.enteredAt().toString());
+            row.put("priorityReason", includeReason ? candidate.reason() : publicPriorityReason(candidate.reason()));
+            rows.add(objectMapper.convertValue(row, new TypeReference<Map<String, Object>>() {}));
+        }
+        return rows;
+    }
+
+    private static String publicPriorityReason(String reason) {
+        return reason != null && reason.startsWith("人工") ? "优先患者" : "";
+    }
+
+    private String registrationBlockReason(String status) {
+        return switch (safe(status)) {
+            case "DRAFT" -> "登记未完成，可补全登记后发号";
+            case "RETURNED" -> "登记已退回，请修正后发号";
+            default -> "当前登记状态暂不可发号";
+        };
     }
 
     private Map<String, Object> counts() {
         Map<String, Object> counts = new LinkedHashMap<>();
         counts.put("inspectionWaiting", countTask(INSPECTION, "WAITING"));
-        counts.put("inspectionActive", countTask(INSPECTION, "CALLED") + countTask(INSPECTION, "ARRIVED") + countTask(INSPECTION, "IN_SERVICE"));
+        counts.put("inspectionActive", countTask(INSPECTION, "CALLED") + countTask(INSPECTION, "ARRIVED") + countTask(INSPECTION, "IN_SERVICE") + countTask(INSPECTION, "INTERRUPTED"));
         counts.put("receptionWaiting", countTask(RECEPTION, "WAITING"));
-        counts.put("receptionActive", countTask(RECEPTION, "CALLED") + countTask(RECEPTION, "ARRIVED") + countTask(RECEPTION, "IN_SERVICE"));
+        counts.put("receptionActive", countTask(RECEPTION, "CALLED") + countTask(RECEPTION, "ARRIVED") + countTask(RECEPTION, "IN_SERVICE") + countTask(RECEPTION, "INTERRUPTED"));
         counts.put("completedToday", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_queue_tickets WHERE business_date = CURDATE() AND overall_status = 'COMPLETED'", Integer.class));
         counts.put("exceptions", jdbcTemplate.queryForObject("""
             SELECT COUNT(*) FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id
@@ -704,17 +827,31 @@ public class ClinicQueueService {
 
     private EncounterPatient loadEncounterPatient(String encounterId) {
         List<EncounterPatient> rows = jdbcTemplate.query("""
-            SELECT id, source_patient_id, visit_no, patient_json FROM pre_ai_encounters WHERE id = ? LIMIT 1
+            SELECT e.id, e.source_patient_id, e.visit_no, e.status, e.patient_json, s.status AS registration_status
+            FROM pre_ai_encounters e
+            LEFT JOIN pre_ai_stage_submissions s ON s.encounter_id = e.id AND s.stage_code = 'REGISTRATION'
+            WHERE e.id = ? LIMIT 1
             """, (rs, rowNum) -> {
                 JsonNode patient = readJson(rs.getString("patient_json"));
                 return new EncounterPatient(
                     rs.getString("id"), safe(rs.getString("source_patient_id")),
-                    text(patient, "patientName"), rs.getInt("visit_no")
+                    text(patient, "patientName"), rs.getInt("visit_no"), rs.getString("status"),
+                    safe(rs.getString("registration_status")), text(patient, "visitDate")
                 );
             }, encounterId);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "就诊记录不存在");
-        if (safe(rows.get(0).patientName()).isBlank()) throw conflict("就诊记录缺少患者姓名，无法发号");
-        return rows.get(0);
+        EncounterPatient encounter = rows.get(0);
+        if (safe(encounter.patientName()).isBlank()) throw conflict("就诊记录缺少患者姓名，无法发号");
+        if ("CANCELLED".equals(encounter.status())) throw conflict("就诊记录已取消，无法发号");
+        if (!"COMPLETED".equals(encounter.registrationStatus())) throw conflict("请先完成就诊登记，再进行发号");
+        try {
+            String visitDate = safe(encounter.visitDate());
+            LocalDate date = LocalDate.parse(visitDate.length() >= 10 ? visitDate.substring(0, 10) : visitDate);
+            if (!LocalDate.now().equals(date)) throw conflict("仅可为当日有效就诊发号");
+        } catch (java.time.format.DateTimeParseException error) {
+            throw conflict("就诊日期无效，请先修正登记信息");
+        }
+        return encounter;
     }
 
     private String nextPublicNo(LocalDate date, String visitType) {
@@ -736,7 +873,13 @@ public class ClinicQueueService {
     }
 
     private ObjectNode loadTicket(String id) {
-        List<ObjectNode> rows = jdbcTemplate.query("SELECT * FROM clinic_queue_tickets WHERE id = ? LIMIT 1", (rs, rowNum) -> readTicket(rs), id);
+        List<ObjectNode> rows = jdbcTemplate.query("""
+            SELECT q.*, e.visit_no AS encounter_visit_no,
+                   JSON_UNQUOTE(JSON_EXTRACT(e.visit_meta_json, '$.visitReason')) AS encounter_visit_reason
+            FROM clinic_queue_tickets q
+            LEFT JOIN pre_ai_encounters e ON e.id = q.encounter_id
+            WHERE q.id = ? LIMIT 1
+            """, (rs, rowNum) -> readTicketWithEncounter(rs), id);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "排队单不存在");
         return rows.get(0);
     }
@@ -765,6 +908,15 @@ public class ClinicQueueService {
         return rows.get(0);
     }
 
+    private ObjectNode loadRoomByStageForUpdate(String stage) {
+        List<ObjectNode> rows = jdbcTemplate.query(
+            "SELECT * FROM clinic_queue_rooms WHERE stage_code = ? LIMIT 1 FOR UPDATE",
+            (rs, rowNum) -> readRoom(rs), stage
+        );
+        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "阶段房间配置不存在");
+        return rows.get(0);
+    }
+
     private ObjectNode readTicket(ResultSet rs) throws SQLException {
         ObjectNode row = objectMapper.createObjectNode();
         row.put("id", rs.getString("id"));
@@ -781,6 +933,13 @@ public class ClinicQueueService {
         row.put("createdAt", rs.getString("created_at"));
         row.put("updatedAt", rs.getString("updated_at"));
         putNullable(row, "completedAt", rs.getString("completed_at"));
+        return row;
+    }
+
+    private ObjectNode readTicketWithEncounter(ResultSet rs) throws SQLException {
+        ObjectNode row = readTicket(rs);
+        row.put("visitNo", rs.getInt("encounter_visit_no"));
+        putNullable(row, "visitReason", rs.getString("encounter_visit_reason"));
         return row;
     }
 
@@ -1105,7 +1264,8 @@ public class ClinicQueueService {
     public record PrintTerminalRequest(String terminalId, String terminalName, String printerName, String agentVersion) {}
     public record PrintTaskRequest(String terminalId, String reason, String clientRequestId) {}
     public record PrintResultRequest(String status, String printerName, String errorMessage, String executionToken) {}
-    record EncounterPatient(String encounterId, String patientId, String patientName, int visitNo) {}
+    record EncounterPatient(String encounterId, String patientId, String patientName, int visitNo,
+                            String status, String registrationStatus, String visitDate) {}
     public record Candidate(String taskId, String ticketId, String visitType, LocalDateTime enteredAt, boolean priorityLocked, String reason) {
         Candidate withReason(String nextReason) {
             return new Candidate(taskId, ticketId, visitType, enteredAt, priorityLocked, nextReason);

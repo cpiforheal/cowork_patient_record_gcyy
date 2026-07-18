@@ -50,7 +50,49 @@ public class MedicalRecordSourceBuilder {
         ObjectNode db = databaseService.readDbForUser(user);
         JsonNode patient = findPatient(db.path("patients"), patientId);
         if (patient == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
-        return buildSourceSnapshot(patient, db.path("records").path(patientId), db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
+        ObjectNode record = mergeReviewedPreAiTcmFacts(patientId, db.path("records").path(patientId));
+        return buildSourceSnapshot(patient, record, db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
+    }
+
+    private ObjectNode mergeReviewedPreAiTcmFacts(String patientId, JsonNode record) {
+        ObjectNode merged = record != null && record.isObject()
+            ? ((ObjectNode) record).deepCopy()
+            : objectMapper.createObjectNode();
+        List<ObjectNode> reviewedTcmRows = jdbcTemplate.query(
+            """
+                SELECT
+                  JSON_UNQUOTE(JSON_EXTRACT(s.data_json, '$.tongue')) AS tongue,
+                  JSON_UNQUOTE(JSON_EXTRACT(s.data_json, '$.pulse')) AS pulse
+                FROM pre_ai_encounters e
+                JOIN pre_ai_stage_submissions s
+                  ON s.encounter_id = e.id
+                 AND s.stage_code = 'TCM'
+                 AND s.status = 'COMPLETED'
+                WHERE e.source_patient_id = ?
+                  AND e.status IN ('REVIEWED', 'EXPORTED')
+                ORDER BY e.reviewed_at DESC, e.updated_at DESC
+                LIMIT 1
+                """,
+            (resultSet, rowNum) -> {
+                ObjectNode facts = objectMapper.createObjectNode();
+                facts.put("tongue", safe(resultSet.getString("tongue")));
+                facts.put("pulse", safe(resultSet.getString("pulse")));
+                return facts;
+            },
+            patientId
+        );
+        if (reviewedTcmRows.isEmpty()) return merged;
+
+        JsonNode tcm = reviewedTcmRows.get(0);
+        putIfIncomplete(merged, "tongue", tcm.path("tongue").asText(""));
+        putIfIncomplete(merged, "pulseCondition", tcm.path("pulse").asText(""));
+        return merged;
+    }
+
+    private void putIfIncomplete(ObjectNode target, String key, String fallbackValue) {
+        if (isIncomplete(target.path(key).asText("")) && !isIncomplete(fallbackValue)) {
+            target.put(key, fallbackValue.trim());
+        }
     }
 
     public void assertCanReadPatient(String patientId) {

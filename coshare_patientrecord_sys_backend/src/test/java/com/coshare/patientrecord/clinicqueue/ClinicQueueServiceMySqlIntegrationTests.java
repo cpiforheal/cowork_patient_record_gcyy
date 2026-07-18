@@ -2,28 +2,29 @@ package com.coshare.patientrecord.clinicqueue;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.preai.PreAiEncounterService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.flywaydb.core.Flyway;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ClinicQueueServiceMySqlIntegrationTests {
 
-    @Container
     private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4")
         .withDatabaseName("clinic_queue_test")
         .withUsername("clinic_test")
@@ -42,19 +43,55 @@ class ClinicQueueServiceMySqlIntegrationTests {
 
     private JdbcTemplate jdbcTemplate;
     private ClinicQueueService service;
+    private PreAiEncounterService preAiService;
+    private boolean containerStarted;
 
     @BeforeAll
     void initializeDatabase() {
+        String externalUrl = System.getenv("CLINIC_TEST_MYSQL_URL");
+        String jdbcUrl;
+        String username;
+        String password;
+        if (externalUrl == null || externalUrl.isBlank()) {
+            MYSQL.start();
+            containerStarted = true;
+            jdbcUrl = MYSQL.getJdbcUrl();
+            username = MYSQL.getUsername();
+            password = MYSQL.getPassword();
+        } else {
+            jdbcUrl = externalUrl;
+            username = environmentValue("CLINIC_TEST_MYSQL_USERNAME", "root");
+            password = environmentValue("CLINIC_TEST_MYSQL_PASSWORD", "");
+        }
+
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        dataSource.setUrl(MYSQL.getJdbcUrl());
-        dataSource.setUsername(MYSQL.getUsername());
-        dataSource.setPassword(MYSQL.getPassword());
+        dataSource.setUrl(jdbcUrl);
+        dataSource.setUsername(username);
+        dataSource.setPassword(password);
         jdbcTemplate = new JdbcTemplate(dataSource);
 
         Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
 
-        service = new ClinicQueueService(jdbcTemplate, new ObjectMapper());
+        ObjectMapper objectMapper = new ObjectMapper();
+        service = new ClinicQueueService(jdbcTemplate, objectMapper);
+        preAiService = new PreAiEncounterService(
+            jdbcTemplate,
+            objectMapper,
+            null,
+            null,
+            null,
+            service,
+            null,
+            "target/generated-pre-ai-tests"
+        );
+    }
+
+    @AfterAll
+    void stopContainer() {
+        if (containerStarted && MYSQL.isRunning()) {
+            MYSQL.stop();
+        }
     }
 
     @BeforeEach
@@ -68,6 +105,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
         jdbcTemplate.update("DELETE FROM clinic_queue_tickets");
         jdbcTemplate.update("DELETE FROM pre_ai_stage_submissions");
         jdbcTemplate.update("DELETE FROM pre_ai_encounters");
+        jdbcTemplate.update("DELETE FROM pre_ai_patient_cases");
         jdbcTemplate.update("""
             UPDATE clinic_queue_rooms
             SET status = 'ACTIVE', pause_reason = '', follow_up_streak = 0, version = 0,
@@ -101,9 +139,12 @@ class ClinicQueueServiceMySqlIntegrationTests {
         String encounterId = insertEncounter("李四", 2);
         service.issue(new ClinicQueueService.IssueRequest(encounterId, "FOLLOW_UP"), ADMIN);
 
-        service.onClinicalStageCompleted(encounterId, "INSPECTION", ADMIN);
-        service.onClinicalStageCompleted(encounterId, "INSPECTION", ADMIN);
+        Map<String, Object> firstHandoff = service.onClinicalStageCompleted(encounterId, "INSPECTION", ADMIN);
+        Map<String, Object> repeatedHandoff = service.onClinicalStageCompleted(encounterId, "INSPECTION", ADMIN);
 
+        assertEquals("RECEPTION", firstHandoff.get("nextStage"));
+        assertEquals("WAITING", firstHandoff.get("nextStatus"));
+        assertEquals(firstHandoff, repeatedHandoff);
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tasks WHERE stage_code = 'INSPECTION' AND status = 'COMPLETED'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tasks WHERE stage_code = 'RECEPTION' AND status = 'WAITING'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tickets WHERE overall_status = 'WAITING_RECEPTION'"));
@@ -200,8 +241,156 @@ class ClinicQueueServiceMySqlIntegrationTests {
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_audit_logs WHERE action_code = 'PRINT_SUCCESS'"));
     }
 
+    @Test
+    void eligibleEncountersExcludeIssuedDraftCancelledAndPreviousDayRecords() {
+        String eligibleId = insertEncounter("eligible", 1);
+        String issuedId = insertEncounter("issued", 2);
+        service.issue(new ClinicQueueService.IssueRequest(issuedId, "FIRST_VISIT"), ADMIN);
+
+        String draftId = insertEncounter("draft", 3);
+        jdbcTemplate.update(
+            "UPDATE pre_ai_stage_submissions SET status = 'DRAFT', completed_at = NULL WHERE encounter_id = ? AND stage_code = 'REGISTRATION'",
+            draftId
+        );
+
+        String cancelledId = insertEncounter("cancelled", 4);
+        jdbcTemplate.update("UPDATE pre_ai_encounters SET status = 'CANCELLED' WHERE id = ?", cancelledId);
+
+        String previousDayId = insertEncounter("previous-day", 5);
+        jdbcTemplate.update(
+            "UPDATE pre_ai_encounters SET patient_json = JSON_SET(patient_json, '$.visitDate', ?) WHERE id = ?",
+            LocalDate.now().minusDays(1) + " 12:00:00",
+            previousDayId
+        );
+
+        Map<String, Object> response = service.eligibleEncounters(ADMIN);
+        @SuppressWarnings("unchecked")
+        java.util.List<Map<String, Object>> rows = (java.util.List<Map<String, Object>>) response.get("list");
+        @SuppressWarnings("unchecked")
+        java.util.List<Map<String, Object>> blocked = (java.util.List<Map<String, Object>>) response.get("blocked");
+
+        assertEquals(1, rows.size());
+        assertEquals(eligibleId, rows.get(0).get("encounterId"));
+        assertEquals(1, blocked.size());
+        assertEquals(draftId, blocked.get(0).get("encounterId"));
+        assertEquals(false, blocked.get(0).get("eligible"));
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.issue(new ClinicQueueService.IssueRequest(draftId, "FIRST_VISIT"), ADMIN)
+        );
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.issue(new ClinicQueueService.IssueRequest(cancelledId, "FIRST_VISIT"), ADMIN)
+        );
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.issue(new ClinicQueueService.IssueRequest(previousDayId, "FIRST_VISIT"), ADMIN)
+        );
+    }
+
+    @Test
+    void followUpRegistrationAndIssueIsIdempotentAndDerivesVisitTypeOnServer() {
+        String initialRequestId = "initial-" + UUID.randomUUID();
+        preAiService.registerAndIssue(
+            new PreAiEncounterService.RegisterAndIssueRequest(
+                Map.of(
+                    "patientName", "follow-up-patient",
+                    "gender", "FEMALE",
+                    "age", "42",
+                    "visitDate", LocalDate.now() + " 08:30:00"
+                ),
+                initialRequestId
+            ),
+            ADMIN
+        );
+        String patientCaseId = jdbcTemplate.queryForObject(
+            "SELECT patient_case_id FROM pre_ai_encounters WHERE registration_request_id = ?",
+            String.class,
+            initialRequestId
+        );
+        String followUpRequestId = "follow-up-" + UUID.randomUUID();
+        PreAiEncounterService.FollowUpRegisterAndIssueRequest request =
+            new PreAiEncounterService.FollowUpRegisterAndIssueRequest(
+                LocalDate.now() + " 09:15:00",
+                Map.of("visitReason", "postoperative review"),
+                followUpRequestId
+            );
+
+        Map<String, Object> first = preAiService.createFollowUpAndIssue(patientCaseId, request, ADMIN);
+        Map<String, Object> repeated = preAiService.createFollowUpAndIssue(patientCaseId, request, ADMIN);
+
+        String encounterId = jdbcTemplate.queryForObject(
+            "SELECT id FROM pre_ai_encounters WHERE registration_request_id = ?",
+            String.class,
+            followUpRequestId
+        );
+        @SuppressWarnings("unchecked")
+        Map<String, Object> firstQueue = (Map<String, Object>) first.get("queueWorkspace");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> repeatedQueue = (Map<String, Object>) repeated.get("queueWorkspace");
+        assertEquals(firstQueue.get("ticket"), repeatedQueue.get("ticket"));
+        assertEquals(2, count("SELECT visit_no FROM pre_ai_encounters WHERE id = ?", encounterId));
+        assertEquals(1, count("SELECT COUNT(*) FROM pre_ai_stage_submissions WHERE encounter_id = ? AND stage_code = 'REGISTRATION' AND status = 'COMPLETED'", encounterId));
+        assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tickets WHERE encounter_id = ? AND visit_type = 'FOLLOW_UP'", encounterId));
+        assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id WHERE q.encounter_id = ? AND t.stage_code = 'INSPECTION' AND t.status = 'WAITING'", encounterId));
+        assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id WHERE q.encounter_id = ? AND t.stage_code = 'RECEPTION' AND t.status = 'INACTIVE'", encounterId));
+    }
+
+    @Test
+    void existingFollowUpDraftCanBeCompletedAndIssuedAtomically() {
+        String initialRequestId = "initial-draft-" + UUID.randomUUID();
+        preAiService.registerAndIssue(
+            new PreAiEncounterService.RegisterAndIssueRequest(
+                Map.of(
+                    "patientName", "draft-patient",
+                    "gender", "MALE",
+                    "age", "38",
+                    "visitDate", LocalDate.now() + " 08:40:00"
+                ),
+                initialRequestId
+            ),
+            ADMIN
+        );
+        String patientCaseId = jdbcTemplate.queryForObject(
+            "SELECT patient_case_id FROM pre_ai_encounters WHERE registration_request_id = ?",
+            String.class,
+            initialRequestId
+        );
+        Map<String, Object> draft = preAiService.createFollowUp(
+            patientCaseId,
+            new PreAiEncounterService.FollowUpEncounterCreateRequest(
+                LocalDate.now() + " 10:10:00",
+                Map.of("visitReason", "draft recovery")
+            ),
+            ADMIN
+        );
+        @SuppressWarnings("unchecked")
+        String encounterId = String.valueOf(((Map<String, Object>) draft.get("encounter")).get("id"));
+        String requestId = "recover-" + UUID.randomUUID();
+
+        preAiService.registerExistingAndIssue(
+            encounterId,
+            new PreAiEncounterService.ExistingRegisterAndIssueRequest(
+                Map.of(
+                    "patientName", "draft-patient",
+                    "gender", "MALE",
+                    "age", "38",
+                    "visitDate", LocalDate.now() + " 10:10:00"
+                ),
+                requestId,
+                0
+            ),
+            ADMIN
+        );
+
+        assertEquals(1, count("SELECT COUNT(*) FROM pre_ai_stage_submissions WHERE encounter_id = ? AND stage_code = 'REGISTRATION' AND status = 'COMPLETED'", encounterId));
+        assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_tickets WHERE encounter_id = ? AND visit_type = 'FOLLOW_UP'", encounterId));
+        assertEquals(requestId, jdbcTemplate.queryForObject("SELECT registration_request_id FROM pre_ai_encounters WHERE id = ?", String.class, encounterId));
+    }
+
     private String insertEncounter(String patientName, int visitNo) {
         String id = "enc-" + UUID.randomUUID();
+        String visitDate = LocalDate.now() + " 12:00:00";
         jdbcTemplate.update(
             """
             INSERT INTO pre_ai_encounters (
@@ -212,9 +401,22 @@ class ClinicQueueServiceMySqlIntegrationTests {
             "patient-" + UUID.randomUUID(),
             visitNo,
             "case-" + UUID.randomUUID(),
-            "{\"patientName\":\"" + patientName + "\"}",
-            "2026-07-17 12:00:00",
-            "2026-07-17 12:00:00"
+            "{\"patientName\":\"" + patientName + "\",\"visitDate\":\"" + visitDate + "\"}",
+            visitDate,
+            visitDate
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO pre_ai_stage_submissions (
+              encounter_id, stage_code, status, version, data_json, submitted_by, submitted_by_role, completed_at, updated_at
+            ) VALUES (?, 'REGISTRATION', 'COMPLETED', 1, JSON_OBJECT('patientName', ?, 'visitDate', ?),
+                      'integration-test', 'admin', ?, ?)
+            """,
+            id,
+            patientName,
+            visitDate,
+            visitDate,
+            visitDate
         );
         return id;
     }
@@ -245,5 +447,10 @@ class ClinicQueueServiceMySqlIntegrationTests {
     private int count(String sql, Object... args) {
         Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
         return value == null ? 0 : value;
+    }
+
+    private String environmentValue(String name, String fallback) {
+        String value = System.getenv(name);
+        return value == null ? fallback : value;
     }
 }

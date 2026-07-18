@@ -47,14 +47,32 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "前置病历就诊已创建", service.create(request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/register-and-issue")
+    public ApiResult<Map<String, Object>> registerAndIssue(@RequestBody PreAiEncounterService.RegisterAndIssueRequest request) {
+        return ApiResult.of(200, "就诊登记和发号已完成", service.registerAndIssue(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/register-and-issue")
+    public ApiResult<Map<String, Object>> registerExistingAndIssue(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.ExistingRegisterAndIssueRequest request
+    ) {
+        return ApiResult.of(200, "复诊补登记和发号已完成",
+            service.registerExistingAndIssue(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/imports/{patientId}")
     public ApiResult<Map<String, Object>> importLegacy(@PathVariable String patientId) {
         return ApiResult.of(200, "旧患者资料已导入或复用现有前置病历", service.importLegacy(patientId, AuthPermission.currentUserOrThrow()));
     }
 
     @GetMapping("/{encounterId}")
-    public ApiResult<Map<String, Object>> workspace(@PathVariable String encounterId) {
-        return ApiResult.success(service.getWorkspace(encounterId, AuthPermission.currentUserOrThrow()));
+    public ApiResult<Map<String, Object>> workspace(
+        @PathVariable String encounterId,
+        @RequestParam(defaultValue = "false") boolean readOnly,
+        @RequestParam(defaultValue = "") String patientCaseId
+    ) {
+        return ApiResult.success(service.getWorkspace(encounterId, readOnly, patientCaseId, AuthPermission.currentUserOrThrow()));
     }
 
     @PutMapping("/{encounterId}/visit-meta")

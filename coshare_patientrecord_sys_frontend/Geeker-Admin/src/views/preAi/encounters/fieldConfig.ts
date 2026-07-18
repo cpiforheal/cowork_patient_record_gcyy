@@ -74,6 +74,104 @@ const examinationOptions = [
 ];
 
 const options = (values: string[]) => values.map(value => ({ label: value, value }));
+const ethnicityOptions = options([
+  "汉族",
+  "回族",
+  "藏族",
+  "蒙古族",
+  "维吾尔族",
+  "苗族",
+  "彝族",
+  "壮族",
+  "布依族",
+  "朝鲜族",
+  "满族",
+  "侗族",
+  "瑶族",
+  "白族",
+  "土家族",
+  "哈尼族",
+  "哈萨克族",
+  "傣族",
+  "黎族",
+  "傈僳族",
+  "佤族",
+  "畲族",
+  "高山族",
+  "拉祜族",
+  "水族",
+  "东乡族",
+  "纳西族",
+  "景颇族",
+  "柯尔克孜族",
+  "土族",
+  "达斡尔族",
+  "仫佬族",
+  "羌族",
+  "布朗族",
+  "撒拉族",
+  "毛南族",
+  "仡佬族",
+  "锡伯族",
+  "阿昌族",
+  "普米族",
+  "塔吉克族",
+  "怒族",
+  "乌孜别克族",
+  "俄罗斯族",
+  "鄂温克族",
+  "德昂族",
+  "保安族",
+  "裕固族",
+  "京族",
+  "塔塔尔族",
+  "独龙族",
+  "鄂伦春族",
+  "赫哲族",
+  "门巴族",
+  "珞巴族",
+  "基诺族",
+  "其他",
+  "未说明"
+]);
+const provinceOptions = options([
+  "甘肃省",
+  "陕西省",
+  "四川省",
+  "青海省",
+  "宁夏回族自治区",
+  "新疆维吾尔自治区",
+  "北京市",
+  "天津市",
+  "河北省",
+  "山西省",
+  "内蒙古自治区",
+  "辽宁省",
+  "吉林省",
+  "黑龙江省",
+  "上海市",
+  "江苏省",
+  "浙江省",
+  "安徽省",
+  "福建省",
+  "江西省",
+  "山东省",
+  "河南省",
+  "湖北省",
+  "湖南省",
+  "广东省",
+  "广西壮族自治区",
+  "海南省",
+  "重庆市",
+  "贵州省",
+  "云南省",
+  "西藏自治区",
+  "香港特别行政区",
+  "澳门特别行政区",
+  "台湾省",
+  "其他"
+]);
+const durationOptions = options(["1天", "3天", "1周", "2周", "1月", "3月", "半年", "1年", "2年", "5年", "10年以上"]);
 const abnormalOptions = options(["正常", "偏高", "偏低", "异常", "危急值", "未判断"]);
 const surgeryOptions = options([
   "混合痔外剥内扎术",
@@ -194,33 +292,48 @@ export const preAiStages: PreAiStageConfig[] = [
         key: "identityType",
         label: "证件类型",
         kind: "select",
-        options: ["居民身份证", "护照", "其他"].map(value => ({ label: value, value }))
+        options: options([
+          "居民身份证",
+          "港澳居民来往内地通行证",
+          "台湾居民来往大陆通行证",
+          "外国人永久居留身份证",
+          "护照",
+          "军官证",
+          "出生医学证明",
+          "其他"
+        ])
       },
       { key: "identityNumber", label: "证件号", kind: "input", placeholder: "仅内部保存，不进入外部文档" },
       { key: "address", label: "常住地址", kind: "input", span: 2 },
       { key: "contactName", label: "联系人姓名", kind: "input" },
-      { key: "contactRelation", label: "联系人关系", kind: "input" },
+      {
+        key: "contactRelation",
+        label: "联系人关系",
+        kind: "select",
+        options: options(["配偶", "父亲", "母亲", "子女", "兄弟姐妹", "其他亲属", "朋友", "同事", "本人", "其他"]),
+        creatable: true
+      },
       { key: "contactPhone", label: "联系人电话", kind: "input" },
       { key: "visitDate", label: "就诊时间", kind: "datetime", required: true },
       {
         key: "nationality",
         label: "民族",
         kind: "select",
-        options: options(["汉族", "回族", "藏族", "彝族", "苗族", "壮族", "其他"]),
+        options: ethnicityOptions,
         creatable: true
       },
       {
         key: "nativePlace",
         label: "籍贯",
         kind: "select",
-        options: options(["甘肃省", "陕西省", "四川省", "青海省", "宁夏回族自治区", "其他"]),
+        options: provinceOptions,
         creatable: true
       },
       {
         key: "birthplace",
         label: "出生地",
         kind: "select",
-        options: options(["甘肃省", "陕西省", "四川省", "青海省", "宁夏回族自治区", "其他"]),
+        options: provinceOptions,
         creatable: true
       },
       { key: "maritalStatus", label: "婚姻状态", kind: "select", options: options(["未婚", "已婚", "离异", "丧偶", "未说明"]) },
@@ -254,7 +367,13 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       { key: "medicalRecordNo", label: "病案号", kind: "input" },
       { key: "inpatientNo", label: "住院号", kind: "input" },
-      { key: "ward", label: "病区", kind: "input" },
+      {
+        key: "ward",
+        label: "病区",
+        kind: "select",
+        options: options(["肛肠科病区", "普通外科病区", "日间病房", "门诊观察区", "其他"]),
+        creatable: true
+      },
       { key: "bedNo", label: "床号", kind: "input" },
       { key: "admissionCount", label: "第几次入院", kind: "number" },
       { key: "registrationNote", label: "登记备注", kind: "textarea", rows: 3, span: 2 }
@@ -379,7 +498,14 @@ export const preAiStages: PreAiStageConfig[] = [
         creatable: true,
         span: 2
       },
-      { key: "symptomDuration", label: "主要症状病程", kind: "input", placeholder: "如：1年、3月余、20年前开始" },
+      {
+        key: "symptomDuration",
+        label: "主要症状病程",
+        kind: "select",
+        options: durationOptions,
+        creatable: true,
+        placeholder: "选择常用病程，或直接输入如“3月余”"
+      },
       {
         key: "chiefComplaintText",
         label: "主诉预览",
@@ -493,7 +619,14 @@ export const preAiStages: PreAiStageConfig[] = [
         creatable: true,
         span: 2
       },
-      { key: "stoolFrequency", label: "大便频次", kind: "input", placeholder: "如：每日1次、每日2-3次" },
+      {
+        key: "stoolFrequency",
+        label: "大便频次",
+        kind: "select",
+        options: options(["每日1次", "每日2-3次", "每日3次以上", "2日1次", "3日1次", "每周1-2次", "无规律"]),
+        creatable: true,
+        placeholder: "选择常用频次，或直接输入"
+      },
       {
         key: "stoolCharacteristics",
         label: "大便性状",
@@ -528,7 +661,7 @@ export const preAiStages: PreAiStageConfig[] = [
             creatable: true,
             required: true
           },
-          { key: "duration", label: "病程", kind: "input" },
+          { key: "duration", label: "病程", kind: "select", options: durationOptions, creatable: true },
           {
             key: "treatment",
             label: "治疗情况",
@@ -553,8 +686,14 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2,
         fields: [
           { key: "year", label: "年份", kind: "number" },
-          { key: "operationName", label: "手术名称", kind: "input", required: true },
-          { key: "site", label: "部位", kind: "input" },
+          { key: "operationName", label: "手术名称", kind: "select", options: surgeryOptions, creatable: true, required: true },
+          {
+            key: "site",
+            label: "部位",
+            kind: "select",
+            options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "腹部", "其他"]),
+            creatable: true
+          },
           {
             key: "result",
             label: "结果",
