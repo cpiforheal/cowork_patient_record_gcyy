@@ -48,18 +48,46 @@ public class InventoryStageConsumptionService {
         String requestedBy,
         String reason
     ) {
-        List<String> previous = ledger.jdbc().query(
+        List<PreviousCommand> previous = ledger.jdbc().query(
             """
-            SELECT id FROM inventory_stage_consumption_commands
-            WHERE encounter_id = ? AND trigger_stage = ? AND command_type = 'CONSUME' AND status = 'SUCCEEDED'
-            ORDER BY completion_version DESC, completed_at DESC LIMIT 1
+            SELECT id, status FROM inventory_stage_consumption_commands
+            WHERE encounter_id = ? AND trigger_stage = ? AND command_type = 'CONSUME'
+              AND completion_version < ?
+            ORDER BY completion_version DESC, created_at DESC LIMIT 1 FOR UPDATE
             """,
-            (rs, rowNum) -> rs.getString(1),
+            (rs, rowNum) -> new PreviousCommand(rs.getString("id"), rs.getString("status")),
             encounterId,
-            normalizeStage(stage)
+            normalizeStage(stage),
+            completionVersion
         );
+        if (previous.isEmpty()) return ledger.mapper().createObjectNode();
+        PreviousCommand original = previous.get(0);
+        if (List.of("PENDING", "RETRY", "FAILED").contains(original.status())) {
+            ledger.jdbc().update(
+                """
+                UPDATE inventory_stage_consumption_commands
+                SET status = 'CANCELLED', completed_at = CURRENT_TIMESTAMP(3), next_attempt_at = NULL,
+                    reason = ?, error_code = NULL, error_message = NULL
+                WHERE id = ? AND status IN ('PENDING', 'RETRY', 'FAILED')
+                """,
+                blankToNull(reason),
+                original.id()
+            );
+            ledger.jdbc().update(
+                """
+                UPDATE inventory_exception_tasks
+                SET status = 'RESOLVED', resolved_by = ?, resolution_note = ?, resolved_at = CURRENT_TIMESTAMP(3)
+                WHERE command_id = ? AND status <> 'RESOLVED'
+                """,
+                requestedBy,
+                reason == null || reason.isBlank() ? "阶段已退回或纠错，未执行的耗用命令已取消" : reason,
+                original.id()
+            );
+            return command(original.id());
+        }
+        if (!"SUCCEEDED".equals(original.status())) return command(original.id());
         return enqueue(encounterId, stage, completionVersion, "REVERSAL", owningDepartmentId,
-            null, null, null, requestedBy, reason, previous.isEmpty() ? null : previous.get(0));
+            null, null, null, requestedBy, reason, original.id());
     }
 
     @Transactional
@@ -427,4 +455,6 @@ public class InventoryStageConsumptionService {
     private record OriginalDetail(
         String eventId, String packageId, String itemId, String batchId, String locationId, BigDecimal quantity
     ) {}
+
+    private record PreviousCommand(String id, String status) {}
 }
