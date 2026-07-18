@@ -38,7 +38,7 @@ export namespace Login {
   }
   export interface ResLogin {
     access_token: string;
-    userInfo?: { name: string; role?: string; department?: string };
+    userInfo?: { name: string; role?: string; activeDepartmentId?: string; department?: string };
     mustChangePassword: boolean;
   }
   export interface ResAuthButtons {

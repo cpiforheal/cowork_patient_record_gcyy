@@ -98,7 +98,13 @@ public class ClinicVisibilityPolicy {
     }
 
     public ObjectNode filterDbForUser(ObjectNode db, SessionUser user) {
-        if (isClinicAdmin(user)) {
+        if (user != null && "admin".equals(user.role())) {
+            return db;
+        }
+
+        if (user != null && "quality".equals(user.role())) {
+            db.set("accounts", hideVisibleAccountPasswords(currentAccountOnly(db.path("accounts"), user)));
+            db.set("roles", objectMapper.createArrayNode());
             return db;
         }
 
@@ -112,7 +118,7 @@ public class ClinicVisibilityPolicy {
     }
 
     public ObjectNode filterWritePayload(ObjectNode payload, SessionUser user, JsonNode templateFieldRules) {
-        if (isClinicAdmin(user)) {
+        if (user != null && "admin".equals(user.role())) {
             return payload;
         }
 
@@ -191,11 +197,15 @@ public class ClinicVisibilityPolicy {
         if (templateFieldRules != null && templateFieldRules.isArray()) {
             for (JsonNode rule : templateFieldRules) {
                 if (!rule.path("enabled").asBoolean(true)) continue;
+                String fieldKey = text(rule, "fieldKey");
+                if ("doctor".equals(role)) {
+                    if (!fieldKey.isBlank()) allowedFields.add(fieldKey);
+                    continue;
+                }
                 JsonNode editors = rule.path("editors");
                 if (editors.isArray()) {
                     for (JsonNode editor : editors) {
                         if (role.equals(editor.asText())) {
-                            String fieldKey = text(rule, "fieldKey");
                             if (!fieldKey.isBlank()) allowedFields.add(fieldKey);
                             break;
                         }

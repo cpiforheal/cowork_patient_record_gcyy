@@ -120,11 +120,12 @@ import { buildColonoscopyConclusion, stableSourceHash } from "../utils/templateT
 
 const props = defineProps<{
   workspace: PreAiWorkspace;
-  currentRole: string;
   currentUserId?: string;
   currentUserName?: string;
   loading?: boolean;
   canReturn?: boolean;
+  capabilities: string[];
+  permissions: Record<string, { readable: boolean; editable: boolean; returnable: boolean }>;
 }>();
 
 const emit = defineEmits<{
@@ -136,7 +137,7 @@ const forms = reactive<Record<string, { title: string; requiredBeforeExport: boo
 const editableTasks = computed(() => props.workspace.auxiliaryTasks.filter(task => task.taskType !== "LAB"));
 const taskDutyCodes: Partial<Record<PreAiAuxiliaryTaskType, string[]>> = {
   VITAL_SIGNS: ["BASIC_NURSING"],
-  COLONOSCOPY: ["INSPECTION_DOCTOR", "ATTENDING_DOCTOR"],
+  COLONOSCOPY: ["INSPECTION_DOCTOR"],
   LAB: ["LAB_STAFF"]
 };
 const creationCandidates: Array<{ type: PreAiAuxiliaryTaskType; label: string }> = [
@@ -156,11 +157,12 @@ const hasDuty = (...codes: string[]) => {
   );
 };
 const canCreateTask = (type: PreAiAuxiliaryTaskType) => {
-  if (["admin", "doctor", "reception"].includes(props.currentRole) || hasDuty("ATTENDING_DOCTOR", "RECEPTION_DOCTOR"))
-    return true;
-  const ownerRole = { VITAL_SIGNS: "nursing", COLONOSCOPY: "doctor", ECG: "ecg", IMAGING: "ultrasound", LAB: "lab" }[type];
-  const ownerMatches = props.currentRole === ownerRole || (type === "VITAL_SIGNS" && props.currentRole === "nurse");
-  return ownerMatches || hasDuty(...(taskDutyCodes[type] || []));
+  const capability = `preai:auxiliary:${type.toLowerCase()}:create`;
+  return (
+    props.capabilities.includes(capability) ||
+    hasDuty("ATTENDING_DOCTOR", "RECEPTION_DOCTOR") ||
+    hasDuty(...(taskDutyCodes[type] || []))
+  );
 };
 const taskCreationOptions = computed(() => creationCandidates.filter(item => canCreateTask(item.type)));
 const canCreate = computed(() => taskCreationOptions.value.length > 0);
@@ -187,9 +189,7 @@ const hydrate = () => {
 
 const canEdit = (task: PreAiAuxiliaryTask) =>
   task.status !== "COMPLETED" &&
-  (["admin", "doctor", task.ownerRole].includes(props.currentRole) ||
-    (task.taskType === "VITAL_SIGNS" && props.currentRole === "nurse") ||
-    hasDuty("ATTENDING_DOCTOR", ...(taskDutyCodes[task.taskType] || [])));
+  (Boolean(props.permissions[task.taskType]?.editable) || hasDuty(...(taskDutyCodes[task.taskType] || [])));
 const fieldOptions = (field: PreAiFieldConfig, form: Record<string, any>) => field.optionsFor?.(form) || field.options || [];
 const visibleFields = (task: PreAiAuxiliaryTask) =>
   auxiliaryTaskFields[task.taskType].filter(field => !field.visible || field.visible(forms[task.id]?.data || {}));

@@ -495,7 +495,7 @@ public class ClinicApiController {
     }
 
     private void requireClinicAdmin() {
-        AuthPermission.requireAnyRole("\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u7cfb\u7edf\u7ba1\u7406\u6743\u9650", "admin", "quality");
+        AuthPermission.requireAnyRole("\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u7cfb\u7edf\u7ba1\u7406\u6743\u9650", "admin");
     }
 
     private void requireClinicContributor() {

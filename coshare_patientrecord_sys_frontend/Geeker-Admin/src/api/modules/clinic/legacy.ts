@@ -944,12 +944,29 @@ export const saveAccountApi = async (params: Partial<AccountRow> & SystemOperati
   const payload = stripSystemContext(params);
   const db = await readDb();
   const list = db.accounts ?? [];
+  const activeDepartments = (db.departments ?? []).filter(item => (item.status || "ACTIVE") === "ACTIVE");
+  const existing = params.id ? list.find(item => item.id === params.id) : undefined;
+  const requestedDepartmentIds = Array.from(
+    new Set((payload.departmentIds ?? existing?.departmentIds ?? []).map(item => String(item || "").trim()).filter(Boolean))
+  );
+  if (requestedDepartmentIds.length === 0) return Promise.reject(new Error("请至少选择一个已启用科室"));
+  const selectedDepartments = requestedDepartmentIds.map(id => activeDepartments.find(item => item.id === id));
+  if (selectedDepartments.some(item => !item)) return Promise.reject(new Error("账号只能关联系统中已启用的科室"));
+  const primaryDepartmentId = String(payload.primaryDepartmentId || existing?.primaryDepartmentId || requestedDepartmentIds[0]);
+  if (!requestedDepartmentIds.includes(primaryDepartmentId)) return Promise.reject(new Error("主科室必须属于账号的授权科室"));
+  const primaryDepartment = selectedDepartments.find(item => item?.id === primaryDepartmentId)!;
   const updatedAt = now();
   let temporaryPassword = "";
   if (params.id) {
-    const target = list.find(item => item.id === params.id);
+    const target = existing;
     if (!target) return Promise.reject(new Error("账号不存在"));
-    Object.assign(target, payload, { roleLabel: roleLabel(payload.role || target.role), updatedAt });
+    Object.assign(target, payload, {
+      departmentIds: requestedDepartmentIds,
+      primaryDepartmentId,
+      department: primaryDepartment.name,
+      roleLabel: roleLabel(payload.role || target.role),
+      updatedAt
+    });
   } else {
     const role = (params.role || "frontdesk") as UserRole;
     temporaryPassword = params.password || createTemporaryPassword();
@@ -958,7 +975,9 @@ export const saveAccountApi = async (params: Partial<AccountRow> & SystemOperati
       username: params.username || `user${Date.now()}`,
       password: temporaryPassword,
       name: params.name || "新账号",
-      department: params.department || roleToDepartment[role],
+      department: primaryDepartment.name,
+      departmentIds: requestedDepartmentIds,
+      primaryDepartmentId,
       role,
       roleLabel: roleLabel(role),
       scope: params.scope || `维护${params.department || roleToDepartment[role]}职责范围内资料`,
@@ -1040,27 +1059,8 @@ export const resetAccountPasswordApi = async (id: string, context: SystemOperati
 
 export const deleteAccountApi = async (id: string, context: SystemOperationContext = {}) => {
   ensureSystemManager(context.operatorRole);
-  const db = await readDb();
-  const list = db.accounts ?? [];
-  const target = list.find(item => item.id === id);
-  if (!target) return Promise.reject(new Error("账号不存在"));
-  if (target.id === "admin" || target.username === "admin") return Promise.reject(new Error("内置管理员账号不能删除"));
-  db.accounts = list.filter(item => item.id !== id);
-  appendAuditLog(db, {
-    operator: context.operator || roleLabel(context.operatorRole || "admin"),
-    role: roleLabel(context.operatorRole || "admin"),
-    patient: "-",
-    module: "system",
-    action: "删除账号",
-    actionCode: "account.delete",
-    targetType: "account",
-    targetKey: target.id,
-    targetLabel: target.name || target.username,
-    beforeValue: valuePreview(JSON.stringify(target)),
-    detail: `删除账号：${target.name || target.username}（${target.department}/${target.roleLabel}）`
-  });
-  await writeDb(db);
-  return response(null, "账号已删除");
+  void id;
+  return Promise.reject(new Error("账号用于历史审计，不能删除；请改为停用"));
 };
 
 export const getRoleListApi = async (params: { pageNum: number; pageSize: number; name?: string }) => {
@@ -1071,68 +1071,13 @@ export const getRoleListApi = async (params: { pageNum: number; pageSize: number
 
 export const saveRoleApi = async (params: Partial<RoleRow> & SystemOperationContext) => {
   ensureSystemManager(params.operatorRole);
-  const payload = stripSystemContext(params);
-  const db = await readDb();
-  const list = db.roles ?? [];
-  if (params.id) {
-    const target = list.find(item => item.id === params.id);
-    if (!target) return Promise.reject(new Error("角色不存在"));
-    Object.assign(target, payload);
-  } else {
-    const role = (params.role || "frontdesk") as UserRole;
-    list.unshift({
-      id: String(Date.now()),
-      name: params.name || roleLabel(role),
-      role,
-      members: 0,
-      desc: params.desc || "",
-      permissions: params.permissions || [],
-      editableSections: params.editableSections || []
-    });
-  }
-  db.roles = list;
-  appendAuditLog(db, {
-    operator: params.operator || roleLabel(params.operatorRole || "admin"),
-    role: roleLabel(params.operatorRole || "admin"),
-    patient: "-",
-    module: "system",
-    action: params.id ? "修改角色权限" : "新增角色",
-    actionCode: params.id ? "role.update" : "role.create",
-    targetType: "role",
-    targetKey: params.id || list[0]?.id,
-    targetLabel: params.name || roleLabel(params.role),
-    afterValue: valuePreview(JSON.stringify(params)),
-    detail: `${params.id ? "修改" : "新增"}角色：${params.name || roleLabel(params.role)}`
-  });
-  await writeDb(db);
-  return response(null, "角色已保存");
+  return Promise.reject(new Error("角色策略由服务端固定版本维护，当前页面只读"));
 };
 
 export const deleteRoleApi = async (id: string, context: SystemOperationContext = {}) => {
   ensureSystemManager(context.operatorRole);
-  const db = await readDb();
-  const list = db.roles ?? [];
-  const target = list.find(item => item.id === id);
-  if (!target) return Promise.reject(new Error("角色不存在"));
-  if (target.role === "admin") return Promise.reject(new Error("内置管理员角色不能删除"));
-  const memberCount = (db.accounts ?? []).filter(account => account.role === target.role).length;
-  if (memberCount > 0) return Promise.reject(new Error(`该角色仍有 ${memberCount} 个账号使用，请先调整账号角色`));
-  db.roles = list.filter(item => item.id !== id);
-  appendAuditLog(db, {
-    operator: context.operator || roleLabel(context.operatorRole || "admin"),
-    role: roleLabel(context.operatorRole || "admin"),
-    patient: "-",
-    module: "system",
-    action: "删除角色",
-    actionCode: "role.delete",
-    targetType: "role",
-    targetKey: target.id,
-    targetLabel: target.name,
-    beforeValue: valuePreview(JSON.stringify(target)),
-    detail: `删除角色：${target.name}（${roleLabel(target.role)}）`
-  });
-  await writeDb(db);
-  return response(null, "角色已删除");
+  void id;
+  return Promise.reject(new Error("角色策略由服务端固定版本维护，不能删除"));
 };
 
 export const getDepartmentListApi = async (params: { pageNum: number; pageSize: number; name?: string }) => {
@@ -1146,14 +1091,23 @@ export const saveDepartmentApi = async (params: Partial<DepartmentRow> & SystemO
   const payload = stripSystemContext(params);
   const db = await readDb();
   const list = db.departments ?? [];
+  const code = String(payload.code || "")
+    .trim()
+    .toUpperCase();
+  if (!code) return Promise.reject(new Error("科室编码不能为空"));
+  if (list.some(item => item.id !== params.id && String(item.code || "").toUpperCase() === code)) {
+    return Promise.reject(new Error("科室编码已存在"));
+  }
   if (params.id) {
     const target = list.find(item => item.id === params.id);
     if (!target) return Promise.reject(new Error("科室不存在"));
-    Object.assign(target, payload);
+    Object.assign(target, payload, { code, status: payload.status || target.status || "ACTIVE" });
   } else {
     list.unshift({
-      id: String(Date.now()),
+      id: `dept-${Date.now()}`,
+      code,
       name: params.name || "新科室",
+      status: payload.status || "ACTIVE",
       uploadTypes: params.uploadTypes || "",
       scope: params.scope || "",
       defaultRole: params.defaultRole || "frontdesk"
@@ -1183,24 +1137,23 @@ export const deleteDepartmentApi = async (id: string, context: SystemOperationCo
   const list = db.departments ?? [];
   const target = list.find(item => item.id === id);
   if (!target) return Promise.reject(new Error("科室不存在"));
-  const accountCount = (db.accounts ?? []).filter(account => account.department === target.name).length;
-  if (accountCount > 0) return Promise.reject(new Error(`该科室仍有 ${accountCount} 个账号使用，请先调整账号所属科室`));
-  db.departments = list.filter(item => item.id !== id);
+  if (target.status === "INACTIVE") return response(null, "科室已处于停用状态");
+  target.status = "INACTIVE";
   appendAuditLog(db, {
     operator: context.operator || roleLabel(context.operatorRole || "admin"),
     role: roleLabel(context.operatorRole || "admin"),
     patient: "-",
     module: "system",
-    action: "删除科室",
-    actionCode: "department.delete",
+    action: "停用科室",
+    actionCode: "department.deactivate",
     targetType: "department",
     targetKey: target.id,
     targetLabel: target.name,
     beforeValue: valuePreview(JSON.stringify(target)),
-    detail: `删除科室：${target.name}`
+    detail: `停用科室：${target.name}`
   });
   await writeDb(db);
-  return response(null, "科室已删除");
+  return response(null, "科室已停用；历史引用保持不变");
 };
 
 export const getDictListApi = async (params: { pageNum: number; pageSize: number; name?: string; department?: string }) => {

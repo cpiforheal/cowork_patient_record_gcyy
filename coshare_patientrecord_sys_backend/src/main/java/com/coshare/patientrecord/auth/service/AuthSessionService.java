@@ -6,6 +6,7 @@ import com.coshare.patientrecord.auth.dto.LoginRequest;
 import com.coshare.patientrecord.auth.dto.LoginResult;
 import com.coshare.patientrecord.auth.dto.PasswordChangeRequest;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.dto.DepartmentOption;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -85,6 +86,21 @@ public class AuthSessionService {
             return;
         }
 
+        String departmentId = "bootstrap-department-information";
+        ObjectNode department = objectMapper.createObjectNode();
+        department.put("id", departmentId);
+        department.put("code", "INFORMATION");
+        department.put("name", "信息科");
+        department.put("status", "ACTIVE");
+        department.put("scope", "首次启动管理员所属科室");
+        jdbcTemplate.update(
+            "INSERT INTO clinic_departments (id, code, name, status, raw_json) VALUES (?, ?, ?, 'ACTIVE', CAST(? AS JSON))",
+            departmentId,
+            "INFORMATION",
+            "信息科",
+            toJson(department)
+        );
+
         ObjectNode account = objectMapper.createObjectNode();
         account.put("id", "bootstrap-admin");
         account.put("username", "admin");
@@ -105,6 +121,11 @@ public class AuthSessionService {
             "admin",
             "启用",
             toJson(account)
+        );
+        jdbcTemplate.update(
+            "INSERT INTO clinic_account_departments (account_id, department_id, is_primary, status) VALUES (?, ?, TRUE, 'ACTIVE')",
+            "bootstrap-admin",
+            departmentId
         );
     }
 
@@ -145,13 +166,19 @@ public class AuthSessionService {
         }
         clearFailedLogin(failureKey);
 
+        String accountRole = text(account, "role").trim();
+        if (accountRole.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "账号尚未配置岗位角色，请联系系统管理员");
+        }
+        DepartmentIdentity department = resolveLoginDepartment(text(account, "id"));
         SessionUser user = new SessionUser(
             text(account, "id"),
             text(account, "username"),
             text(account, "name", text(account, "username")),
-            text(account, "role", "frontdesk"),
-            text(account, "roleLabel", text(account, "role", "frontdesk")),
-            text(account, "department"),
+            accountRole,
+            text(account, "roleLabel", accountRole),
+            department.id(),
+            department.name(),
             account.path("mustChangePassword").asBoolean(false),
             Instant.now().plus(TOKEN_TTL)
         );
@@ -161,6 +188,7 @@ public class AuthSessionService {
             "name", user.name(),
             "role", user.role(),
             "roleLabel", user.roleLabel(),
+            "activeDepartmentId", user.activeDepartmentId(),
             "department", user.department()
         ), account.path("mustChangePassword").asBoolean(false));
     }
@@ -169,9 +197,17 @@ public class AuthSessionService {
         if (token == null || token.isBlank()) return Optional.empty();
         List<SessionUser> users = jdbcTemplate.query(
             """
-            SELECT user_id, username, display_name, role, role_label, department, must_change_password, expires_at
-            FROM clinic_auth_sessions
-            WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP(6)
+            SELECT s.user_id, s.username, s.display_name, s.role, s.role_label,
+                   s.active_department_id, d.name AS department, s.must_change_password, s.expires_at
+            FROM clinic_auth_sessions s
+            JOIN clinic_account_departments ad
+              ON ad.account_id = s.user_id
+             AND ad.department_id = s.active_department_id
+             AND ad.status = 'ACTIVE'
+            JOIN clinic_departments d
+              ON d.id = s.active_department_id
+             AND d.status = 'ACTIVE'
+            WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP(6)
             LIMIT 1
             """,
             (resultSet, rowNum) -> new SessionUser(
@@ -180,6 +216,7 @@ public class AuthSessionService {
                 resultSet.getString("display_name"),
                 resultSet.getString("role"),
                 resultSet.getString("role_label"),
+                resultSet.getString("active_department_id"),
                 resultSet.getString("department"),
                 resultSet.getBoolean("must_change_password"),
                 resultSet.getTimestamp("expires_at").toInstant()
@@ -195,6 +232,63 @@ public class AuthSessionService {
             "UPDATE clinic_auth_sessions SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = 'logout' WHERE token_hash = ? AND revoked_at IS NULL",
             sha256(token)
         );
+    }
+
+    @Transactional
+    public DepartmentOption switchActiveDepartment(String token, SessionUser user, String departmentId) {
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
+        String targetId = departmentId == null ? "" : departmentId.trim();
+        if (targetId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择活动科室");
+        List<DepartmentOption> matches = jdbcTemplate.query(
+            """
+            SELECT d.id, d.code, d.name, d.status, ad.is_primary
+            FROM clinic_account_departments ad
+            JOIN clinic_departments d ON d.id = ad.department_id
+            WHERE ad.account_id = ? AND ad.department_id = ?
+              AND ad.status = 'ACTIVE' AND d.status = 'ACTIVE'
+            LIMIT 1
+            """,
+            (rs, rowNum) -> new DepartmentOption(
+                rs.getString("id"), rs.getString("code"), rs.getString("name"), rs.getBoolean("is_primary"), rs.getString("status")
+            ),
+            user.id(),
+            targetId
+        );
+        DepartmentOption target = matches.stream().findFirst()
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号未获授权使用该科室"));
+        int updated = jdbcTemplate.update(
+            """
+            UPDATE clinic_auth_sessions
+            SET active_department_id = ?, department = ?
+            WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL
+            """,
+            target.id(), target.name(), sha256(token == null ? "" : token), user.id()
+        );
+        if (updated != 1) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
+
+        String auditId = "audit-auth-department-" + java.util.UUID.randomUUID();
+        ObjectNode raw = objectMapper.createObjectNode();
+        raw.put("id", auditId);
+        raw.put("time", Instant.now().toString());
+        raw.put("operator", user.name());
+        raw.put("role", user.roleLabel());
+        raw.put("module", "system");
+        raw.put("action", "切换活动科室");
+        raw.put("actionCode", "auth.active-department.switch");
+        raw.put("targetType", "department");
+        raw.put("targetKey", target.id());
+        raw.put("targetLabel", target.name());
+        raw.put("beforeValue", user.department());
+        raw.put("afterValue", target.name());
+        raw.put("result", "成功");
+        jdbcTemplate.update(
+            """
+            INSERT INTO clinic_audit_logs (id, time, operator, role, patient, patient_id, module, action, result, raw_json)
+            VALUES (?, ?, ?, ?, '-', '', 'system', '切换活动科室', '成功', CAST(? AS JSON))
+            """,
+            auditId, Instant.now().toString(), user.name(), user.roleLabel(), toJson(raw)
+        );
+        return target;
     }
 
     @Transactional
@@ -309,12 +403,31 @@ public class AuthSessionService {
         jdbcTemplate.update(
             """
             INSERT INTO clinic_auth_sessions (
-              token_hash, user_id, username, display_name, role, role_label, department, must_change_password, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              token_hash, user_id, username, display_name, role, role_label, department, active_department_id,
+              must_change_password, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
             """,
             sha256(token), user.id(), user.username(), user.name(), user.role(), user.roleLabel(), user.department(),
-            user.mustChangePassword(),
+            user.activeDepartmentId(), user.mustChangePassword(),
             Timestamp.from(user.expiresAt())
+        );
+    }
+
+    private DepartmentIdentity resolveLoginDepartment(String accountId) {
+        List<DepartmentIdentity> rows = jdbcTemplate.query(
+            """
+            SELECT d.id, d.name
+            FROM clinic_account_departments ad
+            JOIN clinic_departments d ON d.id = ad.department_id
+            WHERE ad.account_id = ? AND ad.status = 'ACTIVE' AND d.status = 'ACTIVE'
+            ORDER BY ad.is_primary DESC, d.name, d.id
+            LIMIT 1
+            """,
+            (rs, rowNum) -> new DepartmentIdentity(rs.getString("id"), rs.getString("name")),
+            accountId
+        );
+        return rows.stream().findFirst().orElseThrow(
+            () -> new ResponseStatusException(HttpStatus.FORBIDDEN, "账号未关联有效科室，请联系系统管理员")
         );
     }
 
@@ -424,5 +537,7 @@ public class AuthSessionService {
                 || lockedUntil == null && lastFailedAt.plus(LOGIN_LOCK_TTL).isBefore(now);
         }
     }
+
+    private record DepartmentIdentity(String id, String name) {}
 
 }

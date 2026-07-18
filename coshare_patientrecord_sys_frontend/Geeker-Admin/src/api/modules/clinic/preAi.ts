@@ -427,6 +427,19 @@ export const completePreAiStageApi = (
     expectedVersion
   });
 
+export const correctPreAiStageApi = (
+  encounterId: string,
+  stageCode: PreAiStageCode,
+  data: Record<string, any>,
+  expectedVersion: number,
+  reason: string
+) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/correct`, "POST", {
+    data,
+    expectedVersion,
+    reason
+  });
+
 export const returnPreAiStageApi = (encounterId: string, stageCode: PreAiStageCode, reason: string, expectedVersion: number) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/return`, "POST", {
     reason,

@@ -8,6 +8,7 @@ public record SessionUser(
     String name,
     String role,
     String roleLabel,
+    String activeDepartmentId,
     String department,
     boolean mustChangePassword,
     Instant expiresAt

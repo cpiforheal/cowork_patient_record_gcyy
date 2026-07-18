@@ -89,7 +89,6 @@
         v-if="workspace"
         :workspace="workspace"
         :cards="workflowCards"
-        :current-role="currentRole"
         :encounter-status-label="encounterStatusLabel"
         :encounter-status-type="encounterStatusType"
         :route-label="routeLabel"
@@ -211,14 +210,14 @@
                     :title="`医生退回：${selectedStageSubmission.returnedReason || '请核对后重新提交'}`"
                   />
                   <el-alert
-                    v-if="!canEditSelectedStage"
+                    v-if="!canModifySelectedStage"
                     type="info"
                     show-icon
                     :closable="false"
                     :title="
                       selectedStageSubmission.status === 'COMPLETED'
-                        ? '本阶段已完成；需要修改时请由医生退回。'
-                        : `当前账号为${roleLabel(currentRole)}，本页仅可查看。`
+                        ? '本阶段已完成；当前账号没有纠错权限。'
+                        : `当前账号为${currentRole ? roleLabel(currentRole) : '未授权岗位'}，本页仅可查看。`
                     "
                   />
 
@@ -476,12 +475,12 @@
                             <small>{{ attachment.relativePath || attachment.description || "独立文件" }}</small>
                           </div>
                           <el-button link type="primary" @click="downloadPreAiAttachmentApi(attachment)">下载</el-button>
-                          <el-button v-if="canEditSelectedStage" link type="danger" @click="voidAttachment(attachment.id)"
+                          <el-button v-if="canModifySelectedStage" link type="danger" @click="voidAttachment(attachment.id)"
                             >作废</el-button
                           >
                         </div>
                       </section>
-                      <div v-if="canEditSelectedStage" class="upload-actions">
+                      <div v-if="canModifySelectedStage" class="upload-actions">
                         <label class="upload-button">
                           <input
                             type="file"
@@ -533,6 +532,13 @@
                     <el-button v-if="canEditSelectedStage" type="primary" :loading="actionLoading" @click="completeSelectedStage"
                       >完成并交接</el-button
                     >
+                    <el-button
+                      v-if="canCorrectSelectedStage"
+                      type="primary"
+                      :loading="actionLoading"
+                      @click="correctSelectedStage"
+                      >保存纠错并重新复核</el-button
+                    >
                   </footer>
                 </template>
 
@@ -543,7 +549,7 @@
                   :preview="reviewPreview"
                   :sections="maskedSections"
                   :can-review="canReview"
-                  :can-generate-target="Boolean(workspace.encounter.sourcePatientId)"
+                  :can-generate-target="canReview && Boolean(workspace.encounter.sourcePatientId)"
                   :loading="actionLoading"
                   :encounter-status="workspace.encounter.status"
                   :exports="workspace.exports"
@@ -558,7 +564,8 @@
               <section v-else class="auxiliary-stack">
                 <AuxiliaryTaskPanel
                   :workspace="workspace"
-                  :current-role="currentRole"
+                  :capabilities="authStore.capabilities"
+                  :permissions="authStore.auxiliaryPermissions"
                   :current-user-id="currentUserId"
                   :current-user-name="currentUserName"
                   :loading="actionLoading"
@@ -712,6 +719,7 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
+import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
 import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
@@ -719,6 +727,7 @@ import { downloadMedicalRecordApi, generateMedicalRecordApi } from "@/api/module
 import { completeQueuePrintTaskApi, createQueuePrintTaskApi } from "@/api/modules/clinic/clinicQueue";
 import {
   completePreAiStageApi,
+  correctPreAiStageApi,
   completePreAiLabApi,
   confirmPreAiReviewApi,
   registerAndIssuePreAiEncounterApi,
@@ -794,9 +803,10 @@ import {
 } from "./utils/templateTextGenerator";
 
 const userStore = useUserStore();
+const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
-const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
+const currentRole = computed(() => userStore.userInfo.role || "");
 const currentUser = computed(() => userStore.userInfo as typeof userStore.userInfo & { id?: string; username?: string });
 const currentUserId = computed(() => String(currentUser.value.id || ""));
 const currentUserName = computed(() => String(currentUser.value.name || currentUser.value.username || ""));
@@ -809,23 +819,16 @@ const hasAssignedDuty = (...duties: PreAiDutyCode[]) =>
         (Boolean(currentUserName.value) &&
           (item.responsibleUserName === currentUserName.value || item.participantUserNames?.includes(currentUserName.value))))
   );
-const canCreateEncounter = computed(() => ["admin", "frontdesk"].includes(currentRole.value));
-const canImportLegacy = computed(() => ["admin", "frontdesk", "doctor"].includes(currentRole.value));
-const canReview = computed(
-  () => ["admin", "doctor"].includes(currentRole.value) || hasAssignedDuty("FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR")
-);
-const canOpenLabWorkbench = computed(
-  () => ["admin", "doctor", "lab"].includes(currentRole.value) || hasAssignedDuty("LAB_STAFF", "ATTENDING_DOCTOR")
-);
-const canCompleteLab = computed(
-  () => ["admin", "doctor", "lab"].includes(currentRole.value) || hasAssignedDuty("LAB_STAFF", "ATTENDING_DOCTOR")
-);
+const hasCapability = (capability: string) => authStore.capabilities.includes(capability);
+const canCreateEncounter = computed(() => hasCapability("preai:encounter:create"));
+const canImportLegacy = computed(() => hasCapability("preai:legacy:import"));
+const canReview = computed(() => hasCapability("preai:review") || hasAssignedDuty("FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR"));
+const canOpenLabWorkbench = computed(() => Boolean(authStore.auxiliaryPermissions.LAB?.editable) || hasAssignedDuty("LAB_STAFF"));
+const canCompleteLab = computed(() => Boolean(authStore.auxiliaryPermissions.LAB?.editable) || hasAssignedDuty("LAB_STAFF"));
 const canMaintainDuties = computed(
-  () =>
-    ["admin", "frontdesk", "doctor"].includes(currentRole.value) ||
-    hasAssignedDuty("FRONT_DESK", "ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR")
+  () => hasCapability("preai:duties:manage") || hasAssignedDuty("FRONT_DESK", "ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR")
 );
-const canConfirmSurgery = computed(() => ["admin", "doctor"].includes(currentRole.value) || hasAssignedDuty("SURGEON"));
+const canConfirmSurgery = computed(() => hasCapability("preai:surgery:confirm") || hasAssignedDuty("SURGEON"));
 
 const encounters = ref<PreAiEncounterSummary[]>([]);
 const patientCases = ref<PreAiPatientCase[]>([]);
@@ -956,6 +959,8 @@ const filteredPatientCases = computed(() => {
   );
 });
 const selectedPatientCase = computed(() => patientCases.value.find(item => item.id === selectedPatientCaseId.value));
+const canHandleStage = (stageCode: PreAiStageCode, ...duties: PreAiDutyCode[]) =>
+  Boolean(authStore.stagePermissions[stageCode]?.editable) || hasAssignedDuty(...duties);
 const workflowCards = computed<WorkflowCard[]>(() => [
   {
     key: "REGISTRATION",
@@ -964,7 +969,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "REGISTRATION",
     title: "前台登记",
     owner: "前台",
-    roles: ["admin", "frontdesk"]
+    editable: canHandleStage("REGISTRATION", "FRONT_DESK")
   },
   {
     key: "INSPECTION",
@@ -973,7 +978,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "INSPECTION",
     title: "检查室",
     owner: "检查室",
-    roles: ["admin", "inspection"]
+    editable: canHandleStage("INSPECTION", "INSPECTION_DOCTOR")
   },
   {
     key: "RECEPTION",
@@ -982,7 +987,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "RECEPTION",
     title: "接诊评估",
     owner: "接诊室",
-    roles: ["admin", "reception", "doctor"]
+    editable: canHandleStage("RECEPTION", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR")
   },
   {
     key: "AUX",
@@ -990,7 +995,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     kind: "AUX",
     title: "化验室",
     owner: "检验报告模板填写与交接",
-    roles: ["admin", "doctor", "lab"]
+    editable: canOpenLabWorkbench.value
   },
   {
     key: "TCM",
@@ -999,7 +1004,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "TCM",
     title: "中医辨证",
     owner: "中医岗位",
-    roles: ["admin", "tcm"]
+    editable: canHandleStage("TCM", "TCM_DOCTOR")
   },
   {
     key: "DOCTOR",
@@ -1008,7 +1013,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "DOCTOR",
     title: "医生诊疗方案",
     owner: "医生",
-    roles: ["admin", "doctor"]
+    editable: canHandleStage("DOCTOR", "ATTENDING_DOCTOR")
   },
   {
     key: "SURGERY",
@@ -1017,7 +1022,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "SURGERY",
     title: "手术结果登记",
     owner: "手术室护士",
-    roles: ["admin", "nurse", "nursing"]
+    editable: canHandleStage("SURGERY", "SURGEON", "OPERATING_ROOM_NURSE")
   },
   {
     key: "REVIEW",
@@ -1026,7 +1031,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "REVIEW",
     title: "医生最终复核",
     owner: "医生",
-    roles: ["admin", "doctor"]
+    editable: canReview.value
   }
 ]);
 const workflowProgress = computed(() => {
@@ -1069,11 +1074,18 @@ const stageDutyCodes: Partial<Record<PreAiStageCode, PreAiDutyCode[]>> = {
 const canEditSelectedStage = computed(() => {
   if (!workspace.value || selectedStageCode.value === "REVIEW") return false;
   const submission = selectedStageSubmission.value;
-  const roleAllowed = selectedStage.value.roles.includes(currentRole.value);
+  const roleAllowed = Boolean(authStore.stagePermissions[selectedStageCode.value]?.editable);
   const dutyAllowed = hasAssignedDuty(...(stageDutyCodes[selectedStageCode.value] || []));
   if (!roleAllowed && !dutyAllowed) return false;
-  return submission.status !== "COMPLETED" || currentRole.value === "admin";
+  return !["COMPLETED", "SKIPPED"].includes(submission.status);
 });
+const canCorrectSelectedStage = computed(
+  () =>
+    Boolean(authStore.stagePermissions[selectedStageCode.value]?.correctable) &&
+    ["COMPLETED", "SKIPPED"].includes(selectedStageSubmission.value?.status || "") &&
+    selectedStageCode.value !== "REVIEW"
+);
+const canModifySelectedStage = computed(() => canEditSelectedStage.value || canCorrectSelectedStage.value);
 const canReturnSelectedStage = computed(
   () =>
     canReview.value &&
@@ -1223,7 +1235,7 @@ const templateSourceHash = (field: PreAiFieldConfig) => {
 };
 const patchStageForm = (code: PreAiStageCode, value: Record<string, any>) => Object.assign(stageForms[code], value);
 const isStageFieldDisabled = (field: PreAiFieldConfig) =>
-  !canEditSelectedStage.value ||
+  !canModifySelectedStage.value ||
   (selectedStageCode.value === "SURGERY" && field.key === "physicianConfirmed" && !canConfirmSurgery.value);
 const fieldOptions = (field: PreAiFieldConfig) => field.optionsFor?.(stageForms[selectedStageCode.value]) || field.options || [];
 const routeLabel = (route?: string) => (route === "OUTPATIENT" ? "门诊" : route === "INPATIENT" ? "住院" : "分支待确认");
@@ -1819,6 +1831,36 @@ const saveSelectedStage = async () =>
     hydrateWorkspace(data);
     ElMessage.success("阶段草稿已保存");
   });
+
+const correctSelectedStage = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请说明本次纠错原因；保存后原终审与既有导出将失效，需要重新复核。",
+      `纠错${selectedStage.value.title}`,
+      {
+        inputType: "textarea",
+        inputPattern: /\S+/,
+        inputErrorMessage: "纠错原因不能为空",
+        confirmButtonText: "确认纠错",
+        cancelButtonText: "取消"
+      }
+    );
+    await runAction(async () => {
+      const { data } = await correctPreAiStageApi(
+        selectedEncounterId.value,
+        selectedStageCode.value,
+        cleanStageForm(selectedStageCode.value),
+        stageSubmission(selectedStageCode.value)?.version ?? 0,
+        value.trim()
+      );
+      hydrateWorkspace(data);
+      await loadEncounterList();
+      ElMessage.success("纠错已保存，病例已转为待重新复核");
+    });
+  } catch (error: any) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(error.message || "阶段纠错失败");
+  }
+};
 
 const completeSelectedStage = async () =>
   runAction(async () => {

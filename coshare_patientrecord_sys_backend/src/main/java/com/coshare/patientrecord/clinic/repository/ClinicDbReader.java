@@ -34,7 +34,7 @@ public class ClinicDbReader {
         db.set("documents", readDocuments());
         db.set("accounts", readAccounts());
         db.set("roles", readArray("clinic_roles", "raw_json", "name ASC"));
-        db.set("departments", readArray("clinic_departments", "raw_json", "name ASC"));
+        db.set("departments", readDepartments());
         db.set("dictionaries", readArray("clinic_dictionaries", "raw_json", "name ASC"));
         db.set("templateFieldRules", readArray("clinic_template_field_rules", "raw_json", "sort_no ASC, id ASC"));
         db.set("auditLogs", readArray("clinic_audit_logs", "raw_json", "time DESC, id DESC"));
@@ -65,11 +65,45 @@ public class ClinicDbReader {
 
     private ArrayNode readAccounts() {
         ArrayNode rows = objectMapper.createArrayNode();
-        jdbcTemplate.query("SELECT raw_json FROM clinic_accounts ORDER BY username ASC", resultSet -> {
+        jdbcTemplate.query("SELECT id, raw_json FROM clinic_accounts ORDER BY username ASC", resultSet -> {
             JsonNode raw = readJson(resultSet, "raw_json");
             ObjectNode account = raw.isObject() ? (ObjectNode) raw.deepCopy() : objectMapper.createObjectNode();
             account.remove(List.of("password", "passwordHash", "currentPassword"));
+            String accountId = resultSet.getString("id");
+            ArrayNode departmentIds = account.putArray("departmentIds");
+            jdbcTemplate.query(
+                """
+                SELECT ad.department_id, ad.is_primary, d.name
+                FROM clinic_account_departments ad
+                JOIN clinic_departments d ON d.id = ad.department_id
+                WHERE ad.account_id = ? AND ad.status = 'ACTIVE'
+                ORDER BY ad.is_primary DESC, d.name, d.id
+                """,
+                membership -> {
+                    String departmentId = membership.getString("department_id");
+                    departmentIds.add(departmentId);
+                    if (membership.getBoolean("is_primary")) {
+                        account.put("primaryDepartmentId", departmentId);
+                        account.put("department", membership.getString("name"));
+                    }
+                },
+                accountId
+            );
             rows.add(account);
+        });
+        return rows;
+    }
+
+    private ArrayNode readDepartments() {
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query("SELECT id, code, name, status, raw_json FROM clinic_departments ORDER BY name ASC, id ASC", resultSet -> {
+            JsonNode raw = readJson(resultSet, "raw_json");
+            ObjectNode department = raw.isObject() ? (ObjectNode) raw.deepCopy() : objectMapper.createObjectNode();
+            department.put("id", resultSet.getString("id"));
+            department.put("code", resultSet.getString("code"));
+            department.put("name", resultSet.getString("name"));
+            department.put("status", resultSet.getString("status"));
+            rows.add(department);
         });
         return rows;
     }

@@ -83,6 +83,24 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "来访及交费参考信息已保存", service.updateVisitMeta(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/{encounterId}/owning-department/correct")
+    public ApiResult<Map<String, Object>> correctOwningDepartment(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.DepartmentCorrectionRequest request
+    ) {
+        return ApiResult.of(200, "病历归属科室已修正",
+            service.correctOwningDepartment(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/department-grants")
+    public ApiResult<Map<String, Object>> updateEncounterGrant(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.EncounterGrantRequest request
+    ) {
+        return ApiResult.of(200, "病历跨科协作授权已更新",
+            service.updateEncounterGrant(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PutMapping("/{encounterId}/duty-assignments")
     public ApiResult<Map<String, Object>> saveDutyAssignments(
         @PathVariable String encounterId,
@@ -107,6 +125,16 @@ public class PreAiEncounterController {
         @RequestBody(required = false) PreAiEncounterService.StageSaveRequest request
     ) {
         return ApiResult.of(200, "阶段已完成并交接", service.completeStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/stages/{stageCode}/correct")
+    public ApiResult<Map<String, Object>> correctStage(
+        @PathVariable String encounterId,
+        @PathVariable String stageCode,
+        @RequestBody PreAiEncounterService.StageCorrectionRequest request
+    ) {
+        return ApiResult.of(200, "已完成阶段纠错已保存，原复核和导出已失效",
+            service.correctStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/{encounterId}/stages/{stageCode}/return")

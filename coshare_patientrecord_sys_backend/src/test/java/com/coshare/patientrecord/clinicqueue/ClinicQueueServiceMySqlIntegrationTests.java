@@ -36,6 +36,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
         "测试管理员",
         "admin",
         "管理员",
+        "dept-test",
         "测试科室",
         false,
         Instant.now().plusSeconds(3600)
@@ -83,6 +84,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
             null,
             service,
             null,
+            new com.coshare.patientrecord.auth.service.AuthNavigationService(jdbcTemplate),
             "target/generated-pre-ai-tests"
         );
     }

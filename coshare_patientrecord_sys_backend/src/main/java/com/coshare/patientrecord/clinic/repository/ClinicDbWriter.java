@@ -7,8 +7,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
@@ -55,9 +58,11 @@ public class ClinicDbWriter {
         writeRecords(writableDb.path("records"));
         writeArchive(writableDb.path("archive"));
         writeDocuments(writableDb.path("documents"));
-        writeSimpleArray("clinic_accounts", writableDb.path("accounts"), List.of("id", "username", "role", "status"));
-        writeSimpleArray("clinic_roles", writableDb.path("roles"), List.of("id", "role", "name"));
-        writeSimpleArray("clinic_departments", writableDb.path("departments"), List.of("id", "name"));
+        // Accounts and departments use stable identifiers and may already be referenced by
+        // encounters/audit data. A full legacy-database save therefore updates them in place
+        // instead of deleting and recreating them. Role policy is server-owned and read-only.
+        upsertSimpleArray("clinic_departments", writableDb.path("departments"), writableDb.path("departments"), "id");
+        upsertSimpleArray("clinic_accounts", writableDb.path("accounts"), writableDb.path("accounts"), "id");
         writeSimpleArray("clinic_dictionaries", writableDb.path("dictionaries"), List.of("id", "name", "department"));
         writeSimpleArray("clinic_template_field_rules", writableDb.path("templateFieldRules"), List.of("id", "sectionKey", "fieldKey", "fieldLabel", "department", "enabled", "sortNo"));
         writeSimpleArray("clinic_audit_logs", writableDb.path("auditLogs"), List.of("id", "time", "operator", "role", "patient", "patientId", "module", "action", "result"));
@@ -76,9 +81,8 @@ public class ClinicDbWriter {
         upsertRecords(mergedDb.path("records"), incomingDb.path("records"));
         upsertArchive(mergedDb.path("archive"), incomingDb.path("archive"));
         upsertDocuments(mergedDb.path("documents"), incomingDb.path("documents"));
-        upsertSimpleArray("clinic_accounts", mergedDb.path("accounts"), incomingDb.path("accounts"), "id");
-        upsertSimpleArray("clinic_roles", mergedDb.path("roles"), incomingDb.path("roles"), "id");
         upsertSimpleArray("clinic_departments", mergedDb.path("departments"), incomingDb.path("departments"), "id");
+        upsertSimpleArray("clinic_accounts", mergedDb.path("accounts"), incomingDb.path("accounts"), "id");
         upsertSimpleArray("clinic_dictionaries", mergedDb.path("dictionaries"), incomingDb.path("dictionaries"), "id");
         upsertSimpleArray("clinic_template_field_rules", mergedDb.path("templateFieldRules"), incomingDb.path("templateFieldRules"), "id");
         upsertSimpleArray("clinic_audit_logs", mergedDb.path("auditLogs"), incomingDb.path("auditLogs"), "id");
@@ -208,7 +212,7 @@ public class ClinicDbWriter {
             if (row == null) row = incomingRow;
             switch (table) {
                 case "clinic_accounts" -> {
-                    ObjectNode account = secureAccountRow(row);
+                    ObjectNode account = normalizeAccountDepartments(secureAccountRow(row));
                     jdbcTemplate.update("""
                     INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role),
@@ -216,20 +220,23 @@ public class ClinicDbWriter {
                     """,
                     id, text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
                     );
+                    synchronizeAccountDepartments(account);
                     revokeSessionsIfDisabled(account);
                 }
-                case "clinic_roles" -> jdbcTemplate.update("""
-                    INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE role = VALUES(role), name = VALUES(name), raw_json = VALUES(raw_json)
+                case "clinic_roles" -> {
+                    // Role definitions are the fixed server policy. Ignore legacy client writes.
+                }
+                case "clinic_departments" -> {
+                    ObjectNode department = normalizeDepartmentRow(row);
+                    jdbcTemplate.update("""
+                    INSERT INTO clinic_departments (id, code, name, status, raw_json) VALUES (?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name),
+                      status = VALUES(status), raw_json = VALUES(raw_json)
                     """,
-                    id, text(row, "role"), text(row, "name"), toJson(row)
-                );
-                case "clinic_departments" -> jdbcTemplate.update("""
-                    INSERT INTO clinic_departments (id, name, raw_json) VALUES (?, ?, ?)
-                    ON DUPLICATE KEY UPDATE name = VALUES(name), raw_json = VALUES(raw_json)
-                    """,
-                    id, text(row, "name"), toJson(row)
-                );
+                    id, text(department, "code"), text(department, "name"),
+                    text(department, "status"), toJson(department)
+                    );
+                }
                 case "clinic_dictionaries" -> jdbcTemplate.update("""
                     INSERT INTO clinic_dictionaries (id, name, department, raw_json) VALUES (?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE name = VALUES(name), department = VALUES(department), raw_json = VALUES(raw_json)
@@ -348,9 +355,6 @@ public class ClinicDbWriter {
             "clinic_record_fields",
             "clinic_archive",
             "clinic_documents",
-            "clinic_accounts",
-            "clinic_roles",
-            "clinic_departments",
             "clinic_dictionaries",
             "clinic_template_field_rules",
             "clinic_audit_logs"
@@ -508,21 +512,31 @@ public class ClinicDbWriter {
         for (JsonNode row : rows) {
             switch (table) {
                 case "clinic_accounts" -> {
-                    ObjectNode account = secureAccountRow(row);
-                    jdbcTemplate.update(
-                    "INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)",
+                    ObjectNode account = normalizeAccountDepartments(secureAccountRow(row));
+                    jdbcTemplate.update("""
+                    INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role),
+                      status = VALUES(status), raw_json = VALUES(raw_json)
+                    """,
                     text(account, "id"), text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
                     );
+                    synchronizeAccountDepartments(account);
                     revokeSessionsIfDisabled(account);
                 }
-                case "clinic_roles" -> jdbcTemplate.update(
-                    "INSERT INTO clinic_roles (id, role, name, raw_json) VALUES (?, ?, ?, ?)",
-                    text(row, "id"), text(row, "role"), text(row, "name"), toJson(row)
-                );
-                case "clinic_departments" -> jdbcTemplate.update(
-                    "INSERT INTO clinic_departments (id, name, raw_json) VALUES (?, ?, ?)",
-                    text(row, "id"), text(row, "name"), toJson(row)
-                );
+                case "clinic_roles" -> {
+                    // Role definitions are the fixed server policy. Ignore legacy client writes.
+                }
+                case "clinic_departments" -> {
+                    ObjectNode department = normalizeDepartmentRow(row);
+                    jdbcTemplate.update("""
+                    INSERT INTO clinic_departments (id, code, name, status, raw_json) VALUES (?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name),
+                      status = VALUES(status), raw_json = VALUES(raw_json)
+                    """,
+                    text(department, "id"), text(department, "code"), text(department, "name"),
+                    text(department, "status"), toJson(department)
+                    );
+                }
                 case "clinic_dictionaries" -> jdbcTemplate.update(
                     "INSERT INTO clinic_dictionaries (id, name, department, raw_json) VALUES (?, ?, ?, ?)",
                     text(row, "id"), text(row, "name"), text(row, "department"), toJson(row)
@@ -547,6 +561,90 @@ public class ClinicDbWriter {
                 );
                 default -> throw new IllegalArgumentException("Unsupported table: " + table + " " + columns);
             }
+        }
+    }
+
+    private ObjectNode normalizeDepartmentRow(JsonNode row) {
+        ObjectNode department = asObject(row).deepCopy();
+        String id = text(department, "id");
+        String code = text(department, "code").trim().toUpperCase(Locale.ROOT);
+        if (code.isBlank()) {
+            code = "DEPT_" + Integer.toUnsignedString(id.hashCode(), 36).toUpperCase(Locale.ROOT);
+        }
+        String status = text(department, "status", "ACTIVE").trim().toUpperCase(Locale.ROOT);
+        if (!"INACTIVE".equals(status)) status = "ACTIVE";
+        department.put("code", code);
+        department.put("status", status);
+        return department;
+    }
+
+    private ObjectNode normalizeAccountDepartments(ObjectNode account) {
+        Set<String> departmentIds = new LinkedHashSet<>();
+        JsonNode incomingDepartmentIds = account.path("departmentIds");
+        if (incomingDepartmentIds.isArray()) {
+            for (JsonNode value : incomingDepartmentIds) {
+                if (!value.asText().isBlank()) departmentIds.add(value.asText());
+            }
+        }
+
+        String primaryDepartmentId = text(account, "primaryDepartmentId");
+        if (departmentIds.isEmpty()) {
+            String legacyDepartmentName = text(account, "department");
+            if (!legacyDepartmentName.isBlank()) {
+                List<String> ids = jdbcTemplate.query(
+                    "SELECT id FROM clinic_departments WHERE name = ? AND status = 'ACTIVE' ORDER BY id LIMIT 1",
+                    (resultSet, rowNum) -> resultSet.getString("id"),
+                    legacyDepartmentName
+                );
+                if (!ids.isEmpty()) departmentIds.add(ids.get(0));
+            }
+        }
+        if (!primaryDepartmentId.isBlank()) departmentIds.add(primaryDepartmentId);
+
+        Set<String> validDepartmentIds = new LinkedHashSet<>();
+        Map<String, String> departmentNames = new java.util.LinkedHashMap<>();
+        for (String departmentId : departmentIds) {
+            List<String> names = jdbcTemplate.query(
+                "SELECT name FROM clinic_departments WHERE id = ? AND status = 'ACTIVE' LIMIT 1",
+                (resultSet, rowNum) -> resultSet.getString("name"),
+                departmentId
+            );
+            if (!names.isEmpty()) {
+                validDepartmentIds.add(departmentId);
+                departmentNames.put(departmentId, names.get(0));
+            }
+        }
+        if (validDepartmentIds.isEmpty()) {
+            throw new IllegalArgumentException("账号必须关联至少一个已启用科室，禁止使用任意科室名称");
+        }
+        if (!validDepartmentIds.contains(primaryDepartmentId)) {
+            primaryDepartmentId = validDepartmentIds.stream().findFirst().orElse("");
+        }
+
+        ArrayNode normalizedIds = objectMapper.createArrayNode();
+        validDepartmentIds.forEach(normalizedIds::add);
+        account.set("departmentIds", normalizedIds);
+        account.put("primaryDepartmentId", primaryDepartmentId);
+        account.put("department", departmentNames.getOrDefault(primaryDepartmentId, ""));
+        return account;
+    }
+
+    private void synchronizeAccountDepartments(ObjectNode account) {
+        String accountId = text(account, "id");
+        jdbcTemplate.update("DELETE FROM clinic_account_departments WHERE account_id = ?", accountId);
+        String primaryDepartmentId = text(account, "primaryDepartmentId");
+        JsonNode departmentIds = account.path("departmentIds");
+        if (!departmentIds.isArray()) return;
+        for (JsonNode departmentId : departmentIds) {
+            jdbcTemplate.update("""
+                INSERT INTO clinic_account_departments (
+                  account_id, department_id, is_primary, status, created_at, updated_at
+                ) VALUES (?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+                """,
+                accountId,
+                departmentId.asText(),
+                primaryDepartmentId.equals(departmentId.asText())
+            );
         }
     }
 

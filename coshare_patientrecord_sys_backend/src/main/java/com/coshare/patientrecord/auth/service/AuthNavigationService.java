@@ -1,21 +1,26 @@
 package com.coshare.patientrecord.auth.service;
 
+import com.coshare.patientrecord.auth.dto.AuxiliaryPermission;
+import com.coshare.patientrecord.auth.dto.DepartmentOption;
 import com.coshare.patientrecord.auth.dto.NavigationMenu;
 import com.coshare.patientrecord.auth.dto.NavigationMeta;
 import com.coshare.patientrecord.auth.dto.NavigationResult;
 import com.coshare.patientrecord.auth.dto.NavigationShortcut;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.dto.StagePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -23,9 +28,37 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.18.1";
+    public static final String VERSION = "2026.07.18.2";
+    public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
+    private static final List<String> STAGES = List.of(
+        "REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW"
+    );
+    private static final Map<String, Set<String>> STAGE_EDITORS = Map.of(
+        "REGISTRATION", Set.of("admin", "doctor", "frontdesk"),
+        "INSPECTION", Set.of("admin", "doctor", "inspection"),
+        "RECEPTION", Set.of("admin", "doctor", "reception"),
+        "TCM", Set.of("admin", "doctor", "tcm"),
+        "DOCTOR", Set.of("admin", "doctor"),
+        "SURGERY", Set.of("admin", "doctor", "nurse", "nursing"),
+        "REVIEW", Set.of("admin", "doctor")
+    );
+    private static final Map<String, Set<String>> AUXILIARY_EDITORS = Map.of(
+        "LAB", Set.of("admin", "lab"),
+        "ECG", Set.of("admin", "ecg"),
+        "IMAGING", Set.of("admin", "ultrasound"),
+        "VITAL_SIGNS", Set.of("admin", "nurse", "nursing"),
+        "COLONOSCOPY", Set.of("admin", "inspection")
+    );
+    private static final Map<String, Set<String>> PRE_AI_CAPABILITY_ROLES = Map.of(
+        "preai:encounter:create", Set.of("admin", "frontdesk"),
+        "preai:legacy:import", Set.of("admin", "frontdesk", "doctor"),
+        "preai:review", Set.of("admin", "doctor"),
+        "preai:duties:manage", Set.of("admin", "frontdesk", "doctor"),
+        "preai:surgery:confirm", Set.of("admin", "doctor")
+    );
 
+    private final JdbcTemplate jdbcTemplate;
     private final List<NavigationMenu> menus = buildMenus();
     private final Map<String, RolePolicy> policies = buildPolicies();
     private final List<NavigationShortcut> shortcuts = List.of(
@@ -42,8 +75,12 @@ public class AuthNavigationService {
         shortcut("操作审计", "追踪关键资料改动", "DocumentChecked", "/audit/log")
     );
 
+    public AuthNavigationService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
     public NavigationResult navigationFor(SessionUser user) {
-        RolePolicy policy = policies.get(user.role());
+        RolePolicy policy = policies.get(normalizeRole(user.role()));
         if (policy == null) {
             log.warn(
                 "SECURITY_AUDIT navigation denied for unknown role: userId={}, username={}, role={}",
@@ -58,7 +95,104 @@ public class AuthNavigationService {
         List<NavigationShortcut> authorizedShortcuts = shortcuts.stream()
             .filter(item -> policy.allMenus() || policy.menuPaths().contains(item.path()))
             .toList();
-        return new NavigationResult(VERSION, authorizedMenus, policy.buttonPermissions(), authorizedShortcuts);
+        List<DepartmentOption> departments = authorizedDepartments(user.id());
+        DepartmentOption activeDepartment = departments.stream()
+            .filter(item -> item.id().equals(user.activeDepartmentId()))
+            .findFirst()
+            .orElse(null);
+        Map<String, StagePermission> stagePermissions = stagePermissions(user.role());
+        Map<String, AuxiliaryPermission> auxiliaryPermissions = auxiliaryPermissions(user.role());
+        Set<String> capabilities = new LinkedHashSet<>();
+        policy.buttonPermissions().values().forEach(capabilities::addAll);
+        PRE_AI_CAPABILITY_ROLES.forEach((capability, roles) -> {
+            if (roles.contains(normalizeRole(user.role()))) capabilities.add(capability);
+        });
+        stagePermissions.forEach((stage, permission) -> {
+            if (permission.editable()) capabilities.add("preai:stage:" + stage.toLowerCase(Locale.ROOT) + ":edit");
+            if (permission.correctable()) capabilities.add("preai:stage:" + stage.toLowerCase(Locale.ROOT) + ":correct");
+        });
+        auxiliaryPermissions.forEach((task, permission) -> {
+            if (permission.editable()) capabilities.add("preai:auxiliary:" + task.toLowerCase(Locale.ROOT) + ":edit");
+            if (canCreateAuxiliary(user.role(), task)) {
+                capabilities.add("preai:auxiliary:" + task.toLowerCase(Locale.ROOT) + ":create");
+            }
+        });
+        return new NavigationResult(
+            VERSION,
+            POLICY_VERSION,
+            authorizedMenus,
+            policy.buttonPermissions(),
+            authorizedShortcuts,
+            activeDepartment,
+            departments,
+            List.copyOf(capabilities),
+            stagePermissions,
+            auxiliaryPermissions
+        );
+    }
+
+    public boolean canEditStage(String role, String stageCode) {
+        return STAGE_EDITORS.getOrDefault(normalize(stageCode), Set.of()).contains(normalizeRole(role));
+    }
+
+    public boolean canCorrectStage(String role, String stageCode) {
+        return !"REVIEW".equals(normalize(stageCode))
+            && Set.of("admin", "doctor").contains(normalizeRole(role))
+            && canEditStage(role, stageCode);
+    }
+
+    public boolean canEditAuxiliary(String role, String taskType) {
+        return AUXILIARY_EDITORS.getOrDefault(normalize(taskType), Set.of()).contains(normalizeRole(role));
+    }
+
+    public boolean canCreateAuxiliary(String role, String taskType) {
+        String normalizedRole = normalizeRole(role);
+        String normalizedTask = normalize(taskType);
+        if (Set.of("admin", "doctor", "reception").contains(normalizedRole)) return true;
+        return AUXILIARY_EDITORS.getOrDefault(normalizedTask, Set.of()).contains(normalizedRole);
+    }
+
+    private Map<String, StagePermission> stagePermissions(String role) {
+        Map<String, StagePermission> result = new LinkedHashMap<>();
+        for (String stage : STAGES) {
+            result.put(stage, new StagePermission(true, canEditStage(role, stage), canCorrectStage(role, stage)));
+        }
+        return Map.copyOf(result);
+    }
+
+    private Map<String, AuxiliaryPermission> auxiliaryPermissions(String role) {
+        Map<String, AuxiliaryPermission> result = new LinkedHashMap<>();
+        AUXILIARY_EDITORS.keySet().stream().sorted().forEach(task -> {
+            boolean editable = canEditAuxiliary(role, task);
+            boolean returnable = Set.of("admin", "doctor").contains(normalizeRole(role));
+            result.put(task, new AuxiliaryPermission(true, editable, returnable));
+        });
+        return Map.copyOf(result);
+    }
+
+    private List<DepartmentOption> authorizedDepartments(String accountId) {
+        if (accountId == null || accountId.isBlank()) return List.of();
+        return jdbcTemplate.query(
+            """
+            SELECT d.id, d.code, d.name, d.status, ad.is_primary
+            FROM clinic_account_departments ad
+            JOIN clinic_departments d ON d.id = ad.department_id
+            WHERE ad.account_id = ? AND ad.status = 'ACTIVE' AND d.status = 'ACTIVE'
+            ORDER BY ad.is_primary DESC, d.name, d.id
+            """,
+            (rs, rowNum) -> new DepartmentOption(
+                rs.getString("id"), rs.getString("code"), rs.getString("name"), rs.getBoolean("is_primary"), rs.getString("status")
+            ),
+            accountId
+        );
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static String normalizeRole(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private List<NavigationMenu> filterMenus(List<NavigationMenu> source, RolePolicy policy) {
@@ -169,9 +303,9 @@ public class AuthNavigationService {
             "documentRecycle=document:restore,document:read",
             "auditReview=audit:read,quality:approve,quality:reject",
             "auditLog=audit:read,audit:export",
-            "accountManage=user:create,user:update,user:disable,user:resetPassword,user:delete",
-            "roleManage=role:create,role:update,role:grant,role:delete",
-            "departmentManage=department:create,department:update,department:delete",
+            "accountManage=user:create,user:update,user:disable,user:resetPassword",
+            "roleManage=role:read",
+            "departmentManage=department:create,department:update,department:deactivate",
             "dictManage=dict:create,dict:update",
             "menuMange=menu:read",
             "aiConfig=ai:config:read,ai:config:update",
@@ -245,16 +379,16 @@ public class AuthNavigationService {
             "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload"
         ), inventoryStaffButtons);
-        result.put("lab", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
-        result.put("ecg", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
-        result.put("ultrasound", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
-        result.put("nurse", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
-        result.put("nursing", role(union(patientFlow, materials, inventoryStaff), diagnosticButtons));
+        result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
+        result.put("ecg", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
+        result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
+        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
+        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
 
-        result.put("tcm", role(union(patientFlow, tcmPharmacy), permissions(
+        result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
         )));
-        result.put("tcmPharmacyOperator", role(tcmPharmacy, permissions(
+        result.put("tcmpharmacyoperator", role(tcmPharmacy, permissions(
             "tcmPharmacyWorkbench=pharmacy:read,charge:confirm,review:execute,dispensing:execute,decoction:execute,pickup:execute",
             "tcmPharmacyDisplayMenu=display:read,announcement:play"
         )));

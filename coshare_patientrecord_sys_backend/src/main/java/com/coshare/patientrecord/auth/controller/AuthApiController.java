@@ -1,5 +1,7 @@
 package com.coshare.patientrecord.auth.controller;
 
+import com.coshare.patientrecord.auth.dto.ActiveDepartmentRequest;
+import com.coshare.patientrecord.auth.dto.DepartmentOption;
 import com.coshare.patientrecord.auth.dto.LoginAccountOptions;
 import com.coshare.patientrecord.auth.dto.LoginOptions;
 import com.coshare.patientrecord.auth.dto.LoginRequest;
@@ -59,6 +61,18 @@ public class AuthApiController {
     @GetMapping("/auth/navigation")
     public ApiResult<NavigationResult> navigation() {
         return ApiResult.success(authNavigationService.navigationFor(AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/auth/active-department")
+    public ApiResult<DepartmentOption> switchActiveDepartment(
+        @RequestBody ActiveDepartmentRequest request,
+        HttpServletRequest servletRequest
+    ) {
+        return ApiResult.success(authSessionService.switchActiveDepartment(
+            AuthTokenFilter.extractToken(servletRequest),
+            AuthPermission.currentUserOrThrow(),
+            request == null ? "" : request.departmentId()
+        ));
     }
 
     @PostMapping("/auth/password")

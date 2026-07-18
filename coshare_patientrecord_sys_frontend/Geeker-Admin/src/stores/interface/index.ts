@@ -26,7 +26,7 @@ export interface GlobalState {
 /* UserState */
 export interface UserState {
   token: string;
-  userInfo: { name: string; role?: string; department?: string };
+  userInfo: { name: string; role?: string; activeDepartmentId?: string; department?: string };
 }
 
 /* tabsMenuProps */
@@ -48,7 +48,13 @@ export interface TabsState {
 export interface AuthState {
   routeName: string;
   navigationVersion: string;
+  policyVersion: string;
   shortcuts: Array<{ title: string; desc: string; icon: string; path: string }>;
+  activeDepartment?: { id: string; code: string; name: string; primary: boolean; status: "ACTIVE" | "INACTIVE" };
+  departments: Array<{ id: string; code: string; name: string; primary: boolean; status: "ACTIVE" | "INACTIVE" }>;
+  capabilities: string[];
+  stagePermissions: Record<string, { readable: boolean; editable: boolean; correctable: boolean }>;
+  auxiliaryPermissions: Record<string, { readable: boolean; editable: boolean; returnable: boolean }>;
   authButtonList: {
     [key: string]: string[];
   };

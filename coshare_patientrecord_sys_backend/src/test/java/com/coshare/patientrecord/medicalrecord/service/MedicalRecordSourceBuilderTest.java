@@ -47,7 +47,7 @@ class MedicalRecordSourceBuilderTest {
             jdbcTemplate,
             new SensitiveDataMasker()
         );
-        user = new SessionUser("user-1", "doctor", "Doctor", "doctor", "Doctor", "TCM", false, Instant.now().plusSeconds(3600));
+        user = new SessionUser("user-1", "doctor", "Doctor", "doctor", "Doctor", "dept-tcm", "TCM", false, Instant.now().plusSeconds(3600));
     }
 
     @Test

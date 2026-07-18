@@ -28,7 +28,12 @@
         </template>
 
         <template #department="{ row }">
-          <el-tag effect="plain">{{ row.department }}</el-tag>
+          <el-space wrap>
+            <el-tag v-for="departmentId in row.departmentIds || []" :key="departmentId" effect="plain">
+              {{ departmentName(departmentId) }}{{ departmentId === row.primaryDepartmentId ? "（主）" : "" }}
+            </el-tag>
+            <el-tag v-if="!row.departmentIds?.length" effect="plain">{{ row.department }}</el-tag>
+          </el-space>
         </template>
 
         <template #roleLabel="{ row }">
@@ -44,9 +49,6 @@
           <el-button v-auth="'user:resetPassword'" type="primary" link @click="resetPassword(row)">重置密码</el-button>
           <el-button v-auth="'user:disable'" :type="row.status === '启用' ? 'danger' : 'primary'" link @click="toggleStatus(row)">
             {{ row.status === "启用" ? "停用" : "启用" }}
-          </el-button>
-          <el-button v-auth="'user:delete'" type="danger" link :disabled="row.username === 'admin'" @click="deleteAccount(row)">
-            删除
           </el-button>
         </template>
       </ProTable>
@@ -73,9 +75,14 @@
               <el-form-item label="姓名">
                 <el-input v-model="accountForm.name" placeholder="请输入姓名" />
               </el-form-item>
-              <el-form-item label="所属科室">
-                <el-select v-model="accountForm.department" filterable allow-create default-first-option placeholder="请选择科室">
-                  <el-option v-for="item in departments" :key="item" :label="item" :value="item" />
+              <el-form-item label="授权科室">
+                <el-select v-model="accountForm.departmentIds" multiple filterable placeholder="请选择一个或多个已启用科室">
+                  <el-option v-for="item in activeDepartments" :key="item.id" :label="item.name" :value="item.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="主科室">
+                <el-select v-model="accountForm.primaryDepartmentId" filterable placeholder="请选择主科室">
+                  <el-option v-for="item in selectedDepartments" :key="item.id" :label="item.name" :value="item.id" />
                 </el-select>
               </el-form-item>
               <el-form-item label="岗位角色">
@@ -98,7 +105,9 @@
           <el-tab-pane label="权限与安全" name="security">
             <el-descriptions :column="1" border>
               <el-descriptions-item label="角色">{{ currentRoleLabel }}</el-descriptions-item>
-              <el-descriptions-item label="科室">{{ accountForm.department || "未设置" }}</el-descriptions-item>
+              <el-descriptions-item label="主科室">{{
+                departmentName(accountForm.primaryDepartmentId) || "未设置"
+              }}</el-descriptions-item>
               <el-descriptions-item label="密码状态">密码仅保存为不可逆哈希，管理员不可查看</el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ accountForm.createdAt || "保存后生成" }}</el-descriptions-item>
               <el-descriptions-item label="更新时间">{{ accountForm.updatedAt || "保存后生成" }}</el-descriptions-item>
@@ -135,13 +144,13 @@ import TreeFilter from "@/components/TreeFilter/index.vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import {
-  getAccountDepartmentOptionsApi,
   getAccountListApi,
-  deleteAccountApi,
+  getDepartmentListApi,
   resetAccountPasswordApi,
   saveAccountApi,
   setAccountStatusApi,
-  type AccountRow
+  type AccountRow,
+  type DepartmentRow
 } from "@/api/modules/clinic";
 import { USER_ROLE_OPTIONS, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
@@ -151,21 +160,12 @@ const proTable = ref<ProTableInstance>();
 const drawerVisible = ref(false);
 const activeDrawerTab = ref("profile");
 
-const defaultDepartments = [
-  "前台",
-  "门诊",
-  "接诊室",
-  "检查室",
-  "化验室",
-  "心电室",
-  "B超/放射",
-  "治疗室",
-  "护理部",
-  "质控/病案",
-  "信息/院办"
-];
-const departments = ref<string[]>([...defaultDepartments]);
-const departmentTree = computed(() => departments.value.map(name => ({ name })));
+const departments = ref<DepartmentRow[]>([]);
+const activeDepartments = computed(() => departments.value.filter(item => (item.status || "ACTIVE") === "ACTIVE"));
+const departmentTree = computed(() => activeDepartments.value.map(item => ({ name: item.name })));
+const selectedDepartments = computed(() =>
+  activeDepartments.value.filter(item => (accountForm.departmentIds || []).includes(item.id))
+);
 const roles = USER_ROLE_OPTIONS;
 
 const initParam = reactive({
@@ -200,7 +200,7 @@ const columns = reactive<ColumnProps<AccountRow>[]>([
     search: { el: "select" }
   },
   { prop: "scope", label: "可操作范围", minWidth: 260 },
-  { prop: "operation", label: "操作", fixed: "right", width: 280 }
+  { prop: "operation", label: "操作", fixed: "right", width: 230 }
 ]);
 
 const drawerTitle = computed(() => (accountForm.id ? "账号详情" : "新增账号"));
@@ -213,10 +213,11 @@ const dataCallback = (data: { list: AccountRow[]; total: number }) => data;
 const refresh = () => proTable.value?.getTableList();
 
 const loadDepartments = async () => {
-  const { data } = await getAccountDepartmentOptionsApi();
-  const merged = new Set([...defaultDepartments, ...(data || [])].map(item => String(item || "").trim()).filter(Boolean));
-  departments.value = Array.from(merged).sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
+  const { data } = await getDepartmentListApi({ pageNum: 1, pageSize: 1000 });
+  departments.value = data.list || [];
 };
+
+const departmentName = (departmentId?: string) => departments.value.find(item => item.id === departmentId)?.name || "";
 
 const changeDepartment = (department: string) => {
   initParam.department = department || "";
@@ -230,13 +231,24 @@ const clearAccountForm = () => {
 
 const openAccountDrawer = (row?: AccountRow) => {
   clearAccountForm();
+  const legacyDepartmentId = row?.departmentIds?.length
+    ? undefined
+    : activeDepartments.value.find(item => item.name === row?.department)?.id;
+  const initialDepartmentId = legacyDepartmentId || activeDepartments.value[0]?.id;
   Object.assign(
     accountForm,
-    row || {
-      status: "启用",
-      role: "frontdesk",
-      department: initParam.department || "前台"
-    }
+    row
+      ? {
+          ...row,
+          departmentIds: row.departmentIds?.length ? [...row.departmentIds] : initialDepartmentId ? [initialDepartmentId] : [],
+          primaryDepartmentId: row.primaryDepartmentId || initialDepartmentId || ""
+        }
+      : {
+          status: "启用",
+          role: "frontdesk",
+          departmentIds: initialDepartmentId ? [initialDepartmentId] : [],
+          primaryDepartmentId: initialDepartmentId || ""
+        }
   );
   activeDrawerTab.value = "profile";
   drawerVisible.value = true;
@@ -247,6 +259,14 @@ onMounted(() => {
 });
 
 const saveAccount = async () => {
+  if (!accountForm.departmentIds?.length) {
+    ElMessage.warning("请至少选择一个授权科室");
+    return;
+  }
+  if (!accountForm.primaryDepartmentId || !accountForm.departmentIds.includes(accountForm.primaryDepartmentId)) {
+    ElMessage.warning("请选择授权科室中的一个作为主科室");
+    return;
+  }
   const { data } = await saveAccountApi({ ...accountForm, operator: operatorName.value, operatorRole: operatorRole.value });
   ElMessage.success(data?.temporaryPassword ? `账号已保存，临时密码：${data.temporaryPassword}` : "账号已保存");
   drawerVisible.value = false;
@@ -299,23 +319,6 @@ const resetPassword = async (row: AccountRow) => {
 const resetPasswordFromDrawer = async () => {
   if (!accountForm.id) return;
   await resetPasswordWithPrompt({ id: accountForm.id, name: accountForm.name || accountForm.username || "" });
-};
-
-const deleteAccount = async (row: AccountRow) => {
-  if (row.username === "admin") {
-    ElMessage.warning("内置管理员账号不能删除");
-    return;
-  }
-  await ElMessageBox.confirm(`确定删除账号“${row.name || row.username}”吗？删除后该账号不能再登录。`, "删除账号", {
-    confirmButtonText: "删除",
-    cancelButtonText: "取消",
-    type: "warning"
-  });
-  await deleteAccountApi(row.id, { operator: operatorName.value, operatorRole: operatorRole.value });
-  ElMessage.success("账号已删除");
-  if (accountForm.id === row.id) drawerVisible.value = false;
-  await loadDepartments();
-  refresh();
 };
 </script>
 

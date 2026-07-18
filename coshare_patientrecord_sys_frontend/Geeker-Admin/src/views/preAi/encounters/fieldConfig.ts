@@ -51,7 +51,6 @@ export interface PreAiStageConfig {
   title: string;
   shortTitle: string;
   owner: string;
-  roles: string[];
   description: string;
   fields: PreAiFieldConfig[];
 }
@@ -274,7 +273,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "前台登记",
     shortTitle: "登记",
     owner: "前台",
-    roles: ["admin", "frontdesk"],
     description: "内部保存真实身份信息；导出的 DOCX 会自动脱敏。",
     fields: [
       { key: "patientName", label: "姓名", kind: "input", required: true },
@@ -384,7 +382,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "检查室",
     shortTitle: "检查",
     owner: "检查室",
-    roles: ["admin", "inspection"],
     description: "只记录客观所见，不填写最终诊断。先选检查类型，再出现对应字段。",
     fields: [
       {
@@ -475,7 +472,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "接诊室",
     shortTitle: "接诊",
     owner: "接诊室 / 医生复核",
-    roles: ["admin", "reception", "doctor"],
     description: "按模板采集现病史及各类病史事实；结构化选择可生成原文，医生仍可修改最终文本。",
     fields: [
       {
@@ -806,7 +802,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "中医岗位",
     shortTitle: "中医",
     owner: "中医",
-    roles: ["admin", "tcm", "doctor"],
     description: "四诊、舌脉和证型均需中医师逐项确认；合并病按疾病逐条辨证。",
     fields: [
       {
@@ -961,7 +956,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "医生诊断与治疗方案",
     shortTitle: "医生",
     owner: "主管医生",
-    roles: ["admin", "doctor"],
     description: "医生确认最终分支、西医诊断、诊断依据和真实治疗计划。",
     fields: [
       { key: "finalRoute", label: "最终门诊/住院分支", kind: "select", required: true, options: routeOptions },
@@ -1172,7 +1166,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "手术室登记",
     shortTitle: "手术",
     owner: "手术室护士",
-    roles: ["admin", "nurse", "nursing"],
     description: "只登记实际发生的手术和术中结果。门诊及非手术患者会自动跳过。",
     fields: [
       {
@@ -1349,7 +1342,6 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "医生最终复核",
     shortTitle: "复核",
     owner: "医生",
-    roles: ["admin", "doctor"],
     description: "核对各岗位事实，确认后生成脱敏前置资料 DOCX。",
     fields: []
   }

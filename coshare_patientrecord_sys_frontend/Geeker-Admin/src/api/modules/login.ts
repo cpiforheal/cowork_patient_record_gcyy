@@ -32,11 +32,37 @@ export interface NavigationShortcut {
   path: string;
 }
 
+export interface AuthDepartmentOption {
+  id: string;
+  code: string;
+  name: string;
+  primary: boolean;
+  status: "ACTIVE" | "INACTIVE";
+}
+
+export interface StagePermission {
+  readable: boolean;
+  editable: boolean;
+  correctable: boolean;
+}
+
+export interface AuxiliaryPermission {
+  readable: boolean;
+  editable: boolean;
+  returnable: boolean;
+}
+
 export interface NavigationResult {
   version: string;
+  policyVersion: string;
   menus: Menu.MenuOptions[];
   buttonPermissions: Login.ResAuthButtons;
   shortcuts: NavigationShortcut[];
+  activeDepartment?: AuthDepartmentOption;
+  departments: AuthDepartmentOption[];
+  capabilities: string[];
+  stagePermissions: Record<string, StagePermission>;
+  auxiliaryPermissions: Record<string, AuxiliaryPermission>;
 }
 
 export const loginApi = (params: Login.ReqLoginForm) => {
@@ -83,6 +109,18 @@ export const getAuthNavigationApi = () => {
   return fetch(`${AUTH_API_BASE_URL}/navigation`, { headers: authHeaders() }).then(async response => {
     const payload = await readJsonResult<NavigationResult>(response);
     if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "导航权限加载失败");
+    return payload;
+  });
+};
+
+export const switchActiveDepartmentApi = (departmentId: string) => {
+  return fetch(`${AUTH_API_BASE_URL}/active-department`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ departmentId })
+  }).then(async response => {
+    const payload = await readJsonResult<AuthDepartmentOption>(response);
+    if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "活动科室切换失败");
     return payload;
   });
 };

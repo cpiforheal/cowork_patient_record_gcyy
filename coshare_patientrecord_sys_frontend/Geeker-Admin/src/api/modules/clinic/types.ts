@@ -475,6 +475,8 @@ export interface AccountRow {
   password?: string;
   name: string;
   department: string;
+  departmentIds?: string[];
+  primaryDepartmentId?: string;
   role: UserRole;
   roleLabel: string;
   scope: string;
@@ -495,7 +497,9 @@ export interface RoleRow {
 
 export interface DepartmentRow {
   id: string;
+  code?: string;
   name: string;
+  status?: "ACTIVE" | "INACTIVE";
   uploadTypes: string;
   scope: string;
   defaultRole: UserRole;
