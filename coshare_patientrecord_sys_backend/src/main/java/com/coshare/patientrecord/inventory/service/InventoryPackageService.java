@@ -76,6 +76,8 @@ public class InventoryPackageService {
         String department = repository.text(input, "department", user.department());
         if (!isManager(user) && !department.equals(user.department())) department = user.department();
         String careType = normalizeCareType(repository.text(input, "careType", repository.text(input, "route")));
+        String triggerStage = normalizeTriggerStage(repository.text(input, "triggerStage", "REVIEW"));
+        String departmentId = resolveDepartmentId(repository.text(input, "departmentId"), department);
         String name = repository.text(input, "name");
         ArrayNode lines = normalizeLines(input.path("lines"));
         if (department.isBlank()) throw new IllegalArgumentException("科室不能为空");
@@ -89,12 +91,14 @@ public class InventoryPackageService {
             throw new IllegalArgumentException("已启用套餐不能直接修改，请新建版本");
         }
         if (id.isBlank()) id = "pkg-" + UUID.randomUUID();
-        int version = existing == null ? nextVersion(department, careType) : existing.path("version").asInt(1);
+        int version = existing == null ? nextVersion(departmentId, careType, triggerStage) : existing.path("version").asInt(1);
         ObjectNode row = input.deepCopy();
         row.put("id", id);
         row.put("name", name);
         row.put("department", department);
+        row.put("departmentId", departmentId);
         row.put("careType", careType);
+        row.put("triggerStage", triggerStage);
         row.put("version", version);
         row.put("status", "draft");
         row.put("operator", user.name());
@@ -104,13 +108,14 @@ public class InventoryPackageService {
         jdbcTemplate.update(
             """
             INSERT INTO inventory_packages
-              (id, name, department, care_type, version_no, status, effective_date, operator_name, raw_json, created_at)
-            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)
+              (id, name, department, department_id, care_type, trigger_stage, version_no, status, effective_date, operator_name, raw_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), department = VALUES(department), care_type = VALUES(care_type),
+              department_id = VALUES(department_id), trigger_stage = VALUES(trigger_stage),
               version_no = VALUES(version_no), status = 'draft', effective_date = VALUES(effective_date),
               operator_name = VALUES(operator_name), raw_json = VALUES(raw_json)
             """,
-            id, name, department, careType, version, repository.text(row, "effectiveDate"), user.name(), toJson(row),
+            id, name, department, departmentId, careType, triggerStage, version, repository.text(row, "effectiveDate"), user.name(), toJson(row),
             repository.text(row, "createdAt")
         );
         jdbcTemplate.update("DELETE FROM inventory_package_lines WHERE package_id = ?", id);
@@ -136,12 +141,14 @@ public class InventoryPackageService {
         if (lines.isEmpty()) throw new IllegalArgumentException("套餐至少需要一项物资");
         validateConsumptionModes(lines);
         String department = repository.text(target, "department");
+        String departmentId = resolveDepartmentId(repository.text(target, "departmentId"), department);
         String careType = normalizeCareType(repository.text(target, "careType", repository.text(target, "route")));
-        jdbcTemplate.query("SELECT id FROM inventory_packages WHERE department = ? AND care_type = ? FOR UPDATE",
-            (resultSet, rowNumber) -> resultSet.getString("id"), department, careType);
+        String triggerStage = normalizeTriggerStage(repository.text(target, "triggerStage", "REVIEW"));
+        jdbcTemplate.query("SELECT id FROM inventory_packages WHERE department_id = ? AND care_type = ? AND trigger_stage = ? FOR UPDATE",
+            (resultSet, rowNumber) -> resultSet.getString("id"), departmentId, careType, triggerStage);
         jdbcTemplate.update(
-            "UPDATE inventory_packages SET status = 'disabled', raw_json = JSON_SET(raw_json, '$.status', 'disabled') WHERE department = ? AND care_type = ? AND status = 'enabled'",
-            department, careType
+            "UPDATE inventory_packages SET status = 'disabled', raw_json = JSON_SET(raw_json, '$.status', 'disabled') WHERE department_id = ? AND care_type = ? AND trigger_stage = ? AND status = 'enabled'",
+            departmentId, careType, triggerStage
         );
         jdbcTemplate.update(
             "UPDATE inventory_packages SET status = 'enabled', effective_date = COALESCE(NULLIF(effective_date, ''), ?), raw_json = JSON_SET(raw_json, '$.status', 'enabled', '$.effectiveDate', COALESCE(NULLIF(effective_date, ''), ?), '$.operator', ?) WHERE id = ?",
@@ -379,9 +386,26 @@ public class InventoryPackageService {
         return details;
     }
 
-    private int nextVersion(String department, String careType) {
-        Integer version = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(version_no), 0) + 1 FROM inventory_packages WHERE department = ? AND care_type = ?", Integer.class, department, careType);
+    private int nextVersion(String departmentId, String careType, String triggerStage) {
+        Integer version = jdbcTemplate.queryForObject(
+            "SELECT COALESCE(MAX(version_no), 0) + 1 FROM inventory_packages WHERE department_id = ? AND care_type = ? AND trigger_stage = ?",
+            Integer.class, departmentId, careType, triggerStage);
         return version == null ? 1 : version;
+    }
+
+    private String resolveDepartmentId(String departmentId, String department) {
+        if (departmentId != null && !departmentId.isBlank()) return departmentId;
+        List<String> rows = jdbcTemplate.query(
+            "SELECT id FROM clinic_departments WHERE name = ? ORDER BY id LIMIT 1",
+            (resultSet, rowNumber) -> resultSet.getString(1), department
+        );
+        if (rows.isEmpty()) throw new IllegalArgumentException("未找到套餐所属科室：" + department);
+        return rows.get(0);
+    }
+
+    static String normalizeTriggerStage(String stage) {
+        if (stage == null || stage.isBlank()) return "REVIEW";
+        return stage.trim().toUpperCase();
     }
 
     private boolean isManager(SessionUser user) {

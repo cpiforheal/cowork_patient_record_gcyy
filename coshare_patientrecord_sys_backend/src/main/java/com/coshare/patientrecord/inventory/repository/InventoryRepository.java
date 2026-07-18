@@ -89,16 +89,17 @@ public class InventoryRepository {
     public void upsertItem(ObjectNode item) {
         jdbcTemplate.update("""
             INSERT INTO inventory_items (
-              id, name, category, spec, unit, location, low_stock_threshold,
+              id, name, category, spec, unit, location, low_stock_threshold, safety_stock,
               is_sensitive, batch_required, expiry_required, enabled, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), category = VALUES(category), spec = VALUES(spec),
               unit = VALUES(unit), location = VALUES(location), low_stock_threshold = VALUES(low_stock_threshold),
+              safety_stock = VALUES(safety_stock),
               is_sensitive = VALUES(is_sensitive), batch_required = VALUES(batch_required), expiry_required = VALUES(expiry_required),
               enabled = VALUES(enabled), raw_json = VALUES(raw_json)
             """,
             text(item, "id"), text(item, "name"), text(item, "category"), text(item, "spec"), text(item, "unit"),
-            text(item, "location"), quantity(item, "lowStockThreshold"), item.path("sensitive").asBoolean(false),
+            text(item, "location"), quantity(item, "lowStockThreshold"), quantity(item, "safetyStock"), item.path("sensitive").asBoolean(false),
             item.path("batchRequired").asBoolean(false), item.path("expiryRequired").asBoolean(false),
             item.path("enabled").asBoolean(true), toJson(item)
         );
@@ -428,15 +429,21 @@ public class InventoryRepository {
         jdbcTemplate.update("""
             INSERT INTO inventory_weekly_consumption (
               id, week_no, department, item_id, consumed_quantity, remaining_quantity, next_week_quantity,
+              actual_consumed_quantity, suggested_quantity, adjusted_quantity, safety_stock, source_type,
               owner, abnormal_reason, confirmed_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE week_no = VALUES(week_no), department = VALUES(department), item_id = VALUES(item_id),
               consumed_quantity = VALUES(consumed_quantity), remaining_quantity = VALUES(remaining_quantity),
-              next_week_quantity = VALUES(next_week_quantity), owner = VALUES(owner), abnormal_reason = VALUES(abnormal_reason),
+              next_week_quantity = VALUES(next_week_quantity), actual_consumed_quantity = VALUES(actual_consumed_quantity),
+              suggested_quantity = VALUES(suggested_quantity), adjusted_quantity = VALUES(adjusted_quantity),
+              safety_stock = VALUES(safety_stock), source_type = VALUES(source_type),
+              owner = VALUES(owner), abnormal_reason = VALUES(abnormal_reason),
               confirmed_at = VALUES(confirmed_at), raw_json = VALUES(raw_json)
             """,
             text(row, "id"), text(row, "weekNo"), text(row, "department"), text(row, "itemId"),
             quantity(row, "consumedQuantity"), quantity(row, "remainingQuantity"), quantity(row, "nextWeekQuantity"),
+            quantity(row, "actualConsumedQuantity"), quantity(row, "suggestedQuantity"), quantity(row, "adjustedQuantity"),
+            quantity(row, "safetyStock"), text(row, "sourceType", "LEDGER"),
             text(row, "owner"), text(row, "abnormalReason"), text(row, "confirmedAt"), toJson(row)
         );
     }

@@ -10,7 +10,8 @@ public final class InventoryPermission {
     private static final Set<String> APPROVER_ROLES = Set.of("admin", "quality");
     private static final Set<String> COUNTER_ROLES = Set.of("admin", "quality");
     private static final Set<String> STAFF_ROLES = Set.of(
-        "admin", "quality", "nurse", "nursing", "doctor", "frontdesk", "reception", "lab", "ecg", "ultrasound", "inspection"
+        "admin", "quality", "manager", "nurse", "nursing", "doctor", "frontdesk", "reception",
+        "lab", "ecg", "ultrasound", "inspection", "pharmacist", "pharmacy"
     );
 
     private InventoryPermission() {}
@@ -51,6 +52,14 @@ public final class InventoryPermission {
         SessionUser user = currentUserOrThrow();
         if (!STAFF_ROLES.contains(user.role())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无进销存操作权限");
+        }
+        return user;
+    }
+
+    public static SessionUser requireReportViewer() {
+        SessionUser user = currentUserOrThrow();
+        if (!Set.of("admin", "quality", "manager").contains(user.role())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无科室耗材报表权限");
         }
         return user;
     }

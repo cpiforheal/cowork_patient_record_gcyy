@@ -2,6 +2,7 @@ package com.coshare.patientrecord.inventory.service.workflow;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
+import com.coshare.patientrecord.inventory.service.InventoryLedgerService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -17,9 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryRequestWorkflow {
 
     private final InventoryRepository repository;
+    private final InventoryLedgerService ledgerService;
 
-    public InventoryRequestWorkflow(InventoryRepository repository) {
+    public InventoryRequestWorkflow(InventoryRepository repository, InventoryLedgerService ledgerService) {
         this.repository = repository;
+        this.ledgerService = ledgerService;
     }
 
     @Transactional
@@ -51,8 +54,10 @@ public class InventoryRequestWorkflow {
     public ObjectNode approveRequest(JsonNode payload, SessionUser user) {
         ObjectNode request = repository.loadRequest(repository.text(payload, "id"));
         repository.assertStatus(request, List.of("pending"), "只有待审核申领单可以审核");
+        ObjectNode transfer = ledgerService.reserveRequest(request, user);
         repository.updateLineStatuses(request, "approved");
         request.put("status", "approved");
+        request.put("transferId", repository.text(transfer, "id"));
         request.put("owner", user.name());
         request.put("approvedAt", repository.now());
         repository.upsertRequest(request);
@@ -67,17 +72,7 @@ public class InventoryRequestWorkflow {
         ArrayNode lines = repository.requestLines(request);
         JsonNode issueLines = payload.path("lines");
         BigDecimal totalIssuedNow = BigDecimal.ZERO;
-        String batchId = repository.text(payload, "batchId");
-        for (JsonNode lineNode : lines) {
-            ObjectNode line = repository.object(lineNode);
-            BigDecimal remaining = repository.quantity(line, "quantity").subtract(repository.quantity(line, "issuedQuantity"));
-            if (remaining.signum() <= 0) continue;
-            BigDecimal requestedIssue = repository.requestedIssueQuantity(payload, issueLines, line, remaining);
-            if (requestedIssue.signum() <= 0) continue;
-            if (requestedIssue.compareTo(remaining) > 0) requestedIssue = remaining;
-            BigDecimal issued = repository.issueLine(line, request, requestedIssue, batchId, user);
-            totalIssuedNow = totalIssuedNow.add(issued);
-        }
+        totalIssuedNow = ledgerService.issueRequest(request, payload, user);
         if (totalIssuedNow.signum() <= 0) throw new IllegalArgumentException("当前没有可发放库存，请先入库或调整发放数量");
 
         repository.applyRequestStatusFromLines(request, lines);
@@ -102,6 +97,7 @@ public class InventoryRequestWorkflow {
         if (!repository.sameDepartment(user, request) && !repository.isInventoryManager(user)) {
             throw new IllegalArgumentException("只能签收本科室申领单");
         }
+        ledgerService.receiveRequest(request, user);
         repository.updateLineStatuses(request, "received");
         request.put("status", "received");
         request.put("receivedAt", repository.now());
@@ -151,6 +147,7 @@ public class InventoryRequestWorkflow {
         repository.assertStatus(request, List.of("pending", "approved"), "只有待审核或待发放申领单可以作废");
         String reason = repository.text(payload, "reason");
         if (reason.isBlank()) throw new IllegalArgumentException("作废必须填写原因");
+        ledgerService.releaseReservation(repository.text(request, "id"), user, reason);
         repository.updateLineStatuses(request, "void");
         request.put("status", "void");
         request.put("voidedAt", repository.now());
