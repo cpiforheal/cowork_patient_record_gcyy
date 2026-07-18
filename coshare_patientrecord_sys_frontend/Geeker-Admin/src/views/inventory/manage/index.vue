@@ -4,7 +4,6 @@
       <div class="command-title">
         <span>{{ currentTabProfile.kicker }}</span>
         <h1>{{ currentTabProfile.title }}</h1>
-        <p>{{ currentTabProfile.desc }}</p>
       </div>
       <div class="command-actions">
         <el-button :icon="Refresh" :loading="loading" @click="loadInventory">刷新</el-button>
@@ -19,11 +18,10 @@
       </div>
     </section>
 
-    <section class="status-ribbon">
+    <section v-if="activeTab !== 'overview'" class="status-ribbon">
       <div class="ribbon-lead">
         <span>{{ currentTabProfile.taskLabel }}</span>
         <strong>{{ currentTabProfile.taskTitle }}</strong>
-        <small>{{ currentTabProfile.taskDesc }}</small>
       </div>
       <button
         v-for="stat in currentTabStats"
@@ -34,7 +32,6 @@
       >
         <span>{{ stat.label }}</span>
         <strong>{{ stat.value }}</strong>
-        <small>{{ stat.desc }}</small>
       </button>
     </section>
 
@@ -56,7 +53,6 @@
         @click="goTab(item.tab)"
       >
         <span>{{ item.title }}</span>
-        <small>{{ item.desc }}</small>
       </button>
     </nav>
 
@@ -68,19 +64,38 @@
       <transition v-else name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
-            <OverviewPanel
-              :active-tab="activeTab"
-              :executive-signal="executiveSignal"
-              :stats="currentTabStats"
+            <OperationsHubPanel
+              v-model:active-center="workspaceCenter"
+              :workbench="inventoryWorkbench"
+              :balances="locationBalances"
+              :exceptions="inventoryExceptions"
+              :consumptions="inventoryConsumptions"
+              :weekly-suggestions="inventoryWorkbench?.weeklySuggestions || []"
+              :weekly-suggestions-ready="Array.isArray(inventoryWorkbench?.weeklySuggestions)"
               :todo-rows="todoRows"
-              :workflow-steps="visibleWorkflowSteps"
-              :risk-rows="riskRows"
-              :role-entry-cards="visibleRoleEntryCards"
-              :can-export-risk="hasInventoryAuth('inventory:export')"
+              :fallback-pending-approval="pendingRequestRows.length"
+              :fallback-pending-issue="approvedRequestRows.length + partiallyIssuedRequestRows.length"
+              :fallback-pending-receipt="issuedRequestRows.length"
+              :fallback-low-stock="lowStockRows.length"
+              :fallback-expiry-soon="expirySoonRows.length"
+              :extended-data-ready="extendedDataReady"
+              :extended-data-errors="extendedDataErrors"
+              :accessible-tabs="visibleTabNavItems.map(item => item.tab)"
+              :can-inbound="hasInventoryAuth('inventory:issue')"
+              :can-request="hasInventoryAuth('inventory:request')"
+              :can-approve="hasInventoryAuth('inventory:approve')"
+              :can-issue="hasInventoryAuth('inventory:issue')"
+              :can-receive="hasInventoryAuth('inventory:receive')"
+              :can-count="hasInventoryAuth('inventory:count')"
+              :can-report="canExportDepartmentUsage"
+              :report-loading="reportLoading"
+              :department-options="reportDepartmentOptions"
+              :item-options="reportItemOptions"
+              :category-options="categoryFilterOptions"
               @go-tab="goTab"
               @open-todo="openTodo"
               @workflow="handleWorkflowStep"
-              @export-risk="exportCsv(riskRows, 'inventory-risk.csv')"
+              @download-report="downloadDepartmentUsageReport"
             />
           </template>
 
@@ -441,7 +456,12 @@ import {
   cancelInventoryRequestApi,
   countInventoryApi,
   createInventoryRequestApi,
+  downloadDepartmentUsageReportApi,
+  getInventoryConsumptionsApi,
   getInventoryDbApi,
+  getInventoryExceptionsApi,
+  getInventoryLocationBalancesApi,
+  getInventoryWorkbenchApi,
   inboundInventoryApi,
   issueInventoryRequestApi,
   receiveInventoryRequestApi,
@@ -455,10 +475,15 @@ import {
   retryInventoryConsumptionEventApi,
   voidInventoryRequestApi,
   type InventoryBatch,
+  type InventoryConsumptionRecord,
   type InventoryDb,
+  type InventoryException,
   type InventoryItem,
+  type InventoryLocationBalance,
   type InventoryRequest,
+  type InventoryWorkbench,
   type ReturnOrScrapParams,
+  type DepartmentUsageReportParams,
   type InventoryPackage,
   type SaveInventoryPackageParams,
   type InventoryConsumptionEvent
@@ -468,7 +493,7 @@ import { useUserStore } from "@/stores/modules/user";
 import ControlsPanel from "./components/ControlsPanel.vue";
 import ExecutivePanel from "./components/ExecutivePanel.vue";
 import ItemsPanel from "./components/ItemsPanel.vue";
-import OverviewPanel from "./components/OverviewPanel.vue";
+import OperationsHubPanel, { type InventoryCenterKey } from "./components/OperationsHubPanel.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
@@ -493,6 +518,14 @@ const initialInventoryLoading = computed(
 );
 const saving = ref(false);
 const activeTab = ref("overview");
+const workspaceCenter = ref<InventoryCenterKey>("flow");
+const inventoryWorkbench = ref<InventoryWorkbench>();
+const locationBalances = ref<InventoryLocationBalance[]>([]);
+const inventoryExceptions = ref<InventoryException[]>([]);
+const inventoryConsumptions = ref<InventoryConsumptionRecord[]>([]);
+const extendedDataReady = ref(false);
+const extendedDataErrors = ref<string[]>([]);
+const reportLoading = ref<"" | "pdf" | "xlsx">("");
 
 const itemDialogVisible = ref(false);
 const inboundDialogVisible = ref(false);
@@ -647,37 +680,6 @@ const workflowSteps = [
   { title: "盘点与追溯", desc: "差异、退回、报废全部留痕", action: "controls", auth: ["inventory:count"] }
 ] as const;
 
-const roleEntryCards = [
-  {
-    scene: "科室人员",
-    title: "我要申领或签收",
-    desc: "提交领用，确认收货",
-    tab: "requests",
-    auth: ["inventory:request", "inventory:receive"]
-  },
-  {
-    scene: "库管人员",
-    title: "我要入库或发放",
-    desc: "看库存，按单发放",
-    tab: "stock",
-    auth: ["inventory:issue"]
-  },
-  {
-    scene: "科室负责人",
-    title: "我要填周消耗",
-    desc: "填本周用量和下周预计",
-    tab: "weekly",
-    auth: ["inventory:request", "inventory:count"]
-  },
-  {
-    scene: "质控/领导",
-    title: "我要看异常追溯",
-    desc: "先看待办、风险和异常",
-    tab: "overview",
-    auth: ["inventory:export"]
-  }
-] as const;
-
 const positiveNumberValidator = (_rule: unknown, value: unknown, callback: (error?: Error) => void) => {
   if (Number(value) > 0) return callback();
   callback(new Error("数量必须大于 0"));
@@ -822,9 +824,8 @@ const tabProfiles = {
 const itemMap = computed(() => new Map(db.value.items.map(item => [item.id, item])));
 const itemName = (itemId?: string) => itemMap.value.get(itemId || "")?.name || itemId || "-";
 const itemUnit = (itemId?: string) => itemMap.value.get(itemId || "")?.unit || "";
-const currentAuthRouteName = computed(() => tabRouteNameMap[activeTab.value] || String(route.name || ""));
-const currentAuthButtons = computed(() => new Set(authStore.authButtonListGet[currentAuthRouteName.value] || []));
-const hasInventoryAuth = (code: string) => currentAuthButtons.value.has(code);
+const inventoryCapabilities = computed(() => new Set((authStore as unknown as { capabilities?: string[] }).capabilities || []));
+const hasInventoryAuth = (code: string) => inventoryCapabilities.value.has(code);
 const hasAnyInventoryAuth = (codes: readonly string[]) => codes.some(code => hasInventoryAuth(code));
 const hasInventoryAuthForTab = (tab: string, code: string) =>
   new Set(authStore.authButtonListGet[tabRouteNameMap[tab]] || []).has(code);
@@ -837,9 +838,11 @@ const tabAuthMap: Record<string, readonly string[]> = {
     "inventory:approve",
     "inventory:issue",
     "inventory:count",
-    "inventory:export"
+    "inventory:export",
+    "inventory:report",
+    "inventory:read"
   ],
-  executive: ["inventory:export"],
+  executive: ["inventory:export", "inventory:report"],
   requests: ["inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
   stock: ["inventory:read"],
   items: ["inventory:read"],
@@ -848,17 +851,13 @@ const tabAuthMap: Record<string, readonly string[]> = {
   packages: ["inventory:read", "inventory:approve"],
   trace: ["inventory:export", "inventory:issue", "inventory:count"]
 };
-const canViewAllDepartments = computed(
-  () =>
-    userStore.userInfo.role === "admin" ||
-    hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export"])
+const canViewAllDepartments = computed(() =>
+  hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export", "inventory:report"])
 );
-const canManagePackages = computed(
-  () => userStore.userInfo.role === "admin" || userStore.userInfo.role === "quality" || hasInventoryAuth("inventory:approve")
-);
+const canManagePackages = computed(() => hasInventoryAuth("inventory:approve"));
 const belongsToCurrentDepartment = (department?: string) =>
   canViewAllDepartments.value || !currentDepartment.value || !department || department === currentDepartment.value;
-const canViewAllPackages = computed(() => ["admin", "quality", "manager"].includes(String(userStore.userInfo.role || "")));
+const canViewAllPackages = computed(() => canViewAllDepartments.value);
 const visiblePackages = computed(() =>
   db.value.packages.filter(
     row => canViewAllPackages.value || !currentDepartment.value || row.department === currentDepartment.value
@@ -933,6 +932,21 @@ const departmentOptions = computed(() =>
 );
 
 const categoryFilterOptions = computed(() => Array.from(new Set(db.value.items.map(row => row.category).filter(Boolean))));
+const reportDepartmentOptions = computed(() => {
+  const departments = new Map<string, string>();
+  const authorizedDepartments =
+    (authStore as unknown as { departments?: { id: string; name: string; status?: string }[] }).departments || [];
+  authorizedDepartments.forEach(row => {
+    if (row.id && row.status !== "INACTIVE") departments.set(row.id, row.name || row.id);
+  });
+  locationBalances.value.forEach(row => {
+    if (row.departmentId) departments.set(row.departmentId, row.departmentName || row.departmentId);
+  });
+  return Array.from(departments, ([value, label]) => ({ value, label }));
+});
+const reportItemOptions = computed(() =>
+  db.value.items.map(item => ({ value: item.id, label: `${item.name}${item.spec ? ` / ${item.spec}` : ""}` }))
+);
 
 const containsText = (values: unknown[], keyword: string) => {
   const normalized = keyword.trim().toLowerCase();
@@ -1149,13 +1163,26 @@ const departmentConsumptionTop = computed(() =>
     .slice(0, 6)
 );
 const maxDepartmentConsumption = computed(() => Math.max(...departmentConsumptionTop.value.map(row => row.value), 1));
-const visibleWorkflowSteps = computed(() => workflowSteps.filter(step => hasAnyInventoryAuth(step.auth)));
-const visibleRoleEntryCards = computed(() => roleEntryCards.filter(card => hasAnyInventoryAuth(card.auth)));
 const visibleTabNavItems = computed(() =>
-  tabNavItems.filter(
-    item => userStore.userInfo.role === "admin" || hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || [])
+  tabNavItems.filter(item =>
+    item.tab === "overview"
+      ? hasAnyInventoryAuth(tabAuthMap.overview)
+      : hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || [])
   )
 );
+const canExportDepartmentUsage = computed(() => hasAnyInventoryAuth(["inventory:report", "inventory:export"]));
+const defaultWorkspaceCenter = computed<InventoryCenterKey>(() => {
+  const hasWorkflowWrite = hasAnyInventoryAuth([
+    "inventory:issue",
+    "inventory:approve",
+    "inventory:receive",
+    "inventory:request"
+  ]);
+  if (canExportDepartmentUsage.value && !hasWorkflowWrite && !hasInventoryAuth("inventory:count")) return "analysis";
+  if (hasWorkflowWrite) return "flow";
+  if (hasAnyInventoryAuth(["inventory:count", "inventory:read"])) return "stock";
+  return "analysis";
+});
 const canAccessTab = (tab: string) => visibleTabNavItems.value.some(item => item.tab === tab);
 const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item => hasInventoryAuth(item.auth)));
 const canSubmitReturnOrScrap = computed(() =>
@@ -1500,15 +1527,60 @@ const validateIssueLines = () => {
   return false;
 };
 
+const loadExtendedInventory = async () => {
+  const endpointLabels = ["工作台", "科室余额", "异常任务", "执行耗用"];
+  const [workbenchResult, balancesResult, exceptionsResult, consumptionsResult] = await Promise.allSettled([
+    getInventoryWorkbenchApi(),
+    getInventoryLocationBalancesApi(),
+    getInventoryExceptionsApi(),
+    getInventoryConsumptionsApi()
+  ]);
+  inventoryWorkbench.value = workbenchResult.status === "fulfilled" ? workbenchResult.value.data : undefined;
+  locationBalances.value = balancesResult.status === "fulfilled" ? balancesResult.value.data : [];
+  inventoryExceptions.value = exceptionsResult.status === "fulfilled" ? exceptionsResult.value.data : [];
+  inventoryConsumptions.value = consumptionsResult.status === "fulfilled" ? consumptionsResult.value.data : [];
+  const results = [workbenchResult, balancesResult, exceptionsResult, consumptionsResult];
+  extendedDataErrors.value = results.flatMap((result, index) =>
+    result.status === "rejected"
+      ? [`${endpointLabels[index]}：${result.reason instanceof Error ? result.reason.message : "接口加载失败"}`]
+      : []
+  );
+  extendedDataReady.value = results.every(result => result.status === "fulfilled");
+};
+
 const loadInventory = async () => {
   loading.value = true;
+  const extendedLoad = loadExtendedInventory();
   try {
     const { data } = await getInventoryDbApi();
     db.value = data;
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
+    await extendedLoad;
     loading.value = false;
+  }
+};
+
+const downloadDepartmentUsageReport = async (params: DepartmentUsageReportParams) => {
+  if (!canExportDepartmentUsage.value) {
+    ElMessage.warning("当前岗位暂无科室耗材报表导出权限");
+    return;
+  }
+  reportLoading.value = params.format;
+  try {
+    const { blob, filename } = await downloadDepartmentUsageReportApi(params);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ElMessage.success("科室耗材报表已生成");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    reportLoading.value = "";
   }
 };
 
@@ -1965,7 +2037,10 @@ const exportWeeklyReport = () => {
   exportCsv(rows, "inventory-weekly-report.csv");
 };
 
-onMounted(loadInventory);
+onMounted(() => {
+  workspaceCenter.value = defaultWorkspaceCenter.value;
+  loadInventory();
+});
 </script>
 
 <style scoped lang="scss">
@@ -2137,7 +2212,7 @@ onMounted(loadInventory);
 
 .module-switcher {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: 0;
   overflow: hidden;
   background: var(--inventory-panel);

@@ -191,6 +191,176 @@ export interface InventoryDb {
   summary: InventorySummary;
 }
 
+export type InventoryExceptionSeverity = "info" | "warning" | "critical";
+export type InventoryExceptionStatus = "open" | "processing" | "resolved" | "ignored";
+
+export interface InventoryWorkflowSnapshot {
+  pendingInbound?: number;
+  pendingApproval?: number;
+  pendingIssue?: number;
+  inTransit?: number;
+  pendingReceipt?: number;
+}
+
+export interface InventoryAutomationSnapshot {
+  pending?: number;
+  succeededToday?: number;
+  failed?: number;
+  reversalPending?: number;
+}
+
+export interface InventoryWeeklySuggestion {
+  id: string;
+  departmentId?: string;
+  departmentName: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  actualConsumption: number;
+  availableQuantity: number;
+  safetyQuantity: number;
+  suggestedQuantity: number;
+  reason?: string;
+}
+
+export interface InventoryWorkbench {
+  generatedAt?: string;
+  activeDepartmentId?: string;
+  activeDepartmentName?: string;
+  workflow: InventoryWorkflowSnapshot;
+  automation: InventoryAutomationSnapshot;
+  centralAvailable?: number;
+  departmentAvailable?: number;
+  lowStockCount?: number;
+  expirySoonCount?: number;
+  weeklySuggestions?: InventoryWeeklySuggestion[];
+}
+
+export interface InventoryLocationBalance {
+  id: string;
+  locationId: string;
+  locationName: string;
+  locationType: "central" | "department" | "transit";
+  departmentId?: string;
+  departmentName?: string;
+  itemId: string;
+  itemName: string;
+  category?: string;
+  spec?: string;
+  unit: string;
+  batchId?: string;
+  batchNo?: string;
+  expiryDate?: string;
+  availableQuantity: number;
+  reservedQuantity: number;
+  inTransitQuantity: number;
+  lowStockThreshold?: number;
+  openingConfirmed?: boolean;
+}
+
+export interface InventoryException {
+  id: string;
+  type: string;
+  severity: InventoryExceptionSeverity;
+  status: InventoryExceptionStatus;
+  departmentId?: string;
+  departmentName?: string;
+  itemId?: string;
+  itemName?: string;
+  encounterId?: string;
+  stage?: string;
+  message: string;
+  retryable?: boolean;
+  occurredAt?: string;
+  resolvedAt?: string;
+}
+
+export interface InventoryConsumptionRecord {
+  id: string;
+  commandId?: string;
+  encounterId?: string;
+  encounterNo?: string;
+  patientDisplayName?: string;
+  departmentId?: string;
+  departmentName?: string;
+  stage?: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  batchId?: string;
+  batchNo?: string;
+  packageName?: string;
+  packageVersion?: string | number;
+  quantity: number;
+  reversedQuantity?: number;
+  status: "pending" | "succeeded" | "failed" | "reversed" | "partially_reversed";
+  source?: "package" | "adjustment" | "reversal";
+  consumedAt?: string;
+  errorMessage?: string;
+}
+
+type InventoryApiList<T> = { list?: T[] };
+
+type InventoryWorkbenchApi = {
+  departmentId?: string;
+  department?: string;
+  balances?: InventoryLocationBalanceApi[];
+  exceptions?: InventoryExceptionApi[];
+  opening?: { confirmed?: boolean };
+  flow?: { status?: string; count?: number }[];
+};
+
+type InventoryLocationBalanceApi = Partial<InventoryLocationBalance> & {
+  quantity?: number;
+  department?: string;
+  locationType?: string;
+};
+
+type InventoryExceptionApi = Partial<Omit<InventoryException, "severity" | "status">> & {
+  commandId?: string;
+  exceptionType?: string;
+  triggerStage?: string;
+  department?: string;
+  createdAt?: string;
+  retryCount?: number;
+  severity?: string;
+  status?: string;
+};
+
+type InventoryConsumptionApi = Partial<Omit<InventoryConsumptionRecord, "status">> & {
+  triggerStage?: string;
+  department?: string;
+  createdAt?: string;
+  eventKind?: string;
+  status?: string;
+};
+
+type InventoryConsumptionPageApi = InventoryApiList<InventoryConsumptionApi> & {
+  page?: number;
+  size?: number;
+  total?: number;
+};
+
+export interface InventoryQueryParams {
+  departmentId?: string;
+  itemId?: string;
+  category?: string;
+  stage?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface DepartmentUsageReportParams extends InventoryQueryParams {
+  departmentIds?: string[];
+  format: "pdf" | "xlsx";
+}
+
+export interface InventoryReportDownload {
+  blob: Blob;
+  filename: string;
+}
+
 export type SaveInventoryItemParams = Partial<InventoryItem> & { operator?: string };
 
 export interface InventoryInboundParams {
@@ -295,6 +465,58 @@ const parseInventoryResponse = async (result: Response): Promise<InventoryDb> =>
   return normalizeDb(payload.data);
 };
 
+const parseInventoryDataResponse = async <T>(result: Response): Promise<T> => {
+  if (result.status === 401) handleUnauthorizedResponse();
+  const text = await result.text();
+  if (text.trim().startsWith("<")) {
+    throw new Error("进销存接口未连通，请检查 /inventory-api 代理或部署转发配置");
+  }
+  let payload: ResultData<T>;
+  try {
+    payload = JSON.parse(text) as ResultData<T>;
+  } catch {
+    throw new Error("进销存接口返回格式异常，请检查后端服务状态");
+  }
+  if (!result.ok || String(payload.code) !== "200") {
+    throw new Error(payload.msg || `inventory api failed: ${result.status}`);
+  }
+  return payload.data;
+};
+
+const buildInventoryQuery = (params: Record<string, unknown> = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    if (Array.isArray(value)) {
+      value.filter(Boolean).forEach(item => search.append(key, String(item)));
+      return;
+    }
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return query ? `?${query}` : "";
+};
+
+const getInventoryData = async <T>(path: string, params?: Record<string, unknown>) => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}${buildInventoryQuery(params)}`, {
+    headers: authHeaders()
+  });
+  return response(await parseInventoryDataResponse<T>(result));
+};
+
+const readDownloadFilename = (result: Response, fallback: string) => {
+  const disposition = result.headers.get("content-disposition") || "";
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  return disposition.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
+};
+
 const normalizeNumber = (value: unknown) => {
   const numberValue = Number(value ?? 0);
   return Number.isFinite(numberValue) ? numberValue : 0;
@@ -376,6 +598,195 @@ const response = <T>(data: T, msg = "成功") =>
 export const getInventoryDbApi = async () => {
   const result = await fetch(`${INVENTORY_API_BASE_URL}/db`, { headers: authHeaders() });
   return response(await parseInventoryResponse(result));
+};
+
+const normalizeLocationType = (value?: string): InventoryLocationBalance["locationType"] => {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized === "CENTRAL") return "central";
+  if (normalized === "IN_TRANSIT" || normalized === "TRANSIT") return "transit";
+  return "department";
+};
+
+const normalizeLocationBalance = (row: InventoryLocationBalanceApi): InventoryLocationBalance => {
+  const locationType = normalizeLocationType(row.locationType);
+  const departmentName = row.departmentName || row.department;
+  return {
+    id: row.id || `${row.locationId || "location"}:${row.itemId || "item"}:${row.batchId || "batch"}`,
+    locationId: row.locationId || "",
+    locationName:
+      row.locationName ||
+      (locationType === "central" ? "中央仓库" : locationType === "transit" ? "配送在途" : `${departmentName || "科室"}库`),
+    locationType,
+    departmentId: row.departmentId,
+    departmentName,
+    itemId: row.itemId || "",
+    itemName: row.itemName || row.itemId || "未命名物资",
+    category: row.category,
+    spec: row.spec,
+    unit: row.unit || "",
+    batchId: row.batchId,
+    batchNo: row.batchNo,
+    expiryDate: row.expiryDate,
+    availableQuantity: normalizeNumber(row.availableQuantity ?? row.quantity),
+    reservedQuantity: normalizeNumber(row.reservedQuantity),
+    inTransitQuantity: locationType === "transit" ? normalizeNumber(row.availableQuantity ?? row.quantity) : 0,
+    lowStockThreshold: row.lowStockThreshold === undefined ? undefined : normalizeNumber(row.lowStockThreshold),
+    openingConfirmed: row.openingConfirmed
+  };
+};
+
+const normalizeExceptionSeverity = (value?: string): InventoryExceptionSeverity => {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized === "HIGH" || normalized === "CRITICAL") return "critical";
+  if (normalized === "MEDIUM" || normalized === "WARNING") return "warning";
+  return "info";
+};
+
+const normalizeExceptionStatus = (value?: string): InventoryExceptionStatus => {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized === "RESOLVED") return "resolved";
+  if (normalized === "RETRYING" || normalized === "PROCESSING") return "processing";
+  if (normalized === "IGNORED") return "ignored";
+  return "open";
+};
+
+const normalizeInventoryException = (row: InventoryExceptionApi): InventoryException => {
+  const status = normalizeExceptionStatus(row.status);
+  return {
+    id: row.id || row.commandId || "",
+    type: row.type || row.exceptionType || "INVENTORY_EXCEPTION",
+    severity: normalizeExceptionSeverity(row.severity),
+    status,
+    departmentId: row.departmentId,
+    departmentName: row.departmentName || row.department,
+    itemId: row.itemId,
+    itemName: row.itemName,
+    encounterId: row.encounterId,
+    stage: row.stage || row.triggerStage,
+    message: row.message || "库存任务执行失败",
+    retryable: status === "open" || status === "processing",
+    occurredAt: row.occurredAt || row.createdAt,
+    resolvedAt: row.resolvedAt
+  };
+};
+
+const normalizeConsumptionStatus = (value?: string): InventoryConsumptionRecord["status"] => {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized === "FAILED") return "failed";
+  if (normalized === "REVERSED") return "reversed";
+  if (normalized === "PARTIALLY_REVERSED") return "partially_reversed";
+  if (normalized === "PENDING" || normalized === "RETRY") return "pending";
+  return "succeeded";
+};
+
+const normalizeConsumption = (row: InventoryConsumptionApi): InventoryConsumptionRecord => ({
+  id: row.id || row.commandId || "",
+  commandId: row.commandId,
+  encounterId: row.encounterId,
+  encounterNo: row.encounterNo,
+  patientDisplayName: row.patientDisplayName,
+  departmentId: row.departmentId,
+  departmentName: row.departmentName || row.department,
+  stage: row.stage || row.triggerStage,
+  itemId: row.itemId || "",
+  itemName: row.itemName || row.itemId || "未命名物资",
+  unit: row.unit || "",
+  batchId: row.batchId,
+  batchNo: row.batchNo,
+  packageName: row.packageName,
+  packageVersion: row.packageVersion,
+  quantity: normalizeNumber(row.quantity),
+  reversedQuantity: normalizeNumber(row.reversedQuantity),
+  status: normalizeConsumptionStatus(row.status),
+  source:
+    row.source ||
+    (String(row.eventKind || "")
+      .toUpperCase()
+      .includes("REVERS")
+      ? "reversal"
+      : "package"),
+  consumedAt: row.consumedAt || row.createdAt,
+  errorMessage: row.errorMessage
+});
+
+const flowCount = (rows: InventoryWorkbenchApi["flow"], statuses: string[]) =>
+  (rows || [])
+    .filter(row => statuses.includes(String(row.status || "").toUpperCase()))
+    .reduce((sum, row) => sum + normalizeNumber(row.count), 0);
+
+export const getInventoryWorkbenchApi = async (params: InventoryQueryParams = {}) => {
+  const result = await getInventoryData<InventoryWorkbenchApi>("/workbench", params as unknown as Record<string, unknown>);
+  const raw = result.data;
+  const balances = (raw.balances || []).map(normalizeLocationBalance);
+  const exceptions = (raw.exceptions || []).map(normalizeInventoryException);
+  return response<InventoryWorkbench>({
+    activeDepartmentId: raw.departmentId,
+    activeDepartmentName: raw.department,
+    workflow: {
+      pendingIssue: flowCount(raw.flow, ["RESERVED", "PARTIALLY_IN_TRANSIT"]),
+      inTransit: flowCount(raw.flow, ["IN_TRANSIT", "PARTIALLY_IN_TRANSIT"]),
+      pendingReceipt: flowCount(raw.flow, ["IN_TRANSIT", "PARTIALLY_IN_TRANSIT"])
+    },
+    automation: {
+      failed: exceptions.filter(row => row.status !== "resolved").length
+    },
+    centralAvailable: balances.some(row => row.locationType === "central")
+      ? balances.filter(row => row.locationType === "central").reduce((sum, row) => sum + row.availableQuantity, 0)
+      : undefined,
+    departmentAvailable: balances.some(row => row.locationType === "department")
+      ? balances.filter(row => row.locationType === "department").reduce((sum, row) => sum + row.availableQuantity, 0)
+      : undefined
+  });
+};
+
+export const getInventoryLocationBalancesApi = async (params: InventoryQueryParams = {}) => {
+  const result = await getInventoryData<InventoryApiList<InventoryLocationBalanceApi>>(
+    "/department-balances",
+    params as unknown as Record<string, unknown>
+  );
+  return response((result.data.list || []).map(normalizeLocationBalance));
+};
+
+export const getInventoryExceptionsApi = async (params: InventoryQueryParams = {}) => {
+  const query = { ...params, status: params.status ? String(params.status).toUpperCase() : "OPEN" };
+  const result = await getInventoryData<InventoryApiList<InventoryExceptionApi>>(
+    "/exception-tasks",
+    query as unknown as Record<string, unknown>
+  );
+  return response((result.data.list || []).map(normalizeInventoryException));
+};
+
+export const getInventoryConsumptionsApi = async (params: InventoryQueryParams = {}) => {
+  const result = await getInventoryData<InventoryConsumptionPageApi>(
+    "/consumption-events",
+    params as unknown as Record<string, unknown>
+  );
+  return response((result.data.list || []).map(normalizeConsumption));
+};
+
+export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageReportParams): Promise<InventoryReportDownload> => {
+  const { format, stage, ...filters } = params;
+  const query = { ...filters, triggerStage: stage };
+  const result = await fetch(
+    `${INVENTORY_API_BASE_URL}/reports/department-usage.${format}${buildInventoryQuery(query as unknown as Record<string, unknown>)}`,
+    { headers: authHeaders() }
+  );
+  if (result.status === 401) handleUnauthorizedResponse();
+  if (!result.ok) {
+    const text = await result.text();
+    let message = text;
+    try {
+      const payload = JSON.parse(text) as { msg?: string; message?: string };
+      message = payload.msg || payload.message || text;
+    } catch {
+      // Keep the server text when the response is not JSON.
+    }
+    throw new Error(message || `科室耗材报表导出失败: ${result.status}`);
+  }
+  return {
+    blob: await result.blob(),
+    filename: readDownloadFilename(result, `department-usage.${format}`)
+  };
 };
 
 export const saveInventoryItemApi = async (params: SaveInventoryItemParams) =>
