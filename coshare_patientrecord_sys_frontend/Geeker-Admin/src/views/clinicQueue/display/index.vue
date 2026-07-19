@@ -1445,4 +1445,91 @@ onBeforeUnmount(() => {
 .display-shell * {
   font-weight: 400 !important;
 }
+/* 视觉收束：让叫号数字成为唯一主焦点，降低装饰噪声并保持远距离可读性。 */
+.display-shell,
+.display-shell button {
+  font-family: "Inter", "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.display-shell * {
+  font-weight: 400 !important;
+}
+.display-shell strong,
+.display-shell b,
+.display-shell h2 {
+  font-weight: 700 !important;
+}
+.display-shell button {
+  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), background-color 140ms ease, border-color 140ms ease;
+}
+.display-shell button:active {
+  transform: scale(0.97);
+}
+.display-header {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px);
+}
+.header-audio:hover {
+  border-color: color-mix(in srgb, var(--blue) 42%, #dcebef);
+  background: #eefaff;
+}
+.health-chip b,
+.header-audio b {
+  font-family: "SF Mono", "Cascadia Mono", monospace;
+}
+.room-board {
+  border-radius: 18px;
+  box-shadow: 0 18px 42px rgba(32, 92, 112, 0.08), inset 0 4px 0 color-mix(in srgb, var(--stage-accent) 62%, transparent);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.room-board.has-calling {
+  box-shadow: 0 20px 52px color-mix(in srgb, var(--stage-accent) 16%, transparent), inset 0 4px 0 var(--stage-accent);
+}
+.focus-number,
+.waiting-count strong,
+.waiting-item strong,
+.date-clock strong {
+  font-family: "SF Mono", "Cascadia Mono", "Roboto Mono", monospace;
+  font-weight: 700 !important;
+  letter-spacing: 0;
+}
+.focus-number {
+  text-shadow: 0 2px 0 rgba(255, 255, 255, 0.8);
+}
+.waiting-item {
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms ease, box-shadow 160ms ease;
+}
+.waiting-item.next {
+  border-width: 2px;
+}
+.queue-list-enter-active,
+.queue-list-leave-active {
+  transition: opacity 180ms ease-out, transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.call-overlay-enter-active {
+  transition: opacity 180ms ease-out;
+}
+.call-overlay-enter-active .calling-card {
+  transition: opacity 220ms ease-out, transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.call-overlay-enter-from .calling-card {
+  opacity: 0;
+  transform: scale(0.95) translateY(8px);
+}
+.call-overlay-leave-active {
+  transition: opacity 140ms ease-out;
+}
+.call-overlay-leave-to .calling-card {
+  opacity: 0;
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  .display-shell *,
+  .display-shell *::before,
+  .display-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 </style>
