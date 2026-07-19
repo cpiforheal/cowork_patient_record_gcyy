@@ -549,7 +549,7 @@
                   :preview="reviewPreview"
                   :sections="maskedSections"
                   :can-review="canReview"
-                  :can-generate-target="canReview && Boolean(workspace.encounter.sourcePatientId)"
+                  :can-generate-target="canReview && Boolean(workspace.encounter.id)"
                   :loading="actionLoading"
                   :version-loading="targetVersionsLoading"
                   :encounter-status="workspace.encounter.status"
@@ -2219,9 +2219,8 @@ const voidAttachment = async (attachmentId: string) => {
 
 const loadTargetMedicalRecordVersions = async () => {
   const encounterId = selectedEncounterId.value;
-  const patientId = workspace.value?.encounter.sourcePatientId;
   const requestSequence = ++targetVersionsRequestSequence;
-  if (!encounterId || !patientId) {
+  if (!encounterId) {
     targetMedicalRecordVersions.value = [];
     targetVersionsLoading.value = false;
     return;
@@ -2229,12 +2228,8 @@ const loadTargetMedicalRecordVersions = async () => {
 
   targetVersionsLoading.value = true;
   try {
-    const { data } = await getGeneratedMedicalRecordVersionsApi(patientId);
-    if (
-      requestSequence !== targetVersionsRequestSequence ||
-      selectedEncounterId.value !== encounterId ||
-      workspace.value?.encounter.sourcePatientId !== patientId
-    ) {
+    const { data } = await getGeneratedMedicalRecordVersionsApi({ encounterId });
+    if (requestSequence !== targetVersionsRequestSequence || selectedEncounterId.value !== encounterId) {
       return;
     }
     targetMedicalRecordVersions.value = data;
@@ -2339,14 +2334,13 @@ const copyInpatientAiResult = async () => {
 };
 
 const completeInpatientAiGeneration = async () => {
-  const patientId = workspace.value?.encounter.sourcePatientId;
+  const encounterId = selectedEncounterId.value;
   const sourceRecord = pendingGeneratedTargetRecord.value;
-  if (!patientId || !sourceRecord || !inpatientAiPrompt.value.trim()) return;
+  if (!encounterId || !sourceRecord || !inpatientAiPrompt.value.trim()) return;
   inpatientAiGenerating.value = true;
   try {
     const { data } = await generateInpatientAiMedicalRecordApi({
-      patientId,
-      encounterId: selectedEncounterId.value,
+      encounterId,
       sourceRecordId: sourceRecord.id,
       prompt: inpatientAiPrompt.value.trim()
     });
@@ -2369,9 +2363,12 @@ const completeInpatientAiGeneration = async () => {
 
 const generateTargetMedicalRecord = async () =>
   runAction(async () => {
-    const patientId = workspace.value?.encounter.sourcePatientId;
-    if (!patientId) throw new Error("当前前置病例尚未关联患者档案，不能生成目标病历");
-    const { data } = await generateMedicalRecordApi(patientId);
+    const encounterId = selectedEncounterId.value;
+    if (!encounterId) throw new Error("请先选择前置病例");
+    const { data } = await generateMedicalRecordApi({
+      encounterId,
+      patientCaseId: workspace.value?.encounter.patientCaseId
+    });
     targetMedicalRecordVersions.value = [
       data.record,
       ...targetMedicalRecordVersions.value.filter(record => record.id !== data.record.id)

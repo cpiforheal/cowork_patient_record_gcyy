@@ -53,7 +53,106 @@ public class MedicalRecordSourceBuilder {
         ObjectNode record = mergeReviewedPreAiTcmFacts(patientId, db.path("records").path(patientId));
         ObjectNode source = buildSourceSnapshot(patient, record, db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
         source.set("reviewedPreAiFacts", reviewedPreAiFacts(patientId, maskSensitive));
+        source.put("recordScopeType", "patient");
+        source.put("recordScopeId", patientId);
         return source;
+    }
+
+    public ObjectNode readEncounterSource(
+        String encounterId,
+        SessionUser user,
+        boolean maskSensitive,
+        String templateName,
+        String templateVersion
+    ) {
+        String safeEncounterId = safe(encounterId);
+        if (safeEncounterId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少前置病例ID");
+        List<ObjectNode> encounters = jdbcTemplate.query(
+            """
+                SELECT id, source_patient_id, patient_case_id, case_token, status, current_stage,
+                       patient_json, reviewed_at, updated_at
+                FROM pre_ai_encounters
+                WHERE id = ?
+                LIMIT 1
+                """,
+            (resultSet, rowNum) -> {
+                ObjectNode encounter = objectMapper.createObjectNode();
+                encounter.put("encounterId", safe(resultSet.getString("id")));
+                encounter.put("sourcePatientId", safe(resultSet.getString("source_patient_id")));
+                encounter.put("patientCaseId", safe(resultSet.getString("patient_case_id")));
+                encounter.put("caseToken", safe(resultSet.getString("case_token")));
+                encounter.put("status", safe(resultSet.getString("status")));
+                encounter.put("currentStage", safe(resultSet.getString("current_stage")));
+                encounter.set("patient", readObject(resultSet.getString("patient_json")));
+                encounter.put("reviewedAt", safe(resultSet.getString("reviewed_at")));
+                encounter.put("updatedAt", safe(resultSet.getString("updated_at")));
+                return encounter;
+            },
+            safeEncounterId
+        );
+        if (encounters.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "前置病例不存在或当前账号无权查看");
+        ObjectNode encounter = encounters.get(0);
+        if (!List.of("REVIEWED", "EXPORTED").contains(encounter.path("status").asText(""))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "请先完成最终医生复核");
+        }
+
+        ObjectNode patient = encounter.withObject("patient").deepCopy();
+        putIfIncomplete(patient, "name", patient.path("patientName").asText(""));
+        putIfIncomplete(patient, "patientName", patient.path("name").asText(""));
+        ObjectNode record = objectMapper.createObjectNode();
+        ArrayNode stages = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            """
+                SELECT stage_code, status, version, data_json, completed_at, updated_at
+                FROM pre_ai_stage_submissions
+                WHERE encounter_id = ? AND status = 'COMPLETED'
+                ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
+                """,
+            resultSet -> {
+                JsonNode data = readObject(resultSet.getString("data_json"));
+                mergeStageFacts(record, data);
+                ObjectNode stage = stages.addObject();
+                stage.put("stageCode", safe(resultSet.getString("stage_code")));
+                stage.put("status", safe(resultSet.getString("status")));
+                stage.put("version", resultSet.getInt("version"));
+                stage.set("facts", maskSensitive ? sensitiveDataMasker.maskJson(data) : data);
+                stage.put("completedAt", safe(resultSet.getString("completed_at")));
+            },
+            safeEncounterId
+        );
+        putIfIncomplete(record, "patientName", patient.path("patientName").asText(""));
+        putIfIncomplete(record, "gender", patient.path("gender").asText(""));
+        putIfIncomplete(record, "age", patient.path("age").asText(""));
+        putIfIncomplete(record, "patientAge", patient.path("age").asText(""));
+
+        ObjectNode source = buildSourceSnapshot(
+            patient,
+            record,
+            objectMapper.createArrayNode(),
+            maskSensitive,
+            templateName,
+            templateVersion
+        );
+        ObjectNode reviewedFacts = encounter.deepCopy();
+        reviewedFacts.remove("patient");
+        reviewedFacts.set("stages", stages);
+        source.set("reviewedPreAiFacts", reviewedFacts);
+        source.put("encounterId", safeEncounterId);
+        source.put("patientCaseId", encounter.path("patientCaseId").asText(""));
+        source.put("sourcePatientId", encounter.path("sourcePatientId").asText(""));
+        source.put("recordScopeType", "preai-encounter");
+        source.put("recordScopeId", "preai:" + safeEncounterId);
+        return source;
+    }
+
+    private void mergeStageFacts(ObjectNode target, JsonNode source) {
+        if (source == null || !source.isObject()) return;
+        source.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            if (value == null || value.isNull() || (value.isTextual() && value.asText("").isBlank())) return;
+            if (value.isValueNode()) target.set(entry.getKey(), value.deepCopy());
+            else target.put(entry.getKey(), value.toString());
+        });
     }
 
     public ObjectNode reviewedPreAiFacts(String patientId, boolean maskSensitive) {
@@ -149,6 +248,23 @@ public class MedicalRecordSourceBuilder {
         if (safe(patientId).isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
         Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_patients WHERE id = ?", Integer.class, patientId);
         if (count == null || count <= 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
+    }
+
+    public void assertCanReadScope(String scopeId) {
+        String safeScopeId = safe(scopeId);
+        if (!safeScopeId.startsWith("preai:")) {
+            assertCanReadPatient(safeScopeId);
+            return;
+        }
+        String encounterId = safeScopeId.substring("preai:".length());
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?",
+            Integer.class,
+            encounterId
+        );
+        if (count == null || count <= 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "前置病例不存在或当前账号无权查看");
+        }
     }
 
     public ArrayNode missingItems(ObjectNode sourceSnapshot, List<TargetField> targetFields) {

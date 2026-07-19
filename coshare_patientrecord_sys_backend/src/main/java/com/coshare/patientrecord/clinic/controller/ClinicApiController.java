@@ -391,10 +391,11 @@ public class ClinicApiController {
 
     @GetMapping("/clinic-api/medical-record/versions")
     public ApiResult<Map<String, Object>> medicalRecordVersions(
-        @RequestParam String patientId,
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId,
         @RequestParam(required = false, defaultValue = "0") int limit
     ) {
-        return ApiResult.success(medicalRecordService.versions(patientId, AuthPermission.currentUserOrThrow(), limit));
+        return ApiResult.success(medicalRecordService.versions(patientId, encounterId, AuthPermission.currentUserOrThrow(), limit));
     }
 
     @PostMapping("/clinic-api/medical-record/precheck")

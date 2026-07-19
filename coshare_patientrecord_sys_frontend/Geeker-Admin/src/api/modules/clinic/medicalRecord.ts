@@ -14,8 +14,20 @@ export const getMedicalRecordTemplateApi = async () => {
   return clinicResponse(data);
 };
 
-export const getGeneratedMedicalRecordVersionsApi = async (patientId: string, limit = 50) => {
-  const params = new URLSearchParams({ patientId });
+export interface MedicalRecordGenerationScope {
+  patientId?: string;
+  encounterId?: string;
+  patientCaseId?: string;
+}
+
+export const getGeneratedMedicalRecordVersionsApi = async (scope: string | MedicalRecordGenerationScope, limit = 50) => {
+  const params = new URLSearchParams(
+    typeof scope === "string"
+      ? { patientId: scope }
+      : scope.encounterId
+        ? { encounterId: scope.encounterId }
+        : { patientId: scope.patientId || "" }
+  );
   if (limit > 0) params.set("limit", String(limit));
   const result = await clinicFetch(`/medical-record/versions?${params.toString()}`, {
     headers: authHeaders()
@@ -44,19 +56,20 @@ export const saveMedicalRecordWorkspaceApi = async (patientId: string, values: R
   return clinicResponse(data, "目标病历填写已保存");
 };
 
-export const generateMedicalRecordApi = async (patientId: string) => {
+export const generateMedicalRecordApi = async (scope: string | MedicalRecordGenerationScope) => {
+  const generationScope = typeof scope === "string" ? { patientId: scope } : scope;
   const result = await clinicFetch("/medical-record/generate", {
     method: "POST",
     headers: clinicJsonHeaders(),
-    body: JSON.stringify({ patientId, mode: "target" })
+    body: JSON.stringify({ ...generationScope, mode: "target" })
   });
   const data = await parseClinicApiResponse<MedicalRecordGenerateResult>(result);
   return clinicResponse(data, "目标病历已生成");
 };
 
 export const generateInpatientAiMedicalRecordApi = async (params: {
-  patientId: string;
-  encounterId: string;
+  patientId?: string;
+  encounterId?: string;
   sourceRecordId: string;
   prompt: string;
 }) => {

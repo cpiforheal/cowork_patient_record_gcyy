@@ -123,9 +123,7 @@ public class ClinicMedicalRecordService {
 
     public Map<String, Object> precheck(GenerateRequest request, SessionUser user) {
         requireReadRole();
-        String patientId = safe(request == null ? "" : request.patientId());
-        if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
-        ObjectNode source = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
+        ObjectNode source = generationSource(request, user, false);
         ObjectNode result = objectMapper.createObjectNode();
         List<TargetField> outputFields = outputTargetFields();
         ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, outputFields);
@@ -169,16 +167,15 @@ public class ClinicMedicalRecordService {
     }
 
     public Map<String, Object> versions(String patientId, SessionUser user) {
-        return versions(patientId, user, 0);
+        return versions(patientId, "", user, 0);
     }
 
-    public Map<String, Object> versions(String patientId, SessionUser user, int limit) {
+    public Map<String, Object> versions(String patientId, String encounterId, SessionUser user, int limit) {
         requireReadRole();
-        String safePatientId = safe(patientId);
-        if (safePatientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
-        sourceBuilder.assertCanReadPatient(safePatientId);
+        String scopeId = generationScopeId(patientId, encounterId);
+        sourceBuilder.assertCanReadScope(scopeId);
         ObjectNode result = objectMapper.createObjectNode();
-        result.set("versions", versionRepository.versionsNode(safePatientId, TEMPLATE_VERSION, GENERATOR_NAME, limit));
+        result.set("versions", versionRepository.versionsNode(scopeId, TEMPLATE_VERSION, GENERATOR_NAME, limit));
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
     }
 
@@ -186,7 +183,8 @@ public class ClinicMedicalRecordService {
     public Map<String, Object> generate(GenerateRequest request, SessionUser user) {
         requireGenerateRole();
         String patientId = safe(request == null ? "" : request.patientId());
-        if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
+        String encounterId = safe(request == null ? "" : request.encounterId());
+        String scopeId = generationScopeId(patientId, encounterId);
         if (!templateRenderer.templateAvailable(TEMPLATE_RESOURCE)) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "医生目标病历模板未配置，请检查后端模板文件");
         }
@@ -196,8 +194,8 @@ public class ClinicMedicalRecordService {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "目标病历模板仍有动态字段未绑定占位符：" + joinArray(unboundFields));
         }
 
-        ObjectNode sourceSnapshot = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
-        ObjectNode logSnapshot = sourceBuilder.readPatientSource(patientId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION);
+        ObjectNode sourceSnapshot = generationSource(request, user, false);
+        ObjectNode logSnapshot = generationSource(request, user, true);
         ArrayNode missingItems = sourceBuilder.missingItems(sourceSnapshot, outputFields);
         if (!missingItems.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历动态字段未补齐：" + joinArray(missingItems));
@@ -205,14 +203,14 @@ public class ClinicMedicalRecordService {
         JsonNode patient = sourceSnapshot.path("patient");
         Map<String, String> replacements = sourceBuilder.buildTemplateValues(sourceSnapshot, outputFields);
 
-        int version = versionRepository.nextVersion(patientId);
+        int version = versionRepository.nextVersion(scopeId);
         String id = "medrec-" + UUID.randomUUID();
         byte[] generatedBytes = templateRenderer.renderTemplate(TEMPLATE_RESOURCE, replacements);
         String fileName = sanitizeFileName(patient.path("name").asText("patient")) + "-医生目标病历-V" + version + ".docx";
-        Path target = writeGeneratedFile(patientId, id, fileName, generatedBytes);
+        Path target = writeGeneratedFile(scopeId, id, fileName, generatedBytes);
         String hash = sha256(generatedBytes);
         ObjectNode created = versionRepository.saveVersion(
-            patientId,
+            scopeId,
             id,
             version,
             target,
@@ -238,19 +236,24 @@ public class ClinicMedicalRecordService {
     public Map<String, Object> generateInpatientAi(InpatientAiGenerateRequest request, SessionUser user) {
         requireGenerateRole();
         String patientId = safe(request == null ? "" : request.patientId());
+        String encounterId = safe(request == null ? "" : request.encounterId());
+        String scopeId = generationScopeId(patientId, encounterId);
         String prompt = safe(request == null ? "" : request.prompt());
         String sourceRecordId = safe(request == null ? "" : request.sourceRecordId());
-        if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
         if (prompt.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能为空");
         if (!sourceRecordId.isBlank()) {
             ObjectNode sourceRecord = loadRecordOrThrow(sourceRecordId);
-            if (!patientId.equals(text(sourceRecord, "patientId"))) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "基础目标病历版本与当前患者不匹配");
+            if (!scopeId.equals(text(sourceRecord, "patientId"))) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "基础目标病历版本与当前生成范围不匹配");
             }
         }
 
-        ObjectNode sourceSnapshot = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
-        ObjectNode logSnapshot = sourceBuilder.readPatientSource(patientId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION);
+        ObjectNode sourceSnapshot = encounterId.isBlank()
+            ? sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION)
+            : sourceBuilder.readEncounterSource(encounterId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
+        ObjectNode logSnapshot = encounterId.isBlank()
+            ? sourceBuilder.readPatientSource(patientId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION)
+            : sourceBuilder.readEncounterSource(encounterId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION);
         Map<String, String> replacements = sourceBuilder.buildTemplateValues(sourceSnapshot, outputTargetFields());
         Set<String> allowedFields = new HashSet<>(templateRenderer.completeTemplatePlaceholderKeys(TEMPLATE_RESOURCE));
         InpatientRecordAiService.AiGeneration generated = inpatientRecordAiService.generate(
@@ -264,19 +267,19 @@ public class ClinicMedicalRecordService {
         );
         generated.fields().fields().forEachRemaining(entry -> replacements.put(entry.getKey(), entry.getValue().asText("")));
 
-        int version = versionRepository.nextVersion(patientId);
+        int version = versionRepository.nextVersion(scopeId);
         String id = "medrec-" + UUID.randomUUID();
         byte[] generatedBytes = templateRenderer.renderCompleteTemplate(TEMPLATE_RESOURCE, replacements);
         String patientName = sourceSnapshot.path("patient").path("name").asText("patient");
         String fileName = sanitizeFileName(patientName) + "-豆包住院病历-V" + version + ".docx";
-        Path target = writeGeneratedFile(patientId, id, fileName, generatedBytes);
+        Path target = writeGeneratedFile(scopeId, id, fileName, generatedBytes);
         logSnapshot.put("sourceRecordId", sourceRecordId);
         logSnapshot.put("encounterId", safe(request == null ? "" : request.encounterId()));
         logSnapshot.put("promptHash", sha256(prompt.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         logSnapshot.put("generatorType", "doubao-inpatient-record");
         logSnapshot.set("generatedFieldKeys", objectMapper.valueToTree(new HashSet<>(generated.fields().properties().stream().map(Map.Entry::getKey).toList())));
         ObjectNode created = versionRepository.saveVersion(
-            patientId,
+            scopeId,
             id,
             version,
             target,
@@ -290,7 +293,9 @@ public class ClinicMedicalRecordService {
             TEMPLATE_VERSION,
             generated.model()
         );
-        versionRepository.writeAudit(patientId, user, "豆包生成住院病历草稿", "medical-record.inpatient-ai.generate", "生成 V" + version + "，基础版本 " + sourceRecordId);
+        if (!scopeId.startsWith("preai:")) {
+            versionRepository.writeAudit(scopeId, user, "豆包生成住院病历草稿", "medical-record.inpatient-ai.generate", "生成 V" + version + "，基础版本 " + sourceRecordId);
+        }
 
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", created);
@@ -316,7 +321,7 @@ public class ClinicMedicalRecordService {
         String id = safe(request == null ? "" : request.id());
         if (id.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少目标病历版本ID");
         ObjectNode row = loadRecordOrThrow(id);
-        sourceBuilder.assertCanReadPatient(text(row, "patientId"));
+        sourceBuilder.assertCanReadScope(text(row, "patientId"));
         if (!"draft".equals(text(row, "status"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "只有草稿版本可以确认定稿");
         }
@@ -334,7 +339,7 @@ public class ClinicMedicalRecordService {
         String id = safe(request == null ? "" : request.id());
         if (id.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少目标病历版本ID");
         ObjectNode row = loadRecordOrThrow(id);
-        sourceBuilder.assertCanReadPatient(text(row, "patientId"));
+        sourceBuilder.assertCanReadScope(text(row, "patientId"));
         if ("voided".equals(text(row, "status"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该版本已作废");
         }
@@ -350,7 +355,7 @@ public class ClinicMedicalRecordService {
     public DownloadFile download(String id, SessionUser user) {
         requireReadRole();
         ObjectNode row = loadRecordOrThrow(safe(id));
-        sourceBuilder.assertCanReadPatient(text(row, "patientId"));
+        sourceBuilder.assertCanReadScope(text(row, "patientId"));
         String filePath = text(row, "filePath");
         if (filePath.isBlank()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "该目标病历暂无可下载文件");
         Path target = Path.of(filePath).toAbsolutePath().normalize();
@@ -358,6 +363,26 @@ public class ClinicMedicalRecordService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "目标病历文件不存在，请重新生成");
         }
         return new DownloadFile(new FileSystemResource(target), text(row, "fileName", "医生目标病历.docx"));
+    }
+
+    private ObjectNode generationSource(GenerateRequest request, SessionUser user, boolean maskSensitive) {
+        String patientId = safe(request == null ? "" : request.patientId());
+        String encounterId = safe(request == null ? "" : request.encounterId());
+        if (!encounterId.isBlank()) {
+            return sourceBuilder.readEncounterSource(encounterId, user, maskSensitive, TEMPLATE_NAME, TEMPLATE_VERSION);
+        }
+        if (patientId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID或前置病例ID");
+        }
+        return sourceBuilder.readPatientSource(patientId, user, maskSensitive, TEMPLATE_NAME, TEMPLATE_VERSION);
+    }
+
+    private String generationScopeId(String patientId, String encounterId) {
+        String safeEncounterId = safe(encounterId);
+        if (!safeEncounterId.isBlank()) return "preai:" + safeEncounterId;
+        String safePatientId = safe(patientId);
+        if (safePatientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID或前置病例ID");
+        return safePatientId;
     }
 
     private ObjectNode loadRecordOrThrow(String id) {

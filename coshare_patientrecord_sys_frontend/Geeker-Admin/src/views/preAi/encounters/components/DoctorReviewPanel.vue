@@ -282,7 +282,7 @@ const reviewConfirmed = computed(() => ["REVIEWED", "EXPORTED"].includes(props.e
 const targetGenerationAvailable = computed(() => reviewConfirmed.value && props.canGenerateTarget);
 const targetGenerationDisabledReason = computed(() => {
   if (!reviewConfirmed.value) return "请先完成最终医生复核";
-  if (!props.canGenerateTarget) return "当前前置病例尚未关联患者档案，暂不能生成目标病历";
+  if (!props.canGenerateTarget) return "当前账号无权为该前置病例生成目标病历";
   return "";
 });
 const orderedTargetVersions = computed(() => [...props.targetVersions].sort((left, right) => right.version - left.version));
