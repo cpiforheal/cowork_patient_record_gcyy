@@ -708,7 +708,7 @@
           type="info"
           :closable="false"
           show-icon
-          title="基础目标病历已生成。请核对并调整提示词，完成后豆包会依据已复核前置事实生成新的住院病历草稿版本。"
+          title="您已选择继续 AI 加工。请核对并调整提示词，豆包会依据已复核前置事实另存为新的住院病历草稿版本。"
         />
         <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">AI 提示词</label>
         <el-input
@@ -724,7 +724,7 @@
         <p>Base URL、API Key 与模型由后台读取已保存的豆包配置，不会传到浏览器或写入病历文件。</p>
       </div>
       <template #footer>
-        <el-button :disabled="inpatientAiGenerating" @click="closeInpatientAiDialog">暂不生成</el-button>
+        <el-button :disabled="inpatientAiGenerating" @click="closeInpatientAiDialog">取消 AI 加工</el-button>
         <el-button
           type="primary"
           :loading="inpatientAiGenerating"
@@ -2306,6 +2306,7 @@ const closeInpatientAiDialog = () => {
   if (inpatientAiGenerating.value) return;
   inpatientAiDialogVisible.value = false;
   pendingGeneratedTargetRecord.value = undefined;
+  ElMessage.info("已取消 AI 加工，基础目标病历仍保留在版本列表中");
 };
 
 const copyInpatientAiResult = async () => {
@@ -2375,11 +2376,29 @@ const generateTargetMedicalRecord = async () =>
     ];
     latestGeneratedTargetVersionId.value = data.record.id;
     latestGeneratedExportVersionId.value = "";
-    pendingGeneratedTargetRecord.value = data.record;
-    inpatientAiPrompt.value = buildInpatientAiPrompt();
-    inpatientAiDialogVisible.value = true;
     await loadTargetMedicalRecordVersions();
-    ElMessage.success(`基础目标病历 V${data.record.version} 已生成，请确认 AI 提示词`);
+
+    const missingHint = data.missingItems.length
+      ? `当前仍有 ${data.missingItems.length} 个模板字段缺失，基础草稿已按前置病历现有事实生成。`
+      : "基础草稿已按前置病历事实完整生成。";
+    try {
+      await ElMessageBox.confirm(
+        `${missingHint}\n\n是否继续使用豆包进行 AI 加工？AI 加工会另存新版本，不会覆盖基础草稿。`,
+        `基础目标病历 V${data.record.version} 已生成`,
+        {
+          confirmButtonText: "继续 AI 加工",
+          cancelButtonText: "暂不加工",
+          type: "success",
+          distinguishCancelAndClose: true
+        }
+      );
+      pendingGeneratedTargetRecord.value = data.record;
+      inpatientAiPrompt.value = buildInpatientAiPrompt();
+      inpatientAiDialogVisible.value = true;
+    } catch {
+      pendingGeneratedTargetRecord.value = undefined;
+      ElMessage.success(`已保留基础目标病历 V${data.record.version}，本次跳过 AI 加工`);
+    }
   });
 
 const generateExport = async () =>

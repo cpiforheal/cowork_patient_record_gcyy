@@ -176,8 +176,9 @@ public class PreAiEncounterService {
         requireRole(user, "admin", "frontdesk");
         ObjectNode patient = sanitizeStageData("REGISTRATION", request == null ? null : request.patient());
         validateStage("REGISTRATION", patient, null);
-        String patientCaseId = createPatientCase(patient, "");
-        return toMap(createEncounterInternal(patient, "", patientCaseId, 1, "", objectMapper.createObjectNode(), objectMapper.createObjectNode(), user));
+        String sourcePatientId = createClinicPatientArchive(patient);
+        String patientCaseId = createPatientCase(patient, sourcePatientId);
+        return toMap(createEncounterInternal(patient, sourcePatientId, patientCaseId, 1, "", objectMapper.createObjectNode(), objectMapper.createObjectNode(), user));
     }
 
     @Transactional
@@ -193,11 +194,12 @@ public class PreAiEncounterService {
 
         ObjectNode patient = sanitizeStageData("REGISTRATION", request.patient());
         validateStage("REGISTRATION", patient, null);
-        String patientCaseId = createPatientCase(patient, "");
+        String sourcePatientId = createClinicPatientArchive(patient);
+        String patientCaseId = createPatientCase(patient, sourcePatientId);
         ObjectNode created;
         try {
             created = createEncounterInternal(
-                patient, "", patientCaseId, 1, "", objectMapper.createObjectNode(), objectMapper.createObjectNode(), user, clientRequestId
+                patient, sourcePatientId, patientCaseId, 1, "", objectMapper.createObjectNode(), objectMapper.createObjectNode(), user, clientRequestId
             );
         } catch (DuplicateKeyException duplicate) {
             List<String> concurrent = jdbcTemplate.query(
@@ -206,6 +208,7 @@ public class PreAiEncounterService {
             );
             if (concurrent.isEmpty()) throw duplicate;
             jdbcTemplate.update("DELETE FROM pre_ai_patient_cases WHERE id = ? AND NOT EXISTS (SELECT 1 FROM pre_ai_encounters WHERE patient_case_id = ?)", patientCaseId, patientCaseId);
+            jdbcTemplate.update("DELETE FROM clinic_patients WHERE id = ? AND NOT EXISTS (SELECT 1 FROM pre_ai_patient_cases WHERE source_patient_id = ?)", sourcePatientId, sourcePatientId);
             return registerAndIssueResult(concurrent.get(0), user);
         }
 
@@ -1338,6 +1341,58 @@ public class PreAiEncounterService {
         if (!rows.isEmpty()) return rows.get(0);
         if (!requested.isBlank()) throw forbidden("所选科室不在当前账号授权范围内");
         throw forbidden("当前账号未配置可用的活动科室");
+    }
+
+    private String createClinicPatientArchive(ObjectNode patient) {
+        String id = "patient-" + UUID.randomUUID();
+        String timestamp = now();
+        String patientName = text(patient, "patientName", "未命名患者");
+        String visitNo = firstNonBlank(
+            text(patient, "visitNo"),
+            text(patient, "inpatientNo"),
+            text(patient, "admissionNo"),
+            text(patient, "medicalRecordNo")
+        );
+        ObjectNode archive = objectMapper.createObjectNode();
+        archive.put("id", id);
+        archive.put("name", patientName);
+        archive.put("visitNo", visitNo);
+        archive.put("visitDate", text(patient, "visitDate"));
+        archive.put("visitType", "前置病历");
+        archive.put("doctor", "");
+        archive.put("currentStage", "前置病历登记");
+        archive.put("completedCount", 1);
+        archive.put("progressPercent", 0);
+        archive.put("status", "前置病历流转中");
+        archive.put("riskType", "info");
+        archive.put("createdAt", timestamp);
+        archive.put("updatedAt", timestamp);
+        archive.put("encounterCount", 1);
+        archive.put("sourceType", "preai");
+        archive.put("phone", text(patient, "phone"));
+        archive.put("gender", text(patient, "gender"));
+        archive.put("identityType", text(patient, "identityType"));
+        archive.put("identityNumber", text(patient, "identityNumber"));
+        archive.set("encounterHistory", objectMapper.createArrayNode());
+        jdbcTemplate.update("""
+            INSERT INTO clinic_patients (
+              id, name, visit_no, visit_date, visit_type, doctor, current_stage, completed_count,
+              progress_percent, status, risk_type, created_at, updated_at, encounter_count,
+              encounter_history_json, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON))
+            """,
+            id, patientName, visitNo, text(patient, "visitDate"), "前置病历", "", "前置病历登记", 1,
+            0, "前置病历流转中", "info", timestamp, timestamp, 1,
+            toJson(archive.path("encounterHistory")), toJson(archive)
+        );
+        return id;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (!safe(value).isBlank()) return safe(value);
+        }
+        return "";
     }
 
     private String createPatientCase(ObjectNode patient, String sourcePatientId) {

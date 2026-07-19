@@ -197,7 +197,7 @@ public class ClinicMedicalRecordService {
         ObjectNode sourceSnapshot = generationSource(request, user, false);
         ObjectNode logSnapshot = generationSource(request, user, true);
         ArrayNode missingItems = sourceBuilder.missingItems(sourceSnapshot, outputFields);
-        if (!missingItems.isEmpty()) {
+        if (encounterId.isBlank() && !missingItems.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历动态字段未补齐：" + joinArray(missingItems));
         }
         JsonNode patient = sourceSnapshot.path("patient");
@@ -228,6 +228,8 @@ public class ClinicMedicalRecordService {
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", created);
         result.set("missingItems", missingItems);
+        result.put("sourceType", encounterId.isBlank() ? "patient-archive" : "preai-encounter");
+        result.put("requiresAiProcessing", false);
         result.put("disclaimer", DISCLAIMER);
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
     }
