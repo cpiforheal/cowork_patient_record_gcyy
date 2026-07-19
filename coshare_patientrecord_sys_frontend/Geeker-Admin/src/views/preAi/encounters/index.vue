@@ -1599,9 +1599,17 @@ const selectEncounter = async (id: string, preserveView = false) => {
       if (pendingSelection?.encounterId === id) {
         activateWorkflowCard(pendingSelection.card);
       } else {
-        selectedStageCode.value = data.encounter.currentStage || "REGISTRATION";
-        selectedPanel.value = "STAGE";
-        workflowSelected.value = false;
+        const currentStage = (data.encounter.currentStage || "REGISTRATION") as PreAiStageCode;
+        const currentCard = workflowCards.value.find(
+          card => card.kind === "STAGE" && card.stageCode === currentStage
+        );
+        if (currentCard) {
+          activateWorkflowCard(currentCard);
+        } else {
+          selectedStageCode.value = currentStage;
+          selectedPanel.value = "STAGE";
+          workflowSelected.value = true;
+        }
       }
       editorMode.value = "EDIT";
       reviewPreview.value = undefined;

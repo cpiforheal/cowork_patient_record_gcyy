@@ -2196,33 +2196,20 @@ public class PreAiEncounterService {
     }
 
     private boolean canAccessEncounter(String encounterId, SessionUser user) {
-        if (user == null) return false;
+        if (user == null || safe(encounterId).isBlank()) return false;
         if (Set.of("admin", "quality", "manager").contains(user.role())) return true;
+
+        // 前置病历是跨科室的岗位流水线：归属科室只用于登记归属和管理边界，
+        // 不应阻断检查室、接诊室、化验室和医生读取同一份正在流转的事实。
+        // 具体写权限仍由 requireStageEditor / 岗位安排单独校验。
+        return READ_ROLES.contains(user.role()) && encounterExists(encounterId);
+    }
+
+    private boolean encounterExists(String encounterId) {
         Integer count = jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*)
-            FROM pre_ai_encounters e
-            WHERE e.id = ?
-              AND (
-                EXISTS (
-                  SELECT 1
-                  FROM clinic_account_departments ad
-                  WHERE ad.account_id = ?
-                    AND ad.department_id = e.owning_department_id
-                    AND ad.status = 'ACTIVE'
-                    AND e.owning_department_id <> 'dept-unassigned'
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM pre_ai_encounter_department_grants g
-                  WHERE g.account_id = ?
-                    AND g.encounter_id = e.id
-                    AND g.status = 'ACTIVE'
-                )
-              )
-            """,
+            "SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?",
             Integer.class,
-            safe(encounterId), safe(user.id()), safe(user.id())
+            safe(encounterId)
         );
         return count != null && count > 0;
     }
