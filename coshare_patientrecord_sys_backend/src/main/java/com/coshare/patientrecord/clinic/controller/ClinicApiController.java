@@ -21,6 +21,7 @@ import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
 import com.coshare.patientrecord.medicalrecord.dto.FinalizeRequest;
 import com.coshare.patientrecord.medicalrecord.dto.GenerateRequest;
+import com.coshare.patientrecord.medicalrecord.dto.InpatientAiGenerateRequest;
 import com.coshare.patientrecord.medicalrecord.dto.VoidRequest;
 import com.coshare.patientrecord.medicalrecord.dto.WorkspaceSaveRequest;
 import com.coshare.patientrecord.medicalrecord.service.ClinicMedicalRecordService;
@@ -409,6 +410,11 @@ public class ClinicApiController {
     @PostMapping("/clinic-api/medical-record/generate")
     public ApiResult<Map<String, Object>> generateMedicalRecord(@RequestBody GenerateRequest request) {
         return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u5df2\u751f\u6210", medicalRecordService.generate(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/generate-inpatient-ai")
+    public ApiResult<Map<String, Object>> generateInpatientAiMedicalRecord(@RequestBody InpatientAiGenerateRequest request) {
+        return ApiResult.of(200, "豆包住院病历草稿已生成", medicalRecordService.generateInpatientAi(request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/clinic-api/medical-record/finalize")

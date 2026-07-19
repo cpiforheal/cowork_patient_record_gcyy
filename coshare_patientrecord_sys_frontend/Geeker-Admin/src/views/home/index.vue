@@ -22,7 +22,6 @@
       >
         进入第一项待办
       </el-button>
-      <el-button size="large" :icon="ChatDotRound" @click="assistantVisible = true">豆包助手</el-button>
     </section>
 
     <section v-loading="dashboardLoading" class="exception-strip" element-loading-text="正在刷新待办...">
@@ -126,13 +125,6 @@
         @run-backup-now="runBackupNow"
       />
     </section>
-    <AiAssistantPanel
-      v-model="assistantVisible"
-      :assistant-type="homeAssistantType"
-      :title="homeAssistantTitle"
-      :default-prompt="homeAssistantPrompt"
-      :context="homeAssistantContext"
-    />
   </div>
 </template>
 
@@ -140,7 +132,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { ArrowRight, ChatDotRound } from "@element-plus/icons-vue";
+import { ArrowRight } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
@@ -152,14 +144,12 @@ import {
   getWorkRemindersApi,
   runBackupNowApi,
   saveBackupConfigApi,
-  type AiAssistantType,
   type BackupStatus,
   type MaintenanceStatus,
   type OperationStats,
   type PatientRow,
   type WorkReminder
 } from "@/api/modules/clinic";
-import AiAssistantPanel from "@/components/AiAssistantPanel/index.vue";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
@@ -212,7 +202,6 @@ const backupPath = ref("");
 const backupEnabled = ref(true);
 const backupLoading = ref(false);
 const choosingBackupDir = ref(false);
-const assistantVisible = ref(false);
 const stats = ref<OperationStats>({
   totalPatients: 0,
   pendingPatients: 0,
@@ -537,42 +526,6 @@ const taskCards = computed<HomeTask[]>(() =>
 );
 
 const firstActionTask = computed(() => actionTasks.value.find(task => task.level !== "success") || actionTasks.value[0]);
-const homeAssistantType = computed<AiAssistantType>(() => {
-  if (["admin", "manager"].includes(currentRole.value)) return "leader";
-  if (currentRole.value === "quality") return "quality";
-  return "public";
-});
-const homeAssistantTitle = computed(() =>
-  homeAssistantType.value === "leader" ? "管理助手" : homeAssistantType.value === "quality" ? "质控助手" : "豆包院内助手"
-);
-const homeAssistantPrompt = computed(() => {
-  if (homeAssistantType.value === "leader") return "请根据当前首页数据，帮我概括今天最需要管理层关注的风险和建议动作。";
-  if (homeAssistantType.value === "quality") return "请根据当前待审核与退回数据，帮我整理质控优先处理顺序。";
-  return "请结合我的岗位和当前待办，告诉我现在最应该先处理什么。";
-});
-const homeAssistantContext = computed(() => ({
-  role: currentRole.value,
-  roleName: roleName.value,
-  department: userStore.userInfo.department || "",
-  operator: userStore.userInfo.name || "",
-  stats: stats.value,
-  actionTasks: actionTasks.value.map(item => ({
-    title: item.title,
-    count: item.count,
-    level: item.level,
-    desc: item.desc,
-    actionText: item.actionText
-  })),
-  backup:
-    currentRole.value === "admin"
-      ? {
-          latest: latestBackupSummary.value,
-          storage: backupStorageSummary.value,
-          running: Boolean(backupStatus.value?.running),
-          health: backupHealthItems.value
-        }
-      : undefined
-}));
 
 const loadPrimaryDashboard = async () => {
   dashboardLoading.value = true;

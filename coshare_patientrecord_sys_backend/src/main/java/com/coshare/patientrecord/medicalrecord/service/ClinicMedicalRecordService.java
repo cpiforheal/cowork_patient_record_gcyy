@@ -3,6 +3,7 @@ package com.coshare.patientrecord.medicalrecord.service;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.medicalrecord.dto.DownloadFile;
 import com.coshare.patientrecord.medicalrecord.dto.FinalizeRequest;
+import com.coshare.patientrecord.medicalrecord.dto.InpatientAiGenerateRequest;
 import com.coshare.patientrecord.medicalrecord.dto.GenerateRequest;
 import com.coshare.patientrecord.medicalrecord.dto.VoidRequest;
 import com.coshare.patientrecord.medicalrecord.dto.WorkspaceSaveRequest;
@@ -74,6 +75,7 @@ public class ClinicMedicalRecordService {
     private final ObjectMapper objectMapper;
     private final MedicalRecordTemplateRenderer templateRenderer;
     private final MedicalRecordSourceBuilder sourceBuilder;
+    private final InpatientRecordAiService inpatientRecordAiService;
     private final Path generatedDir;
 
     public ClinicMedicalRecordService(
@@ -81,12 +83,14 @@ public class ClinicMedicalRecordService {
         ObjectMapper objectMapper,
         MedicalRecordTemplateRenderer templateRenderer,
         MedicalRecordSourceBuilder sourceBuilder,
+        InpatientRecordAiService inpatientRecordAiService,
         @Value("${clinic.generated-medical-record-dir:${clinic.attachment-dir}/../generated-medical-records}") String generatedDir
     ) {
         this.versionRepository = versionRepository;
         this.objectMapper = objectMapper;
         this.templateRenderer = templateRenderer;
         this.sourceBuilder = sourceBuilder;
+        this.inpatientRecordAiService = inpatientRecordAiService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
 
@@ -98,9 +102,9 @@ public class ClinicMedicalRecordService {
         status.put("name", TEMPLATE_NAME);
         status.put("templateVersion", TEMPLATE_VERSION);
         status.put("configured", templateRenderer.templateAvailable(TEMPLATE_RESOURCE) && unboundFields.isEmpty());
-        status.put("promptConfigurable", false);
+        status.put("promptConfigurable", true);
         status.put("templateSource", TEMPLATE_SOURCE_NAME);
-        status.put("commandSource", "固定 docx 母版 + 多岗位协作字段填充；本轮不调用 AI");
+        status.put("commandSource", "固定 docx 母版 + 多岗位协作字段填充；医生确认提示词后可调用豆包生成完整住院病历草稿");
         status.put("disclaimer", DISCLAIMER);
         status.put("generatedDir", generatedDir.toString());
         ArrayNode sections = status.putArray("sections");
@@ -227,6 +231,71 @@ public class ClinicMedicalRecordService {
         result.set("record", created);
         result.set("missingItems", missingItems);
         result.put("disclaimer", DISCLAIMER);
+        return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+    }
+
+    @Transactional
+    public Map<String, Object> generateInpatientAi(InpatientAiGenerateRequest request, SessionUser user) {
+        requireGenerateRole();
+        String patientId = safe(request == null ? "" : request.patientId());
+        String prompt = safe(request == null ? "" : request.prompt());
+        String sourceRecordId = safe(request == null ? "" : request.sourceRecordId());
+        if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
+        if (prompt.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能为空");
+        if (!sourceRecordId.isBlank()) {
+            ObjectNode sourceRecord = loadRecordOrThrow(sourceRecordId);
+            if (!patientId.equals(text(sourceRecord, "patientId"))) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "基础目标病历版本与当前患者不匹配");
+            }
+        }
+
+        ObjectNode sourceSnapshot = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
+        ObjectNode logSnapshot = sourceBuilder.readPatientSource(patientId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION);
+        Map<String, String> replacements = sourceBuilder.buildTemplateValues(sourceSnapshot, outputTargetFields());
+        Set<String> allowedFields = new HashSet<>(templateRenderer.completeTemplatePlaceholderKeys(TEMPLATE_RESOURCE));
+        InpatientRecordAiService.AiGeneration generated = inpatientRecordAiService.generate(
+            prompt,
+            sourceSnapshot,
+            sourceSnapshot.path("reviewedPreAiFacts").isObject()
+                ? (ObjectNode) sourceSnapshot.path("reviewedPreAiFacts")
+                : objectMapper.createObjectNode(),
+            replacements,
+            allowedFields
+        );
+        generated.fields().fields().forEachRemaining(entry -> replacements.put(entry.getKey(), entry.getValue().asText("")));
+
+        int version = versionRepository.nextVersion(patientId);
+        String id = "medrec-" + UUID.randomUUID();
+        byte[] generatedBytes = templateRenderer.renderCompleteTemplate(TEMPLATE_RESOURCE, replacements);
+        String patientName = sourceSnapshot.path("patient").path("name").asText("patient");
+        String fileName = sanitizeFileName(patientName) + "-豆包住院病历-V" + version + ".docx";
+        Path target = writeGeneratedFile(patientId, id, fileName, generatedBytes);
+        logSnapshot.put("sourceRecordId", sourceRecordId);
+        logSnapshot.put("encounterId", safe(request == null ? "" : request.encounterId()));
+        logSnapshot.put("promptHash", sha256(prompt.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        logSnapshot.put("generatorType", "doubao-inpatient-record");
+        logSnapshot.set("generatedFieldKeys", objectMapper.valueToTree(new HashSet<>(generated.fields().properties().stream().map(Map.Entry::getKey).toList())));
+        ObjectNode created = versionRepository.saveVersion(
+            patientId,
+            id,
+            version,
+            target,
+            fileName,
+            sha256(generatedBytes),
+            logSnapshot,
+            user,
+            "draft",
+            "",
+            "周xx住院病历模板",
+            TEMPLATE_VERSION,
+            generated.model()
+        );
+        versionRepository.writeAudit(patientId, user, "豆包生成住院病历草稿", "medical-record.inpatient-ai.generate", "生成 V" + version + "，基础版本 " + sourceRecordId);
+
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("record", created);
+        result.set("missingItems", objectMapper.createArrayNode());
+        result.put("disclaimer", "该版本由豆包依据已复核病历事实生成，必须由医生复核后方可定稿。");
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
     }
 

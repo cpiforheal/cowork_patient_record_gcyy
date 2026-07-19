@@ -54,6 +54,21 @@ export const generateMedicalRecordApi = async (patientId: string) => {
   return clinicResponse(data, "目标病历已生成");
 };
 
+export const generateInpatientAiMedicalRecordApi = async (params: {
+  patientId: string;
+  encounterId: string;
+  sourceRecordId: string;
+  prompt: string;
+}) => {
+  const result = await clinicFetch("/medical-record/generate-inpatient-ai", {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(params)
+  });
+  const data = await parseClinicApiResponse<MedicalRecordGenerateResult>(result);
+  return clinicResponse(data, "豆包住院病历草稿已生成");
+};
+
 export const finalizeMedicalRecordApi = async (id: string) => {
   const result = await clinicFetch("/medical-record/finalize", {
     method: "POST",

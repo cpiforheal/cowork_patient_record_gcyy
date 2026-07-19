@@ -46,6 +46,14 @@ public class MedicalRecordTemplateRenderer {
     }
 
     public byte[] renderTemplate(String templateResource, Map<String, String> replacements) {
+        return renderTemplate(templateResource, replacements, true);
+    }
+
+    public byte[] renderCompleteTemplate(String templateResource, Map<String, String> replacements) {
+        return renderTemplate(templateResource, replacements, false);
+    }
+
+    private byte[] renderTemplate(String templateResource, Map<String, String> replacements, boolean trimGenerationScope) {
         try (InputStream inputStream = templateInputStream(templateResource);
              ZipInputStream zipInputStream = new ZipInputStream(inputStream, StandardCharsets.UTF_8);
              ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -57,7 +65,7 @@ public class MedicalRecordTemplateRenderer {
                 byte[] bytes = zipInputStream.readAllBytes();
                 if (entry.getName().matches("word/(document|header\\d*|footer\\d*)\\.xml")) {
                     String xml = new String(bytes, StandardCharsets.UTF_8);
-                    if ("word/document.xml".equals(entry.getName())) {
+                    if (trimGenerationScope && "word/document.xml".equals(entry.getName())) {
                         xml = trimDocumentXmlToGenerationScope(xml);
                     }
                     xml = applyReplacements(xml, replacements);
@@ -113,6 +121,14 @@ public class MedicalRecordTemplateRenderer {
     }
 
     public Set<String> templatePlaceholderKeys(String templateResource) {
+        return readTemplatePlaceholderKeys(templateResource, true);
+    }
+
+    public Set<String> completeTemplatePlaceholderKeys(String templateResource) {
+        return readTemplatePlaceholderKeys(templateResource, false);
+    }
+
+    private Set<String> readTemplatePlaceholderKeys(String templateResource, boolean trimGenerationScope) {
         Set<String> keys = new HashSet<>();
         if (!templateAvailable(templateResource)) return keys;
         try (InputStream inputStream = templateInputStream(templateResource);
@@ -123,7 +139,7 @@ public class MedicalRecordTemplateRenderer {
                 byte[] bytes = zipInputStream.readAllBytes();
                 if (entry.getName().matches("word/(document|header\\d*|footer\\d*)\\.xml")) {
                     String xml = new String(bytes, StandardCharsets.UTF_8);
-                    if ("word/document.xml".equals(entry.getName())) {
+                    if (trimGenerationScope && "word/document.xml".equals(entry.getName())) {
                         xml = trimDocumentXmlToGenerationScope(xml);
                     }
                     var matcher = placeholder.matcher(xml);

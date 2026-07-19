@@ -51,7 +51,57 @@ public class MedicalRecordSourceBuilder {
         JsonNode patient = findPatient(db.path("patients"), patientId);
         if (patient == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
         ObjectNode record = mergeReviewedPreAiTcmFacts(patientId, db.path("records").path(patientId));
-        return buildSourceSnapshot(patient, record, db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
+        ObjectNode source = buildSourceSnapshot(patient, record, db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
+        source.set("reviewedPreAiFacts", reviewedPreAiFacts(patientId, maskSensitive));
+        return source;
+    }
+
+    public ObjectNode reviewedPreAiFacts(String patientId, boolean maskSensitive) {
+        List<ObjectNode> encounters = jdbcTemplate.query(
+            """
+                SELECT id, case_token, status, current_stage, reviewed_at, updated_at
+                FROM pre_ai_encounters
+                WHERE source_patient_id = ?
+                  AND status IN ('REVIEWED', 'EXPORTED')
+                ORDER BY reviewed_at DESC, updated_at DESC
+                LIMIT 1
+                """,
+            (resultSet, rowNum) -> {
+                ObjectNode encounter = objectMapper.createObjectNode();
+                encounter.put("encounterId", safe(resultSet.getString("id")));
+                encounter.put("caseToken", safe(resultSet.getString("case_token")));
+                encounter.put("status", safe(resultSet.getString("status")));
+                encounter.put("currentStage", safe(resultSet.getString("current_stage")));
+                encounter.put("reviewedAt", safe(resultSet.getString("reviewed_at")));
+                encounter.put("updatedAt", safe(resultSet.getString("updated_at")));
+                return encounter;
+            },
+            patientId
+        );
+        if (encounters.isEmpty()) return objectMapper.createObjectNode();
+
+        ObjectNode facts = encounters.get(0);
+        ArrayNode stages = facts.putArray("stages");
+        jdbcTemplate.query(
+            """
+                SELECT stage_code, status, version, data_json, completed_at, updated_at
+                FROM pre_ai_stage_submissions
+                WHERE encounter_id = ?
+                  AND status = 'COMPLETED'
+                ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
+                """,
+            resultSet -> {
+                ObjectNode stage = stages.addObject();
+                stage.put("stageCode", safe(resultSet.getString("stage_code")));
+                stage.put("status", safe(resultSet.getString("status")));
+                stage.put("version", resultSet.getInt("version"));
+                JsonNode data = readObject(resultSet.getString("data_json"));
+                stage.set("facts", maskSensitive ? sensitiveDataMasker.maskJson(data) : data);
+                stage.put("completedAt", safe(resultSet.getString("completed_at")));
+            },
+            facts.path("encounterId").asText("")
+        );
+        return facts;
     }
 
     private ObjectNode mergeReviewedPreAiTcmFacts(String patientId, JsonNode record) {
@@ -186,6 +236,15 @@ public class MedicalRecordSourceBuilder {
             if (patientId.equals(text(patient, "id"))) return patient;
         }
         return null;
+    }
+
+    private JsonNode readObject(String rawJson) {
+        try {
+            JsonNode parsed = objectMapper.readTree(safe(rawJson));
+            return parsed != null && parsed.isObject() ? parsed : objectMapper.createObjectNode();
+        } catch (Exception ignored) {
+            return objectMapper.createObjectNode();
+        }
     }
 
     private void put(Map<String, String> values, String key, String value) {

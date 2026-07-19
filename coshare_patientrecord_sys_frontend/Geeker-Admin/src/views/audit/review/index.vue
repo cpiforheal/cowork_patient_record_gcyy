@@ -10,7 +10,6 @@
         <el-select v-model="statusFilter" clearable placeholder="审核状态" @change="loadReviewList">
           <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-button :icon="ChatDotRound" @click="qualityAssistantVisible = true">质控助手</el-button>
         <el-button :icon="Refresh" :loading="listLoading" @click="loadReviewList">刷新</el-button>
       </div>
     </section>
@@ -125,15 +124,6 @@
         </template>
       </main>
     </section>
-    <AiAssistantPanel
-      v-model="qualityAssistantVisible"
-      assistant-type="quality"
-      title="质控助手"
-      :patient-id="activeDetail?.patient.id"
-      :default-prompt="qualityAssistantPrompt"
-      :context="qualityAssistantContext"
-      :attachment-ids="qualityAssistantAttachmentIds"
-    />
   </div>
 </template>
 
@@ -141,8 +131,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { ChatDotRound, Refresh } from "@element-plus/icons-vue";
-import AiAssistantPanel from "@/components/AiAssistantPanel/index.vue";
+import { Refresh } from "@element-plus/icons-vue";
 import {
   approveQualityReviewApi,
   getQualityReviewDetailApi,
@@ -169,7 +158,6 @@ const reviewComment = ref("");
 const listLoading = ref(false);
 const detailLoading = ref(false);
 const actionLoading = ref<"" | "reject" | "approve">("");
-const qualityAssistantVisible = ref(false);
 
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
 const currentOperator = computed(() => userStore.userInfo.name || roleLabel(currentRole.value));
@@ -213,63 +201,6 @@ const filteredIssues = computed(() => {
     return levelMatched && textMatched;
   });
 });
-
-const qualityAssistantPrompt = computed(() =>
-  activeDetail.value
-    ? "请帮我根据当前档案质控问题，整理退回意见草稿、优先处理顺序和是否可归档的判断依据。"
-    : "请帮我梳理当前质控队列的风险优先级和今日处理建议。"
-);
-const qualityAssistantAttachmentIds = computed(() =>
-  (activeDetail.value?.attachments || [])
-    .filter(attachment => attachment.status !== "voided")
-    .map(attachment => attachment.key || attachment.storagePath || attachment.fileName)
-    .filter(Boolean)
-);
-const qualityAssistantContext = computed<Record<string, unknown>>(() => ({
-  role: currentRole.value,
-  operator: currentOperator.value,
-  queue: {
-    total: reviewRows.value.length,
-    criticalTotal: reviewRows.value.reduce((total, row) => total + row.criticalCount, 0),
-    warningTotal: reviewRows.value.reduce((total, row) => total + row.warningCount, 0),
-    rows: reviewRows.value.slice(0, 20).map(row => ({
-      patient: row.name,
-      visitNo: row.visitNo,
-      status: row.status,
-      score: row.score,
-      issueCount: row.issueCount,
-      criticalCount: row.criticalCount,
-      warningCount: row.warningCount,
-      updatedAt: row.updatedAt
-    }))
-  },
-  activeReview: activeDetail.value
-    ? {
-        patient: {
-          id: activeDetail.value.patient.id,
-          name: activeDetail.value.patient.name,
-          visitNo: activeDetail.value.patient.visitNo,
-          doctor: activeDetail.value.patient.doctor,
-          currentStage: activeDetail.value.patient.currentStage
-        },
-        score: activeDetail.value.score,
-        summary: qualitySummary.value,
-        archiveSubmitted: activeDetail.value.archiveSubmitted,
-        archiveVersion: activeDetail.value.archiveVersion,
-        generatedAt: activeDetail.value.generatedAt,
-        checks: archiveChecks.value,
-        issues: filteredIssues.value.slice(0, 40),
-        attachments: activeDetail.value.attachments.slice(0, 30).map(attachment => ({
-          key: attachment.key,
-          title: attachment.title,
-          field: attachment.fieldLabel,
-          fileName: attachment.fileName,
-          status: attachment.status || "active",
-          uploadedAt: attachment.uploadedAt
-        }))
-      }
-    : undefined
-}));
 
 const loadReviewDetail = async (id: string) => {
   activeId.value = id;

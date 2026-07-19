@@ -694,6 +694,48 @@
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="inpatientAiDialogVisible"
+      title="豆包生成住院病历"
+      width="720px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!inpatientAiGenerating"
+      :show-close="!inpatientAiGenerating"
+      destroy-on-close
+    >
+      <div class="inpatient-ai-dialog">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="基础目标病历已生成。请核对并调整提示词，完成后豆包会依据已复核前置事实生成新的住院病历草稿版本。"
+        />
+        <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">AI 提示词</label>
+        <el-input
+          id="inpatient-ai-prompt"
+          v-model="inpatientAiPrompt"
+          type="textarea"
+          :rows="8"
+          maxlength="4000"
+          show-word-limit
+          resize="vertical"
+          :disabled="inpatientAiGenerating"
+        />
+        <p>Base URL、API Key 与模型由后台读取已保存的豆包配置，不会传到浏览器或写入病历文件。</p>
+      </div>
+      <template #footer>
+        <el-button :disabled="inpatientAiGenerating" @click="closeInpatientAiDialog">暂不生成</el-button>
+        <el-button
+          type="primary"
+          :loading="inpatientAiGenerating"
+          :disabled="!inpatientAiPrompt.trim()"
+          @click="completeInpatientAiGeneration"
+        >
+          完成并生成
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="legacyDialogVisible" title="导入进行中的旧患者" width="620px">
       <el-alert type="info" :closable="false" show-icon title="只复制可明确映射的字段和附件引用，不会修改或反写旧档案。" />
       <el-select
@@ -730,6 +772,7 @@ import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
 import {
   downloadMedicalRecordApi,
+  generateInpatientAiMedicalRecordApi,
   generateMedicalRecordApi,
   getGeneratedMedicalRecordVersionsApi
 } from "@/api/modules/clinic/medicalRecord";
@@ -910,6 +953,10 @@ const targetMedicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
 const targetVersionsLoading = ref(false);
 const latestGeneratedTargetVersionId = ref("");
 const latestGeneratedExportVersionId = ref("");
+const inpatientAiDialogVisible = ref(false);
+const inpatientAiGenerating = ref(false);
+const inpatientAiPrompt = ref("");
+const pendingGeneratedTargetRecord = ref<GeneratedMedicalRecord>();
 let workspaceRequestSequence = 0;
 let workspaceImageRequestSequence = 0;
 let timelineRequestSequence = 0;
@@ -2212,6 +2259,50 @@ const confirmReview = async () =>
     ElMessage.success("医生复核已确认，现在可以生成脱敏 DOCX");
   });
 
+const buildInpatientAiPrompt = () => {
+  const patientName = workspace.value?.encounter.patient.patientName || "当前患者";
+  const doctorFacts = stageForms.DOCTOR || {};
+  const primaryDiagnosis = String(doctorFacts.westernDiagnosis || doctorFacts.primaryDiagnosis || "待医生确认主诊断").trim();
+  const secondaryItems = Array.isArray(doctorFacts.secondaryDiagnoses)
+    ? doctorFacts.secondaryDiagnoses
+        .map((item: any) => String(item?.diagnosis || item?.name || item || "").trim())
+        .filter(Boolean)
+    : [];
+  const diagnoses = [primaryDiagnosis, ...secondaryItems].filter(Boolean).join("、");
+  return `请按照周xx病历的格式、结构、段落、排版、查房时序，完整生成【${patientName}】【${diagnoses}】的住院病历，要求自动生成中药方剂参考主病、主证及兼证、四诊内容，理法一致，不改动任何格式与写法，排版相同。`;
+};
+
+const closeInpatientAiDialog = () => {
+  if (inpatientAiGenerating.value) return;
+  inpatientAiDialogVisible.value = false;
+  pendingGeneratedTargetRecord.value = undefined;
+};
+
+const completeInpatientAiGeneration = async () => {
+  const patientId = workspace.value?.encounter.sourcePatientId;
+  const sourceRecord = pendingGeneratedTargetRecord.value;
+  if (!patientId || !sourceRecord || !inpatientAiPrompt.value.trim()) return;
+  inpatientAiGenerating.value = true;
+  try {
+    const { data } = await generateInpatientAiMedicalRecordApi({
+      patientId,
+      encounterId: selectedEncounterId.value,
+      sourceRecordId: sourceRecord.id,
+      prompt: inpatientAiPrompt.value.trim()
+    });
+    latestGeneratedTargetVersionId.value = data.record.id;
+    latestGeneratedExportVersionId.value = "";
+    inpatientAiDialogVisible.value = false;
+    pendingGeneratedTargetRecord.value = undefined;
+    await loadTargetMedicalRecordVersions();
+    ElMessage.success(`豆包住院病历 V${data.record.version} 已生成，请下载并完成医生复核`);
+  } catch (error: any) {
+    ElMessage.error(error.message || "豆包住院病历生成失败，提示词已保留，可重试");
+  } finally {
+    inpatientAiGenerating.value = false;
+  }
+};
+
 const generateTargetMedicalRecord = async () =>
   runAction(async () => {
     const patientId = workspace.value?.encounter.sourcePatientId;
@@ -2223,8 +2314,11 @@ const generateTargetMedicalRecord = async () =>
     ];
     latestGeneratedTargetVersionId.value = data.record.id;
     latestGeneratedExportVersionId.value = "";
+    pendingGeneratedTargetRecord.value = data.record;
+    inpatientAiPrompt.value = buildInpatientAiPrompt();
+    inpatientAiDialogVisible.value = true;
     await loadTargetMedicalRecordVersions();
-    ElMessage.success(`目标病历 V${data.record.version} 已生成并进入版本列表`);
+    ElMessage.success(`基础目标病历 V${data.record.version} 已生成，请确认 AI 提示词`);
   });
 
 const generateExport = async () =>
@@ -2333,6 +2427,24 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
+.inpatient-ai-dialog {
+  display: grid;
+  gap: 16px;
+
+  &__label {
+    color: #1f2937;
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  p {
+    margin: 0;
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+}
+
 .pre-ai-page {
   display: flex;
   flex-direction: column;

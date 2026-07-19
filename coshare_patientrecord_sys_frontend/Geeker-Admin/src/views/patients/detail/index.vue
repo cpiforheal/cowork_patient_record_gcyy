@@ -151,8 +151,6 @@
 
                 <el-dropdown-item command="ai" :disabled="aiSummaryLoading">AI总结</el-dropdown-item>
 
-                <el-dropdown-item command="assistant" :icon="ChatDotRound">患者助手</el-dropdown-item>
-
                 <el-dropdown-item v-if="canUseRoleViewFilter" command="inspection">检查室视图</el-dropdown-item>
 
                 <el-dropdown-item v-if="canUseRoleViewFilter" command="lab">化验报告视图</el-dropdown-item>
@@ -1533,15 +1531,6 @@
         />
       </el-dialog>
 
-      <AiAssistantPanel
-        v-model="patientAssistantVisible"
-        assistant-type="patient"
-        title="患者助手"
-        :patient-id="patientId"
-        :default-prompt="patientAssistantPrompt"
-        :context="patientAssistantContext"
-        :attachment-ids="patientAssistantAttachmentIds"
-      />
     </div>
   </div>
 </template>
@@ -1566,9 +1555,7 @@ import { ElMessage } from "element-plus";
 
 import { useRoute, useRouter } from "vue-router";
 
-import { ArrowDown, ChatDotRound, Clock, DocumentCopy, FolderOpened, Printer, Upload, View } from "@element-plus/icons-vue";
-
-import AiAssistantPanel from "@/components/AiAssistantPanel/index.vue";
+import { ArrowDown, Clock, DocumentCopy, FolderOpened, Printer, Upload, View } from "@element-plus/icons-vue";
 
 import TreeFilter from "@/components/TreeFilter/index.vue";
 
@@ -1685,7 +1672,6 @@ type PatientDetailMoreCommand =
   | "quality"
   | "timeline"
   | "ai"
-  | "assistant"
   | "inspection"
   | "lab"
   | "copy";
@@ -1734,7 +1720,6 @@ const savedSectionKey = ref("");
 
 const highlightedFieldKey = ref("");
 
-const patientAssistantVisible = ref(false);
 
 const medicalRecordVisible = ref(false);
 
@@ -3707,96 +3692,6 @@ const patientFieldSearchItems = computed<PatientFieldSearchItem[]>(() => {
   return [...fieldItems, ...attachmentItems, ...stageItems];
 });
 
-const patientAssistantPrompt = computed(
-  () => "请根据当前患者档案，帮我总结重点、缺失项、附件证据和下一步处理建议。请只给院内辅助建议，不要替代诊断。"
-);
-
-const patientAssistantAttachmentIds = computed(() =>
-  currentAttachments.value
-
-    .filter(attachment => attachment.status !== "voided")
-
-    .map(attachment => attachment.key || attachment.storagePath || attachment.fileName)
-
-    .filter(Boolean)
-);
-
-const patientAssistantContext = computed<Record<string, unknown>>(() => ({
-  role: currentRole.value,
-
-  roleName: roleName.value,
-
-  patientId: patientId.value,
-
-  patientName: fieldValues.patientName || patientInfo.value?.name || "",
-
-  visitNo: fieldValues.visitNo || patientInfo.value?.visitNo || patientId.value,
-
-  visitType: currentVisitType.value,
-
-  currentStage: patientInfo.value?.currentStage || activeLifecycleStage.value.title,
-
-  activeLifecycleStage: {
-    title: activeLifecycleStage.value.title,
-
-    owner: activeLifecycleStage.value.owner,
-
-    department: activeLifecycleStage.value.department,
-
-    nextOwner: nextLifecycleStage.value.owner
-  },
-
-  completion: {
-    percent: completionPercent.value,
-
-    completed: completionStats.value.completed,
-
-    total: completionStats.value.total,
-
-    lifecycleCompleted: lifecycleProgress.value.completed,
-
-    lifecycleTotal: lifecycleProgress.value.total
-  },
-
-  workflowHint: workflowHint.value,
-
-  missingOrInvalidItems: fieldIssues.value.slice(0, 30).map(issue => ({
-    section: issue.sectionTitle,
-
-    field: issue.fieldLabel,
-
-    level: issue.level,
-
-    message: issue.message
-  })),
-
-  attachments: currentAttachments.value.slice(0, 30).map(attachment => ({
-    key: attachment.key,
-
-    title: attachment.title,
-
-    field: attachment.fieldLabel,
-
-    department: attachment.department,
-
-    fileName: attachment.fileName,
-
-    status: attachment.status || "active",
-
-    uploadedAt: attachment.uploadedAt
-  })),
-
-  archive: {
-    submitted: archiveSubmitted.value,
-
-    version: archiveVersion.value,
-
-    lastSavedAt: lastSavedAt.value,
-
-    autoSaveStatus: autoSaveStatus.value
-  }
-}));
-
 const lifecycleRailSummary = computed(
   () => `${activeLifecycleStage.value.department} · ${lifecycleProgress.value.completed}/${lifecycleProgress.value.total} 环`
 );
@@ -4091,10 +3986,6 @@ const handleMoreAction = (command: PatientDetailMoreCommand) => {
     return;
   }
 
-  if (command === "assistant") {
-    patientAssistantVisible.value = true;
-    return;
-  }
 
   if (command === "inspection" || command === "lab") {
     openRoleView(command);
