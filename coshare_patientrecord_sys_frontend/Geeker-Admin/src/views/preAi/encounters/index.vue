@@ -551,13 +551,18 @@
                   :can-review="canReview"
                   :can-generate-target="canReview && Boolean(workspace.encounter.sourcePatientId)"
                   :loading="actionLoading"
+                  :version-loading="targetVersionsLoading"
                   :encounter-status="workspace.encounter.status"
                   :exports="workspace.exports"
+                  :target-versions="targetMedicalRecordVersions"
+                  :latest-target-version-id="latestGeneratedTargetVersionId"
+                  :latest-export-version-id="latestGeneratedExportVersionId"
                   @refresh="loadReviewPreview"
                   @confirm="confirmReview"
                   @generate="generateExport"
                   @generate-target="generateTargetMedicalRecord"
                   @download="downloadPreAiExportApi"
+                  @download-target="downloadMedicalRecordApi"
                 />
               </section>
 
@@ -723,7 +728,11 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
 import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
-import { downloadMedicalRecordApi, generateMedicalRecordApi } from "@/api/modules/clinic/medicalRecord";
+import {
+  downloadMedicalRecordApi,
+  generateMedicalRecordApi,
+  getGeneratedMedicalRecordVersionsApi
+} from "@/api/modules/clinic/medicalRecord";
 import { completeQueuePrintTaskApi, createQueuePrintTaskApi } from "@/api/modules/clinic/clinicQueue";
 import {
   completePreAiStageApi,
@@ -751,6 +760,7 @@ import {
   uploadPreAiAttachmentApi,
   voidPreAiAttachmentApi,
   type PatientRow,
+  type GeneratedMedicalRecord,
   type InspectionTimelineNode,
   type PreAiAttachment,
   type PreAiDutyAssignment,
@@ -896,10 +906,15 @@ const auxForms = reactive<Record<string, { title: string; requiredBeforeExport: 
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
+const targetMedicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
+const targetVersionsLoading = ref(false);
+const latestGeneratedTargetVersionId = ref("");
+const latestGeneratedExportVersionId = ref("");
 let workspaceRequestSequence = 0;
 let workspaceImageRequestSequence = 0;
 let timelineRequestSequence = 0;
 let reviewRequestSequence = 0;
+let targetVersionsRequestSequence = 0;
 let historyRequestSequence = 0;
 let workspaceAbortController: AbortController | undefined;
 let workspaceImageAbortController: AbortController | undefined;
@@ -1557,6 +1572,11 @@ const selectEncounter = async (id: string, preserveView = false) => {
     resetTimelineContext();
     cancelReviewRequest();
     resetHistoricalComparison();
+    targetVersionsRequestSequence += 1;
+    targetVersionsLoading.value = false;
+    targetMedicalRecordVersions.value = [];
+    latestGeneratedTargetVersionId.value = "";
+    latestGeneratedExportVersionId.value = "";
   }
   const requestController = new AbortController();
   workspaceAbortController = requestController;
@@ -2107,9 +2127,40 @@ const voidAttachment = async (attachmentId: string) => {
   });
 };
 
+const loadTargetMedicalRecordVersions = async () => {
+  const encounterId = selectedEncounterId.value;
+  const patientId = workspace.value?.encounter.sourcePatientId;
+  const requestSequence = ++targetVersionsRequestSequence;
+  if (!encounterId || !patientId) {
+    targetMedicalRecordVersions.value = [];
+    targetVersionsLoading.value = false;
+    return;
+  }
+
+  targetVersionsLoading.value = true;
+  try {
+    const { data } = await getGeneratedMedicalRecordVersionsApi(patientId);
+    if (
+      requestSequence !== targetVersionsRequestSequence ||
+      selectedEncounterId.value !== encounterId ||
+      workspace.value?.encounter.sourcePatientId !== patientId
+    ) {
+      return;
+    }
+    targetMedicalRecordVersions.value = data;
+  } catch (error: any) {
+    if (requestSequence === targetVersionsRequestSequence) {
+      ElMessage.error(error.message || "目标病历版本加载失败");
+    }
+  } finally {
+    if (requestSequence === targetVersionsRequestSequence) targetVersionsLoading.value = false;
+  }
+};
+
 const loadReviewPreview = async () => {
   const encounterId = selectedEncounterId.value;
   if (!encounterId || !canReview.value) return;
+  void loadTargetMedicalRecordVersions();
   if (reviewRequestInFlightEncounterId === encounterId) return;
   if (reviewAbortController) cancelReviewRequest();
 
@@ -2158,8 +2209,14 @@ const generateTargetMedicalRecord = async () =>
     const patientId = workspace.value?.encounter.sourcePatientId;
     if (!patientId) throw new Error("当前前置病例尚未关联患者档案，不能生成目标病历");
     const { data } = await generateMedicalRecordApi(patientId);
-    await downloadMedicalRecordApi(data.record);
-    ElMessage.success("目标病历模板已生成并下载");
+    targetMedicalRecordVersions.value = [
+      data.record,
+      ...targetMedicalRecordVersions.value.filter(record => record.id !== data.record.id)
+    ];
+    latestGeneratedTargetVersionId.value = data.record.id;
+    latestGeneratedExportVersionId.value = "";
+    await loadTargetMedicalRecordVersions();
+    ElMessage.success(`目标病历 V${data.record.version} 已生成并进入版本列表`);
   });
 
 const generateExport = async () =>
@@ -2171,13 +2228,10 @@ const generateExport = async () =>
       throw new Error(error.message || "生成失败，请根据请求编号查看后台日志");
     }
     hydrateWorkspace(data.workspace);
+    latestGeneratedTargetVersionId.value = "";
+    latestGeneratedExportVersionId.value = data.export.id;
     await loadEncounterList();
-    try {
-      await downloadPreAiExportApi(data.export);
-    } catch (error: any) {
-      throw new Error(error.message || "文档已生成，但下载失败，请从导出版本列表重试");
-    }
-    ElMessage.success("脱敏前置资料已生成并下载");
+    ElMessage.success(`脱敏前置资料 V${data.export.version} 已生成并进入版本列表`);
   });
 
 const runAction = async (action: () => Promise<void>) => {
@@ -2200,6 +2254,8 @@ const cleanupTransientResources = () => {
   resetWorkspaceImageContext();
   resetTimelineContext();
   cancelReviewRequest();
+  targetVersionsRequestSequence += 1;
+  targetVersionsLoading.value = false;
   historyAbortController?.abort();
   historyAbortController = undefined;
   historyRequestSequence += 1;
