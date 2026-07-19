@@ -294,9 +294,20 @@ public class ClinicMedicalRecordService {
 
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", created);
+        result.put("generatedContent", buildCopyableInpatientContent(generated.fields()));
+        result.put("model", generated.model());
         result.set("missingItems", objectMapper.createArrayNode());
         result.put("disclaimer", "该版本由豆包依据已复核病历事实生成，必须由医生复核后方可定稿。");
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private String buildCopyableInpatientContent(ObjectNode generatedFields) {
+        List<String> blocks = new ArrayList<>();
+        generatedFields.fields().forEachRemaining(entry -> {
+            String value = safe(entry.getValue().asText(""));
+            if (!value.isBlank()) blocks.add(value);
+        });
+        return String.join(System.lineSeparator() + System.lineSeparator(), blocks);
     }
 
     @Transactional

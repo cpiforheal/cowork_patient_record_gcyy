@@ -736,6 +736,39 @@
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="inpatientAiResultDialogVisible"
+      title="豆包已生成目标住院病历"
+      width="860px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <div class="inpatient-ai-result">
+        <el-alert
+          type="success"
+          :closable="false"
+          show-icon
+          title="目标内容已生成并保存为新的病历草稿版本，请复制或下载后继续医生复核。"
+        />
+        <div class="inpatient-ai-result__meta">
+          <span>模型：{{ inpatientAiResultModel || "已配置豆包模型" }}</span>
+          <span v-if="inpatientAiResultRecord">版本：V{{ inpatientAiResultRecord.version }}</span>
+        </div>
+        <el-input
+          v-model="inpatientAiResultContent"
+          type="textarea"
+          :rows="18"
+          readonly
+          resize="vertical"
+          aria-label="豆包生成的目标住院病历内容"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="inpatientAiResultDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :disabled="!inpatientAiResultContent" @click="copyInpatientAiResult"> 复制全部内容 </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="legacyDialogVisible" title="导入进行中的旧患者" width="620px">
       <el-alert type="info" :closable="false" show-icon title="只复制可明确映射的字段和附件引用，不会修改或反写旧档案。" />
       <el-select
@@ -957,6 +990,10 @@ const inpatientAiDialogVisible = ref(false);
 const inpatientAiGenerating = ref(false);
 const inpatientAiPrompt = ref("");
 const pendingGeneratedTargetRecord = ref<GeneratedMedicalRecord>();
+const inpatientAiResultDialogVisible = ref(false);
+const inpatientAiResultContent = ref("");
+const inpatientAiResultModel = ref("");
+const inpatientAiResultRecord = ref<GeneratedMedicalRecord>();
 let workspaceRequestSequence = 0;
 let workspaceImageRequestSequence = 0;
 let timelineRequestSequence = 0;
@@ -1647,9 +1684,7 @@ const selectEncounter = async (id: string, preserveView = false) => {
         activateWorkflowCard(pendingSelection.card);
       } else {
         const currentStage = (data.encounter.currentStage || "REGISTRATION") as PreAiStageCode;
-        const currentCard = workflowCards.value.find(
-          card => card.kind === "STAGE" && card.stageCode === currentStage
-        );
+        const currentCard = workflowCards.value.find(card => card.kind === "STAGE" && card.stageCode === currentStage);
         if (currentCard) {
           activateWorkflowCard(currentCard);
         } else {
@@ -2278,6 +2313,31 @@ const closeInpatientAiDialog = () => {
   pendingGeneratedTargetRecord.value = undefined;
 };
 
+const copyInpatientAiResult = async () => {
+  const content = inpatientAiResultContent.value;
+  if (!content) return;
+
+  try {
+    if (navigator.clipboard && globalThis.isSecureContext) {
+      await navigator.clipboard.writeText(content);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = content;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("浏览器未允许复制");
+    }
+    ElMessage.success("目标病历内容已复制");
+  } catch {
+    ElMessage.warning("自动复制失败，请在文本框内全选并复制");
+  }
+};
+
 const completeInpatientAiGeneration = async () => {
   const patientId = workspace.value?.encounter.sourcePatientId;
   const sourceRecord = pendingGeneratedTargetRecord.value;
@@ -2292,10 +2352,14 @@ const completeInpatientAiGeneration = async () => {
     });
     latestGeneratedTargetVersionId.value = data.record.id;
     latestGeneratedExportVersionId.value = "";
+    inpatientAiResultContent.value = data.generatedContent || data.record.content || "";
+    inpatientAiResultModel.value = data.model || data.record.model || "";
+    inpatientAiResultRecord.value = data.record;
     inpatientAiDialogVisible.value = false;
     pendingGeneratedTargetRecord.value = undefined;
+    inpatientAiResultDialogVisible.value = true;
     await loadTargetMedicalRecordVersions();
-    ElMessage.success(`豆包住院病历 V${data.record.version} 已生成，请下载并完成医生复核`);
+    ElMessage.success(`豆包住院病历 V${data.record.version} 已生成，可复制内容或下载复核`);
   } catch (error: any) {
     ElMessage.error(error.message || "豆包住院病历生成失败，提示词已保留，可重试");
   } finally {
@@ -2442,6 +2506,26 @@ onBeforeUnmount(() => {
     color: #6b7280;
     font-size: 12px;
     line-height: 1.7;
+  }
+}
+
+.inpatient-ai-result {
+  display: grid;
+  gap: 16px;
+
+  &__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    color: #4b5563;
+    font-size: 13px;
+  }
+
+  :deep(.el-textarea__inner) {
+    color: #1f2937;
+    font-family: inherit;
+    line-height: 1.8;
+    background: #f8fafc;
   }
 }
 

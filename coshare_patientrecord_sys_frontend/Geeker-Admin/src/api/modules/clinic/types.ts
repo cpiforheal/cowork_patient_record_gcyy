@@ -444,6 +444,8 @@ export interface MedicalRecordTemplateStatus {
 
 export interface MedicalRecordGenerateResult {
   record: GeneratedMedicalRecord;
+  generatedContent?: string;
+  model?: string;
   missingItems: string[];
   disclaimer: string;
 }
