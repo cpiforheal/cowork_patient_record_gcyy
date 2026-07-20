@@ -109,6 +109,15 @@ export const voidMedicalRecordApi = async (id: string, reason: string) => {
   return clinicResponse(data.record, "目标病历版本已作废");
 };
 
+export const deleteMedicalRecordApi = async (id: string) => {
+  const result = await clinicFetch(`/medical-record/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const data = await parseClinicApiResponse<{ id: string; version: number; fileDeleted: boolean }>(result);
+  return clinicResponse(data, "目标病历历史版本及对应文件已删除");
+};
+
 export const downloadMedicalRecordApi = async (record: GeneratedMedicalRecord) => {
   const result = await clinicFetch(`/medical-record/download?id=${encodeURIComponent(record.id)}`, {
     headers: authHeaders()

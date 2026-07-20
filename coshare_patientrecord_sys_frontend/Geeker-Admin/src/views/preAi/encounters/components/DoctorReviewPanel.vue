@@ -205,9 +205,20 @@
                   {{ version.templateVersion || version.templateName || "当前模板" }}
                 </small>
               </div>
-              <el-button type="primary" plain :disabled="version.status === 'voided'" @click="$emit('downloadTarget', version)">
-                下载
-              </el-button>
+              <div class="version-actions">
+                <el-button type="primary" plain :disabled="version.status === 'voided'" @click="$emit('downloadTarget', version)">
+                  下载
+                </el-button>
+                <el-button
+                  v-if="version.status !== 'finalized'"
+                  type="danger"
+                  plain
+                  :loading="deletingTargetVersionId === version.id"
+                  @click="$emit('deleteTarget', version)"
+                >
+                  删除
+                </el-button>
+              </div>
             </div>
           </template>
         </article>
@@ -276,6 +287,7 @@ const props = defineProps<{
   targetVersions: GeneratedMedicalRecord[];
   latestTargetVersionId: string;
   latestExportVersionId: string;
+  deletingTargetVersionId: string;
 }>();
 
 const reviewConfirmed = computed(() => ["REVIEWED", "EXPORTED"].includes(props.encounterStatus));
@@ -313,6 +325,7 @@ defineEmits<{
   generateTarget: [];
   download: [version: PreAiExportVersion];
   downloadTarget: [version: GeneratedMedicalRecord];
+  deleteTarget: [version: GeneratedMedicalRecord];
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
 }>();
@@ -350,6 +363,11 @@ defineEmits<{
 }
 .review-actions {
   align-items: center;
+}
+.version-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
 }
 .generate-actions {
   display: flex;

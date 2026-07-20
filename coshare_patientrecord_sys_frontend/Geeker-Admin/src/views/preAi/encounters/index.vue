@@ -557,12 +557,14 @@
                   :target-versions="targetMedicalRecordVersions"
                   :latest-target-version-id="latestGeneratedTargetVersionId"
                   :latest-export-version-id="latestGeneratedExportVersionId"
+                  :deleting-target-version-id="deletingTargetVersionId"
                   @refresh="loadReviewPreview"
                   @confirm="confirmReview"
                   @generate="generateExport"
                   @generate-target="generateTargetMedicalRecord"
                   @download="downloadPreAiExportApi"
                   @download-target="downloadMedicalRecordApi"
+                  @delete-target="deleteTargetMedicalRecord"
                 />
               </section>
 
@@ -834,6 +836,7 @@ import { useUserStore } from "@/stores/modules/user";
 import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
 import {
+  deleteMedicalRecordApi,
   downloadMedicalRecordApi,
   generateInpatientAiMedicalRecordApi,
   generateMedicalRecordApi,
@@ -1014,6 +1017,7 @@ const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
 const targetMedicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
 const targetVersionsLoading = ref(false);
+const deletingTargetVersionId = ref("");
 const latestGeneratedTargetVersionId = ref("");
 const latestGeneratedExportVersionId = ref("");
 const inpatientAiDialogVisible = ref(false);
@@ -2247,6 +2251,47 @@ const voidAttachment = async (attachmentId: string) => {
     hydrateWorkspace(data);
     ElMessage.success("附件引用已作废");
   });
+};
+
+const deleteTargetMedicalRecord = async (version: GeneratedMedicalRecord) => {
+  if (version.status === "finalized") {
+    ElMessage.warning("已定稿目标病历不可删除；如需更正，请先按病历管理流程作废");
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除目标病历 V${version.version} 及对应 Word 文件吗？此操作不可恢复。`,
+      "删除历史病历",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消"
+      }
+    );
+    deletingTargetVersionId.value = version.id;
+    await deleteMedicalRecordApi(version.id);
+
+    if (latestGeneratedTargetVersionId.value === version.id) latestGeneratedTargetVersionId.value = "";
+    if (pendingGeneratedTargetRecord.value?.id === version.id) {
+      pendingGeneratedTargetRecord.value = undefined;
+      inpatientAiDialogVisible.value = false;
+      clearInpatientAiReference();
+    }
+    if (inpatientAiResultRecord.value?.id === version.id) {
+      inpatientAiResultRecord.value = undefined;
+      inpatientAiResultContent.value = "";
+      inpatientAiResultModel.value = "";
+      inpatientAiResultDialogVisible.value = false;
+    }
+
+    await loadTargetMedicalRecordVersions();
+    ElMessage.success(`目标病历 V${version.version} 已删除`);
+  } catch (error: any) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(error?.message || "目标病历删除失败");
+  } finally {
+    deletingTargetVersionId.value = "";
+  }
 };
 
 const loadTargetMedicalRecordVersions = async () => {

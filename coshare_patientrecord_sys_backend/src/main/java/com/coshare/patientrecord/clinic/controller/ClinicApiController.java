@@ -44,6 +44,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -450,6 +451,15 @@ public class ClinicApiController {
     @PostMapping("/clinic-api/medical-record/void")
     public ApiResult<Map<String, Object>> voidMedicalRecord(@RequestBody VoidRequest request) {
         return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u7248\u672c\u5df2\u4f5c\u5e9f", medicalRecordService.voidRecord(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @DeleteMapping("/clinic-api/medical-record/{id}")
+    public ApiResult<Map<String, Object>> deleteMedicalRecord(@PathVariable String id) {
+        return ApiResult.of(
+            200,
+            "目标病历历史版本及对应文件已删除",
+            medicalRecordService.deleteRecord(id, AuthPermission.currentUserOrThrow())
+        );
     }
 
     @GetMapping("/clinic-api/medical-record/download")

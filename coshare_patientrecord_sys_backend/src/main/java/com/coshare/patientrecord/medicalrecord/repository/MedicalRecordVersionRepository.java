@@ -161,6 +161,11 @@ public class MedicalRecordVersionRepository {
         );
     }
 
+    public int deleteRecord(String id) {
+        if (safe(id).isBlank()) throw new IllegalArgumentException("缺少目标病历版本ID");
+        return jdbcTemplate.update("DELETE FROM clinic_generated_medical_records WHERE id = ?", id);
+    }
+
     public ObjectNode loadRecord(String id) {
         if (safe(id).isBlank()) throw new IllegalArgumentException("缺少目标病历版本ID");
         java.util.List<ObjectNode> rows = jdbcTemplate.query(

@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
+import java.net.http.HttpTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -16,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,8 +29,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class InpatientRecordAiService {
 
+    private static final Logger log = LoggerFactory.getLogger(InpatientRecordAiService.class);
     private static final int MAX_PROMPT_LENGTH = 4000;
     private static final int MAX_FIELD_LENGTH = 12000;
+    private static final int MAX_UPSTREAM_ERROR_LENGTH = 500;
 
     private final ClinicAiConfigService aiConfigService;
     private final AiCallGuard aiCallGuard;
@@ -101,10 +107,21 @@ public class InpatientRecordAiService {
                 () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
             );
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY,
-                    "GPT 兼容病历生成失败：上游返回 HTTP " + response.statusCode()
+                String upstreamMessage = upstreamErrorMessage(response.body());
+                log.warn(
+                    "GPT-compatible inpatient generation rejected by upstream: status={}, model={}, endpoint={}, detail={}",
+                    response.statusCode(),
+                    model,
+                    safeEndpoint(baseUrl),
+                    upstreamMessage
                 );
+                HttpStatus status = response.statusCode() == 401 || response.statusCode() == 403
+                    ? HttpStatus.SERVICE_UNAVAILABLE
+                    : HttpStatus.BAD_GATEWAY;
+                String hint = response.statusCode() == 401 || response.statusCode() == 403
+                    ? "API Key 无效或无权访问当前模型，请由管理员检查病历 AI 配置"
+                    : "上游返回 HTTP " + response.statusCode() + (upstreamMessage.isBlank() ? "" : "：" + upstreamMessage);
+                throw new ResponseStatusException(status, "GPT 兼容病历生成失败：" + hint);
             }
             ObjectNode fields = parseAndValidateFields(extractContent(response.body()), allowedFields);
             if (fields.isEmpty()) {
@@ -115,9 +132,19 @@ public class InpatientRecordAiService {
             throw error;
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "GPT 兼容病历生成已中断");
-        } catch (IOException | IllegalArgumentException error) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "GPT 兼容病历生成暂时不可用，请稍后重试");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "GPT 兼容病历生成已中断，请稍后重试", error);
+        } catch (HttpTimeoutException error) {
+            log.warn("GPT-compatible inpatient generation timed out: endpoint={}", safeEndpoint(baseUrl), error);
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "GPT 兼容病历生成超时，请检查模型服务网络后重试", error);
+        } catch (ConnectException error) {
+            log.warn("GPT-compatible inpatient generation connection failed: endpoint={}", safeEndpoint(baseUrl), error);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "无法连接 GPT 兼容模型服务，请检查 Base URL 和网络", error);
+        } catch (IOException error) {
+            log.warn("GPT-compatible inpatient generation I/O or response parsing failed: endpoint={}", safeEndpoint(baseUrl), error);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "GPT 兼容模型响应无法解析：" + safeErrorMessage(error), error);
+        } catch (IllegalArgumentException error) {
+            log.warn("GPT-compatible inpatient generation request is invalid: endpoint={}", safeEndpoint(baseUrl), error);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "GPT 兼容 Base URL 或请求参数格式不正确", error);
         }
     }
 
@@ -176,6 +203,35 @@ public class InpatientRecordAiService {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回了空内容");
         }
         return content.asText();
+    }
+
+    private String upstreamErrorMessage(String responseBody) {
+        try {
+            JsonNode root = objectMapper.readTree(safe(responseBody));
+            String message = safe(root.path("error").path("message").asText(root.path("message").asText("")));
+            return truncate(message);
+        } catch (Exception ignored) {
+            return truncate(safe(responseBody).replaceAll("\\s+", " "));
+        }
+    }
+
+    private String truncate(String value) {
+        String text = safe(value);
+        return text.length() <= MAX_UPSTREAM_ERROR_LENGTH ? text : text.substring(0, MAX_UPSTREAM_ERROR_LENGTH) + "…";
+    }
+
+    private String safeEndpoint(String endpoint) {
+        try {
+            URI uri = URI.create(endpoint);
+            return uri.getScheme() + "://" + uri.getAuthority() + safe(uri.getPath());
+        } catch (Exception ignored) {
+            return "invalid-endpoint";
+        }
+    }
+
+    private String safeErrorMessage(Exception error) {
+        String message = safe(error == null ? "" : error.getMessage());
+        return message.isBlank() ? "响应格式错误" : truncate(message);
     }
 
     private String normalizeChatCompletionsUrl(String rawUrl) {

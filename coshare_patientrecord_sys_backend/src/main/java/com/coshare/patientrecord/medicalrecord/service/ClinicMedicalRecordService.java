@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -35,6 +36,8 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -107,7 +110,7 @@ public class ClinicMedicalRecordService {
         status.put("configured", templateRenderer.templateAvailable(TEMPLATE_RESOURCE) && unboundFields.isEmpty());
         status.put("promptConfigurable", true);
         status.put("templateSource", TEMPLATE_SOURCE_NAME);
-        status.put("commandSource", "固定 docx 母版 + 多岗位协作字段填充；医生确认提示词后可调用豆包生成完整住院病历草稿");
+        status.put("commandSource", "固定 docx 母版 + 多岗位协作字段填充；医生确认后可调用 GPT 兼容模型生成完整住院病历草稿");
         status.put("disclaimer", DISCLAIMER);
         status.put("generatedDir", generatedDir.toString());
         ArrayNode sections = status.putArray("sections");
@@ -392,6 +395,96 @@ public class ClinicMedicalRecordService {
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", row);
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+    }
+
+    @Transactional
+    public Map<String, Object> deleteRecord(String id, SessionUser user) {
+        requireGenerateRole();
+        ObjectNode row = loadRecordOrThrow(safe(id));
+        String scopeId = text(row, "patientId");
+        sourceBuilder.assertCanReadScope(scopeId);
+        String status = text(row, "status");
+        if (!Set.of("draft", "voided").contains(status)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "已定稿目标病历不可删除；如需更正，请先按病历管理流程作废");
+        }
+
+        Path target = managedRecordPath(text(row, "filePath"));
+        Path stagedFile = stageFileForDeletion(target, text(row, "id"));
+        registerStagedFileCleanup(target, stagedFile);
+
+        versionRepository.writeAudit(
+            scopeId,
+            user,
+            "删除目标病历历史版本",
+            "medical-record.delete",
+            "删除 V" + row.path("version").asInt() + "（" + status + "），文件 " + text(row, "fileName", "未命名")
+        );
+        int deleted = versionRepository.deleteRecord(text(row, "id"));
+        if (deleted != 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "目标病历版本删除冲突，请刷新后重试");
+        }
+
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("id", text(row, "id"));
+        result.put("version", row.path("version").asInt());
+        result.put("fileDeleted", stagedFile != null);
+        return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private Path managedRecordPath(String filePath) {
+        if (safe(filePath).isBlank()) return null;
+        try {
+            Path target = Path.of(filePath).toAbsolutePath().normalize();
+            if (!target.startsWith(generatedDir)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "目标病历文件路径超出受管目录，已拒绝删除");
+            }
+            return target;
+        } catch (ResponseStatusException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "目标病历文件路径无效，已拒绝删除数据库记录", error);
+        }
+    }
+
+    private Path stageFileForDeletion(Path target, String recordId) {
+        if (target == null || !Files.exists(target)) return null;
+        try {
+            Path trashDir = generatedDir.resolve(".trash").normalize();
+            Files.createDirectories(trashDir);
+            Path staged = trashDir.resolve(sanitizeFileName(recordId) + "-" + UUID.randomUUID() + ".deleted").normalize();
+            if (!staged.startsWith(trashDir)) throw new IOException("invalid staged file path");
+            try {
+                return Files.move(target, staged, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                return Files.move(target, staged);
+            }
+        } catch (IOException error) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "物理文件无法移入受管回收区，病历版本未删除", error);
+        }
+    }
+
+    private void registerStagedFileCleanup(Path original, Path staged) {
+        if (staged == null) return;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    Files.deleteIfExists(staged);
+                } catch (IOException ignored) {
+                    // 数据库已提交；文件留在受管 .trash 目录，避免恢复为可下载病历。
+                }
+            }
+
+            @Override
+            public void afterCompletion(int completionStatus) {
+                if (completionStatus == TransactionSynchronization.STATUS_COMMITTED || original == null || !Files.exists(staged)) return;
+                try {
+                    Files.move(staged, original, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException ignored) {
+                    // 回滚恢复失败时仍保留在受管 .trash 目录，禁止越界写入。
+                }
+            }
+        });
     }
 
     public DownloadFile download(String id, SessionUser user) {

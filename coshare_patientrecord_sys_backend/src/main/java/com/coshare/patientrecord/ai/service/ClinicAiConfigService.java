@@ -109,7 +109,16 @@ public class ClinicAiConfigService {
     public ObjectNode statusFor(String configId) {
         AiDefaults defaults = defaultsFor(configId);
         StoredAiConfig stored = readStoredConfig(configId, defaults.model());
-        EffectiveAiConfig effective = resolveEffectiveConfig(configId);
+        String effectiveApiKey = defaults.apiKey();
+        boolean apiKeyDecryptable = true;
+        if (stored != null && !safe(stored.apiKeyCipher()).isBlank()) {
+            try {
+                effectiveApiKey = decrypt(stored.apiKeyCipher());
+            } catch (ResponseStatusException error) {
+                effectiveApiKey = "";
+                apiKeyDecryptable = false;
+            }
+        }
         ObjectNode status = objectMapper.createObjectNode();
         status.put("baseUrl", stored == null ? defaults.baseUrl() : stored.baseUrl());
         status.put("model", stored == null ? defaults.model() : stored.model());
@@ -117,8 +126,10 @@ public class ClinicAiConfigService {
         status.put("voiceType", stored == null ? defaults.voiceType() : stored.voiceType());
         status.put("speedRatio", stored == null ? defaults.speedRatio() : stored.speedRatio());
         status.put("enabled", stored == null || stored.enabled());
-        status.put("apiKeyConfigured", !effective.apiKey().isBlank());
-        status.put("apiKeyMasked", maskKey(effective.apiKey()));
+        status.put("apiKeyConfigured", !normalizeApiKey(effectiveApiKey).isBlank());
+        status.put("apiKeyMasked", maskKey(effectiveApiKey));
+        status.put("apiKeyDecryptable", apiKeyDecryptable);
+        status.put("apiKeyRequiresReset", stored != null && !apiKeyDecryptable);
         status.put("usingRuntimeConfig", stored != null);
         status.put("updatedAt", stored == null ? "" : stored.updatedAt());
         status.put("updatedBy", stored == null ? "" : stored.updatedBy());
@@ -240,6 +251,15 @@ public class ClinicAiConfigService {
             cipher = encrypt(apiKey);
         } else if (!keepExisting || cipher.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI API Key is required, or keep the existing key");
+        } else {
+            try {
+                decrypt(cipher);
+            } catch (ResponseStatusException error) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "现有 AI API Key 已无法解密，请取消保留现有 Key 并重新填写后保存"
+                );
+            }
         }
 
         String updatedAt = LocalDateTime.now().format(TIME_FORMATTER);
@@ -344,10 +364,12 @@ public class ClinicAiConfigService {
         if (secret.isBlank()) {
             secret = safe(System.getenv("AI_CONFIG_SECRET"));
         }
-        boolean production = java.util.Arrays.stream(safe(activeProfiles).toLowerCase(java.util.Locale.ROOT).split("[,;\\s]+"))
-            .anyMatch(profile -> profile.equals("prod") || profile.equals("production"));
-        if (secret.isBlank() && production) {
-            throw new IllegalStateException("Production startup requires AI_CONFIG_SECRET");
+        boolean persistentProfile = java.util.Arrays.stream(safe(activeProfiles).toLowerCase(java.util.Locale.ROOT).split("[,;\\s]+"))
+            .anyMatch(profile -> profile.equals("mysql") || profile.equals("prod") || profile.equals("production"));
+        if (secret.isBlank() && persistentProfile) {
+            throw new IllegalStateException(
+                "Persistent AI configuration requires AI_CONFIG_SECRET; refusing to use a temporary key that would break after restart"
+            );
         }
         if (secret.isBlank()) {
             byte[] temporarySecret = new byte[32];
@@ -390,7 +412,11 @@ public class ClinicAiConfigService {
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(encryptionKey, "AES"), new GCMParameterSpec(GCM_TAG_BITS, iv));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (Exception error) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to decrypt AI API Key, please save the config again");
+            throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "病历 AI API Key 无法解密，请由管理员在 AI 配置页重新填写并保存 API Key",
+                error
+            );
         }
     }
 

@@ -28,6 +28,14 @@
           </div>
           <el-button :icon="Refresh" :loading="medicalLoading" @click="loadMedicalConfig">刷新</el-button>
         </div>
+        <el-alert
+          v-if="medicalConfig.apiKeyRequiresReset"
+          title="现有病历 AI API Key 已无法解密，必须重新填写并保存"
+          description="请取消“保留现有 API Key”，输入有效 Key 后保存。旧密文无法自动恢复；完成重置前住院病历 AI 生成不可用。"
+          type="error"
+          show-icon
+          :closable="false"
+        />
         <el-form :model="medicalForm" label-width="112px" class="ai-config-form">
           <el-form-item label="启用 AI">
             <el-switch v-model="medicalForm.enabled" active-text="启用" inactive-text="停用" />
@@ -48,7 +56,10 @@
             />
           </el-form-item>
           <el-form-item>
-            <el-checkbox v-model="medicalForm.keepExistingApiKey" :disabled="!medicalConfig.apiKeyConfigured">
+            <el-checkbox
+              v-model="medicalForm.keepExistingApiKey"
+              :disabled="!medicalConfig.apiKeyConfigured || medicalConfig.apiKeyRequiresReset"
+            >
               保留现有 API Key
             </el-checkbox>
           </el-form-item>
@@ -265,6 +276,7 @@ const doubaoModelCheckedAt = ref("");
 const ttsHasExistingKey = computed(() => ttsConfig.value.apiKeyConfigured);
 
 const statusOf = (config: AiRuntimeConfig) => {
+  if (config.apiKeyRequiresReset) return { tagType: "danger" as TagProps["type"], tagText: "Key 待重置" };
   if (!config.enabled) return { tagType: "info" as TagProps["type"], tagText: "已停用" };
   return config.baseUrl && config.apiKeyConfigured
     ? { tagType: "success" as TagProps["type"], tagText: "可用" }
@@ -309,7 +321,7 @@ const syncForm = (form: AiRuntimeConfigPayload, config: AiRuntimeConfig, fallbac
   form.speedRatio = config.speedRatio || 1;
   form.enabled = config.enabled;
   form.apiKey = "";
-  form.keepExistingApiKey = config.apiKeyConfigured;
+  form.keepExistingApiKey = config.apiKeyConfigured && !config.apiKeyRequiresReset;
 };
 
 const loadMedicalConfig = async () => {
@@ -460,7 +472,11 @@ const detectTtsConfig = async () => {
 };
 
 const saveMedicalConfig = async () => {
-  if (!validateForm(medicalForm, medicalConfig.value.apiKeyConfigured)) return;
+  if (medicalConfig.value.apiKeyRequiresReset && !medicalForm.apiKey?.trim()) {
+    ElMessage.warning("现有 API Key 已无法解密，请重新填写 API Key 后保存");
+    return;
+  }
+  if (!validateForm(medicalForm, medicalConfig.value.apiKeyConfigured && !medicalConfig.value.apiKeyRequiresReset)) return;
   medicalSaving.value = true;
   try {
     const { data } = await saveAiRuntimeConfigApi(savePayload(medicalForm));
@@ -593,6 +609,11 @@ h3 {
 .ai-config-form {
   max-width: 760px;
   margin-top: 18px;
+}
+
+.ai-form-panel > .el-alert {
+  max-width: 760px;
+  margin: 14px 0;
 }
 
 .doubao-panel .ai-config-form {
