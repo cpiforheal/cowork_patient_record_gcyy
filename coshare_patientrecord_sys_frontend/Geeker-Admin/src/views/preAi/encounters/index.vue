@@ -696,7 +696,7 @@
 
     <el-dialog
       v-model="inpatientAiDialogVisible"
-      title="豆包生成住院病历"
+      title="GPT 兼容模型生成住院病历"
       width="720px"
       :close-on-click-modal="false"
       :close-on-press-escape="!inpatientAiGenerating"
@@ -708,8 +708,38 @@
           type="info"
           :closable="false"
           show-icon
-          title="系统将使用内置的周xx病历模版和固定生成规则。豆包只依据已复核前置事实生成新的住院病历草稿版本。"
+          title="请上传本次生成使用的 DOCX 参考文档。模型只依据已复核前置事实和本次上传内容生成新的住院病历草稿，参考文档不会被保存。"
         />
+        <div class="inpatient-ai-dialog__reference">
+          <span class="inpatient-ai-dialog__label">本次参考文档（必选）</span>
+          <input
+            ref="inpatientAiReferenceInput"
+            class="inpatient-ai-dialog__file-input"
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            :disabled="inpatientAiGenerating"
+            @change="handleInpatientAiReferenceChange"
+          />
+          <div class="inpatient-ai-dialog__file-actions">
+            <el-button :icon="Upload" :disabled="inpatientAiGenerating" @click="openInpatientAiReferencePicker">
+              {{ inpatientAiReferenceDocument ? "替换 DOCX" : "选择 DOCX" }}
+            </el-button>
+            <span v-if="inpatientAiReferenceDocument" class="inpatient-ai-dialog__file-name">
+              {{ inpatientAiReferenceDocument.name }}（{{ formatFileSize(inpatientAiReferenceDocument.size) }}）
+            </span>
+            <span v-else class="inpatient-ai-dialog__file-empty">尚未选择文件</span>
+            <el-button
+              v-if="inpatientAiReferenceDocument"
+              link
+              type="danger"
+              :disabled="inpatientAiGenerating"
+              @click="clearInpatientAiReference"
+            >
+              清除
+            </el-button>
+          </div>
+          <p>仅支持 DOCX，单个文件不超过 10 MB。文件只用于当前生成请求，关闭对话框后会清空选择。</p>
+        </div>
         <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">医生补充说明（可选）</label>
         <el-input
           id="inpatient-ai-prompt"
@@ -721,17 +751,24 @@
           resize="vertical"
           :disabled="inpatientAiGenerating"
         />
-        <p>Base URL、API Key 与模型由后台读取已保存的豆包配置，不会传到浏览器或写入病历文件。</p>
+        <p>Base URL、API Key 与模型由后台“病历 AI”配置读取，不会传到浏览器或写入病历文件。</p>
       </div>
       <template #footer>
         <el-button :disabled="inpatientAiGenerating" @click="closeInpatientAiDialog">取消 AI 加工</el-button>
-        <el-button type="primary" :loading="inpatientAiGenerating" @click="completeInpatientAiGeneration"> 完成并生成 </el-button>
+        <el-button
+          type="primary"
+          :loading="inpatientAiGenerating"
+          :disabled="!inpatientAiReferenceDocument"
+          @click="completeInpatientAiGeneration"
+        >
+          完成并生成
+        </el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="inpatientAiResultDialogVisible"
-      title="豆包已生成目标住院病历"
+      title="GPT 兼容模型已生成目标住院病历"
       width="860px"
       :close-on-click-modal="false"
       destroy-on-close
@@ -744,7 +781,7 @@
           title="目标内容已生成并保存为新的病历草稿版本，请复制或下载后继续医生复核。"
         />
         <div class="inpatient-ai-result__meta">
-          <span>模型：{{ inpatientAiResultModel || "已配置豆包模型" }}</span>
+          <span>模型：{{ inpatientAiResultModel || "已配置 GPT 兼容模型" }}</span>
           <span v-if="inpatientAiResultRecord">版本：V{{ inpatientAiResultRecord.version }}</span>
         </div>
         <el-input
@@ -753,7 +790,7 @@
           :rows="18"
           readonly
           resize="vertical"
-          aria-label="豆包生成的目标住院病历内容"
+          aria-label="GPT 兼容模型生成的目标住院病历内容"
         />
       </div>
       <template #footer>
@@ -982,6 +1019,8 @@ const latestGeneratedExportVersionId = ref("");
 const inpatientAiDialogVisible = ref(false);
 const inpatientAiGenerating = ref(false);
 const inpatientAiPrompt = ref("");
+const inpatientAiReferenceDocument = ref<File>();
+const inpatientAiReferenceInput = ref<HTMLInputElement>();
 const pendingGeneratedTargetRecord = ref<GeneratedMedicalRecord>();
 const inpatientAiResultDialogVisible = ref(false);
 const inpatientAiResultContent = ref("");
@@ -2284,10 +2323,40 @@ const confirmReview = async () =>
 
 const buildInpatientAiPrompt = () => "";
 
+const formatFileSize = (size: number) => {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const clearInpatientAiReference = () => {
+  inpatientAiReferenceDocument.value = undefined;
+  if (inpatientAiReferenceInput.value) inpatientAiReferenceInput.value.value = "";
+};
+
+const openInpatientAiReferencePicker = () => inpatientAiReferenceInput.value?.click();
+
+const handleInpatientAiReferenceChange = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".docx")) {
+    clearInpatientAiReference();
+    ElMessage.error("参考文档仅支持 DOCX 格式");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    clearInpatientAiReference();
+    ElMessage.error("参考文档不能超过 10 MB");
+    return;
+  }
+  inpatientAiReferenceDocument.value = file;
+};
+
 const closeInpatientAiDialog = () => {
   if (inpatientAiGenerating.value) return;
   inpatientAiDialogVisible.value = false;
   pendingGeneratedTargetRecord.value = undefined;
+  clearInpatientAiReference();
   ElMessage.info("已取消 AI 加工，基础目标病历仍保留在版本列表中");
 };
 
@@ -2319,13 +2388,19 @@ const copyInpatientAiResult = async () => {
 const completeInpatientAiGeneration = async () => {
   const encounterId = selectedEncounterId.value;
   const sourceRecord = pendingGeneratedTargetRecord.value;
+  const referenceDocument = inpatientAiReferenceDocument.value;
   if (!encounterId || !sourceRecord) return;
+  if (!referenceDocument) {
+    ElMessage.warning("请先选择本次生成使用的 DOCX 参考文档");
+    return;
+  }
   inpatientAiGenerating.value = true;
   try {
     const { data } = await generateInpatientAiMedicalRecordApi({
       encounterId,
       sourceRecordId: sourceRecord.id,
-      prompt: inpatientAiPrompt.value.trim()
+      prompt: inpatientAiPrompt.value.trim(),
+      referenceDocument
     });
     latestGeneratedTargetVersionId.value = data.record.id;
     latestGeneratedExportVersionId.value = "";
@@ -2334,11 +2409,12 @@ const completeInpatientAiGeneration = async () => {
     inpatientAiResultRecord.value = data.record;
     inpatientAiDialogVisible.value = false;
     pendingGeneratedTargetRecord.value = undefined;
+    clearInpatientAiReference();
     inpatientAiResultDialogVisible.value = true;
     await loadTargetMedicalRecordVersions();
-    ElMessage.success(`豆包住院病历 V${data.record.version} 已生成，可复制内容或下载复核`);
+    ElMessage.success(`AI 住院病历 V${data.record.version} 已生成，可复制内容或下载复核`);
   } catch (error: any) {
-    ElMessage.error(error.message || "豆包住院病历生成失败，提示词已保留，可重试");
+    ElMessage.error(error.message || "AI 住院病历生成失败，提示词已保留，可重试");
   } finally {
     inpatientAiGenerating.value = false;
   }
@@ -2365,7 +2441,7 @@ const generateTargetMedicalRecord = async () =>
       : "基础草稿已按前置病历事实完整生成。";
     try {
       await ElMessageBox.confirm(
-        `${missingHint}\n\n是否继续使用豆包进行 AI 加工？AI 加工会另存新版本，不会覆盖基础草稿。`,
+        `${missingHint}\n\n是否继续使用 GPT 兼容模型进行 AI 加工？需要在下一步显式上传 DOCX 参考文档，AI 加工会另存新版本，不会覆盖基础草稿。`,
         `基础目标病历 V${data.record.version} 已生成`,
         {
           confirmButtonText: "继续 AI 加工",
@@ -2376,6 +2452,7 @@ const generateTargetMedicalRecord = async () =>
       );
       pendingGeneratedTargetRecord.value = data.record;
       inpatientAiPrompt.value = buildInpatientAiPrompt();
+      clearInpatientAiReference();
       inpatientAiDialogVisible.value = true;
     } catch {
       pendingGeneratedTargetRecord.value = undefined;
@@ -2492,6 +2569,35 @@ onBeforeUnmount(() => {
 .inpatient-ai-dialog {
   display: grid;
   gap: 16px;
+
+  &__reference {
+    display: grid;
+    gap: 8px;
+  }
+
+  &__file-input {
+    display: none;
+  }
+
+  &__file-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  &__file-name {
+    max-width: 420px;
+    overflow: hidden;
+    color: #374151;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__file-empty {
+    color: #9ca3af;
+    font-size: 13px;
+  }
 
   &__label {
     color: #1f2937;

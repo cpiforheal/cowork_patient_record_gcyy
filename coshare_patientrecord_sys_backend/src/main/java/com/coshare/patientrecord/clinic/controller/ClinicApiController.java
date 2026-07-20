@@ -52,6 +52,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @Profile("mysql")
@@ -413,9 +414,32 @@ public class ClinicApiController {
         return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u5df2\u751f\u6210", medicalRecordService.generate(request, AuthPermission.currentUserOrThrow()));
     }
 
-    @PostMapping("/clinic-api/medical-record/generate-inpatient-ai")
-    public ApiResult<Map<String, Object>> generateInpatientAiMedicalRecord(@RequestBody InpatientAiGenerateRequest request) {
-        return ApiResult.of(200, "豆包住院病历草稿已生成", medicalRecordService.generateInpatientAi(request, AuthPermission.currentUserOrThrow()));
+    @PostMapping(
+        value = "/clinic-api/medical-record/generate-inpatient-ai",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ApiResult<Map<String, Object>> generateInpatientAiMedicalRecord(
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId,
+        @RequestParam String sourceRecordId,
+        @RequestParam(required = false, defaultValue = "") String prompt,
+        @RequestParam("referenceDocument") MultipartFile referenceDocument
+    ) {
+        InpatientAiGenerateRequest request = new InpatientAiGenerateRequest(
+            patientId,
+            encounterId,
+            sourceRecordId,
+            prompt
+        );
+        return ApiResult.of(
+            200,
+            "AI 住院病历草稿已生成",
+            medicalRecordService.generateInpatientAi(
+                request,
+                referenceDocument,
+                AuthPermission.currentUserOrThrow()
+            )
+        );
     }
 
     @PostMapping("/clinic-api/medical-record/finalize")

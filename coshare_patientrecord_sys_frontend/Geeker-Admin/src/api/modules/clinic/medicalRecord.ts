@@ -72,14 +72,21 @@ export const generateInpatientAiMedicalRecordApi = async (params: {
   encounterId?: string;
   sourceRecordId: string;
   prompt: string;
+  referenceDocument: File;
 }) => {
+  const body = new FormData();
+  if (params.patientId) body.append("patientId", params.patientId);
+  if (params.encounterId) body.append("encounterId", params.encounterId);
+  body.append("sourceRecordId", params.sourceRecordId);
+  body.append("prompt", params.prompt);
+  body.append("referenceDocument", params.referenceDocument, params.referenceDocument.name);
   const result = await clinicFetch("/medical-record/generate-inpatient-ai", {
     method: "POST",
-    headers: clinicJsonHeaders(),
-    body: JSON.stringify(params)
+    headers: authHeaders(),
+    body
   });
   const data = await parseClinicApiResponse<MedicalRecordGenerateResult>(result);
-  return clinicResponse(data, "豆包住院病历草稿已生成");
+  return clinicResponse(data, "AI 住院病历草稿已生成");
 };
 
 export const finalizeMedicalRecordApi = async (id: string) => {

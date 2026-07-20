@@ -4,7 +4,7 @@
       <div>
         <span class="section-label">运行状态</span>
         <h2>AI 接口配置</h2>
-        <p>病历 AI 与豆包助手分开配置，互不覆盖。</p>
+        <p>病历 AI 使用 GPT/OpenAI 兼容接口，与豆包助手分开配置、互不覆盖。</p>
       </div>
 
       <article v-for="item in statusCards" :key="item.key" class="status-card">
@@ -24,7 +24,7 @@
         <div class="panel-head">
           <div>
             <span class="section-label">病历 AI 设置</span>
-            <h3>用于病历总结与目标病历生成</h3>
+            <h3>GPT/OpenAI 兼容接口，用于病历总结与目标病历生成</h3>
           </div>
           <el-button :icon="Refresh" :loading="medicalLoading" @click="loadMedicalConfig">刷新</el-button>
         </div>

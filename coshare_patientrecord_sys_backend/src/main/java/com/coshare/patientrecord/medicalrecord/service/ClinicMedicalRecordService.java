@@ -36,12 +36,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 @Profile("mysql")
 public class ClinicMedicalRecordService {
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final long MAX_REFERENCE_DOCUMENT_BYTES = 10L * 1024 * 1024;
+    private static final int MAX_REFERENCE_DOCUMENT_CHARACTERS = 18000;
     private static final String TEMPLATE_NAME = "医生目标病历模板 v1";
     private static final String TEMPLATE_VERSION = "leader-template-20260623";
     private static final String TEMPLATE_RESOURCE = "medical-record-templates/target-medical-record-template.docx";
@@ -235,14 +238,18 @@ public class ClinicMedicalRecordService {
     }
 
     @Transactional
-    public Map<String, Object> generateInpatientAi(InpatientAiGenerateRequest request, SessionUser user) {
+    public Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        MultipartFile referenceDocument,
+        SessionUser user
+    ) {
         requireGenerateRole();
         String patientId = safe(request == null ? "" : request.patientId());
         String encounterId = safe(request == null ? "" : request.encounterId());
         String scopeId = generationScopeId(patientId, encounterId);
         String prompt = safe(request == null ? "" : request.prompt());
         String sourceRecordId = safe(request == null ? "" : request.sourceRecordId());
-        if (prompt.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能为空");
+        ReferenceDocument reference = readReferenceDocument(referenceDocument);
         if (!sourceRecordId.isBlank()) {
             ObjectNode sourceRecord = loadRecordOrThrow(sourceRecordId);
             if (!scopeId.equals(text(sourceRecord, "patientId"))) {
@@ -260,6 +267,7 @@ public class ClinicMedicalRecordService {
         Set<String> allowedFields = new HashSet<>(templateRenderer.completeTemplatePlaceholderKeys(TEMPLATE_RESOURCE));
         InpatientRecordAiService.AiGeneration generated = inpatientRecordAiService.generate(
             prompt,
+            reference.text(),
             sourceSnapshot,
             sourceSnapshot.path("reviewedPreAiFacts").isObject()
                 ? (ObjectNode) sourceSnapshot.path("reviewedPreAiFacts")
@@ -273,12 +281,14 @@ public class ClinicMedicalRecordService {
         String id = "medrec-" + UUID.randomUUID();
         byte[] generatedBytes = templateRenderer.renderCompleteTemplate(TEMPLATE_RESOURCE, replacements);
         String patientName = sourceSnapshot.path("patient").path("name").asText("patient");
-        String fileName = sanitizeFileName(patientName) + "-豆包住院病历-V" + version + ".docx";
+        String fileName = sanitizeFileName(patientName) + "-AI住院病历-V" + version + ".docx";
         Path target = writeGeneratedFile(scopeId, id, fileName, generatedBytes);
         logSnapshot.put("sourceRecordId", sourceRecordId);
         logSnapshot.put("encounterId", safe(request == null ? "" : request.encounterId()));
         logSnapshot.put("promptHash", sha256(prompt.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        logSnapshot.put("generatorType", "doubao-inpatient-record");
+        logSnapshot.put("referenceDocumentName", reference.fileName());
+        logSnapshot.put("referenceDocumentHash", reference.sha256());
+        logSnapshot.put("generatorType", "openai-compatible-inpatient-record");
         logSnapshot.set("generatedFieldKeys", objectMapper.valueToTree(new HashSet<>(generated.fields().properties().stream().map(Map.Entry::getKey).toList())));
         ObjectNode created = versionRepository.saveVersion(
             scopeId,
@@ -291,12 +301,12 @@ public class ClinicMedicalRecordService {
             user,
             "draft",
             "",
-            "周xx住院病历模板",
+            "医生上传住院病历参考文档",
             TEMPLATE_VERSION,
             generated.model()
         );
         if (!scopeId.startsWith("preai:")) {
-            versionRepository.writeAudit(scopeId, user, "豆包生成住院病历草稿", "medical-record.inpatient-ai.generate", "生成 V" + version + "，基础版本 " + sourceRecordId);
+            versionRepository.writeAudit(scopeId, user, "AI 生成住院病历草稿", "medical-record.inpatient-ai.generate", "生成 V" + version + "，基础版本 " + sourceRecordId);
         }
 
         ObjectNode result = objectMapper.createObjectNode();
@@ -304,8 +314,36 @@ public class ClinicMedicalRecordService {
         result.put("generatedContent", buildCopyableInpatientContent(generated.fields()));
         result.put("model", generated.model());
         result.set("missingItems", objectMapper.createArrayNode());
-        result.put("disclaimer", "该版本由豆包依据已复核病历事实生成，必须由医生复核后方可定稿。");
+        result.put("disclaimer", "该版本由 GPT 兼容模型依据已复核病历事实和本次上传的参考文档生成，必须由医生复核后方可定稿。");
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private ReferenceDocument readReferenceDocument(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请上传本次生成使用的 DOCX 参考文档");
+        }
+        if (file.getSize() > MAX_REFERENCE_DOCUMENT_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "参考文档不能超过 10 MB");
+        }
+        String fileName = safe(file.getOriginalFilename());
+        if (!fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".docx")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "参考文档仅支持 DOCX 格式");
+        }
+        try {
+            byte[] bytes = file.getBytes();
+            String text = templateRenderer.referenceDocumentText(
+                new java.io.ByteArrayInputStream(bytes),
+                MAX_REFERENCE_DOCUMENT_CHARACTERS
+            );
+            if (text.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传的 DOCX 未读取到正文内容");
+            }
+            return new ReferenceDocument(fileName, sha256(bytes), text);
+        } catch (ResponseStatusException error) {
+            throw error;
+        } catch (IOException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "参考文档读取失败", error);
+        }
     }
 
     private String buildCopyableInpatientContent(ObjectNode generatedFields) {
@@ -316,6 +354,8 @@ public class ClinicMedicalRecordService {
         });
         return String.join(System.lineSeparator() + System.lineSeparator(), blocks);
     }
+
+    private record ReferenceDocument(String fileName, String sha256, String text) {}
 
     @Transactional
     public Map<String, Object> finalizeRecord(FinalizeRequest request, SessionUser user) {

@@ -27,31 +27,26 @@ public class InpatientRecordAiService {
 
     private static final int MAX_PROMPT_LENGTH = 4000;
     private static final int MAX_FIELD_LENGTH = 12000;
-    private static final int MAX_REFERENCE_LENGTH = 18000;
-    private static final String REFERENCE_TEMPLATE_RESOURCE =
-        "medical-record-templates/zhouxx-reference.docx";
 
     private final ClinicAiConfigService aiConfigService;
     private final AiCallGuard aiCallGuard;
     private final ObjectMapper objectMapper;
-    private final MedicalRecordTemplateRenderer templateRenderer;
     private final HttpClient httpClient;
 
     public InpatientRecordAiService(
         ClinicAiConfigService aiConfigService,
         AiCallGuard aiCallGuard,
-        ObjectMapper objectMapper,
-        MedicalRecordTemplateRenderer templateRenderer
+        ObjectMapper objectMapper
     ) {
         this.aiConfigService = aiConfigService;
         this.aiCallGuard = aiCallGuard;
         this.objectMapper = objectMapper;
-        this.templateRenderer = templateRenderer;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
     public AiGeneration generate(
         String prompt,
+        String referenceDocumentText,
         ObjectNode sourceSnapshot,
         ObjectNode preAiFacts,
         Map<String, String> currentValues,
@@ -62,14 +57,14 @@ public class InpatientRecordAiService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能超过 " + MAX_PROMPT_LENGTH + " 个字符");
         }
 
-        EffectiveAiConfig config = aiConfigService.resolveDoubaoConfig();
+        EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
         String baseUrl = normalizeChatCompletionsUrl(config.baseUrl());
         String apiKey = normalizeApiKey(config.apiKey());
         String model = safe(config.model());
         if (!config.enabled() || baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
             throw new ResponseStatusException(
                 HttpStatus.SERVICE_UNAVAILABLE,
-                "豆包住院病历生成未启用，或 Base URL、API Key、Model 尚未完整配置"
+                "病历 AI 未启用，或 GPT 兼容 Base URL、API Key、Model 尚未完整配置"
             );
         }
 
@@ -92,10 +87,7 @@ public class InpatientRecordAiService {
                     sourceSnapshot,
                     preAiFacts,
                     currentValues,
-                    templateRenderer.referenceDocumentText(
-                        REFERENCE_TEMPLATE_RESOURCE,
-                        MAX_REFERENCE_LENGTH
-                    )
+                    referenceDocumentText
                 )
             );
 
@@ -111,28 +103,28 @@ public class InpatientRecordAiService {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
-                    "豆包住院病历生成失败：上游返回 HTTP " + response.statusCode()
+                    "GPT 兼容病历生成失败：上游返回 HTTP " + response.statusCode()
                 );
             }
             ObjectNode fields = parseAndValidateFields(extractContent(response.body()), allowedFields);
             if (fields.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "豆包未返回可用于病历模板的字段");
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型未返回可用于病历模板的字段");
             }
             return new AiGeneration(fields, model);
         } catch (ResponseStatusException error) {
             throw error;
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "豆包住院病历生成已中断");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "GPT 兼容病历生成已中断");
         } catch (IOException | IllegalArgumentException error) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "豆包住院病历生成暂时不可用，请稍后重试");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "GPT 兼容病历生成暂时不可用，请稍后重试");
         }
     }
 
     private String systemPrompt(Set<String> allowedFields) {
         return """
             你是院内住院病历结构化生成引擎。只能依据用户提供的患者资料和已复核前置事实撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断。
-            固定业务要求：参照内置的《周xx病历模版.docx》组织内容，保持其固定格式、标题、段落顺序、查房时序和医学书写风格；你只生成动态字段的纯文本值，最终排版由系统模板完成。
+            固定业务要求：参照医生本次显式上传的 DOCX 参考文档组织内容，学习其标题、段落顺序、查房时序和医学书写风格；你只生成动态字段的纯文本值，最终排版由系统模板完成。参考文档只用于格式和风格，不得把其中患者的事实写入当前病历。
             输出必须是单个 JSON 对象，禁止 Markdown、解释文字和代码围栏。JSON 的键只能来自下列模板字段：
             %s
             缺少事实时保留现有字段值或写“待医生补充”，不得猜测。已复核前置事实优先级高于当前字段值和医生补充说明。
@@ -165,7 +157,7 @@ public class InpatientRecordAiService {
         JsonNode parsed = objectMapper.readTree(content);
         JsonNode candidate = parsed.has("fields") && parsed.path("fields").isObject() ? parsed.path("fields") : parsed;
         if (!candidate.isObject()) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "豆包返回格式错误：需要 JSON 对象");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回格式错误：需要 JSON 对象");
         }
         ObjectNode accepted = objectMapper.createObjectNode();
         candidate.fields().forEachRemaining(entry -> {
@@ -181,7 +173,7 @@ public class InpatientRecordAiService {
         JsonNode content = objectMapper.readTree(responseBody)
             .path("choices").path(0).path("message").path("content");
         if (!content.isTextual() || content.asText("").isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "豆包返回了空内容");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回了空内容");
         }
         return content.asText();
     }

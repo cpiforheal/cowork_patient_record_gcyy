@@ -132,10 +132,9 @@ public class MedicalRecordTemplateRenderer {
         return readTemplatePlaceholderKeys(templateResource, false);
     }
 
-    public String referenceDocumentText(String templateResource, int maxCharacters) {
-        if (!templateAvailable(templateResource) || maxCharacters <= 0) return "";
-        try (InputStream inputStream = templateInputStream(templateResource);
-             ZipInputStream zipInputStream = new ZipInputStream(inputStream, StandardCharsets.UTF_8)) {
+    public String referenceDocumentText(InputStream inputStream, int maxCharacters) {
+        if (inputStream == null || maxCharacters <= 0) return "";
+        try (ZipInputStream zipInputStream = new ZipInputStream(inputStream, StandardCharsets.UTF_8)) {
             ZipEntry entry;
             while ((entry = zipInputStream.getNextEntry()) != null) {
                 if (!"word/document.xml".equals(entry.getName())) {
@@ -163,11 +162,13 @@ public class MedicalRecordTemplateRenderer {
                 }
                 return result.toString();
             }
-            return "";
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件不是有效的 DOCX 文档");
+        } catch (ResponseStatusException error) {
+            throw error;
         } catch (Exception error) {
             throw new ResponseStatusException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                "住院病历参考模板无法读取：" + error.getMessage(),
+                HttpStatus.BAD_REQUEST,
+                "上传的住院病历参考文档无法读取：" + error.getMessage(),
                 error
             );
         }
