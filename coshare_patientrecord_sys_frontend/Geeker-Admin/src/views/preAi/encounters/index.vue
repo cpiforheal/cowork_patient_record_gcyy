@@ -708,9 +708,9 @@
           type="info"
           :closable="false"
           show-icon
-          title="您已选择继续 AI 加工。请核对并调整提示词，豆包会依据已复核前置事实另存为新的住院病历草稿版本。"
+          title="系统将使用内置的周xx病历模版和固定生成规则。豆包只依据已复核前置事实生成新的住院病历草稿版本。"
         />
-        <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">AI 提示词</label>
+        <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">医生补充说明（可选）</label>
         <el-input
           id="inpatient-ai-prompt"
           v-model="inpatientAiPrompt"
@@ -725,14 +725,7 @@
       </div>
       <template #footer>
         <el-button :disabled="inpatientAiGenerating" @click="closeInpatientAiDialog">取消 AI 加工</el-button>
-        <el-button
-          type="primary"
-          :loading="inpatientAiGenerating"
-          :disabled="!inpatientAiPrompt.trim()"
-          @click="completeInpatientAiGeneration"
-        >
-          完成并生成
-        </el-button>
+        <el-button type="primary" :loading="inpatientAiGenerating" @click="completeInpatientAiGeneration"> 完成并生成 </el-button>
       </template>
     </el-dialog>
 
@@ -2289,18 +2282,7 @@ const confirmReview = async () =>
     ElMessage.success("医生复核已确认，现在可以生成脱敏 DOCX");
   });
 
-const buildInpatientAiPrompt = () => {
-  const patientName = workspace.value?.encounter.patient.patientName || "当前患者";
-  const doctorFacts = stageForms.DOCTOR || {};
-  const primaryDiagnosis = String(doctorFacts.westernDiagnosis || doctorFacts.primaryDiagnosis || "待医生确认主诊断").trim();
-  const secondaryItems = Array.isArray(doctorFacts.secondaryDiagnoses)
-    ? doctorFacts.secondaryDiagnoses
-        .map((item: any) => String(item?.diagnosis || item?.name || item || "").trim())
-        .filter(Boolean)
-    : [];
-  const diagnoses = [primaryDiagnosis, ...secondaryItems].filter(Boolean).join("、");
-  return `请按照周xx病历的格式、结构、段落、排版、查房时序，完整生成【${patientName}】【${diagnoses}】的住院病历，要求自动生成中药方剂参考主病、主证及兼证、四诊内容，理法一致，不改动任何格式与写法，排版相同。`;
-};
+const buildInpatientAiPrompt = () => "";
 
 const closeInpatientAiDialog = () => {
   if (inpatientAiGenerating.value) return;
@@ -2337,7 +2319,7 @@ const copyInpatientAiResult = async () => {
 const completeInpatientAiGeneration = async () => {
   const encounterId = selectedEncounterId.value;
   const sourceRecord = pendingGeneratedTargetRecord.value;
-  if (!encounterId || !sourceRecord || !inpatientAiPrompt.value.trim()) return;
+  if (!encounterId || !sourceRecord) return;
   inpatientAiGenerating.value = true;
   try {
     const { data } = await generateInpatientAiMedicalRecordApi({

@@ -15,6 +15,10 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -126,6 +130,64 @@ public class MedicalRecordTemplateRenderer {
 
     public Set<String> completeTemplatePlaceholderKeys(String templateResource) {
         return readTemplatePlaceholderKeys(templateResource, false);
+    }
+
+    public String referenceDocumentText(String templateResource, int maxCharacters) {
+        if (!templateAvailable(templateResource) || maxCharacters <= 0) return "";
+        try (InputStream inputStream = templateInputStream(templateResource);
+             ZipInputStream zipInputStream = new ZipInputStream(inputStream, StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (!"word/document.xml".equals(entry.getName())) {
+                    zipInputStream.closeEntry();
+                    continue;
+                }
+                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                factory.setNamespaceAware(true);
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                Document document = factory.newDocumentBuilder().parse(zipInputStream);
+                StringBuilder result = new StringBuilder();
+                NodeList paragraphs = document.getElementsByTagNameNS(
+                    "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                    "p"
+                );
+                for (int index = 0; index < paragraphs.getLength(); index++) {
+                    String paragraph = visibleParagraphText(paragraphs.item(index)).trim();
+                    if (paragraph.isBlank()) continue;
+                    if (result.length() > 0) result.append('\n');
+                    int remaining = maxCharacters - result.length();
+                    if (remaining <= 0) break;
+                    result.append(paragraph, 0, Math.min(paragraph.length(), remaining));
+                }
+                return result.toString();
+            }
+            return "";
+        } catch (Exception error) {
+            throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "住院病历参考模板无法读取：" + error.getMessage(),
+                error
+            );
+        }
+    }
+
+    private String visibleParagraphText(Node paragraph) {
+        StringBuilder result = new StringBuilder();
+        appendTextNodes(paragraph, result);
+        return result.toString().replaceAll("\\s+", " ");
+    }
+
+    private void appendTextNodes(Node node, StringBuilder result) {
+        if (node.getNodeType() == Node.TEXT_NODE) {
+            result.append(node.getNodeValue());
+            return;
+        }
+        NodeList children = node.getChildNodes();
+        for (int index = 0; index < children.getLength(); index++) {
+            appendTextNodes(children.item(index), result);
+        }
     }
 
     private Set<String> readTemplatePlaceholderKeys(String templateResource, boolean trimGenerationScope) {

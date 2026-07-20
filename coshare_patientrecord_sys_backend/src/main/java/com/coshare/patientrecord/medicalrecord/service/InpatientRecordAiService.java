@@ -14,7 +14,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.context.annotation.Profile;
@@ -28,20 +27,26 @@ public class InpatientRecordAiService {
 
     private static final int MAX_PROMPT_LENGTH = 4000;
     private static final int MAX_FIELD_LENGTH = 12000;
+    private static final int MAX_REFERENCE_LENGTH = 18000;
+    private static final String REFERENCE_TEMPLATE_RESOURCE =
+        "medical-record-templates/zhouxx-reference.docx";
 
     private final ClinicAiConfigService aiConfigService;
     private final AiCallGuard aiCallGuard;
     private final ObjectMapper objectMapper;
+    private final MedicalRecordTemplateRenderer templateRenderer;
     private final HttpClient httpClient;
 
     public InpatientRecordAiService(
         ClinicAiConfigService aiConfigService,
         AiCallGuard aiCallGuard,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        MedicalRecordTemplateRenderer templateRenderer
     ) {
         this.aiConfigService = aiConfigService;
         this.aiCallGuard = aiCallGuard;
         this.objectMapper = objectMapper;
+        this.templateRenderer = templateRenderer;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -53,9 +58,6 @@ public class InpatientRecordAiService {
         Set<String> allowedFields
     ) {
         String normalizedPrompt = safe(prompt);
-        if (normalizedPrompt.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能为空");
-        }
         if (normalizedPrompt.length() > MAX_PROMPT_LENGTH) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能超过 " + MAX_PROMPT_LENGTH + " 个字符");
         }
@@ -80,9 +82,21 @@ public class InpatientRecordAiService {
             payload.putObject("response_format").put("type", "json_object");
             ArrayNode messages = payload.putArray("messages");
             messages.addObject().put("role", "system").put("content", systemPrompt(allowedFields));
-            messages.addObject().put("role", "user").put(
+            messages.addObject().put(
+                "role",
+                "user"
+            ).put(
                 "content",
-                buildUserContent(normalizedPrompt, sourceSnapshot, preAiFacts, currentValues)
+                buildUserContent(
+                    normalizedPrompt,
+                    sourceSnapshot,
+                    preAiFacts,
+                    currentValues,
+                    templateRenderer.referenceDocumentText(
+                        REFERENCE_TEMPLATE_RESOURCE,
+                        MAX_REFERENCE_LENGTH
+                    )
+                )
             );
 
             HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl))
@@ -118,9 +132,10 @@ public class InpatientRecordAiService {
     private String systemPrompt(Set<String> allowedFields) {
         return """
             你是院内住院病历结构化生成引擎。只能依据用户提供的患者资料和已复核前置事实撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断。
+            固定业务要求：参照内置的《周xx病历模版.docx》组织内容，保持其固定格式、标题、段落顺序、查房时序和医学书写风格；你只生成动态字段的纯文本值，最终排版由系统模板完成。
             输出必须是单个 JSON 对象，禁止 Markdown、解释文字和代码围栏。JSON 的键只能来自下列模板字段：
             %s
-            保持原有周xx病历模板的固定格式、标题、段落和查房时序；你只负责生成这些动态字段的纯文本值。缺少事实时保留现有字段值或写“待医生补充”，不得猜测。
+            缺少事实时保留现有字段值或写“待医生补充”，不得猜测。已复核前置事实优先级高于当前字段值和医生补充说明。
             中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致；方剂仅作为医生复核用参考，并在字段文本中明确“参考”。
             attendingRoundsJson、postOpRoundsJson 等时序字段请按原资料中的日期顺序组织为可直接放入 Word 段落的中文文本，不要输出嵌套 JSON。
             """.formatted(String.join(", ", allowedFields));
@@ -130,10 +145,12 @@ public class InpatientRecordAiService {
         String prompt,
         ObjectNode sourceSnapshot,
         ObjectNode preAiFacts,
-        Map<String, String> currentValues
+        Map<String, String> currentValues,
+        String referenceDocumentText
     ) throws IOException {
         ObjectNode context = objectMapper.createObjectNode();
-        context.put("doctorPrompt", prompt);
+        context.put("doctorSupplement", prompt);
+        context.put("referenceDocument", referenceDocumentText);
         context.set("patientAndRecord", sourceSnapshot);
         context.set("reviewedPreAiFacts", preAiFacts == null ? objectMapper.createObjectNode() : preAiFacts);
         context.set("currentTemplateValues", objectMapper.valueToTree(currentValues));
