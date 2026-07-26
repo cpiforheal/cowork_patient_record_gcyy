@@ -1,130 +1,87 @@
 <template>
-  <div class="table-box home-page">
-    <section class="today-panel">
-      <div class="role-block">
-        <span>当前岗位</span>
-        <strong>{{ roleName }}</strong>
-        <small>{{ userStore.userInfo.department || "未设置科室" }}</small>
-      </div>
+  <div class="home-page">
+    <GreetingBanner
+      :user-name="userName"
+      :role-name="roleName"
+      :department="department"
+      :task-title="focusTask?.title"
+      @open-first="openFocusTask"
+    />
 
-      <div class="today-summary">
-        <p>今天要处理什么</p>
-        <h1>{{ firstActionTask ? firstActionTask.title : "暂无待处理任务" }}</h1>
-        <span>{{ firstActionTask ? firstActionTask.desc : "可以从患者流程看板查看全院门诊进度。" }}</span>
-      </div>
-
-      <el-button
-        type="primary"
-        size="large"
-        :icon="ArrowRight"
-        :disabled="!firstActionTask"
-        @click="openActionTask(firstActionTask)"
-      >
-        进入第一项待办
-      </el-button>
-    </section>
-
-    <section v-loading="dashboardLoading" class="exception-strip" element-loading-text="正在刷新待办...">
-      <button
-        class="exception-card"
-        :class="{ warning: stats.pendingPatients > 0, 'is-zero': stats.pendingPatients === 0 }"
-        :aria-label="`待处理 ${stats.pendingPatients} 人`"
-        @click="router.push('/encounters/active')"
-      >
-        <span>待处理</span>
-        <strong>{{ stats.pendingPatients }}</strong>
-        <small>今日未闭环</small>
-      </button>
-      <button
-        class="exception-card"
-        :class="{ danger: stats.reviewPatients > 0, 'is-zero': stats.reviewPatients === 0 }"
-        :aria-label="`待档案审核 ${stats.reviewPatients} 人`"
-        @click="router.push('/audit/review')"
-      >
-        <span>待档案审核</span>
-        <strong>{{ stats.reviewPatients }}</strong>
-        <small>需要复核</small>
-      </button>
-      <button
-        class="exception-card"
-        :class="{ warning: stats.returnedPatients > 0, 'is-zero': stats.returnedPatients === 0 }"
-        :aria-label="`退回整改 ${stats.returnedPatients} 人`"
-        @click="router.push('/audit/review')"
-      >
-        <span>退回整改</span>
-        <strong>{{ stats.returnedPatients }}</strong>
-        <small>优先补齐</small>
-      </button>
-      <button
-        class="exception-card"
-        :class="{ danger: stats.voidedDocumentCount > 0, 'is-zero': stats.voidedDocumentCount === 0 }"
-        :aria-label="`附件作废 ${stats.voidedDocumentCount} 份`"
-        @click="router.push('/documents/recycle')"
-      >
-        <span>附件作废</span>
-        <strong>{{ stats.voidedDocumentCount }}</strong>
-        <small>需要留痕</small>
-      </button>
-      <button
-        class="exception-card"
-        :class="{ 'is-zero': editableSectionCount === 0 }"
-        :aria-label="`可写章节 ${editableSectionCount} 项`"
-        @click="router.push('/encounters/active')"
-      >
-        <span>可写章节</span>
-        <strong>{{ editableSectionCount }}</strong>
-        <small>{{ roleName }}权限</small>
+    <section class="stat-strip">
+      <button v-for="card in statCards" :key="card.id" class="stat-card" :class="`is-${card.tone}`" @click="openStatCard(card)">
+        <span>{{ card.label }}</span>
+        <strong>{{ card.count }}</strong>
+        <small>{{ card.desc }}</small>
       </button>
     </section>
 
-    <section class="workbench-grid">
-      <div v-loading="dashboardLoading" class="workbench-main" element-loading-text="正在刷新任务...">
-        <HomeTaskPanel
-          :role-name="roleName"
-          :action-tasks="actionTasks"
-          :task-cards="taskCards"
-          @refresh="loadTasks"
-          @open-action-task="openActionTask"
-          @open-task="openTask"
+    <div class="workbench-grid">
+      <div class="workbench-main">
+        <template v-if="showPatientBoard">
+          <HomeTaskPanel
+            v-loading="dashboardLoading"
+            class="board-card"
+            :role-name="roleName"
+            :action-tasks="actionTasks"
+            :task-cards="taskCards"
+            @refresh="reloadAll"
+            @open-task="openTask"
+            @open-action-task="openActionTask"
+          />
+          <div class="board-card chart-row">
+            <MiniBarChart title="近 7 日就诊收录" subtitle="按就诊日期" :items="trendItems" unit=" 人" />
+            <MiniBarChart title="在办阶段分布" subtitle="当前流程所处阶段" :items="stageItems" unit=" 人" />
+          </div>
+          <CalendarHeatmap
+            class="board-card"
+            :month-title="calendarMonthTitle"
+            :month-total="calendarMonthTotal"
+            :peak-count="calendarPeakCount"
+            :weekday-labels="weekdayLabels"
+            :cells="calendarCells"
+            @shift-month="shiftCalendarMonth"
+            @current-month="jumpToCurrentMonth"
+            @select-month="selectCalendarMonth"
+            @select-date="selectCalendarDate"
+          />
+        </template>
+        <template v-else-if="showPharmacyBoard">
+          <div class="board-card">
+            <MiniBarChart title="处方状态分布" subtitle="中药房当前流水线" :items="pharmacyChartItems" unit=" 张" />
+          </div>
+        </template>
+        <template v-else-if="showInventoryBoard">
+          <div class="board-card">
+            <MiniBarChart title="库存工作概况" subtitle="本科室范围" :items="inventoryChartItems" unit=" 项" />
+          </div>
+        </template>
+      </div>
+
+      <aside class="workbench-side board-card">
+        <ShortcutPanel :quick-entries="quickEntries" :reminders="roleReminders" @navigate="navigateTo" />
+        <MaintenancePanel
+          v-if="isAdmin"
+          v-model:backup-enabled="backupEnabled"
+          v-model:backup-path="backupPath"
+          :maintenance-loading="maintenanceLoading"
+          :storage-summary="storageSummary"
+          :snapshot-summary="snapshotSummary"
+          :maintenance-status="maintenanceStatus"
+          :latest-backup-summary="latestBackupSummary"
+          :backup-status="backupStatus"
+          :backup-loading="backupLoading"
+          :choosing-backup-dir="choosingBackupDir"
+          :backup-storage-summary="backupStorageSummary"
+          :backup-health-items="backupHealthItems"
+          @refresh="loadMaintenanceDashboard({ fullMaintenanceScan: true })"
+          @create-snapshot="createSnapshot"
+          @choose-backup-directory="chooseBackupDirectory"
+          @save-backup-config="saveBackupConfig"
+          @run-backup-now="runBackupNow"
         />
-
-        <CalendarHeatmap
-          :month-title="calendarMonthTitle"
-          :month-total="calendarMonthTotal"
-          :peak-count="calendarPeakCount"
-          :weekday-labels="weekdayLabels"
-          :cells="calendarCells"
-          @shift-month="shiftCalendarMonth"
-          @current-month="jumpToCurrentMonth"
-          @select-month="selectCalendarMonth"
-          @select-date="selectCalendarDate"
-        />
-      </div>
-
-      <ShortcutMaintenancePanel
-        v-model:backup-enabled="backupEnabled"
-        v-model:backup-path="backupPath"
-        :quick-entries="quickEntries"
-        :work-reminders="workReminders"
-        :current-role="currentRole"
-        :maintenance-loading="maintenanceLoading"
-        :storage-summary="storageSummary"
-        :snapshot-summary="snapshotSummary"
-        :maintenance-status="maintenanceStatus"
-        :latest-backup-summary="latestBackupSummary"
-        :backup-status="backupStatus"
-        :backup-loading="backupLoading"
-        :choosing-backup-dir="choosingBackupDir"
-        :backup-storage-summary="backupStorageSummary"
-        :backup-health-items="backupHealthItems"
-        @navigate="path => router.push(path)"
-        @refresh="loadTasks({ fullMaintenanceScan: true })"
-        @create-snapshot="createSnapshot"
-        @choose-backup-directory="chooseBackupDirectory"
-        @save-backup-config="saveBackupConfig"
-        @run-backup-now="runBackupNow"
-      />
-    </section>
+      </aside>
+    </div>
   </div>
 </template>
 
@@ -132,7 +89,6 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { ArrowRight } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
@@ -150,12 +106,18 @@ import {
   type PatientRow,
   type WorkReminder
 } from "@/api/modules/clinic";
+import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/tcmPharmacy";
+import { getInventoryWorkbenchApi, type InventoryWorkbench } from "@/api/modules/inventory";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
+import { useAuthStore } from "@/stores/modules/auth";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 import CalendarHeatmap from "./components/CalendarHeatmap.vue";
 import HomeTaskPanel from "./components/HomeTaskPanel.vue";
-import ShortcutMaintenancePanel from "./components/ShortcutMaintenancePanel.vue";
+import GreetingBanner from "./components/GreetingBanner.vue";
+import MiniBarChart from "./components/MiniBarChart.vue";
+import ShortcutPanel from "./components/ShortcutPanel.vue";
+import MaintenancePanel from "./components/MaintenancePanel.vue";
 import { useHomeDashboard } from "./composables/useHomeDashboard";
 
 interface HomeTask {
@@ -178,6 +140,16 @@ interface ActionTask {
   query?: Record<string, string>;
 }
 
+interface StatCard {
+  id: string;
+  label: string;
+  count: number | string;
+  desc: string;
+  tone: "success" | "warning" | "danger" | "info";
+  path: string;
+  query?: Record<string, string>;
+}
+
 type CalendarDayCell = {
   key: string;
   date: string;
@@ -192,6 +164,8 @@ type CalendarDayCell = {
 
 const router = useRouter();
 const userStore = useUserStore();
+const authStore = useAuthStore();
+
 const patientRows = ref<PatientRow[]>([]);
 const dashboardLoading = ref(false);
 const workReminders = ref<WorkReminder[]>([]);
@@ -202,6 +176,8 @@ const backupPath = ref("");
 const backupEnabled = ref(true);
 const backupLoading = ref(false);
 const choosingBackupDir = ref(false);
+const tcmCounts = ref<TcmStatusCounts>();
+const inventoryStats = ref<InventoryWorkbench>();
 const stats = ref<OperationStats>({
   totalPatients: 0,
   pendingPatients: 0,
@@ -233,10 +209,21 @@ const todayText = toDateText(new Date());
 const activeCalendarMonth = ref(todayText.slice(0, 7));
 const selectedCalendarDate = ref("");
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
+const isAdmin = computed(() => currentRole.value === "admin");
 const roleName = computed(() => roleLabel(currentRole.value));
+const userName = computed(() => userStore.userInfo.name || "同事");
+const department = computed(() => userStore.userInfo.department || "门诊");
 const editableSections = computed(() => recordSections.filter(section => canEditSection(currentRole.value, section)));
 const editableSectionCount = computed(() => editableSections.value.length);
 const firstEditableSection = computed(() => editableSections.value[0] ?? recordSections[0]);
+
+// 严格按后端下发的菜单权限决定加载哪块工作面板——绝不调用本岗位无权的接口。
+const menuPaths = computed(() => new Set(authStore.flatMenuListGet.map(item => item.path)));
+const showPatientBoard = computed(() => menuPaths.value.has("/patients/list"));
+const showPharmacyBoard = computed(() => !showPatientBoard.value && menuPaths.value.has("/tcm-pharmacy/workbench"));
+const showInventoryBoard = computed(
+  () => !showPatientBoard.value && !showPharmacyBoard.value && menuPaths.value.has("/inventory/overview")
+);
 
 const {
   quickEntries,
@@ -370,7 +357,7 @@ const roleActionConfig = computed(() => {
       }
     ];
   }
-  if (["admin", "manager"].includes(role)) {
+  if (role === "admin") {
     return [
       {
         id: "admin-backup",
@@ -440,6 +427,227 @@ const actionTasks = computed<ActionTask[]>(() =>
   }))
 );
 
+// 岗位统计卡：不同岗位组呈现完全不同的数据面。
+const statCards = computed<StatCard[]>(() => {
+  if (showPatientBoard.value) {
+    return [
+      {
+        id: "pending",
+        label: "待处理",
+        count: pendingRows.value.length,
+        desc: "本岗位相关在办患者",
+        tone: pendingRows.value.length ? "warning" : "success",
+        path: "/encounters/active"
+      },
+      {
+        id: "review",
+        label: "待档案审核",
+        count: stats.value.reviewPatients,
+        desc: "等待质控审核",
+        tone: stats.value.reviewPatients ? "warning" : "success",
+        path: "/audit/review"
+      },
+      {
+        id: "returned",
+        label: "退回整改",
+        count: stats.value.returnedPatients,
+        desc: "需按原因补齐后重新提交",
+        tone: stats.value.returnedPatients ? "danger" : "success",
+        path: "/audit/review"
+      },
+      {
+        id: "attachment",
+        label: "附件待补",
+        count: attachmentTodoRows.value.length,
+        desc: "缺少证据附件的档案",
+        tone: attachmentTodoRows.value.length ? "warning" : "success",
+        path: "/workbench/upload"
+      },
+      {
+        id: "sections",
+        label: "可写章节",
+        count: editableSectionCount.value,
+        desc: `${roleName.value}可编辑的档案章节`,
+        tone: "info",
+        path: "/encounters/active"
+      }
+    ];
+  }
+  if (showPharmacyBoard.value) {
+    const counts = tcmCounts.value;
+    const value = (key: keyof TcmStatusCounts) => counts?.[key] ?? 0;
+    return [
+      {
+        id: "charge",
+        label: "待收费",
+        count: value("waitingCharge"),
+        desc: "医师已签署提交",
+        tone: value("waitingCharge") ? "warning" : "success",
+        path: "/tcm-pharmacy/workbench"
+      },
+      {
+        id: "reviewRx",
+        label: "待审方",
+        count: value("waitingReview"),
+        desc: "收费完成待药师审核",
+        tone: value("waitingReview") ? "warning" : "success",
+        path: "/tcm-pharmacy/workbench"
+      },
+      {
+        id: "dispensing",
+        label: "调剂中",
+        count: value("dispensing"),
+        desc: "抓药与复核进行中",
+        tone: "info",
+        path: "/tcm-pharmacy/workbench"
+      },
+      {
+        id: "decocting",
+        label: "代煎中",
+        count: value("decocting"),
+        desc: "浸泡、煎制与包装",
+        tone: "info",
+        path: "/tcm-pharmacy/workbench"
+      },
+      {
+        id: "ready",
+        label: "待取药",
+        count: value("ready"),
+        desc: "可叫号发药",
+        tone: value("ready") ? "warning" : "success",
+        path: "/tcm-pharmacy/workbench"
+      },
+      {
+        id: "exception",
+        label: "异常处方",
+        count: value("exception"),
+        desc: "缺药或设备异常",
+        tone: value("exception") ? "danger" : "success",
+        path: "/tcm-pharmacy/workbench"
+      }
+    ];
+  }
+  if (showInventoryBoard.value) {
+    const workbench = inventoryStats.value;
+    return [
+      {
+        id: "issue",
+        label: "待发放",
+        count: workbench?.workflow.pendingIssue ?? 0,
+        desc: "已审批等待中央仓发放",
+        tone: "info",
+        path: "/inventory/requests"
+      },
+      {
+        id: "transit",
+        label: "在途",
+        count: workbench?.workflow.inTransit ?? 0,
+        desc: "已发放等待科室签收",
+        tone: "info",
+        path: "/inventory/requests"
+      },
+      {
+        id: "failed",
+        label: "异常任务",
+        count: workbench?.automation.failed ?? 0,
+        desc: "自动扣减失败待处理",
+        tone: (workbench?.automation.failed ?? 0) ? "danger" : "success",
+        path: "/inventory/overview"
+      },
+      {
+        id: "low",
+        label: "低库存",
+        count: workbench?.lowStockCount ?? 0,
+        desc: "低于安全库存的物资",
+        tone: (workbench?.lowStockCount ?? 0) ? "warning" : "success",
+        path: "/inventory/overview"
+      },
+      {
+        id: "expiry",
+        label: "临期物资",
+        count: workbench?.expirySoonCount ?? 0,
+        desc: "请优先安排使用或隔离",
+        tone: (workbench?.expirySoonCount ?? 0) ? "warning" : "success",
+        path: "/inventory/overview"
+      }
+    ];
+  }
+  return [];
+});
+
+// 横幅"今天要处理什么"：优先取有告警的项。
+const focusTask = computed(() => {
+  if (showPatientBoard.value) {
+    const task = actionTasks.value.find(item => item.level !== "success") || actionTasks.value[0];
+    return task ? { title: task.title, path: task.path, query: task.query } : undefined;
+  }
+  const card = statCards.value.find(item => ["warning", "danger"].includes(item.tone));
+  return card ? { title: card.label, path: card.path, query: card.query } : undefined;
+});
+
+// 岗位提醒：admin 用后端全院巡检提醒；其余岗位从自身可见数据本地推导，不发无权请求。
+const roleReminders = computed<WorkReminder[]>(() => {
+  if (isAdmin.value) return workReminders.value;
+  const reminders: WorkReminder[] = [];
+  if (showPatientBoard.value) {
+    if (stats.value.returnedPatients) {
+      reminders.push({
+        id: "role-returned",
+        title: "退回整改待处理",
+        desc: "质控退回的档案请尽快补齐并重新提交",
+        count: stats.value.returnedPatients,
+        level: "danger",
+        path: "/audit/review"
+      });
+    }
+    if (stats.value.overduePatients) {
+      reminders.push({
+        id: "role-overdue",
+        title: "超 24 小时未更新",
+        desc: "关注长时间停留在同一阶段的患者",
+        count: stats.value.overduePatients,
+        level: "warning",
+        path: "/encounters/active"
+      });
+    }
+  }
+  if (showPharmacyBoard.value && tcmCounts.value) {
+    if (tcmCounts.value.exception) {
+      reminders.push({
+        id: "tcm-exception",
+        title: "异常处方待跟进",
+        desc: "缺药、设备或生产异常需登记处理",
+        count: tcmCounts.value.exception,
+        level: "danger",
+        path: "/tcm-pharmacy/workbench"
+      });
+    }
+    if (tcmCounts.value.ready) {
+      reminders.push({
+        id: "tcm-ready",
+        title: "成品待叫号",
+        desc: "已完成的处方尽快叫号发药",
+        count: tcmCounts.value.ready,
+        level: "warning",
+        path: "/tcm-pharmacy/workbench"
+      });
+    }
+  }
+  if (showInventoryBoard.value && inventoryStats.value) {
+    if (inventoryStats.value.automation.failed) {
+      reminders.push({
+        id: "inv-failed",
+        title: "扣减异常任务",
+        desc: "修复根因后重试原幂等任务",
+        count: inventoryStats.value.automation.failed,
+        level: "danger",
+        path: "/inventory/overview"
+      });
+    }
+  }
+  return reminders;
+});
+
 const patientEncounterDates = (patient: PatientRow) => {
   const history = patient.encounterHistory?.length
     ? patient.encounterHistory
@@ -459,6 +667,51 @@ const countByDate = computed(() => {
 
 const rangeCount = (from: string, to: string) =>
   patientRows.value.filter(patient => patientEncounterDates(patient).some(date => date >= from && date <= to)).length;
+
+// 近 7 日趋势（含今天）。
+const trendItems = computed(() => {
+  const items: { label: string; value: number }[] = [];
+  for (let offset = 6; offset >= 0; offset--) {
+    const date = new Date();
+    date.setDate(date.getDate() - offset);
+    const dateText = toDateText(date);
+    items.push({
+      label: offset === 0 ? "今天" : `${date.getMonth() + 1}/${date.getDate()}`,
+      value: countByDate.value.get(dateText) || 0
+    });
+  }
+  return items;
+});
+
+const stageItems = computed(() =>
+  stats.value.stageBuckets.slice(0, 6).map(bucket => ({ label: bucket.stage, value: bucket.count }))
+);
+
+const pharmacyChartItems = computed(() => {
+  const counts = tcmCounts.value;
+  if (!counts) return [];
+  return [
+    { label: "待收费", value: counts.waitingCharge },
+    { label: "待审方", value: counts.waitingReview },
+    { label: "调剂中", value: counts.dispensing },
+    { label: "代煎中", value: counts.decocting },
+    { label: "待取药", value: counts.ready },
+    { label: "今日已取", value: counts.collectedToday }
+  ];
+});
+
+const inventoryChartItems = computed(() => {
+  const workbench = inventoryStats.value;
+  if (!workbench) return [];
+  return [
+    { label: "待发放", value: workbench.workflow.pendingIssue ?? 0 },
+    { label: "在途", value: workbench.workflow.inTransit ?? 0 },
+    { label: "待签收", value: workbench.workflow.pendingReceipt ?? 0 },
+    { label: "异常任务", value: workbench.automation.failed ?? 0 },
+    { label: "低库存", value: workbench.lowStockCount ?? 0 },
+    { label: "临期", value: workbench.expirySoonCount ?? 0 }
+  ];
+});
 
 const weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"];
 const calendarMonthRange = computed(() => getMonthRange(activeCalendarMonth.value));
@@ -525,8 +778,6 @@ const taskCards = computed<HomeTask[]>(() =>
   }))
 );
 
-const firstActionTask = computed(() => actionTasks.value.find(task => task.level !== "success") || actionTasks.value[0]);
-
 const loadPrimaryDashboard = async () => {
   dashboardLoading.value = true;
   try {
@@ -543,19 +794,37 @@ const loadPrimaryDashboard = async () => {
   }
 };
 
+const loadPharmacyBoard = async () => {
+  try {
+    const { data } = await getTcmDashboardApi();
+    tcmCounts.value = data.counts;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
+};
+
+const loadInventoryBoard = async () => {
+  try {
+    const { data } = await getInventoryWorkbenchApi();
+    inventoryStats.value = data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
+};
+
+// 仅管理员拉取全院巡检/备份数据，其余岗位不发起这些无权请求。
 const loadMaintenanceDashboard = async (options: { fullMaintenanceScan?: boolean } = {}) => {
+  if (!isAdmin.value) return;
   maintenanceLoading.value = true;
   try {
     const maintenanceRequest = options.fullMaintenanceScan ? getMaintenanceStatusApi : getMaintenanceSummaryApi;
     const [{ data: reminders }, { data: status }] = await Promise.all([getWorkRemindersApi(), maintenanceRequest()]);
     workReminders.value = reminders;
     maintenanceStatus.value = status;
-    if (currentRole.value === "admin") {
-      const { data: backup } = await getBackupStatusApi();
-      backupStatus.value = backup;
-      backupPath.value = backup.backupDir;
-      backupEnabled.value = backup.enabled;
-    }
+    const { data: backup } = await getBackupStatusApi();
+    backupStatus.value = backup;
+    backupPath.value = backup.backupDir;
+    backupEnabled.value = backup.enabled;
   } catch (error) {
     ElMessage.warning(`生产巡检暂不可用：${(error as Error).message}`);
   } finally {
@@ -563,8 +832,13 @@ const loadMaintenanceDashboard = async (options: { fullMaintenanceScan?: boolean
   }
 };
 
-const loadTasks = async (options: { fullMaintenanceScan?: boolean } = {}) => {
-  await Promise.allSettled([loadPrimaryDashboard(), loadMaintenanceDashboard(options)]);
+const reloadAll = async () => {
+  const jobs: Promise<unknown>[] = [];
+  if (showPatientBoard.value) jobs.push(loadPrimaryDashboard());
+  if (showPharmacyBoard.value) jobs.push(loadPharmacyBoard());
+  if (showInventoryBoard.value) jobs.push(loadInventoryBoard());
+  if (isAdmin.value) jobs.push(loadMaintenanceDashboard());
+  await Promise.allSettled(jobs);
 };
 
 const saveBackupConfig = async () => {
@@ -628,7 +902,7 @@ const createSnapshot = async () => {
   try {
     const { data } = await createMaintenanceSnapshotApi();
     ElMessage.success(`快照已生成，当前共 ${data.snapshotCount} 个`);
-    await loadTasks();
+    await reloadAll();
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
@@ -668,903 +942,121 @@ const openActionTask = (task?: ActionTask) => {
   router.push({ path: task.path, query: task.query });
 };
 
-onMounted(loadTasks);
+const openStatCard = (card: StatCard) => {
+  router.push({ path: card.path, query: card.query });
+};
+
+const openFocusTask = () => {
+  if (!focusTask.value) return;
+  router.push({ path: focusTask.value.path, query: focusTask.value.query });
+};
+
+const navigateTo = (path: string) => {
+  router.push(path);
+};
+
+onMounted(reloadAll);
 </script>
 
 <style scoped lang="scss">
 .home-page {
-  --clinic-success: #16a34a;
-  --clinic-success-soft: #f0fdf4;
-  --clinic-warning: #d97706;
-  --clinic-warning-soft: #fffbeb;
-  --clinic-danger: #dc2626;
-  --clinic-danger-soft: #fef2f2;
+  --clinic-success: #15803d;
+  --clinic-warning: #b45309;
+  --clinic-danger: #b91c1c;
   --clinic-info: #0f766e;
-  --clinic-info-soft: #ecfdf5;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: #1f2937;
-}
+  --clinic-success-soft: #ecf8f0;
+  --clinic-warning-soft: #fef7e8;
+  --clinic-danger-soft: #fdeeee;
 
-.today-panel,
-.calendar-heatmap-card,
-.task-panel,
-.shortcut-panel,
-.exception-card {
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-}
-
-.today-panel {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: center;
-  padding: 18px;
-  overflow: hidden;
-  background: linear-gradient(90deg, rgb(236 253 245 / 86%), rgb(255 255 255 / 98%) 48%), #ffffff;
-  border-color: rgb(20 184 166 / 18%);
-  box-shadow: 0 10px 24px rgb(15 118 110 / 8%);
+  gap: 14px;
+  padding: 4px 2px 16px;
 }
 
-.role-block {
+.stat-strip {
   display: grid;
-  gap: 4px;
-  padding-right: 18px;
-  border-right: 1px solid var(--el-border-color-lighter);
-
-  span,
-  small {
-    color: var(--el-text-color-secondary);
-  }
-
-  strong {
-    color: var(--clinic-info);
-    font-size: 26px;
-    line-height: 1.15;
-  }
-}
-
-.today-summary {
-  min-width: 0;
-
-  p,
-  h1,
-  span {
-    margin: 0;
-  }
-
-  p {
-    color: var(--clinic-info);
-    font-size: 13px;
-    font-weight: 700;
-  }
-
-  h1 {
-    margin-top: 4px;
-    color: var(--el-text-color-primary);
-    font-size: 24px;
-    line-height: 1.35;
-  }
-
-  span {
-    display: block;
-    margin-top: 4px;
-    color: var(--el-text-color-regular);
-    line-height: 1.45;
-  }
-}
-
-.exception-strip {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
-
-.exception-card {
-  position: relative;
+.stat-card {
   display: grid;
-  min-width: 0;
-  gap: 2px;
-  padding: 13px 14px;
-  overflow: hidden;
+  gap: 3px;
+  padding: 14px 16px;
   text-align: left;
   cursor: pointer;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
   transition:
-    border-color 160ms ease,
+    transform 160ms ease,
     box-shadow 160ms ease,
-    transform 160ms ease;
-
-  &::before {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 4px;
-    content: "";
-    background: var(--clinic-info);
-    opacity: 0.72;
-  }
-
+    border-color 160ms ease;
   &:hover {
-    border-color: rgb(15 118 110 / 28%);
-    box-shadow: 0 10px 22px rgb(15 23 42 / 8%);
-    transform: translateY(-1px);
+    border-color: rgb(15 118 110 / 26%);
+    box-shadow: 0 8px 20px rgb(15 118 110 / 10%);
+    transform: translateY(-2px);
   }
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
   span {
     color: var(--el-text-color-secondary);
     font-size: 13px;
+    font-weight: 600;
   }
-
   strong {
-    margin-top: 2px;
     color: var(--el-text-color-primary);
-    font-size: 22px;
+    font-size: 26px;
     font-variant-numeric: tabular-nums;
+    line-height: 1.15;
   }
-
   small {
     overflow: hidden;
-    color: var(--el-text-color-secondary);
+    color: var(--el-text-color-placeholder);
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  &.warning {
-    border-color: rgb(245 158 11 / 28%);
-    background: var(--clinic-warning-soft);
-
-    &::before {
-      background: var(--clinic-warning);
-    }
-
-    strong {
-      color: var(--clinic-warning);
-    }
+  &.is-warning strong {
+    color: var(--clinic-warning);
   }
-
-  &.danger {
-    border-color: rgb(239 68 68 / 22%);
-    background: var(--clinic-danger-soft);
-
-    &::before {
-      background: var(--clinic-danger);
-    }
-
-    strong {
-      color: var(--clinic-danger);
-    }
+  &.is-danger strong {
+    color: var(--clinic-danger);
   }
-
-  &.is-zero {
-    background: #ffffff;
-    border-color: var(--el-border-color-lighter);
-    opacity: 0.74;
-
-    &::before {
-      background: var(--el-border-color);
-      opacity: 0.55;
-    }
-
-    strong {
-      color: var(--el-text-color-secondary);
-    }
-  }
-}
-
-.workbench-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.42fr) minmax(320px, 0.58fr);
-  gap: 12px;
-}
-
-.workbench-main {
-  display: grid;
-  min-width: 0;
-  gap: 12px;
-}
-
-.task-panel,
-.shortcut-panel,
-.calendar-heatmap-card {
-  padding: 16px;
-}
-
-.calendar-heatmap-card {
-  background: linear-gradient(135deg, rgb(236 253 245 / 58%), rgb(255 255 255 / 92%)), #ffffff;
-  border-color: rgb(20 184 166 / 18%);
-}
-
-.scope-eyebrow {
-  color: #008f84;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.calendar-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-
-  h2,
-  p {
-    margin: 0;
-  }
-
-  h2 {
-    margin-top: 4px;
-    color: var(--el-text-color-primary);
-    font-size: 18px;
-    line-height: 1.35;
-  }
-
-  p {
-    margin-top: 4px;
-    color: var(--el-text-color-secondary);
-  }
-}
-
-.calendar-actions {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 8px;
-}
-
-.calendar-weekdays,
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.calendar-weekdays {
-  margin: 14px 0 7px;
-
-  span {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-    font-weight: 700;
-    text-align: center;
-  }
-}
-
-.calendar-day {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-width: 0;
-  min-height: 52px;
-  padding: 7px;
-  color: var(--el-text-color-primary);
-  text-align: left;
-  cursor: pointer;
-  background: #f8fbfa;
-  border: 1px solid #dfeee9;
-  border-radius: 8px;
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-
-  &:not(.is-empty):hover {
-    border-color: #0f9f8f;
-    box-shadow: 0 7px 16px rgb(15 118 110 / 12%);
-    transform: translateY(-1px);
-  }
-
-  &.is-empty {
-    visibility: hidden;
-    pointer-events: none;
-  }
-
-  &.is-level-1 {
-    background: #e7f7f1;
-    border-color: #ccecdf;
-  }
-
-  &.is-level-2 {
-    background: #caefdf;
-    border-color: #a4dfc8;
-  }
-
-  &.is-level-3 {
-    color: #07594f;
-    background: #8edcc3;
-    border-color: #62c6a8;
-  }
-
-  &.is-level-4 {
-    color: #ffffff;
-    background: #0f9f8f;
-    border-color: #0d857a;
-
-    .day-count {
-      color: rgb(255 255 255 / 86%);
-    }
-  }
-
-  &.is-selected {
-    border-color: #07594f;
-    box-shadow: 0 0 0 2px rgb(15 118 110 / 20%);
-  }
-
-  &.is-today .day-number::after {
-    margin-left: 4px;
-    color: #b45309;
-    font-size: 11px;
-    font-weight: 700;
-    content: "今";
-  }
-}
-
-.day-number {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.day-count {
-  overflow: hidden;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.heatmap-legend {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 10px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-
-  i {
-    width: 18px;
-    height: 10px;
-    border: 1px solid #dfeee9;
-    border-radius: 3px;
-  }
-
-  .legend-anchor {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .is-level-0 {
-    background: #f8fbfa;
-  }
-
-  .is-level-1 {
-    background: #e7f7f1;
-  }
-
-  .is-level-2 {
-    background: #caefdf;
-  }
-
-  .is-level-3 {
-    background: #8edcc3;
-  }
-
-  .is-level-4 {
-    background: #0f9f8f;
-    border-color: #0d857a;
-  }
-}
-
-.panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-
-  h2,
-  p {
-    margin: 0;
-  }
-
-  h2 {
-    font-size: 18px;
-    line-height: 1.35;
-  }
-
-  p {
-    margin-top: 4px;
-    color: var(--el-text-color-secondary);
-  }
-}
-
-.task-list {
-  display: grid;
-  gap: 8px;
-}
-
-.action-task-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.action-task-card {
-  position: relative;
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-  padding: 13px 14px 36px;
-  overflow: hidden;
-  text-align: left;
-  cursor: pointer;
-  background: linear-gradient(135deg, rgb(236 253 245 / 62%), #ffffff);
-  border: 1px solid rgb(15 118 110 / 14%);
-  border-radius: 8px;
-  transition:
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
-
-  &::after {
-    position: absolute;
-    right: 12px;
-    bottom: 10px;
-    color: var(--clinic-info);
-    font-size: 12px;
-    font-weight: 700;
-    content: attr(data-action);
-  }
-
-  &:hover {
-    border-color: rgb(15 118 110 / 26%);
-    box-shadow: 0 12px 24px rgb(15 118 110 / 10%);
-    transform: translateY(-2px);
-  }
-
-  span,
-  strong,
-  em,
-  small,
-  b {
-    display: block;
-  }
-
-  span {
-    color: var(--clinic-info);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  strong {
-    color: var(--hos-primary-deep, #3d6b54);
-    font-size: 34px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-
-  em {
-    color: var(--el-text-color-primary);
-    font-style: normal;
-    font-weight: 700;
-    line-height: 1.35;
-  }
-
-  small {
-    min-height: 34px;
-    color: var(--el-text-color-secondary);
-    line-height: 1.45;
-  }
-
-  b {
-    position: absolute;
-    right: 12px;
-    bottom: 10px;
-    color: var(--clinic-info);
-    font-size: 12px;
-  }
-
-  &.is-warning {
-    background: var(--clinic-warning-soft);
-    border-color: rgb(245 158 11 / 26%);
-
-    strong,
-    b {
-      color: var(--clinic-warning);
-    }
-  }
-
-  &.is-danger {
-    background: var(--clinic-danger-soft);
-    border-color: rgb(239 68 68 / 22%);
-
-    strong,
-    b {
-      color: var(--clinic-danger);
-    }
-  }
-
-  &.is-success {
-    background: var(--clinic-success-soft);
-    border-color: rgb(22 163 74 / 18%);
-
-    strong,
-    b {
-      color: var(--clinic-success);
-    }
-  }
-}
-
-.patient-task-list {
-  padding-top: 10px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-}
-
-.task-card {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px;
-  text-align: left;
-  cursor: pointer;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
-
-  &:hover {
-    border-color: rgb(15 118 110 / 24%);
-    box-shadow: 0 8px 18px rgb(15 23 42 / 7%);
-    transform: translateY(-1px);
-  }
-
-  strong,
-  span,
-  em,
-  small {
-    display: block;
-  }
-
-  strong {
-    color: var(--el-text-color-primary);
-    font-size: 16px;
-  }
-
-  span,
-  small {
-    color: var(--el-text-color-secondary);
-  }
-
-  em {
-    color: var(--el-text-color-primary);
-    font-style: normal;
-    font-weight: 600;
-    line-height: 1.45;
-  }
-}
-
-.shortcut-list {
-  display: grid;
-  gap: 8px;
-
-  button {
-    display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
-    gap: 2px 10px;
-    align-items: center;
-    padding: 11px 12px;
-    text-align: left;
-    cursor: pointer;
-    background: #ffffff;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 6px;
-    transition:
-      background 160ms ease,
-      border-color 160ms ease,
-      transform 160ms ease;
-
-    &:hover {
-      background: #f8fffd;
-      border-color: rgb(15 118 110 / 22%);
-      transform: translateX(2px);
-    }
-
-    .el-icon {
-      grid-row: span 2;
-      color: var(--clinic-info);
-      font-size: 22px;
-    }
-
-    span {
-      color: var(--el-text-color-primary);
-      font-weight: 600;
-    }
-
-    small {
-      color: var(--el-text-color-secondary);
-    }
-  }
-}
-
-.production-panel {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--el-border-color-lighter);
-}
-
-.panel-head.compact {
-  align-items: flex-start;
-  margin-bottom: 10px;
-
-  h2 {
-    font-size: 16px;
-  }
-
-  p {
-    font-size: 12px;
-  }
-}
-
-.reminder-list {
-  display: grid;
-  gap: 8px;
-}
-
-.reminder-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 10px;
-  padding: 10px 11px;
-  text-align: left;
-  cursor: pointer;
-  background: #f8fafc;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span {
-    color: var(--el-text-color-primary);
-    font-weight: 700;
-  }
-
-  strong {
-    color: var(--el-color-primary);
-    font-size: 20px;
-  }
-
-  small {
-    grid-column: 1 / -1;
-    color: var(--el-text-color-secondary);
-    line-height: 1.45;
-  }
-
-  &.is-warning {
-    background: var(--clinic-warning-soft);
-    border-color: rgb(245 158 11 / 25%);
-
-    strong {
-      color: var(--clinic-warning);
-    }
-  }
-
-  &.is-danger {
-    background: var(--clinic-danger-soft);
-    border-color: rgb(239 68 68 / 22%);
-
-    strong {
-      color: var(--clinic-danger);
-    }
-  }
-
   &.is-success strong {
     color: var(--clinic-success);
   }
 }
 
-.maintenance-card {
+.workbench-grid {
   display: grid;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 12px;
-  background: #f7fbfa;
-  border: 1px solid rgb(20 184 166 / 16%);
-  border-radius: 6px;
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span,
-  small {
-    color: var(--el-text-color-secondary);
-  }
-
-  strong {
-    margin-top: 2px;
-    color: var(--el-text-color-primary);
-  }
-
-  small {
-    overflow: hidden;
-    margin-top: 2px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 14px;
+  align-items: start;
 }
-
-.backup-card {
-  display: grid;
-  gap: 10px;
-  margin-top: 10px;
-  padding: 12px;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span,
-  small {
-    color: var(--el-text-color-secondary);
-  }
-
-  strong {
-    margin-top: 2px;
-    color: var(--el-text-color-primary);
-    line-height: 1.35;
-  }
-
-  small {
-    margin-top: 2px;
-    line-height: 1.45;
-  }
-}
-
-.backup-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.backup-meta {
-  display: grid;
-  gap: 2px;
+.workbench-main {
   min-width: 0;
-
-  span,
-  small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  display: grid;
+  gap: 14px;
 }
-
-.backup-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+.board-card {
+  padding: 16px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
 }
-
-.backup-health-grid {
+.chart-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-
-  article {
-    display: grid;
-    grid-template-columns: 8px minmax(0, 1fr);
-    gap: 2px 8px;
-    align-items: center;
-    padding: 9px 10px;
-    background: #f8fafc;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 6px;
-
-    i {
-      width: 8px;
-      height: 8px;
-      background: var(--clinic-info);
-      border-radius: 50%;
-      box-shadow: 0 0 0 4px rgb(15 118 110 / 10%);
-    }
-
-    span,
-    strong {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    span {
-      color: var(--el-text-color-secondary);
-      font-size: 12px;
-    }
-
-    strong {
-      grid-column: 2;
-      color: var(--el-text-color-primary);
-      font-size: 13px;
-    }
-
-    &.is-success i {
-      background: var(--clinic-success);
-      box-shadow: 0 0 0 4px rgb(22 163 74 / 10%);
-    }
-
-    &.is-warning i {
-      background: var(--clinic-warning);
-      box-shadow: 0 0 0 4px rgb(217 119 6 / 12%);
-    }
-
-    &.is-danger i {
-      background: var(--clinic-danger);
-      box-shadow: 0 0 0 4px rgb(220 38 38 / 10%);
-    }
-  }
+  gap: 22px;
+}
+.workbench-side {
+  min-width: 0;
 }
 
 @media (max-width: 1080px) {
-  .today-panel,
   .workbench-grid {
     grid-template-columns: 1fr;
   }
-
-  .role-block {
-    padding-right: 0;
-    padding-bottom: 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--el-border-color-lighter);
-  }
-}
-
-@media (max-width: 760px) {
-  .today-panel {
-    padding: 14px;
-  }
-
-  .exception-strip,
-  .task-card,
-  .action-task-list,
-  .backup-health-grid {
+  .chart-row {
     grid-template-columns: 1fr;
-  }
-
-  .calendar-toolbar {
-    flex-direction: column;
-  }
-
-  .calendar-actions {
-    flex-wrap: wrap;
-  }
-
-  .calendar-day {
-    min-height: 46px;
-    padding: 6px;
   }
 }
 </style>
