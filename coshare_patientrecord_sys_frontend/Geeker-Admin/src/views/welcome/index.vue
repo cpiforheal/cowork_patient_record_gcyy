@@ -1,5 +1,5 @@
 <template>
-  <div class="welcome-page" :data-sky="sky.key" :data-sky-text="sky.text">
+  <div ref="rootRef" class="welcome-page" :class="{ 'is-splash': splashing }" :data-sky="sky.key" :data-sky-text="sky.text">
     <!-- 天空背景：主题切换时旧背景淡出、新背景淡入 -->
     <transition name="sky-fade">
       <div :key="sky.key" class="sky-layer" :style="{ background: sky.bg }"></div>
@@ -63,6 +63,9 @@
     </section>
 
     <p class="welcome-footnote">数据每分钟自动更新 · 以各工作台实际业务为准</p>
+    <transition name="care-fade">
+      <p v-if="splashing" class="splash-hint">即将进入工作台 · 点击任意处跳过</p>
+    </transition>
   </div>
 </template>
 
@@ -287,6 +290,66 @@ const careTip = computed(() => {
   return pool[tipIndex.value % pool.length];
 });
 
+/* ---------------- 开屏动画：首次进入全屏展示后收纳回工作区 ---------------- */
+
+const SPLASH_KEY = "welcome-splash-played";
+const SPLASH_HOLD_MS = 2400;
+const SPLASH_SETTLE_MS = 900;
+
+const rootRef = ref<HTMLElement>();
+const splashing = ref(false);
+let splashHoldTimer = 0;
+let splashSettleTimer = 0;
+
+function playSplash() {
+  const el = rootRef.value;
+  if (!el) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  try {
+    if (window.sessionStorage.getItem(SPLASH_KEY) === "1") return;
+    window.sessionStorage.setItem(SPLASH_KEY, "1");
+  } catch {
+    return;
+  }
+  splashing.value = true;
+  el.style.position = "fixed";
+  el.style.top = "0";
+  el.style.left = "0";
+  el.style.width = "100vw";
+  el.style.height = "100vh";
+  el.style.zIndex = "3000";
+  el.style.borderRadius = "0";
+  el.addEventListener("click", settleSplash, { once: true });
+  splashHoldTimer = window.setTimeout(settleSplash, SPLASH_HOLD_MS);
+}
+
+/** 回收动画：从全屏过渡到布局主区域的实际位置，结束后交还文档流。 */
+function settleSplash() {
+  if (!splashing.value) return;
+  splashing.value = false;
+  window.clearTimeout(splashHoldTimer);
+  const el = rootRef.value;
+  const target = el?.parentElement?.getBoundingClientRect();
+  if (!el || !target || target.width < 80) {
+    finishSplash();
+    return;
+  }
+  const ease = "cubic-bezier(0.25, 0.8, 0.3, 1)";
+  el.style.transition = `top ${SPLASH_SETTLE_MS}ms ${ease}, left ${SPLASH_SETTLE_MS}ms ${ease}, width ${SPLASH_SETTLE_MS}ms ${ease}, height ${SPLASH_SETTLE_MS}ms ${ease}, border-radius ${SPLASH_SETTLE_MS}ms ${ease}`;
+  el.style.top = `${target.top}px`;
+  el.style.left = `${target.left}px`;
+  el.style.width = `${target.width}px`;
+  el.style.height = `${target.height}px`;
+  el.style.borderRadius = "12px";
+  splashSettleTimer = window.setTimeout(finishSplash, SPLASH_SETTLE_MS + 60);
+}
+
+function finishSplash() {
+  splashing.value = false;
+  const el = rootRef.value;
+  if (el) el.style.cssText = "";
+}
+
 /* ---------------- 生命周期 ---------------- */
 
 function handleVisibilityChange() {
@@ -302,11 +365,14 @@ onMounted(() => {
     if (document.visibilityState === "visible") void loadSummary();
   }, SUMMARY_REFRESH_MS);
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  playSplash();
 });
 onBeforeUnmount(() => {
   window.clearInterval(clockTimer);
   window.clearInterval(summaryTimer);
   window.clearInterval(tipTimer);
+  window.clearTimeout(splashHoldTimer);
+  window.clearTimeout(splashSettleTimer);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
 });
 </script>
@@ -660,6 +726,50 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-placeholder);
   font-size: 12px;
   letter-spacing: 0.06em;
+}
+
+/* ---------- 开屏动画 ---------- */
+.welcome-stage,
+.summary-strip {
+  transition: transform 0.9s cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+.welcome-page.is-splash {
+  .welcome-stage {
+    transform: scale(1.06);
+  }
+  .summary-strip {
+    transform: scale(1.03);
+  }
+}
+.splash-hint {
+  position: absolute;
+  bottom: 3.5%;
+  left: 50%;
+  z-index: 2;
+  margin: 0;
+  padding: 6px 16px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(10, 30, 46, 0.35);
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  animation: hint-breathe 2.2s ease-in-out infinite;
+}
+.welcome-page[data-sky-text="dark"] .splash-hint {
+  color: rgba(30, 60, 75, 0.85);
+  background: rgba(255, 255, 255, 0.55);
+}
+@keyframes hint-breathe {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* ---------- 深色天空（夜/晨曦/黄昏/夜晚）下的文字与卡片适配 ---------- */
