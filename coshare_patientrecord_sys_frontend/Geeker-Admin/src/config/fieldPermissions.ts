@@ -7,6 +7,8 @@ export type UserRole =
   | "ultrasound"
   | "inspection"
   | "tcm"
+  | "tcm_pharmacy"
+  | "warehouse"
   | "tcmPharmacyOperator"
   | "pharmacist"
   | "pharmacy"
@@ -97,45 +99,44 @@ export interface RecordAttachment {
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
-  admin: "管理员",
-  frontdesk: "前台",
-  reception: "接诊",
-  lab: "化验室",
-  ecg: "心电室",
-  ultrasound: "B超/放射",
-  inspection: "检查室",
-  tcm: "中医",
+  admin: "系统管理员",
+  frontdesk: "登记前台",
+  reception: "接诊岗位",
+  lab: "检验岗位",
+  ecg: "心电岗位",
+  ultrasound: "超声岗位",
+  inspection: "检查岗位",
+  tcm: "中医岗位",
+  tcm_pharmacy: "中药房岗位",
+  warehouse: "仓库岗位",
   tcmPharmacyOperator: "中药房业务岗",
   pharmacist: "审方药师",
   pharmacy: "中药房",
   decoction: "代煎岗位",
-  doctor: "医生",
-  nurse: "护士/治疗室",
+  doctor: "医生岗位",
+  nurse: "护理与手术",
   nursing: "护理部",
-  manager: "院办/管理",
-  quality: "质控",
+  manager: "管理负责人",
+  quality: "质控与病案",
   display: "展示终端"
 };
 
 export const USER_ROLES: UserRole[] = [
   "admin",
+  "manager",
+  "quality",
+  "display",
   "frontdesk",
   "reception",
   "inspection",
   "tcm",
-  "tcmPharmacyOperator",
-  "pharmacist",
-  "pharmacy",
-  "decoction",
+  "doctor",
+  "nurse",
   "lab",
   "ecg",
   "ultrasound",
-  "doctor",
-  "nurse",
-  "nursing",
-  "manager",
-  "quality",
-  "display"
+  "warehouse",
+  "tcm_pharmacy"
 ];
 
 export const USER_ROLE_OPTIONS: { label: string; value: UserRole }[] = USER_ROLES.map(value => ({
@@ -143,10 +144,10 @@ export const USER_ROLE_OPTIONS: { label: string; value: UserRole }[] = USER_ROLE
   value
 }));
 
-export const roleLabel = (role?: string) => ROLE_LABELS[(role as UserRole) || "frontdesk"] ?? "前台";
+export const roleLabel = (role?: string) => ROLE_LABELS[(role as UserRole) || "frontdesk"] ?? "未知岗位";
 
 export const canEditField = (role: string | undefined, field: RecordField) => {
-  if (role === "admin") return true;
+  if (role === "admin") return false;
   return Array.isArray(field.editors) && field.editors.includes(role as UserRole);
 };
 
@@ -156,6 +157,7 @@ export const canEditSection = (role: string | undefined, section: RecordSection)
 
 export const editorLabels = (editors: UserRole[] = []) =>
   editors
+    .filter(item => item !== "admin")
     .map(item => ROLE_LABELS[item])
     .filter(Boolean)
     .join("、");

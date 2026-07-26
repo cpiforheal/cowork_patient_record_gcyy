@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.security.SecureRandom;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
@@ -25,6 +26,9 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.DependsOn;
@@ -51,6 +55,7 @@ public class AuthSessionService {
     private static final Logger log = LoggerFactory.getLogger(AuthSessionService.class);
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOGIN_LOCK_TTL = Duration.ofMinutes(10);
+    private static final Duration LOGIN_HANDLE_TTL = Duration.ofMinutes(5);
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -58,6 +63,8 @@ public class AuthSessionService {
     private final Environment environment;
     private final String bootstrapAdminPassword;
     private final SecureRandom secureRandom = new SecureRandom();
+    private final byte[] loginHandleSecret = new byte[32];
+    private final Map<String, LoginHandle> loginHandles = new ConcurrentHashMap<>();
 
     public AuthSessionService(
         JdbcTemplate jdbcTemplate,
@@ -71,6 +78,7 @@ public class AuthSessionService {
         this.passwordEncoder = passwordEncoder;
         this.environment = environment;
         this.bootstrapAdminPassword = bootstrapAdminPassword == null ? "" : bootstrapAdminPassword.trim();
+        secureRandom.nextBytes(loginHandleSecret);
     }
 
     @PostConstruct
@@ -138,14 +146,19 @@ public class AuthSessionService {
 
     public LoginResult login(LoginRequest request, String remoteAddress) {
         cleanupAuthenticationState();
-        String username = normalize(request.username());
-        if (username.isBlank() || request.password() == null || request.password().isBlank()) {
+        String accountHandle = request == null || request.accountHandle() == null ? "" : request.accountHandle().trim();
+        String loginIdentity = request == null ? "" : normalize(request.username());
+        if ((loginIdentity.isBlank() && accountHandle.isBlank()) || request.password() == null || request.password().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入账号和密码");
         }
 
-        String failureKey = username + "|" + normalize(remoteAddress);
+        Optional<JsonNode> candidate = accountHandle.isBlank()
+            ? loadAccount(loginIdentity)
+            : resolveLoginHandle(accountHandle).flatMap(this::loadAccountById);
+        String username = candidate.map(account -> normalize(text(account, "username"))).orElse(loginIdentity);
+        String failureKey = (username.isBlank() ? "invalid-handle" : username) + "|" + normalize(remoteAddress);
         rejectIfLocked(failureKey);
-        JsonNode account = loadAccount(username)
+        JsonNode account = candidate
             .orElseThrow(() -> {
                 registerFailedLogin(failureKey);
                 return new ResponseStatusException(HttpStatus.UNAUTHORIZED, "账号不存在或未启用");
@@ -169,8 +182,8 @@ public class AuthSessionService {
         }
         clearFailedLogin(failureKey);
 
-        String accountRole = text(account, "role").trim();
-        if (accountRole.isBlank()) {
+        String accountRole = RoleCatalog.canonicalize(text(account, "role"));
+        if (!RoleCatalog.isCanonical(accountRole)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "账号尚未配置岗位角色，请联系系统管理员");
         }
         DepartmentIdentity department = resolveLoginDepartment(text(account, "id"));
@@ -179,7 +192,7 @@ public class AuthSessionService {
             text(account, "username"),
             text(account, "name", text(account, "username")),
             accountRole,
-            text(account, "roleLabel", accountRole),
+            RoleCatalog.label(accountRole),
             department.id(),
             department.name(),
             account.path("mustChangePassword").asBoolean(false),
@@ -203,6 +216,10 @@ public class AuthSessionService {
             SELECT s.user_id, s.username, s.display_name, s.role, s.role_label,
                    s.active_department_id, d.name AS department, s.must_change_password, s.expires_at
             FROM clinic_auth_sessions s
+            JOIN clinic_accounts a
+              ON a.id = s.user_id
+             AND a.status = '启用'
+             AND LOWER(a.role) = LOWER(s.role)
             JOIN clinic_account_departments ad
               ON ad.account_id = s.user_id
              AND ad.department_id = s.active_department_id
@@ -343,6 +360,7 @@ public class AuthSessionService {
     }
 
     public LoginOptions loginOptions() {
+        cleanupLoginHandles();
         List<ObjectNode> accounts = loadEnabledAccounts();
         List<String> departments = new ArrayList<>();
         for (JsonNode account : accounts) {
@@ -356,6 +374,7 @@ public class AuthSessionService {
     }
 
     public LoginAccountOptions loginAccounts(String department) {
+        cleanupLoginHandles();
         String normalizedDepartment = department == null ? "" : department.trim();
         List<Map<String, String>> accountOptions = new ArrayList<>();
         for (JsonNode account : loadEnabledAccounts()) {
@@ -367,22 +386,24 @@ public class AuthSessionService {
     }
 
     private Map<String, String> toLoginAccountOption(JsonNode account) {
-        String username = text(account, "username", text(account, "id"));
+        String accountId = text(account, "id");
         return Map.of(
-            "id", text(account, "id", username),
-            "username", username,
-            "name", text(account, "name", username),
+            "accountHandle", issueLoginHandle(accountId),
+            "label", maskedLabel(account),
             "department", text(account, "department")
         );
     }
 
     private Optional<JsonNode> loadAccount(String username) {
         return jdbcTemplate.query(
-            "SELECT id, raw_json FROM clinic_accounts WHERE LOWER(username) = ? OR id = ? LIMIT 1",
+            "SELECT id, username, role, status, raw_json FROM clinic_accounts WHERE LOWER(username) = ? OR id = ? LIMIT 1",
             resultSet -> {
                 if (!resultSet.next()) return Optional.empty();
                 ObjectNode account = readJson(resultSet.getString("raw_json"));
-                if (!account.hasNonNull("id")) account.put("id", resultSet.getString("id"));
+                account.put("id", resultSet.getString("id"));
+                account.put("username", resultSet.getString("username"));
+                account.put("role", resultSet.getString("role"));
+                account.put("status", resultSet.getString("status"));
                 return Optional.of(account);
             },
             username,
@@ -390,17 +411,97 @@ public class AuthSessionService {
         );
     }
 
+    private Optional<JsonNode> loadAccountById(String accountId) {
+        return jdbcTemplate.query(
+            "SELECT id, username, role, status, raw_json FROM clinic_accounts WHERE id = ? LIMIT 1",
+            resultSet -> {
+                if (!resultSet.next()) return Optional.empty();
+                ObjectNode account = readJson(resultSet.getString("raw_json"));
+                account.put("id", resultSet.getString("id"));
+                account.put("username", resultSet.getString("username"));
+                account.put("role", resultSet.getString("role"));
+                account.put("status", resultSet.getString("status"));
+                return Optional.of(account);
+            },
+            accountId
+        );
+    }
+
     private List<ObjectNode> loadEnabledAccounts() {
         return jdbcTemplate.query(
-            "SELECT raw_json FROM clinic_accounts ORDER BY username",
-            (resultSet, rowNum) -> readJson(resultSet.getString("raw_json"))
+            "SELECT id, username, role, status, raw_json FROM clinic_accounts ORDER BY username",
+            (resultSet, rowNum) -> {
+                ObjectNode account = readJson(resultSet.getString("raw_json"));
+                account.put("id", resultSet.getString("id"));
+                account.put("username", resultSet.getString("username"));
+                account.put("role", resultSet.getString("role"));
+                account.put("status", resultSet.getString("status"));
+                return account;
+            }
         ).stream()
             .filter(account -> "启用".equals(text(account, "status", "启用")))
+            .filter(account -> RoleCatalog.find(text(account, "role")).isPresent())
             .sorted(Comparator
                 .comparing((ObjectNode account) -> text(account, "department"))
                 .thenComparing(account -> text(account, "name", text(account, "username")))
                 .thenComparing(account -> text(account, "username", text(account, "id"))))
             .toList();
+    }
+
+    private String issueLoginHandle(String accountId) {
+        String nonce = newToken();
+        Instant expiresAt = Instant.ofEpochSecond(Instant.now().plus(LOGIN_HANDLE_TTL).getEpochSecond());
+        String payload = nonce + "." + expiresAt.getEpochSecond();
+        loginHandles.put(nonce, new LoginHandle(accountId, expiresAt));
+        return payload + "." + signLoginHandle(payload);
+    }
+
+    private Optional<String> resolveLoginHandle(String handle) {
+        String[] parts = handle.split("\\.", -1);
+        if (parts.length != 3) return Optional.empty();
+        String payload = parts[0] + "." + parts[1];
+        String expectedSignature = signLoginHandle(payload);
+        if (!MessageDigest.isEqual(
+            expectedSignature.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+            parts[2].getBytes(java.nio.charset.StandardCharsets.US_ASCII)
+        )) return Optional.empty();
+        long epochSecond;
+        try {
+            epochSecond = Long.parseLong(parts[1]);
+        } catch (NumberFormatException error) {
+            return Optional.empty();
+        }
+        LoginHandle value = loginHandles.get(parts[0]);
+        Instant signedExpiry = Instant.ofEpochSecond(epochSecond);
+        if (value == null || !value.expiresAt().equals(signedExpiry) || !signedExpiry.isAfter(Instant.now())) {
+            loginHandles.remove(parts[0]);
+            return Optional.empty();
+        }
+        return Optional.of(value.accountId());
+    }
+
+    private String signLoginHandle(String payload) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(loginHandleSecret, "HmacSHA256"));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(
+                mac.doFinal(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            );
+        } catch (GeneralSecurityException error) {
+            throw new IllegalStateException("HMAC-SHA256 is unavailable", error);
+        }
+    }
+
+    private void cleanupLoginHandles() {
+        Instant now = Instant.now();
+        loginHandles.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
+    }
+
+    private String maskedLabel(JsonNode account) {
+        String name = text(account, "name");
+        String masked = name.isBlank() ? "岗位账号" : name.substring(0, 1) + "**";
+        String roleLabel = RoleCatalog.label(text(account, "role"));
+        return roleLabel.isBlank() ? masked : masked + "（" + roleLabel + "）";
     }
 
     private ObjectNode readJson(String rawJson) throws SQLException {
@@ -566,5 +667,7 @@ public class AuthSessionService {
     }
 
     private record DepartmentIdentity(String id, String name) {}
+
+    private record LoginHandle(String accountId, Instant expiresAt) {}
 
 }

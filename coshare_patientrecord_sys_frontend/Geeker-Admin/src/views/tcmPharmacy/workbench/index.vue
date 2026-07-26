@@ -9,7 +9,6 @@
       <div class="hero-actions">
         <el-button v-if="canCreatePrescription" type="primary" size="large" @click="openCreateDialog">新建电子处方</el-button>
         <el-button v-if="canViewDisplay" size="large" @click="openDisplay">打开取药大屏</el-button>
-        <el-button v-if="currentRole === 'admin'" size="large" plain @click="resetDemo">重置演示数据</el-button>
       </div>
     </header>
 
@@ -309,7 +308,6 @@ import {
   getTcmPrescriptionsApi,
   getTcmWorkspaceApi,
   markTcmExceptionApi,
-  resetTcmDemoApi,
   reviewTcmPrescriptionApi,
   submitTcmPrescriptionApi,
   type TcmPrescription,
@@ -321,19 +319,15 @@ import {
 
 const userStore = useUserStore();
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
-const isAdmin = computed(() => currentRole.value === "admin");
-const isDedicatedPharmacyOperator = computed(() => currentRole.value === "tcmPharmacyOperator");
-const canCreatePrescription = computed(() => isAdmin.value || ["tcm", "doctor"].includes(currentRole.value));
-const canViewDisplay = computed(
-  () =>
-    isAdmin.value || ["tcm", "doctor", "tcmPharmacyOperator", "pharmacist", "pharmacy", "decoction"].includes(currentRole.value)
-);
-const canCharge = computed(() => isAdmin.value || currentRole.value === "frontdesk" || isDedicatedPharmacyOperator.value);
-const canReview = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canDispense = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canDecoct = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canPickup = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canMarkException = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
+const isDedicatedPharmacyOperator = computed(() => currentRole.value === "tcm_pharmacy");
+const canCreatePrescription = computed(() => ["tcm", "doctor"].includes(currentRole.value));
+const canViewDisplay = computed(() => ["tcm", "doctor", "tcm_pharmacy"].includes(currentRole.value));
+const canCharge = computed(() => currentRole.value === "frontdesk" || isDedicatedPharmacyOperator.value);
+const canReview = computed(() => isDedicatedPharmacyOperator.value);
+const canDispense = computed(() => isDedicatedPharmacyOperator.value);
+const canDecoct = computed(() => isDedicatedPharmacyOperator.value);
+const canPickup = computed(() => isDedicatedPharmacyOperator.value);
+const canMarkException = computed(() => isDedicatedPharmacyOperator.value);
 const loading = ref(false);
 const saving = ref(false);
 const patientLoading = ref(false);
@@ -746,17 +740,6 @@ async function markException() {
       inputErrorMessage: "异常原因不能为空"
     });
     await run(() => markTcmExceptionApi(selected.value!.id, value));
-  } finally {
-    operationPending.value -= 1;
-  }
-}
-async function resetDemo() {
-  operationPending.value += 1;
-  try {
-    await ElMessageBox.confirm("将清空当前中药房数据并恢复演示队列，是否继续？", "重置演示数据", { type: "warning" });
-    await resetTcmDemoApi();
-    workspace.value = undefined;
-    await refresh();
   } finally {
     operationPending.value -= 1;
   }

@@ -19,6 +19,8 @@ export const roleToDepartment: Record<UserRole, string> = {
   ultrasound: "B超/放射",
   inspection: "检查室",
   tcm: "中医科",
+  tcm_pharmacy: "中药房",
+  warehouse: "中央仓库",
   tcmPharmacyOperator: "中药房",
   pharmacist: "中药房",
   pharmacy: "中药房",

@@ -38,6 +38,8 @@ public class AuthTokenFilter extends OncePerRequestFilter {
             && !path.equals("/auth/password")
             && !path.equals("/auth/navigation")
             && !path.equals("/auth/active-department")
+            && !path.startsWith("/auth/admin/")
+            && !path.startsWith("/auth/directory/")
             && !path.startsWith("/clinic-api/")
             && !path.startsWith("/inventory-api/");
     }

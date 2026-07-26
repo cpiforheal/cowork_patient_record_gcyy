@@ -1530,7 +1530,6 @@
           @select-version="selectMedicalRecordVersion"
         />
       </el-dialog>
-
     </div>
   </div>
 </template>
@@ -1652,7 +1651,7 @@ const normalizeUserRole = (role?: string): UserRole => (USER_ROLES.includes(role
 const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 
 const roleName = computed(() => roleLabel(currentRole.value));
-const canManageMedicalRecordVersions = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
+const canManageMedicalRecordVersions = computed(() => currentRole.value === "doctor");
 
 const patientId = computed(() => String(route.params.id || "").trim());
 
@@ -1665,16 +1664,7 @@ type PatientFieldSearchItem = {
   typeLabel: string;
   keywords: string;
 };
-type PatientDetailMoreCommand =
-  | "preview"
-  | "upload"
-  | "legacy"
-  | "quality"
-  | "timeline"
-  | "ai"
-  | "inspection"
-  | "lab"
-  | "copy";
+type PatientDetailMoreCommand = "preview" | "upload" | "legacy" | "quality" | "timeline" | "ai" | "inspection" | "lab" | "copy";
 
 const medicalRecordFirstRoles = new Set<UserRole>([
   "admin",
@@ -1719,7 +1709,6 @@ const isHydratingRecord = ref(false);
 const savedSectionKey = ref("");
 
 const highlightedFieldKey = ref("");
-
 
 const medicalRecordVisible = ref(false);
 
@@ -2797,7 +2786,7 @@ const showLabReportOverview = computed(
     (currentRole.value === "lab" || (canUseRoleViewFilter.value && activeRoleView.value === "lab"))
 );
 
-const canEditLabSupplementNote = computed(() => ["admin", "doctor", "lab", "nurse", "quality"].includes(currentRole.value));
+const canEditLabSupplementNote = computed(() => ["doctor", "lab", "nurse"].includes(currentRole.value));
 
 const treatmentManagementRows = computed(() => [
   ["手术可行性评估", displayFieldValue("surgeryFeasibility")],
@@ -2902,10 +2891,10 @@ const medicalRecordFields = computed<MedicalRecordTemplateField[]>(() =>
   medicalRecordFieldSections.value.flatMap(section => ensureArray(section.fields))
 );
 
-const canGenerateMedicalRecord = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
+const canGenerateMedicalRecord = computed(() => currentRole.value === "doctor");
 
 const canEditMedicalRecordField = (field: MedicalRecordTemplateField) => {
-  if (currentRole.value === "admin") return true;
+  if (currentRole.value === "admin") return false;
   if (!field.editorRoles?.length) return currentRole.value === "doctor";
 
   return field.editorRoles.includes(currentRole.value);
@@ -3143,7 +3132,7 @@ const previewTimelineEvents = computed(() => {
 const shortTitle = (title: string) => title.replace(/^.*?、/, "");
 
 const isEditable = (field: RecordField) =>
-  field.enabled !== false && (currentRole.value === "admin" || ensureArray(field.editors).includes(currentRole.value));
+  field.enabled !== false && currentRole.value !== "admin" && ensureArray(field.editors).includes(currentRole.value);
 
 const canEditRecordSection = (section: RecordSection) => section.fields.some(isEditable);
 
@@ -3986,7 +3975,6 @@ const handleMoreAction = (command: PatientDetailMoreCommand) => {
     return;
   }
 
-
   if (command === "inspection" || command === "lab") {
     openRoleView(command);
     return;
@@ -4268,7 +4256,7 @@ const generateMedicalRecord = async () => {
   if (!patientId.value) return;
 
   if (!canGenerateMedicalRecord.value) {
-    ElMessage.warning("当前岗位可维护目标病历字段，但生成 docx 需由医生或管理员操作");
+    ElMessage.warning("当前岗位可维护目标病历字段，但生成 docx 需由医生操作");
 
     return;
   }
@@ -4314,7 +4302,7 @@ const finalizeMedicalRecord = async () => {
   if (!currentMedicalRecord.value) return;
 
   if (!canGenerateMedicalRecord.value) {
-    ElMessage.warning("目标病历定稿需由医生或管理员操作");
+    ElMessage.warning("目标病历定稿需由医生操作");
 
     return;
   }
@@ -4340,7 +4328,7 @@ const voidMedicalRecord = async () => {
   if (!currentMedicalRecord.value) return;
 
   if (!canGenerateMedicalRecord.value) {
-    ElMessage.warning("目标病历作废需由医生或管理员操作");
+    ElMessage.warning("目标病历作废需由医生操作");
 
     return;
   }

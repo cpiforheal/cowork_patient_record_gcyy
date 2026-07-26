@@ -768,7 +768,7 @@ public class ClinicMedicalRecordService {
         Set<String> keys = new HashSet<>();
         String role = user == null ? "" : safe(user.role());
         outputTargetFields().forEach(field -> {
-            if ("admin".equals(role) || field.editorRoles().contains(role)) {
+            if (field.editorRoles().contains(role)) {
                 keys.add(field.key());
             }
         });
@@ -788,15 +788,18 @@ public class ClinicMedicalRecordService {
     }
 
     private void requireWorkspaceRole() {
-        AuthPermission.requireAnyRole("当前账号无权维护目标病历", COLLABORATOR_ROLES.toArray(String[]::new));
+        AuthPermission.requireAnyRole(
+            "当前账号无权维护目标病历",
+            COLLABORATOR_ROLES.stream().filter(role -> !"admin".equals(role)).toArray(String[]::new)
+        );
     }
 
     private void requireGenerateRole() {
-        AuthPermission.requireAnyRole("当前账号无权生成目标病历", "admin", "doctor");
+        AuthPermission.requireAnyRole("当前账号无权生成目标病历", "doctor");
     }
 
     private void requireFinalizeRole() {
-        AuthPermission.requireAnyRole("当前账号无权定稿目标病历", "admin", "doctor");
+        AuthPermission.requireAnyRole("当前账号无权定稿目标病历", "doctor");
     }
 
     private String joinArray(ArrayNode array) {
@@ -880,7 +883,7 @@ public class ClinicMedicalRecordService {
             sources,
             anchors,
             COLLABORATOR_ROLES,
-            editorRoles,
+            editorRoles.stream().filter(role -> !"admin".equals(role)).toList(),
             sources,
             targetUse
         );

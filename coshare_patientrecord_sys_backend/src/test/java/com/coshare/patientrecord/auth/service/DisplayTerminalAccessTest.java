@@ -45,6 +45,7 @@ class DisplayTerminalAccessTest {
         assertThat(findMenuOrNull(navigation.menus(), "/tcm-pharmacy/display")).isNotNull();
 
         for (String forbidden : List.of(
+            "/welcome/index",
             "/home/index",
             "/patients/list",
             "/pre-ai/encounters",

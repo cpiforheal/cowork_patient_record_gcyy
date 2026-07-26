@@ -17,9 +17,9 @@
         <el-option v-for="department in departmentOptions" :key="department" :label="department" :value="department" />
       </el-select>
     </el-form-item>
-    <el-form-item prop="username">
+    <el-form-item prop="accountHandle">
       <el-select
-        v-model="loginForm.username"
+        v-model="loginForm.accountHandle"
         filterable
         :disabled="accountLoading || accountOptions.length === 0"
         :loading="accountLoading"
@@ -32,12 +32,12 @@
         </template>
         <el-option
           v-for="account in filteredAccountOptions"
-          :key="account.id"
-          :label="accountLabel(account)"
-          :value="account.username"
+          :key="account.accountHandle"
+          :label="account.label"
+          :value="account.accountHandle"
         >
           <div class="account-option">
-            <span class="account-name">{{ account.name }}</span>
+            <span class="account-name">{{ account.label }}</span>
             <span class="account-meta">{{ account.department }}</span>
           </div>
         </el-option>
@@ -112,7 +112,7 @@ const keepAliveStore = useKeepAliveStore();
 type FormInstance = InstanceType<typeof ElForm>;
 const loginFormRef = ref<FormInstance>();
 const loginRules = reactive({
-  username: [{ required: true, message: "请选择登录账号", trigger: "change" }],
+  accountHandle: [{ required: true, message: "请选择登录账号", trigger: "change" }],
   password: [{ required: true, message: "请输入登录密码", trigger: "blur" }]
 });
 
@@ -125,7 +125,7 @@ const accountOptions = ref<LoginAccountOption[]>([]);
 const departmentOptions = ref<string[]>([]);
 const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
   department: "",
-  username: "",
+  accountHandle: "",
   password: ""
 });
 const passwordChange = reactive({ newPassword: "", confirmPassword: "" });
@@ -168,7 +168,7 @@ const completeForcedPasswordChange = async () => {
     await changePasswordApi({ newPassword: passwordChange.newPassword });
     const newPassword = passwordChange.newPassword;
     userStore.setToken("");
-    const { data } = await loginApi({ username: loginForm.username.trim(), password: newPassword });
+    const { data } = await loginApi({ accountHandle: loginForm.accountHandle?.trim(), password: newPassword });
     forcePasswordVisible.value = false;
     passwordChange.newPassword = "";
     passwordChange.confirmPassword = "";
@@ -182,8 +182,6 @@ const completeForcedPasswordChange = async () => {
 };
 
 const filteredAccountOptions = computed(() => accountOptions.value);
-
-const accountLabel = (account: LoginAccountOption) => account.name;
 
 const syncDepartmentOptions = (departmentNames: string[]) => {
   const names = new Set<string>();
@@ -199,7 +197,7 @@ const loadDepartments = async () => {
     const { data } = await getLoginOptionsApi();
     accountOptions.value = data.accounts ?? [];
     syncDepartmentOptions(data.departments);
-    if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
+    if (accountOptions.value.length === 1) loginForm.accountHandle = accountOptions.value[0].accountHandle;
   } catch (error) {
     ElNotification({
       title: "登录数据加载失败",
@@ -217,7 +215,7 @@ const loadAccountsByDepartment = async (department: string) => {
   try {
     const { data } = await getLoginAccountsApi(department);
     accountOptions.value = data.accounts ?? [];
-    if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
+    if (accountOptions.value.length === 1) loginForm.accountHandle = accountOptions.value[0].accountHandle;
   } catch (error) {
     ElNotification({
       title: "账号列表加载失败",
@@ -231,7 +229,7 @@ const loadAccountsByDepartment = async (department: string) => {
 };
 
 const handleDepartmentChange = async (department: string) => {
-  loginForm.username = "";
+  loginForm.accountHandle = "";
   loginForm.password = "";
   accountOptions.value = [];
   await loadAccountsByDepartment(department);
@@ -243,7 +241,7 @@ const login = (formEl: FormInstance | undefined) => {
     if (!valid) return;
     loading.value = true;
     try {
-      const { data } = await loginApi({ username: loginForm.username.trim(), password: loginForm.password });
+      const { data } = await loginApi({ accountHandle: loginForm.accountHandle?.trim(), password: loginForm.password });
       userStore.setToken(data.access_token);
       if (!data.userInfo) throw new Error("登录响应缺少用户信息");
       userStore.setUserInfo(data.userInfo);

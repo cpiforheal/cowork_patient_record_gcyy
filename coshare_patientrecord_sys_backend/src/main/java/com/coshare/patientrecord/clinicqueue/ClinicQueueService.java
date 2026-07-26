@@ -37,11 +37,11 @@ public class ClinicQueueService {
     static final String RECEPTION = "RECEPTION";
     private static final Set<String> STAGES = Set.of(INSPECTION, RECEPTION);
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "doctor");
-    private static final Set<String> DISPLAY_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "doctor", "display");
-    private static final Set<String> ISSUE_ROLES = Set.of("admin", "frontdesk");
-    private static final Set<String> INSPECTION_ROLES = Set.of("admin", "inspection");
-    private static final Set<String> RECEPTION_ROLES = Set.of("admin", "reception", "doctor");
-    private static final Set<String> ROOM_CONTROL_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "doctor");
+    private static final Set<String> DISPLAY_ROLES = Set.of("frontdesk", "inspection", "reception", "doctor", "display");
+    private static final Set<String> ISSUE_ROLES = Set.of("frontdesk");
+    private static final Set<String> INSPECTION_ROLES = Set.of("inspection");
+    private static final Set<String> RECEPTION_ROLES = Set.of("reception", "doctor");
+    private static final Set<String> ROOM_CONTROL_ROLES = Set.of("frontdesk", "inspection", "reception", "doctor");
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int FOLLOW_UP_STREAK_LIMIT = 2;
     private static final long FIRST_VISIT_MIN_WAIT_MINUTES = 10;
@@ -57,7 +57,7 @@ public class ClinicQueueService {
 
     @Transactional
     public Map<String, Object> issue(IssueRequest request, SessionUser user) {
-        requireRole(user, ISSUE_ROLES, "仅前台或管理员可发号");
+        requireRole(user, ISSUE_ROLES, "仅登记前台可发号");
         String encounterId = required(request == null ? "" : request.encounterId(), "就诊记录");
         List<Map<String, Object>> existing = jdbcTemplate.queryForList(
             "SELECT id FROM clinic_queue_tickets WHERE encounter_id = ? LIMIT 1", encounterId
@@ -140,7 +140,7 @@ public class ClinicQueueService {
     }
 
     public Map<String, Object> eligibleEncounters(SessionUser user) {
-        requireRole(user, ISSUE_ROLES, "仅前台或管理员可查看待发号就诊");
+        requireRole(user, ISSUE_ROLES, "仅登记前台可查看待发号就诊");
         ArrayNode rows = objectMapper.createArrayNode();
         ArrayNode blocked = objectMapper.createArrayNode();
         jdbcTemplate.query("""
@@ -244,7 +244,7 @@ public class ClinicQueueService {
             case "RESUME" -> transition(task, Set.of("TEMPORARILY_AWAY", "ON_HOLD", "MISSED"), "WAITING", user, reason, "queue_entered_at = ?", now());
             case "HOLD" -> transition(task, Set.of("WAITING", "CALLED", "ARRIVED", "IN_SERVICE", "INTERRUPTED"), "ON_HOLD", user, required(reason, "挂起原因"), "", new Object[0]);
             case "PRIORITIZE" -> {
-                requireRole(user, Set.of("admin", "frontdesk"), "仅前台或管理员可人工优先");
+                requireRole(user, Set.of("frontdesk"), "仅登记前台可人工优先");
                 requireState(current, Set.of("WAITING"), "仅等候中患者可人工优先");
                 String detail = required(reason, "人工优先原因");
                 optimisticUpdate(task, "UPDATE clinic_queue_tasks SET priority_locked = TRUE, priority_reason = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ? AND version = ?",
@@ -392,7 +392,7 @@ public class ClinicQueueService {
     }
 
     public Map<String, Object> testPrintPayload(PrintTaskRequest request, SessionUser user) {
-        requireRole(user, ISSUE_ROLES, "仅前台或管理员可测试打印");
+        requireRole(user, ISSUE_ROLES, "仅登记前台可测试打印");
         String terminalId = required(request == null ? "" : request.terminalId(), "打印终端");
         Map<String, Object> terminal = printTerminal(terminalId);
         ObjectNode payload = buildPrintPayload("TEST-" + UUID.randomUUID(), "TEST-001", "测*者", "初诊", terminal, false, true);
@@ -400,7 +400,7 @@ public class ClinicQueueService {
     }
 
     public Map<String, Object> registerPrintTerminal(PrintTerminalRequest request, SessionUser user) {
-        requireRole(user, ISSUE_ROLES, "仅前台或管理员可登记打印终端");
+        requireRole(user, ISSUE_ROLES, "仅登记前台可登记打印终端");
         String terminalId = required(request == null ? "" : request.terminalId(), "终端编号");
         String terminalName = required(request == null ? "" : request.terminalName(), "终端名称");
         String printerName = safe(request == null ? "" : request.printerName());
@@ -418,7 +418,7 @@ public class ClinicQueueService {
 
     @Transactional
     public Map<String, Object> createPrintTask(String ticketId, PrintTaskRequest request, SessionUser user) {
-        requireRole(user, ISSUE_ROLES, "仅前台或管理员可打印排队票");
+        requireRole(user, ISSUE_ROLES, "仅登记前台可打印排队票");
         String clientRequestId = required(request == null ? "" : request.clientRequestId(), "客户端请求编号");
         Map<String, Object> existing = printTaskByClientRequestId(clientRequestId);
         if (existing != null) {
@@ -463,7 +463,7 @@ public class ClinicQueueService {
 
     @Transactional
     public Map<String, Object> completePrintTask(String id, PrintResultRequest request, SessionUser user) {
-        requireRole(user, ISSUE_ROLES, "仅前台或管理员可确认打印结果");
+        requireRole(user, ISSUE_ROLES, "仅登记前台可确认打印结果");
         Map<String, Object> task = printTask(id);
         String executionToken = required(request == null ? "" : request.executionToken(), "打印执行令牌");
         if (!executionToken.equals(String.valueOf(task.get("executionToken")))) throw conflict("打印执行令牌无效");
@@ -648,7 +648,7 @@ public class ClinicQueueService {
     }
 
     private Map<String, Object> cancelOrLeave(ObjectNode task, String terminal, SessionUser user, String reason) {
-        requireRole(user, Set.of("admin", "frontdesk"), "仅前台或管理员可取消或办理离院");
+        requireRole(user, Set.of("frontdesk"), "仅登记前台可取消或办理离院");
         String ticketId = text(task, "ticketId");
         jdbcTemplate.update("""
             UPDATE clinic_queue_tasks SET status = 'CANCELLED', exception_reason = ?, version = version + 1,
@@ -1176,7 +1176,7 @@ public class ClinicQueueService {
     }
 
     private void assertRoomRole(ObjectNode room, SessionUser user) {
-        if (Set.of("admin", "frontdesk").contains(user.role())) return;
+        if ("frontdesk".equals(user.role())) return;
         requireStageRole(text(room, "stageCode"), user);
     }
 

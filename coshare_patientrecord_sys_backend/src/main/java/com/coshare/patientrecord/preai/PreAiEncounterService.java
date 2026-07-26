@@ -54,7 +54,7 @@ public class PreAiEncounterService {
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW");
     private static final Set<String> INVENTORY_CONSUMPTION_STAGES = Set.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
-    private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "nursing", "lab", "ecg", "ultrasound", "quality", "manager");
+    private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound", "quality");
     private static final Set<String> DUTY_CODES = Set.of(
         "FRONT_DESK", "RECEPTION_DOCTOR", "TCM_DOCTOR", "INSPECTION_DOCTOR", "LAB_STAFF",
         "BASIC_NURSING", "ATTENDING_DOCTOR", "SURGEON", "OPERATING_ROOM_NURSE", "FINAL_REVIEW_DOCTOR"
@@ -173,7 +173,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> create(CreateEncounterRequest request, SessionUser user) {
-        requireRole(user, "admin", "frontdesk");
+        requireRole(user, "frontdesk");
         ObjectNode patient = sanitizeStageData("REGISTRATION", request == null ? null : request.patient());
         validateStage("REGISTRATION", patient, null);
         String sourcePatientId = createClinicPatientArchive(patient);
@@ -183,7 +183,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> registerAndIssue(RegisterAndIssueRequest request, SessionUser user) {
-        requireRole(user, "admin", "frontdesk");
+        requireRole(user, "frontdesk");
         String clientRequestId = validateRegistrationRequestId(request == null ? "" : request.clientRequestId());
 
         List<String> existing = jdbcTemplate.query(
@@ -221,7 +221,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> createFollowUpAndIssue(String patientCaseId, FollowUpRegisterAndIssueRequest request, SessionUser user) {
-        requireRole(user, "admin", "frontdesk");
+        requireRole(user, "frontdesk");
         String clientRequestId = validateRegistrationRequestId(request == null ? "" : request.clientRequestId());
         List<ObjectNode> existing = jdbcTemplate.query(
             "SELECT * FROM pre_ai_encounters WHERE registration_request_id = ? LIMIT 1",
@@ -280,7 +280,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> registerExistingAndIssue(String encounterId, ExistingRegisterAndIssueRequest request, SessionUser user) {
-        requireRole(user, "admin", "frontdesk");
+        requireRole(user, "frontdesk");
         requireEncounterAccess(encounterId, user);
         String clientRequestId = validateRegistrationRequestId(request == null ? "" : request.clientRequestId());
         ObjectNode encounter = loadEncounter(encounterId);
@@ -331,7 +331,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> importLegacy(String patientId, SessionUser user) {
-        requireRole(user, "admin", "frontdesk", "doctor");
+        requireRole(user, "frontdesk", "doctor");
         String sourcePatientId = safe(patientId);
         if (sourcePatientId.isBlank()) throw badRequest("缺少旧患者 ID");
         List<String> existing = jdbcTemplate.query(
@@ -481,7 +481,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> createFollowUp(String patientCaseId, FollowUpEncounterCreateRequest request, SessionUser user) {
-        requireRole(user, "admin", "frontdesk");
+        requireRole(user, "frontdesk");
         ObjectNode patientCase = loadPatientCase(patientCaseId);
         ObjectNode patient = safeObject(patientCase.path("patient"));
         String visitDate = safe(request == null ? "" : request.visitDate());
@@ -528,7 +528,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> updateVisitMeta(String encounterId, VisitMetaRequest request, SessionUser user) {
-        requireRole(user, "admin", "frontdesk");
+        requireRole(user, "frontdesk");
         requireEncounterAccess(encounterId, user);
         loadEncounter(encounterId);
         ObjectNode visitMeta = sanitizeVisitMeta(request == null ? null : request.visitMeta());
@@ -589,8 +589,7 @@ public class PreAiEncounterService {
     public Map<String, Object> saveDutyAssignments(String encounterId, DutyAssignmentsRequest request, SessionUser user) {
         requireEncounterAccess(encounterId, user);
         ObjectNode encounter = loadEncounter(encounterId);
-        if (user == null || !(Set.of("admin", "frontdesk", "doctor").contains(user.role())
-            || hasAssignedDuty(encounter, user, Set.of("FRONT_DESK", "ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR")))) {
+        if (user == null || !Set.of("admin", "frontdesk", "doctor").contains(user.role())) {
             throw forbidden("当前账号无权维护本病例岗位安排");
         }
         ArrayNode assignments = objectMapper.createArrayNode();
@@ -854,8 +853,7 @@ public class PreAiEncounterService {
         ObjectNode encounter = loadEncounter(encounterId);
         ObjectNode task = loadAuxiliaryTask(encounterId, taskId);
         requireAuxEditor(encounter, task, user);
-        boolean assignedDoctor = hasAssignedDuty(encounter, user, Set.of("ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR"));
-        if ("COMPLETED".equals(text(task, "status")) && !Set.of("admin", "doctor").contains(user.role()) && !assignedDoctor) {
+        if ("COMPLETED".equals(text(task, "status")) && !"doctor".equals(user.role())) {
             throw conflict("辅助检查已完成，需医生退回后才能修改");
         }
         String taskType = text(task, "taskType");
@@ -972,8 +970,7 @@ public class PreAiEncounterService {
         ObjectNode encounter = loadEncounter(encounterId);
         requireAuxTaskEditor(encounter, "LAB", user);
         ObjectNode task = ensureLabTask(encounterId, user.name());
-        boolean assignedDoctor = hasAssignedDuty(encounter, user, Set.of("ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR"));
-        if ("COMPLETED".equals(text(task, "status")) && !Set.of("admin", "doctor").contains(user.role()) && !assignedDoctor) {
+        if ("COMPLETED".equals(text(task, "status")) && !"doctor".equals(user.role())) {
             throw conflict("化验室已完成交接，需医生退回后才能继续填写");
         }
         String templateId = safe(request == null ? "" : request.templateId());
@@ -1458,8 +1455,8 @@ public class PreAiEncounterService {
             data.remove(List.of("physicianConfirmedBy", "physicianConfirmedAt"));
             return;
         }
-        boolean surgeon = user != null && (Set.of("admin", "doctor").contains(user.role())
-            || hasAssignedDuty(encounter, user, Set.of("SURGEON")));
+        boolean surgeon = user != null && "doctor".equals(user.role())
+            && hasAssignedDuty(encounter, user, Set.of("SURGEON", "ATTENDING_DOCTOR"));
         if (!surgeon) throw forbidden("手术事实只能由手术医生确认");
         data.put("physicianConfirmed", true);
         data.put("physicianConfirmedBy", user.name());
@@ -2244,7 +2241,7 @@ public class PreAiEncounterService {
 
     private void requireEncounterAccess(String encounterId, SessionUser user) {
         requireReadRole(user);
-        if (Set.of("admin", "quality", "manager").contains(user.role())) return;
+        if (Set.of("admin", "quality").contains(user.role())) return;
         if (!canAccessEncounter(encounterId, user)) {
             throw forbidden("当前账号不属于病历归属科室，且未获得该病历的跨科授权");
         }
@@ -2252,27 +2249,27 @@ public class PreAiEncounterService {
 
     private boolean canAccessEncounter(String encounterId, SessionUser user) {
         if (user == null || safe(encounterId).isBlank()) return false;
-        if (Set.of("admin", "quality", "manager").contains(user.role())) return true;
+        if (Set.of("admin", "quality").contains(user.role())) return true;
+        if (!READ_ROLES.contains(user.role())) return false;
 
-        // 前置病历是跨科室的岗位流水线：归属科室只用于登记归属和管理边界，
-        // 不应阻断检查室、接诊室、化验室和医生读取同一份正在流转的事实。
-        // 具体写权限仍由 requireStageEditor / 岗位安排单独校验。
-        return READ_ROLES.contains(user.role()) && encounterExists(encounterId);
-    }
-
-    private boolean encounterExists(String encounterId) {
-        Integer count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?",
+        ObjectNode encounter = loadEncounter(encounterId);
+        if (!safe(user.activeDepartmentId()).isBlank()
+            && safe(user.activeDepartmentId()).equals(text(encounter, "owningDepartmentId"))) {
+            return true;
+        }
+        Integer grantCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_encounter_department_grants WHERE encounter_id = ? AND account_id = ? AND status = 'ACTIVE'",
             Integer.class,
-            safe(encounterId)
+            safe(encounterId),
+            safe(user.id())
         );
-        return count != null && count > 0;
+        return (grantCount != null && grantCount > 0)
+            || hasAssignedDuty(encounter, user, DUTY_CODES);
     }
 
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {
         boolean policyAllowed = user != null && navigationService.canEditStage(user.role(), stage);
-        boolean assigned = user != null && hasAssignedDuty(encounter, user, STAGE_DUTIES.getOrDefault(stage, Set.of()));
-        if (!policyAllowed && !assigned) throw forbidden("当前岗位无权维护" + stageLabel(stage));
+        if (!policyAllowed) throw forbidden("当前岗位无权维护" + stageLabel(stage));
     }
 
     private boolean hasAssignedDuty(ObjectNode encounter, SessionUser user, Set<String> dutyCodes) {
@@ -2302,15 +2299,12 @@ public class PreAiEncounterService {
 
     private void requireAuxCreator(ObjectNode encounter, String taskType, SessionUser user) {
         boolean baseRole = user != null && navigationService.canCreateAuxiliary(user.role(), taskType);
-        boolean assigned = hasAssignedDuty(encounter, user, Set.of("ATTENDING_DOCTOR", "RECEPTION_DOCTOR"))
-            || hasAssignedDuty(encounter, user, AUX_DUTIES.getOrDefault(taskType, Set.of()));
-        if (!baseRole && !assigned) throw forbidden("当前岗位无权创建该辅助检查任务");
+        if (!baseRole) throw forbidden("当前岗位无权创建该辅助检查任务");
     }
 
     private void requireAuxTaskEditor(ObjectNode encounter, String taskType, SessionUser user) {
         boolean baseRole = user != null && navigationService.canEditAuxiliary(user.role(), taskType);
-        boolean assigned = hasAssignedDuty(encounter, user, AUX_DUTIES.getOrDefault(taskType, Set.of()));
-        if (!baseRole && !assigned) throw forbidden("当前岗位无权维护该辅助检查任务");
+        if (!baseRole) throw forbidden("当前岗位无权维护该辅助检查任务");
     }
 
     private void requireAuxEditor(ObjectNode encounter, ObjectNode task, SessionUser user) {
@@ -2323,9 +2317,8 @@ public class PreAiEncounterService {
     }
 
     private void requireReviewer(ObjectNode encounter, SessionUser user) {
-        boolean baseRole = user != null && Set.of("admin", "doctor").contains(user.role());
-        boolean assigned = hasAssignedDuty(encounter, user, Set.of("FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR"));
-        if (!baseRole && !assigned) throw forbidden("当前岗位无权执行医生复核操作");
+        boolean baseRole = user != null && navigationService.canEditStage(user.role(), "REVIEW");
+        if (!baseRole) throw forbidden("当前岗位无权执行医生复核操作");
     }
 
     private void requireRole(SessionUser user, String... roles) {

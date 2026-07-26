@@ -29,14 +29,13 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class TcmPharmacyService {
 
-    private static final String TCM_PHARMACY_OPERATOR_ROLE = "tcmPharmacyOperator";
-    private static final Set<String> READ_ROLES = Set.of("admin", "tcm", "doctor", TCM_PHARMACY_OPERATOR_ROLE, "pharmacist", "pharmacy", "decoction");
-    private static final Set<String> DISPLAY_ROLES = Set.of("admin", "tcm", "doctor", TCM_PHARMACY_OPERATOR_ROLE, "pharmacist", "pharmacy", "decoction", "display");
-    private static final Set<String> DOCTOR_ROLES = Set.of("admin", "tcm", "doctor");
-    private static final Set<String> CHARGE_ROLES = Set.of("admin", "frontdesk", TCM_PHARMACY_OPERATOR_ROLE);
-    private static final Set<String> REVIEW_ROLES = Set.of("admin", TCM_PHARMACY_OPERATOR_ROLE);
-    private static final Set<String> DISPENSING_ROLES = Set.of("admin", TCM_PHARMACY_OPERATOR_ROLE);
-    private static final Set<String> DECOCTION_ROLES = Set.of("admin", TCM_PHARMACY_OPERATOR_ROLE);
+    private static final Set<String> READ_ROLES = Set.of("tcm", "doctor", "tcm_pharmacy");
+    private static final Set<String> DISPLAY_ROLES = Set.of("tcm", "doctor", "tcm_pharmacy", "display");
+    private static final Set<String> DOCTOR_ROLES = Set.of("tcm", "doctor");
+    private static final Set<String> CHARGE_ROLES = Set.of("frontdesk", "tcm_pharmacy");
+    private static final Set<String> REVIEW_ROLES = Set.of("tcm_pharmacy");
+    private static final Set<String> DISPENSING_ROLES = Set.of("tcm_pharmacy");
+    private static final Set<String> DECOCTION_ROLES = Set.of("tcm_pharmacy");
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final JdbcTemplate jdbcTemplate;
@@ -301,46 +300,6 @@ public class TcmPharmacyService {
             WHERE id = ? AND status = 'PENDING'
             """, now(), id);
         return Map.of("id", id, "status", "PLAYED");
-    }
-
-    @Transactional
-    public Map<String, Object> resetDemo(SessionUser user) {
-        requireRole(user, Set.of("admin"), "仅管理员可重置演示数据");
-        jdbcTemplate.update("DELETE FROM tcm_pharmacy_announcements");
-        jdbcTemplate.update("DELETE FROM tcm_pharmacy_audit_logs");
-        jdbcTemplate.update("DELETE FROM tcm_pharmacy_prescriptions");
-        seedDemoIfEmpty();
-        return dashboard(user);
-    }
-
-    private void seedDemoIfEmpty() {
-        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tcm_pharmacy_prescriptions", Integer.class);
-        if (count != null && count > 0) return;
-        seed("演示患者甲", "SELF_DECOCTION", "READY", "VERIFIED", "NOT_REQUIRED", "READY", "A018", 8, 7);
-        seed("演示患者乙", "HOSPITAL_DECOCTION", "CALLED", "VERIFIED", "VERIFIED", "CALLED", "A019", 12, 14);
-        seed("演示患者丙", "HOSPITAL_DECOCTION", "DECOCTING", "VERIFIED", "DECOCTING", "WAITING", "A020", 10, 12);
-        seed("演示患者丁", "SELF_DECOCTION", "DISPENSING", "IN_PROGRESS", "NOT_REQUIRED", "WAITING", "A021", 7, 9);
-        seed("演示患者戊", "SELF_DECOCTION", "WAITING_REVIEW", "NOT_STARTED", "NOT_REQUIRED", "WAITING", "", 6, 8);
-    }
-
-    private void seed(String name, String type, String status, String dispensing, String decoction, String pickup, String pickupNo, int doses, int herbs) {
-        String id = "demo-" + UUID.randomUUID();
-        String time = now();
-        ArrayNode items = objectMapper.createArrayNode();
-        for (int index = 0; index < herbs; index++) {
-            items.add(objectMapper.createObjectNode().put("name", "示例药味" + (index + 1)).put("dose", (index + 1) * 3).put("unit", "g"));
-        }
-        String charge = Set.of("DRAFT", "WAITING_CHARGE").contains(status) ? "UNPAID" : "PAID";
-        String review = Set.of("WAITING_REVIEW").contains(status) ? "PENDING" : "APPROVED";
-        jdbcTemplate.update("""
-            INSERT INTO tcm_pharmacy_prescriptions (id, prescription_no, version_no, patient_id, patient_name, masked_name,
-              visit_no, doctor_name, dispense_type, prescription_status, charge_status, review_status, dispensing_status,
-              decoction_status, pickup_status, pickup_no, amount, herb_count, dose_count, items_json, requirements_json,
-              created_by, updated_by, submitted_at, charged_at, reviewed_at, ready_at, created_at, updated_at)
-            VALUES (?, ?, 1, ?, ?, ?, ?, '演示中医师', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '系统演示', '系统演示', ?, ?, ?, ?, ?, ?)
-            """, id, nextPrescriptionNo(), "demo-patient", name, maskName(name), "DEMO-" + UUID.randomUUID().toString().substring(0, 6),
-            type, status, charge, review, dispensing, decoction, pickup, pickupNo, herbs * doses * 2.5, herbs, doses,
-            toJson(items), "{}", time, time, time, Set.of("READY", "CALLED").contains(status) ? time : null, time, time);
     }
 
     private ArrayNode queryPrescriptions(String status, String keyword, int limit) {

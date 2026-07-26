@@ -33,7 +33,8 @@ export namespace Upload {
 // 登录模块
 export namespace Login {
   export interface ReqLoginForm {
-    username: string;
+    accountHandle?: string;
+    username?: string;
     password: string;
   }
   export interface ResLogin {

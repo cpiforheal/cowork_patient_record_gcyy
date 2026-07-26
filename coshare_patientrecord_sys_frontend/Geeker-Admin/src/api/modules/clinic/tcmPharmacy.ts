@@ -183,5 +183,3 @@ export const getPendingTcmAnnouncementsApi = async () => {
 
 export const markTcmAnnouncementPlayedApi = (id: string) =>
   request<{ id: string; status: string }>(`/tcm-pharmacy/announcements/${encodeURIComponent(id)}/played`, "POST");
-
-export const resetTcmDemoApi = () => request("/tcm-pharmacy/demo/reset", "POST");

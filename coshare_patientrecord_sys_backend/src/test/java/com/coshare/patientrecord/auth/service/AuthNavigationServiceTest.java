@@ -35,13 +35,23 @@ class AuthNavigationServiceTest {
     }
 
     @Test
-    void doctorCanEditAndCorrectEveryMainClinicalStage() {
-        for (String stage : List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY")) {
-            assertThat(service.canEditStage("doctor", stage)).as(stage).isTrue();
-            assertThat(service.canCorrectStage("doctor", stage)).as(stage).isTrue();
+    void eachClinicalStageIsOwnedByItsResponsiblePost() {
+        for (String stage : List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "SURGERY")) {
+            assertThat(service.canEditStage("doctor", stage)).as(stage).isFalse();
         }
+        assertThat(service.canEditStage("frontdesk", "REGISTRATION")).isTrue();
+        assertThat(service.canEditStage("inspection", "INSPECTION")).isTrue();
+        assertThat(service.canEditStage("reception", "RECEPTION")).isTrue();
+        assertThat(service.canEditStage("tcm", "TCM")).isTrue();
+        assertThat(service.canEditStage("nurse", "SURGERY")).isTrue();
+        assertThat(service.canEditStage("nursing", "SURGERY")).isTrue();
+        assertThat(service.canEditStage("doctor", "DOCTOR")).isTrue();
+        assertThat(service.canCorrectStage("doctor", "DOCTOR")).isTrue();
         assertThat(service.canEditStage("doctor", "REVIEW")).isTrue();
         assertThat(service.canCorrectStage("doctor", "REVIEW")).isFalse();
+        for (String stage : List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW")) {
+            assertThat(service.canEditStage("admin", stage)).as(stage).isFalse();
+        }
     }
 
     @Test
@@ -61,12 +71,15 @@ class AuthNavigationServiceTest {
         assertThat(doctor.policyVersion()).isEqualTo(AuthNavigationService.POLICY_VERSION);
         assertThat(doctor.capabilities()).contains(
             "preai:review",
-            "preai:duties:manage",
-            "preai:stage:registration:edit",
-            "preai:stage:inspection:correct",
+            "preai:stage:doctor:edit",
+            "preai:stage:doctor:correct",
             "preai:auxiliary:lab:create"
         );
-        assertThat(doctor.capabilities()).doesNotContain("preai:encounter:create", "preai:auxiliary:lab:edit");
+        assertThat(doctor.capabilities()).doesNotContain(
+            "preai:encounter:create", "preai:duties:manage", "preai:stage:registration:edit", "preai:auxiliary:lab:edit"
+        );
+        assertThat(service.hasCapability(user("doctor"), "preai:review")).isTrue();
+        assertThat(service.hasCapability(user("doctor"), "preai:stage:doctor:edit")).isTrue();
 
         NavigationResult quality = service.navigationFor(user("quality"));
         assertThat(quality.capabilities()).doesNotContain("user:create", "preai:review");
@@ -80,20 +93,36 @@ class AuthNavigationServiceTest {
         assertThat(service.hasCapability(manager, "inventory:receive")).isFalse();
 
         SessionUser qualityUser = user("quality");
-        assertThat(service.hasCapability(qualityUser, "inventory:receive")).isTrue();
+        assertThat(service.hasCapability(qualityUser, "inventory:receive")).isFalse();
+        assertThat(service.hasCapability(qualityUser, "inventory:approve")).isFalse();
+        assertThat(service.hasCapability(qualityUser, "inventory:rule")).isTrue();
+        assertThat(service.hasCapability(qualityUser, "inventory:confirm")).isTrue();
+        assertThat(service.hasCapability(qualityUser, "inventory:retry")).isTrue();
+
+        SessionUser warehouse = user("warehouse");
+        assertThat(service.hasCapability(warehouse, "inventory:receive")).isTrue();
+        assertThat(service.hasCapability(warehouse, "inventory:issue")).isTrue();
+        assertThat(service.hasCapability(warehouse, "inventory:retry")).isTrue();
+        assertThat(service.hasCapability(warehouse, "inventory:rule")).isFalse();
+        assertThat(service.hasCapability(warehouse, "inventory:confirm")).isFalse();
+
+        NavigationResult admin = service.navigationFor(user("admin"));
+        assertThat(admin.capabilities()).doesNotContain("preai:review", "preai:stage:doctor:edit", "inventory:issue");
+        assertThat(admin.capabilities()).contains("maintenance:purge", "maintenance:backup");
+        assertThat(findMenu(admin.menus(), "/system/dataMaintenance").meta().title()).isEqualTo("数据维护");
+        assertThat(findMenuOrNull(service.navigationFor(user("quality")).menus(), "/system/dataMaintenance")).isNull();
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void inventoryNavigationExposesNineTaskEntriesAndKeepsCompatibilityRouteHidden() {
+    void warehouseNavigationExposesItsTaskEntriesAndKeepsCompatibilityRouteHidden() {
         doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
 
-        NavigationMenu inventory = findMenu(service.navigationFor(user("quality")).menus(), "/inventory");
+        NavigationMenu inventory = findMenu(service.navigationFor(user("warehouse")).menus(), "/inventory");
         assertThat(inventory.children()).isNotNull();
         assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
             .containsExactly(
                 "/inventory/overview",
-                "/inventory/executive",
                 "/inventory/requests",
                 "/inventory/stock",
                 "/inventory/controls",
@@ -103,9 +132,9 @@ class AuthNavigationServiceTest {
                 "/inventory/items"
             );
         assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(item -> item.meta().title()))
-            .containsExactly("今日待办", "管理看板", "申领与签收", "入库与库存", "盘点与报损", "患者耗材套餐", "周用量核对", "出入库记录", "物资设置");
+            .containsExactly("今日待办", "申领与签收", "入库与库存", "盘点与报损", "患者耗材套餐", "周用量核对", "出入库记录", "物资设置");
         assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(item -> item.meta().icon()))
-            .containsExactly("Monitor", "TrendCharts", "Tickets", "Box", "SetUp", "CollectionTag", "DataLine", "Search", "Goods");
+            .containsExactly("Monitor", "Tickets", "Box", "SetUp", "CollectionTag", "DataLine", "Search", "Goods");
         assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(item -> item.meta().activeMenu()))
             .containsOnlyNulls();
 
@@ -121,12 +150,12 @@ class AuthNavigationServiceTest {
 
         NavigationMenu staffInventory = findMenu(service.navigationFor(user("doctor")).menus(), "/inventory");
         assertThat(staffInventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
-            .containsExactly("/inventory/overview", "/inventory/requests", "/inventory/packages", "/inventory/weekly");
+            .containsExactly("/inventory/overview", "/inventory/requests", "/inventory/controls", "/inventory/packages", "/inventory/weekly");
         assertThat(findMenu(staffInventory.children(), "/inventory/manage").meta().isHide()).isTrue();
 
         NavigationMenu managerInventory = findMenu(service.navigationFor(user("manager")).menus(), "/inventory");
         assertThat(managerInventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
-            .containsExactly("/inventory/overview", "/inventory/executive", "/inventory/packages", "/inventory/items");
+            .containsExactly("/inventory/overview", "/inventory/executive");
 
         assertThat(findMenuOrNull(service.navigationFor(user("reception")).menus(), "/inventory")).isNull();
     }
@@ -212,9 +241,7 @@ class AuthNavigationServiceTest {
         assertThat(findMenu(quality.menus(), "/navigation/quality-audit").redirect()).isEqualTo("/audit/review");
 
         NavigationResult manager = service.navigationFor(user("manager"));
-        NavigationMenu managerMaterials = findMenu(manager.menus(), "/navigation/materials-documents");
-        assertThat(visibleChildren(managerMaterials).stream().map(NavigationMenu::path))
-            .containsExactly("/templates/ai-document");
+        assertThat(findMenuOrNull(manager.menus(), "/navigation/materials-documents")).isNull();
         assertThat(findMenuOrNull(manager.menus(), "/navigation/patient-collaboration")).isNull();
         assertThat(findMenuOrNull(manager.menus(), "/navigation/quality-audit")).isNull();
     }
@@ -226,7 +253,7 @@ class AuthNavigationServiceTest {
 
         assertThat(service.navigationFor(user("doctor")).shortcuts().get(0).path()).isEqualTo("/pre-ai/encounters");
         assertThat(service.navigationFor(user("quality")).shortcuts().get(0).path()).isEqualTo("/audit/review");
-        assertThat(service.navigationFor(user("manager")).shortcuts().get(0).path()).isEqualTo("/templates/ai-document");
+        assertThat(service.navigationFor(user("manager")).shortcuts().get(0).path()).isEqualTo("/inventory/overview");
         assertThat(service.navigationFor(user("quality")).shortcuts())
             .noneMatch(item -> "/pre-ai/encounters".equals(item.path()));
     }

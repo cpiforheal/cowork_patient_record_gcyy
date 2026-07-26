@@ -99,7 +99,7 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/exception-tasks/retry")
     public ApiResult<Map<String, Object>> retryException(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:retry");
         return ApiResult.of(200, "库存异常任务已重新排队", databaseService.asMap(databaseService.retryConsumption(toJson(payload), user)));
     }
 
@@ -168,19 +168,19 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/weekly/standards")
     public ApiResult<Map<String, Object>> saveWeeklyStandard(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:rule");
         return ApiResult.of(200, "周度标准草稿已保存", databaseService.asMap(databaseService.saveWeeklyStandard(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/weekly/standards/publish")
     public ApiResult<Map<String, Object>> publishWeeklyStandard(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:rule");
         return ApiResult.of(200, "周度标准已发布", databaseService.asMap(databaseService.publishWeeklyStandard(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/weekly/standards/delete")
     public ApiResult<Map<String, Object>> deleteWeeklyStandard(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:rule");
         return ApiResult.of(200, "周度标准草稿已删除", databaseService.asMap(databaseService.deleteWeeklyStandard(toJson(payload), user)));
     }
 
@@ -201,19 +201,19 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/weekly/snapshots/generate")
     public ApiResult<Map<String, Object>> generateWeeklySnapshot(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:count");
+        SessionUser user = requireCapability("inventory:confirm");
         return ApiResult.of(200, "周度库存快照已生成", databaseService.asMap(databaseService.generateWeeklySnapshot(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/weekly/snapshots/confirm")
     public ApiResult<Map<String, Object>> confirmWeeklySnapshot(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:confirm");
         return ApiResult.of(200, "周度库存快照已确认", databaseService.asMap(databaseService.confirmWeeklySnapshot(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/weekly/snapshots/revise")
     public ApiResult<Map<String, Object>> reviseWeeklySnapshot(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:confirm");
         return ApiResult.of(200, "周度库存更正版本已生成", databaseService.asMap(databaseService.reviseWeeklySnapshot(toJson(payload), user)));
     }
 
@@ -301,31 +301,31 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/packages")
     public ApiResult<Map<String, Object>> savePackage(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:rule");
         return ApiResult.of(200, "套餐草稿已保存", databaseService.asMap(databaseService.savePackage(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/packages/enable")
     public ApiResult<Map<String, Object>> enablePackage(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:rule");
         return ApiResult.of(200, "套餐已启用", databaseService.asMap(databaseService.enablePackage(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/packages/disable")
     public ApiResult<Map<String, Object>> disablePackage(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:rule");
         return ApiResult.of(200, "套餐已停用", databaseService.asMap(databaseService.disablePackage(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/consumption-events")
     public ApiResult<Map<String, Object>> consumeEncounter(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:retry");
         return ApiResult.of(200, "消耗事件已记录", databaseService.asMap(databaseService.consumeEncounter(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/consumption-events/retry")
     public ApiResult<Map<String, Object>> retryConsumption(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:approve");
+        SessionUser user = requireCapability("inventory:retry");
         return ApiResult.of(200, "消耗事件已重试", databaseService.asMap(databaseService.retryConsumption(toJson(payload), user)));
     }
 

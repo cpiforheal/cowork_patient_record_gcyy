@@ -1,5 +1,5 @@
 import { authHeaders, handleUnauthorizedResponse } from "@/api/modules/authToken";
-import { getLoginOptionsApi, type LoginAccountOption } from "@/api/modules/login";
+import { getDirectoryAccountsApi, type DirectoryAccountOption } from "@/api/modules/login";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 import type { QueueWorkspace } from "./clinicQueue";
 
@@ -29,7 +29,7 @@ export interface PreAiDutyAssignment {
   participantUserNames?: string[];
 }
 
-export interface PreAiDutyUserOption extends LoginAccountOption {}
+export interface PreAiDutyUserOption extends DirectoryAccountOption {}
 
 export interface PreAiEncounterSummary {
   id: string;
@@ -318,8 +318,8 @@ let dutyUserOptionsRequest: Promise<PreAiDutyUserOption[]> | undefined;
 
 export const getPreAiDutyUserOptionsApi = async () => {
   if (!dutyUserOptionsCache) {
-    dutyUserOptionsRequest ||= getLoginOptionsApi()
-      .then(({ data }) => data.accounts || [])
+    dutyUserOptionsRequest ||= getDirectoryAccountsApi()
+      .then(({ data }) => data || [])
       .then(accounts => {
         dutyUserOptionsCache = accounts;
         return accounts;

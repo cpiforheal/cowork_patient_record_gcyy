@@ -417,7 +417,7 @@ const canViewMedicalField = (field: MedicalRecordTemplateField) => {
 };
 
 const canEditMedicalField = (field: MedicalRecordTemplateField) => {
-  if (props.currentRole === "admin") return true;
+  if (props.currentRole === "admin") return false;
   if (!props.currentRole) return false;
   if (!field.editorRoles?.length) return props.currentRole === "doctor";
 

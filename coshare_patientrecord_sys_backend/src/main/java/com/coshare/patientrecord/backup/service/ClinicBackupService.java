@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -123,6 +125,67 @@ public class ClinicBackupService {
 
     public ObjectNode runManualBackup() {
         return runBackup("manual");
+    }
+
+    /** Creates a non-prunable backup before destructive maintenance. */
+    public ProtectedBackup createProtectedBackup(
+        Path targetDir,
+        Map<String, Path> managedDirectories,
+        ObjectNode beforeCounts
+    ) throws IOException, InterruptedException {
+        Path normalizedTarget = targetDir.toAbsolutePath().normalize();
+        if (normalizedTarget.getParent() == null || Files.exists(normalizedTarget)) {
+            throw new IOException("Protected backup target must be a new non-root directory: " + normalizedTarget);
+        }
+        for (Path managedDirectory : managedDirectories.values()) {
+            Path source = managedDirectory.toAbsolutePath().normalize();
+            if (source.getParent() == null || normalizedTarget.startsWith(source)) {
+                throw new IOException("Protected backup target overlaps a managed directory: " + source);
+            }
+        }
+        if (!backupRunning.compareAndSet(false, true)) {
+            throw new IOException("Another backup is already running");
+        }
+
+        try {
+            Files.createDirectories(normalizedTarget);
+            writeDatabaseDump(normalizedTarget.resolve("database.sql"));
+
+            ObjectNode manifest = objectMapper.createObjectNode();
+            manifest.put("backupVersion", 2);
+            manifest.put("backupType", "protected-data-purge");
+            manifest.put("createdAt", Instant.now().toString());
+            manifest.put("hostName", hostName());
+            manifest.put("database", parseJdbcTarget().database());
+            manifest.set("beforeCounts", beforeCounts.deepCopy());
+
+            ObjectNode directoryManifest = manifest.putObject("managedDirectories");
+            Path filesRoot = normalizedTarget.resolve("managed-files");
+            for (Map.Entry<String, Path> entry : managedDirectories.entrySet()) {
+                String label = safeBackupLabel(entry.getKey());
+                Path source = entry.getValue().toAbsolutePath().normalize();
+                copyDirectory(source, filesRoot.resolve(label));
+                ObjectNode directory = directoryManifest.putObject(label);
+                directory.put("source", source.toString());
+                directory.put("fileCount", countRegularFiles(source));
+                directory.put("totalBytes", sumRegularFileBytes(source));
+            }
+
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(normalizedTarget.resolve("manifest.json").toFile(), manifest);
+            writeProtectedRestoreScript(normalizedTarget.resolve("restore-protected-backup.ps1"));
+            Map<String, String> hashes = hashBackupFiles(normalizedTarget);
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(normalizedTarget.resolve("sha256.json").toFile(), hashes);
+            String aggregateHash = aggregateHash(hashes);
+            Files.writeString(normalizedTarget.resolve("backup.sha256"), aggregateHash + System.lineSeparator(), StandardCharsets.UTF_8);
+            return new ProtectedBackup(normalizedTarget, aggregateHash, manifest);
+        } catch (Exception error) {
+            deleteDirectory(normalizedTarget);
+            if (error instanceof IOException ioException) throw ioException;
+            if (error instanceof InterruptedException interruptedException) throw interruptedException;
+            throw new IOException("Protected backup failed", error);
+        } finally {
+            backupRunning.set(false);
+        }
     }
 
     public ObjectNode chooseBackupDirectory(String initialDir) {
@@ -221,7 +284,7 @@ public class ClinicBackupService {
         return new BackupPayload(manifest);
     }
 
-    private void writeDatabaseDump(Path target) throws IOException, InterruptedException {
+    protected void writeDatabaseDump(Path target) throws IOException, InterruptedException {
         JdbcTarget jdbcTarget = parseJdbcTarget();
         String dumpExecutable = resolveMysqlDumpExecutable();
         Path optionFile = null;
@@ -284,6 +347,125 @@ public class ClinicBackupService {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    private void copyDirectory(Path sourceDir, Path targetDir) throws IOException {
+        Files.createDirectories(targetDir);
+        if (!Files.isDirectory(sourceDir)) return;
+        Files.walkFileTree(sourceDir, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Files.createDirectories(targetDir.resolve(sourceDir.relativize(dir).toString()));
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Path target = targetDir.resolve(sourceDir.relativize(file).toString());
+                Files.createDirectories(target.getParent());
+                Files.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private long countRegularFiles(Path root) throws IOException {
+        if (!Files.isDirectory(root)) return 0;
+        try (var paths = Files.walk(root)) {
+            return paths.filter(Files::isRegularFile).count();
+        }
+    }
+
+    private long sumRegularFileBytes(Path root) throws IOException {
+        if (!Files.isDirectory(root)) return 0;
+        long total = 0;
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.filter(Files::isRegularFile).toList()) total += Files.size(path);
+        }
+        return total;
+    }
+
+    private Map<String, String> hashBackupFiles(Path root) throws IOException {
+        Map<String, String> hashes = new LinkedHashMap<>();
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+                hashes.put(root.relativize(path).toString().replace("\\", "/"), sha256(path));
+            }
+        }
+        return hashes;
+    }
+
+    private String aggregateHash(Map<String, String> hashes) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Map.Entry<String, String> entry : hashes.entrySet()) {
+                digest.update(entry.getKey().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(entry.getValue().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) '\n');
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException error) {
+            throw new IOException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private String sha256(Path path) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read > 0) digest.update(buffer, 0, read);
+                }
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException error) {
+            throw new IOException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private String safeBackupLabel(String raw) {
+        String label = raw == null ? "" : raw.trim();
+        if (!label.matches("[a-z0-9-]+")) throw new IllegalArgumentException("Invalid managed-directory label: " + raw);
+        return label;
+    }
+
+    private void writeProtectedRestoreScript(Path target) throws IOException {
+        String script = """
+            param(
+              [Parameter(Mandatory=$true)][string]$MysqlExe,
+              [Parameter(Mandatory=$true)][string]$Database,
+              [Parameter(Mandatory=$true)][string]$Username,
+              [string]$HostName = '127.0.0.1',
+              [int]$Port = 3306
+            )
+            $ErrorActionPreference = 'Stop'
+            if ([string]::IsNullOrWhiteSpace($env:MYSQL_PWD)) { throw 'Set MYSQL_PWD for this process before restoring.' }
+            $backupRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+            $expectedHashes = Get-Content -Raw (Join-Path $backupRoot 'sha256.json') | ConvertFrom-Json
+            $expectedHashes.PSObject.Properties | ForEach-Object {
+              $candidate = Join-Path $backupRoot $_.Name
+              $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidate).Hash.ToLowerInvariant()
+              if ($actual -ne $_.Value) { throw "Backup checksum mismatch: $($_.Name)" }
+            }
+            $sqlPath = (Join-Path $backupRoot 'database.sql').Replace('\\', '/')
+            & $MysqlExe --host=$HostName --port=$Port --user=$Username $Database "--execute=source $sqlPath"
+            if ($LASTEXITCODE -ne 0) { throw "mysql restore failed with exit code $LASTEXITCODE" }
+            $manifest = Get-Content -Raw (Join-Path $backupRoot 'manifest.json') | ConvertFrom-Json
+            $managedRoot = Join-Path $backupRoot 'managed-files'
+            $manifest.managedDirectories.PSObject.Properties | ForEach-Object {
+              $source = Join-Path $managedRoot $_.Name
+              $destination = $_.Value.source
+              New-Item -ItemType Directory -Force -Path $destination | Out-Null
+              if (Test-Path -LiteralPath $source) {
+                Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $destination -Recurse -Force
+              }
+            }
+            Write-Host 'Protected backup restored. Restart the clinic service before verification.'
+            """;
+        Files.writeString(target, script, StandardCharsets.UTF_8);
     }
 
     private void writeZip(Path sourceDir, Path targetZip) throws IOException {
@@ -539,5 +721,8 @@ public class ClinicBackupService {
     }
 
     private record BackupFile(Path path, Instant createdAt) {
+    }
+
+    public record ProtectedBackup(Path directory, String sha256, ObjectNode manifest) {
     }
 }

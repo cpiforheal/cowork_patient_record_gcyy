@@ -30,17 +30,31 @@ class ClinicQueueServiceMySqlIntegrationTests {
         .withUsername("clinic_test")
         .withPassword("clinic_test_password");
 
-    private static final SessionUser ADMIN = new SessionUser(
+    private static final SessionUser FRONTDESK = new SessionUser(
         "test-admin",
         "test-admin",
-        "测试管理员",
-        "admin",
-        "管理员",
+        "测试前台",
+        "frontdesk",
+        "登记前台",
         "dept-test",
         "测试科室",
         false,
         Instant.now().plusSeconds(3600)
     );
+
+    private static final SessionUser INSPECTION = new SessionUser(
+        "test-admin",
+        "test-admin",
+        "测试检查岗",
+        "inspection",
+        "检查岗位",
+        "dept-test",
+        "测试科室",
+        false,
+        Instant.now().plusSeconds(3600)
+    );
+
+    private static final SessionUser ADMIN = FRONTDESK;
 
     private JdbcTemplate jdbcTemplate;
     private ClinicQueueService service;
@@ -182,8 +196,8 @@ class ClinicQueueServiceMySqlIntegrationTests {
         service.issue(new ClinicQueueService.IssueRequest(encounterId, "FIRST_VISIT"), ADMIN);
         String taskId = inspectionTaskId();
 
-        service.taskAction(taskId, "CALL", new ClinicQueueService.ActionRequest("首次叫号"), ADMIN);
-        service.taskAction(taskId, "RECALL", new ClinicQueueService.ActionRequest("患者未听清"), ADMIN);
+        service.taskAction(taskId, "CALL", new ClinicQueueService.ActionRequest("首次叫号"), INSPECTION);
+        service.taskAction(taskId, "RECALL", new ClinicQueueService.ActionRequest("患者未听清"), INSPECTION);
 
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_announcements WHERE status = 'PENDING'"));
         assertEquals(1, count("SELECT COUNT(*) FROM clinic_queue_announcements WHERE status = 'SUPERSEDED'"));
@@ -195,8 +209,8 @@ class ClinicQueueServiceMySqlIntegrationTests {
         service.markAnnouncementPlayed(pendingId, ADMIN);
         assertEquals(1, count("SELECT play_count FROM clinic_queue_announcements WHERE id = ?", pendingId));
 
-        service.taskAction(taskId, "ARRIVE", new ClinicQueueService.ActionRequest("已到场"), ADMIN);
-        service.taskAction(taskId, "START", new ClinicQueueService.ActionRequest("开始检查"), ADMIN);
+        service.taskAction(taskId, "ARRIVE", new ClinicQueueService.ActionRequest("已到场"), INSPECTION);
+        service.taskAction(taskId, "START", new ClinicQueueService.ActionRequest("开始检查"), INSPECTION);
         assertEquals("IN_SERVICE", taskStatus(taskId));
     }
 
@@ -204,7 +218,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
     void expiredAnnouncementIsNotReturnedAsPending() {
         String encounterId = insertEncounter("赵六", 1);
         service.issue(new ClinicQueueService.IssueRequest(encounterId, "FIRST_VISIT"), ADMIN);
-        service.taskAction(inspectionTaskId(), "CALL", new ClinicQueueService.ActionRequest("首次叫号"), ADMIN);
+        service.taskAction(inspectionTaskId(), "CALL", new ClinicQueueService.ActionRequest("首次叫号"), INSPECTION);
         jdbcTemplate.update("UPDATE clinic_queue_announcements SET expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND)");
 
         Map<String, Object> response = service.pendingAnnouncements(ADMIN);
@@ -218,7 +232,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
         String encounterId = insertEncounter("孙七", 1);
         service.issue(new ClinicQueueService.IssueRequest(encounterId, "FIRST_VISIT"), ADMIN);
         String taskId = inspectionTaskId();
-        service.taskAction(taskId, "CALL", new ClinicQueueService.ActionRequest("首次叫号"), ADMIN);
+        service.taskAction(taskId, "CALL", new ClinicQueueService.ActionRequest("首次叫号"), INSPECTION);
 
         service.roomAction(
             "INSPECTION_ROOM",

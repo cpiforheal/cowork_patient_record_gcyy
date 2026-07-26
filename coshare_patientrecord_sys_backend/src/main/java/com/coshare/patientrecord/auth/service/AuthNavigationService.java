@@ -28,34 +28,34 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.26.3";
+    public static final String VERSION = "2026.07.27.1";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
         "REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW"
     );
     private static final Map<String, Set<String>> STAGE_EDITORS = Map.of(
-        "REGISTRATION", Set.of("admin", "doctor", "frontdesk"),
-        "INSPECTION", Set.of("admin", "doctor", "inspection"),
-        "RECEPTION", Set.of("admin", "doctor", "reception"),
-        "TCM", Set.of("admin", "doctor", "tcm"),
-        "DOCTOR", Set.of("admin", "doctor"),
-        "SURGERY", Set.of("admin", "doctor", "nurse", "nursing"),
-        "REVIEW", Set.of("admin", "doctor")
+        "REGISTRATION", Set.of("frontdesk"),
+        "INSPECTION", Set.of("inspection"),
+        "RECEPTION", Set.of("reception"),
+        "TCM", Set.of("tcm"),
+        "DOCTOR", Set.of("doctor"),
+        "SURGERY", Set.of("nurse"),
+        "REVIEW", Set.of("doctor")
     );
     private static final Map<String, Set<String>> AUXILIARY_EDITORS = Map.of(
-        "LAB", Set.of("admin", "lab"),
-        "ECG", Set.of("admin", "ecg"),
-        "IMAGING", Set.of("admin", "ultrasound"),
-        "VITAL_SIGNS", Set.of("admin", "nurse", "nursing"),
-        "COLONOSCOPY", Set.of("admin", "inspection")
+        "LAB", Set.of("lab"),
+        "ECG", Set.of("ecg"),
+        "IMAGING", Set.of("ultrasound"),
+        "VITAL_SIGNS", Set.of("nurse"),
+        "COLONOSCOPY", Set.of("inspection")
     );
     private static final Map<String, Set<String>> PRE_AI_CAPABILITY_ROLES = Map.of(
-        "preai:encounter:create", Set.of("admin", "frontdesk"),
-        "preai:legacy:import", Set.of("admin", "frontdesk", "doctor"),
-        "preai:review", Set.of("admin", "doctor"),
-        "preai:duties:manage", Set.of("admin", "frontdesk", "doctor"),
-        "preai:surgery:confirm", Set.of("admin", "doctor")
+        "preai:encounter:create", Set.of("frontdesk"),
+        "preai:legacy:import", Set.of("frontdesk"),
+        "preai:review", Set.of("doctor"),
+        "preai:duties:manage", Set.of("frontdesk"),
+        "preai:surgery:confirm", Set.of("nurse")
     );
     private final JdbcTemplate jdbcTemplate;
     private final List<NavigationMenu> menus = buildMenus();
@@ -137,7 +137,6 @@ public class AuthNavigationService {
 
     public boolean canCorrectStage(String role, String stageCode) {
         return !"REVIEW".equals(normalize(stageCode))
-            && Set.of("admin", "doctor").contains(normalizeRole(role))
             && canEditStage(role, stageCode);
     }
 
@@ -148,7 +147,7 @@ public class AuthNavigationService {
     public boolean canCreateAuxiliary(String role, String taskType) {
         String normalizedRole = normalizeRole(role);
         String normalizedTask = normalize(taskType);
-        if (Set.of("admin", "doctor", "reception").contains(normalizedRole)) return true;
+        if (Set.of("doctor", "reception").contains(normalizedRole)) return true;
         return AUXILIARY_EDITORS.getOrDefault(normalizedTask, Set.of()).contains(normalizedRole);
     }
 
@@ -156,9 +155,22 @@ public class AuthNavigationService {
         if (user == null || capability == null || capability.isBlank()) return false;
         RolePolicy policy = policies.get(normalizeRole(user.role()));
         if (policy == null) return false;
-        return policy.buttonPermissions().values().stream()
+        if (policy.buttonPermissions().values().stream()
             .flatMap(List::stream)
-            .anyMatch(capability::equals);
+            .anyMatch(capability::equals)) return true;
+        Set<String> roles = PRE_AI_CAPABILITY_ROLES.get(capability);
+        if (roles != null && roles.contains(normalizeRole(user.role()))) return true;
+        if (capability.startsWith("preai:stage:")) {
+            String[] parts = capability.split(":");
+            if (parts.length == 4 && "edit".equals(parts[3])) return canEditStage(user.role(), parts[2]);
+            if (parts.length == 4 && "correct".equals(parts[3])) return canCorrectStage(user.role(), parts[2]);
+        }
+        if (capability.startsWith("preai:auxiliary:")) {
+            String[] parts = capability.split(":");
+            if (parts.length == 4 && "edit".equals(parts[3])) return canEditAuxiliary(user.role(), parts[2]);
+            if (parts.length == 4 && "create".equals(parts[3])) return canCreateAuxiliary(user.role(), parts[2]);
+        }
+        return false;
     }
 
     private Map<String, StagePermission> stagePermissions(String role) {
@@ -173,7 +185,7 @@ public class AuthNavigationService {
         Map<String, AuxiliaryPermission> result = new LinkedHashMap<>();
         AUXILIARY_EDITORS.keySet().stream().sorted().forEach(task -> {
             boolean editable = canEditAuxiliary(role, task);
-            boolean returnable = Set.of("admin", "doctor").contains(normalizeRole(role));
+            boolean returnable = "doctor".equals(normalizeRole(role));
             result.put(task, new AuxiliaryPermission(true, editable, returnable));
         });
         return Map.copyOf(result);
@@ -201,7 +213,7 @@ public class AuthNavigationService {
     }
 
     private static String normalizeRole(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return RoleCatalog.canonicalize(value);
     }
 
     private static List<NavigationShortcut> prioritizeShortcuts(String role, List<NavigationShortcut> source) {
@@ -275,7 +287,8 @@ public class AuthNavigationService {
 
     private static List<NavigationMenu> buildMenus() {
         List<NavigationMenu> result = new ArrayList<>();
-        result.add(page("/home/index", "home", "/home/index", "我的待办", "HomeFilled", false, false, true));
+        result.add(page("/welcome/index", "welcome", "/welcome/index", "主页", "HomeFilled", false, false, true));
+        result.add(page("/home/index", "home", "/home/index", "我的待办", "List", false, false, false));
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/pre-ai/encounters", "患者就诊", "UserFilled",
             page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen", false, false, false),
             page("/encounters/active", "encounterActive", "/encounters/active/index", "患者进度", "Connection", false, false, false),
@@ -328,6 +341,7 @@ public class AuthNavigationService {
                 page("/system/aiConfig", "aiConfig", "/system/aiConfig/index", "AI接口配置", "Setting", false, false, false),
                 page("/system/aiAssistantAnalysis", "aiAssistantAnalysis", "/system/aiAssistantAnalysis/index", "AI使用分析", "DataAnalysis", false, false, false)
             ),
+            page("/system/dataMaintenance", "dataMaintenance", "/system/dataMaintenance/index", "数据维护", "Tools", false, false, false),
             page("/system/systemLog", "systemLog", "/system/systemLog/index", "系统日志", "Notebook", true, false, false)
         ));
 
@@ -348,16 +362,16 @@ public class AuthNavigationService {
 
     private static Map<String, RolePolicy> buildPolicies() {
         Map<String, RolePolicy> result = new LinkedHashMap<>();
-        Map<String, List<String>> allButtons = permissions(
+        Map<String, List<String>> administratorButtons = permissions(
             "home=view",
-            "workbenchUpload=patient:search,document:upload",
-            "workbenchLabReport=patient:search,field:read,field:edit,document:read,document:upload",
+            "workbenchUpload=patient:search,document:read",
+            "workbenchLabReport=patient:search,field:read,document:read",
             "encounterActive=patient:read,field:read",
             "recordTemplate=field:read",
-            "patientList=patient:create,patient:read,patient:update",
-            "patientDetail=field:read,field:edit,document:read,document:upload,document:void,document:download",
-            "documentRecycle=document:restore,document:read",
-            "auditReview=audit:read,quality:approve,quality:reject",
+            "patientList=patient:read",
+            "patientDetail=field:read,document:read,document:download",
+            "documentRecycle=document:read",
+            "auditReview=audit:read",
             "auditLog=audit:read,audit:export",
             "accountManage=user:create,user:update,user:disable,user:resetPassword",
             "roleManage=role:read",
@@ -367,48 +381,61 @@ public class AuthNavigationService {
             "aiConfig=ai:config:read,ai:config:update",
             "aiAssistantAnalysis=ai:usage:read,ai:template:candidate",
             "systemLog=audit:read",
-            "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read,charge:confirm,review:execute,dispensing:execute,decoction:execute,pickup:execute",
-            "tcmPharmacyDisplayMenu=display:read,announcement:play",
-            "clinicQueueWorkbench=queue:read,queue:issue,queue:intervene,inspection:operate,reception:operate,room:control,audit:read",
-            "clinicQueueDisplayMenu=display:read,announcement:play",
-            "inventoryOverview=inventory:read,inventory:request,inventory:receive,inventory:approve,inventory:count,inventory:export",
-            "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
-            "inventoryRequests=inventory:read,inventory:request,inventory:receive,inventory:approve,inventory:export",
-            "inventoryStock=inventory:read,inventory:issue,inventory:count,inventory:export",
-            "inventoryItems=inventory:read,inventory:issue,inventory:export",
-            "inventoryWeekly=inventory:read,inventory:request,inventory:count,inventory:export",
-            "inventoryPackages=inventory:read,inventory:approve",
-            "inventoryControls=inventory:read,inventory:count,inventory:export",
+            "dataMaintenance=maintenance:purge,maintenance:backup",
+            "tcmPharmacyWorkbench=pharmacy:read",
+            "tcmPharmacyDisplayMenu=display:read",
+            "clinicQueueWorkbench=queue:read,audit:read",
+            "clinicQueueDisplayMenu=display:read",
+            "inventoryOverview=inventory:read,inventory:export",
+            "inventoryExecutive=inventory:read,inventory:export",
+            "inventoryRequests=inventory:read,inventory:export",
+            "inventoryStock=inventory:read,inventory:export",
+            "inventoryItems=inventory:read,inventory:export",
+            "inventoryWeekly=inventory:read,inventory:export",
+            "inventoryPackages=inventory:read",
+            "inventoryControls=inventory:read,inventory:export",
             "inventoryTrace=inventory:read,inventory:export"
         );
-        result.put("admin", new RolePolicy(Set.of("*"), allButtons));
+        result.put("admin", new RolePolicy(Set.of("*"), administratorButtons));
 
-        Set<String> patientFlow = paths("/home/index", "/patients/list", "/patients/detail/:id", "/encounters/active");
+        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/encounters/active");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record", "/templates/ai-document");
         Set<String> preAi = paths("/pre-ai/encounters");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
         Set<String> inventoryStaff = paths(
-            "/inventory/overview", "/inventory/requests", "/inventory/weekly", "/inventory/packages", "/inventory/manage"
+            "/inventory/overview", "/inventory/requests", "/inventory/weekly", "/inventory/packages",
+            "/inventory/controls", "/inventory/manage"
         );
         Set<String> inventoryQuality = paths(
-            "/inventory/overview", "/inventory/executive", "/inventory/requests", "/inventory/stock", "/inventory/items", "/inventory/weekly",
+            "/inventory/overview", "/inventory/executive", "/inventory/weekly", "/inventory/packages",
+            "/inventory/trace", "/inventory/manage"
+        );
+        Set<String> inventoryWarehouse = paths(
+            "/inventory/overview", "/inventory/requests", "/inventory/stock", "/inventory/items", "/inventory/weekly",
             "/inventory/packages", "/inventory/controls", "/inventory/trace", "/inventory/manage"
         );
         Map<String, List<String>> inventoryStaffButtons = permissions(
-            "inventoryOverview=inventory:read,inventory:request,inventory:receive",
+            "inventoryOverview=inventory:read,inventory:request,inventory:receive,inventory:count",
             "inventoryRequests=inventory:read,inventory:request,inventory:receive",
-            "inventoryWeekly=inventory:read,inventory:request",
-            "inventoryPackages=inventory:read"
+            "inventoryWeekly=inventory:read",
+            "inventoryPackages=inventory:read",
+            "inventoryControls=inventory:read,inventory:count"
         );
         Map<String, List<String>> inventoryQualityButtons = permissions(
-            "inventoryOverview=inventory:read,inventory:receive,inventory:approve,inventory:count,inventory:export",
-            "inventoryExecutive=inventory:read,inventory:approve,inventory:count,inventory:export",
-            "inventoryRequests=inventory:read,inventory:receive,inventory:approve,inventory:export",
-            "inventoryStock=inventory:read,inventory:issue,inventory:count,inventory:export",
+            "inventoryOverview=inventory:read,inventory:export",
+            "inventoryExecutive=inventory:read,inventory:export",
+            "inventoryWeekly=inventory:read,inventory:rule,inventory:confirm,inventory:export",
+            "inventoryPackages=inventory:read,inventory:rule,inventory:retry",
+            "inventoryTrace=inventory:read,inventory:export"
+        );
+        Map<String, List<String>> inventoryWarehouseButtons = permissions(
+            "inventoryOverview=inventory:read,inventory:approve,inventory:issue,inventory:receive,inventory:count,inventory:export",
+            "inventoryRequests=inventory:read,inventory:approve,inventory:issue,inventory:receive,inventory:export",
+            "inventoryStock=inventory:read,inventory:issue,inventory:receive,inventory:count,inventory:export",
             "inventoryItems=inventory:read,inventory:issue,inventory:export",
             "inventoryWeekly=inventory:read,inventory:count,inventory:export",
-            "inventoryPackages=inventory:read,inventory:approve",
+            "inventoryPackages=inventory:read,inventory:retry",
             "inventoryControls=inventory:read,inventory:receive,inventory:count,inventory:export",
             "inventoryTrace=inventory:read,inventory:export"
         );
@@ -439,23 +466,13 @@ public class AuthNavigationService {
         result.put("ecg", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
-        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
 
         result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
         )));
-        result.put("tcmpharmacyoperator", role(tcmPharmacy, permissions(
-            "tcmPharmacyWorkbench=pharmacy:read,charge:confirm,review:execute,dispensing:execute,decoction:execute,pickup:execute",
+        result.put("tcm_pharmacy", role(union(paths("/welcome/index", "/home/index"), tcmPharmacy), permissions(
+            "home=view", "tcmPharmacyWorkbench=pharmacy:read,charge:confirm,review:execute,dispensing:execute,decoction:execute,pickup:execute",
             "tcmPharmacyDisplayMenu=display:read,announcement:play"
-        )));
-        Map<String, List<String>> pharmacyButtons = permissions(
-            "home=view", "tcmPharmacyWorkbench=charge:confirm,review:execute,dispensing:execute,pickup:execute",
-            "tcmPharmacyDisplayMenu=display:read,announcement:play"
-        );
-        result.put("pharmacist", role(union(paths("/home/index"), tcmPharmacy), pharmacyButtons));
-        result.put("pharmacy", role(union(paths("/home/index"), tcmPharmacy), pharmacyButtons));
-        result.put("decoction", role(union(paths("/home/index"), tcmPharmacy), permissions(
-            "home=view", "tcmPharmacyWorkbench=decoction:execute,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
         )));
         result.put("display", role(paths("/tcm-pharmacy/clinic-queue/display", "/tcm-pharmacy/display"), permissions(
             "clinicQueueDisplayMenu=display:read,announcement:play",
@@ -476,11 +493,13 @@ public class AuthNavigationService {
             "documentRecycle=document:restore,document:read", "auditReview=audit:read,quality:approve,quality:reject", "auditLog=audit:read,audit:export"
         ), inventoryQualityButtons)));
         result.put("manager", role(paths(
-            "/home/index", "/templates/record", "/templates/ai-document",
-            "/inventory/overview", "/inventory/executive", "/inventory/items", "/inventory/packages"
+            "/welcome/index", "/home/index", "/inventory/overview", "/inventory/executive"
         ), permissions(
-            "home=view", "recordTemplate=field:read", "inventoryOverview=inventory:read",
-            "inventoryExecutive=inventory:read,inventory:export", "inventoryItems=inventory:read", "inventoryPackages=inventory:read"
+            "home=view", "inventoryOverview=inventory:read,inventory:export",
+            "inventoryExecutive=inventory:read,inventory:export"
+        )));
+        result.put("warehouse", role(union(paths("/welcome/index", "/home/index"), inventoryWarehouse), mergePermissions(
+            permissions("home=view"), inventoryWarehouseButtons
         )));
         return Map.copyOf(result);
     }

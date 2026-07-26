@@ -1,5 +1,6 @@
 package com.coshare.patientrecord.clinic.repository;
 
+import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -212,7 +213,9 @@ public class ClinicDbWriter {
             if (row == null) row = incomingRow;
             switch (table) {
                 case "clinic_accounts" -> {
-                    ObjectNode account = normalizeAccountDepartments(secureAccountRow(row));
+                    ObjectNode previous = existingAccountRow(id);
+                    ObjectNode account = normalizeAndValidateAccount(row);
+                    ensureAdministratorContinuity(previous, account, id);
                     jdbcTemplate.update("""
                     INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role),
@@ -221,7 +224,7 @@ public class ClinicDbWriter {
                     id, text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
                     );
                     synchronizeAccountDepartments(account);
-                    revokeSessionsIfDisabled(account);
+                    revokeSessionsIfIdentityChanged(previous, account);
                 }
                 case "clinic_roles" -> {
                     // Role definitions are the fixed server policy. Ignore legacy client writes.
@@ -295,6 +298,77 @@ public class ClinicDbWriter {
             account.put("passwordHash", isBcrypt(existingPasswordHash) ? existingPasswordHash : passwordEncoder.encode(existingPasswordHash));
         }
         return account;
+    }
+
+    private ObjectNode normalizeAndValidateAccount(JsonNode row) {
+        ObjectNode account = normalizeAccountDepartments(secureAccountRow(row));
+        String id = text(account, "id");
+        String username = text(account, "username").trim();
+        String role = RoleCatalog.canonicalize(text(account, "role"));
+        if (id.isBlank() || username.length() < 3 || username.length() > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "账号标识无效或账号名长度不符合要求");
+        }
+        if (!RoleCatalog.isCanonical(role)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择系统提供的规范岗位");
+        }
+        JsonNode departmentIds = account.path("departmentIds");
+        String primaryDepartmentId = text(account, "primaryDepartmentId");
+        if (!departmentIds.isArray() || departmentIds.isEmpty() || primaryDepartmentId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "账号必须配置授权科室和主科室");
+        }
+        boolean primaryAuthorized = false;
+        for (JsonNode departmentId : departmentIds) {
+            if (primaryDepartmentId.equals(departmentId.asText())) primaryAuthorized = true;
+        }
+        if (!primaryAuthorized) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "主科室必须包含在授权科室中");
+        }
+        Integer duplicate = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM clinic_accounts WHERE LOWER(username) = LOWER(?) AND id <> ?",
+            Integer.class,
+            username,
+            id
+        );
+        if (duplicate != null && duplicate > 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "账号名已存在");
+        }
+        account.put("username", username);
+        account.put("role", role);
+        account.put("roleLabel", RoleCatalog.label(role));
+        return account;
+    }
+
+    private ObjectNode existingAccountRow(String accountId) {
+        if (accountId == null || accountId.isBlank()) return objectMapper.createObjectNode();
+        List<ObjectNode> rows = jdbcTemplate.query(
+            "SELECT username, role, status, raw_json FROM clinic_accounts WHERE id = ? LIMIT 1",
+            (rs, rowNum) -> {
+                JsonNode value = readJson(rs, "raw_json");
+                ObjectNode account = value.isObject() ? (ObjectNode) value : objectMapper.createObjectNode();
+                account.put("username", rs.getString("username"));
+                account.put("role", rs.getString("role"));
+                account.put("status", rs.getString("status"));
+                return account;
+            },
+            accountId
+        );
+        return rows.isEmpty() ? objectMapper.createObjectNode() : rows.get(0);
+    }
+
+    private void ensureAdministratorContinuity(ObjectNode previous, ObjectNode account, String accountId) {
+        boolean wasEnabledAdmin = "admin".equals(RoleCatalog.canonicalize(text(previous, "role")))
+            && "启用".equals(text(previous, "status", "启用"));
+        boolean remainsEnabledAdmin = "admin".equals(text(account, "role"))
+            && "启用".equals(text(account, "status", "启用"));
+        if (!wasEnabledAdmin || remainsEnabledAdmin) return;
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM clinic_accounts WHERE role = 'admin' AND status = '启用' AND id <> ?",
+            Integer.class,
+            accountId
+        );
+        if (count == null || count == 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "系统必须至少保留一个启用的管理员账号");
+        }
     }
 
     private String existingAccountPasswordHash(String id) {
@@ -512,7 +586,9 @@ public class ClinicDbWriter {
         for (JsonNode row : rows) {
             switch (table) {
                 case "clinic_accounts" -> {
-                    ObjectNode account = normalizeAccountDepartments(secureAccountRow(row));
+                    ObjectNode previous = existingAccountRow(text(row, "id"));
+                    ObjectNode account = normalizeAndValidateAccount(row);
+                    ensureAdministratorContinuity(previous, account, text(account, "id"));
                     jdbcTemplate.update("""
                     INSERT INTO clinic_accounts (id, username, role, status, raw_json) VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role),
@@ -521,7 +597,7 @@ public class ClinicDbWriter {
                     text(account, "id"), text(account, "username"), text(account, "role"), text(account, "status"), toJson(account)
                     );
                     synchronizeAccountDepartments(account);
-                    revokeSessionsIfDisabled(account);
+                    revokeSessionsIfIdentityChanged(previous, account);
                 }
                 case "clinic_roles" -> {
                     // Role definitions are the fixed server policy. Ignore legacy client writes.
@@ -648,12 +724,20 @@ public class ClinicDbWriter {
         }
     }
 
-    private void revokeSessionsIfDisabled(ObjectNode account) {
-        if ("启用".equals(text(account, "status", "启用"))) return;
+    private void revokeSessionsIfIdentityChanged(ObjectNode previous, ObjectNode account) {
+        if (previous != null && !previous.isEmpty()
+            && text(previous, "username").equals(text(account, "username"))
+            && RoleCatalog.canonicalize(text(previous, "role")).equals(text(account, "role"))
+            && text(previous, "status", "启用").equals(text(account, "status", "启用"))
+            && text(previous, "primaryDepartmentId").equals(text(account, "primaryDepartmentId"))
+            && previous.path("departmentIds").equals(account.path("departmentIds"))
+            && text(previous, "passwordHash").equals(text(account, "passwordHash"))) {
+            return;
+        }
         jdbcTemplate.update(
             """
             UPDATE clinic_auth_sessions
-            SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = 'account_disabled'
+            SET revoked_at = CURRENT_TIMESTAMP(6), revoke_reason = 'account_identity_changed'
             WHERE user_id = ? AND revoked_at IS NULL
             """,
             text(account, "id")

@@ -1,5 +1,5 @@
 import { Login, ResultData } from "@/api/interface/index";
-import { authHeaders } from "./authToken";
+import { authHeaders, handleUnauthorizedResponse } from "./authToken";
 
 const AUTH_API_BASE_URL = import.meta.env.VITE_AUTH_API_BASE_URL || "/auth";
 
@@ -14,10 +14,18 @@ const readJsonResult = async <T>(response: Response): Promise<ResultData<T>> => 
 };
 
 export interface LoginAccountOption {
+  accountHandle: string;
+  label: string;
+  department: string;
+}
+
+export interface DirectoryAccountOption {
   id: string;
   username: string;
   name: string;
   department: string;
+  role?: string;
+  roleLabel?: string;
 }
 
 export interface LoginOptions {
@@ -102,6 +110,19 @@ export const getLoginAccountsApi = (department: string) => {
     })
     .catch(error => {
       throw error instanceof Error ? error : new Error("登录选项服务未连通，请确认后端已启动");
+    });
+};
+
+export const getDirectoryAccountsApi = () => {
+  return fetch(`${AUTH_API_BASE_URL}/directory/accounts`, { headers: authHeaders() })
+    .then(async response => {
+      if (response.status === 401) handleUnauthorizedResponse();
+      const payload = await readJsonResult<DirectoryAccountOption[]>(response);
+      if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "人员目录加载失败");
+      return payload;
+    })
+    .catch(error => {
+      throw error instanceof Error ? error : new Error("人员目录服务未连通，请确认后端已启动");
     });
 };
 
