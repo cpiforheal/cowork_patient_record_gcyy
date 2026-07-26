@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 
+import com.coshare.patientrecord.auth.dto.NavigationMenu;
 import com.coshare.patientrecord.auth.dto.NavigationResult;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import java.time.Instant;
@@ -82,10 +83,48 @@ class AuthNavigationServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void inventoryNavigationExposesFourEntriesAndKeepsLegacyRoutesHidden() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        NavigationMenu inventory = findMenu(service.navigationFor(user("quality")).menus(), "/inventory");
+        assertThat(inventory.children()).isNotNull();
+        assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
+            .containsExactly("/inventory/overview", "/inventory/requests", "/inventory/packages", "/inventory/weekly");
+
+        assertThat(findMenu(inventory.children(), "/inventory/executive").meta().activeMenu()).isEqualTo("/inventory/overview");
+        assertThat(findMenu(inventory.children(), "/inventory/stock").meta().activeMenu()).isEqualTo("/inventory/requests");
+        assertThat(findMenu(inventory.children(), "/inventory/controls").meta().activeMenu()).isEqualTo("/inventory/requests");
+        assertThat(findMenu(inventory.children(), "/inventory/items").meta().activeMenu()).isEqualTo("/inventory/packages");
+        assertThat(findMenu(inventory.children(), "/inventory/trace").meta().activeMenu()).isEqualTo("/inventory/weekly");
+
+        NavigationMenu compatibility = findMenu(inventory.children(), "/inventory/manage");
+        assertThat(compatibility.meta().isHide()).isTrue();
+        assertThat(compatibility.redirect()).isEqualTo("/inventory/overview");
+    }
+
+    @Test
     void unknownRoleIsDeniedInsteadOfFallingBackToFrontDesk() {
         assertThatThrownBy(() -> service.navigationFor(user("unknown-role")))
             .isInstanceOf(ResponseStatusException.class)
             .hasMessageContaining("角色未配置");
+    }
+
+    private NavigationMenu findMenu(List<NavigationMenu> menus, String path) {
+        NavigationMenu result = findMenuOrNull(menus, path);
+        if (result != null) return result;
+        throw new AssertionError("Menu not found: " + path);
+    }
+
+    private NavigationMenu findMenuOrNull(List<NavigationMenu> menus, String path) {
+        for (NavigationMenu item : menus) {
+            if (path.equals(item.path())) return item;
+            if (item.children() != null && !item.children().isEmpty()) {
+                NavigationMenu nested = findMenuOrNull(item.children(), path);
+                if (nested != null) return nested;
+            }
+        }
+        return null;
     }
 
     private SessionUser user(String role) {

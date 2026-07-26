@@ -1,204 +1,219 @@
 <template>
   <section class="weekly-workbench">
-    <div class="panel weekly-section">
-      <div class="panel-head">
-        <div>
-          <h2>周度标准清单</h2>
-          <p>维护门诊 / 住院计划患者数、每患者标准耗材量和单位换算，发布后用于生成不可变周度快照。</p>
-        </div>
-        <el-button v-if="canApprove" type="primary" :icon="Plus" @click="openStandardDialog()">新建标准</el-button>
-      </div>
-      <el-table :data="standards" border>
-        <el-table-column prop="name" label="标准名称" min-width="180" />
-        <el-table-column prop="standardCode" label="编码" width="130" />
-        <el-table-column label="版本" width="80">
-          <template #default="{ row }">v{{ row.version }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="standardStatusTag(row.status)" effect="light">{{ standardStatusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="effectiveWeek" label="生效周" width="120" />
-        <el-table-column prop="expiresWeek" label="失效周" width="120" />
-        <el-table-column label="清单行" width="90">
-          <template #default="{ row }">{{ row.lineCount || row.lines?.length || 0 }} 项</template>
-        </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="viewStandard(row as InventoryWeeklyStandard)">查看</el-button>
-            <el-button
-              v-if="canApprove && row.status === 'DRAFT'"
-              link
-              type="primary"
-              @click="openStandardDialog(row as InventoryWeeklyStandard)"
-            >
-              编辑
-            </el-button>
-            <el-button
-              v-if="canApprove && row.status === 'DRAFT'"
-              link
-              type="success"
-              @click="emit('publishStandard', row as InventoryWeeklyStandard)"
-            >
-              发布
-            </el-button>
-            <el-button
-              v-if="canApprove && row.status === 'DRAFT'"
-              link
-              type="danger"
-              @click="emit('deleteStandard', row as InventoryWeeklyStandard)"
-            >
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-        <template #empty><el-empty description="暂无周度标准" /></template>
-      </el-table>
-    </div>
-
-    <div class="panel weekly-section">
-      <div class="panel-head">
-        <div>
-          <h2>周度库存快照</h2>
-          <p>按患者量预估和关键阶段实际扣减聚合 expected / actual / adjusted 差异，确认后作为审计口径保留。</p>
-        </div>
-        <div class="snapshot-tools">
-          <el-date-picker v-model="snapshotWeek" value-format="YYYY-[W]ww" type="week" format="YYYY 第 ww 周" />
-          <el-select v-model="snapshotDepartmentId" clearable filterable placeholder="科室">
-            <el-option v-for="item in departmentOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <el-button
-            :icon="Refresh"
-            :loading="loading"
-            @click="emit('refreshWeekly', { weekNo: snapshotWeek, departmentId: snapshotDepartmentId })"
-          >
-            查询
-          </el-button>
-          <el-button v-if="canCount" type="primary" :icon="Plus" :loading="loading" @click="generateSnapshot">生成快照</el-button>
-        </div>
-      </div>
-      <el-table :data="snapshots" border>
-        <el-table-column type="expand" width="44">
-          <template #default="{ row }">
-            <div class="snapshot-detail">
-              <div class="snapshot-detail-title">
-                周度对账明细
-                <el-tag :type="snapshotStatusTag(row.status)" effect="plain" size="small">{{ snapshotStatusLabel(row.status) }}</el-tag>
-              </div>
-              <el-table v-if="row.lines?.length" :data="row.lines" border size="small">
-                <el-table-column prop="itemName" label="物资" min-width="150" />
-                <el-table-column label="类型" width="80">
-                  <template #default="{ row: line }">{{ careTypeLabel(line.careType || line.sourceSummary?.careType) }}</template>
-                </el-table-column>
-                <el-table-column label="患者数" width="110">
-                  <template #default="{ row: line }">
-                    {{ formatQty(linePatientVolume(line)) }}
-                    <span class="muted">/{{ formatQty(linePlannedPatientVolume(line)) }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="每患者标准" width="120">
-                  <template #default="{ row: line }">{{ formatQty(linePerPatientStandard(line)) }}</template>
-                </el-table-column>
-                <el-table-column label="预估量" width="100">
-                  <template #default="{ row: line }">{{ formatQty(line.expectedQuantity) }}</template>
-                </el-table-column>
-                <el-table-column label="实际量" width="100">
-                  <template #default="{ row: line }">{{ formatQty(lineActualConsumed(line)) }}</template>
-                </el-table-column>
-                <el-table-column label="差异" width="100">
-                  <template #default="{ row: line }">
-                    <span :class="{ negative: Number(line.expectedActualVariance || 0) < 0 }">{{ formatQty(line.expectedActualVariance) }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="建议补领" width="100">
-                  <template #default="{ row: line }">{{ formatQty(line.suggestedQuantity) }}</template>
-                </el-table-column>
-                <el-table-column label="人工调整" width="100">
-                  <template #default="{ row: line }">{{ formatQty(line.adjustedQuantity) }}</template>
-                </el-table-column>
-                <el-table-column label="审计来源" min-width="220" show-overflow-tooltip>
-                  <template #default="{ row: line }">{{ lineSourceSummary(line) }}</template>
-                </el-table-column>
-              </el-table>
-              <el-empty v-else description="点击“明细”加载快照明细" />
+    <el-tabs v-model="activeSection" class="weekly-tabs">
+      <el-tab-pane label="每患者标准量" name="standards">
+        <div class="panel weekly-section">
+          <div class="panel-head">
+            <div>
+              <h2>周度标准清单</h2>
+              <p>维护门诊 / 住院计划患者数、每患者标准耗材量和单位换算，发布后用于生成不可变周度快照。</p>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="weekNo" label="周次" width="120" />
-        <el-table-column prop="departmentName" label="科室" min-width="140" />
-        <el-table-column label="版本" width="80">
-          <template #default="{ row }">R{{ row.revision }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="snapshotStatusTag(row.status)" effect="light">{{ snapshotStatusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="预估量" width="110">
-          <template #default="{ row }">{{ formatQty(row.totalExpectedQuantity) }}</template>
-        </el-table-column>
-        <el-table-column label="实际量" width="110">
-          <template #default="{ row }">{{ formatQty(row.totalActualConsumedQuantity) }}</template>
-        </el-table-column>
-        <el-table-column label="差异" width="110">
-          <template #default="{ row }">
-            <span :class="{ negative: snapshotVariance(row) < 0 }">{{ formatQty(snapshotVariance(row)) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="调整" width="110">
-          <template #default="{ row }">{{ formatQty(row.totalAdjustedQuantity) }}</template>
-        </el-table-column>
-        <el-table-column prop="confirmedAt" label="确认时间" width="160" show-overflow-tooltip />
-        <el-table-column label="操作" width="330" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="emit('viewSnapshot', row as InventoryWeeklySnapshot)">明细</el-button>
-            <el-button
-              v-if="canApprove && row.status === 'DRAFT'"
-              link
-              type="success"
-              @click="emit('confirmSnapshot', row as InventoryWeeklySnapshot)"
-            >
-              确认
-            </el-button>
-            <el-button v-if="canApprove" link type="warning" @click="openRevise(row as InventoryWeeklySnapshot)">更正</el-button>
-            <el-dropdown
-              v-if="canExport"
-              @command="format => emit('exportSnapshot', row as InventoryWeeklySnapshot, format as InventoryWeeklyExportFormat)"
-            >
-              <el-button link type="primary" :icon="Download">导出</el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="xlsx">XLSX</el-dropdown-item>
-                  <el-dropdown-item command="pdf">PDF</el-dropdown-item>
-                  <el-dropdown-item command="docx">DOCX</el-dropdown-item>
-                </el-dropdown-menu>
+            <el-button v-if="canApprove" type="primary" :icon="Plus" @click="openStandardDialog()">新建标准</el-button>
+          </div>
+          <el-table :data="standards" border>
+            <el-table-column prop="name" label="标准名称" min-width="180" />
+            <el-table-column prop="standardCode" label="编码" width="130" />
+            <el-table-column label="版本" width="80">
+              <template #default="{ row }">v{{ row.version }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="standardStatusTag(row.status)" effect="light">{{ standardStatusLabel(row.status) }}</el-tag>
               </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty><el-empty description="暂无周度快照" /></template>
-      </el-table>
-    </div>
-
-    <div class="panel weekly-section legacy-section">
-      <div class="panel-head compact">
-        <div>
-          <h2>旧周计划记录</h2>
-          <p>保留原有科室填报数据，便于和 V14 快照口径并行核对。</p>
+            </el-table-column>
+            <el-table-column prop="effectiveWeek" label="生效周" width="120" />
+            <el-table-column prop="expiresWeek" label="失效周" width="120" />
+            <el-table-column label="清单行" width="90">
+              <template #default="{ row }">{{ row.lineCount || row.lines?.length || 0 }} 项</template>
+            </el-table-column>
+            <el-table-column label="操作" width="210" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="viewStandard(row as InventoryWeeklyStandard)">查看</el-button>
+                <el-button
+                  v-if="canApprove && row.status === 'DRAFT'"
+                  link
+                  type="primary"
+                  @click="openStandardDialog(row as InventoryWeeklyStandard)"
+                >
+                  编辑
+                </el-button>
+                <el-button
+                  v-if="canApprove && row.status === 'DRAFT'"
+                  link
+                  type="success"
+                  @click="emit('publishStandard', row as InventoryWeeklyStandard)"
+                >
+                  发布
+                </el-button>
+                <el-button
+                  v-if="canApprove && row.status === 'DRAFT'"
+                  link
+                  type="danger"
+                  @click="emit('deleteStandard', row as InventoryWeeklyStandard)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty description="暂无周度标准" /></template>
+          </el-table>
         </div>
-      </div>
-      <el-table :data="rows" border max-height="260">
-        <el-table-column prop="weekNo" label="周次" width="120" />
-        <el-table-column prop="department" label="科室" width="120" />
-        <el-table-column prop="itemName" label="物资" min-width="150" />
-        <el-table-column prop="actualConsumedQuantity" label="实际耗用" width="100" />
-        <el-table-column prop="remainingQuantity" label="剩余" width="90" />
-        <el-table-column prop="suggestedQuantity" label="建议" width="90" />
-        <el-table-column prop="adjustedQuantity" label="调整" width="90" />
-        <el-table-column prop="abnormalReason" label="异常说明" min-width="180" />
-      </el-table>
-    </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="周度快照" name="snapshots">
+        <div class="panel weekly-section">
+          <div class="panel-head">
+            <div>
+              <h2>周度库存快照</h2>
+              <p>按患者量预估和关键阶段实际扣减聚合 expected / actual / adjusted 差异，确认后作为审计口径保留。</p>
+            </div>
+            <div class="snapshot-tools">
+              <el-date-picker v-model="snapshotWeek" value-format="YYYY-[W]ww" type="week" format="YYYY 第 ww 周" />
+              <el-select v-model="snapshotDepartmentId" clearable filterable placeholder="科室">
+                <el-option v-for="item in departmentOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+              <el-button
+                :icon="Refresh"
+                :loading="loading"
+                @click="emit('refreshWeekly', { weekNo: snapshotWeek, departmentId: snapshotDepartmentId })"
+              >
+                查询
+              </el-button>
+              <el-button v-if="canCount" type="primary" :icon="Plus" :loading="loading" @click="generateSnapshot"
+                >生成快照</el-button
+              >
+            </div>
+          </div>
+          <el-table :data="snapshots" border>
+            <el-table-column type="expand" width="44">
+              <template #default="{ row }">
+                <div class="snapshot-detail">
+                  <div class="snapshot-detail-title">
+                    周度对账明细
+                    <el-tag :type="snapshotStatusTag(row.status)" effect="plain" size="small">{{
+                      snapshotStatusLabel(row.status)
+                    }}</el-tag>
+                  </div>
+                  <el-table v-if="row.lines?.length" :data="row.lines" border size="small">
+                    <el-table-column prop="itemName" label="物资" min-width="150" />
+                    <el-table-column label="类型" width="80">
+                      <template #default="{ row: line }">{{
+                        careTypeLabel(line.careType || line.sourceSummary?.careType)
+                      }}</template>
+                    </el-table-column>
+                    <el-table-column label="患者数" width="110">
+                      <template #default="{ row: line }">
+                        {{ formatQty(linePatientVolume(line)) }}
+                        <span class="muted">/{{ formatQty(linePlannedPatientVolume(line)) }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="每患者标准" width="120">
+                      <template #default="{ row: line }">{{ formatQty(linePerPatientStandard(line)) }}</template>
+                    </el-table-column>
+                    <el-table-column label="预估量" width="100">
+                      <template #default="{ row: line }">{{ formatQty(line.expectedQuantity) }}</template>
+                    </el-table-column>
+                    <el-table-column label="实际量" width="100">
+                      <template #default="{ row: line }">{{ formatQty(lineActualConsumed(line)) }}</template>
+                    </el-table-column>
+                    <el-table-column label="差异" width="100">
+                      <template #default="{ row: line }">
+                        <span :class="{ negative: Number(line.expectedActualVariance || 0) < 0 }">{{
+                          formatQty(line.expectedActualVariance)
+                        }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="建议补领" width="100">
+                      <template #default="{ row: line }">{{ formatQty(line.suggestedQuantity) }}</template>
+                    </el-table-column>
+                    <el-table-column label="人工调整" width="100">
+                      <template #default="{ row: line }">{{ formatQty(line.adjustedQuantity) }}</template>
+                    </el-table-column>
+                    <el-table-column label="审计来源" min-width="220" show-overflow-tooltip>
+                      <template #default="{ row: line }">{{ lineSourceSummary(line) }}</template>
+                    </el-table-column>
+                  </el-table>
+                  <el-empty v-else description="点击“明细”加载快照明细" />
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="weekNo" label="周次" width="120" />
+            <el-table-column prop="departmentName" label="科室" min-width="140" />
+            <el-table-column label="版本" width="80">
+              <template #default="{ row }">R{{ row.revision }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="snapshotStatusTag(row.status)" effect="light">{{ snapshotStatusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="预估量" width="110">
+              <template #default="{ row }">{{ formatQty(row.totalExpectedQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="实际量" width="110">
+              <template #default="{ row }">{{ formatQty(row.totalActualConsumedQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="差异" width="110">
+              <template #default="{ row }">
+                <span :class="{ negative: snapshotVariance(row) < 0 }">{{ formatQty(snapshotVariance(row)) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="调整" width="110">
+              <template #default="{ row }">{{ formatQty(row.totalAdjustedQuantity) }}</template>
+            </el-table-column>
+            <el-table-column prop="confirmedAt" label="确认时间" width="160" show-overflow-tooltip />
+            <el-table-column label="操作" width="330" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="emit('viewSnapshot', row as InventoryWeeklySnapshot)">明细</el-button>
+                <el-button
+                  v-if="canApprove && row.status === 'DRAFT'"
+                  link
+                  type="success"
+                  @click="emit('confirmSnapshot', row as InventoryWeeklySnapshot)"
+                >
+                  确认
+                </el-button>
+                <el-button v-if="canApprove" link type="warning" @click="openRevise(row as InventoryWeeklySnapshot)"
+                  >更正</el-button
+                >
+                <el-dropdown
+                  v-if="canExport"
+                  @command="
+                    format => emit('exportSnapshot', row as InventoryWeeklySnapshot, format as InventoryWeeklyExportFormat)
+                  "
+                >
+                  <el-button link type="primary" :icon="Download">导出</el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="xlsx">XLSX</el-dropdown-item>
+                      <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                      <el-dropdown-item command="docx">DOCX</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty description="暂无周度快照" /></template>
+          </el-table>
+        </div>
+
+        <el-collapse class="legacy-collapse">
+          <el-collapse-item title="历史兼容数据（旧周计划记录）" name="legacy">
+            <p class="legacy-description">保留原有科室填报数据，便于和周度快照口径核对。</p>
+            <el-table :data="rows" border max-height="260">
+              <el-table-column prop="weekNo" label="周次" width="120" />
+              <el-table-column prop="department" label="科室" width="120" />
+              <el-table-column prop="itemName" label="物资" min-width="150" />
+              <el-table-column prop="actualConsumedQuantity" label="实际耗用" width="100" />
+              <el-table-column prop="remainingQuantity" label="剩余" width="90" />
+              <el-table-column prop="suggestedQuantity" label="建议" width="90" />
+              <el-table-column prop="adjustedQuantity" label="调整" width="90" />
+              <el-table-column prop="abnormalReason" label="异常说明" min-width="180" />
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog
       v-model="standardDialogVisible"
@@ -278,7 +293,9 @@
             <template #default="{ row }">{{ formatQty(linePatientVolume(row)) }}</template>
           </el-table-column>
           <el-table-column label="预估/实际" width="120">
-            <template #default="{ row }">{{ formatQty(row.expectedQuantity) }} / {{ formatQty(lineActualConsumed(row)) }}</template>
+            <template #default="{ row }"
+              >{{ formatQty(row.expectedQuantity) }} / {{ formatQty(lineActualConsumed(row)) }}</template
+            >
           </el-table-column>
           <el-table-column label="系统建议" width="110">
             <template #default="{ row }">{{ formatQty(row.suggestedQuantity) }}</template>
@@ -371,6 +388,7 @@ const emit = defineEmits<{
 }>();
 
 const standardFormRef = ref<FormInstance>();
+const activeSection = ref("standards");
 const standardDialogVisible = ref(false);
 const reviseDialogVisible = ref(false);
 const editingStandardId = ref("");
@@ -417,8 +435,7 @@ const linePlannedPatientVolume = (line: LooseWeeklyLine) =>
   sourceNumber(line, "plannedPatientVolume", sourceNumber(line, "businessVolume"));
 const linePerPatientStandard = (line: LooseWeeklyLine) =>
   sourceNumber(line, "perPatientStandardQuantity", sourceNumber(line, "standardQuantity"));
-const lineActualConsumed = (line: LooseWeeklyLine) =>
-  Number(line.consumedQuantity || 0) - Number(line.reversalQuantity || 0);
+const lineActualConsumed = (line: LooseWeeklyLine) => Number(line.consumedQuantity || 0) - Number(line.reversalQuantity || 0);
 const snapshotVariance = (row: LooseWeeklySnapshot) =>
   Number(row.totalExpectedQuantity || 0) - Number(row.totalActualConsumedQuantity || 0);
 const lineSourceSummary = (line: LooseWeeklyLine) => {
@@ -450,7 +467,9 @@ const openStandardDialog = (row?: InventoryWeeklyStandard) => {
         departmentId: line.departmentId,
         itemId: line.itemId,
         careType: linePolicy(line)?.careType || line.careType || "outpatient",
-        businessVolume: Number(linePolicy(line)?.plannedPatientVolume ?? linePolicy(line)?.businessVolume ?? line.businessVolume ?? 1),
+        businessVolume: Number(
+          linePolicy(line)?.plannedPatientVolume ?? linePolicy(line)?.businessVolume ?? line.businessVolume ?? 1
+        ),
         standardQuantity: Number(linePolicy(line)?.standardQuantity ?? line.standardQuantity ?? line.expectedQuantity ?? 1),
         standardUnit:
           linePolicy(line)?.standardUnit || line.standardUnit || line.itemUnit || itemMap.value.get(line.itemId)?.unit || "",
@@ -603,8 +622,19 @@ const submitRevision = () => {
   font-size: 12px;
 }
 
-.legacy-section {
-  background: #fbfcfd;
+.weekly-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
+}
+
+.legacy-collapse {
+  margin-top: 12px;
+  border-top: 1px solid var(--inventory-line-soft);
+}
+
+.legacy-description {
+  margin: 0 0 10px;
+  color: var(--inventory-muted);
+  font-size: 13px;
 }
 
 @media (max-width: 1180px) {

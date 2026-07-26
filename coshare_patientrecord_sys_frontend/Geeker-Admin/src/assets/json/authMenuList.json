@@ -272,7 +272,7 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Monitor",
-            "title": "进销存主控台",
+            "title": "工作台",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -286,9 +286,10 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "TrendCharts",
-            "title": "领导驾驶舱",
+            "title": "领导视图",
+            "activeMenu": "/inventory/overview",
             "isLink": "",
-            "isHide": false,
+            "isHide": true,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
@@ -300,7 +301,7 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Tickets",
-            "title": "科室申领审批",
+            "title": "库存作业",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -314,7 +315,37 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Box",
-            "title": "库存与批次",
+            "title": "库存批次",
+            "activeMenu": "/inventory/requests",
+            "isLink": "",
+            "isHide": true,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/controls",
+          "name": "inventoryControls",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Checked",
+            "title": "盘点控制",
+            "activeMenu": "/inventory/requests",
+            "isLink": "",
+            "isHide": true,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/packages",
+          "name": "inventoryPackages",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "CollectionTag",
+            "title": "耗材规则",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -329,8 +360,9 @@
           "meta": {
             "icon": "Goods",
             "title": "物资档案",
+            "activeMenu": "/inventory/packages",
             "isLink": "",
-            "isHide": false,
+            "isHide": true,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
@@ -342,35 +374,7 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "DataLine",
-            "title": "周消耗预估",
-            "isLink": "",
-            "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        },
-        {
-          "path": "/inventory/packages",
-          "name": "inventoryPackages",
-          "component": "/inventory/manage/index",
-          "meta": {
-            "icon": "CollectionTag",
-            "title": "使用套餐与自动扣减",
-            "isLink": "",
-            "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        },
-        {
-          "path": "/inventory/controls",
-          "name": "inventoryControls",
-          "component": "/inventory/manage/index",
-          "meta": {
-            "icon": "Checked",
-            "title": "盘点退回报损",
+            "title": "周度对账",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -384,9 +388,24 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "DocumentChecked",
-            "title": "追溯报表",
+            "title": "追溯流水",
+            "activeMenu": "/inventory/weekly",
             "isLink": "",
-            "isHide": false,
+            "isHide": true,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/manage",
+          "name": "inventoryManageCompatibility",
+          "redirect": "/inventory/overview",
+          "meta": {
+            "icon": "Link",
+            "title": "进销存兼容入口",
+            "isLink": "",
+            "isHide": true,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true

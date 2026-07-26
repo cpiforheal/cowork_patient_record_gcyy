@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.18.2";
+    public static final String VERSION = "2026.07.26.1";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -56,6 +56,12 @@ public class AuthNavigationService {
         "preai:review", Set.of("admin", "doctor"),
         "preai:duties:manage", Set.of("admin", "frontdesk", "doctor"),
         "preai:surgery:confirm", Set.of("admin", "doctor")
+    );
+    private static final Map<String, Set<String>> INVENTORY_ENTRY_PATHS = Map.of(
+        "/inventory/overview", Set.of("/inventory/overview", "/inventory/executive"),
+        "/inventory/requests", Set.of("/inventory/requests", "/inventory/stock", "/inventory/controls"),
+        "/inventory/packages", Set.of("/inventory/packages", "/inventory/items"),
+        "/inventory/weekly", Set.of("/inventory/weekly", "/inventory/trace")
     );
 
     private final JdbcTemplate jdbcTemplate;
@@ -91,7 +97,7 @@ public class AuthNavigationService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号角色未配置导航权限，请联系系统管理员");
         }
 
-        List<NavigationMenu> authorizedMenus = filterMenus(menus, policy.menuPaths());
+        List<NavigationMenu> authorizedMenus = filterMenus(menus, effectiveMenuPaths(policy.menuPaths()));
         List<NavigationShortcut> authorizedShortcuts = shortcuts.stream()
             .filter(item -> policy.allMenus() || policy.menuPaths().contains(item.path()))
             .toList();
@@ -227,6 +233,17 @@ public class AuthNavigationService {
         return List.copyOf(result);
     }
 
+    private static Set<String> effectiveMenuPaths(Set<String> source) {
+        if (source.contains("*")) return source;
+        Set<String> result = new LinkedHashSet<>(source);
+        boolean hasInventoryAccess = source.stream().anyMatch(path -> path.startsWith("/inventory/"));
+        INVENTORY_ENTRY_PATHS.forEach((entryPath, internalPaths) -> {
+            if (internalPaths.stream().anyMatch(source::contains)) result.add(entryPath);
+        });
+        if (hasInventoryAccess) result.add("/inventory/manage");
+        return Set.copyOf(result);
+    }
+
     private static List<NavigationMenu> buildMenus() {
         List<NavigationMenu> result = new ArrayList<>();
         result.add(page("/home/index", "home", "/home/index", "我的待办", "HomeFilled", false, false, true));
@@ -244,15 +261,16 @@ public class AuthNavigationService {
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "FirstAidKit",
             group("/inventory", "inventory", "/inventory/overview", "进销存管理", "Box",
-                page("/inventory/overview", "inventoryOverview", "/inventory/manage/index", "进销存主控台", "Monitor", false, false, false),
-                page("/inventory/executive", "inventoryExecutive", "/inventory/manage/index", "领导驾驶舱", "TrendCharts", false, false, false),
-                page("/inventory/requests", "inventoryRequests", "/inventory/manage/index", "科室申领审批", "Tickets", false, false, false),
-                page("/inventory/stock", "inventoryStock", "/inventory/manage/index", "库存与批次", "Box", false, false, false),
-                page("/inventory/items", "inventoryItems", "/inventory/manage/index", "物资档案", "Goods", false, false, false),
-                page("/inventory/weekly", "inventoryWeekly", "/inventory/manage/index", "周消耗预估", "DataLine", false, false, false),
-                page("/inventory/packages", "inventoryPackages", "/inventory/manage/index", "使用套餐与自动扣减", "CollectionTag", false, false, false),
-                page("/inventory/controls", "inventoryControls", "/inventory/manage/index", "盘点与控制", "SetUp", false, false, false),
-                page("/inventory/trace", "inventoryTrace", "/inventory/manage/index", "全链路追溯", "Search", false, false, false)
+                page("/inventory/overview", "inventoryOverview", "/inventory/manage/index", "工作台", "Monitor", false, false, false),
+                pageWithActiveMenu("/inventory/executive", "inventoryExecutive", "/inventory/manage/index", "领导视图", "TrendCharts", "/inventory/overview"),
+                page("/inventory/requests", "inventoryRequests", "/inventory/manage/index", "库存作业", "Tickets", false, false, false),
+                pageWithActiveMenu("/inventory/stock", "inventoryStock", "/inventory/manage/index", "库存批次", "Box", "/inventory/requests"),
+                pageWithActiveMenu("/inventory/controls", "inventoryControls", "/inventory/manage/index", "盘点控制", "SetUp", "/inventory/requests"),
+                page("/inventory/packages", "inventoryPackages", "/inventory/manage/index", "耗材规则", "CollectionTag", false, false, false),
+                pageWithActiveMenu("/inventory/items", "inventoryItems", "/inventory/manage/index", "物资档案", "Goods", "/inventory/packages"),
+                page("/inventory/weekly", "inventoryWeekly", "/inventory/manage/index", "周度对账", "DataLine", false, false, false),
+                pageWithActiveMenu("/inventory/trace", "inventoryTrace", "/inventory/manage/index", "追溯流水", "Search", "/inventory/weekly"),
+                redirect("/inventory/manage", "inventoryManageCompatibility", "/inventory/overview", "进销存兼容入口", "Link", true)
             ),
             page("/tcm-pharmacy/workbench", "tcmPharmacyWorkbench", "/tcmPharmacy/workbench/index", "中药房工作台", "MedicineBox", false, false, false),
             page("/tcm-pharmacy/display", "tcmPharmacyDisplayMenu", "/tcmPharmacy/display/index", "取药展示大屏", "Monitor", true, true, false),
@@ -342,11 +360,11 @@ public class AuthNavigationService {
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
         Set<String> inventoryStaff = paths(
-            "/inventory/overview", "/inventory/requests", "/inventory/weekly", "/inventory/packages"
+            "/inventory/overview", "/inventory/requests", "/inventory/weekly", "/inventory/packages", "/inventory/manage"
         );
         Set<String> inventoryQuality = paths(
             "/inventory/overview", "/inventory/executive", "/inventory/requests", "/inventory/stock", "/inventory/items", "/inventory/weekly",
-            "/inventory/packages", "/inventory/controls", "/inventory/trace"
+            "/inventory/packages", "/inventory/controls", "/inventory/trace", "/inventory/manage"
         );
         Map<String, List<String>> inventoryStaffButtons = permissions(
             "inventoryOverview=inventory:read,inventory:request,inventory:receive",

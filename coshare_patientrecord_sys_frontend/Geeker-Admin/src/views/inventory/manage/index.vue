@@ -6,6 +6,9 @@
         <h1>{{ currentTabProfile.title }}</h1>
       </div>
       <div class="command-actions">
+        <el-tooltip content="查看进销存操作说明" placement="bottom">
+          <el-button :icon="QuestionFilled" circle aria-label="查看进销存操作说明" @click="helpVisible = true" />
+        </el-tooltip>
         <el-button :icon="Refresh" :loading="loading" @click="loadInventory">刷新</el-button>
         <el-button
           v-for="action in currentTabActions"
@@ -18,13 +21,9 @@
       </div>
     </section>
 
-    <section v-if="activeTab !== 'overview'" class="status-ribbon">
-      <div class="ribbon-lead">
-        <span>{{ currentTabProfile.taskLabel }}</span>
-        <strong>{{ currentTabProfile.taskTitle }}</strong>
-      </div>
+    <section v-if="alertTabStats.length" class="status-ribbon" aria-label="待处理提醒">
       <button
-        v-for="stat in currentTabStats"
+        v-for="stat in alertTabStats"
         :key="stat.label"
         class="ribbon-metric"
         :class="stat.tone"
@@ -45,16 +44,9 @@
       show-icon
     />
 
-    <nav class="module-switcher" aria-label="进销存二级功能">
-      <button
-        v-for="item in visibleTabNavItems"
-        :key="item.tab"
-        :class="{ active: activeTab === item.tab }"
-        @click="goTab(item.tab)"
-      >
-        <span>{{ item.title }}</span>
-      </button>
-    </nav>
+    <el-tabs :model-value="activeTab" class="entry-tabs" @tab-change="goTab(String($event))">
+      <el-tab-pane v-for="item in currentEntryTabItems" :key="item.tab" :label="item.title" :name="item.tab" />
+    </el-tabs>
 
     <div v-loading="loading" class="inventory-workspace" element-loading-text="正在同步库存...">
       <div v-if="initialInventoryLoading" class="inventory-loading-skeleton">
@@ -65,7 +57,6 @@
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
             <OperationsHubPanel
-              v-model:active-center="workspaceCenter"
               :workbench="inventoryWorkbench"
               :balances="locationBalances"
               :exceptions="inventoryExceptions"
@@ -80,7 +71,7 @@
               :fallback-expiry-soon="expirySoonRows.length"
               :extended-data-ready="extendedDataReady"
               :extended-data-errors="extendedDataErrors"
-              :accessible-tabs="visibleTabNavItems.map(item => item.tab)"
+              :accessible-tabs="accessibleTabItems.map(item => item.tab)"
               :can-inbound="hasInventoryAuth('inventory:issue')"
               :can-request="hasInventoryAuth('inventory:request')"
               :can-approve="hasInventoryAuth('inventory:approve')"
@@ -249,6 +240,8 @@
         </div>
       </transition>
     </div>
+
+    <InventoryHelpDrawer v-model="helpVisible" />
 
     <el-dialog v-model="itemDialogVisible" :title="itemForm.id ? '编辑物资' : '新增物资'" width="640px" destroy-on-close>
       <el-form ref="itemFormRef" :model="itemForm" :rules="itemFormRules" label-width="108px" status-icon>
@@ -463,7 +456,7 @@
 <script setup lang="ts" name="inventoryManage">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
-import { Download, Plus, Refresh } from "@element-plus/icons-vue";
+import { Download, Plus, QuestionFilled, Refresh } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   approveInventoryRequestApi,
@@ -521,8 +514,9 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
 import ControlsPanel from "./components/ControlsPanel.vue";
 import ExecutivePanel from "./components/ExecutivePanel.vue";
+import InventoryHelpDrawer from "./components/InventoryHelpDrawer.vue";
 import ItemsPanel from "./components/ItemsPanel.vue";
-import OperationsHubPanel, { type InventoryCenterKey } from "./components/OperationsHubPanel.vue";
+import OperationsHubPanel from "./components/OperationsHubPanel.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
@@ -547,7 +541,7 @@ const initialInventoryLoading = computed(
 );
 const saving = ref(false);
 const activeTab = ref("overview");
-const workspaceCenter = ref<InventoryCenterKey>("flow");
+const helpVisible = ref(false);
 const inventoryWorkbench = ref<InventoryWorkbench>();
 const locationBalances = ref<InventoryLocationBalance[]>([]);
 const inventoryExceptions = ref<InventoryException[]>([]);
@@ -690,15 +684,15 @@ const returnTypeOptions = [
   { label: "报废", value: "scrap", auth: "inventory:count" }
 ];
 const tabNavItems = [
-  { tab: "overview", title: "主控台", desc: "待办与风险" },
-  { tab: "executive", title: "领导驾驶舱", desc: "红绿灯与指标" },
-  { tab: "requests", title: "申领审批", desc: "申请到签收" },
-  { tab: "stock", title: "库存看板", desc: "批次与效期" },
-  { tab: "items", title: "物资档案", desc: "字典与规则" },
-  { tab: "weekly", title: "周计划", desc: "自动建议与调整" },
-  { tab: "controls", title: "盘点处置", desc: "退回与报废" },
-  { tab: "packages", title: "使用套餐", desc: "版本与自动扣减" },
-  { tab: "trace", title: "追溯流水", desc: "导出与复核" }
+  { tab: "overview", title: "运营总览", entry: "overview" },
+  { tab: "executive", title: "领导视图", entry: "overview" },
+  { tab: "requests", title: "申领、审批与签收", entry: "requests" },
+  { tab: "stock", title: "库存批次", entry: "requests" },
+  { tab: "controls", title: "盘点控制", entry: "requests" },
+  { tab: "items", title: "物资档案", entry: "packages" },
+  { tab: "packages", title: "套餐与扣减异常", entry: "packages" },
+  { tab: "weekly", title: "标准与快照", entry: "weekly" },
+  { tab: "trace", title: "追溯流水", entry: "weekly" }
 ] as const;
 const workflowSteps = [
   { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:issue"] },
@@ -818,9 +812,9 @@ const tabProfiles = {
     taskDesc: "敏感、批号、效期、预警线提前定义。"
   },
   weekly: {
-    kicker: "进销存管理 / 周消耗预计",
-    title: "周消耗与预计",
-    desc: "记录本周使用、剩余和下周预计。",
+    kicker: "进销存管理 / 周度对账",
+    title: "每患者标准量与周度快照",
+    desc: "按患者量核对预估耗用、实际扣减和差异。",
     taskLabel: "当前重点",
     taskTitle: "按周确认真实用量",
     taskDesc: "波动明显时补充原因。"
@@ -834,12 +828,12 @@ const tabProfiles = {
     taskDesc: "每次处置都留下可复核记录。"
   },
   packages: {
-    kicker: "进销存管理 / 使用套餐",
-    title: "按就诊量自动扣减",
-    desc: "维护科室的门诊、住院标准用量，并查看自动消耗事件。",
+    kicker: "进销存管理 / 耗材规则",
+    title: "套餐与自动扣减异常",
+    desc: "维护科室门诊、住院关键阶段套餐，并处理自动扣减失败任务。",
     taskLabel: "当前重点",
     taskTitle: "先确认启用版本，再处理失败事件",
-    taskDesc: "套餐启用后才会参与自动计数，草稿不会影响库存。"
+    taskDesc: "仅最新启用且处于生效期的套餐参与匹配，草稿不会影响库存。"
   },
   trace: {
     kicker: "进销存管理 / 追溯报表",
@@ -1169,27 +1163,13 @@ const departmentConsumptionTop = computed(() =>
     .slice(0, 6)
 );
 const maxDepartmentConsumption = computed(() => Math.max(...departmentConsumptionTop.value.map(row => row.value), 1));
-const visibleTabNavItems = computed(() =>
-  tabNavItems.filter(item =>
-    item.tab === "overview"
-      ? hasAnyInventoryAuth(tabAuthMap.overview)
-      : hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || [])
-  )
+const accessibleTabItems = computed(() =>
+  tabNavItems.filter(item => hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || []))
 );
+const currentEntryKey = computed(() => tabNavItems.find(item => item.tab === activeTab.value)?.entry || "overview");
+const currentEntryTabItems = computed(() => accessibleTabItems.value.filter(item => item.entry === currentEntryKey.value));
 const canExportDepartmentUsage = computed(() => hasAnyInventoryAuth(["inventory:report", "inventory:export"]));
-const defaultWorkspaceCenter = computed<InventoryCenterKey>(() => {
-  const hasWorkflowWrite = hasAnyInventoryAuth([
-    "inventory:issue",
-    "inventory:approve",
-    "inventory:receive",
-    "inventory:request"
-  ]);
-  if (canExportDepartmentUsage.value && !hasWorkflowWrite && !hasInventoryAuth("inventory:count")) return "analysis";
-  if (hasWorkflowWrite) return "flow";
-  if (hasAnyInventoryAuth(["inventory:count", "inventory:read"])) return "stock";
-  return "analysis";
-});
-const canAccessTab = (tab: string) => visibleTabNavItems.value.some(item => item.tab === tab);
+const canAccessTab = (tab: string) => accessibleTabItems.value.some(item => item.tab === tab);
 const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item => hasInventoryAuth(item.auth)));
 const canSubmitReturnOrScrap = computed(() =>
   returnForm.type === "return" ? hasInventoryAuth("inventory:receive") : hasInventoryAuth("inventory:count")
@@ -1445,13 +1425,27 @@ const currentTabStats = computed<TabStat[]>(() => {
       ];
   }
 });
+const alertTabStats = computed(() =>
+  activeTab.value === "overview"
+    ? []
+    : currentTabStats.value.filter(
+        stat =>
+          (stat.tone === "warning" || stat.tone === "danger") && Number.parseFloat(String(stat.value).replace(/[^\d.-]/g, "")) > 0
+      )
+);
 
 const goTab = (tab: string) => {
   if (canAccessTab(tab)) {
     activeTab.value = tab;
     return;
   }
-  activeTab.value = visibleTabNavItems.value[0]?.tab || "overview";
+  const entry = tabNavItems.find(item => item.tab === tab)?.entry;
+  const fallback = accessibleTabItems.value.find(item => item.entry === entry);
+  if (fallback) {
+    activeTab.value = fallback.tab;
+    return;
+  }
+  if (Object.keys(authStore.authButtonListGet || {}).length) router.replace("/403");
 };
 
 watch(
@@ -1468,14 +1462,7 @@ watch(activeTab, tab => {
   if (nextPath && route.path !== nextPath) router.replace(nextPath);
 });
 
-watch(
-  visibleTabNavItems,
-  items => {
-    if (!items.length) return;
-    if (!items.some(item => item.tab === activeTab.value)) activeTab.value = items[0].tab;
-  },
-  { immediate: true }
-);
+watch(accessibleTabItems, () => goTab(activeTab.value), { immediate: true });
 
 watch(
   availableReturnTypeOptions,
@@ -2184,7 +2171,6 @@ const exportWeeklyReport = () => {
 };
 
 onMounted(() => {
-  workspaceCenter.value = defaultWorkspaceCenter.value;
   loadInventory();
 });
 </script>
@@ -2213,7 +2199,6 @@ onMounted(() => {
 }
 
 .inventory-command,
-.ribbon-lead,
 .ribbon-metric,
 .panel {
   background: var(--inventory-panel);
@@ -2272,43 +2257,15 @@ onMounted(() => {
 
 .status-ribbon {
   display: grid;
-  grid-template-columns: minmax(220px, 0.95fr) repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 220px));
   gap: 8px;
 }
 
-.ribbon-lead,
 .ribbon-metric {
   display: grid;
   gap: 3px;
   min-width: 0;
   padding: 10px 12px;
-}
-
-.ribbon-lead {
-  background: #f7fafb;
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span {
-    color: var(--inventory-primary);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  strong {
-    color: var(--inventory-text);
-    font-size: 15px;
-    line-height: 1.35;
-  }
-
-  small {
-    color: var(--el-text-color-secondary);
-    line-height: 1.35;
-  }
 }
 
 .ribbon-metric {
@@ -2356,65 +2313,25 @@ onMounted(() => {
   }
 }
 
-.module-switcher {
-  display: grid;
-  grid-template-columns: repeat(9, minmax(0, 1fr));
-  gap: 0;
-  overflow: hidden;
+.entry-tabs {
+  padding: 0 14px;
   background: var(--inventory-panel);
   border: 1px solid var(--inventory-line);
   border-radius: 8px;
 
-  button {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-    padding: 9px 10px 8px;
-    text-align: left;
-    cursor: pointer;
-    background: transparent;
-    border: 0;
-    border-right: 1px solid var(--inventory-line-soft);
-    border-radius: 0;
-    transition:
-      background 0.16s ease,
-      color 0.16s ease;
-
-    &:hover,
-    &.active {
-      background: #f5fbfa;
-    }
-
-    &.active {
-      box-shadow: inset 0 -3px 0 var(--inventory-primary);
-
-      span {
-        color: var(--inventory-primary);
-      }
-    }
-
-    &:last-child {
-      border-right: 0;
-    }
+  :deep(.el-tabs__header) {
+    margin: 0;
   }
 
-  span,
-  small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  :deep(.el-tabs__item) {
+    height: 42px;
+    padding: 0 18px;
+    font-weight: 600;
   }
 
-  span {
-    color: var(--inventory-text);
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  small {
-    color: var(--inventory-muted);
-    font-size: 12px;
+  :deep(.el-tabs__nav-wrap::after) {
+    height: 1px;
+    background: var(--inventory-line-soft);
   }
 }
 
@@ -2610,14 +2527,6 @@ onMounted(() => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ribbon-lead {
-    grid-column: 1 / -1;
-  }
-
-  .module-switcher {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .request-line-editor,
   .issue-line-editor {
     grid-template-columns: 1fr;
@@ -2643,10 +2552,6 @@ onMounted(() => {
     .el-button {
       flex: 1;
     }
-  }
-
-  .module-switcher {
-    grid-template-columns: 1fr;
   }
 
   .weekly-assist {

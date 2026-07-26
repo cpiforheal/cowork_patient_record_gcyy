@@ -1,94 +1,104 @@
 <template>
   <section class="package-layout">
-    <div class="panel package-panel">
-      <div class="panel-head">
-        <div>
-          <h2>门诊 / 住院使用套餐</h2>
-          <p>按科室维护标准用量，启用后用于就诊消耗事件的自动计数。</p>
+    <el-tabs v-model="activeSection" class="package-tabs">
+      <el-tab-pane label="门诊 / 住院套餐" name="packages">
+        <div class="panel package-panel">
+          <div class="panel-head">
+            <div>
+              <h2>门诊 / 住院使用套餐</h2>
+              <p>按科室、照护类型和关键阶段维护套餐，仅最新启用且处于生效期的版本参与匹配。</p>
+            </div>
+            <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建套餐</el-button>
+          </div>
+
+          <div class="table-toolbar">
+            <el-input v-model="filters.keyword" clearable placeholder="搜索套餐、科室" />
+            <el-select v-model="filters.careType" clearable placeholder="照护类型">
+              <el-option label="门诊" value="outpatient" />
+              <el-option label="住院" value="inpatient" />
+            </el-select>
+            <el-select v-model="filters.status" clearable placeholder="状态">
+              <el-option label="草稿" value="draft" />
+              <el-option label="已启用" value="enabled" />
+              <el-option label="已停用" value="disabled" />
+            </el-select>
+          </div>
+
+          <el-table :data="filteredPackages" border>
+            <el-table-column prop="name" label="套餐名称" min-width="180" />
+            <el-table-column prop="department" label="科室" width="130" />
+            <el-table-column label="类型" width="90">
+              <template #default="{ row }">{{ careTypeLabel(row.careType) }}</template>
+            </el-table-column>
+            <el-table-column label="版本" width="90">
+              <template #default="{ row }">v{{ row.version || 1 }}</template>
+            </el-table-column>
+            <el-table-column label="物资项" width="90">
+              <template #default="{ row }">{{ row.lines?.length || 0 }} 项</template>
+            </el-table-column>
+            <el-table-column prop="effectiveDate" label="生效日期" width="120" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="statusTag(row.status)" effect="light">{{ statusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="230" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="canManage && row.status === 'enabled'"
+                  link
+                  type="primary"
+                  @click="openNewVersion(row as InventoryPackage)"
+                >
+                  创建新版本
+                </el-button>
+                <el-button v-else-if="canManage" link type="primary" @click="openEdit(row as InventoryPackage)">编辑</el-button>
+                <el-button v-if="canManage && row.status !== 'enabled'" link type="success" @click="emitEnable(row)"
+                  >启用</el-button
+                >
+                <el-button v-if="canManage && row.status === 'enabled'" link type="warning" @click="emitDisable(row)"
+                  >停用</el-button
+                >
+              </template>
+            </el-table-column>
+            <template #empty><el-empty description="暂无使用套餐" /></template>
+          </el-table>
         </div>
-        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建套餐</el-button>
-      </div>
+      </el-tab-pane>
 
-      <div class="table-toolbar">
-        <el-input v-model="filters.keyword" clearable placeholder="搜索套餐、科室" />
-        <el-select v-model="filters.careType" clearable placeholder="照护类型">
-          <el-option label="门诊" value="outpatient" />
-          <el-option label="住院" value="inpatient" />
-        </el-select>
-        <el-select v-model="filters.status" clearable placeholder="状态">
-          <el-option label="草稿" value="draft" />
-          <el-option label="已启用" value="enabled" />
-          <el-option label="已停用" value="disabled" />
-        </el-select>
-      </div>
-
-      <el-table :data="filteredPackages" border>
-        <el-table-column prop="name" label="套餐名称" min-width="180" />
-        <el-table-column prop="department" label="科室" width="130" />
-        <el-table-column label="类型" width="90">
-          <template #default="{ row }">{{ careTypeLabel(row.careType) }}</template>
-        </el-table-column>
-        <el-table-column label="版本" width="90">
-          <template #default="{ row }">v{{ row.version || 1 }}</template>
-        </el-table-column>
-        <el-table-column label="物资项" width="90">
-          <template #default="{ row }">{{ row.lines?.length || 0 }} 项</template>
-        </el-table-column>
-        <el-table-column prop="effectiveDate" label="生效日期" width="120" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusTag(row.status)" effect="light">{{ statusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="canManage && row.status === 'enabled'"
-              link
-              type="primary"
-              @click="openNewVersion(row as InventoryPackage)"
-            >
-              创建新版本
-            </el-button>
-            <el-button v-else-if="canManage" link type="primary" @click="openEdit(row as InventoryPackage)">编辑</el-button>
-            <el-button v-if="canManage && row.status !== 'enabled'" link type="success" @click="emitEnable(row)">启用</el-button>
-            <el-button v-if="canManage && row.status === 'enabled'" link type="warning" @click="emitDisable(row)">停用</el-button>
-          </template>
-        </el-table-column>
-        <template #empty><el-empty description="暂无使用套餐" /></template>
-      </el-table>
-    </div>
-
-    <div class="panel event-panel">
-      <div class="panel-head">
-        <div>
-          <h2>自动消耗事件</h2>
-          <p>每次就诊只生成一条事件，失败原因会保留在这里便于补处理。</p>
+      <el-tab-pane :label="`扣减异常${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
+        <div class="panel event-panel">
+          <div class="panel-head">
+            <div>
+              <h2>自动扣减任务</h2>
+              <p>每个病历、阶段、完成版本和命令类型生成一条幂等任务；失败后修复原因再重试。</p>
+            </div>
+            <el-tag effect="plain">共 {{ events.length }} 条</el-tag>
+          </div>
+          <el-table :data="displayEvents" border max-height="460">
+            <el-table-column prop="visitDate" label="就诊日期" width="112" />
+            <el-table-column prop="department" label="科室" width="110" />
+            <el-table-column prop="route" label="业务类型" width="110" />
+            <el-table-column prop="packageName" label="使用套餐" min-width="170" />
+            <el-table-column prop="encounterId" label="就诊标识" min-width="170" show-overflow-tooltip />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="eventTag(row.status)" effect="light">{{ eventLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="失败原因" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.errorMessage || "-" }}</template>
+            </el-table-column>
+            <el-table-column v-if="canManage" label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.status === 'failed'" link type="primary" @click="emitRetry(row)">重试</el-button>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty description="暂无自动消耗事件" /></template>
+          </el-table>
         </div>
-        <el-tag effect="plain">共 {{ events.length }} 条</el-tag>
-      </div>
-      <el-table :data="events" border max-height="360">
-        <el-table-column prop="visitDate" label="就诊日期" width="112" />
-        <el-table-column prop="department" label="科室" width="110" />
-        <el-table-column prop="route" label="业务类型" width="110" />
-        <el-table-column prop="packageName" label="使用套餐" min-width="170" />
-        <el-table-column prop="encounterId" label="就诊标识" min-width="170" show-overflow-tooltip />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="eventTag(row.status)" effect="light">{{ eventLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="失败原因" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.errorMessage || "-" }}</template>
-        </el-table-column>
-        <el-table-column v-if="canManage" label="操作" width="90" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="row.status === 'failed'" link type="primary" @click="emitRetry(row)">重试</el-button>
-          </template>
-        </el-table-column>
-        <template #empty><el-empty description="暂无自动消耗事件" /></template>
-      </el-table>
-    </div>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="760px" destroy-on-close>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="92px" status-icon>
@@ -120,7 +130,7 @@
             <el-option v-for="item in items" :key="item.id" :label="`${item.name} / ${item.unit}`" :value="item.id" />
           </el-select>
           <el-input-number v-model="line.quantity" :min="0.01" :precision="2" controls-position="right" />
-          <el-tag class="consumption-mode" type="info" effect="plain">按次就诊</el-tag>
+          <el-tag class="consumption-mode" type="info" effect="plain">每患者/阶段</el-tag>
           <el-button circle text type="danger" :icon="Delete" aria-label="删除物资" @click="removeLine(index)" />
         </div>
         <el-empty v-if="!form.lines.length" description="请添加至少一项物资" :image-size="64" />
@@ -164,6 +174,7 @@ const emit = defineEmits<{
 }>();
 
 const filters = reactive({ keyword: "", careType: "", status: "" });
+const activeSection = ref("packages");
 const dialogVisible = ref(false);
 const editingId = ref("");
 const creatingVersion = ref(false);
@@ -189,6 +200,10 @@ const filteredPackages = computed(() => {
     return !keyword || `${row.name} ${row.department}`.toLowerCase().includes(keyword);
   });
 });
+const failedEvents = computed(() => props.events.filter(row => row.status === "failed"));
+const displayEvents = computed(() =>
+  [...props.events].sort((a, b) => Number(b.status === "failed") - Number(a.status === "failed"))
+);
 
 const dialogTitle = computed(() => {
   if (creatingVersion.value) return "创建使用套餐新版本";
@@ -292,6 +307,10 @@ const submit = async () => {
 .package-layout {
   display: grid;
   gap: 12px;
+}
+
+.package-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
 }
 
 .panel-head,
