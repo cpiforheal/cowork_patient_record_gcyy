@@ -207,7 +207,7 @@ public class AuthNavigationService {
         return filterMenus(source, policy.menuPaths());
     }
 
-    private List<NavigationMenu> filterMenus(List<NavigationMenu> source, Set<String> allowedPaths) {
+    List<NavigationMenu> filterMenus(List<NavigationMenu> source, Set<String> allowedPaths) {
         boolean allowAll = allowedPaths.contains("*");
         List<NavigationMenu> result = new ArrayList<>();
         for (NavigationMenu item : source) {
@@ -218,6 +218,16 @@ public class AuthNavigationService {
             String redirect = item.redirect();
             if (!children.isEmpty() && redirect != null && !allowAll && !allowedPaths.contains(redirect)) {
                 redirect = children.get(0).redirect() == null ? children.get(0).path() : children.get(0).redirect();
+            }
+            if ("/inventory".equals(item.path()) && redirect != null) {
+                String inventoryRedirect = redirect;
+                children = children.stream()
+                    .map(child -> "/inventory/manage".equals(child.path())
+                        ? new NavigationMenu(
+                            child.path(), child.name(), child.component(), inventoryRedirect, child.meta(), child.children()
+                        )
+                        : child)
+                    .toList();
             }
             result.add(new NavigationMenu(
                 item.path(), item.name(), item.component(), redirect, item.meta(), children.isEmpty() ? null : children

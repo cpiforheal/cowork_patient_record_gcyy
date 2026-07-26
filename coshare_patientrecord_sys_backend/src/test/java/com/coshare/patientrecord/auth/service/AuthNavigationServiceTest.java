@@ -11,6 +11,7 @@ import com.coshare.patientrecord.auth.dto.NavigationResult;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -128,6 +129,21 @@ class AuthNavigationServiceTest {
             .containsExactly("/inventory/overview", "/inventory/executive", "/inventory/packages", "/inventory/items");
 
         assertThat(findMenuOrNull(service.navigationFor(user("reception")).menus(), "/inventory")).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inventoryCompatibilityRouteRedirectsToTheFirstAuthorizedTask() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        List<NavigationMenu> weeklyOnlyMenus = service.filterMenus(
+            service.navigationFor(user("admin")).menus(),
+            Set.of("/inventory/weekly", "/inventory/manage")
+        );
+        NavigationMenu inventory = findMenu(weeklyOnlyMenus, "/inventory");
+
+        assertThat(inventory.redirect()).isEqualTo("/inventory/weekly");
+        assertThat(findMenu(inventory.children(), "/inventory/manage").redirect()).isEqualTo("/inventory/weekly");
     }
 
     @Test
