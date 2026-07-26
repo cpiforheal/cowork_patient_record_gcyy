@@ -19,7 +19,7 @@
     <section class="table-box audit-log-page">
       <div class="audit-scope-card">
         <div>
-          <span class="scope-eyebrow">当前审计范围</span>
+          <span class="scope-eyebrow">操作记录查询</span>
           <h2>{{ activeScopeTitle }}</h2>
           <p>{{ activeScopeDesc }}</p>
         </div>

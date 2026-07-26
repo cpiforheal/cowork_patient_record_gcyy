@@ -2,7 +2,7 @@
   <div class="table-box quality-page">
     <section class="card mb10 quality-head">
       <div>
-        <h2>档案审核</h2>
+        <h2>待审病历</h2>
         <p>按患者健康管理档案提交状态读取待审队列，退回会进入整改，严重问题清零后可通过归档。</p>
       </div>
       <div class="head-actions">

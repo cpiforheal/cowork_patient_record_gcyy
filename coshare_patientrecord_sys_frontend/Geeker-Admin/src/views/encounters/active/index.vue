@@ -2,8 +2,8 @@
   <div class="table-box encounter-page">
     <section class="board-toolbar">
       <div>
-        <h2>患者流程看板</h2>
-        <p>{{ roleName }} 可填写 {{ editableSectionCount }} 个章节。</p>
+        <h2>患者进度</h2>
+        <p>查看患者当前诊疗阶段和下一责任岗位；{{ roleName }} 可填写 {{ editableSectionCount }} 个章节。</p>
       </div>
       <div class="toolbar-actions">
         <el-radio-group v-model="viewMode" size="large">

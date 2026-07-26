@@ -2,8 +2,8 @@
   <div class="table-box ai-document-page">
     <section class="tool-head">
       <div>
-        <h2>AI 文稿生成 DOCX</h2>
-        <p>粘贴领导整理的提纲、草稿或自然语言要求，系统调用已配置的 AI 直接生成最终文稿并输出 Word 文件。</p>
+        <h2>通用文书生成</h2>
+        <p>粘贴提纲、草稿或自然语言要求，系统调用已配置的 AI 生成并下载独立 Word 文稿，不写入患者档案。</p>
       </div>
       <el-tag effect="plain" size="large">调用 AI · 生成 DOCX · 不进入患者档案</el-tag>
     </section>

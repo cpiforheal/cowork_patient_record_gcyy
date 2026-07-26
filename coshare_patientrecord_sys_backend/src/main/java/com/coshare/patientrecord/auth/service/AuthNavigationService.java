@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.26.2";
+    public static final String VERSION = "2026.07.26.3";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -61,17 +61,18 @@ public class AuthNavigationService {
     private final List<NavigationMenu> menus = buildMenus();
     private final Map<String, RolePolicy> policies = buildPolicies();
     private final List<NavigationShortcut> shortcuts = List.of(
-        shortcut("诊疗流程", "查看患者诊疗进度", "Connection", "/encounters/active"),
-        shortcut("患者档案", "按姓名和门诊号查询", "UserFilled", "/patients/list"),
-        shortcut("科室资料上传", "定位患者后上传资料", "UploadFilled", "/workbench/upload"),
-        shortcut("检验报告录入", "录入并复核检验结果", "Memo", "/workbench/lab-report"),
-        shortcut("文书生成", "生成并下载临床文书", "DocumentAdd", "/templates/ai-document"),
+        shortcut("登记与事实采集", "登记患者并完成前置事实采集", "EditPen", "/pre-ai/encounters"),
+        shortcut("患者进度", "查看患者当前诊疗阶段", "Connection", "/encounters/active"),
+        shortcut("患者档案查询", "按姓名和门诊号查询历史档案", "Search", "/patients/list"),
+        shortcut("患者资料上传", "定位患者后上传本科室资料", "UploadFilled", "/workbench/upload"),
+        shortcut("检验报告填写", "填写并复核患者检验报告", "Memo", "/workbench/lab-report"),
+        shortcut("通用文书生成", "生成并下载独立 Word 文稿", "DocumentAdd", "/templates/ai-document"),
         shortcut("进销存管理", "科室申领、库存与自动扣减", "Box", "/inventory/overview"),
         shortcut("中药房工作台", "收费、审方、调剂和取药", "FirstAidKit", "/tcm-pharmacy/workbench"),
         shortcut("检查接诊叫号", "管理检查与接诊双队列", "Guide", "/tcm-pharmacy/clinic-queue/workbench"),
-        shortcut("档案审核", "退回整改或通过归档", "Tickets", "/audit/review"),
-        shortcut("作废与恢复", "恢复误作废资料", "RefreshLeft", "/documents/recycle"),
-        shortcut("操作审计", "追踪关键资料改动", "DocumentChecked", "/audit/log")
+        shortcut("待审病历", "退回整改或通过归档", "Tickets", "/audit/review"),
+        shortcut("作废资料恢复", "恢复误作废的患者资料", "RefreshLeft", "/documents/recycle"),
+        shortcut("操作记录查询", "追踪关键资料改动", "Search", "/audit/log")
     );
 
     public AuthNavigationService(JdbcTemplate jdbcTemplate) {
@@ -91,9 +92,9 @@ public class AuthNavigationService {
         }
 
         List<NavigationMenu> authorizedMenus = filterMenus(menus, effectiveMenuPaths(policy.menuPaths()));
-        List<NavigationShortcut> authorizedShortcuts = shortcuts.stream()
+        List<NavigationShortcut> authorizedShortcuts = prioritizeShortcuts(normalizeRole(user.role()), shortcuts.stream()
             .filter(item -> policy.allMenus() || policy.menuPaths().contains(item.path()))
-            .toList();
+            .toList());
         List<DepartmentOption> departments = authorizedDepartments(user.id());
         DepartmentOption activeDepartment = departments.stream()
             .filter(item -> item.id().equals(user.activeDepartmentId()))
@@ -203,6 +204,18 @@ public class AuthNavigationService {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
+    private static List<NavigationShortcut> prioritizeShortcuts(String role, List<NavigationShortcut> source) {
+        String preferredPath = switch (role) {
+            case "quality" -> "/audit/review";
+            case "manager" -> "/templates/ai-document";
+            default -> "/pre-ai/encounters";
+        };
+        List<NavigationShortcut> result = new ArrayList<>(source.size());
+        source.stream().filter(item -> preferredPath.equals(item.path())).forEach(result::add);
+        source.stream().filter(item -> !preferredPath.equals(item.path())).forEach(result::add);
+        return List.copyOf(result);
+    }
+
     private List<NavigationMenu> filterMenus(List<NavigationMenu> source, RolePolicy policy) {
         return filterMenus(source, policy.menuPaths());
     }
@@ -233,6 +246,22 @@ public class AuthNavigationService {
                 item.path(), item.name(), item.component(), redirect, item.meta(), children.isEmpty() ? null : children
             ));
         }
+        if (!allowAll) {
+            List<NavigationMenu> filteredResult = List.copyOf(result);
+            result = filteredResult.stream().map(item -> {
+                String groupPath = switch (item.path()) {
+                    case "/workbench", "/templates" -> "/navigation/materials-documents";
+                    default -> null;
+                };
+                if (groupPath == null || item.redirect() == null || allowedPaths.contains(item.redirect())) return item;
+                NavigationMenu group = filteredResult.stream()
+                    .filter(candidate -> groupPath.equals(candidate.path()))
+                    .findFirst()
+                    .orElse(null);
+                if (group == null || group.redirect() == null) return item;
+                return new NavigationMenu(item.path(), item.name(), item.component(), group.redirect(), item.meta(), item.children());
+            }).toList();
+        }
         return List.copyOf(result);
     }
 
@@ -247,16 +276,16 @@ public class AuthNavigationService {
     private static List<NavigationMenu> buildMenus() {
         List<NavigationMenu> result = new ArrayList<>();
         result.add(page("/home/index", "home", "/home/index", "我的待办", "HomeFilled", false, false, true));
-        result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/patients/list", "患者协作", "UserFilled",
-            page("/patients/list", "patientList", "/patients/list/index", "患者档案", "List", false, false, false),
-            pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者流程详情", "Document", "/patients/list"),
-            page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "前置事实采集", "EditPen", false, false, false),
-            page("/encounters/active", "encounterActive", "/encounters/active/index", "诊疗流程", "Connection", false, false, false)
+        result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/pre-ai/encounters", "患者就诊", "UserFilled",
+            page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen", false, false, false),
+            page("/encounters/active", "encounterActive", "/encounters/active/index", "患者进度", "Connection", false, false, false),
+            page("/patients/list", "patientList", "/patients/list/index", "患者档案查询", "Search", false, false, false),
+            pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/list")
         ));
-        result.add(group("/navigation/materials-documents", "materialsDocuments", "/workbench/upload", "资料与文书", "Files",
-            page("/workbench/upload", "workbenchUpload", "/workbench/upload/index", "科室资料上传", "Upload", false, false, false),
-            page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告录入", "Memo", false, false, false),
-            page("/templates/ai-document", "aiDocumentGenerator", "/templates/aiDocument/index", "文书生成", "DocumentAdd", false, false, false),
+        result.add(group("/navigation/materials-documents", "materialsDocuments", "/workbench/upload", "资料录入与文书", "FolderOpened",
+            page("/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled", false, false, false),
+            page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false),
+            page("/templates/ai-document", "aiDocumentGenerator", "/templates/aiDocument/index", "通用文书生成", "DocumentAdd", false, false, false),
             redirect("/workbench/legacy", "workbenchLegacy", "/workbench/upload?tab=legacy", "旧共享病历导入", "FolderOpened", true)
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "Operation",
@@ -277,10 +306,10 @@ public class AuthNavigationService {
             page("/tcm-pharmacy/clinic-queue/workbench", "clinicQueueWorkbench", "/clinicQueue/workbench/index", "检查接诊叫号", "Guide", false, false, false),
             page("/tcm-pharmacy/clinic-queue/display", "clinicQueueDisplayMenu", "/clinicQueue/display/index", "检查接诊大屏", "Monitor", true, true, false)
         ));
-        result.add(group("/navigation/quality-audit", "qualityAudit", "/audit/review", "质控与审计", "Tickets",
-            page("/audit/review", "auditReview", "/audit/review/index", "档案审核", "Tickets", false, false, false),
-            page("/documents/recycle", "documentRecycle", "/documents/recycle/index", "作废与恢复", "RefreshLeft", false, false, false),
-            page("/audit/log", "auditLog", "/audit/log/index", "操作审计", "DocumentChecked", false, false, false)
+        result.add(group("/navigation/quality-audit", "qualityAudit", "/audit/review", "审核与追溯", "DocumentChecked",
+            page("/audit/review", "auditReview", "/audit/review/index", "待审病历", "Tickets", false, false, false),
+            page("/documents/recycle", "documentRecycle", "/documents/recycle/index", "作废资料恢复", "RefreshLeft", false, false, false),
+            page("/audit/log", "auditLog", "/audit/log/index", "操作记录查询", "Search", false, false, false)
         ));
         result.add(group("/system", "system", "/system/accountManage", "系统管理", "Tools",
             group("/system/organization", "systemOrganization", "/system/accountManage", "组织与账号", "OfficeBuilding",

@@ -2,7 +2,7 @@
   <div class="table-box lab-report-page">
     <section class="page-head">
       <div>
-        <h2>检验报告模板填写</h2>
+        <h2>检验报告填写</h2>
         <p>左侧填写可变指标，右侧按检验报告样式即时预览；保存后同步到健康档案、附件索引和时间轴。</p>
       </div>
       <el-tag effect="plain" size="large">{{ roleName }} · 检验室模板</el-tag>

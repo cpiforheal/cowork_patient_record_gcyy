@@ -54,7 +54,7 @@
     <section class="table-box patient-list-page">
       <div class="date-scope-card">
         <div>
-          <span class="scope-eyebrow">当前回看范围</span>
+          <span class="scope-eyebrow">患者档案查询</span>
           <h2>{{ activeScopeTitle }}</h2>
           <p>{{ activeScopeDesc }}</p>
         </div>
@@ -75,10 +75,13 @@
       >
         <template #tableHeader>
           <div class="patient-table-header">
-            <el-button v-auth="'patient:create'" type="primary" :icon="CirclePlus" @click="createDialogVisible = true">
-              新建患者
+            <el-button v-if="router.hasRoute('preAiEncounters')" type="primary" @click="router.push('/pre-ai/encounters')">
+              去登记与事实采集
             </el-button>
-            <span class="patient-table-hint">新建后自动打开患者详情流程视图。</span>
+            <el-button v-auth="'patient:create'" plain :icon="CirclePlus" @click="createDialogVisible = true">
+              新建患者档案
+            </el-button>
+            <span class="patient-table-hint">本页用于历史患者和档案查询；日常接诊请从事实采集入口登记。</span>
           </div>
         </template>
 
@@ -138,7 +141,7 @@
         </template>
       </ProTable>
 
-      <el-dialog v-model="createDialogVisible" title="新建患者" width="560px" destroy-on-close>
+      <el-dialog v-model="createDialogVisible" title="新建患者档案" width="560px" destroy-on-close>
         <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="110px">
           <el-form-item label="患者姓名" prop="name">
             <el-input v-model="createForm.name" placeholder="请输入患者姓名" />

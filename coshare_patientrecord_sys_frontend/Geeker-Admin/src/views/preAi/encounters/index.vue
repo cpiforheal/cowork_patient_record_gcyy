@@ -3,8 +3,8 @@
   <div class="pre-ai-page">
     <header class="page-hero">
       <div>
-        <el-tag type="primary" effect="plain">前置病历</el-tag>
-        <h2>病历事实采集</h2>
+        <el-tag type="primary" effect="plain">患者就诊</el-tag>
+        <h2>登记与事实采集</h2>
       </div>
       <div class="hero-actions">
         <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>

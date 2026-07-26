@@ -16,12 +16,12 @@
       }
     },
     {
-      "path": "/pre-ai",
-      "name": "preAi",
+      "path": "/navigation/patient-collaboration",
+      "name": "patientCollaboration",
       "redirect": "/pre-ai/encounters",
       "meta": {
-        "icon": "DocumentChecked",
-        "title": "前置病历",
+        "icon": "UserFilled",
+        "title": "患者就诊",
         "isLink": "",
         "isHide": false,
         "isFull": false,
@@ -35,37 +35,7 @@
           "component": "/preAi/encounters/index",
           "meta": {
             "icon": "EditPen",
-            "title": "事实采集与脱敏资料",
-            "isLink": "",
-            "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        }
-      ]
-    },
-    {
-      "path": "/workbench",
-      "name": "workbench",
-      "redirect": "/workbench/upload",
-      "meta": {
-        "icon": "UploadFilled",
-        "title": "岗位上传",
-        "isLink": "",
-        "isHide": false,
-        "isFull": false,
-        "isAffix": false,
-        "isKeepAlive": true
-      },
-      "children": [
-        {
-          "path": "/workbench/upload",
-          "name": "workbenchUpload",
-          "component": "/workbench/upload/index",
-          "meta": {
-            "icon": "Upload",
-            "title": "上传本科室资料",
+            "title": "登记与事实采集",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -74,12 +44,12 @@
           }
         },
         {
-          "path": "/workbench/lab-report",
-          "name": "workbenchLabReport",
-          "component": "/workbench/labReport/index",
+          "path": "/encounters/active",
+          "name": "encounterActive",
+          "component": "/encounters/active/index",
           "meta": {
-            "icon": "Memo",
-            "title": "检验报告模板",
+            "icon": "Connection",
+            "title": "患者进度",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -87,43 +57,13 @@
             "isKeepAlive": true
           }
         },
-        {
-          "path": "/workbench/legacy",
-          "name": "workbenchLegacy",
-          "component": "/workbench/upload/index",
-          "meta": {
-            "icon": "FolderOpened",
-            "title": "旧共享病历导入",
-            "isLink": "",
-            "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        }
-      ]
-    },
-    {
-      "path": "/patients",
-      "name": "patients",
-      "redirect": "/patients/list",
-      "meta": {
-        "icon": "UserFilled",
-        "title": "今日患者",
-        "isLink": "",
-        "isHide": false,
-        "isFull": false,
-        "isAffix": false,
-        "isKeepAlive": true
-      },
-      "children": [
         {
           "path": "/patients/list",
           "name": "patientList",
           "component": "/patients/list/index",
           "meta": {
-            "icon": "List",
-            "title": "今日患者",
+            "icon": "Search",
+            "title": "患者档案查询",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -137,8 +77,8 @@
           "component": "/patients/detail/index",
           "meta": {
             "icon": "Document",
-            "title": "患者流程详情",
-            "activeMenu": "/encounters/active",
+            "title": "患者档案详情",
+            "activeMenu": "/patients/list",
             "isLink": "",
             "isHide": true,
             "isFull": false,
@@ -149,12 +89,12 @@
       ]
     },
     {
-      "path": "/encounters",
-      "name": "encounters",
-      "redirect": "/encounters/active",
+      "path": "/navigation/materials-documents",
+      "name": "materialsDocuments",
+      "redirect": "/workbench/upload",
       "meta": {
-        "icon": "Guide",
-        "title": "患者流程",
+        "icon": "FolderOpened",
+        "title": "资料录入与文书",
         "isLink": "",
         "isHide": false,
         "isFull": false,
@@ -163,42 +103,26 @@
       },
       "children": [
         {
-          "path": "/encounters/active",
-          "name": "encounterActive",
-          "component": "/encounters/active/index",
+          "path": "/workbench/upload",
+          "name": "workbenchUpload",
+          "component": "/workbench/upload/index",
           "meta": {
-            "icon": "Connection",
-            "title": "流程看板",
+            "icon": "UploadFilled",
+            "title": "患者资料上传",
             "isLink": "",
             "isHide": false,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
           }
-        }
-      ]
-    },
-    {
-      "path": "/templates",
-      "name": "templates",
-      "redirect": "/templates/record",
-      "meta": {
-        "icon": "Files",
-        "title": "模板工具",
-        "isLink": "",
-        "isHide": false,
-        "isFull": false,
-        "isAffix": false,
-        "isKeepAlive": true
-      },
-      "children": [
+        },
         {
-          "path": "/templates/record",
-          "name": "recordTemplate",
-          "component": "/templates/record/index",
+          "path": "/workbench/lab-report",
+          "name": "workbenchLabReport",
+          "component": "/workbench/labReport/index",
           "meta": {
-            "icon": "DocumentCopy",
-            "title": "模板与字段权限",
+            "icon": "Memo",
+            "title": "检验报告填写",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -212,43 +136,27 @@
           "component": "/templates/aiDocument/index",
           "meta": {
             "icon": "DocumentAdd",
-            "title": "AI文稿转DOCX",
+            "title": "通用文书生成",
             "isLink": "",
             "isHide": false,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
           }
-        }
-      ]
-    },
-    {
-      "path": "/documents",
-      "name": "documents",
-      "redirect": "/documents/recycle",
-      "meta": {
-        "icon": "FolderOpened",
-        "title": "资料管控",
-        "isLink": "",
-        "isHide": false,
-        "isFull": false,
-        "isAffix": false,
-        "isKeepAlive": true
-      },
-      "children": [
+        },
         {
-          "path": "/documents/recycle",
-          "name": "documentRecycle",
-          "component": "/documents/recycle/index",
+          "path": "/workbench/legacy",
+          "name": "workbenchLegacy",
           "meta": {
-            "icon": "RefreshLeft",
-            "title": "作废与恢复",
+            "icon": "FolderOpened",
+            "title": "旧共享病历导入",
             "isLink": "",
-            "isHide": false,
+            "isHide": true,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
-          }
+          },
+          "redirect": "/workbench/upload?tab=legacy"
         }
       ]
     },
@@ -409,50 +317,6 @@
       ]
     },
     {
-      "path": "/audit",
-      "name": "audit",
-      "redirect": "/audit/log",
-      "meta": {
-        "icon": "Tickets",
-        "title": "质控审计",
-        "isLink": "",
-        "isHide": false,
-        "isFull": false,
-        "isAffix": false,
-        "isKeepAlive": true
-      },
-      "children": [
-        {
-          "path": "/audit/review",
-          "name": "auditReview",
-          "component": "/audit/review/index",
-          "meta": {
-            "icon": "Tickets",
-            "title": "质控审核",
-            "isLink": "",
-            "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        },
-        {
-          "path": "/audit/log",
-          "name": "auditLog",
-          "component": "/audit/log/index",
-          "meta": {
-            "icon": "DocumentChecked",
-            "title": "操作日志",
-            "isLink": "",
-            "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        }
-      ]
-    },
-    {
       "path": "/tcm-pharmacy",
       "name": "tcmPharmacy",
       "redirect": "/tcm-pharmacy/clinic-queue/workbench",
@@ -553,6 +417,64 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "path": "/navigation/quality-audit",
+      "name": "qualityAudit",
+      "redirect": "/audit/review",
+      "meta": {
+        "icon": "DocumentChecked",
+        "title": "审核与追溯",
+        "isLink": "",
+        "isHide": false,
+        "isFull": false,
+        "isAffix": false,
+        "isKeepAlive": true
+      },
+      "children": [
+        {
+          "path": "/audit/review",
+          "name": "auditReview",
+          "component": "/audit/review/index",
+          "meta": {
+            "icon": "Tickets",
+            "title": "待审病历",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/documents/recycle",
+          "name": "documentRecycle",
+          "component": "/documents/recycle/index",
+          "meta": {
+            "icon": "RefreshLeft",
+            "title": "作废资料恢复",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/audit/log",
+          "name": "auditLog",
+          "component": "/audit/log/index",
+          "meta": {
+            "icon": "Search",
+            "title": "操作记录查询",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
         }
       ]
     },
@@ -681,9 +603,23 @@
             "isAffix": false,
             "isKeepAlive": true
           }
+        },
+        {
+          "path": "/templates/record",
+          "name": "recordTemplate",
+          "component": "/templates/record/index",
+          "meta": {
+            "icon": "DocumentCopy",
+            "title": "模板与字段权限",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
         }
       ]
     }
   ],
-  "msg": "鎴愬姛"
+  "msg": "开发导航样例；运行时菜单和权限来自 GET /auth/navigation"
 }

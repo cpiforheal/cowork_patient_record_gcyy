@@ -13,6 +13,18 @@ const routerMode = {
   history: () => createWebHistory()
 };
 const createHistory = routerMode[mode as keyof typeof routerMode] ?? routerMode.hash;
+const PROTECTED_BUSINESS_PATHS = [
+  /^\/navigation\/(patient-collaboration|materials-documents|quality-audit)\/?$/,
+  /^\/pre-ai(?:\/encounters)?\/?$/,
+  /^\/patients(?:\/list|\/detail\/[^/]+)?\/?$/,
+  /^\/encounters(?:\/active)?\/?$/,
+  /^\/workbench(?:\/upload|\/lab-report|\/legacy)?\/?$/,
+  /^\/templates\/ai-document\/?$/,
+  /^\/audit(?:\/review|\/log)?\/?$/,
+  /^\/documents(?:\/recycle)?\/?$/
+];
+
+const unavailableRouteFor = (path: string) => (PROTECTED_BUSINESS_PATHS.some(pattern => pattern.test(path)) ? "/403" : "/404");
 
 /**
  * @description 📚 路由参数配置简介
@@ -66,12 +78,12 @@ router.beforeEach(async to => {
       await initDynamicRouter();
       const resolvedTarget = router.resolve(to.fullPath);
       if (!resolvedTarget.matched.length || resolvedTarget.name === "notFound") {
-        return { path: "/404", replace: true };
+        return { path: unavailableRouteFor(to.path), replace: true };
       }
       return { path: to.fullPath, replace: true };
     }
 
-    if (to.name === "notFound") return { path: "/404", replace: true };
+    if (to.name === "notFound") return { path: unavailableRouteFor(to.path), replace: true };
     await authStore.setRouteName(String(to.name || ""));
     return true;
   } catch (error) {

@@ -157,6 +157,81 @@ class AuthNavigationServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void patientDocumentAndAuditNavigationUsesTaskLanguageAndStableRoutes() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        List<NavigationMenu> menus = service.navigationFor(user("admin")).menus();
+        NavigationMenu patient = findMenu(menus, "/navigation/patient-collaboration");
+        assertThat(patient.meta().title()).isEqualTo("患者就诊");
+        assertThat(patient.meta().icon()).isEqualTo("UserFilled");
+        assertThat(patient.redirect()).isEqualTo("/pre-ai/encounters");
+        assertThat(visibleChildren(patient).stream().map(NavigationMenu::path)).containsExactly(
+            "/pre-ai/encounters", "/encounters/active", "/patients/list"
+        );
+        assertThat(visibleChildren(patient).stream().map(item -> item.meta().title())).containsExactly(
+            "登记与事实采集", "患者进度", "患者档案查询"
+        );
+        assertThat(visibleChildren(patient).stream().map(item -> item.meta().icon())).containsExactly(
+            "EditPen", "Connection", "Search"
+        );
+        NavigationMenu detail = findMenu(patient.children(), "/patients/detail/:id");
+        assertThat(detail.meta().isHide()).isTrue();
+        assertThat(detail.meta().activeMenu()).isEqualTo("/patients/list");
+
+        NavigationMenu materials = findMenu(menus, "/navigation/materials-documents");
+        assertThat(materials.meta().title()).isEqualTo("资料录入与文书");
+        assertThat(materials.meta().icon()).isEqualTo("FolderOpened");
+        assertThat(visibleChildren(materials).stream().map(item -> item.meta().title())).containsExactly(
+            "患者资料上传", "检验报告填写", "通用文书生成"
+        );
+
+        NavigationMenu quality = findMenu(menus, "/navigation/quality-audit");
+        assertThat(quality.meta().title()).isEqualTo("审核与追溯");
+        assertThat(quality.meta().icon()).isEqualTo("DocumentChecked");
+        assertThat(visibleChildren(quality).stream().map(item -> item.meta().title())).containsExactly(
+            "待审病历", "作废资料恢复", "操作记录查询"
+        );
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void taskGroupsRedirectToTheFirstAuthorizedEntryWithoutExpandingPermissions() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        NavigationResult doctor = service.navigationFor(user("doctor"));
+        assertThat(findMenu(doctor.menus(), "/navigation/patient-collaboration").redirect()).isEqualTo("/pre-ai/encounters");
+        NavigationMenu doctorMaterials = findMenu(doctor.menus(), "/navigation/materials-documents");
+        assertThat(doctorMaterials.redirect()).isEqualTo("/workbench/lab-report");
+        assertThat(findMenu(doctor.menus(), "/workbench").redirect()).isEqualTo("/workbench/lab-report");
+
+        NavigationResult quality = service.navigationFor(user("quality"));
+        NavigationMenu qualityPatient = findMenu(quality.menus(), "/navigation/patient-collaboration");
+        assertThat(qualityPatient.redirect()).isEqualTo("/encounters/active");
+        assertThat(findMenuOrNull(qualityPatient.children(), "/pre-ai/encounters")).isNull();
+        assertThat(findMenu(quality.menus(), "/navigation/quality-audit").redirect()).isEqualTo("/audit/review");
+
+        NavigationResult manager = service.navigationFor(user("manager"));
+        NavigationMenu managerMaterials = findMenu(manager.menus(), "/navigation/materials-documents");
+        assertThat(visibleChildren(managerMaterials).stream().map(NavigationMenu::path))
+            .containsExactly("/templates/ai-document");
+        assertThat(findMenuOrNull(manager.menus(), "/navigation/patient-collaboration")).isNull();
+        assertThat(findMenuOrNull(manager.menus(), "/navigation/quality-audit")).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shortcutsPrioritizeEachRolesPrimaryTask() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        assertThat(service.navigationFor(user("doctor")).shortcuts().get(0).path()).isEqualTo("/pre-ai/encounters");
+        assertThat(service.navigationFor(user("quality")).shortcuts().get(0).path()).isEqualTo("/audit/review");
+        assertThat(service.navigationFor(user("manager")).shortcuts().get(0).path()).isEqualTo("/templates/ai-document");
+        assertThat(service.navigationFor(user("quality")).shortcuts())
+            .noneMatch(item -> "/pre-ai/encounters".equals(item.path()));
+    }
+
+    @Test
     void unknownRoleIsDeniedInsteadOfFallingBackToFrontDesk() {
         assertThatThrownBy(() -> service.navigationFor(user("unknown-role")))
             .isInstanceOf(ResponseStatusException.class)
@@ -178,6 +253,10 @@ class AuthNavigationServiceTest {
             }
         }
         return null;
+    }
+
+    private List<NavigationMenu> visibleChildren(NavigationMenu menu) {
+        return menu.children().stream().filter(item -> !item.meta().isHide()).toList();
     }
 
     private SessionUser user(String role) {

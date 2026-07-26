@@ -3,7 +3,7 @@
     <section class="quick-upload-panel" :class="{ 'is-upload-success': uploadSuccess }">
       <div class="page-head">
         <div>
-          <h2>上传资料</h2>
+          <h2>患者资料上传</h2>
           <p>输入门诊号或姓名，确认患者后连续上传本科室资料。</p>
         </div>
         <div class="upload-mode-tools">
