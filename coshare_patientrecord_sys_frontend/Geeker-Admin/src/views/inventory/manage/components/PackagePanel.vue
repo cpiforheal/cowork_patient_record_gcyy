@@ -66,7 +66,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane :label="`扣减异常${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
+      <el-tab-pane :label="`扣减失败任务${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
         <div class="panel event-panel">
           <div class="panel-head">
             <div>

@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.26.1";
+    public static final String VERSION = "2026.07.26.2";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -57,13 +57,6 @@ public class AuthNavigationService {
         "preai:duties:manage", Set.of("admin", "frontdesk", "doctor"),
         "preai:surgery:confirm", Set.of("admin", "doctor")
     );
-    private static final Map<String, Set<String>> INVENTORY_ENTRY_PATHS = Map.of(
-        "/inventory/overview", Set.of("/inventory/overview", "/inventory/executive"),
-        "/inventory/requests", Set.of("/inventory/requests", "/inventory/stock", "/inventory/controls"),
-        "/inventory/packages", Set.of("/inventory/packages", "/inventory/items"),
-        "/inventory/weekly", Set.of("/inventory/weekly", "/inventory/trace")
-    );
-
     private final JdbcTemplate jdbcTemplate;
     private final List<NavigationMenu> menus = buildMenus();
     private final Map<String, RolePolicy> policies = buildPolicies();
@@ -74,7 +67,7 @@ public class AuthNavigationService {
         shortcut("检验报告录入", "录入并复核检验结果", "Memo", "/workbench/lab-report"),
         shortcut("文书生成", "生成并下载临床文书", "DocumentAdd", "/templates/ai-document"),
         shortcut("进销存管理", "科室申领、库存与自动扣减", "Box", "/inventory/overview"),
-        shortcut("中药房工作台", "收费、审方、调剂和取药", "MedicineBox", "/tcm-pharmacy/workbench"),
+        shortcut("中药房工作台", "收费、审方、调剂和取药", "FirstAidKit", "/tcm-pharmacy/workbench"),
         shortcut("检查接诊叫号", "管理检查与接诊双队列", "Guide", "/tcm-pharmacy/clinic-queue/workbench"),
         shortcut("档案审核", "退回整改或通过归档", "Tickets", "/audit/review"),
         shortcut("作废与恢复", "恢复误作废资料", "RefreshLeft", "/documents/recycle"),
@@ -237,9 +230,6 @@ public class AuthNavigationService {
         if (source.contains("*")) return source;
         Set<String> result = new LinkedHashSet<>(source);
         boolean hasInventoryAccess = source.stream().anyMatch(path -> path.startsWith("/inventory/"));
-        INVENTORY_ENTRY_PATHS.forEach((entryPath, internalPaths) -> {
-            if (internalPaths.stream().anyMatch(source::contains)) result.add(entryPath);
-        });
         if (hasInventoryAccess) result.add("/inventory/manage");
         return Set.copyOf(result);
     }
@@ -259,20 +249,20 @@ public class AuthNavigationService {
             page("/templates/ai-document", "aiDocumentGenerator", "/templates/aiDocument/index", "文书生成", "DocumentAdd", false, false, false),
             redirect("/workbench/legacy", "workbenchLegacy", "/workbench/upload?tab=legacy", "旧共享病历导入", "FolderOpened", true)
         ));
-        result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "FirstAidKit",
+        result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "Operation",
             group("/inventory", "inventory", "/inventory/overview", "进销存管理", "Box",
-                page("/inventory/overview", "inventoryOverview", "/inventory/manage/index", "工作台", "Monitor", false, false, false),
-                pageWithActiveMenu("/inventory/executive", "inventoryExecutive", "/inventory/manage/index", "领导视图", "TrendCharts", "/inventory/overview"),
-                page("/inventory/requests", "inventoryRequests", "/inventory/manage/index", "库存作业", "Tickets", false, false, false),
-                pageWithActiveMenu("/inventory/stock", "inventoryStock", "/inventory/manage/index", "库存批次", "Box", "/inventory/requests"),
-                pageWithActiveMenu("/inventory/controls", "inventoryControls", "/inventory/manage/index", "盘点控制", "SetUp", "/inventory/requests"),
-                page("/inventory/packages", "inventoryPackages", "/inventory/manage/index", "耗材规则", "CollectionTag", false, false, false),
-                pageWithActiveMenu("/inventory/items", "inventoryItems", "/inventory/manage/index", "物资档案", "Goods", "/inventory/packages"),
-                page("/inventory/weekly", "inventoryWeekly", "/inventory/manage/index", "周度对账", "DataLine", false, false, false),
-                pageWithActiveMenu("/inventory/trace", "inventoryTrace", "/inventory/manage/index", "追溯流水", "Search", "/inventory/weekly"),
+                page("/inventory/overview", "inventoryOverview", "/inventory/manage/index", "今日待办", "Monitor", false, false, false),
+                page("/inventory/executive", "inventoryExecutive", "/inventory/manage/index", "管理看板", "TrendCharts", false, false, false),
+                page("/inventory/requests", "inventoryRequests", "/inventory/manage/index", "申领与签收", "Tickets", false, false, false),
+                page("/inventory/stock", "inventoryStock", "/inventory/manage/index", "入库与库存", "Box", false, false, false),
+                page("/inventory/controls", "inventoryControls", "/inventory/manage/index", "盘点与报损", "SetUp", false, false, false),
+                page("/inventory/packages", "inventoryPackages", "/inventory/manage/index", "患者耗材套餐", "CollectionTag", false, false, false),
+                page("/inventory/weekly", "inventoryWeekly", "/inventory/manage/index", "周用量核对", "DataLine", false, false, false),
+                page("/inventory/trace", "inventoryTrace", "/inventory/manage/index", "出入库记录", "Search", false, false, false),
+                page("/inventory/items", "inventoryItems", "/inventory/manage/index", "物资设置", "Goods", false, false, false),
                 redirect("/inventory/manage", "inventoryManageCompatibility", "/inventory/overview", "进销存兼容入口", "Link", true)
             ),
-            page("/tcm-pharmacy/workbench", "tcmPharmacyWorkbench", "/tcmPharmacy/workbench/index", "中药房工作台", "MedicineBox", false, false, false),
+            page("/tcm-pharmacy/workbench", "tcmPharmacyWorkbench", "/tcmPharmacy/workbench/index", "中药房工作台", "FirstAidKit", false, false, false),
             page("/tcm-pharmacy/display", "tcmPharmacyDisplayMenu", "/tcmPharmacy/display/index", "取药展示大屏", "Monitor", true, true, false),
             page("/tcm-pharmacy/clinic-queue/workbench", "clinicQueueWorkbench", "/clinicQueue/workbench/index", "检查接诊叫号", "Guide", false, false, false),
             page("/tcm-pharmacy/clinic-queue/display", "clinicQueueDisplayMenu", "/clinicQueue/display/index", "检查接诊大屏", "Monitor", true, true, false)

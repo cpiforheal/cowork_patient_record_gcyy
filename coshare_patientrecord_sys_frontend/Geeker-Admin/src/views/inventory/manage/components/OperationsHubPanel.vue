@@ -54,13 +54,6 @@
           </template>
         </el-table-column>
       </el-table>
-
-      <div class="quick-actions" aria-label="常用操作">
-        <el-button v-if="canApprove" text @click="emit('goTab', 'requests')">审核申领</el-button>
-        <el-button v-if="canIssue" text @click="emit('goTab', 'requests')">配发物资</el-button>
-        <el-button v-if="canReceive" text @click="emit('goTab', 'requests')">科室签收</el-button>
-        <el-button v-if="canOpen('items')" text @click="emit('goTab', 'items')">维护物资档案</el-button>
-      </div>
     </section>
   </div>
 </template>
@@ -109,9 +102,6 @@ const props = defineProps<{
   accessibleTabs: string[];
   canInbound: boolean;
   canRequest: boolean;
-  canApprove: boolean;
-  canIssue: boolean;
-  canReceive: boolean;
   canCount: boolean;
   canReport: boolean;
   reportLoading: "" | "pdf" | "xlsx";
@@ -155,8 +145,7 @@ const automationFailed = computed(
 
 .section-head,
 .todo-head,
-.head-actions,
-.quick-actions {
+.head-actions {
   display: flex;
   align-items: center;
 }
@@ -187,8 +176,7 @@ const automationFailed = computed(
   font-weight: 700;
 }
 
-.head-actions,
-.quick-actions {
+.head-actions {
   gap: 8px;
 }
 
@@ -240,12 +228,6 @@ const automationFailed = computed(
 
 .metric-strip strong.danger {
   color: var(--inventory-danger);
-}
-
-.quick-actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  padding-top: 2px;
 }
 
 @media (max-width: 900px) {

@@ -44,10 +44,6 @@
       show-icon
     />
 
-    <el-tabs :model-value="activeTab" class="entry-tabs" @tab-change="goTab(String($event))">
-      <el-tab-pane v-for="item in currentEntryTabItems" :key="item.tab" :label="item.title" :name="item.tab" />
-    </el-tabs>
-
     <div v-loading="loading" class="inventory-workspace" element-loading-text="正在同步库存...">
       <div v-if="initialInventoryLoading" class="inventory-loading-skeleton">
         <el-skeleton animated :rows="12" />
@@ -74,9 +70,6 @@
               :accessible-tabs="accessibleTabItems.map(item => item.tab)"
               :can-inbound="hasInventoryAuth('inventory:issue')"
               :can-request="hasInventoryAuth('inventory:request')"
-              :can-approve="hasInventoryAuth('inventory:approve')"
-              :can-issue="hasInventoryAuth('inventory:issue')"
-              :can-receive="hasInventoryAuth('inventory:receive')"
               :can-count="hasInventoryAuth('inventory:count')"
               :can-report="canExportDepartmentUsage"
               :report-loading="reportLoading"
@@ -684,15 +677,15 @@ const returnTypeOptions = [
   { label: "报废", value: "scrap", auth: "inventory:count" }
 ];
 const tabNavItems = [
-  { tab: "overview", title: "运营总览", entry: "overview" },
-  { tab: "executive", title: "领导视图", entry: "overview" },
-  { tab: "requests", title: "申领、审批与签收", entry: "requests" },
-  { tab: "stock", title: "库存批次", entry: "requests" },
-  { tab: "controls", title: "盘点控制", entry: "requests" },
-  { tab: "items", title: "物资档案", entry: "packages" },
-  { tab: "packages", title: "套餐与扣减异常", entry: "packages" },
-  { tab: "weekly", title: "标准与快照", entry: "weekly" },
-  { tab: "trace", title: "追溯流水", entry: "weekly" }
+  { tab: "overview", title: "今日待办" },
+  { tab: "executive", title: "管理看板" },
+  { tab: "requests", title: "申领与签收" },
+  { tab: "stock", title: "入库与库存" },
+  { tab: "controls", title: "盘点与报损" },
+  { tab: "packages", title: "患者耗材套餐" },
+  { tab: "weekly", title: "周用量核对" },
+  { tab: "trace", title: "出入库记录" },
+  { tab: "items", title: "物资设置" }
 ] as const;
 const workflowSteps = [
   { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:issue"] },
@@ -772,72 +765,72 @@ type TabStat = {
 
 const tabProfiles = {
   overview: {
-    kicker: "进销存管理 / 主控台",
-    title: "今天需要处理什么",
+    kicker: "进销存管理 / 今日待办",
+    title: "今日待办",
     desc: "待办、风险、库存异常集中看。",
     taskLabel: "当前重点",
     taskTitle: "先处理红黄提醒",
     taskDesc: "不用先翻明细，异常和待办会自动靠前。"
   },
   executive: {
-    kicker: "进销存管理 / 领导驾驶舱",
-    title: "今天物资运行是否安全",
+    kicker: "进销存管理 / 管理看板",
+    title: "管理看板",
     desc: "用红绿灯、关键指标和科室消耗看清当前风险。",
     taskLabel: "当前结论",
     taskTitle: "先看红绿灯，再看待签字",
     taskDesc: "适合主任、质控和管理岗位快速复核。"
   },
   requests: {
-    kicker: "进销存管理 / 科室申领审批",
-    title: "申领单流转",
+    kicker: "进销存管理 / 申领与签收",
+    title: "申领与签收",
     desc: "提交、审核、发放、签收按顺序闭环。",
     taskLabel: "当前重点",
     taskTitle: "处理待审核、待发放、待签收",
     taskDesc: "每张单只做当前状态允许的动作。"
   },
   stock: {
-    kicker: "进销存管理 / 库存与批次",
-    title: "库存与批次",
+    kicker: "进销存管理 / 入库与库存",
+    title: "入库与库存",
     desc: "看数量、批号、效期和位置。",
     taskLabel: "当前重点",
     taskTitle: "先看低库存和临期",
     taskDesc: "入库时补齐批次、效期和位置。"
   },
   items: {
-    kicker: "进销存管理 / 物资档案",
-    title: "物资档案",
+    kicker: "进销存管理 / 物资设置",
+    title: "物资设置",
     desc: "统一名称、规格、单位和规则。",
     taskLabel: "当前重点",
     taskTitle: "先建档，再申领",
     taskDesc: "敏感、批号、效期、预警线提前定义。"
   },
   weekly: {
-    kicker: "进销存管理 / 周度对账",
-    title: "每患者标准量与周度快照",
+    kicker: "进销存管理 / 周用量核对",
+    title: "周用量核对",
     desc: "按患者量核对预估耗用、实际扣减和差异。",
     taskLabel: "当前重点",
     taskTitle: "按周确认真实用量",
     taskDesc: "波动明显时补充原因。"
   },
   controls: {
-    kicker: "进销存管理 / 盘点退回报废",
-    title: "盘点与处置",
-    desc: "记录差异、退回和报废。",
+    kicker: "进销存管理 / 盘点与报损",
+    title: "盘点与报损",
+    desc: "处理盘点差异、科室退回和物资报废。",
     taskLabel: "当前重点",
     taskTitle: "补齐原因和处理人",
     taskDesc: "每次处置都留下可复核记录。"
   },
   packages: {
-    kicker: "进销存管理 / 耗材规则",
-    title: "套餐与自动扣减异常",
+    kicker: "进销存管理 / 患者耗材套餐",
+    title: "患者耗材套餐",
     desc: "维护科室门诊、住院关键阶段套餐，并处理自动扣减失败任务。",
     taskLabel: "当前重点",
     taskTitle: "先确认启用版本，再处理失败事件",
     taskDesc: "仅最新启用且处于生效期的套餐参与匹配，草稿不会影响库存。"
   },
   trace: {
-    kicker: "进销存管理 / 追溯报表",
-    title: "追溯流水",
+    kicker: "进销存管理 / 出入库记录",
+    title: "出入库记录",
     desc: "倒查入库、发放、退回、报废和盘点。",
     taskLabel: "当前重点",
     taskTitle: "按物资、科室、时间倒查",
@@ -1166,8 +1159,6 @@ const maxDepartmentConsumption = computed(() => Math.max(...departmentConsumptio
 const accessibleTabItems = computed(() =>
   tabNavItems.filter(item => hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || []))
 );
-const currentEntryKey = computed(() => tabNavItems.find(item => item.tab === activeTab.value)?.entry || "overview");
-const currentEntryTabItems = computed(() => accessibleTabItems.value.filter(item => item.entry === currentEntryKey.value));
 const canExportDepartmentUsage = computed(() => hasAnyInventoryAuth(["inventory:report", "inventory:export"]));
 const canAccessTab = (tab: string) => accessibleTabItems.value.some(item => item.tab === tab);
 const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item => hasInventoryAuth(item.auth)));
@@ -1439,8 +1430,7 @@ const goTab = (tab: string) => {
     activeTab.value = tab;
     return;
   }
-  const entry = tabNavItems.find(item => item.tab === tab)?.entry;
-  const fallback = accessibleTabItems.value.find(item => item.entry === entry);
+  const fallback = accessibleTabItems.value[0];
   if (fallback) {
     activeTab.value = fallback.tab;
     return;
@@ -2310,28 +2300,6 @@ onMounted(() => {
     strong {
       color: var(--inventory-danger);
     }
-  }
-}
-
-.entry-tabs {
-  padding: 0 14px;
-  background: var(--inventory-panel);
-  border: 1px solid var(--inventory-line);
-  border-radius: 8px;
-
-  :deep(.el-tabs__header) {
-    margin: 0;
-  }
-
-  :deep(.el-tabs__item) {
-    height: 42px;
-    padding: 0 18px;
-    font-weight: 600;
-  }
-
-  :deep(.el-tabs__nav-wrap::after) {
-    height: 1px;
-    background: var(--inventory-line-soft);
   }
 }
 

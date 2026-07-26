@@ -272,7 +272,7 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Monitor",
-            "title": "工作台",
+            "title": "今日待办",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -286,10 +286,9 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "TrendCharts",
-            "title": "领导视图",
-            "activeMenu": "/inventory/overview",
+            "title": "管理看板",
             "isLink": "",
-            "isHide": true,
+            "isHide": false,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
@@ -301,7 +300,7 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Tickets",
-            "title": "库存作业",
+            "title": "申领与签收",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -315,10 +314,9 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Box",
-            "title": "库存批次",
-            "activeMenu": "/inventory/requests",
+            "title": "入库与库存",
             "isLink": "",
-            "isHide": true,
+            "isHide": false,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
@@ -329,11 +327,10 @@
           "name": "inventoryControls",
           "component": "/inventory/manage/index",
           "meta": {
-            "icon": "Checked",
-            "title": "盘点控制",
-            "activeMenu": "/inventory/requests",
+            "icon": "SetUp",
+            "title": "盘点与报损",
             "isLink": "",
-            "isHide": true,
+            "isHide": false,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
@@ -345,7 +342,35 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "CollectionTag",
-            "title": "耗材规则",
+            "title": "患者耗材套餐",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/weekly",
+          "name": "inventoryWeekly",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "DataLine",
+            "title": "周用量核对",
+            "isLink": "",
+            "isHide": false,
+            "isFull": false,
+            "isAffix": false,
+            "isKeepAlive": true
+          }
+        },
+        {
+          "path": "/inventory/trace",
+          "name": "inventoryTrace",
+          "component": "/inventory/manage/index",
+          "meta": {
+            "icon": "Search",
+            "title": "出入库记录",
             "isLink": "",
             "isHide": false,
             "isFull": false,
@@ -359,39 +384,9 @@
           "component": "/inventory/manage/index",
           "meta": {
             "icon": "Goods",
-            "title": "物资档案",
-            "activeMenu": "/inventory/packages",
-            "isLink": "",
-            "isHide": true,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        },
-        {
-          "path": "/inventory/weekly",
-          "name": "inventoryWeekly",
-          "component": "/inventory/manage/index",
-          "meta": {
-            "icon": "DataLine",
-            "title": "周度对账",
+            "title": "物资设置",
             "isLink": "",
             "isHide": false,
-            "isFull": false,
-            "isAffix": false,
-            "isKeepAlive": true
-          }
-        },
-        {
-          "path": "/inventory/trace",
-          "name": "inventoryTrace",
-          "component": "/inventory/manage/index",
-          "meta": {
-            "icon": "DocumentChecked",
-            "title": "追溯流水",
-            "activeMenu": "/inventory/weekly",
-            "isLink": "",
-            "isHide": true,
             "isFull": false,
             "isAffix": false,
             "isKeepAlive": true
@@ -476,7 +471,7 @@
           "name": "tcmPharmacyBusiness",
           "redirect": "/tcm-pharmacy/workbench",
           "meta": {
-            "icon": "MedicineBox",
+            "icon": "Operation",
             "title": "中药房业务",
             "isLink": "",
             "isHide": false,
@@ -490,8 +485,8 @@
               "name": "tcmPharmacyWorkbench",
               "component": "/tcmPharmacy/workbench/index",
               "meta": {
-                "icon": "List",
-                "title": "业务工作台",
+                "icon": "FirstAidKit",
+                "title": "中药房工作台",
                 "isLink": "",
                 "isHide": false,
                 "isFull": false,

@@ -84,23 +84,60 @@ class AuthNavigationServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void inventoryNavigationExposesFourEntriesAndKeepsLegacyRoutesHidden() {
+    void inventoryNavigationExposesNineTaskEntriesAndKeepsCompatibilityRouteHidden() {
         doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
 
         NavigationMenu inventory = findMenu(service.navigationFor(user("quality")).menus(), "/inventory");
         assertThat(inventory.children()).isNotNull();
         assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
-            .containsExactly("/inventory/overview", "/inventory/requests", "/inventory/packages", "/inventory/weekly");
-
-        assertThat(findMenu(inventory.children(), "/inventory/executive").meta().activeMenu()).isEqualTo("/inventory/overview");
-        assertThat(findMenu(inventory.children(), "/inventory/stock").meta().activeMenu()).isEqualTo("/inventory/requests");
-        assertThat(findMenu(inventory.children(), "/inventory/controls").meta().activeMenu()).isEqualTo("/inventory/requests");
-        assertThat(findMenu(inventory.children(), "/inventory/items").meta().activeMenu()).isEqualTo("/inventory/packages");
-        assertThat(findMenu(inventory.children(), "/inventory/trace").meta().activeMenu()).isEqualTo("/inventory/weekly");
+            .containsExactly(
+                "/inventory/overview",
+                "/inventory/executive",
+                "/inventory/requests",
+                "/inventory/stock",
+                "/inventory/controls",
+                "/inventory/packages",
+                "/inventory/weekly",
+                "/inventory/trace",
+                "/inventory/items"
+            );
+        assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(item -> item.meta().title()))
+            .containsExactly("今日待办", "管理看板", "申领与签收", "入库与库存", "盘点与报损", "患者耗材套餐", "周用量核对", "出入库记录", "物资设置");
+        assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(item -> item.meta().icon()))
+            .containsExactly("Monitor", "TrendCharts", "Tickets", "Box", "SetUp", "CollectionTag", "DataLine", "Search", "Goods");
+        assertThat(inventory.children().stream().filter(item -> !item.meta().isHide()).map(item -> item.meta().activeMenu()))
+            .containsOnlyNulls();
 
         NavigationMenu compatibility = findMenu(inventory.children(), "/inventory/manage");
         assertThat(compatibility.meta().isHide()).isTrue();
         assertThat(compatibility.redirect()).isEqualTo("/inventory/overview");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inventoryNavigationFiltersEachTaskByItsOriginalRolePermissions() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        NavigationMenu staffInventory = findMenu(service.navigationFor(user("doctor")).menus(), "/inventory");
+        assertThat(staffInventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
+            .containsExactly("/inventory/overview", "/inventory/requests", "/inventory/packages", "/inventory/weekly");
+        assertThat(findMenu(staffInventory.children(), "/inventory/manage").meta().isHide()).isTrue();
+
+        NavigationMenu managerInventory = findMenu(service.navigationFor(user("manager")).menus(), "/inventory");
+        assertThat(managerInventory.children().stream().filter(item -> !item.meta().isHide()).map(NavigationMenu::path))
+            .containsExactly("/inventory/overview", "/inventory/executive", "/inventory/packages", "/inventory/items");
+
+        assertThat(findMenuOrNull(service.navigationFor(user("reception")).menus(), "/inventory")).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void businessWorkbenchUsesRegisteredTaskIcons() {
+        doReturn(List.of()).when(jdbcTemplate).query(anyString(), any(RowMapper.class), anyString());
+
+        List<NavigationMenu> menus = service.navigationFor(user("admin")).menus();
+        assertThat(findMenu(menus, "/navigation/business-workbench").meta().icon()).isEqualTo("Operation");
+        assertThat(findMenu(menus, "/tcm-pharmacy/workbench").meta().icon()).isEqualTo("FirstAidKit");
     }
 
     @Test
