@@ -218,6 +218,8 @@ export interface QueueDisplayRoom {
   room: QueueRoom;
   calling: QueueDisplayRow[];
   waiting: QueueDisplayRow[];
+  /** 过号名单（最多 5 条）：大屏提示患者到前台重新排队。 */
+  missed: QueueDisplayRow[];
 }
 
 export interface QueueDisplaySnapshot {
