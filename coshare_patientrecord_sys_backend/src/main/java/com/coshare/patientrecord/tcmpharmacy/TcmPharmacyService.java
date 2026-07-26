@@ -31,6 +31,7 @@ public class TcmPharmacyService {
 
     private static final String TCM_PHARMACY_OPERATOR_ROLE = "tcmPharmacyOperator";
     private static final Set<String> READ_ROLES = Set.of("admin", "tcm", "doctor", TCM_PHARMACY_OPERATOR_ROLE, "pharmacist", "pharmacy", "decoction");
+    private static final Set<String> DISPLAY_ROLES = Set.of("admin", "tcm", "doctor", TCM_PHARMACY_OPERATOR_ROLE, "pharmacist", "pharmacy", "decoction", "display");
     private static final Set<String> DOCTOR_ROLES = Set.of("admin", "tcm", "doctor");
     private static final Set<String> CHARGE_ROLES = Set.of("admin", "frontdesk", TCM_PHARMACY_OPERATOR_ROLE);
     private static final Set<String> REVIEW_ROLES = Set.of("admin", TCM_PHARMACY_OPERATOR_ROLE);
@@ -253,7 +254,7 @@ public class TcmPharmacyService {
     }
 
     public Map<String, Object> displaySnapshot(SessionUser user) {
-        requireRole(user, READ_ROLES, "当前岗位无权查看叫号大屏");
+        requireRole(user, DISPLAY_ROLES, "当前岗位无权查看叫号大屏");
         ArrayNode ready = objectMapper.createArrayNode();
         ArrayNode waiting = objectMapper.createArrayNode();
         jdbcTemplate.query("""
@@ -277,7 +278,7 @@ public class TcmPharmacyService {
     }
 
     public Map<String, Object> pendingAnnouncements(SessionUser user) {
-        requireRole(user, READ_ROLES, "当前岗位无权读取播报队列");
+        requireRole(user, DISPLAY_ROLES, "当前岗位无权读取播报队列");
         ArrayNode rows = objectMapper.createArrayNode();
         jdbcTemplate.query("""
             SELECT * FROM tcm_pharmacy_announcements
@@ -293,7 +294,7 @@ public class TcmPharmacyService {
 
     @Transactional
     public Map<String, Object> markAnnouncementPlayed(String id, SessionUser user) {
-        requireRole(user, READ_ROLES, "当前岗位无权确认播报结果");
+        requireRole(user, DISPLAY_ROLES, "当前岗位无权确认播报结果");
         jdbcTemplate.update("""
             UPDATE tcm_pharmacy_announcements
             SET status = 'PLAYED', play_count = play_count + 1, played_at = ?

@@ -27,7 +27,8 @@ export const roleToDepartment: Record<UserRole, string> = {
   nurse: "治疗室",
   nursing: "护理部",
   manager: "信息/院办",
-  quality: "质控/病案"
+  quality: "质控/病案",
+  display: "信息/院办"
 };
 
 const seedDepartments = (): DepartmentRow[] => [

@@ -15,7 +15,8 @@ export type UserRole =
   | "nurse"
   | "nursing"
   | "manager"
-  | "quality";
+  | "quality"
+  | "display";
 
 export type FieldKind = "input" | "textarea" | "select" | "attachment";
 
@@ -112,7 +113,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   nurse: "护士/治疗室",
   nursing: "护理部",
   manager: "院办/管理",
-  quality: "质控"
+  quality: "质控",
+  display: "展示终端"
 };
 
 export const USER_ROLES: UserRole[] = [
@@ -132,7 +134,8 @@ export const USER_ROLES: UserRole[] = [
   "nurse",
   "nursing",
   "manager",
-  "quality"
+  "quality",
+  "display"
 ];
 
 export const USER_ROLE_OPTIONS: { label: string; value: UserRole }[] = USER_ROLES.map(value => ({

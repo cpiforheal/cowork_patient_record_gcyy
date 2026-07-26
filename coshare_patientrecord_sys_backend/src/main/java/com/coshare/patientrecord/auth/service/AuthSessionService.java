@@ -45,6 +45,9 @@ import org.springframework.http.HttpStatus;
 public class AuthSessionService {
 
     private static final Duration TOKEN_TTL = Duration.ofHours(12);
+    /** 展示终端（候诊大屏）专用长效会话：无人值守设备无法定期重新登录。 */
+    private static final String DISPLAY_ROLE = "display";
+    private static final Duration DISPLAY_TOKEN_TTL = Duration.ofDays(30);
     private static final Logger log = LoggerFactory.getLogger(AuthSessionService.class);
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final Duration LOGIN_LOCK_TTL = Duration.ofMinutes(10);
@@ -180,7 +183,7 @@ public class AuthSessionService {
             department.id(),
             department.name(),
             account.path("mustChangePassword").asBoolean(false),
-            Instant.now().plus(TOKEN_TTL)
+            Instant.now().plus(tokenTtlForRole(accountRole))
         );
         String token = newToken();
         storeSession(token, user);
@@ -223,7 +226,31 @@ public class AuthSessionService {
             ),
             sha256(token)
         );
-        return users.stream().findFirst();
+        Optional<SessionUser> user = users.stream().findFirst();
+        user.ifPresent(value -> renewDisplaySessionIfNeeded(token, value));
+        return user;
+    }
+
+    /**
+     * 展示终端会话滑动续期：剩余有效期不足一半时后移过期时间，
+     * 保证常亮大屏只要在持续轮询就不会掉线。普通岗位账号维持固定 12 小时语义。
+     */
+    private void renewDisplaySessionIfNeeded(String token, SessionUser user) {
+        if (!isDisplayRole(user.role())) return;
+        if (user.expiresAt().isAfter(Instant.now().plus(DISPLAY_TOKEN_TTL.dividedBy(2)))) return;
+        jdbcTemplate.update(
+            "UPDATE clinic_auth_sessions SET expires_at = ? WHERE token_hash = ? AND revoked_at IS NULL",
+            Timestamp.from(Instant.now().plus(DISPLAY_TOKEN_TTL)),
+            sha256(token)
+        );
+    }
+
+    static Duration tokenTtlForRole(String role) {
+        return isDisplayRole(role) ? DISPLAY_TOKEN_TTL : TOKEN_TTL;
+    }
+
+    static boolean isDisplayRole(String role) {
+        return role != null && DISPLAY_ROLE.equalsIgnoreCase(role.trim());
     }
 
     public void logout(String token) {

@@ -97,6 +97,7 @@ import {
   type LoginAccountOption
 } from "@/api/modules/login";
 import { useUserStore } from "@/stores/modules/user";
+import { useAuthStore } from "@/stores/modules/auth";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
@@ -129,6 +130,14 @@ const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
 });
 const passwordChange = reactive({ newPassword: "", confirmPassword: "" });
 
+// 展示终端等受限角色没有 /home 权限，登录后需落到本岗位第一个可用页面。
+const resolveLandingPath = () => {
+  const authStore = useAuthStore();
+  const pages = authStore.flatMenuListGet.filter(item => item.component);
+  if (!pages.length || pages.some(item => item.path === HOME_URL)) return HOME_URL;
+  return pages[0].path;
+};
+
 const completeLogin = async (data: Login.ResLogin) => {
   if (!data.userInfo) throw new Error("登录响应缺少用户信息");
   userStore.setToken(data.access_token);
@@ -136,7 +145,7 @@ const completeLogin = async (data: Login.ResLogin) => {
   await initDynamicRouter();
   tabsStore.setTabs([]);
   keepAliveStore.setKeepAliveName([]);
-  await router.replace({ path: HOME_URL });
+  await router.replace({ path: resolveLandingPath() });
   ElNotification({
     title: "登录成功",
     message: `${data.userInfo.department || "当前科室"}：仅显示本岗位已授权的功能`,

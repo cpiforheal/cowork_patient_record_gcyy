@@ -37,6 +37,7 @@ public class ClinicQueueService {
     static final String RECEPTION = "RECEPTION";
     private static final Set<String> STAGES = Set.of(INSPECTION, RECEPTION);
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "doctor");
+    private static final Set<String> DISPLAY_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "doctor", "display");
     private static final Set<String> ISSUE_ROLES = Set.of("admin", "frontdesk");
     private static final Set<String> INSPECTION_ROLES = Set.of("admin", "inspection");
     private static final Set<String> RECEPTION_ROLES = Set.of("admin", "reception", "doctor");
@@ -334,7 +335,7 @@ public class ClinicQueueService {
     }
 
     public Map<String, Object> displaySnapshot(SessionUser user) {
-        requireRole(user, READ_ROLES, "当前岗位无权查看叫号大屏");
+        requireRole(user, DISPLAY_ROLES, "当前岗位无权查看叫号大屏");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("inspection", displayRoom(INSPECTION));
         result.put("reception", displayRoom(RECEPTION));
@@ -346,7 +347,7 @@ public class ClinicQueueService {
 
     @Transactional
     public Map<String, Object> pendingAnnouncements(SessionUser user) {
-        requireRole(user, READ_ROLES, "当前岗位无权读取播报队列");
+        requireRole(user, DISPLAY_ROLES, "当前岗位无权读取播报队列");
         jdbcTemplate.update("""
             UPDATE clinic_queue_announcements
             SET status = 'EXPIRED'
@@ -363,7 +364,7 @@ public class ClinicQueueService {
 
     @Transactional
     public Map<String, Object> markAnnouncementPlayed(String id, SessionUser user) {
-        requireRole(user, READ_ROLES, "当前岗位无权确认播报结果");
+        requireRole(user, DISPLAY_ROLES, "当前岗位无权确认播报结果");
         jdbcTemplate.update("""
             UPDATE clinic_queue_announcements
             SET status = 'PLAYED', play_count = play_count + 1, played_at = ?
@@ -742,7 +743,14 @@ public class ClinicQueueService {
             """, (RowCallbackHandler) rs -> calling.add(readDisplayTask(rs)), stage);
         List<Map<String, Object>> waiting = recommendedWaiting(stage, false);
         if (waiting.size() > 10) waiting = waiting.subList(0, 10);
-        return Map.of("room", plain(room), "calling", plain(calling), "waiting", waiting);
+        ArrayNode missed = objectMapper.createArrayNode();
+        jdbcTemplate.query("""
+            SELECT t.id, t.status, t.called_at, t.updated_at, q.public_no, q.visit_type
+            FROM clinic_queue_tasks t JOIN clinic_queue_tickets q ON q.id = t.ticket_id
+            WHERE t.stage_code = ? AND q.business_date = CURDATE() AND t.status = 'MISSED'
+            ORDER BY t.updated_at DESC LIMIT 5
+            """, (RowCallbackHandler) rs -> missed.add(readDisplayTask(rs)), stage);
+        return Map.of("room", plain(room), "calling", plain(calling), "waiting", waiting, "missed", plain(missed));
     }
 
     private List<Map<String, Object>> recommendedWaiting(String stage, boolean includeReason) {

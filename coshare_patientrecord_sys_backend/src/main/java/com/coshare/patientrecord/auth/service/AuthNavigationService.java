@@ -457,6 +457,10 @@ public class AuthNavigationService {
         result.put("decoction", role(union(paths("/home/index"), tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=decoction:execute,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
         )));
+        result.put("display", role(paths("/tcm-pharmacy/clinic-queue/display", "/tcm-pharmacy/display"), permissions(
+            "clinicQueueDisplayMenu=display:read,announcement:play",
+            "tcmPharmacyDisplayMenu=display:read,announcement:play"
+        )));
 
         result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record", "/templates/ai-document"), tcmPharmacy, clinicQueue, inventoryStaff), mergePermissions(permissions(
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "encounterActive=patient:read,field:read",

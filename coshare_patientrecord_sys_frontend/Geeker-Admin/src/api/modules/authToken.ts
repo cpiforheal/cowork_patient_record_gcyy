@@ -5,6 +5,12 @@ const USER_STORE_KEY = "geeker-user";
 const AUTH_EXPIRED_MESSAGE = "\u767b\u5f55\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55";
 
 let redirectingToLogin = false;
+// 展示大屏等无人值守页面开启后，401 不再清 token、不跳登录页，由页面自行呈现会话失效引导。
+let authRedirectSuppressed = false;
+
+export const setAuthRedirectSuppressed = (suppressed: boolean) => {
+  authRedirectSuppressed = suppressed;
+};
 
 export class AuthExpiredError extends Error {
   status = 401;
@@ -59,6 +65,7 @@ export const clearStoredAuthSession = () => {
 };
 
 export const handleUnauthorizedResponse = (message = AUTH_EXPIRED_MESSAGE): never => {
+  if (authRedirectSuppressed) throw new AuthExpiredError(message);
   clearStoredAuthSession();
   if (typeof window !== "undefined" && !redirectingToLogin) {
     const normalizedLogin = LOGIN_URL.startsWith("/") ? LOGIN_URL : `/${LOGIN_URL}`;
