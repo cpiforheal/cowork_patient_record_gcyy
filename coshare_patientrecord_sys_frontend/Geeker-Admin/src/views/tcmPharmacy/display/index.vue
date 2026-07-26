@@ -111,6 +111,8 @@ const snapshot = reactive<TcmDisplaySnapshot>({
 const { clock, dateText, calibrate } = useDisplayClock();
 
 const { offline, sessionExpired, lastUpdated, offlineSince, refreshNow, setIntervalSeconds } = useDisplayPolling({
+  // 连续离线 10 分钟后整页重载自愈（无人值守大屏的最后兜底）。
+  watchdogReloadSeconds: 600,
   refresh: async () => {
     const [{ data }, announcements] = await Promise.all([getTcmDisplayApi(), getPendingTcmAnnouncementsApi()]);
     Object.assign(snapshot, data);
