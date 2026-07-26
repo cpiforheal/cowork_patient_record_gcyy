@@ -27,6 +27,8 @@ public class InventoryDatabaseService {
     private final InventoryLedgerService ledgerService;
     private final InventoryStageConsumptionService consumptionService;
     private final InventoryDepartmentReportService reportService;
+    private final InventoryWeeklyService weeklyService;
+    private final InventoryWeeklyExportService weeklyExportService;
 
     public InventoryDatabaseService(
         InventoryRepository repository,
@@ -36,7 +38,9 @@ public class InventoryDatabaseService {
         InventoryLedgerRepository ledgerRepository,
         InventoryLedgerService ledgerService,
         InventoryStageConsumptionService consumptionService,
-        InventoryDepartmentReportService reportService
+        InventoryDepartmentReportService reportService,
+        InventoryWeeklyService weeklyService,
+        InventoryWeeklyExportService weeklyExportService
     ) {
         this.repository = repository;
         this.requestWorkflow = requestWorkflow;
@@ -46,6 +50,8 @@ public class InventoryDatabaseService {
         this.ledgerService = ledgerService;
         this.consumptionService = consumptionService;
         this.reportService = reportService;
+        this.weeklyService = weeklyService;
+        this.weeklyExportService = weeklyExportService;
     }
 
     public ObjectNode readDb() {
@@ -226,6 +232,51 @@ public class InventoryDatabaseService {
 
     public byte[] exportDepartmentUsagePdf(ObjectNode report) {
         return reportService.exportPdf(report);
+    }
+
+    public ObjectNode weeklyStandards() {
+        return weeklyService.listStandards();
+    }
+
+    public ObjectNode weeklyStandard(String id) {
+        return weeklyService.getStandard(id);
+    }
+
+    public ObjectNode saveWeeklyStandard(JsonNode payload, SessionUser user) {
+        return weeklyService.saveStandard(payload, user);
+    }
+
+    public ObjectNode publishWeeklyStandard(JsonNode payload, SessionUser user) {
+        return weeklyService.publishStandard(payload, user);
+    }
+
+    public ObjectNode deleteWeeklyStandard(JsonNode payload, SessionUser user) {
+        return weeklyService.deleteStandard(payload, user);
+    }
+
+    public ObjectNode weeklySnapshots(SessionUser user, String departmentId, String weekNo) {
+        return weeklyService.listSnapshots(user, departmentId, weekNo);
+    }
+
+    public ObjectNode weeklySnapshot(String id, SessionUser user) {
+        return weeklyService.getSnapshot(id, user);
+    }
+
+    public ObjectNode generateWeeklySnapshot(JsonNode payload, SessionUser user) {
+        return weeklyService.generateSnapshot(payload, user);
+    }
+
+    public ObjectNode confirmWeeklySnapshot(JsonNode payload, SessionUser user) {
+        return weeklyService.confirmSnapshot(payload, user);
+    }
+
+    public ObjectNode reviseWeeklySnapshot(JsonNode payload, SessionUser user) {
+        return weeklyService.reviseSnapshot(payload, user);
+    }
+
+    public InventoryWeeklyExportService.ExportFile exportWeeklySnapshot(String id, String format, SessionUser user) {
+        ObjectNode snapshot = weeklyService.getSnapshot(id, user);
+        return weeklyExportService.export(snapshot, format, user);
     }
 
     private String scopedDepartmentId(SessionUser user, String requestedDepartmentId) {

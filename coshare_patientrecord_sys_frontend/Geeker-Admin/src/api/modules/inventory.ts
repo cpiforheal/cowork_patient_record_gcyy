@@ -302,6 +302,144 @@ export interface InventoryConsumptionRecord {
   errorMessage?: string;
 }
 
+export type InventoryWeeklyStandardStatus = "DRAFT" | "PUBLISHED" | "RETIRED";
+export type InventoryWeeklySnapshotStatus = "DRAFT" | "CONFIRMED" | "REVISED";
+export type InventoryWeeklyExportFormat = "xlsx" | "pdf" | "docx";
+
+export interface InventoryWeeklyLinePolicy {
+  careType?: InventoryCareType;
+  plannedPatientVolume?: number;
+  actualPatientVolume?: number;
+  patientVolumeSource?: string;
+  consumptionEventVolume?: number;
+  perPatientStandardQuantity?: number;
+  varianceFlag?: string;
+  businessVolume?: number;
+  standardQuantity?: number;
+  standardUnit?: string;
+  conversionFactor?: number;
+  baseUnit?: string;
+  expectedOverrideQuantity?: number;
+  safetyStockQuantity?: number;
+  strictValidation?: boolean;
+}
+
+export interface InventoryWeeklyStandardLine {
+  id?: string;
+  standardId?: string;
+  departmentId: string;
+  departmentName?: string;
+  itemId: string;
+  itemName?: string;
+  itemUnit?: string;
+  expectedQuantity?: number;
+  safetyStockQuantity?: number;
+  calculationPolicy?: string;
+  linePolicy?: InventoryWeeklyLinePolicy;
+  status?: string;
+  createdAt?: string;
+  careType?: InventoryCareType;
+  plannedPatientVolume?: number;
+  businessVolume?: number;
+  standardQuantity?: number;
+  standardUnit?: string;
+  conversionFactor?: number;
+  baseUnit?: string;
+}
+
+export interface InventoryWeeklyStandard {
+  id: string;
+  standardCode: string;
+  version: number;
+  name: string;
+  status: InventoryWeeklyStandardStatus;
+  effectiveWeek: string;
+  expiresWeek?: string;
+  hospitalTimezone?: string;
+  policy?: Record<string, unknown>;
+  lineCount?: number;
+  publishedBy?: string;
+  publishedAt?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lines?: InventoryWeeklyStandardLine[];
+}
+
+export interface InventoryWeeklySnapshotLine {
+  id: string;
+  snapshotId?: string;
+  standardLineId?: string;
+  careType?: InventoryCareType;
+  itemId: string;
+  itemName: string;
+  itemUnit?: string;
+  openingQuantity?: number;
+  inboundQuantity?: number;
+  transferInQuantity?: number;
+  transferOutQuantity?: number;
+  consumedQuantity?: number;
+  reversalQuantity?: number;
+  returnedQuantity?: number;
+  scrappedQuantity?: number;
+  countAdjustmentQuantity?: number;
+  closingQuantity?: number;
+  reservedQuantity?: number;
+  availableQuantity?: number;
+  expectedQuantity?: number;
+  expectedActualVariance?: number;
+  safetyStockQuantity?: number;
+  suggestedQuantity?: number;
+  adjustedQuantity?: number;
+  adjustmentVariance?: number;
+  adjustmentReason?: string;
+  sourceSummary?: Record<string, unknown> &
+    InventoryWeeklyLinePolicy & {
+      actualBusinessVolume?: number;
+      movementCount?: number;
+    };
+}
+
+export interface InventoryWeeklyAuditEvent {
+  id: string;
+  actionCode: string;
+  actorName?: string;
+  actorRole?: string;
+  departmentId?: string;
+  detail?: Record<string, unknown>;
+  occurredAt?: string;
+}
+
+export interface InventoryWeeklySnapshot {
+  id: string;
+  weekNo: string;
+  departmentId: string;
+  departmentName?: string;
+  standardId?: string;
+  standardVersion?: number;
+  revision: number;
+  previousSnapshotId?: string;
+  rootSnapshotId?: string;
+  status: InventoryWeeklySnapshotStatus;
+  sourceCutoffAt?: string;
+  hospitalTimezone?: string;
+  calculationVersion?: string;
+  sourceDigest?: string;
+  lineCount?: number;
+  totalExpectedQuantity?: number;
+  totalActualConsumedQuantity?: number;
+  totalAdjustedQuantity?: number;
+  revisionReason?: string;
+  confirmationNote?: string;
+  confirmedBy?: string;
+  confirmedAt?: string;
+  createdBy?: string;
+  createdAt?: string;
+  commandId?: string;
+  lines?: InventoryWeeklySnapshotLine[];
+  auditEvents?: InventoryWeeklyAuditEvent[];
+}
+
 type InventoryApiList<T> = { list?: T[] };
 
 type InventoryWorkbenchApi = {
@@ -445,6 +583,44 @@ export interface SaveInventoryPackageParams {
 export interface InventoryPackageActionParams {
   id: string;
   operator?: string;
+}
+
+export interface SaveInventoryWeeklyStandardParams {
+  id?: string;
+  standardCode?: string;
+  name: string;
+  effectiveWeek: string;
+  expiresWeek?: string;
+  hospitalTimezone?: string;
+  calculationPolicy?: string;
+  lines: InventoryWeeklyStandardLine[];
+}
+
+export interface InventoryWeeklySnapshotQueryParams {
+  weekNo?: string;
+  departmentId?: string;
+}
+
+export interface GenerateInventoryWeeklySnapshotParams {
+  weekNo: string;
+  departmentId?: string;
+  adjustmentReason?: string;
+  idempotencyKey?: string;
+}
+
+export interface ConfirmInventoryWeeklySnapshotParams {
+  id: string;
+  expectedRevision?: number;
+  confirmationNote?: string;
+  idempotencyKey?: string;
+}
+
+export interface ReviseInventoryWeeklySnapshotParams {
+  id: string;
+  expectedRevision?: number;
+  revisionReason: string;
+  idempotencyKey?: string;
+  lines: { itemId: string; careType?: InventoryCareType; adjustedQuantity: number; adjustmentReason?: string }[];
 }
 
 const parseInventoryJson = async (result: Response) => {
@@ -591,6 +767,15 @@ const postInventory = async <T extends object>(path: string, payload: T) => {
     body: JSON.stringify(payload)
   });
   return parseInventoryResponse(result);
+};
+
+const postInventoryData = async <T, P extends object>(path: string, payload: P) => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  return response(await parseInventoryDataResponse<T>(result));
 };
 
 const response = <T>(data: T, msg = "成功") =>
@@ -770,13 +955,8 @@ export const getInventoryConsumptionsApi = async (params: InventoryQueryParams =
   return response((result.data.list || []).map(normalizeConsumption));
 };
 
-export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageReportParams): Promise<InventoryReportDownload> => {
-  const { format, stage, ...filters } = params;
-  const query = { ...filters, triggerStage: stage };
-  const result = await fetch(
-    `${INVENTORY_API_BASE_URL}/reports/department-usage.${format}${buildInventoryQuery(query as unknown as Record<string, unknown>)}`,
-    { headers: authHeaders() }
-  );
+const downloadInventoryFile = async (path: string, fallback: string): Promise<InventoryReportDownload> => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}`, { headers: authHeaders() });
   if (result.status === 401) handleUnauthorizedResponse();
   if (!result.ok) {
     const text = await result.text();
@@ -787,12 +967,21 @@ export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageRe
     } catch {
       // Keep the server text when the response is not JSON.
     }
-    throw new Error(message || `科室耗材报表导出失败: ${result.status}`);
+    throw new Error(message || `文件导出失败: ${result.status}`);
   }
   return {
     blob: await result.blob(),
-    filename: readDownloadFilename(result, `department-usage.${format}`)
+    filename: readDownloadFilename(result, fallback)
   };
+};
+
+export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageReportParams): Promise<InventoryReportDownload> => {
+  const { format, stage, ...filters } = params;
+  const query = { ...filters, triggerStage: stage };
+  return downloadInventoryFile(
+    `/reports/department-usage.${format}${buildInventoryQuery(query as unknown as Record<string, unknown>)}`,
+    `department-usage.${format}`
+  );
 };
 
 export const saveInventoryItemApi = async (params: SaveInventoryItemParams) =>
@@ -824,6 +1013,46 @@ export const voidInventoryRequestApi = async (params: InventoryActionParams) =>
 
 export const saveWeeklyConsumptionApi = async (params: WeeklyConsumptionParams) =>
   response(await postInventory("/weekly-consumptions", params), "周消耗已确认");
+
+export const getInventoryWeeklyStandardsApi = async () => {
+  const result = await getInventoryData<InventoryApiList<InventoryWeeklyStandard>>("/weekly/standards");
+  return response(result.data.list || []);
+};
+
+export const getInventoryWeeklyStandardApi = async (id: string) =>
+  getInventoryData<InventoryWeeklyStandard>("/weekly/standards/detail", { id });
+
+export const saveInventoryWeeklyStandardApi = async (params: SaveInventoryWeeklyStandardParams) =>
+  postInventoryData<InventoryWeeklyStandard, SaveInventoryWeeklyStandardParams>("/weekly/standards", params);
+
+export const publishInventoryWeeklyStandardApi = async (id: string) =>
+  postInventoryData<InventoryWeeklyStandard, { id: string }>("/weekly/standards/publish", { id });
+
+export const deleteInventoryWeeklyStandardApi = async (id: string) =>
+  postInventoryData<{ deleted: string }, { id: string }>("/weekly/standards/delete", { id });
+
+export const getInventoryWeeklySnapshotsApi = async (params: InventoryWeeklySnapshotQueryParams = {}) => {
+  const result = await getInventoryData<InventoryApiList<InventoryWeeklySnapshot>>(
+    "/weekly/snapshots",
+    params as Record<string, unknown>
+  );
+  return response(result.data.list || []);
+};
+
+export const getInventoryWeeklySnapshotApi = async (id: string) =>
+  getInventoryData<InventoryWeeklySnapshot>("/weekly/snapshots/detail", { id });
+
+export const generateInventoryWeeklySnapshotApi = async (params: GenerateInventoryWeeklySnapshotParams) =>
+  postInventoryData<InventoryWeeklySnapshot, GenerateInventoryWeeklySnapshotParams>("/weekly/snapshots/generate", params);
+
+export const confirmInventoryWeeklySnapshotApi = async (params: ConfirmInventoryWeeklySnapshotParams) =>
+  postInventoryData<InventoryWeeklySnapshot, ConfirmInventoryWeeklySnapshotParams>("/weekly/snapshots/confirm", params);
+
+export const reviseInventoryWeeklySnapshotApi = async (params: ReviseInventoryWeeklySnapshotParams) =>
+  postInventoryData<InventoryWeeklySnapshot, ReviseInventoryWeeklySnapshotParams>("/weekly/snapshots/revise", params);
+
+export const downloadInventoryWeeklySnapshotApi = async (id: string, format: InventoryWeeklyExportFormat) =>
+  downloadInventoryFile(`/weekly/snapshots/export${buildInventoryQuery({ id, format })}`, `inventory-weekly-snapshot.${format}`);
 
 export const returnOrScrapInventoryApi = async (params: ReturnOrScrapParams) =>
   response(await postInventory("/movements/return-or-scrap", params), "库存变更已记录");

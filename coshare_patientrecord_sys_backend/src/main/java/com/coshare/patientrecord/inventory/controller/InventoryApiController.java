@@ -154,6 +154,76 @@ public class InventoryApiController {
         );
     }
 
+    @GetMapping("/inventory-api/weekly/standards")
+    public ApiResult<Map<String, Object>> weeklyStandards() {
+        requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.weeklyStandards()));
+    }
+
+    @GetMapping("/inventory-api/weekly/standards/detail")
+    public ApiResult<Map<String, Object>> weeklyStandard(@RequestParam String id) {
+        requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.weeklyStandard(id)));
+    }
+
+    @PostMapping("/inventory-api/weekly/standards")
+    public ApiResult<Map<String, Object>> saveWeeklyStandard(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "周度标准草稿已保存", databaseService.asMap(databaseService.saveWeeklyStandard(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/weekly/standards/publish")
+    public ApiResult<Map<String, Object>> publishWeeklyStandard(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "周度标准已发布", databaseService.asMap(databaseService.publishWeeklyStandard(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/weekly/standards/delete")
+    public ApiResult<Map<String, Object>> deleteWeeklyStandard(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "周度标准草稿已删除", databaseService.asMap(databaseService.deleteWeeklyStandard(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/weekly/snapshots")
+    public ApiResult<Map<String, Object>> weeklySnapshots(
+        @RequestParam(required = false) String departmentId,
+        @RequestParam(required = false) String weekNo
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.weeklySnapshots(user, departmentId, weekNo)));
+    }
+
+    @GetMapping("/inventory-api/weekly/snapshots/detail")
+    public ApiResult<Map<String, Object>> weeklySnapshot(@RequestParam String id) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.weeklySnapshot(id, user)));
+    }
+
+    @PostMapping("/inventory-api/weekly/snapshots/generate")
+    public ApiResult<Map<String, Object>> generateWeeklySnapshot(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:count");
+        return ApiResult.of(200, "周度库存快照已生成", databaseService.asMap(databaseService.generateWeeklySnapshot(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/weekly/snapshots/confirm")
+    public ApiResult<Map<String, Object>> confirmWeeklySnapshot(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "周度库存快照已确认", databaseService.asMap(databaseService.confirmWeeklySnapshot(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/weekly/snapshots/revise")
+    public ApiResult<Map<String, Object>> reviseWeeklySnapshot(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "周度库存更正版本已生成", databaseService.asMap(databaseService.reviseWeeklySnapshot(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/weekly/snapshots/export")
+    public ResponseEntity<byte[]> exportWeeklySnapshot(@RequestParam String id, @RequestParam String format) {
+        SessionUser user = requireCapability("inventory:export");
+        var file = databaseService.exportWeeklySnapshot(id, format, user);
+        return attachment(file.body(), file.filename(), file.mediaType());
+    }
+
     @PostMapping("/inventory-api/items")
     public ApiResult<Map<String, Object>> saveItem(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:issue");

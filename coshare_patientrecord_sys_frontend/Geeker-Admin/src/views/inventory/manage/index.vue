@@ -175,7 +175,28 @@
           </template>
 
           <template v-else-if="activeTab === 'weekly'">
-            <WeeklyPanel :rows="weeklyRows" :can-create="hasInventoryAuth('inventory:request')" @create="openWeeklyDialog" />
+            <WeeklyPanel
+              :rows="weeklyRows"
+              :standards="weeklyStandards"
+              :snapshots="weeklySnapshots"
+              :items="db.items"
+              :department-options="weeklyDepartmentOptions"
+              :current-week-no="currentWeekNo()"
+              :can-approve="hasInventoryAuth('inventory:approve')"
+              :can-count="hasInventoryAuth('inventory:count')"
+              :can-export="hasInventoryAuth('inventory:export')"
+              :saving="saving"
+              :loading="weeklyLoading"
+              @refresh-weekly="loadWeekly"
+              @save-standard="saveWeeklyStandard"
+              @publish-standard="publishWeeklyStandard"
+              @delete-standard="deleteWeeklyStandard"
+              @generate-snapshot="generateWeeklySnapshot"
+              @view-snapshot="viewWeeklySnapshot"
+              @confirm-snapshot="confirmWeeklySnapshot"
+              @revise-snapshot="reviseWeeklySnapshot"
+              @export-snapshot="exportWeeklySnapshot"
+            />
           </template>
 
           <template v-else-if="activeTab === 'controls'">
@@ -447,39 +468,54 @@ import { useRoute, useRouter } from "vue-router";
 import {
   approveInventoryRequestApi,
   cancelInventoryRequestApi,
+  confirmInventoryWeeklySnapshotApi,
   countInventoryApi,
   createInventoryRequestApi,
+  deleteInventoryWeeklyStandardApi,
   downloadDepartmentUsageReportApi,
+  downloadInventoryWeeklySnapshotApi,
+  generateInventoryWeeklySnapshotApi,
   getInventoryConsumptionsApi,
   getInventoryDbApi,
   getInventoryExceptionsApi,
   getInventoryLocationBalancesApi,
+  getInventoryWeeklySnapshotApi,
+  getInventoryWeeklySnapshotsApi,
+  getInventoryWeeklyStandardsApi,
   getInventoryWorkbenchApi,
   inboundInventoryApi,
   issueInventoryRequestApi,
+  publishInventoryWeeklyStandardApi,
   receiveInventoryRequestApi,
   rejectInventoryRequestApi,
+  reviseInventoryWeeklySnapshotApi,
   returnOrScrapInventoryApi,
   saveInventoryItemApi,
+  saveInventoryWeeklyStandardApi,
   saveWeeklyConsumptionApi,
   saveInventoryPackageApi,
   enableInventoryPackageApi,
   disableInventoryPackageApi,
   retryInventoryConsumptionEventApi,
   voidInventoryRequestApi,
+  type DepartmentUsageReportParams,
+  type GenerateInventoryWeeklySnapshotParams,
   type InventoryBatch,
+  type InventoryConsumptionEvent,
   type InventoryConsumptionRecord,
   type InventoryDb,
   type InventoryException,
   type InventoryItem,
+  type InventoryCareType,
   type InventoryLocationBalance,
   type InventoryRequest,
+  type InventoryWeeklySnapshot,
+  type InventoryWeeklyStandard,
   type InventoryWorkbench,
   type ReturnOrScrapParams,
-  type DepartmentUsageReportParams,
   type InventoryPackage,
   type SaveInventoryPackageParams,
-  type InventoryConsumptionEvent
+  type SaveInventoryWeeklyStandardParams
 } from "@/api/modules/inventory";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
@@ -519,6 +555,9 @@ const inventoryConsumptions = ref<InventoryConsumptionRecord[]>([]);
 const extendedDataReady = ref(false);
 const extendedDataErrors = ref<string[]>([]);
 const reportLoading = ref<"" | "pdf" | "xlsx">("");
+const weeklyStandards = ref<InventoryWeeklyStandard[]>([]);
+const weeklySnapshots = ref<InventoryWeeklySnapshot[]>([]);
+const weeklyLoading = ref(false);
 
 const itemDialogVisible = ref(false);
 const inboundDialogVisible = ref(false);
@@ -837,7 +876,7 @@ const tabAuthMap: Record<string, readonly string[]> = {
   requests: ["inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
   stock: ["inventory:read"],
   items: ["inventory:read"],
-  weekly: ["inventory:request", "inventory:count"],
+  weekly: ["inventory:read", "inventory:count", "inventory:approve", "inventory:export"],
   controls: ["inventory:receive", "inventory:count"],
   packages: ["inventory:read", "inventory:approve"],
   trace: ["inventory:export", "inventory:issue", "inventory:count"]
@@ -921,6 +960,7 @@ const departmentOptions = computed(() =>
     ])
   ).filter(Boolean)
 );
+const weeklyDepartmentOptions = computed(() => departmentOptions.value.map(value => ({ value, label: value })));
 
 const categoryFilterOptions = computed(() => Array.from(new Set(db.value.items.map(row => row.category).filter(Boolean))));
 const reportDepartmentOptions = computed(() => {
@@ -1176,9 +1216,7 @@ const currentTabActions = computed(() => {
       ],
       stock: [{ label: "入库", action: "inbound", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
       items: [{ label: "新增物资", action: "item", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
-      weekly: [
-        { label: "确认周计划", action: "weekly", auth: "inventory:request", buttonProps: { type: "primary", icon: Plus } }
-      ],
+      weekly: [],
       controls: [{ label: "新增盘点", action: "count", auth: "inventory:count", buttonProps: { type: "primary", icon: Plus } }],
       trace: [
         { label: "导出流水", action: "exportTrace", auth: "inventory:export", buttonProps: { type: "primary", icon: Download } }
@@ -1509,16 +1547,36 @@ const loadExtendedInventory = async () => {
   extendedDataReady.value = results.every(result => result.status === "fulfilled");
 };
 
+const loadWeekly = async (filters: { weekNo?: string; departmentId?: string } = {}) => {
+  weeklyLoading.value = true;
+  try {
+    const [standardsResult, snapshotsResult] = await Promise.all([
+      getInventoryWeeklyStandardsApi(),
+      getInventoryWeeklySnapshotsApi({
+        weekNo: filters.weekNo || currentWeekNo(),
+        departmentId: filters.departmentId || currentDepartment.value || undefined
+      })
+    ]);
+    weeklyStandards.value = standardsResult.data;
+    weeklySnapshots.value = snapshotsResult.data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    weeklyLoading.value = false;
+  }
+};
+
 const loadInventory = async () => {
   loading.value = true;
   const extendedLoad = loadExtendedInventory();
+  const weeklyLoad = loadWeekly();
   try {
     const { data } = await getInventoryDbApi();
     db.value = data;
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
-    await extendedLoad;
+    await Promise.all([extendedLoad, weeklyLoad]);
     loading.value = false;
   }
 };
@@ -1857,6 +1915,135 @@ const saveWeekly = async () => {
     ElMessage.error((error as Error).message);
   } finally {
     saving.value = false;
+  }
+};
+
+const saveWeeklyStandard = async (payload: SaveInventoryWeeklyStandardParams) => {
+  if (!requireInventoryAuth("inventory:approve", "保存周度标准")) return;
+  saving.value = true;
+  try {
+    await saveInventoryWeeklyStandardApi(payload);
+    await loadWeekly();
+    ElMessage.success("周度标准草稿已保存");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const publishWeeklyStandard = async (row: InventoryWeeklyStandard) => {
+  if (!requireInventoryAuth("inventory:approve", "发布周度标准")) return;
+  saving.value = true;
+  try {
+    await publishInventoryWeeklyStandardApi(row.id);
+    await loadWeekly();
+    ElMessage.success("周度标准已发布");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const deleteWeeklyStandard = async (row: InventoryWeeklyStandard) => {
+  if (!requireInventoryAuth("inventory:approve", "删除周度标准")) return;
+  try {
+    await ElMessageBox.confirm(`确认删除标准“${row.name}”草稿？`, "删除周度标准", {
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+    saving.value = true;
+    await deleteInventoryWeeklyStandardApi(row.id);
+    await loadWeekly();
+    ElMessage.success("周度标准草稿已删除");
+  } catch (error) {
+    if (error !== "cancel") ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const generateWeeklySnapshot = async (payload: GenerateInventoryWeeklySnapshotParams) => {
+  if (!requireInventoryAuth("inventory:count", "生成周度快照")) return;
+  saving.value = true;
+  try {
+    await generateInventoryWeeklySnapshotApi(payload);
+    await loadWeekly({ weekNo: payload.weekNo, departmentId: payload.departmentId });
+    ElMessage.success("周度快照已生成");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const viewWeeklySnapshot = async (row: InventoryWeeklySnapshot) => {
+  try {
+    const result = await getInventoryWeeklySnapshotApi(row.id);
+    const index = weeklySnapshots.value.findIndex(item => item.id === row.id);
+    if (index >= 0) weeklySnapshots.value[index] = result.data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
+};
+
+const confirmWeeklySnapshot = async (row: InventoryWeeklySnapshot) => {
+  if (!requireInventoryAuth("inventory:approve", "确认周度快照")) return;
+  saving.value = true;
+  try {
+    await confirmInventoryWeeklySnapshotApi({ id: row.id, expectedRevision: row.revision, confirmationNote: "前端工作台确认" });
+    await loadWeekly({ weekNo: row.weekNo, departmentId: row.departmentId });
+    ElMessage.success("周度快照已确认");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const reviseWeeklySnapshot = async (payload: {
+  snapshot: InventoryWeeklySnapshot;
+  revisionReason: string;
+  lines: Array<{ itemId: string; careType?: InventoryCareType; adjustedQuantity: number; adjustmentReason: string }>;
+}) => {
+  if (!requireInventoryAuth("inventory:approve", "更正周度快照")) return;
+  saving.value = true;
+  try {
+    await reviseInventoryWeeklySnapshotApi({
+      id: payload.snapshot.id,
+      expectedRevision: payload.snapshot.revision,
+      revisionReason: payload.revisionReason,
+      lines: payload.lines.map(line => ({
+        itemId: line.itemId,
+        careType: line.careType,
+        adjustedQuantity: Number(line.adjustedQuantity || 0),
+        adjustmentReason: line.adjustmentReason
+      }))
+    });
+    await loadWeekly({ weekNo: payload.snapshot.weekNo, departmentId: payload.snapshot.departmentId });
+    ElMessage.success("周度快照更正已生成新版本");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const exportWeeklySnapshot = async (row: InventoryWeeklySnapshot, format: "xlsx" | "pdf" | "docx") => {
+  if (!requireInventoryAuth("inventory:export", "导出周度快照")) return;
+  try {
+    const { blob, filename } = await downloadInventoryWeeklySnapshotApi(row.id, format);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ElMessage.success("周度快照已导出");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
   }
 };
 
