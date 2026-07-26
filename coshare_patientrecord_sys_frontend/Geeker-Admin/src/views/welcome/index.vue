@@ -64,7 +64,7 @@
 
     <p class="welcome-footnote">数据每分钟自动更新 · 以各工作台实际业务为准</p>
     <transition name="care-fade">
-      <p v-if="splashing" class="splash-hint">即将进入工作台 · 点击任意处跳过</p>
+      <p v-if="splashing" class="splash-hint">点击任意处进入工作台</p>
     </transition>
   </div>
 </template>
@@ -293,12 +293,10 @@ const careTip = computed(() => {
 /* ---------------- 开屏动画：首次进入全屏展示后收纳回工作区 ---------------- */
 
 const SPLASH_KEY = "welcome-splash-played";
-const SPLASH_HOLD_MS = 2400;
 const SPLASH_SETTLE_MS = 900;
 
 const rootRef = ref<HTMLElement>();
 const splashing = ref(false);
-let splashHoldTimer = 0;
 let splashSettleTimer = 0;
 
 function playSplash() {
@@ -319,15 +317,14 @@ function playSplash() {
   el.style.height = "100vh";
   el.style.zIndex = "3000";
   el.style.borderRadius = "0";
+  // 全屏常驻展示，由用户点击任意处触发回收。
   el.addEventListener("click", settleSplash, { once: true });
-  splashHoldTimer = window.setTimeout(settleSplash, SPLASH_HOLD_MS);
 }
 
 /** 回收动画：从全屏过渡到布局主区域的实际位置，结束后交还文档流。 */
 function settleSplash() {
   if (!splashing.value) return;
   splashing.value = false;
-  window.clearTimeout(splashHoldTimer);
   const el = rootRef.value;
   const target = el?.parentElement?.getBoundingClientRect();
   if (!el || !target || target.width < 80) {
@@ -371,7 +368,6 @@ onBeforeUnmount(() => {
   window.clearInterval(clockTimer);
   window.clearInterval(summaryTimer);
   window.clearInterval(tipTimer);
-  window.clearTimeout(splashHoldTimer);
   window.clearTimeout(splashSettleTimer);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
 });
