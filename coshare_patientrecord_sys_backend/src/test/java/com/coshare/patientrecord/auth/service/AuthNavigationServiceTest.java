@@ -112,9 +112,10 @@ class AuthNavigationServiceTest {
         NavigationResult admin = service.navigationFor(user("admin"));
         assertThat(admin.capabilities()).doesNotContain("preai:review", "preai:stage:doctor:edit", "inventory:issue");
         assertThat(admin.capabilities()).contains(
-            "maintenance:purge", "maintenance:backup", "preai:encounter:create"
+            "maintenance:purge", "maintenance:backup", "inventory:item:manage", "preai:encounter:create"
         );
-        assertThat(admin.capabilities()).doesNotContain("inventory:item:manage");
+        assertThat(service.hasCapability(user("admin"), "inventory:item:manage")).isTrue();
+        assertThat(service.hasCapability(user("admin"), "inventory:issue")).isFalse();
         assertThat(service.hasCapability(user("admin"), "preai:encounter:create")).isTrue();
         assertThat(findMenu(admin.menus(), "/system/dataMaintenance").meta().title()).isEqualTo("数据维护");
         assertThat(findMenuOrNull(service.navigationFor(user("quality")).menus(), "/system/dataMaintenance")).isNull();

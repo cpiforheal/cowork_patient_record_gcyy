@@ -8,6 +8,7 @@ import org.springframework.web.server.ResponseStatusException;
 public final class InventoryPermission {
 
     private static final Set<String> APPROVER_ROLES = Set.of("warehouse");
+    private static final Set<String> ITEM_MANAGER_ROLES = Set.of("admin", "warehouse");
     private static final Set<String> COUNTER_ROLES = Set.of("warehouse", "quality");
     private static final Set<String> STAFF_ROLES = Set.of(
         "admin", "quality", "manager", "warehouse", "nurse", "doctor", "frontdesk", "reception",
@@ -42,7 +43,7 @@ public final class InventoryPermission {
 
     public static SessionUser requireStockKeeper() {
         SessionUser user = currentUserOrThrow();
-        if (!APPROVER_ROLES.contains(user.role())) {
+        if (!ITEM_MANAGER_ROLES.contains(user.role())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无物资档案及库存维护权限");
         }
         return user;

@@ -390,7 +390,7 @@ public class AuthNavigationService {
             "inventoryExecutive=inventory:read,inventory:export",
             "inventoryRequests=inventory:read,inventory:export",
             "inventoryStock=inventory:read,inventory:export",
-            "inventoryItems=inventory:read,inventory:export",
+            "inventoryItems=inventory:read,inventory:item:manage,inventory:export",
             "inventoryWeekly=inventory:read,inventory:export",
             "inventoryPackages=inventory:read",
             "inventoryControls=inventory:read,inventory:export",
