@@ -154,6 +154,7 @@ public class InventoryWeeklyService {
         if (expectedRevision != null && expectedRevision != snapshot.path("revision").asInt()) {
             throw new IllegalStateException("快照版本已变化，请刷新后重试");
         }
+        assertConfirmable(snapshot);
         String commandId = "weekly-command-" + UUID.randomUUID();
         weekly.beginCommand(commandId, idempotencyKey, "CONFIRM", weekNo, departmentId, expectedRevision, requestHash, payload, user.name(), user.role());
         weekly.confirmSnapshot(snapshotId, text(payload, "confirmationNote"), user.name(), user.role());
@@ -161,6 +162,53 @@ public class InventoryWeeklyService {
         weekly.completeCommand(commandId, snapshotId, confirmed);
         weekly.audit(snapshotId, commandId, null, "SNAPSHOT_CONFIRMED", user.name(), user.role(), departmentId, auditDetail("revision", String.valueOf(confirmed.path("revision").asInt())));
         return confirmed;
+    }
+
+    private void assertConfirmable(ObjectNode snapshot) {
+        if (!"DRAFT".equals(snapshot.path("status").asText())) {
+            throw new IllegalStateException("只有草稿快照可以确认");
+        }
+        if (!"CURRENT".equals(snapshot.path("validityStatus").asText("CURRENT"))) {
+            throw new IllegalStateException("该快照已失效，请重新生成更正版本");
+        }
+        String weekNo = snapshot.path("weekNo").asText();
+        String departmentId = snapshot.path("departmentId").asText();
+        LocalDate start = weekStart(weekNo);
+        LocalDate end = start.plusDays(6);
+        LocalDateTime expectedCutoff = end.plusDays(1).atStartOfDay();
+        if (!LocalDate.now().isAfter(end)) {
+            throw new IllegalStateException("本周尚未结束，只能生成草稿，不能正式确认");
+        }
+        LocalDateTime actualCutoff = LocalDateTime.parse(snapshot.path("sourceCutoffAt").asText());
+        if (!expectedCutoff.equals(actualCutoff)) {
+            throw new IllegalStateException("快照统计截止时间未锁定到周末，请重新生成快照");
+        }
+        Integer activeCommands = weekly.jdbc().queryForObject(
+            """
+            SELECT COUNT(*) FROM inventory_stage_consumption_commands
+            WHERE department_id = ? AND visit_date BETWEEN ? AND ?
+              AND status IN ('PENDING', 'PROCESSING', 'RETRY')
+            """,
+            Integer.class, departmentId, start, end
+        );
+        if (activeCommands != null && activeCommands > 0) {
+            throw new IllegalStateException("本周仍有待执行或处理中耗用任务，不能确认");
+        }
+        Integer openExceptions = weekly.jdbc().queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM inventory_exception_tasks x
+            JOIN inventory_stage_consumption_commands c ON c.id = x.command_id
+            WHERE c.department_id = ? AND c.visit_date BETWEEN ? AND ? AND x.status <> 'RESOLVED'
+            """,
+            Integer.class, departmentId, start, end
+        );
+        if (openExceptions != null && openExceptions > 0) {
+            throw new IllegalStateException("本周自动耗用异常尚未清零，不能确认");
+        }
+        if (!ledger.isOpeningConfirmed(departmentId)) {
+            throw new IllegalStateException("科室期初库存尚未确认，不能确认周度快照");
+        }
     }
 
     @Transactional
@@ -254,6 +302,7 @@ public class InventoryWeeklyService {
             source.put("baseUnit", linePolicy.path("baseUnit").asText(standardLine.itemUnit()));
             source.put("movementCount", flow.movementCount());
             source.put("source", "pre_ai_encounters + inventory_ledger_movements + inventory_consumption_events + inventory_weekly_standard_lines");
+            source.set("consumptionTrace", weekly.consumptionTrace(departmentId, standardLine.itemId(), careType, start, end, cutoff));
             if (actualPatientVolume == 0 && flow.actualConsumed().signum() > 0) {
                 source.put("varianceFlag", "CONSUMED_WITHOUT_REGISTERED_PATIENT_VOLUME");
             }

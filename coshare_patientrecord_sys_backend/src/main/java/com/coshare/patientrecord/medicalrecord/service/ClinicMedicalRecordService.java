@@ -2,6 +2,8 @@ package com.coshare.patientrecord.medicalrecord.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.medicalrecord.dto.DownloadFile;
+import com.coshare.patientrecord.medicalrecord.ooxml.DocxControlledEditor;
+import com.coshare.patientrecord.medicalrecord.ooxml.DocxNodeMapper;
 import com.coshare.patientrecord.medicalrecord.dto.FinalizeRequest;
 import com.coshare.patientrecord.medicalrecord.dto.InpatientAiGenerateRequest;
 import com.coshare.patientrecord.medicalrecord.dto.GenerateRequest;
@@ -80,6 +82,8 @@ public class ClinicMedicalRecordService {
     private final MedicalRecordVersionRepository versionRepository;
     private final ObjectMapper objectMapper;
     private final MedicalRecordTemplateRenderer templateRenderer;
+    private final DocxNodeMapper nodeMapper;
+    private final DocxControlledEditor controlledEditor;
     private final MedicalRecordSourceBuilder sourceBuilder;
     private final InpatientRecordAiService inpatientRecordAiService;
     private final Path generatedDir;
@@ -88,6 +92,8 @@ public class ClinicMedicalRecordService {
         MedicalRecordVersionRepository versionRepository,
         ObjectMapper objectMapper,
         MedicalRecordTemplateRenderer templateRenderer,
+        DocxNodeMapper nodeMapper,
+        DocxControlledEditor controlledEditor,
         MedicalRecordSourceBuilder sourceBuilder,
         InpatientRecordAiService inpatientRecordAiService,
         @Value("${clinic.generated-medical-record-dir:${clinic.attachment-dir}/../generated-medical-records}") String generatedDir
@@ -95,13 +101,15 @@ public class ClinicMedicalRecordService {
         this.versionRepository = versionRepository;
         this.objectMapper = objectMapper;
         this.templateRenderer = templateRenderer;
+        this.nodeMapper = nodeMapper;
+        this.controlledEditor = controlledEditor;
         this.sourceBuilder = sourceBuilder;
         this.inpatientRecordAiService = inpatientRecordAiService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
 
     public Map<String, Object> templateStatus(SessionUser user) {
-        requireReadRole();
+        requireReadRole(user);
         List<TargetField> outputFields = outputTargetFields();
         ArrayNode unboundFields = templateRenderer.unboundTemplateFields(TEMPLATE_RESOURCE, outputFields);
         ObjectNode status = objectMapper.createObjectNode();
@@ -128,7 +136,7 @@ public class ClinicMedicalRecordService {
     }
 
     public Map<String, Object> precheck(GenerateRequest request, SessionUser user) {
-        requireReadRole();
+        requireReadRole(user);
         ObjectNode source = generationSource(request, user, false);
         ObjectNode result = objectMapper.createObjectNode();
         List<TargetField> outputFields = outputTargetFields();
@@ -143,10 +151,10 @@ public class ClinicMedicalRecordService {
 
     @Transactional
     public Map<String, Object> saveWorkspace(WorkspaceSaveRequest request, SessionUser user) {
-        requireWorkspaceRole();
+        requireWorkspaceRole(user);
         String patientId = safe(request == null ? "" : request.patientId());
         if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
-        sourceBuilder.assertCanReadPatient(patientId);
+        sourceBuilder.assertCanReadPatient(patientId, user);
         JsonNode values = request == null || request.values() == null ? objectMapper.createObjectNode() : objectMapper.valueToTree(request.values());
         if (!values.isObject()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历字段必须是对象");
 
@@ -177,9 +185,9 @@ public class ClinicMedicalRecordService {
     }
 
     public Map<String, Object> versions(String patientId, String encounterId, SessionUser user, int limit) {
-        requireReadRole();
+        requireReadRole(user);
         String scopeId = generationScopeId(patientId, encounterId);
-        sourceBuilder.assertCanReadScope(scopeId);
+        sourceBuilder.assertCanReadScope(scopeId, user);
         ObjectNode result = objectMapper.createObjectNode();
         result.set("versions", versionRepository.versionsNode(scopeId, TEMPLATE_VERSION, GENERATOR_NAME, limit));
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
@@ -187,7 +195,7 @@ public class ClinicMedicalRecordService {
 
     @Transactional
     public Map<String, Object> generate(GenerateRequest request, SessionUser user) {
-        requireGenerateRole();
+        requireGenerateRole(user);
         String patientId = safe(request == null ? "" : request.patientId());
         String encounterId = safe(request == null ? "" : request.encounterId());
         String scopeId = generationScopeId(patientId, encounterId);
@@ -202,6 +210,7 @@ public class ClinicMedicalRecordService {
 
         ObjectNode sourceSnapshot = generationSource(request, user, false);
         ObjectNode logSnapshot = generationSource(request, user, true);
+        annotateSourceAudit(sourceSnapshot, logSnapshot, encounterId);
         ArrayNode missingItems = sourceBuilder.missingItems(sourceSnapshot, outputFields);
         if (encounterId.isBlank() && !missingItems.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历动态字段未补齐：" + joinArray(missingItems));
@@ -246,13 +255,87 @@ public class ClinicMedicalRecordService {
         MultipartFile referenceDocument,
         SessionUser user
     ) {
-        requireGenerateRole();
+        return generateInpatientAi(request, readReferenceDocument(referenceDocument), user);
+    }
+
+    @Transactional
+    public Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        String referenceFileName,
+        byte[] referenceBytes,
+        SessionUser user
+    ) {
+        return generateInpatientAi(
+            request,
+            readReferenceDocument(referenceFileName, referenceBytes),
+            DocxNodeMapper.MappingMode.LEGACY_ORDINAL,
+            List.of(),
+            user
+        );
+    }
+
+    @Transactional
+    public Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        String referenceFileName,
+        byte[] referenceBytes,
+        DocxNodeMapper.MappingMode mappingMode,
+        SessionUser user
+    ) {
+        return generateInpatientAi(
+            request,
+            readReferenceDocument(referenceFileName, referenceBytes),
+            mappingMode,
+            List.of(),
+            user
+        );
+    }
+
+    @Transactional
+    public Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        String referenceFileName,
+        byte[] referenceBytes,
+        DocxNodeMapper.MappingMode mappingMode,
+        List<String> targetNodeKeys,
+        SessionUser user
+    ) {
+        return generateInpatientAi(
+            request,
+            readReferenceDocument(referenceFileName, referenceBytes),
+            mappingMode,
+            targetNodeKeys,
+            user
+        );
+    }
+
+    private Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        ReferenceDocument reference,
+        SessionUser user
+    ) {
+        return generateInpatientAi(
+            request,
+            reference,
+            DocxNodeMapper.MappingMode.LEGACY_ORDINAL,
+            List.of(),
+            user
+        );
+    }
+
+    private Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        ReferenceDocument reference,
+        DocxNodeMapper.MappingMode mappingMode,
+        List<String> targetNodeKeys,
+        SessionUser user
+    ) {
+        requireGenerateRole(user);
         String patientId = safe(request == null ? "" : request.patientId());
         String encounterId = safe(request == null ? "" : request.encounterId());
         String scopeId = generationScopeId(patientId, encounterId);
         String prompt = safe(request == null ? "" : request.prompt());
         String sourceRecordId = safe(request == null ? "" : request.sourceRecordId());
-        ReferenceDocument reference = readReferenceDocument(referenceDocument);
         if (!sourceRecordId.isBlank()) {
             ObjectNode sourceRecord = loadRecordOrThrow(sourceRecordId);
             if (!scopeId.equals(text(sourceRecord, "patientId"))) {
@@ -266,8 +349,29 @@ public class ClinicMedicalRecordService {
         ObjectNode logSnapshot = encounterId.isBlank()
             ? sourceBuilder.readPatientSource(patientId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION)
             : sourceBuilder.readEncounterSource(encounterId, user, true, TEMPLATE_NAME, TEMPLATE_VERSION);
-        Map<String, String> replacements = sourceBuilder.buildTemplateValues(sourceSnapshot, outputTargetFields());
-        Set<String> allowedFields = new HashSet<>(templateRenderer.completeTemplatePlaceholderKeys(TEMPLATE_RESOURCE));
+        annotateSourceAudit(sourceSnapshot, logSnapshot, encounterId);
+        Map<String, String> currentValues = sourceBuilder.buildTemplateValues(sourceSnapshot, outputTargetFields());
+        DocxNodeMapper.MappingMode effectiveMappingMode = mappingMode == null
+            ? DocxNodeMapper.MappingMode.CONTROLLED
+            : mappingMode;
+        DocxNodeMapper.Catalog sourceCatalog = nodeMapper.catalog(reference.bytes());
+        List<String> availableNodeKeys = sourceCatalog.nodes().stream()
+            .map(DocxNodeMapper.CatalogNode::nodeKey)
+            .toList();
+        List<String> requestedNodeKeys = targetNodeKeys == null ? List.of() : targetNodeKeys.stream()
+            .map(ClinicMedicalRecordService::safe)
+            .filter(value -> !value.isBlank())
+            .distinct()
+            .toList();
+        if (requestedNodeKeys.size() != (targetNodeKeys == null ? 0 : targetNodeKeys.size())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "受控目标节点键不能为空或重复");
+        }
+        if (!availableNodeKeys.containsAll(requestedNodeKeys)) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "受控目标节点不存在或文档已变化");
+        }
+        List<String> controlledNodeKeys = effectiveMappingMode == DocxNodeMapper.MappingMode.CONTROLLED
+            ? (requestedNodeKeys.isEmpty() ? availableNodeKeys : requestedNodeKeys)
+            : List.of();
         InpatientRecordAiService.AiGeneration generated = inpatientRecordAiService.generate(
             prompt,
             reference.text(),
@@ -275,24 +379,32 @@ public class ClinicMedicalRecordService {
             sourceSnapshot.path("reviewedPreAiFacts").isObject()
                 ? (ObjectNode) sourceSnapshot.path("reviewedPreAiFacts")
                 : objectMapper.createObjectNode(),
-            replacements,
-            allowedFields
+            currentValues,
+            reference.paragraphs().size(),
+            controlledNodeKeys
         );
-        generated.fields().fields().forEachRemaining(entry -> replacements.put(entry.getKey(), entry.getValue().asText("")));
 
         int version = versionRepository.nextVersion(scopeId);
         String id = "medrec-" + UUID.randomUUID();
-        byte[] generatedBytes = templateRenderer.renderCompleteTemplate(TEMPLATE_RESOURCE, replacements);
+        List<String> generatedParagraphs = textValues(generated.paragraphs());
+        byte[] generatedBytes = rewriteReferenceDocument(
+            reference.bytes(),
+            generatedParagraphs,
+            generated.nodeReplacements(),
+            effectiveMappingMode
+        );
         String patientName = sourceSnapshot.path("patient").path("name").asText("patient");
         String fileName = sanitizeFileName(patientName) + "-AI住院病历-V" + version + ".docx";
         Path target = writeGeneratedFile(scopeId, id, fileName, generatedBytes);
+        logSnapshot.putPOJO("targetNodeKeys", controlledNodeKeys);
         logSnapshot.put("sourceRecordId", sourceRecordId);
         logSnapshot.put("encounterId", safe(request == null ? "" : request.encounterId()));
         logSnapshot.put("promptHash", sha256(prompt.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         logSnapshot.put("referenceDocumentName", reference.fileName());
         logSnapshot.put("referenceDocumentHash", reference.sha256());
-        logSnapshot.put("generatorType", "openai-compatible-inpatient-record");
-        logSnapshot.set("generatedFieldKeys", objectMapper.valueToTree(new HashSet<>(generated.fields().properties().stream().map(Map.Entry::getKey).toList())));
+        logSnapshot.put("generatorType", "openai-compatible-reference-docx-rewrite");
+        logSnapshot.put("mappingMode", effectiveMappingMode.name());
+        logSnapshot.put("generatedParagraphCount", generated.paragraphs().size());
         ObjectNode created = versionRepository.saveVersion(
             scopeId,
             id,
@@ -314,65 +426,94 @@ public class ClinicMedicalRecordService {
 
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", created);
-        result.put("generatedContent", buildCopyableInpatientContent(generated.fields()));
+        result.put("generatedContent", String.join("\n\n", generatedParagraphs));
         result.put("model", generated.model());
         result.set("missingItems", objectMapper.createArrayNode());
         result.put("disclaimer", "该版本由 GPT 兼容模型依据已复核病历事实和本次上传的参考文档生成，必须由医生复核后方可定稿。");
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
     }
 
+    private byte[] rewriteReferenceDocument(
+        byte[] referenceBytes,
+        List<String> generatedParagraphs,
+        Map<String, String> controlledReplacements,
+        DocxNodeMapper.MappingMode mappingMode
+    ) {
+        if (mappingMode == DocxNodeMapper.MappingMode.LEGACY_ORDINAL) {
+            return templateRenderer.rewriteReferenceDocument(referenceBytes, generatedParagraphs);
+        }
+        if (controlledReplacements == null || controlledReplacements.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型未返回受控 DOCX 节点内容");
+        }
+        try {
+            return controlledEditor.edit(referenceBytes, controlledReplacements).docxBytes();
+        } catch (IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, error.getMessage(), error);
+        }
+    }
+
     private ReferenceDocument readReferenceDocument(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请上传本次生成使用的 DOCX 参考文档");
         }
-        if (file.getSize() > MAX_REFERENCE_DOCUMENT_BYTES) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "参考文档不能超过 10 MB");
-        }
-        String fileName = safe(file.getOriginalFilename());
-        if (!fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".docx")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "参考文档仅支持 DOCX 格式");
-        }
         try {
-            byte[] bytes = file.getBytes();
-            String text = templateRenderer.referenceDocumentText(
-                new java.io.ByteArrayInputStream(bytes),
-                MAX_REFERENCE_DOCUMENT_CHARACTERS
-            );
-            if (text.isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传的 DOCX 未读取到正文内容");
-            }
-            return new ReferenceDocument(fileName, sha256(bytes), text);
-        } catch (ResponseStatusException error) {
-            throw error;
+            return readReferenceDocument(file.getOriginalFilename(), file.getBytes());
         } catch (IOException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "参考文档读取失败", error);
         }
     }
 
-    private String buildCopyableInpatientContent(ObjectNode generatedFields) {
-        List<String> blocks = new ArrayList<>();
-        generatedFields.fields().forEachRemaining(entry -> {
-            String value = safe(entry.getValue().asText(""));
-            if (!value.isBlank()) blocks.add(value);
-        });
-        return String.join(System.lineSeparator() + System.lineSeparator(), blocks);
+    private ReferenceDocument readReferenceDocument(String rawFileName, byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请上传本次生成使用的 DOCX 参考文档");
+        }
+        if (bytes.length > MAX_REFERENCE_DOCUMENT_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "参考文档不能超过 10 MB");
+        }
+        String fileName = safe(rawFileName);
+        if (!fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".docx")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "参考文档仅支持 DOCX 格式");
+        }
+        try {
+            List<String> paragraphs = templateRenderer.referenceDocumentParagraphs(
+                new java.io.ByteArrayInputStream(bytes),
+                MAX_REFERENCE_DOCUMENT_CHARACTERS
+            );
+            if (paragraphs.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "上传的 DOCX 未读取到正文内容");
+            }
+            return new ReferenceDocument(fileName, sha256(bytes), String.join("\n", paragraphs), paragraphs, bytes);
+        } catch (ResponseStatusException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "参考文档读取失败", error);
+        }
     }
 
-    private record ReferenceDocument(String fileName, String sha256, String text) {}
+    private List<String> textValues(ArrayNode values) {
+        List<String> result = new ArrayList<>();
+        values.forEach(value -> result.add(value.asText("")));
+        return List.copyOf(result);
+    }
+
+    private record ReferenceDocument(String fileName, String sha256, String text, List<String> paragraphs, byte[] bytes) {}
 
     @Transactional
     public Map<String, Object> finalizeRecord(FinalizeRequest request, SessionUser user) {
-        requireFinalizeRole();
+        requireFinalizeRole(user);
         String id = safe(request == null ? "" : request.id());
         if (id.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少目标病历版本ID");
         ObjectNode row = loadRecordOrThrow(id);
-        sourceBuilder.assertCanReadScope(text(row, "patientId"));
+        sourceBuilder.assertCanReadScope(text(row, "patientId"), user);
+        assertRecordCurrent(row, user, true);
         if (!"draft".equals(text(row, "status"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "只有草稿版本可以确认定稿");
         }
         row.put("status", "finalized");
         row.put("finalizedAt", now());
+        row.put("finalizedBy", user.name());
         versionRepository.upsertRaw(row);
+        versionRepository.writeAudit(text(row, "patientId"), user, "定稿目标病历", "medical-record.finalize", "定稿 V" + row.path("version").asInt());
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", row);
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
@@ -380,18 +521,22 @@ public class ClinicMedicalRecordService {
 
     @Transactional
     public Map<String, Object> voidRecord(VoidRequest request, SessionUser user) {
-        requireFinalizeRole();
+        requireFinalizeRole(user);
         String id = safe(request == null ? "" : request.id());
         if (id.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少目标病历版本ID");
         ObjectNode row = loadRecordOrThrow(id);
-        sourceBuilder.assertCanReadScope(text(row, "patientId"));
+        sourceBuilder.assertCanReadScope(text(row, "patientId"), user);
         if ("voided".equals(text(row, "status"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该版本已作废");
         }
+        String reason = safe(request == null ? "" : request.reason());
+        if (reason.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "作废原因不能为空");
         row.put("status", "voided");
         row.put("voidedAt", now());
-        row.put("voidReason", safe(request == null ? "" : request.reason()));
+        row.put("voidedBy", user.name());
+        row.put("voidReason", reason);
         versionRepository.upsertRaw(row);
+        versionRepository.writeAudit(text(row, "patientId"), user, "作废目标病历", "medical-record.void", "作废 V" + row.path("version").asInt() + "：" + reason);
         ObjectNode result = objectMapper.createObjectNode();
         result.set("record", row);
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
@@ -399,10 +544,10 @@ public class ClinicMedicalRecordService {
 
     @Transactional
     public Map<String, Object> deleteRecord(String id, SessionUser user) {
-        requireGenerateRole();
+        requireGenerateRole(user);
         ObjectNode row = loadRecordOrThrow(safe(id));
         String scopeId = text(row, "patientId");
-        sourceBuilder.assertCanReadScope(scopeId);
+        sourceBuilder.assertCanReadScope(scopeId, user);
         String status = text(row, "status");
         if (!Set.of("draft", "voided").contains(status)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "已定稿目标病历不可删除；如需更正，请先按病历管理流程作废");
@@ -488,9 +633,10 @@ public class ClinicMedicalRecordService {
     }
 
     public DownloadFile download(String id, SessionUser user) {
-        requireReadRole();
+        requireReadRole(user);
         ObjectNode row = loadRecordOrThrow(safe(id));
-        sourceBuilder.assertCanReadScope(text(row, "patientId"));
+        sourceBuilder.assertCanReadScope(text(row, "patientId"), user);
+        assertRecordCurrent(row, user, false);
         String filePath = text(row, "filePath");
         if (filePath.isBlank()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "该目标病历暂无可下载文件");
         Path target = Path.of(filePath).toAbsolutePath().normalize();
@@ -510,6 +656,39 @@ public class ClinicMedicalRecordService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID或前置病例ID");
         }
         return sourceBuilder.readPatientSource(patientId, user, maskSensitive, TEMPLATE_NAME, TEMPLATE_VERSION);
+    }
+
+    private void annotateSourceAudit(ObjectNode sourceSnapshot, ObjectNode logSnapshot, String encounterId) {
+        String sourceDigest = sha256(sourceSnapshot.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        logSnapshot.put("sourceDigest", sourceDigest);
+        if (!safe(encounterId).isBlank()) {
+            long factsRevision = sourceSnapshot.path("reviewedPreAiFacts").path("factsRevision").asLong(0L);
+            logSnapshot.put("sourceEncounterId", safe(encounterId));
+            logSnapshot.put("sourceFactsRevision", factsRevision);
+        }
+    }
+
+    private void assertRecordCurrent(ObjectNode row, SessionUser user, boolean requireCompleteFields) {
+        if (!"CURRENT".equalsIgnoreCase(text(row, "validityStatus", "CURRENT"))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该目标病历来源事实已变更，请基于最新事实重新生成");
+        }
+        String encounterId = text(row, "sourceEncounterId");
+        if (encounterId.isBlank() && text(row, "patientId").startsWith("preai:")) {
+            encounterId = text(row, "patientId").substring("preai:".length());
+        }
+        if (encounterId.isBlank()) return;
+
+        ObjectNode currentSource = sourceBuilder.readEncounterSource(encounterId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
+        long currentRevision = currentSource.path("reviewedPreAiFacts").path("factsRevision").asLong(0L);
+        if (row.has("sourceFactsRevision") && row.path("sourceFactsRevision").asLong() != currentRevision) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该目标病历对应的前置事实版本已过期，请重新生成");
+        }
+        if (requireCompleteFields) {
+            ArrayNode missingItems = sourceBuilder.missingItems(currentSource, outputTargetFields());
+            if (!missingItems.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "目标病历必填字段未补齐：" + joinArray(missingItems));
+            }
+        }
     }
 
     private String generationScopeId(String patientId, String encounterId) {
@@ -783,23 +962,31 @@ public class ClinicMedicalRecordService {
             .toList();
     }
 
-    private void requireReadRole() {
-        AuthPermission.requireAnyRole("当前账号无权查看目标病历", COLLABORATOR_ROLES.toArray(String[]::new));
+    private void requireReadRole(SessionUser user) {
+        requireRole(user, "当前账号无权查看目标病历", COLLABORATOR_ROLES);
     }
 
-    private void requireWorkspaceRole() {
-        AuthPermission.requireAnyRole(
-            "当前账号无权维护目标病历",
-            COLLABORATOR_ROLES.stream().filter(role -> !"admin".equals(role)).toArray(String[]::new)
-        );
+    private void requireWorkspaceRole(SessionUser user) {
+        requireRole(user, "当前账号无权维护目标病历", COLLABORATOR_ROLES.stream()
+            .filter(role -> !"admin".equals(role))
+            .toList());
     }
 
-    private void requireGenerateRole() {
-        AuthPermission.requireAnyRole("当前账号无权生成目标病历", "doctor");
+    private void requireGenerateRole(SessionUser user) {
+        requireRole(user, "当前账号无权生成目标病历", List.of("doctor"));
     }
 
-    private void requireFinalizeRole() {
-        AuthPermission.requireAnyRole("当前账号无权定稿目标病历", "doctor");
+    private void requireFinalizeRole(SessionUser user) {
+        requireRole(user, "当前账号无权定稿目标病历", List.of("doctor"));
+    }
+
+    private void requireRole(SessionUser user, String message, List<String> allowedRoles) {
+        if (user == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
+        }
+        if (!allowedRoles.contains(safe(user.role()))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, message);
+        }
     }
 
     private String joinArray(ArrayNode array) {

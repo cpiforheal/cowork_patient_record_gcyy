@@ -509,7 +509,7 @@ public class InventoryRepository {
     }
 
     public boolean isInventoryManager(SessionUser user) {
-        return "admin".equals(user.role()) || "quality".equals(user.role());
+        return "warehouse".equals(user.role());
     }
 
     public boolean sameDepartment(SessionUser user, JsonNode row) {

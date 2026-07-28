@@ -3,6 +3,7 @@ package com.coshare.patientrecord.inventory.service;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.inventory.repository.InventoryWeeklyRepository;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lowagie.text.Document;
 import com.lowagie.text.Element;
@@ -97,6 +98,12 @@ public class InventoryWeeklyExportService {
             }
             row(sheet, rowIndex + 1, "制表", "", "科室负责人", "", "复核", "", "日期", "");
             for (int i = 0; i < HEADERS.length; i++) sheet.setColumnWidth(i, Math.min(i == 0 || i == 25 ? 6800 : 3600, 12000));
+            Sheet traceSheet = workbook.createSheet("患者耗用追溯");
+            String[] traceHeaders = traceHeaders();
+            row(traceSheet, 0, traceHeaders);
+            int traceIndex = 1;
+            for (JsonNode trace : traceRows(snapshot)) row(traceSheet, traceIndex++, traceValues(trace));
+            for (int i = 0; i < traceHeaders.length; i++) traceSheet.setColumnWidth(i, i < 3 ? 5200 : 4200);
             workbook.write(output);
             return output.toByteArray();
         } catch (Exception error) {
@@ -127,6 +134,18 @@ public class InventoryWeeklyExportService {
                 for (int i = 0; i < values.length; i++) table.getRow(rowIndex).getCell(i).setText(values[i]);
                 rowIndex++;
             }
+            XWPFParagraph traceTitle = document.createParagraph();
+            traceTitle.createRun().setBold(true);
+            traceTitle.createRun().setText("患者耗用追溯明细");
+            ArrayNode traceRows = traceRows(snapshot);
+            XWPFTable traceTable = document.createTable(traceRows.size() + 1, traceHeaders().length);
+            for (int i = 0; i < traceHeaders().length; i++) traceTable.getRow(0).getCell(i).setText(traceHeaders()[i]);
+            int traceIndex = 1;
+            for (JsonNode trace : traceRows) {
+                String[] values = traceValues(trace);
+                for (int i = 0; i < values.length; i++) traceTable.getRow(traceIndex).getCell(i).setText(values[i]);
+                traceIndex++;
+            }
             XWPFParagraph sign = document.createParagraph();
             sign.createRun().setText("制表：____________    科室负责人：____________    复核：____________    日期：____________");
             document.write(output);
@@ -156,6 +175,12 @@ public class InventoryWeeklyExportService {
             for (String header : HEADERS) cell(table, body, header);
             for (JsonNode line : snapshot.withArray("lines")) for (String value : values(snapshot, line)) cell(table, body, value);
             document.add(table);
+            document.add(new Paragraph("患者耗用追溯明细", titleFont));
+            PdfPTable traceTable = new PdfPTable(traceHeaders().length);
+            traceTable.setWidthPercentage(100);
+            for (String header : traceHeaders()) cell(traceTable, body, header);
+            for (JsonNode trace : traceRows(snapshot)) for (String value : traceValues(trace)) cell(traceTable, body, value);
+            document.add(traceTable);
             document.add(new Paragraph("制表：____________    科室负责人：____________    复核：____________    日期：____________", body));
             document.close();
             return output.toByteArray();
@@ -175,6 +200,44 @@ public class InventoryWeeklyExportService {
             textNumber(line, "availableQuantity"), textNumber(line, "expectedQuantity"), textNumber(line, "expectedActualVariance"),
             textNumber(line, "safetyStockQuantity"), textNumber(line, "suggestedQuantity"), textNumber(line, "adjustedQuantity"),
             textNumber(line, "adjustmentVariance"), line.path("adjustmentReason").asText(""), statusLabel(snapshot), auditSource(line)
+        };
+    }
+
+    private static ArrayNode traceRows(ObjectNode snapshot) {
+        ArrayNode rows = snapshot.arrayNode();
+        for (JsonNode line : snapshot.withArray("lines")) {
+            for (JsonNode source : line.path("sourceSummary").path("consumptionTrace")) {
+                ObjectNode row = source.deepCopy();
+                row.put("itemName", line.path("itemName").asText());
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+
+    private static String[] traceHeaders() {
+        return new String[] {
+            "病例回查号", "就诊口径", "关联就诊", "物资", "耗用事件号", "命令号", "触发阶段", "完成版本",
+            "套餐号", "套餐版本", "批次", "数量", "事件类型", "冲销原事件"
+        };
+    }
+
+    private static String[] traceValues(JsonNode trace) {
+        return new String[] {
+            trace.path("caseToken").asText(),
+            "inpatient".equals(trace.path("careType").asText()) ? "住院" : "门诊",
+            trace.path("careEncounterId").asText(),
+            trace.path("itemName").asText(),
+            trace.path("eventId").asText(),
+            trace.path("commandId").asText(),
+            trace.path("triggerStage").asText(),
+            trace.path("completionVersion").asText(),
+            trace.path("packageId").asText(),
+            trace.path("packageVersion").asText(),
+            trace.path("batchNo").asText(trace.path("batchId").asText()),
+            trace.path("quantity").asText(),
+            trace.path("eventKind").asText(),
+            trace.path("reversalOfEventId").asText()
         };
     }
 

@@ -533,6 +533,14 @@
                       >完成并交接</el-button
                     >
                     <el-button
+                      v-if="canPhysicianConfirmSelectedSurgery"
+                      type="primary"
+                      :loading="actionLoading"
+                      @click="confirmSelectedSurgery"
+                    >
+                      医生确认手术事实
+                    </el-button>
+                    <el-button
                       v-if="canCorrectSelectedStage"
                       type="primary"
                       :loading="actionLoading"
@@ -698,8 +706,8 @@
 
     <el-dialog
       v-model="inpatientAiDialogVisible"
-      title="GPT 兼容模型生成住院病历"
-      width="720px"
+      title="以前置 DOCX 为基础生成住院病历"
+      width="920px"
       :close-on-click-modal="false"
       :close-on-press-escape="!inpatientAiGenerating"
       :show-close="!inpatientAiGenerating"
@@ -710,21 +718,26 @@
           type="info"
           :closable="false"
           show-icon
-          title="请上传本次生成使用的 DOCX 参考文档。模型只依据已复核前置事实和本次上传内容生成新的住院病历草稿，参考文档不会被保存。"
+          title="系统先对 DOCX 原包进行安全检查，再按受控节点精准回填；不会提取纯文本后重建默认样式文档。"
         />
         <div class="inpatient-ai-dialog__reference">
-          <span class="inpatient-ai-dialog__label">本次参考文档（必选）</span>
+          <span class="inpatient-ai-dialog__label">前置病历 DOCX（必选）</span>
           <input
             ref="inpatientAiReferenceInput"
             class="inpatient-ai-dialog__file-input"
             type="file"
             accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            :disabled="inpatientAiGenerating"
+            :disabled="inpatientAiGenerating || inpatientAiInspecting"
             @change="handleInpatientAiReferenceChange"
           />
           <div class="inpatient-ai-dialog__file-actions">
-            <el-button :icon="Upload" :disabled="inpatientAiGenerating" @click="openInpatientAiReferencePicker">
-              {{ inpatientAiReferenceDocument ? "替换 DOCX" : "选择 DOCX" }}
+            <el-button
+              :icon="Upload"
+              :loading="inpatientAiInspecting"
+              :disabled="inpatientAiGenerating"
+              @click="openInpatientAiReferencePicker"
+            >
+              {{ inpatientAiReferenceDocument ? "替换并重新检查" : "选择并检查 DOCX" }}
             </el-button>
             <span v-if="inpatientAiReferenceDocument" class="inpatient-ai-dialog__file-name">
               {{ inpatientAiReferenceDocument.name }}（{{ formatFileSize(inpatientAiReferenceDocument.size) }}）
@@ -740,38 +753,129 @@
               清除
             </el-button>
           </div>
-          <p>仅支持 DOCX，单个文件不超过 10 MB。文件只用于当前生成请求，关闭对话框后会清空选择。</p>
+          <p>仅支持 DOCX，单个文件不超过 10 MB。原包、净化包和检查报告受服务端权限及路径门禁保护。</p>
         </div>
-        <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">医生补充说明（可选）</label>
+
+        <section v-if="inpatientAiInspection" class="workflow-card">
+          <header class="workflow-card__head">
+            <strong>DOCX 安全检查</strong>
+            <div>
+              <el-tag :type="inspectionDecisionType">{{ inspectionDecisionLabel }}</el-tag>
+              <el-tag :type="inspectionRiskType" effect="plain">风险 {{ inpatientAiInspection.highestRiskLevel }}</el-tag>
+            </div>
+          </header>
+          <el-alert
+            v-if="!inpatientAiInspection.packageValidation.valid"
+            type="error"
+            :closable="false"
+            show-icon
+            title="OOXML 包结构校验未通过，禁止生成"
+          />
+          <div v-if="inpatientAiInspection.findings.length" class="finding-list">
+            <div v-for="finding in inpatientAiInspection.findings" :key="`${finding.code}-${finding.partName}`">
+              <el-tag size="small" :type="finding.risk === 'CRITICAL' || finding.risk === 'HIGH' ? 'danger' : 'warning'">{{
+                finding.risk
+              }}</el-tag>
+              <span
+                >{{ finding.message }}<small v-if="finding.partName"> · {{ finding.partName }}</small></span
+              >
+            </div>
+          </div>
+          <el-empty v-else :image-size="52" description="未发现危险部件" />
+        </section>
+
+        <section v-if="inpatientAiInspection?.nodes.length" class="workflow-card">
+          <header class="workflow-card__head">
+            <div>
+              <strong>受控节点目录</strong>
+              <small
+                >已选择 {{ inpatientAiTargetNodeKeys.length }} /
+                {{ inpatientAiInspection.nodes.length }} 个节点；不选择表示按全部可映射节点处理。</small
+              >
+            </div>
+            <el-select v-model="inpatientAiMappingMode" :disabled="inpatientAiGenerating" style="width: 180px">
+              <el-option label="受控语义映射" value="CONTROLLED" />
+              <el-option label="旧文档顺序映射" value="LEGACY_ORDINAL" />
+            </el-select>
+          </header>
+          <el-checkbox-group v-model="inpatientAiTargetNodeKeys" class="node-catalog" :disabled="inpatientAiGenerating">
+            <el-checkbox v-for="node in inpatientAiInspection.nodes" :key="node.nodeKey" :value="node.nodeKey">
+              <span>#{{ node.sequenceNo }} {{ node.preview || "空段落" }}</span>
+              <small>{{ node.locatorType }} · {{ node.locator || node.structuralPath }}</small>
+            </el-checkbox>
+          </el-checkbox-group>
+        </section>
+
+        <label class="inpatient-ai-dialog__label" for="inpatient-ai-prompt">生成要求</label>
         <el-input
           id="inpatient-ai-prompt"
           v-model="inpatientAiPrompt"
           type="textarea"
-          :rows="8"
+          :rows="6"
           maxlength="4000"
           show-word-limit
           resize="vertical"
           :disabled="inpatientAiGenerating"
         />
-        <p>Base URL、API Key 与模型由后台“病历 AI”配置读取，不会传到浏览器或写入病历文件。</p>
+
+        <section v-if="inpatientAiTask" class="workflow-card">
+          <header class="workflow-card__head">
+            <div>
+              <strong>异步生成任务</strong><small>{{ inpatientAiTask.taskId }}</small>
+            </div>
+            <el-tag :type="workflowTaskStatusType">{{ inpatientAiTask.status }}</el-tag>
+          </header>
+          <el-progress
+            :percentage="workflowProgressPercent"
+            :status="
+              inpatientAiTask.status === 'FAILED' ? 'exception' : inpatientAiTask.status === 'SUCCEEDED' ? 'success' : undefined
+            "
+          />
+          <p>当前阶段：{{ workflowStageLabel(inpatientAiTask.currentStage) }} · 第 {{ inpatientAiTask.attemptCount }} 次尝试</p>
+          <el-alert
+            v-if="inpatientAiTask.status === 'FAILED'"
+            type="error"
+            show-icon
+            :closable="false"
+            :title="`${inpatientAiTask.errorCode || 'GENERATION_FAILED'}：${inpatientAiTask.errorMessage || '生成失败'}`"
+          />
+          <el-timeline v-if="inpatientAiTask.events.length" class="task-events">
+            <el-timeline-item
+              v-for="event in inpatientAiTask.events"
+              :key="event.sequenceNo"
+              :timestamp="event.occurredAt"
+              placement="top"
+            >
+              {{ event.message || workflowStageLabel(event.stage) }}
+            </el-timeline-item>
+          </el-timeline>
+        </section>
       </div>
       <template #footer>
-        <el-button :disabled="inpatientAiGenerating" @click="closeInpatientAiDialog">取消 AI 加工</el-button>
+        <el-button @click="closeInpatientAiDialog">{{ inpatientAiGenerating ? "取消轮询" : "取消 AI 加工" }}</el-button>
         <el-button
+          v-if="inpatientAiTask?.status === 'FAILED'"
+          type="warning"
+          :loading="inpatientAiGenerating"
+          @click="retryInpatientAiGeneration"
+          >失败重试</el-button
+        >
+        <el-button
+          v-else
           type="primary"
           :loading="inpatientAiGenerating"
-          :disabled="!inpatientAiReferenceDocument"
+          :disabled="!inpatientAiInspection?.canGenerate || inpatientAiInspecting || Boolean(inpatientAiTask)"
           @click="completeInpatientAiGeneration"
         >
-          完成并生成
+          提交保真生成任务
         </el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="inpatientAiResultDialogVisible"
-      title="GPT 兼容模型已生成目标住院病历"
-      width="860px"
+      title="保真病历生成结果"
+      width="920px"
       :close-on-click-modal="false"
       destroy-on-close
     >
@@ -780,24 +884,42 @@
           type="success"
           :closable="false"
           show-icon
-          title="目标内容已生成并保存为新的病历草稿版本，请复制或下载后继续医生复核。"
+          title="新 DOCX 已基于检查后的原包完成节点级回填并另存为病历草稿版本。"
         />
         <div class="inpatient-ai-result__meta">
           <span>模型：{{ inpatientAiResultModel || "已配置 GPT 兼容模型" }}</span>
           <span v-if="inpatientAiResultRecord">版本：V{{ inpatientAiResultRecord.version }}</span>
+          <span v-if="inpatientAiTask">任务：{{ inpatientAiTask.taskId }}</span>
+          <span v-if="inpatientAiMappings">映射：{{ mappedNodeCount }} / {{ inpatientAiMappings.mappings.length }}</span>
         </div>
         <el-input
           v-model="inpatientAiResultContent"
           type="textarea"
-          :rows="18"
+          :rows="14"
           readonly
           resize="vertical"
           aria-label="GPT 兼容模型生成的目标住院病历内容"
         />
+        <el-collapse v-if="inpatientAiMappings?.mappings.length">
+          <el-collapse-item :title="`节点映射明细（${inpatientAiMappings.mappings.length}）`">
+            <div class="mapping-list">
+              <div v-for="mapping in inpatientAiMappings.mappings" :key="mapping.sequenceNo">
+                <el-tag size="small" :type="mapping.status === 'MAPPED' ? 'success' : 'warning'">{{ mapping.status }}</el-tag>
+                <span>{{ mapping.beforePreview || "空节点" }} → {{ mapping.afterPreview || "未回填" }}</span>
+              </div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
       <template #footer>
         <el-button @click="inpatientAiResultDialogVisible = false">关闭</el-button>
-        <el-button type="primary" :disabled="!inpatientAiResultContent" @click="copyInpatientAiResult"> 复制全部内容 </el-button>
+        <el-button :disabled="!inpatientAiResultContent" @click="copyInpatientAiResult">复制全部内容</el-button>
+        <el-button :disabled="!inpatientAiTask?.outputAssetId" @click="downloadInpatientAiOutputAsset"
+          >下载校验后输出资产</el-button
+        >
+        <el-button type="primary" :disabled="!inpatientAiResultRecord" @click="downloadInpatientAiResultRecord"
+          >下载 / 导出新 DOCX</el-button
+        >
       </template>
     </el-dialog>
 
@@ -837,14 +959,27 @@ import { useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
 import {
   deleteMedicalRecordApi,
+  downloadGeneratedMedicalRecordV2Api,
   downloadMedicalRecordApi,
-  generateInpatientAiMedicalRecordApi,
+  downloadMedicalRecordAssetV2Api,
   generateMedicalRecordApi,
-  getGeneratedMedicalRecordVersionsApi
+  getGeneratedMedicalRecordVersionsApi,
+  getMedicalRecordWorkflowMappingsApi,
+  inspectMedicalRecordDocumentV2Api,
+  pollMedicalRecordWorkflowTask,
+  retryMedicalRecordWorkflowTaskApi,
+  submitMedicalRecordWorkflowTaskApi
 } from "@/api/modules/clinic/medicalRecord";
+import type {
+  MedicalRecordDocxInspection,
+  MedicalRecordMappingMode,
+  MedicalRecordWorkflowMappings,
+  MedicalRecordWorkflowTask
+} from "@/api/modules/clinic/types";
 import { completeQueuePrintTaskApi, createQueuePrintTaskApi } from "@/api/modules/clinic/clinicQueue";
 import {
   completePreAiStageApi,
+  confirmPreAiSurgeryApi,
   correctPreAiStageApi,
   completePreAiLabApi,
   confirmPreAiReviewApi,
@@ -1020,16 +1155,26 @@ const targetVersionsLoading = ref(false);
 const deletingTargetVersionId = ref("");
 const latestGeneratedTargetVersionId = ref("");
 const latestGeneratedExportVersionId = ref("");
+const medicalRecordV2Enabled = false;
+const DEFAULT_INPATIENT_AI_PROMPT =
+  "请按照周xx病历的格式、结构、段落、排版、查房时序，完整生成【姓名】【西医主诊断+次诊断 】的住院病历，要求自动生成中药方剂参考主病、主证及兼证、四诊内容，理法一致，不改动任何格式与写法，排版相同。";
 const inpatientAiDialogVisible = ref(false);
 const inpatientAiGenerating = ref(false);
-const inpatientAiPrompt = ref("");
+const inpatientAiInspecting = ref(false);
+const inpatientAiPrompt = ref(DEFAULT_INPATIENT_AI_PROMPT);
 const inpatientAiReferenceDocument = ref<File>();
 const inpatientAiReferenceInput = ref<HTMLInputElement>();
+const inpatientAiInspection = ref<MedicalRecordDocxInspection>();
+const inpatientAiMappingMode = ref<MedicalRecordMappingMode>("CONTROLLED");
+const inpatientAiTargetNodeKeys = ref<string[]>([]);
+const inpatientAiTask = ref<MedicalRecordWorkflowTask>();
+const inpatientAiMappings = ref<MedicalRecordWorkflowMappings>();
 const pendingGeneratedTargetRecord = ref<GeneratedMedicalRecord>();
 const inpatientAiResultDialogVisible = ref(false);
 const inpatientAiResultContent = ref("");
 const inpatientAiResultModel = ref("");
 const inpatientAiResultRecord = ref<GeneratedMedicalRecord>();
+let inpatientAiAbortController: AbortController | undefined;
 let workspaceRequestSequence = 0;
 let workspaceImageRequestSequence = 0;
 let timelineRequestSequence = 0;
@@ -1067,7 +1212,8 @@ const createDialogVisible = ref(false);
 const createRequestId = ref("");
 const handoffNotice = ref("");
 const createForm = reactive<Record<string, any>>({
-  visitDate: currentLocalDateTime()
+  visitDate: currentLocalDateTime(),
+  inventoryCareType: "outpatient"
 });
 const patchCreateForm = (key: string, value: any) => {
   createForm[key] = value;
@@ -1212,8 +1358,15 @@ const canEditSelectedStage = computed(() => {
   const roleAllowed = Boolean(authStore.stagePermissions[selectedStageCode.value]?.editable);
   const dutyAllowed = hasAssignedDuty(...(stageDutyCodes[selectedStageCode.value] || []));
   if (!roleAllowed && !dutyAllowed) return false;
+  if (submission.status === "PENDING_CONFIRMATION") return false;
   return !["COMPLETED", "SKIPPED"].includes(submission.status);
 });
+const canPhysicianConfirmSelectedSurgery = computed(
+  () =>
+    selectedStageCode.value === "SURGERY" &&
+    selectedStageSubmission.value?.status === "PENDING_CONFIRMATION" &&
+    canConfirmSurgery.value
+);
 const canCorrectSelectedStage = computed(
   () =>
     Boolean(authStore.stagePermissions[selectedStageCode.value]?.correctable) &&
@@ -1379,7 +1532,13 @@ const treatmentPathLabel = (path?: string) =>
 const stageStatusClass = (status: PreAiStageStatus) =>
   status === "COMPLETED" ? "done" : status === "RETURNED" ? "returned" : status === "SKIPPED" ? "skipped" : "waiting";
 const stageStatusType = (status: PreAiStageStatus) =>
-  status === "COMPLETED" ? "success" : status === "RETURNED" ? "warning" : status === "SKIPPED" ? "info" : "info";
+  status === "COMPLETED"
+    ? "success"
+    : status === "RETURNED" || status === "PENDING_CONFIRMATION"
+      ? "warning"
+      : status === "SKIPPED"
+        ? "info"
+        : "info";
 const encounterStatusType = (status: PreAiEncounterStatus) =>
   status === "EXPORTED" ? "success" : status === "REVIEWED" ? "success" : status === "PENDING_REVIEW" ? "warning" : "info";
 const fieldLabel = (stageCode: PreAiStageCode, key: string) =>
@@ -2029,6 +2188,14 @@ const completeSelectedStage = async () =>
     }
   });
 
+const confirmSelectedSurgery = async () =>
+  runAction(async () => {
+    const { data } = await confirmPreAiSurgeryApi(selectedEncounterId.value, stageSubmission("SURGERY")?.version ?? 0);
+    hydrateWorkspace(data);
+    await loadEncounterList();
+    ElMessage.success("手术事实已由医生确认并完成交接");
+  });
+
 const hasFormValue = (value: any, field?: PreAiFieldConfig) => {
   if (value === undefined || value === null || value === "") return false;
   if (Array.isArray(value)) return value.length > 0;
@@ -2085,6 +2252,7 @@ const createEncounter = async () =>
     createDialogVisible.value = false;
     Object.keys(createForm).forEach(key => delete createForm[key]);
     createForm.visitDate = currentLocalDateTime();
+    createForm.inventoryCareType = "outpatient";
     createRequestId.value = "";
     await loadEncounterList();
     selectedPatientCaseId.value = encounterWorkspace.encounter.patientCaseId;
@@ -2260,15 +2428,11 @@ const deleteTargetMedicalRecord = async (version: GeneratedMedicalRecord) => {
   }
 
   try {
-    await ElMessageBox.confirm(
-      `确认删除目标病历 V${version.version} 及对应 Word 文件吗？此操作不可恢复。`,
-      "删除历史病历",
-      {
-        type: "warning",
-        confirmButtonText: "确认删除",
-        cancelButtonText: "取消"
-      }
-    );
+    await ElMessageBox.confirm(`确认删除目标病历 V${version.version} 及对应 Word 文件吗？此操作不可恢复。`, "删除历史病历", {
+      type: "warning",
+      confirmButtonText: "确认删除",
+      cancelButtonText: "取消"
+    });
     deletingTargetVersionId.value = version.id;
     await deleteMedicalRecordApi(version.id);
 
@@ -2366,21 +2530,74 @@ const confirmReview = async () =>
     ElMessage.success("医生复核已确认，现在可以生成脱敏 DOCX");
   });
 
-const buildInpatientAiPrompt = () => "";
+const buildInpatientAiPrompt = () => DEFAULT_INPATIENT_AI_PROMPT;
 
 const formatFileSize = (size: number) => {
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+const inspectionDecisionLabel = computed(() => {
+  const decision = inpatientAiInspection.value?.decision;
+  return decision === "ACCEPTED" ? "检查通过" : decision === "SANITIZED" ? "已安全净化" : "已拒绝";
+});
+const inspectionDecisionType = computed(() =>
+  inpatientAiInspection.value?.decision === "REJECTED"
+    ? "danger"
+    : inpatientAiInspection.value?.decision === "SANITIZED"
+      ? "warning"
+      : "success"
+);
+const inspectionRiskType = computed(() =>
+  ["CRITICAL", "HIGH"].includes(inpatientAiInspection.value?.highestRiskLevel || "")
+    ? "danger"
+    : inpatientAiInspection.value?.highestRiskLevel === "MEDIUM"
+      ? "warning"
+      : "success"
+);
+const workflowTaskStatusType = computed(() =>
+  inpatientAiTask.value?.status === "SUCCEEDED" ? "success" : inpatientAiTask.value?.status === "FAILED" ? "danger" : "warning"
+);
+const workflowStageOrder = ["PENDING", "ASSET_LOADING", "AI_GENERATION", "OUTPUT_VALIDATION", "MAPPING_PERSISTENCE", "COMPLETED"];
+const workflowProgressPercent = computed(() => {
+  if (inpatientAiTask.value?.status === "SUCCEEDED") return 100;
+  const index = workflowStageOrder.indexOf(inpatientAiTask.value?.currentStage || "PENDING");
+  return Math.max(5, Math.round(((Math.max(0, index) + 1) / workflowStageOrder.length) * 100));
+});
+const mappedNodeCount = computed(() => inpatientAiMappings.value?.mappings.filter(item => item.status === "MAPPED").length || 0);
+const workflowStageLabel = (stage: string) =>
+  ({
+    PENDING: "等待执行",
+    ASSET_LOADING: "读取已检查资产",
+    AI_GENERATION: "模型生成与节点回填",
+    OUTPUT_VALIDATION: "输出 DOCX 安全复检",
+    MAPPING_PERSISTENCE: "保存节点映射",
+    COMPLETED: "生成完成",
+    QUEUE_REJECTED: "任务队列拒绝"
+  })[stage] ||
+  stage ||
+  "等待执行";
+
+const abortInpatientAiWorkflow = () => {
+  inpatientAiAbortController?.abort();
+  inpatientAiAbortController = undefined;
+  inpatientAiInspecting.value = false;
+  inpatientAiGenerating.value = false;
+};
+
 const clearInpatientAiReference = () => {
+  abortInpatientAiWorkflow();
   inpatientAiReferenceDocument.value = undefined;
+  inpatientAiInspection.value = undefined;
+  inpatientAiTargetNodeKeys.value = [];
+  inpatientAiTask.value = undefined;
+  inpatientAiMappings.value = undefined;
   if (inpatientAiReferenceInput.value) inpatientAiReferenceInput.value.value = "";
 };
 
 const openInpatientAiReferencePicker = () => inpatientAiReferenceInput.value?.click();
 
-const handleInpatientAiReferenceChange = (event: Event) => {
+const handleInpatientAiReferenceChange = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
@@ -2394,15 +2611,44 @@ const handleInpatientAiReferenceChange = (event: Event) => {
     ElMessage.error("参考文档不能超过 10 MB");
     return;
   }
+
+  abortInpatientAiWorkflow();
   inpatientAiReferenceDocument.value = file;
+  inpatientAiInspection.value = undefined;
+  inpatientAiTargetNodeKeys.value = [];
+  inpatientAiTask.value = undefined;
+  inpatientAiMappings.value = undefined;
+  const encounterId = selectedEncounterId.value;
+  if (!encounterId) return;
+  const requestController = new AbortController();
+  inpatientAiAbortController = requestController;
+  inpatientAiInspecting.value = true;
+  try {
+    const { data } = await inspectMedicalRecordDocumentV2Api({ encounterId, document: file, signal: requestController.signal });
+    if (inpatientAiAbortController !== requestController || inpatientAiReferenceDocument.value !== file) return;
+    inpatientAiInspection.value = data;
+    if (data.decision === "REJECTED") ElMessage.error("DOCX 安全检查未通过，已禁止提交生成");
+    else ElMessage.success(data.decision === "SANITIZED" ? "危险部件已移除，可使用净化后的原包生成" : "DOCX 原包检查通过");
+  } catch (error: any) {
+    if (error?.name !== "AbortError") {
+      inpatientAiInspection.value = undefined;
+      ElMessage.error(error.message || "DOCX 安全检查失败");
+    }
+  } finally {
+    if (inpatientAiAbortController === requestController) inpatientAiAbortController = undefined;
+    inpatientAiInspecting.value = false;
+  }
 };
 
 const closeInpatientAiDialog = () => {
-  if (inpatientAiGenerating.value) return;
+  const wasRunning = inpatientAiGenerating.value || inpatientAiInspecting.value;
+  abortInpatientAiWorkflow();
   inpatientAiDialogVisible.value = false;
   pendingGeneratedTargetRecord.value = undefined;
   clearInpatientAiReference();
-  ElMessage.info("已取消 AI 加工，基础目标病历仍保留在版本列表中");
+  ElMessage.info(
+    wasRunning ? "已取消当前请求；服务端已提交的任务仍保留审计记录" : "已取消 AI 加工，基础目标病历仍保留在版本列表中"
+  );
 };
 
 const copyInpatientAiResult = async () => {
@@ -2430,38 +2676,123 @@ const copyInpatientAiResult = async () => {
   }
 };
 
-const completeInpatientAiGeneration = async () => {
-  const encounterId = selectedEncounterId.value;
-  const sourceRecord = pendingGeneratedTargetRecord.value;
-  const referenceDocument = inpatientAiReferenceDocument.value;
-  if (!encounterId || !sourceRecord) return;
-  if (!referenceDocument) {
-    ElMessage.warning("请先选择本次生成使用的 DOCX 参考文档");
+const saveMedicalRecordDownload = (download: { blob: Blob; filename: string }) => {
+  const url = URL.createObjectURL(download.blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = download.filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+};
+
+const loadSuccessfulWorkflowResult = async (task: MedicalRecordWorkflowTask, signal?: AbortSignal) => {
+  const result = task.result;
+  const record = result.record;
+  if (!record) throw new Error("生成任务成功但缺少病历版本信息");
+  inpatientAiTask.value = task;
+  const mappingsResponse = await getMedicalRecordWorkflowMappingsApi(task.taskId, signal);
+  inpatientAiMappings.value = mappingsResponse.data;
+  latestGeneratedTargetVersionId.value = record.id;
+  latestGeneratedExportVersionId.value = "";
+  inpatientAiResultContent.value = result.generatedContent || record.content || "";
+  inpatientAiResultModel.value = task.model || result.model || record.model || "";
+  inpatientAiResultRecord.value = record;
+  inpatientAiDialogVisible.value = false;
+  pendingGeneratedTargetRecord.value = undefined;
+  inpatientAiReferenceDocument.value = undefined;
+  inpatientAiInspection.value = undefined;
+  inpatientAiTargetNodeKeys.value = [];
+  if (inpatientAiReferenceInput.value) inpatientAiReferenceInput.value.value = "";
+  inpatientAiResultDialogVisible.value = true;
+  await loadTargetMedicalRecordVersions();
+  ElMessage.success(`AI 住院病历 V${record.version} 已完成原包保真回填，可直接下载或导出`);
+};
+
+const pollSubmittedInpatientAiTask = async (taskId: string, requestController: AbortController) => {
+  const task = await pollMedicalRecordWorkflowTask(taskId, {
+    signal: requestController.signal,
+    onUpdate: update => {
+      if (inpatientAiAbortController === requestController) inpatientAiTask.value = update;
+    }
+  });
+  inpatientAiTask.value = task;
+  if (task.status === "FAILED") {
+    ElMessage.error(`${task.errorCode || "GENERATION_FAILED"}：${task.errorMessage || "病历生成失败，可保留当前检查结果重试"}`);
     return;
   }
+  await loadSuccessfulWorkflowResult(task, requestController.signal);
+};
+
+const completeInpatientAiGeneration = async () => {
+  const sourceRecord = pendingGeneratedTargetRecord.value;
+  const inspection = inpatientAiInspection.value;
+  if (!sourceRecord || !inspection?.canGenerate) {
+    ElMessage.warning("请先上传并通过 DOCX 安全检查");
+    return;
+  }
+  abortInpatientAiWorkflow();
+  const requestController = new AbortController();
+  inpatientAiAbortController = requestController;
   inpatientAiGenerating.value = true;
   try {
-    const { data } = await generateInpatientAiMedicalRecordApi({
-      encounterId,
-      sourceRecordId: sourceRecord.id,
-      prompt: inpatientAiPrompt.value.trim(),
-      referenceDocument
-    });
-    latestGeneratedTargetVersionId.value = data.record.id;
-    latestGeneratedExportVersionId.value = "";
-    inpatientAiResultContent.value = data.generatedContent || data.record.content || "";
-    inpatientAiResultModel.value = data.model || data.record.model || "";
-    inpatientAiResultRecord.value = data.record;
-    inpatientAiDialogVisible.value = false;
-    pendingGeneratedTargetRecord.value = undefined;
-    clearInpatientAiReference();
-    inpatientAiResultDialogVisible.value = true;
-    await loadTargetMedicalRecordVersions();
-    ElMessage.success(`AI 住院病历 V${data.record.version} 已生成，可复制内容或下载复核`);
+    const { data } = await submitMedicalRecordWorkflowTaskApi(
+      {
+        reportId: inspection.reportId,
+        sourceRecordId: sourceRecord.id,
+        prompt: inpatientAiPrompt.value.trim(),
+        mappingMode: inpatientAiMappingMode.value,
+        targetNodeKeys: inpatientAiTargetNodeKeys.value
+      },
+      requestController.signal
+    );
+    inpatientAiTask.value = data;
+    await pollSubmittedInpatientAiTask(data.taskId, requestController);
   } catch (error: any) {
-    ElMessage.error(error.message || "AI 住院病历生成失败，提示词已保留，可重试");
+    if (error?.name !== "AbortError") ElMessage.error(error.message || "病历生成任务提交或轮询失败，检查结果已保留");
   } finally {
+    if (inpatientAiAbortController === requestController) inpatientAiAbortController = undefined;
     inpatientAiGenerating.value = false;
+  }
+};
+
+const retryInpatientAiGeneration = async () => {
+  const failedTask = inpatientAiTask.value;
+  if (!failedTask || failedTask.status !== "FAILED") return;
+  abortInpatientAiWorkflow();
+  const requestController = new AbortController();
+  inpatientAiAbortController = requestController;
+  inpatientAiGenerating.value = true;
+  try {
+    const { data } = await retryMedicalRecordWorkflowTaskApi(failedTask.taskId, requestController.signal);
+    inpatientAiTask.value = data;
+    await pollSubmittedInpatientAiTask(data.taskId, requestController);
+  } catch (error: any) {
+    if (error?.name !== "AbortError") ElMessage.error(error.message || "病历生成任务重试失败");
+  } finally {
+    if (inpatientAiAbortController === requestController) inpatientAiAbortController = undefined;
+    inpatientAiGenerating.value = false;
+  }
+};
+
+const downloadInpatientAiOutputAsset = async () => {
+  const assetId = inpatientAiTask.value?.outputAssetId;
+  if (!assetId) return;
+  try {
+    saveMedicalRecordDownload(await downloadMedicalRecordAssetV2Api(assetId));
+  } catch (error: any) {
+    ElMessage.error(error.message || "输出资产下载失败");
+  }
+};
+
+const downloadInpatientAiResultRecord = async () => {
+  const recordId = inpatientAiResultRecord.value?.id;
+  if (!recordId) return;
+  try {
+    saveMedicalRecordDownload(await downloadGeneratedMedicalRecordV2Api(recordId));
+  } catch (error: any) {
+    ElMessage.error(error.message || "目标病历下载失败");
   }
 };
 
@@ -2480,6 +2811,10 @@ const generateTargetMedicalRecord = async () =>
     latestGeneratedTargetVersionId.value = data.record.id;
     latestGeneratedExportVersionId.value = "";
     await loadTargetMedicalRecordVersions();
+    if (!medicalRecordV2Enabled) {
+      ElMessage.success(`目标病历 V${data.record.version} 已生成并保留在稳定版版本列表中`);
+      return;
+    }
 
     const missingHint = data.missingItems.length
       ? `当前仍有 ${data.missingItems.length} 个模板字段缺失，基础草稿已按前置病历现有事实生成。`
@@ -2495,9 +2830,10 @@ const generateTargetMedicalRecord = async () =>
           distinguishCancelAndClose: true
         }
       );
+      clearInpatientAiReference();
       pendingGeneratedTargetRecord.value = data.record;
       inpatientAiPrompt.value = buildInpatientAiPrompt();
-      clearInpatientAiReference();
+      inpatientAiMappingMode.value = "CONTROLLED";
       inpatientAiDialogVisible.value = true;
     } catch {
       pendingGeneratedTargetRecord.value = undefined;
@@ -2532,6 +2868,7 @@ const runAction = async (action: () => Promise<void>) => {
 };
 
 const cleanupTransientResources = () => {
+  abortInpatientAiWorkflow();
   workspaceAbortController?.abort();
   workspaceAbortController = undefined;
   workspaceRequestSequence += 1;
@@ -2614,6 +2951,9 @@ onBeforeUnmount(() => {
 .inpatient-ai-dialog {
   display: grid;
   gap: 16px;
+  max-height: 68vh;
+  padding-right: 4px;
+  overflow-y: auto;
 
   &__reference {
     display: grid;
@@ -2656,6 +2996,92 @@ onBeforeUnmount(() => {
     font-size: 12px;
     line-height: 1.7;
   }
+}
+
+.workflow-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
+}
+
+.workflow-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-card__head > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-card__head > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-card__head small {
+  color: var(--el-text-color-secondary);
+  font-weight: 400;
+}
+
+.finding-list,
+.mapping-list {
+  display: grid;
+  gap: 8px;
+}
+
+.finding-list > div,
+.mapping-list > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.node-catalog {
+  display: grid;
+  max-height: 240px;
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--el-bg-color);
+}
+
+.node-catalog :deep(.el-checkbox) {
+  height: auto;
+  min-height: 38px;
+  margin-right: 0;
+  padding: 6px 4px;
+  white-space: normal;
+}
+
+.node-catalog :deep(.el-checkbox__label) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.node-catalog small {
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-events {
+  max-height: 220px;
+  padding: 4px 8px;
+  overflow-y: auto;
 }
 
 .inpatient-ai-result {

@@ -314,6 +314,16 @@ export const preAiStages: PreAiStageConfig[] = [
       { key: "contactPhone", label: "联系人电话", kind: "input" },
       { key: "visitDate", label: "就诊时间", kind: "datetime", required: true },
       {
+        key: "inventoryCareType",
+        label: "耗材统计口径",
+        kind: "select",
+        required: true,
+        options: [
+          { label: "门诊", value: "outpatient" },
+          { label: "住院", value: "inpatient" }
+        ]
+      },
+      {
         key: "nationality",
         label: "民族",
         kind: "select",
@@ -1544,6 +1554,7 @@ export const stageByCode = (code: PreAiStageCode) => preAiStages.find(stage => s
 
 export const stageStatusLabel: Record<string, string> = {
   DRAFT: "待填写",
+  PENDING_CONFIRMATION: "待医生确认",
   COMPLETED: "已完成",
   RETURNED: "已退回",
   SKIPPED: "已跳过"

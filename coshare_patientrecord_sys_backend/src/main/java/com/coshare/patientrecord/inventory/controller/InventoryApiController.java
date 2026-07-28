@@ -226,7 +226,7 @@ public class InventoryApiController {
 
     @PostMapping("/inventory-api/items")
     public ApiResult<Map<String, Object>> saveItem(@RequestBody Map<String, Object> payload) {
-        SessionUser user = requireCapability("inventory:issue");
+        SessionUser user = requireCapability("inventory:item:manage");
         return ApiResult.of(200, "saved", databaseService.asMap(databaseService.saveItem(toJson(payload), user)));
     }
 

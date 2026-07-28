@@ -193,43 +193,84 @@ public class InventoryWeeklyRepository {
             SELECT COALESCE(SUM(reserved_quantity), 0) FROM inventory_batch_balances WHERE location_id = ? AND item_id = ?
             """, locationId, itemId));
         String normalizedCareType = careType == null || careType.isBlank() ? "" : careType.trim().toLowerCase();
+        ObjectNode consumption = one("""
+            SELECT
+              COALESCE(SUM(CASE WHEN e.event_kind = 'CONSUMPTION' THEN d.quantity ELSE 0 END), 0) consumedQuantity,
+              COALESCE(SUM(CASE WHEN e.event_kind = 'REVERSAL' THEN d.quantity ELSE 0 END), 0) reversalQuantity,
+              COUNT(DISTINCT e.id) eventCount
+            FROM inventory_consumption_events e
+            JOIN inventory_consumption_details d ON d.event_id = e.id
+            WHERE e.department_id = ? AND d.item_id = ? AND e.status = 'succeeded'
+              AND e.visit_date >= ? AND e.visit_date <= ?
+              AND (? = '' OR e.care_type = ?)
+              AND COALESCE(STR_TO_DATE(REPLACE(LEFT(NULLIF(e.created_at, ''), 19), 'T', ' '), '%Y-%m-%d %H:%i:%s'), CURRENT_TIMESTAMP(3)) < ?
+            """, departmentId, itemId, from, to, normalizedCareType, normalizedCareType, cutoff);
         Integer registeredVolume = normalizedCareType.isBlank()
             ? jdbc.queryForObject("""
-                SELECT COUNT(DISTINCT e.id)
-                FROM pre_ai_encounters e
-                WHERE e.owning_department_id = ?
-                  AND COALESCE(STR_TO_DATE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.visitDate')), ''), '%Y-%m-%d'),
-                               STR_TO_DATE(LEFT(e.created_at, 10), '%Y-%m-%d')) BETWEEN ? AND ?
-                  AND e.status <> 'VOID'
+                SELECT COUNT(DISTINCT e.id) FROM pre_ai_care_encounters e
+                WHERE e.owning_department_id = ? AND e.visit_date BETWEEN ? AND ? AND e.status <> 'CANCELLED'
                 """, Integer.class, departmentId, from, to)
             : jdbc.queryForObject("""
-                SELECT COUNT(DISTINCT e.id)
-                FROM pre_ai_encounters e
-                WHERE e.owning_department_id = ?
-                  AND COALESCE(STR_TO_DATE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.visitDate')), ''), '%Y-%m-%d'),
-                               STR_TO_DATE(LEFT(e.created_at, 10), '%Y-%m-%d')) BETWEEN ? AND ?
-                  AND LOWER(e.route) = ?
-                  AND e.status <> 'VOID'
+                SELECT COUNT(DISTINCT e.id) FROM pre_ai_care_encounters e
+                WHERE e.owning_department_id = ? AND e.visit_date BETWEEN ? AND ?
+                  AND e.care_type = ? AND e.status <> 'CANCELLED'
                 """, Integer.class, departmentId, from, to, normalizedCareType);
         Integer consumptionEventVolume = normalizedCareType.isBlank()
             ? jdbc.queryForObject("""
-                SELECT COUNT(DISTINCT encounter_id) FROM inventory_consumption_events
+                SELECT COUNT(DISTINCT COALESCE(care_encounter_id, encounter_id)) FROM inventory_consumption_events
                 WHERE department_id = ? AND visit_date >= ? AND visit_date <= ? AND status = 'succeeded'
                 """, Integer.class, departmentId, from, to)
             : jdbc.queryForObject("""
-                SELECT COUNT(DISTINCT encounter_id) FROM inventory_consumption_events
+                SELECT COUNT(DISTINCT COALESCE(care_encounter_id, encounter_id)) FROM inventory_consumption_events
                 WHERE department_id = ? AND visit_date >= ? AND visit_date <= ? AND status = 'succeeded'
-                  AND LOWER(route) = ?
+                  AND care_type = ?
                 """, Integer.class, departmentId, from, to, normalizedCareType);
         return new FlowSummary(
             decimal(row.path("openingQuantity")), decimal(row.path("inboundQuantity")),
             decimal(row.path("transferInQuantity")), decimal(row.path("transferOutQuantity")),
-            decimal(row.path("consumedQuantity")), decimal(row.path("reversalQuantity")),
+            decimal(consumption.path("consumedQuantity")), decimal(consumption.path("reversalQuantity")),
             decimal(row.path("returnedQuantity")), decimal(row.path("scrappedQuantity")),
             decimal(row.path("countAdjustmentQuantity")), closing, reserved,
             row.path("movementCount").asInt(),
             registeredVolume == null ? 0 : registeredVolume,
             consumptionEventVolume == null ? 0 : consumptionEventVolume
+        );
+    }
+
+    public ArrayNode consumptionTrace(
+        String departmentId,
+        String itemId,
+        String careType,
+        LocalDate from,
+        LocalDate to,
+        LocalDateTime cutoff
+    ) {
+        String normalizedCareType = careType == null ? "" : careType.trim().toLowerCase();
+        return queryJson(
+            """
+            SELECT e.id eventId, e.command_id commandId, e.encounter_id encounterId,
+                   e.care_encounter_id careEncounterId, e.case_token caseToken, e.care_type careType,
+                   e.trigger_stage triggerStage, e.completion_version completionVersion,
+                   e.package_id packageId, e.package_version packageVersion,
+                   e.event_kind eventKind, e.reversal_of_event_id reversalOfEventId,
+                   d.batch_id batchId, b.batch_no batchNo, b.expiry_date expiryDate,
+                   d.quantity, e.visit_date visitDate, e.created_at occurredAt
+            FROM inventory_consumption_events e
+            JOIN inventory_consumption_details d ON d.event_id = e.id
+            LEFT JOIN inventory_batches b ON b.id = d.batch_id
+            WHERE e.department_id = ? AND d.item_id = ? AND e.status = 'succeeded'
+              AND e.visit_date BETWEEN ? AND ?
+              AND (? = '' OR e.care_type = ?)
+              AND COALESCE(STR_TO_DATE(REPLACE(LEFT(NULLIF(e.created_at, ''), 19), 'T', ' '), '%Y-%m-%d %H:%i:%s'), CURRENT_TIMESTAMP(3)) < ?
+            ORDER BY e.visit_date, e.created_at, e.id, d.id
+            """,
+            departmentId,
+            itemId,
+            from,
+            to,
+            normalizedCareType,
+            normalizedCareType,
+            cutoff
         );
     }
 
@@ -323,6 +364,7 @@ public class InventoryWeeklyRepository {
             SELECT id, week_no weekNo, department_id departmentId, department_name_snapshot departmentName,
                    standard_id standardId, standard_version standardVersion, revision,
                    previous_snapshot_id previousSnapshotId, root_snapshot_id rootSnapshotId, status,
+                   validity_status validityStatus,
                    source_cutoff_at sourceCutoffAt, hospital_timezone hospitalTimezone,
                    calculation_version calculationVersion, source_digest sourceDigest, line_count lineCount,
                    total_expected_quantity totalExpectedQuantity,
@@ -330,6 +372,7 @@ public class InventoryWeeklyRepository {
                    total_adjusted_quantity totalAdjustedQuantity, revision_reason revisionReason,
                    confirmation_note confirmationNote, confirmed_by confirmedBy,
                    confirmed_by_role confirmedByRole, confirmed_at confirmedAt,
+                   invalidated_at invalidatedAt, invalidated_reason invalidatedReason,
                    created_by createdBy, created_by_role createdByRole, created_at createdAt
             FROM inventory_weekly_snapshots WHERE id = ?
             """, id);
@@ -357,11 +400,13 @@ public class InventoryWeeklyRepository {
         StringBuilder sql = new StringBuilder("""
             SELECT id, week_no weekNo, department_id departmentId, department_name_snapshot departmentName,
                    standard_id standardId, standard_version standardVersion, revision, status,
+                   validity_status validityStatus,
                    source_cutoff_at sourceCutoffAt, line_count lineCount,
                    total_expected_quantity totalExpectedQuantity,
                    total_actual_consumed_quantity totalActualConsumedQuantity,
                    total_adjusted_quantity totalAdjustedQuantity, confirmed_by confirmedBy,
-                   confirmed_at confirmedAt, created_at createdAt
+                   confirmed_at confirmedAt, invalidated_at invalidatedAt,
+                   invalidated_reason invalidatedReason, created_at createdAt
             FROM inventory_weekly_snapshots WHERE 1 = 1
             """);
         java.util.ArrayList<Object> args = new java.util.ArrayList<>();
@@ -376,7 +421,7 @@ public class InventoryWeeklyRepository {
             UPDATE inventory_weekly_snapshots
             SET status = 'CONFIRMED', confirmation_note = ?, confirmed_by = ?,
                 confirmed_by_role = ?, confirmed_at = CURRENT_TIMESTAMP(3)
-            WHERE id = ? AND status = 'DRAFT'
+            WHERE id = ? AND status = 'DRAFT' AND validity_status = 'CURRENT'
             """, blankToNull(note), actor, role, id);
         if (updated != 1) throw new IllegalStateException("仅草稿快照可确认");
     }

@@ -30,6 +30,9 @@
             <el-table-column label="类型" width="90">
               <template #default="{ row }">{{ careTypeLabel(row.careType) }}</template>
             </el-table-column>
+            <el-table-column label="触发阶段" width="100">
+              <template #default="{ row }">{{ stageLabel(row.triggerStage) }}</template>
+            </el-table-column>
             <el-table-column label="版本" width="90">
               <template #default="{ row }">v{{ row.version || 1 }}</template>
             </el-table-column>
@@ -66,6 +69,44 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="套餐覆盖检查" name="coverage">
+        <div class="panel package-panel">
+          <div class="panel-head">
+            <div>
+              <h2>科室套餐覆盖情况</h2>
+              <p>正式运行前，门诊和住院的检查、中医、医生、手术四个关键阶段都应配置有效且非空的套餐。</p>
+            </div>
+            <el-tag :type="uncoveredCount ? 'danger' : 'success'" effect="plain">
+              {{ uncoveredCount ? `${uncoveredCount} 项未覆盖` : "已全部覆盖" }}
+            </el-tag>
+          </div>
+          <el-table :data="coverage" border max-height="520">
+            <el-table-column prop="department" label="科室" min-width="130" />
+            <el-table-column label="口径" width="90">
+              <template #default="{ row }">{{ careTypeLabel(row.careType) }}</template>
+            </el-table-column>
+            <el-table-column label="关键阶段" width="110">
+              <template #default="{ row }">{{ stageLabel(row.triggerStage) }}</template>
+            </el-table-column>
+            <el-table-column prop="packageName" label="当前有效套餐" min-width="180">
+              <template #default="{ row }">{{ row.packageName || "未配置" }}</template>
+            </el-table-column>
+            <el-table-column label="版本" width="80">
+              <template #default="{ row }">{{ row.packageVersion ? `v${row.packageVersion}` : "-" }}</template>
+            </el-table-column>
+            <el-table-column prop="lineCount" label="物资项" width="80" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.covered ? 'success' : 'danger'" effect="light">
+                  {{ row.covered ? "可用" : "缺失" }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty description="暂无科室覆盖数据" /></template>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane :label="`扣减失败任务${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
         <div class="panel event-panel">
           <div class="panel-head">
@@ -78,9 +119,14 @@
           <el-table :data="displayEvents" border max-height="460">
             <el-table-column prop="visitDate" label="就诊日期" width="112" />
             <el-table-column prop="department" label="科室" width="110" />
-            <el-table-column prop="route" label="业务类型" width="110" />
+            <el-table-column label="业务类型" width="90">
+              <template #default="{ row }">{{ careTypeLabel(row.careType || row.route) }}</template>
+            </el-table-column>
+            <el-table-column prop="triggerStage" label="触发阶段" width="100" />
             <el-table-column prop="packageName" label="使用套餐" min-width="170" />
+            <el-table-column prop="packageVersion" label="套餐版本" width="90" />
             <el-table-column prop="encounterId" label="就诊标识" min-width="170" show-overflow-tooltip />
+            <el-table-column prop="commandId" label="命令号" min-width="170" show-overflow-tooltip />
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="eventTag(row.status)" effect="light">{{ eventLabel(row.status) }}</el-tag>
@@ -117,6 +163,14 @@
               <el-radio-button label="inpatient">住院</el-radio-button>
             </el-radio-group>
           </el-form-item>
+          <el-form-item label="触发阶段" prop="triggerStage">
+            <el-select v-model="form.triggerStage" placeholder="选择实际扣减触发点">
+              <el-option label="检查完成" value="INSPECTION" />
+              <el-option label="中医完成" value="TCM" />
+              <el-option label="医生完成" value="DOCTOR" />
+              <el-option label="手术医生确认" value="SURGERY" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="生效日期">
             <el-date-picker v-model="form.effectiveDate" type="date" value-format="YYYY-MM-DD" placeholder="留空立即可用" />
           </el-form-item>
@@ -152,13 +206,16 @@ import type {
   InventoryConsumptionEvent,
   InventoryItem,
   InventoryPackage,
+  InventoryPackageCoverage,
   InventoryPackageLine,
   InventoryPackageStatus,
+  InventoryTriggerStage,
   SaveInventoryPackageParams
 } from "@/api/modules/inventory";
 
 const props = defineProps<{
   packages: InventoryPackage[];
+  coverage: InventoryPackageCoverage[];
   events: InventoryConsumptionEvent[];
   items: InventoryItem[];
   departmentOptions: string[];
@@ -183,13 +240,15 @@ const form = reactive<SaveInventoryPackageParams & { lines: (InventoryPackageLin
   name: "",
   department: "",
   careType: "outpatient",
+  triggerStage: "INSPECTION",
   effectiveDate: "",
   lines: []
 });
 const rules = reactive<FormRules>({
   name: [{ required: true, message: "请输入套餐名称", trigger: "blur" }],
   department: [{ required: true, message: "请选择科室", trigger: "change" }],
-  careType: [{ required: true, message: "请选择照护类型", trigger: "change" }]
+  careType: [{ required: true, message: "请选择照护类型", trigger: "change" }],
+  triggerStage: [{ required: true, message: "请选择触发阶段", trigger: "change" }]
 });
 
 const filteredPackages = computed(() => {
@@ -201,6 +260,7 @@ const filteredPackages = computed(() => {
   });
 });
 const failedEvents = computed(() => props.events.filter(row => row.status === "failed"));
+const uncoveredCount = computed(() => props.coverage.filter(row => !row.covered).length);
 const displayEvents = computed(() =>
   [...props.events].sort((a, b) => Number(b.status === "failed") - Number(a.status === "failed"))
 );
@@ -210,7 +270,9 @@ const dialogTitle = computed(() => {
   return editingId.value ? "编辑使用套餐" : "新建使用套餐";
 });
 
-const careTypeLabel = (value: InventoryCareType) => (value === "inpatient" ? "住院" : "门诊");
+const careTypeLabel = (value: InventoryCareType | string) => (value === "inpatient" ? "住院" : "门诊");
+const stageLabel = (value: InventoryPackageCoverage["triggerStage"]) =>
+  ({ INSPECTION: "检查", TCM: "中医", DOCTOR: "医生", SURGERY: "手术" })[value];
 const statusLabel = (value: InventoryPackageStatus) => ({ draft: "草稿", enabled: "已启用", disabled: "已停用" })[value];
 const statusTag = (value: InventoryPackageStatus) =>
   ({ draft: "info", enabled: "success", disabled: "warning" })[value] as "info" | "success" | "warning";
@@ -239,6 +301,7 @@ const resetForm = () => {
     name: "",
     department: props.departmentOptions[0] || "",
     careType: "outpatient",
+    triggerStage: "INSPECTION",
     effectiveDate: "",
     lines: [newLine()]
   });
@@ -258,6 +321,7 @@ const openEdit = (row: InventoryPackage) => {
     name: row.name,
     department: row.department,
     careType: row.careType,
+    triggerStage: row.triggerStage,
     effectiveDate: row.effectiveDate || "",
     lines: (row.lines || []).map(line => ({ ...line, localId: `${line.id || line.itemId}-${Date.now()}` }))
   });
@@ -270,6 +334,7 @@ const openNewVersion = (row: InventoryPackage) => {
     name: row.name,
     department: row.department,
     careType: row.careType,
+    triggerStage: row.triggerStage,
     effectiveDate: row.effectiveDate || "",
     // A new package version must receive fresh package-line IDs from the API.
     lines: (row.lines || []).map(line => ({
@@ -291,6 +356,7 @@ const submit = async () => {
     name: form.name.trim(),
     department: form.department,
     careType: form.careType,
+    triggerStage: form.triggerStage as InventoryTriggerStage,
     effectiveDate: form.effectiveDate || undefined,
     lines: form.lines.map(line => ({
       id: editingId.value ? line.id : undefined,

@@ -26,6 +26,7 @@ public class InventoryStockWorkflow {
 
     @Transactional
     public ObjectNode saveItem(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode item = repository.object(payload).deepCopy();
         repository.applyOperator(item, user);
         if (repository.text(item, "id").isBlank()) item.put("id", "item-" + UUID.randomUUID());
@@ -38,6 +39,7 @@ public class InventoryStockWorkflow {
 
     @Transactional
     public ObjectNode inbound(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode row = repository.object(payload).deepCopy();
         repository.applyOperator(row, user);
         String itemId = repository.text(row, "itemId");
@@ -131,5 +133,14 @@ public class InventoryStockWorkflow {
         repository.saveInventoryCount(row, itemId, batch, bookQuantity, actualQuantity, difference);
         repository.log(repository.text(row, "operator"), "库存盘点", "count", repository.itemLabel(itemId), "账面 " + bookQuantity + "，实盘 " + actualQuantity);
         return repository.readDbForUser(user);
+    }
+
+    private void requireWarehouse(SessionUser user) {
+        if (user == null || !"warehouse".equals(user.role())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "只有仓库岗位可以维护物资档案和中央仓库存"
+            );
+        }
     }
 }

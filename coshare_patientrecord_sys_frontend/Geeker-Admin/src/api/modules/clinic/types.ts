@@ -452,6 +452,135 @@ export interface MedicalRecordGenerateResult {
   disclaimer: string;
 }
 
+export type MedicalRecordDocxDecision = "ACCEPTED" | "SANITIZED" | "REJECTED";
+export type MedicalRecordDocxRiskLevel = "NONE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type MedicalRecordNodeLocatorType = "CONTENT_CONTROL" | "BOOKMARK" | "STRUCTURAL_PATH";
+export type MedicalRecordMappingMode = "CONTROLLED" | "LEGACY_ORDINAL";
+export type MedicalRecordWorkflowTaskStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+
+export interface MedicalRecordDocxPackageValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+export interface MedicalRecordDocxFinding {
+  code: string;
+  risk: MedicalRecordDocxRiskLevel;
+  partName: string;
+  message: string;
+}
+
+export interface MedicalRecordDocxNode {
+  sequenceNo: number;
+  nodeKey: string;
+  locatorType: MedicalRecordNodeLocatorType;
+  locator: string;
+  structuralPath: string;
+  contentHash: string;
+  preview: string;
+  legacyOrdinal: number;
+}
+
+export interface MedicalRecordDocxInspection {
+  reportId: string;
+  sourceAssetId: string;
+  sanitizedAssetId: string;
+  effectiveAssetId: string;
+  scopeId: string;
+  decision: MedicalRecordDocxDecision;
+  highestRiskLevel: MedicalRecordDocxRiskLevel;
+  packageValidation: MedicalRecordDocxPackageValidation;
+  findings: MedicalRecordDocxFinding[];
+  nodes: MedicalRecordDocxNode[];
+  canGenerate: boolean;
+}
+
+export interface MedicalRecordWorkflowSubmitParams {
+  reportId: string;
+  sourceRecordId: string;
+  prompt?: string;
+  mappingMode?: MedicalRecordMappingMode;
+  targetNodeKeys?: string[];
+}
+
+export interface MedicalRecordWorkflowTaskEvent {
+  sequenceNo: number;
+  eventType: string;
+  stage: string;
+  fromStatus: string;
+  toStatus: string;
+  message: string;
+  detail: Record<string, unknown>;
+  operatorName: string;
+  operatorRole: string;
+  occurredAt: string;
+}
+
+export interface MedicalRecordMappingSummary {
+  sourceNodeCount: number;
+  targetNodeCount: number;
+  mappedCount: number;
+  sourceUnmappedCount: number;
+  targetUnmappedCount: number;
+}
+
+export interface MedicalRecordWorkflowResult extends MedicalRecordGenerateResult {
+  mappingSummary?: MedicalRecordMappingSummary;
+}
+
+export interface MedicalRecordWorkflowTask {
+  taskId: string;
+  scopeId: string;
+  status: MedicalRecordWorkflowTaskStatus;
+  currentStage: string;
+  mappingMode: MedicalRecordMappingMode;
+  attemptCount: number;
+  retryOfTaskId: string;
+  sourceAssetId: string;
+  sanitizedAssetId: string;
+  outputAssetId: string;
+  resultRecordId: string;
+  model: string;
+  errorCode: string;
+  errorMessage: string;
+  createdAt: string;
+  startedAt: string;
+  finishedAt: string;
+  updatedAt: string;
+  result: Partial<MedicalRecordWorkflowResult>;
+  events: MedicalRecordWorkflowTaskEvent[];
+}
+
+export interface MedicalRecordNodeMapping {
+  sequenceNo: number;
+  sourceNodeKey: string;
+  targetNodeKey: string;
+  sourceLocatorType: MedicalRecordNodeLocatorType;
+  sourceLocator: string;
+  targetLocatorType: MedicalRecordNodeLocatorType | "";
+  targetLocator: string;
+  sourceContentHash: string;
+  targetContentHash: string;
+  mappingMode: MedicalRecordMappingMode;
+  status: "MAPPED" | "SOURCE_UNMAPPED" | "TARGET_UNMAPPED";
+  confidence: number;
+  beforePreview: string;
+  afterPreview: string;
+  metadata: { matchBasis?: string } & Record<string, unknown>;
+}
+
+export interface MedicalRecordWorkflowMappings {
+  taskId: string;
+  status: MedicalRecordWorkflowTaskStatus;
+  mappingMode: MedicalRecordMappingMode;
+  mappings: MedicalRecordNodeMapping[];
+}
+
+export interface MedicalRecordDocxDownload {
+  blob: Blob;
+  filename: string;
+}
+
 export interface MedicalRecordPrecheckResult {
   ready: boolean;
   missingItems: string[];

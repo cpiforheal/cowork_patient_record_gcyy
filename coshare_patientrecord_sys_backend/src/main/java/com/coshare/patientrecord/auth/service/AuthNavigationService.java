@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.27.1";
+    public static final String VERSION = "2026.07.28.2";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -51,11 +51,11 @@ public class AuthNavigationService {
         "COLONOSCOPY", Set.of("inspection")
     );
     private static final Map<String, Set<String>> PRE_AI_CAPABILITY_ROLES = Map.of(
-        "preai:encounter:create", Set.of("frontdesk"),
+        "preai:encounter:create", Set.of("admin", "frontdesk"),
         "preai:legacy:import", Set.of("frontdesk"),
         "preai:review", Set.of("doctor"),
         "preai:duties:manage", Set.of("frontdesk"),
-        "preai:surgery:confirm", Set.of("nurse")
+        "preai:surgery:confirm", Set.of("doctor")
     );
     private final JdbcTemplate jdbcTemplate;
     private final List<NavigationMenu> menus = buildMenus();
@@ -433,7 +433,7 @@ public class AuthNavigationService {
             "inventoryOverview=inventory:read,inventory:approve,inventory:issue,inventory:receive,inventory:count,inventory:export",
             "inventoryRequests=inventory:read,inventory:approve,inventory:issue,inventory:receive,inventory:export",
             "inventoryStock=inventory:read,inventory:issue,inventory:receive,inventory:count,inventory:export",
-            "inventoryItems=inventory:read,inventory:issue,inventory:export",
+            "inventoryItems=inventory:read,inventory:item:manage,inventory:issue,inventory:export",
             "inventoryWeekly=inventory:read,inventory:count,inventory:export",
             "inventoryPackages=inventory:read,inventory:retry",
             "inventoryControls=inventory:read,inventory:receive,inventory:count,inventory:export",

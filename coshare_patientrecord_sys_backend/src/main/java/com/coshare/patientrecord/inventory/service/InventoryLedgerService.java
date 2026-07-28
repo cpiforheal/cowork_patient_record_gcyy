@@ -271,10 +271,7 @@ public class InventoryLedgerService {
 
     @Transactional
     public ObjectNode returnToCentral(JsonNode payload, SessionUser user) {
-        String departmentId = ledger.resolveDepartmentId(
-            legacy.text(payload, "departmentId"),
-            legacy.text(payload, "department", user.department())
-        );
+        String departmentId = scopedDepartmentId(payload, user);
         String itemId = legacy.text(payload, "itemId");
         BigDecimal requested = legacy.quantity(payload, "quantity");
         if (itemId.isBlank() || requested.signum() <= 0) throw new IllegalArgumentException("请选择物资并填写正数退库数量");
@@ -335,10 +332,7 @@ public class InventoryLedgerService {
 
     @Transactional
     public ObjectNode confirmOpening(JsonNode payload, SessionUser user) {
-        String departmentId = ledger.resolveDepartmentId(
-            legacy.text(payload, "departmentId"),
-            legacy.text(payload, "department", user.department())
-        );
+        String departmentId = scopedDepartmentId(payload, user);
         return ledger.confirmOpening(departmentId, payload, user.name());
     }
 
@@ -448,6 +442,10 @@ public class InventoryLedgerService {
     }
 
     private LocationScope locationScope(JsonNode payload, SessionUser user) {
+        if (!"warehouse".equals(user.role())) {
+            String departmentId = scopedDepartmentId(payload, user);
+            return new LocationScope(ledger.departmentLocation(departmentId), departmentId);
+        }
         String requestedLocationId = legacy.text(payload, "locationId");
         String requestedLocationType = legacy.text(payload, "locationType");
         if (InventoryLedgerRepository.CENTRAL_LOCATION.equals(requestedLocationId)
@@ -461,6 +459,22 @@ public class InventoryLedgerService {
         }
         String resolved = ledger.resolveDepartmentId(departmentId, department.isBlank() ? user.department() : department);
         return new LocationScope(ledger.departmentLocation(resolved), resolved);
+    }
+
+    private String scopedDepartmentId(JsonNode payload, SessionUser user) {
+        if (!"warehouse".equals(user.role())) {
+            if (user.activeDepartmentId() == null || user.activeDepartmentId().isBlank()) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "当前账号未绑定可操作科室"
+                );
+            }
+            return ledger.resolveDepartmentId(user.activeDepartmentId(), user.department());
+        }
+        return ledger.resolveDepartmentId(
+            legacy.text(payload, "departmentId"),
+            legacy.text(payload, "department", user.department())
+        );
     }
 
     private Map<String, BigDecimal> desiredIssueQuantities(ObjectNode request, JsonNode payload) {

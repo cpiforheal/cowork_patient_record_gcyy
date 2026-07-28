@@ -336,6 +336,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
                     "patientName", "follow-up-patient",
                     "gender", "FEMALE",
                     "age", "42",
+                    "inventoryCareType", "outpatient",
                     "visitDate", LocalDate.now() + " 08:30:00"
                 ),
                 initialRequestId
@@ -384,6 +385,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
                     "patientName", "draft-patient",
                     "gender", "MALE",
                     "age", "38",
+                    "inventoryCareType", "outpatient",
                     "visitDate", LocalDate.now() + " 08:40:00"
                 ),
                 initialRequestId
@@ -414,6 +416,7 @@ class ClinicQueueServiceMySqlIntegrationTests {
                     "patientName", "draft-patient",
                     "gender", "MALE",
                     "age", "38",
+                    "inventoryCareType", "outpatient",
                     "visitDate", LocalDate.now() + " 10:10:00"
                 ),
                 requestId,

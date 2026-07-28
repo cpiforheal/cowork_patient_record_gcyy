@@ -30,7 +30,8 @@ export const parseClinicApiResponse = async <T>(result: Response): Promise<T> =>
   if (isUnauthorizedApiResponse(result, payload)) {
     handleUnauthorizedResponse(payload.msg || "登录已失效，请重新登录");
   }
-  if (!result.ok || String(payload.code) !== "200") {
+  const businessCode = Number(payload.code);
+  if (!result.ok || !Number.isInteger(businessCode) || businessCode < 200 || businessCode >= 300) {
     throw new Error(payload.msg || `clinic api failed: ${result.status}`);
   }
   return payload.data;

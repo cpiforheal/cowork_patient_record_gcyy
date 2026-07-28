@@ -137,6 +137,10 @@ public class InventoryLedgerRepository {
             FROM inventory_batch_balances b
             JOIN inventory_batches ib ON ib.id = b.batch_id
             WHERE b.location_id = ? AND b.item_id = ? AND b.quantity > 0
+              AND (
+                ib.expiry_date IS NULL OR ib.expiry_date = ''
+                OR STR_TO_DATE(LEFT(ib.expiry_date, 10), '%Y-%m-%d') >= CURRENT_DATE
+              )
             ORDER BY CASE WHEN ib.expiry_date IS NULL OR ib.expiry_date = '' THEN 1 ELSE 0 END,
                      ib.expiry_date, ib.updated_at, ib.id
             FOR UPDATE

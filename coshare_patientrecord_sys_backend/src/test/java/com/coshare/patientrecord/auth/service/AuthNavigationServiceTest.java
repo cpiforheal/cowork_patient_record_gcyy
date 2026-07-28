@@ -89,6 +89,7 @@ class AuthNavigationServiceTest {
         assertThat(service.hasCapability(manager, "inventory:read")).isTrue();
         assertThat(service.hasCapability(manager, "inventory:export")).isTrue();
         assertThat(service.hasCapability(manager, "inventory:issue")).isFalse();
+        assertThat(service.hasCapability(manager, "inventory:item:manage")).isFalse();
         assertThat(service.hasCapability(manager, "inventory:count")).isFalse();
         assertThat(service.hasCapability(manager, "inventory:receive")).isFalse();
 
@@ -98,17 +99,23 @@ class AuthNavigationServiceTest {
         assertThat(service.hasCapability(qualityUser, "inventory:rule")).isTrue();
         assertThat(service.hasCapability(qualityUser, "inventory:confirm")).isTrue();
         assertThat(service.hasCapability(qualityUser, "inventory:retry")).isTrue();
+        assertThat(service.hasCapability(qualityUser, "inventory:item:manage")).isFalse();
 
         SessionUser warehouse = user("warehouse");
         assertThat(service.hasCapability(warehouse, "inventory:receive")).isTrue();
         assertThat(service.hasCapability(warehouse, "inventory:issue")).isTrue();
+        assertThat(service.hasCapability(warehouse, "inventory:item:manage")).isTrue();
         assertThat(service.hasCapability(warehouse, "inventory:retry")).isTrue();
         assertThat(service.hasCapability(warehouse, "inventory:rule")).isFalse();
         assertThat(service.hasCapability(warehouse, "inventory:confirm")).isFalse();
 
         NavigationResult admin = service.navigationFor(user("admin"));
         assertThat(admin.capabilities()).doesNotContain("preai:review", "preai:stage:doctor:edit", "inventory:issue");
-        assertThat(admin.capabilities()).contains("maintenance:purge", "maintenance:backup");
+        assertThat(admin.capabilities()).contains(
+            "maintenance:purge", "maintenance:backup", "preai:encounter:create"
+        );
+        assertThat(admin.capabilities()).doesNotContain("inventory:item:manage");
+        assertThat(service.hasCapability(user("admin"), "preai:encounter:create")).isTrue();
         assertThat(findMenu(admin.menus(), "/system/dataMaintenance").meta().title()).isEqualTo("数据维护");
         assertThat(findMenuOrNull(service.navigationFor(user("quality")).menus(), "/system/dataMaintenance")).isNull();
     }

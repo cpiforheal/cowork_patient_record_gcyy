@@ -127,6 +127,14 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "阶段已完成并交接", service.completeStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/{encounterId}/stages/SURGERY/physician-confirm")
+    public ApiResult<Map<String, Object>> confirmSurgery(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.VersionRequest request
+    ) {
+        return ApiResult.of(200, "手术医生已完成独立确认", service.confirmSurgery(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/{encounterId}/stages/{stageCode}/correct")
     public ApiResult<Map<String, Object>> correctStage(
         @PathVariable String encounterId,

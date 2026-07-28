@@ -144,9 +144,11 @@
             </el-table-column>
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
-                <el-tag :type="snapshotStatusTag(row.status)" effect="light">{{ snapshotStatusLabel(row.status) }}</el-tag>
+                <el-tag v-if="row.validityStatus === 'INVALIDATED'" type="danger" effect="light">已失效</el-tag>
+                <el-tag v-else :type="snapshotStatusTag(row.status)" effect="light">{{ snapshotStatusLabel(row.status) }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column prop="invalidatedReason" label="失效原因" min-width="160" show-overflow-tooltip />
             <el-table-column label="预估量" width="110">
               <template #default="{ row }">{{ formatQty(row.totalExpectedQuantity) }}</template>
             </el-table-column>
@@ -166,7 +168,7 @@
               <template #default="{ row }">
                 <el-button link type="primary" @click="emit('viewSnapshot', row as InventoryWeeklySnapshot)">明细</el-button>
                 <el-button
-                  v-if="canApprove && row.status === 'DRAFT'"
+                  v-if="canApprove && row.status === 'DRAFT' && row.validityStatus !== 'INVALIDATED'"
                   link
                   type="success"
                   @click="emit('confirmSnapshot', row as InventoryWeeklySnapshot)"

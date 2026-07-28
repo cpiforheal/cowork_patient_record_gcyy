@@ -112,9 +112,9 @@ export interface InventoryMovement {
 }
 
 export type InventoryCareType = "outpatient" | "inpatient";
+export type InventoryTriggerStage = "INSPECTION" | "TCM" | "DOCTOR" | "SURGERY";
 export type InventoryPackageStatus = "draft" | "enabled" | "disabled";
-// The current automatic-consumption workflow is triggered once per visit.
-// Keep the type narrow until admission/day/procedure triggers are implemented.
+// One package line is consumed for each effective completion version of its configured stage.
 export type InventoryConsumptionMode = "per_visit";
 
 export interface InventoryPackageLine {
@@ -129,12 +129,25 @@ export interface InventoryPackage {
   name: string;
   department: string;
   careType: InventoryCareType;
+  triggerStage: InventoryTriggerStage;
   version?: number | string;
   status: InventoryPackageStatus;
   effectiveDate?: string;
   operator?: string;
   createdAt?: string;
   lines: InventoryPackageLine[];
+}
+
+export interface InventoryPackageCoverage {
+  departmentId: string;
+  department: string;
+  careType: InventoryCareType;
+  triggerStage: InventoryTriggerStage;
+  packageId?: string;
+  packageName?: string;
+  packageVersion?: number;
+  lineCount: number;
+  covered: boolean;
 }
 
 export interface InventoryConsumptionDetail {
@@ -147,13 +160,21 @@ export interface InventoryConsumptionDetail {
 
 export interface InventoryConsumptionEvent {
   id: string;
+  commandId?: string;
   encounterId: string;
+  careEncounterId?: string;
   caseToken?: string;
   route: string;
+  careType?: InventoryCareType;
   department: string;
   visitDate: string;
   packageId?: string;
   packageName?: string;
+  packageVersion?: number;
+  triggerStage?: string;
+  completionVersion?: number;
+  eventKind?: string;
+  reversalOfEventId?: string;
   status: "pending" | "success" | "succeeded" | "failed" | "reversed";
   errorMessage?: string;
   operator?: string;
@@ -189,6 +210,7 @@ export interface InventoryDb {
   counts: InventoryCount[];
   movements: InventoryMovement[];
   packages: InventoryPackage[];
+  packageCoverage: InventoryPackageCoverage[];
   consumptionEvents: InventoryConsumptionEvent[];
   auditLogs: InventoryAuditLog[];
   summary: InventorySummary;
@@ -421,6 +443,9 @@ export interface InventoryWeeklySnapshot {
   previousSnapshotId?: string;
   rootSnapshotId?: string;
   status: InventoryWeeklySnapshotStatus;
+  validityStatus?: "CURRENT" | "INVALIDATED";
+  invalidatedAt?: string;
+  invalidatedReason?: string;
   sourceCutoffAt?: string;
   hospitalTimezone?: string;
   calculationVersion?: string;
@@ -575,6 +600,7 @@ export interface SaveInventoryPackageParams {
   name: string;
   department: string;
   careType: InventoryCareType;
+  triggerStage: InventoryTriggerStage;
   effectiveDate?: string;
   lines: InventoryPackageLine[];
   operator?: string;
@@ -743,6 +769,12 @@ const normalizeDb = (db: InventoryDb): InventoryDb => ({
   packages: (db.packages ?? []).map(row => ({
     ...row,
     lines: (row.lines ?? []).map(line => ({ ...line, quantity: normalizeNumber(line.quantity) }))
+  })),
+  packageCoverage: (db.packageCoverage ?? []).map(row => ({
+    ...row,
+    packageVersion: row.packageVersion == null ? undefined : normalizeNumber(row.packageVersion),
+    lineCount: normalizeNumber(row.lineCount),
+    covered: Boolean(row.covered)
   })),
   consumptionEvents: (db.consumptionEvents ?? []).map(row => ({
     ...row,

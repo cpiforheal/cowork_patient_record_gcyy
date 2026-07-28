@@ -5,6 +5,7 @@ import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository.
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Profile("mysql")
 public class InventoryStageConsumptionService {
+
+    private static final List<String> SUPPORTED_STAGES = List.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
 
     private final InventoryLedgerRepository ledger;
 
@@ -50,12 +53,12 @@ public class InventoryStageConsumptionService {
     ) {
         List<PreviousCommand> previous = ledger.jdbc().query(
             """
-            SELECT id, status FROM inventory_stage_consumption_commands
+            SELECT id, status, care_type FROM inventory_stage_consumption_commands
             WHERE encounter_id = ? AND trigger_stage = ? AND command_type = 'CONSUME'
               AND completion_version < ?
             ORDER BY completion_version DESC, created_at DESC LIMIT 1 FOR UPDATE
             """,
-            (rs, rowNum) -> new PreviousCommand(rs.getString("id"), rs.getString("status")),
+            (rs, rowNum) -> new PreviousCommand(rs.getString("id"), rs.getString("status"), rs.getString("care_type")),
             encounterId,
             normalizeStage(stage),
             completionVersion
@@ -87,7 +90,7 @@ public class InventoryStageConsumptionService {
         }
         if (!"SUCCEEDED".equals(original.status())) return command(original.id());
         return enqueue(encounterId, stage, completionVersion, "REVERSAL", owningDepartmentId,
-            null, null, null, requestedBy, reason, original.id());
+            null, original.careType(), null, requestedBy, reason, original.id());
     }
 
     @Transactional
@@ -127,7 +130,8 @@ public class InventoryStageConsumptionService {
         List<Command> rows = ledger.jdbc().query(
             """
             SELECT id, encounter_id, trigger_stage, completion_version, command_type, department_id,
-                   department_name_snapshot, case_token, route, visit_date, reversal_of_command_id,
+                   department_name_snapshot, case_token, route, care_type, care_encounter_id,
+                   package_id, package_version, visit_date, reversal_of_command_id,
                    requested_by, reason, status
             FROM inventory_stage_consumption_commands WHERE id = ? FOR UPDATE
             """,
@@ -135,6 +139,8 @@ public class InventoryStageConsumptionService {
                 rs.getString("id"), rs.getString("encounter_id"), rs.getString("trigger_stage"),
                 rs.getLong("completion_version"), rs.getString("command_type"), rs.getString("department_id"),
                 rs.getString("department_name_snapshot"), rs.getString("case_token"), rs.getString("route"),
+                rs.getString("care_type"), rs.getString("care_encounter_id"), rs.getString("package_id"),
+                (Integer) rs.getObject("package_version"),
                 rs.getObject("visit_date", LocalDate.class), rs.getString("reversal_of_command_id"),
                 rs.getString("requested_by"), rs.getString("reason"), rs.getString("status")
             ),
@@ -186,7 +192,19 @@ public class InventoryStageConsumptionService {
     ) {
         if (encounterId == null || encounterId.isBlank()) throw new IllegalArgumentException("就诊标识不能为空");
         String normalizedStage = normalizeStage(stage);
+        if (!SUPPORTED_STAGES.contains(normalizedStage)) {
+            throw new IllegalArgumentException("仅检查、中医、医生和手术阶段可以触发患者耗用");
+        }
         String resolvedDepartment = ledger.resolveDepartmentId(departmentId, departmentId);
+        String careType = normalizeCareType(route);
+        String careEncounterId = ledger.jdbc().query(
+            """
+            SELECT id FROM pre_ai_care_encounters
+            WHERE clinical_encounter_id = ? AND care_type = ?
+            ORDER BY CASE WHEN status = 'ACTIVE' THEN 0 ELSE 1 END, started_at DESC LIMIT 1
+            """,
+            (rs, rowNum) -> rs.getString("id"), encounterId, careType
+        ).stream().findFirst().orElse(null);
         String id = "consume-command-" + UUID.randomUUID();
         ObjectNode payload = ledger.mapper().createObjectNode();
         payload.put("encounterId", encounterId);
@@ -197,13 +215,13 @@ public class InventoryStageConsumptionService {
             """
             INSERT INTO inventory_stage_consumption_commands
               (id, encounter_id, trigger_stage, completion_version, command_type, department_id,
-               department_name_snapshot, case_token, route, visit_date, status,
+               department_name_snapshot, case_token, route, care_type, care_encounter_id, visit_date, status,
                reversal_of_command_id, requested_by, reason, payload_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE id = id
             """,
             id, encounterId, normalizedStage, completionVersion, type, resolvedDepartment,
-            ledger.departmentName(resolvedDepartment), blankToNull(caseToken), blankToNull(route), visitDate,
+            ledger.departmentName(resolvedDepartment), blankToNull(caseToken), careType, careType, careEncounterId, visitDate,
             blankToNull(reversalOfCommandId), requestedBy, reason, payload.toString()
         );
         String actualId = ledger.jdbc().queryForObject(
@@ -238,6 +256,10 @@ public class InventoryStageConsumptionService {
                 command.departmentId(), command.encounterId(), command.stage());
             return;
         }
+        ledger.jdbc().update(
+            "UPDATE inventory_stage_consumption_commands SET package_id = ?, package_version = ? WHERE id = ? AND package_id IS NULL",
+            packageDefinition.id(), packageDefinition.version(), command.id()
+        );
         String locationId = ledger.departmentLocation(command.departmentId());
         List<Allocation> allocations = new ArrayList<>();
         Map<String, BigDecimal> requiredByItem = new LinkedHashMap<>();
@@ -266,14 +288,15 @@ public class InventoryStageConsumptionService {
         ledger.jdbc().update(
             """
             INSERT INTO inventory_consumption_events
-              (id, command_id, encounter_id, case_token, route, department, department_id,
-               visit_date, package_id, status, event_kind, trigger_stage, completion_version,
+              (id, command_id, encounter_id, case_token, route, care_type, care_encounter_id, department, department_id,
+               visit_date, package_id, package_version, status, event_kind, trigger_stage, completion_version,
                operator_name, created_at, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'succeeded', 'CONSUMPTION', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'succeeded', 'CONSUMPTION', ?, ?, ?, ?, ?)
             """,
-            eventId, command.id(), command.encounterId(), command.caseToken(), defaultRoute(command.route()),
-            command.department(), command.departmentId(), command.visitDate() == null ? LocalDate.now().toString() : command.visitDate().toString(),
-            packageDefinition.id(), command.stage(), command.completionVersion(), command.requestedBy(),
+            eventId, command.id(), command.encounterId(), command.caseToken(), command.careType(), command.careType(),
+            command.careEncounterId(), command.department(), command.departmentId(),
+            command.visitDate() == null ? LocalDate.now().toString() : command.visitDate().toString(),
+            packageDefinition.id(), packageDefinition.version(), command.stage(), command.completionVersion(), command.requestedBy(),
             java.time.LocalDateTime.now().toString(), raw.toString()
         );
         for (Allocation allocation : allocations) {
@@ -295,6 +318,7 @@ public class InventoryStageConsumptionService {
             );
         }
         succeed(command.id());
+        invalidateConfirmedWeeklySnapshot(command, "患者耗用流水在快照确认后发生变化");
     }
 
     private void reverse(Command command) {
@@ -305,14 +329,14 @@ public class InventoryStageConsumptionService {
         }
         List<OriginalDetail> originals = ledger.jdbc().query(
             """
-            SELECT e.id event_id, e.package_id, d.item_id, d.batch_id, d.location_id, d.quantity
+            SELECT e.id event_id, e.package_id, e.package_version, d.item_id, d.batch_id, d.location_id, d.quantity
             FROM inventory_consumption_events e
             JOIN inventory_consumption_details d ON d.event_id = e.id
             WHERE e.command_id = ? AND e.status = 'succeeded' AND e.event_kind = 'CONSUMPTION'
             FOR UPDATE
             """,
             (rs, rowNum) -> new OriginalDetail(
-                rs.getString("event_id"), rs.getString("package_id"), rs.getString("item_id"),
+                rs.getString("event_id"), rs.getString("package_id"), (Integer) rs.getObject("package_version"), rs.getString("item_id"),
                 rs.getString("batch_id"), rs.getString("location_id"), rs.getBigDecimal("quantity")
             ),
             command.reversalOfCommandId()
@@ -339,13 +363,15 @@ public class InventoryStageConsumptionService {
         ledger.jdbc().update(
             """
             INSERT INTO inventory_consumption_events
-              (id, command_id, encounter_id, case_token, route, department, department_id,
-               visit_date, package_id, status, event_kind, reversal_of_event_id, trigger_stage,
+              (id, command_id, encounter_id, case_token, route, care_type, care_encounter_id, department, department_id,
+               visit_date, package_id, package_version, status, event_kind, reversal_of_event_id, trigger_stage,
                completion_version, operator_name, created_at, raw_json)
-            VALUES (?, ?, ?, NULL, 'reversal', ?, ?, ?, ?, 'succeeded', 'REVERSAL', ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'succeeded', 'REVERSAL', ?, ?, ?, ?, ?, ?)
             """,
-            eventId, command.id(), command.encounterId(), command.department(), command.departmentId(),
-            LocalDate.now().toString(), originals.get(0).packageId(), originalEventId,
+            eventId, command.id(), command.encounterId(), command.careType(), command.careType(), command.careEncounterId(),
+            command.department(), command.departmentId(),
+            command.visitDate() == null ? LocalDate.now().toString() : command.visitDate().toString(),
+            originals.get(0).packageId(), originals.get(0).packageVersion(), originalEventId,
             command.stage(), command.completionVersion(), command.requestedBy(),
             java.time.LocalDateTime.now().toString(), raw.toString()
         );
@@ -368,10 +394,19 @@ public class InventoryStageConsumptionService {
             );
         }
         succeed(command.id());
+        invalidateConfirmedWeeklySnapshot(command, "患者耗用冲销使已确认快照失效");
     }
 
     private PackageDefinition findPackage(Command command) {
-        String careType = "inpatient".equalsIgnoreCase(command.route()) ? "inpatient" : "outpatient";
+        if (command.packageId() != null && !command.packageId().isBlank()) {
+            List<PackageDefinition> fixed = ledger.jdbc().query(
+                "SELECT id, version_no FROM inventory_packages WHERE id = ? AND status = 'enabled' LIMIT 1",
+                (rs, rowNum) -> new PackageDefinition(rs.getString("id"), rs.getInt("version_no")),
+                command.packageId()
+            );
+            if (!fixed.isEmpty()) return fixed.get(0);
+        }
+        String careType = command.careType();
         List<PackageDefinition> rows = ledger.jdbc().query(
             """
             SELECT id, version_no FROM inventory_packages
@@ -433,6 +468,27 @@ public class InventoryStageConsumptionService {
         return route == null || route.isBlank() ? "outpatient" : route;
     }
 
+    private static String normalizeCareType(String route) {
+        return "inpatient".equalsIgnoreCase(route) || "住院".equals(route) ? "inpatient" : "outpatient";
+    }
+
+    private void invalidateConfirmedWeeklySnapshot(Command command, String reason) {
+        LocalDate visitDate = command.visitDate() == null ? LocalDate.now() : command.visitDate();
+        WeekFields fields = WeekFields.ISO;
+        String weekNo = "%04d-W%02d".formatted(
+            visitDate.get(fields.weekBasedYear()),
+            visitDate.get(fields.weekOfWeekBasedYear())
+        );
+        ledger.jdbc().update(
+            """
+            UPDATE inventory_weekly_snapshots
+            SET validity_status = 'INVALIDATED', invalidated_at = CURRENT_TIMESTAMP(3), invalidated_reason = ?
+            WHERE week_no = ? AND department_id = ? AND status = 'CONFIRMED' AND validity_status = 'CURRENT'
+            """,
+            reason, weekNo, command.departmentId()
+        );
+    }
+
     private static String safeMessage(Exception error) {
         String message = error == null ? "库存任务执行失败" : error.getMessage();
         if (message == null || message.isBlank()) message = error.getClass().getSimpleName();
@@ -445,7 +501,8 @@ public class InventoryStageConsumptionService {
 
     private record Command(
         String id, String encounterId, String stage, long completionVersion, String type,
-        String departmentId, String department, String caseToken, String route, LocalDate visitDate,
+        String departmentId, String department, String caseToken, String route, String careType,
+        String careEncounterId, String packageId, Integer packageVersion, LocalDate visitDate,
         String reversalOfCommandId, String requestedBy, String reason, String status
     ) {}
 
@@ -453,8 +510,8 @@ public class InventoryStageConsumptionService {
     private record PackageLine(String itemId, BigDecimal quantity) {}
     private record Allocation(String itemId, Balance balance, BigDecimal quantity) {}
     private record OriginalDetail(
-        String eventId, String packageId, String itemId, String batchId, String locationId, BigDecimal quantity
+        String eventId, String packageId, Integer packageVersion, String itemId, String batchId, String locationId, BigDecimal quantity
     ) {}
 
-    private record PreviousCommand(String id, String status) {}
+    private record PreviousCommand(String id, String status, String careType) {}
 }

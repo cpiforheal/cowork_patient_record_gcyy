@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -31,22 +32,24 @@ public class InpatientRecordAiService {
 
     private static final Logger log = LoggerFactory.getLogger(InpatientRecordAiService.class);
     private static final int MAX_PROMPT_LENGTH = 4000;
-    private static final int MAX_FIELD_LENGTH = 12000;
     private static final int MAX_UPSTREAM_ERROR_LENGTH = 500;
 
     private final ClinicAiConfigService aiConfigService;
     private final AiCallGuard aiCallGuard;
     private final ObjectMapper objectMapper;
+    private final InpatientAiResponseParser responseParser;
     private final HttpClient httpClient;
 
     public InpatientRecordAiService(
         ClinicAiConfigService aiConfigService,
         AiCallGuard aiCallGuard,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        InpatientAiResponseParser responseParser
     ) {
         this.aiConfigService = aiConfigService;
         this.aiCallGuard = aiCallGuard;
         this.objectMapper = objectMapper;
+        this.responseParser = responseParser;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -56,7 +59,8 @@ public class InpatientRecordAiService {
         ObjectNode sourceSnapshot,
         ObjectNode preAiFacts,
         Map<String, String> currentValues,
-        Set<String> allowedFields
+        int referenceParagraphCount,
+        List<String> controlledNodeKeys
     ) {
         String normalizedPrompt = safe(prompt);
         if (normalizedPrompt.length() > MAX_PROMPT_LENGTH) {
@@ -78,11 +82,15 @@ public class InpatientRecordAiService {
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("model", model);
             payload.put("temperature", 0.2);
-            payload.put("max_tokens", 10000);
+            payload.put("max_tokens", 16000);
             payload.put("stream", false);
             payload.putObject("response_format").put("type", "json_object");
             ArrayNode messages = payload.putArray("messages");
-            messages.addObject().put("role", "system").put("content", systemPrompt(allowedFields));
+            List<String> expectedNodeKeys = controlledNodeKeys == null ? List.of() : List.copyOf(controlledNodeKeys);
+            messages.addObject().put("role", "system").put(
+                "content",
+                systemPrompt(referenceParagraphCount, expectedNodeKeys)
+            );
             messages.addObject().put(
                 "role",
                 "user"
@@ -123,11 +131,12 @@ public class InpatientRecordAiService {
                     : "上游返回 HTTP " + response.statusCode() + (upstreamMessage.isBlank() ? "" : "：" + upstreamMessage);
                 throw new ResponseStatusException(status, "GPT 兼容病历生成失败：" + hint);
             }
-            ObjectNode fields = parseAndValidateFields(extractContent(response.body()), allowedFields);
-            if (fields.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型未返回可用于病历模板的字段");
-            }
-            return new AiGeneration(fields, model);
+            InpatientAiResponseParser.ParsedGeneration parsed = responseParser.parse(
+                extractContent(response.body()),
+                referenceParagraphCount,
+                expectedNodeKeys
+            );
+            return new AiGeneration(parsed.paragraphs(), parsed.nodeReplacements(), model);
         } catch (ResponseStatusException error) {
             throw error;
         } catch (InterruptedException error) {
@@ -148,16 +157,21 @@ public class InpatientRecordAiService {
         }
     }
 
-    private String systemPrompt(Set<String> allowedFields) {
+    private String systemPrompt(int referenceParagraphCount, List<String> controlledNodeKeys) throws IOException {
+        String outputContract = controlledNodeKeys.isEmpty()
+            ? "输出必须是单个 JSON 对象，格式只能为 {\"paragraphs\":[\"第一段\", \"第二段\"]}；paragraphs 必须恰好包含 "
+                + referenceParagraphCount + " 个字符串，并与参考文档非空段落逐一对应。"
+            : "输出必须是单个 JSON 对象，格式只能为 {\"nodes\":[{\"key\":\"节点键\",\"text\":\"节点正文\"}]}。"
+                + "nodes 必须逐一包含以下全部受控节点键，每个键恰好出现一次，不得新增、遗漏或改写键："
+                + objectMapper.writeValueAsString(controlledNodeKeys);
         return """
-            你是院内住院病历结构化生成引擎。只能依据用户提供的患者资料和已复核前置事实撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断。
-            固定业务要求：参照医生本次显式上传的 DOCX 参考文档组织内容，学习其标题、段落顺序、查房时序和医学书写风格；你只生成动态字段的纯文本值，最终排版由系统模板完成。参考文档只用于格式和风格，不得把其中患者的事实写入当前病历。
-            输出必须是单个 JSON 对象，禁止 Markdown、解释文字和代码围栏。JSON 的键只能来自下列模板字段：
-            %s
-            缺少事实时保留现有字段值或写“待医生补充”，不得猜测。已复核前置事实优先级高于当前字段值和医生补充说明。
-            中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致；方剂仅作为医生复核用参考，并在字段文本中明确“参考”。
-            attendingRoundsJson、postOpRoundsJson 等时序字段请按原资料中的日期顺序组织为可直接放入 Word 段落的中文文本，不要输出嵌套 JSON。
-            """.formatted(String.join(", ", allowedFields));
+            你是院内住院病历文档生成引擎。任务方式与网页端“提示词 + 参考文档”一致：根据医生提示词、当前患者资料和已复核事实，重写上传参考 DOCX 的正文，生成一份新住院病历。
+            必须严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实复制给当前患者。
+            当前参考文档共有 %d 个非空正文节点。%s 禁止 Markdown、解释、代码围栏或其他键。
+            只能依据当前患者资料、已复核事实和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断。缺少事实时写“待医生补充”。已复核事实优先级高于当前模板值。
+            中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致；方剂只能作为医生复核用参考，并明确标注“参考”。
+            每个输出值只放对应节点正文，不要自行合并或拆分节点。系统只会按受控节点键写回上传 DOCX 的原位置，以保留原文档样式、表格、书签和排版。
+            """.formatted(referenceParagraphCount, outputContract);
     }
 
     private String buildUserContent(
@@ -174,26 +188,6 @@ public class InpatientRecordAiService {
         context.set("reviewedPreAiFacts", preAiFacts == null ? objectMapper.createObjectNode() : preAiFacts);
         context.set("currentTemplateValues", objectMapper.valueToTree(currentValues));
         return objectMapper.writeValueAsString(context);
-    }
-
-    private ObjectNode parseAndValidateFields(String rawContent, Set<String> allowedFields) throws IOException {
-        String content = safe(rawContent);
-        if (content.startsWith("```")) {
-            content = content.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "").trim();
-        }
-        JsonNode parsed = objectMapper.readTree(content);
-        JsonNode candidate = parsed.has("fields") && parsed.path("fields").isObject() ? parsed.path("fields") : parsed;
-        if (!candidate.isObject()) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回格式错误：需要 JSON 对象");
-        }
-        ObjectNode accepted = objectMapper.createObjectNode();
-        candidate.fields().forEachRemaining(entry -> {
-            if (!allowedFields.contains(entry.getKey()) || !entry.getValue().isValueNode()) return;
-            String value = safe(entry.getValue().asText(""));
-            if (value.length() > MAX_FIELD_LENGTH) value = value.substring(0, MAX_FIELD_LENGTH);
-            if (!value.isBlank()) accepted.put(entry.getKey(), value);
-        });
-        return accepted;
     }
 
     private String extractContent(String responseBody) throws IOException {
@@ -250,5 +244,9 @@ public class InpatientRecordAiService {
         return String.valueOf(value == null ? "" : value).trim();
     }
 
-    public record AiGeneration(ObjectNode fields, String model) {}
+    public record AiGeneration(ArrayNode paragraphs, Map<String, String> nodeReplacements, String model) {
+        public AiGeneration {
+            nodeReplacements = Map.copyOf(nodeReplacements);
+        }
+    }
 }

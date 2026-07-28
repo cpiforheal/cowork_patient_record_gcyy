@@ -7,18 +7,18 @@ import org.springframework.web.server.ResponseStatusException;
 
 public final class InventoryPermission {
 
-    private static final Set<String> APPROVER_ROLES = Set.of("admin", "quality");
-    private static final Set<String> COUNTER_ROLES = Set.of("admin", "quality");
+    private static final Set<String> APPROVER_ROLES = Set.of("warehouse");
+    private static final Set<String> COUNTER_ROLES = Set.of("warehouse", "quality");
     private static final Set<String> STAFF_ROLES = Set.of(
-        "admin", "quality", "manager", "nurse", "nursing", "doctor", "frontdesk", "reception",
-        "lab", "ecg", "ultrasound", "inspection", "pharmacist", "pharmacy"
+        "admin", "quality", "manager", "warehouse", "nurse", "doctor", "frontdesk", "reception",
+        "lab", "ecg", "ultrasound", "inspection", "tcm_pharmacy"
     );
 
     private InventoryPermission() {}
 
     public static SessionUser requireAdmin() {
         SessionUser user = currentUserOrThrow();
-        if (!"admin".equals(user.role())) {
+        if (!"warehouse".equals(user.role())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无进销存管理权限");
         }
         return user;

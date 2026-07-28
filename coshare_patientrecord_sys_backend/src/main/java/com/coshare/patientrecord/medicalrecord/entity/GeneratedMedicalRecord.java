@@ -12,7 +12,15 @@ public record GeneratedMedicalRecord(
     String operatorRole,
     String generatedAt,
     String finalizedAt,
+    String sourceEncounterId,
+    String sourceDigest,
+    Long sourceFactsRevision,
+    String validityStatus,
+    String invalidatedAt,
+    String invalidatedReason,
+    String finalizedBy,
     String voidedAt,
+    String voidedBy,
     String voidReason,
     String rawJson
 ) {}

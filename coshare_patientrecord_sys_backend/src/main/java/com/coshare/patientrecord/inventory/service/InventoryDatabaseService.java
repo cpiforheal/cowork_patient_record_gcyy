@@ -57,17 +57,24 @@ public class InventoryDatabaseService {
     public ObjectNode readDb() {
         ObjectNode db = repository.readDb();
         db.set("packages", packageService.readPackages());
+        db.set("packageCoverage", packageService.coverageMatrix());
         db.set("consumptionEvents", packageService.readConsumptionEvents());
         return db;
     }
 
     public ObjectNode readDbForUser(SessionUser user) {
         ObjectNode db = repository.readDbForUser(user);
-        if ("admin".equals(user.role()) || "quality".equals(user.role()) || "manager".equals(user.role())) {
+        if ("manager".equals(user.role())) {
+            db.set("packages", JsonNodeFactory.instance.arrayNode());
+            db.set("packageCoverage", JsonNodeFactory.instance.arrayNode());
+            db.set("consumptionEvents", JsonNodeFactory.instance.arrayNode());
+        } else if ("admin".equals(user.role()) || "quality".equals(user.role())) {
             db.set("packages", packageService.readPackages());
+            db.set("packageCoverage", packageService.coverageMatrix());
             db.set("consumptionEvents", packageService.readConsumptionEvents());
         } else {
             db.set("packages", filterByDepartment(packageService.readPackages(), user.activeDepartmentId(), user.department()));
+            db.set("packageCoverage", filterByDepartment(packageService.coverageMatrix(), user.activeDepartmentId(), user.department()));
             db.set("consumptionEvents", filterByDepartment(packageService.readConsumptionEvents(), user.activeDepartmentId(), user.department()));
         }
         return db;
@@ -192,6 +199,12 @@ public class InventoryDatabaseService {
         int page,
         int size
     ) {
+        if ("manager".equals(user.role())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "管理岗位只能查看库存汇总，不能读取患者级耗用流水"
+            );
+        }
         ArrayNode all = ledgerRepository.readConsumptions(scopedDepartmentId(user, requestedDepartmentId), from, to);
         ObjectNode result = JsonNodeFactory.instance.objectNode();
         int safePage = Math.max(page, 1);

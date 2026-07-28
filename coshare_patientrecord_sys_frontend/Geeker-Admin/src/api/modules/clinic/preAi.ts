@@ -4,7 +4,7 @@ import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse 
 import type { QueueWorkspace } from "./clinicQueue";
 
 export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "TCM" | "DOCTOR" | "SURGERY" | "REVIEW";
-export type PreAiStageStatus = "DRAFT" | "COMPLETED" | "RETURNED" | "SKIPPED";
+export type PreAiStageStatus = "DRAFT" | "PENDING_CONFIRMATION" | "COMPLETED" | "RETURNED" | "SKIPPED";
 export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED";
 export type PreAiEncounterRoute = "" | "OUTPATIENT" | "INPATIENT";
 export type PreAiTreatmentPath = "" | "CONSERVATIVE" | "SURGICAL";
@@ -39,6 +39,7 @@ export interface PreAiEncounterSummary {
   followUpOfEncounterId?: string;
   caseToken: string;
   route: PreAiEncounterRoute;
+  inventoryCareType?: "outpatient" | "inpatient";
   treatmentPath: PreAiTreatmentPath;
   status: PreAiEncounterStatus;
   currentStage: PreAiStageCode;
@@ -127,6 +128,7 @@ export interface PreAiStageSubmission {
   version: number;
   data: Record<string, any>;
   returnedReason?: string;
+  requiresReconfirmation?: boolean;
   submittedBy?: string;
   submittedByRole?: string;
   completedAt?: string;
@@ -424,6 +426,11 @@ export const completePreAiStageApi = (
 ) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/complete`, "POST", {
     data,
+    expectedVersion
+  });
+
+export const confirmPreAiSurgeryApi = (encounterId: string, expectedVersion: number) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/SURGERY/physician-confirm`, "POST", {
     expectedVersion
   });
 

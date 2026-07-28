@@ -67,10 +67,11 @@ public class MedicalRecordSourceBuilder {
     ) {
         String safeEncounterId = safe(encounterId);
         if (safeEncounterId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少前置病例ID");
+        assertCanReadScope("preai:" + safeEncounterId, user);
         List<ObjectNode> encounters = jdbcTemplate.query(
             """
                 SELECT id, source_patient_id, patient_case_id, case_token, status, current_stage,
-                       patient_json, reviewed_at, updated_at
+                       patient_json, reviewed_at, updated_at, facts_revision, reviewed_facts_revision
                 FROM pre_ai_encounters
                 WHERE id = ?
                 LIMIT 1
@@ -86,6 +87,9 @@ public class MedicalRecordSourceBuilder {
                 encounter.set("patient", readObject(resultSet.getString("patient_json")));
                 encounter.put("reviewedAt", safe(resultSet.getString("reviewed_at")));
                 encounter.put("updatedAt", safe(resultSet.getString("updated_at")));
+                encounter.put("factsRevision", resultSet.getLong("facts_revision"));
+                Object reviewedRevision = resultSet.getObject("reviewed_facts_revision");
+                if (reviewedRevision != null) encounter.put("reviewedFactsRevision", ((Number) reviewedRevision).longValue());
                 return encounter;
             },
             safeEncounterId
@@ -244,24 +248,49 @@ public class MedicalRecordSourceBuilder {
         }
     }
 
-    public void assertCanReadPatient(String patientId) {
+    public void assertCanReadPatient(String patientId, SessionUser user) {
         if (safe(patientId).isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
-        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_patients WHERE id = ?", Integer.class, patientId);
-        if (count == null || count <= 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
+        JsonNode patients = databaseService.readDbForUser(user).path("patients");
+        if (findPatient(patients, patientId) == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
+        }
     }
 
-    public void assertCanReadScope(String scopeId) {
+    public void assertCanReadScope(String scopeId, SessionUser user) {
         String safeScopeId = safe(scopeId);
         if (!safeScopeId.startsWith("preai:")) {
-            assertCanReadPatient(safeScopeId);
+            assertCanReadPatient(safeScopeId, user);
             return;
         }
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
         String encounterId = safeScopeId.substring("preai:".length());
-        Integer count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?",
-            Integer.class,
-            encounterId
-        );
+        boolean globalRead = List.of("admin", "quality").contains(safe(user.role()));
+        Integer count = globalRead
+            ? jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?", Integer.class, encounterId)
+            : jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM pre_ai_encounters e
+                WHERE e.id = ?
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM clinic_account_departments ad
+                      WHERE ad.account_id = ? AND ad.department_id = e.owning_department_id AND ad.status = 'ACTIVE'
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM pre_ai_encounter_department_grants g
+                      WHERE g.encounter_id = e.id AND g.account_id = ? AND g.status = 'ACTIVE'
+                    )
+                    OR JSON_SEARCH(e.duty_assignments_json, 'one', ?) IS NOT NULL
+                  )
+                """,
+                Integer.class,
+                encounterId,
+                user.id(),
+                user.id(),
+                user.id()
+            );
         if (count == null || count <= 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "前置病例不存在或当前账号无权查看");
         }

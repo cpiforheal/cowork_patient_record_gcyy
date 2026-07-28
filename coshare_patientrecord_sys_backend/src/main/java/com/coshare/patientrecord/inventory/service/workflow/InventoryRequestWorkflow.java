@@ -52,6 +52,7 @@ public class InventoryRequestWorkflow {
 
     @Transactional
     public ObjectNode approveRequest(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode request = repository.loadRequest(repository.text(payload, "id"));
         repository.assertStatus(request, List.of("pending"), "只有待审核申领单可以审核");
         ObjectNode transfer = ledgerService.reserveRequest(request, user);
@@ -67,6 +68,7 @@ public class InventoryRequestWorkflow {
 
     @Transactional
     public ObjectNode issueRequest(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode request = repository.loadRequest(repository.text(payload, "id"));
         repository.assertStatus(request, List.of("approved", "partially_issued"), "只有已审核或部分发放的申领单可以发放");
         ArrayNode lines = repository.requestLines(request);
@@ -109,6 +111,7 @@ public class InventoryRequestWorkflow {
 
     @Transactional
     public ObjectNode rejectRequest(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode request = repository.loadRequest(repository.text(payload, "id"));
         repository.assertStatus(request, List.of("pending"), "只有待审核申领单可以驳回");
         String reason = repository.text(payload, "reason");
@@ -143,6 +146,7 @@ public class InventoryRequestWorkflow {
 
     @Transactional
     public ObjectNode voidRequest(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode request = repository.loadRequest(repository.text(payload, "id"));
         repository.assertStatus(request, List.of("pending", "approved"), "只有待审核或待发放申领单可以作废");
         String reason = repository.text(payload, "reason");
@@ -156,5 +160,14 @@ public class InventoryRequestWorkflow {
         repository.upsertRequest(request);
         repository.log(user.name(), "作废申领", "request", repository.requestLineSummary(repository.requestLines(request)), reason);
         return repository.readDbForUser(user);
+    }
+
+    private void requireWarehouse(SessionUser user) {
+        if (user == null || !"warehouse".equals(user.role())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "只有仓库岗位可以审核、发放或作废申领单"
+            );
+        }
     }
 }

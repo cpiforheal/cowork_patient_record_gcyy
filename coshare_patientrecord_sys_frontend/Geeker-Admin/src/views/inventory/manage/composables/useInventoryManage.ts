@@ -71,6 +71,7 @@ export const createEmptyInventoryDb = (): InventoryDb => ({
   counts: [],
   movements: [],
   packages: [],
+  packageCoverage: [],
   consumptionEvents: [],
   auditLogs: [],
   summary: {

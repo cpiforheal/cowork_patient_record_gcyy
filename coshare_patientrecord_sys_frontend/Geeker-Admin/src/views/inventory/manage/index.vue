@@ -35,10 +35,10 @@
     </section>
 
     <el-alert
-      v-if="activeTab === 'items' && !hasInventoryAuth('inventory:issue')"
+      v-if="activeTab === 'items' && !hasInventoryAuth('inventory:item:manage')"
       class="inventory-readonly-alert"
       title="物资档案当前为只读模式"
-      description="您可以查看物资名称、规格和预警信息；新增、编辑及入库操作仅向管理员和质控人员开放。"
+      description="您可以查看物资名称、规格和预警信息；物资档案维护仅向管理员和仓库岗位开放。"
       type="info"
       :closable="false"
       show-icon
@@ -128,7 +128,7 @@
               v-model:category="itemFilters.category"
               :rows="filteredItemRows"
               :category-options="categoryFilterOptions"
-              :can-manage="hasInventoryAuth('inventory:issue')"
+              :can-manage="hasInventoryAuth('inventory:item:manage')"
               @create="openItemDialog()"
               @edit="openItemDialog"
             />
@@ -206,6 +206,7 @@
           <template v-else-if="activeTab === 'packages'">
             <PackagePanel
               :packages="visiblePackages"
+              :coverage="db.packageCoverage"
               :events="visibleConsumptionEvents"
               :items="db.items"
               :department-options="departmentOptions"
@@ -688,7 +689,7 @@ const tabNavItems = [
   { tab: "items", title: "物资设置" }
 ] as const;
 const workflowSteps = [
-  { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:issue"] },
+  { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:item:manage"] },
   { title: "入库形成库存", desc: "记录数量、批号、效期和来源", action: "inbound", auth: ["inventory:issue"] },
   { title: "科室提交申领", desc: "填写用途、数量、负责人和周期", action: "request", auth: ["inventory:request"] },
   { title: "审核与发放", desc: "负责人审核，仓库按批次发放", action: "requests", auth: ["inventory:approve", "inventory:issue"] },
@@ -1186,7 +1187,7 @@ const currentTabActions = computed(() => {
         { label: "新增申领", action: "request", auth: "inventory:request", buttonProps: { type: "primary", icon: Plus } }
       ],
       stock: [{ label: "入库", action: "inbound", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
-      items: [{ label: "新增物资", action: "item", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
+      items: [{ label: "新增物资", action: "item", auth: "inventory:item:manage", buttonProps: { type: "primary", icon: Plus } }],
       weekly: [],
       controls: [{ label: "新增盘点", action: "count", auth: "inventory:count", buttonProps: { type: "primary", icon: Plus } }],
       trace: [
@@ -1581,7 +1582,7 @@ const downloadDepartmentUsageReport = async (params: DepartmentUsageReportParams
 };
 
 const openItemDialog = (row?: InventoryItem) => {
-  if (!requireInventoryAuth("inventory:issue", "维护物资档案")) return;
+  if (!requireInventoryAuth("inventory:item:manage", "维护物资档案")) return;
   resetObject(itemForm, {
     id: row?.id,
     name: row?.name || "",
@@ -1600,7 +1601,7 @@ const openItemDialog = (row?: InventoryItem) => {
 };
 
 const saveItem = async () => {
-  if (!requireInventoryAuth("inventory:issue", "保存物资档案")) return;
+  if (!requireInventoryAuth("inventory:item:manage", "保存物资档案")) return;
   if (!(await itemFormRef.value?.validate().catch(() => false))) return;
   saving.value = true;
   try {

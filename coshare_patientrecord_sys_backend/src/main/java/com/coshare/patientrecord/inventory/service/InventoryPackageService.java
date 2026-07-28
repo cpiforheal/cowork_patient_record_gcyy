@@ -65,8 +65,9 @@ public class InventoryPackageService {
         ArrayNode events = objectMapper.createArrayNode();
         jdbcTemplate.query(
             """
-            SELECT id, command_id, encounter_id, case_token, route, department, department_id,
-                   trigger_stage, completion_version, visit_date, package_id, status, error_message,
+            SELECT id, command_id, encounter_id, case_token, route, care_type, care_encounter_id,
+                   department, department_id, trigger_stage, completion_version, visit_date,
+                   package_id, package_version, status, error_message,
                    event_kind, reversal_of_event_id, operator_name, created_at, raw_json
             FROM inventory_consumption_events
             ORDER BY created_at DESC, id DESC
@@ -81,6 +82,50 @@ public class InventoryPackageService {
             }
         );
         return events;
+    }
+
+    public ArrayNode coverageMatrix() {
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            """
+            WITH care_types AS (
+              SELECT 'outpatient' care_type UNION ALL SELECT 'inpatient'
+            ), stages AS (
+              SELECT 'INSPECTION' trigger_stage UNION ALL SELECT 'TCM'
+              UNION ALL SELECT 'DOCTOR' UNION ALL SELECT 'SURGERY'
+            )
+            SELECT d.id department_id, d.name department_name, c.care_type, s.trigger_stage,
+                   p.id package_id, p.name package_name, p.version_no,
+                   COALESCE((SELECT COUNT(*) FROM inventory_package_lines l WHERE l.package_id = p.id AND l.quantity > 0), 0) line_count
+            FROM clinic_departments d
+            CROSS JOIN care_types c
+            CROSS JOIN stages s
+            LEFT JOIN inventory_packages p ON p.id = (
+              SELECT p2.id FROM inventory_packages p2
+              WHERE p2.department_id = d.id AND p2.care_type = c.care_type
+                AND p2.trigger_stage = s.trigger_stage AND p2.status = 'enabled'
+                AND (p2.effective_date IS NULL OR p2.effective_date = '' OR p2.effective_date <= CURRENT_DATE)
+              ORDER BY p2.version_no DESC, p2.updated_at DESC LIMIT 1
+            )
+            WHERE d.status = 'ACTIVE' AND d.id <> 'dept-unassigned'
+            ORDER BY d.name, c.care_type, FIELD(s.trigger_stage, 'INSPECTION', 'TCM', 'DOCTOR', 'SURGERY')
+            """,
+            resultSet -> {
+                ObjectNode row = rows.addObject();
+                row.put("departmentId", resultSet.getString("department_id"));
+                row.put("department", resultSet.getString("department_name"));
+                row.put("careType", resultSet.getString("care_type"));
+                row.put("triggerStage", resultSet.getString("trigger_stage"));
+                putText(row, "packageId", resultSet.getString("package_id"));
+                putText(row, "packageName", resultSet.getString("package_name"));
+                int version = resultSet.getInt("version_no");
+                if (!resultSet.wasNull()) row.put("packageVersion", version);
+                int lineCount = resultSet.getInt("line_count");
+                row.put("lineCount", lineCount);
+                row.put("covered", !row.path("packageId").asText("").isBlank() && lineCount > 0);
+            }
+        );
+        return rows;
     }
 
     private ObjectNode packageRow(ResultSet resultSet) throws SQLException {
@@ -106,6 +151,8 @@ public class InventoryPackageService {
         putText(row, "encounterId", resultSet.getString("encounter_id"));
         putText(row, "caseToken", resultSet.getString("case_token"));
         putText(row, "route", resultSet.getString("route"));
+        putText(row, "careType", resultSet.getString("care_type"));
+        putText(row, "careEncounterId", resultSet.getString("care_encounter_id"));
         putText(row, "department", resultSet.getString("department"));
         putText(row, "departmentId", resultSet.getString("department_id"));
         putText(row, "triggerStage", resultSet.getString("trigger_stage"));
@@ -113,6 +160,8 @@ public class InventoryPackageService {
         if (!resultSet.wasNull()) row.put("completionVersion", completionVersion);
         putText(row, "visitDate", resultSet.getString("visit_date"));
         putText(row, "packageId", resultSet.getString("package_id"));
+        int packageVersion = resultSet.getInt("package_version");
+        if (!resultSet.wasNull()) row.put("packageVersion", packageVersion);
         putText(row, "status", resultSet.getString("status"));
         putText(row, "errorMessage", resultSet.getString("error_message"));
         putText(row, "eventKind", resultSet.getString("event_kind"));

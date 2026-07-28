@@ -270,10 +270,10 @@ class InventoryLedgerMySqlIntegrationTests {
     @Test
     void shortageCreatesRetryableExceptionWithoutAnyPartialDeduction() {
         seedItemAndBatch("item-short", "batch-short", "2026-09-01", new BigDecimal("3"), DEPARTMENT_LOCATION);
-        seedPackage("package-short", "RECEPTION", "item-short", new BigDecimal("2"));
+        seedPackage("package-short", "DOCTOR", "item-short", new BigDecimal("2"));
         seedPackageLine("package-short", "item-short", new BigDecimal("2"));
         ObjectNode command = consumptionService.enqueueStageCompletion(
-            "encounter-short", "RECEPTION", 1, DEPARTMENT_ID, "case-short",
+            "encounter-short", "DOCTOR", 1, DEPARTMENT_ID, "case-short",
             "outpatient", LocalDate.now(), ADMIN.name()
         );
 
