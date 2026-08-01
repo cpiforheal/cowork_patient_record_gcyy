@@ -1048,6 +1048,7 @@ import {
   buildDiagnosisBasis,
   buildHandoffText,
   buildInspectionConclusion,
+  buildPhysicalExamText,
   buildPresentIllnessText,
   buildProcedureSteps,
   buildSurgeryFindings,
@@ -1391,7 +1392,7 @@ const upstreamStages = computed(() => {
 const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
   REGISTRATION: ["patientName", "gender", "age", "visitDate"],
   INSPECTION: ["diseaseDirections", "examinationTypes", "factualConclusion"],
-  RECEPTION: ["chiefComplaint", "symptomDuration", "presentIllness"],
+  RECEPTION: ["chiefComplaint", "presentIllness", "physicalExam"],
   TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],
   DOCTOR: ["primaryWesternDiagnosis", "treatmentPath", "treatmentPlan"],
   SURGERY: ["actualOperationName", "operationDate", "intraoperativeFindings"]
@@ -1482,6 +1483,8 @@ const generatedTemplateText = (field: PreAiFieldConfig, form: Record<string, any
       return buildChiefComplaintText(form);
     case "presentIllness":
       return buildPresentIllnessText(form);
+    case "physicalExam":
+      return buildPhysicalExamText(form);
     case "inspectionConclusion":
       return buildInspectionConclusion(form);
     case "syndromeBasis":

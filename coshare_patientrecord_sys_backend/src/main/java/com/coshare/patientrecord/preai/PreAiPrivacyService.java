@@ -27,7 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class PreAiPrivacyService {
 
-    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v2-20260718";
+    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v3-20260802";
 
     private static final Pattern MOBILE_PATTERN = Pattern.compile("(?<!\\d)(1[3-9]\\d{9})(?!\\d)");
     private static final Pattern ID_CARD_PATTERN = Pattern.compile("(?<!\\d)\\d{6}(?:19|20)\\d{2}\\d{7}[0-9Xx](?![0-9Xx])");
@@ -41,7 +41,7 @@ public class PreAiPrivacyService {
         "RECEPTION", List.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
-            "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness",
+            "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness", "physicalExam",
             "pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory",
             "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
             "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"
@@ -304,10 +304,13 @@ public class PreAiPrivacyService {
         ObjectNode tcmSection = addSection(sections, "05", "五、中医四诊与辨证");
         addNodeRows(tcmSection, tcm, List.of("inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"), Set.of("tcmDisease", "primarySyndrome"));
 
-        ObjectNode inspectionSection = addSection(sections, "06", "六、专科检查");
+        ObjectNode physicalExam = addSection(sections, "06", "六、体格检查");
+        addNodeRows(physicalExam, reception, List.of("physicalExam"), Set.of("physicalExam"));
+
+        ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
         addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "biopsyPerformed", "factualConclusion"), Set.of("factualConclusion"));
 
-        ObjectNode auxiliary = addSection(sections, "07", "七、辅助检查");
+        ObjectNode auxiliary = addSection(sections, "08", "八、辅助检查");
         addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
         int taskIndex = 0;
         for (JsonNode task : masked.path("auxiliaryTasks")) {
@@ -335,21 +338,21 @@ public class PreAiPrivacyService {
             reportIndex++;
         }
 
-        ObjectNode primaryDiagnosis = addSection(sections, "08", "八、中西医主诊断");
+        ObjectNode primaryDiagnosis = addSection(sections, "09", "九、中西医主诊断");
         addNodeRows(primaryDiagnosis, tcm, List.of("tcmDisease", "primarySyndrome"), Set.of("tcmDisease", "primarySyndrome"));
         addNodeRows(primaryDiagnosis, doctor, List.of("primaryWesternDiagnosis", "diagnosisBasis"), Set.of("primaryWesternDiagnosis"));
 
-        ObjectNode secondaryDiagnosis = addSection(sections, "09", "九、次诊断（已选择）");
+        ObjectNode secondaryDiagnosis = addSection(sections, "10", "十、次诊断（已选择）");
         addNodeRows(secondaryDiagnosis, doctor, List.of("secondaryDiagnosisItems", "secondaryWesternDiagnoses", "differentialDiagnoses"), Set.of());
 
-        ObjectNode comorbid = addSection(sections, "10", "十、合并病中医病名及证型");
+        ObjectNode comorbid = addSection(sections, "11", "十一、合并病中医病名及证型");
         addNodeRows(comorbid, tcm, List.of("comorbidTcmItems", "concurrentSyndrome"), Set.of());
 
-        ObjectNode operation = addSection(sections, "11", "十一、手术 / 操作信息");
+        ObjectNode operation = addSection(sections, "12", "十二、手术 / 操作信息");
         addNodeRows(operation, doctor, List.of("plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"), Set.of("plannedPrimaryOperation", "plannedOperationName"));
         addNodeRows(operation, surgery, List.of("actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindingOptions", "intraoperativeFindings", "procedureStepOptions", "procedurePerformed", "pathologySubmitted", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoffOptions", "postoperativeHandoff"), Set.of("actualPrimaryOperation", "actualOperationName", "complications"));
 
-        ObjectNode dip = addSection(sections, "12", "十二、DIP 病组与治疗路径");
+        ObjectNode dip = addSection(sections, "13", "十三、DIP 病组与治疗路径");
         addNodeRows(dip, doctor, List.of("finalRoute", "treatmentPath", "treatmentPlan"), Set.of());
 
         int effectiveFieldCount = 0;
@@ -415,7 +418,7 @@ public class PreAiPrivacyService {
                 rows.add(row(text(item, "label"), text(item, "value"), item.path("emphasis").asBoolean(false) || !"NORMAL".equals(text(item, "severity"))));
             }
             if (!rows.isEmpty()) addTable(body, rows);
-            if ("06".equals(text(section, "code")) && !images.isEmpty()) {
+            if ("07".equals(text(section, "code")) && !images.isEmpty()) {
                 for (int index = 0; index < images.size(); index++) {
                     body.append(paragraph("专科检查图片 " + (index + 1), "ImageCaption"));
                     body.append(imageDrawing(index + 1, images.get(index)));
@@ -746,7 +749,7 @@ public class PreAiPrivacyService {
             {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
             {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
-            {"presentIllness", "现病史最终文本"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
+            {"presentIllness", "现病史最终文本"}, {"physicalExam", "体格检查"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
             {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
             {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
             {"dispositionSuggestion", "建议就诊分支"}, {"recommendedAuxiliaryExams", "建议辅助检查"},

@@ -86,7 +86,7 @@
         </div>
       </div>
     </section>
-    <footer class="panel-actions compact-actions">
+    <footer class="panel-actions compact-actions sticky-actions">
       <el-button
         v-if="canReview && labTask?.status === 'COMPLETED'"
         type="warning"
@@ -135,6 +135,12 @@ defineEmits<{
 </script>
 
 <style scoped lang="scss">
+.auxiliary-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 156px);
+  overflow: hidden;
+}
 .panel-heading {
   display: flex;
   align-items: flex-start;
@@ -163,7 +169,24 @@ defineEmits<{
   margin-left: 0;
 }
 .compact-actions {
+  flex: 0 0 auto;
   margin-top: 10px;
+}
+.lab-report-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.sticky-actions {
+  position: sticky;
+  z-index: 9;
+  bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
+  box-shadow: 0 -8px 26px rgb(31 78 120 / 10%);
+  backdrop-filter: blur(10px);
 }
 .lab-report-tabs {
   margin-top: 14px;

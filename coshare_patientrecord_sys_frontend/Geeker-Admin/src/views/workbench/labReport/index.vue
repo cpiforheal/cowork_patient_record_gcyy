@@ -74,6 +74,7 @@
             <el-tag v-if="!canSaveActiveTemplate" type="warning" effect="plain">当前岗位只读</el-tag>
           </div>
 
+          <div class="editor-scroll">
           <template v-if="activeTemplate.id === 'ecgImage'">
             <el-alert
               type="info"
@@ -144,6 +145,7 @@
               </div>
             </el-form>
           </template>
+          </div>
 
           <div class="actions">
             <el-button :icon="Refresh" :disabled="!canSaveActiveTemplate" @click="resetTemplateValues">重置当前模板</el-button>
@@ -251,6 +253,7 @@ const canEditLabMetrics = computed(() => ["admin", "doctor", "lab"].includes(cur
 type LabPatientCandidate = PatientRow & {
   preAiEncounterId?: string;
   legacyPatientId?: string;
+  legacyPatientAvailable?: boolean;
   preAiGender?: string;
 };
 
@@ -275,11 +278,17 @@ const patientPickerKey = (patient: LabPatientCandidate) =>
 
 const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounterSummary[]) => {
   const candidates = new Map<string, LabPatientCandidate>();
-  legacyPatients.forEach(patient => candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id }));
+  legacyPatients.forEach(patient =>
+    candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id, legacyPatientAvailable: true })
+  );
   encounters.forEach(encounter => {
     const linkedKey = encounter.sourcePatientId ? `legacy:${encounter.sourcePatientId}` : "";
     if (linkedKey && candidates.has(linkedKey)) {
-      Object.assign(candidates.get(linkedKey)!, { preAiEncounterId: encounter.id, preAiGender: encounter.gender });
+      Object.assign(candidates.get(linkedKey)!, {
+        preAiEncounterId: encounter.id,
+        preAiGender: encounter.gender,
+        legacyPatientAvailable: true
+      });
       return;
     }
     candidates.set(`preai:${encounter.id}`, {
@@ -387,9 +396,11 @@ const selectPatient = async (patient: LabPatientCandidate) => {
   try {
     const { data } = await getPatientDetailApi(patient.legacyPatientId);
     patientGender.value = data.fieldValues.gender || "";
+    patient.legacyPatientAvailable = true;
     patientFieldValues.value = data.fieldValues || {};
     hydrateTemplateValues();
   } catch {
+    patient.legacyPatientAvailable = false;
     patientGender.value = "";
   }
 };
@@ -429,11 +440,13 @@ const loadPatientFromRoute = async () => {
           candidate = {
             ...detail.patient,
             legacyPatientId: detail.patient.id,
+            legacyPatientAvailable: true,
             preAiEncounterId: encounterId,
             preAiGender: workspace.encounter.patient.gender || detail.fieldValues.gender || ""
           };
           patientFieldValues.value = detail.fieldValues || {};
         } catch {
+          candidate = { ...candidate, legacyPatientId: undefined, legacyPatientAvailable: false };
           patientFieldValues.value = {};
         }
       }
@@ -445,7 +458,7 @@ const loadPatientFromRoute = async () => {
       return;
     }
     const { data } = await getPatientDetailApi(routePatientId);
-    const candidate: LabPatientCandidate = { ...data.patient, legacyPatientId: data.patient.id };
+    const candidate: LabPatientCandidate = { ...data.patient, legacyPatientId: data.patient.id, legacyPatientAvailable: true };
     selectedPatient.value = candidate;
     selectedPatientKey.value = patientPickerKey(candidate);
     matchedPatients.value = [candidate];
@@ -543,7 +556,10 @@ const buildArchiveValues = () => {
 
 const validateBeforeSave = () => {
   if (!selectedPatient.value) return "请先选择患者";
-  if (activeTemplate.value.id === "ecgImage" && !selectedPatient.value.legacyPatientId)
+  if (
+    activeTemplate.value.id === "ecgImage" &&
+    (!selectedPatient.value.legacyPatientId || !selectedPatient.value.legacyPatientAvailable)
+  )
     return "心电图不属于本次前置病历化验室节点";
   if (!canSaveActiveTemplate.value) return "当前岗位只能查看该检验报告模板，不能保存检验数值";
   if (activeTemplate.value.id === "ecgImage" && !ecgFiles.value.length) return "请先选择心电图图片";
@@ -571,16 +587,20 @@ const saveToArchive = async () => {
   try {
     const batchId = `lab-${selectedPatient.value.id}-${Date.now()}`;
     const archiveValues = buildArchiveValues();
-    if (selectedPatient.value.legacyPatientId) {
+    const legacyPatientId =
+      selectedPatient.value.legacyPatientAvailable && selectedPatient.value.legacyPatientId
+        ? selectedPatient.value.legacyPatientId
+        : "";
+    if (legacyPatientId) {
       await savePatientRecordApi({
-        id: selectedPatient.value.legacyPatientId,
+        id: legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         values: archiveValues
       });
       patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
     }
-    if (activeTemplate.value.id === "ecgImage" && selectedPatient.value.legacyPatientId) {
+    if (activeTemplate.value.id === "ecgImage" && legacyPatientId) {
       const documents = await Promise.all(
         ecgFiles.value.map(async file => ({
           type: activeTemplate.value.documentType,
@@ -591,7 +611,7 @@ const saveToArchive = async () => {
         }))
       );
       await uploadDocumentsApi({
-        patientId: selectedPatient.value.legacyPatientId,
+        patientId: legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         sourceRole: "ecg",
@@ -599,9 +619,9 @@ const saveToArchive = async () => {
         batchName: `${activeTemplate.value.name}-${reportDate.value}`,
         documents
       });
-    } else if (activeTemplate.value.id !== "ecgImage" && selectedPatient.value.legacyPatientId) {
+    } else if (activeTemplate.value.id !== "ecgImage" && legacyPatientId) {
       await uploadDocumentsApi({
-        patientId: selectedPatient.value.legacyPatientId,
+        patientId: legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         sourceRole: "lab",
@@ -781,7 +801,15 @@ const printPreview = async () => {
   position: sticky;
   top: 12px;
   align-self: start;
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - 120px);
+  overflow: hidden;
+}
+
+.editor-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -853,6 +881,7 @@ const printPreview = async () => {
   position: sticky;
   bottom: 0;
   z-index: 2;
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;

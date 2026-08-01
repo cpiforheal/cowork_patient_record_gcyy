@@ -15,6 +15,7 @@ export type PreAiFieldKind =
 export type PreAiTemplateGenerator =
   | "chiefComplaint"
   | "presentIllness"
+  | "physicalExam"
   | "inspectionConclusion"
   | "syndromeBasis"
   | "diagnosisBasis"
@@ -651,6 +652,18 @@ export const preAiStages: PreAiStageConfig[] = [
         overrideKey: "presentIllnessOverride",
         sourceHashKey: "presentIllnessSourceHash",
         confirmedKey: "presentIllnessConfirmed"
+      },
+      {
+        key: "physicalExam",
+        label: "体格检查模板与医生修订",
+        kind: "template-text",
+        required: true,
+        rows: 5,
+        span: 2,
+        templateGenerator: "physicalExam",
+        overrideKey: "physicalExamOverride",
+        sourceHashKey: "physicalExamSourceHash",
+        confirmedKey: "physicalExamConfirmed"
       },
       {
         key: "chronicDiseaseItems",

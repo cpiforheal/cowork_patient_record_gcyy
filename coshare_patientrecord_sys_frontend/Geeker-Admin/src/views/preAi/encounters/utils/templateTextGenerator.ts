@@ -45,6 +45,19 @@ export const buildPresentIllnessText = (form: Record<string, any>) => {
   return parts.filter(Boolean).map(sentence).join("");
 };
 
+export const buildPhysicalExamText = (form: Record<string, any>) => {
+  const generalCondition = join(form.generalCondition);
+  const stool = [form.stoolFrequency, join(form.stoolCharacteristics)].filter(Boolean).join("，");
+  const parts = [
+    "神志清楚，查体合作，步入诊室",
+    generalCondition ? `一般情况：${generalCondition}` : "一般情况：精神可，饮食、睡眠可，小便正常",
+    stool && `大便情况：${stool}`,
+    "心肺听诊未闻及明显异常，腹软，无明显压痛及反跳痛",
+    "肛肠专科查体详见专科检查事实"
+  ];
+  return parts.filter(Boolean).map(sentence).join("");
+};
+
 const measurementText = (value: any) => {
   if (!value || typeof value !== "object") return String(value || "").trim();
   return [value.value, value.unit, value.status && value.status !== "NORMAL" ? `（${value.status}）` : ""]
