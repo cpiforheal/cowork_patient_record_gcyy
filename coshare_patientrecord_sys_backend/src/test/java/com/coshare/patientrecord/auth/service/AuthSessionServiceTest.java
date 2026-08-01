@@ -37,4 +37,11 @@ class AuthSessionServiceTest {
         assertThat(resolved).contains("account-1");
         assertThat(tampered).isEmpty();
     }
+
+    @Test
+    void restoredSessionPrefersCanonicalAccountRoleOverLegacySessionRole() {
+        assertThat(AuthSessionService.canonicalSessionRole("frontdesk", "前台")).isEqualTo("frontdesk");
+        assertThat(AuthSessionService.canonicalSessionRole("前台", "前台")).isEqualTo("frontdesk");
+        assertThat(AuthSessionService.canonicalSessionRole("", "接诊医生")).isEqualTo("reception");
+    }
 }

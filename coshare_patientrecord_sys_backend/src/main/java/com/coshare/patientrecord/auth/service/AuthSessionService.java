@@ -213,13 +213,12 @@ public class AuthSessionService {
         if (token == null || token.isBlank()) return Optional.empty();
         List<SessionUser> users = jdbcTemplate.query(
             """
-            SELECT s.user_id, s.username, s.display_name, s.role, s.role_label,
+            SELECT s.user_id, s.username, s.display_name, s.role, s.role_label, a.role AS account_role,
                    s.active_department_id, d.name AS department, s.must_change_password, s.expires_at
             FROM clinic_auth_sessions s
             JOIN clinic_accounts a
               ON a.id = s.user_id
              AND a.status = '启用'
-             AND LOWER(a.role) = LOWER(s.role)
             JOIN clinic_account_departments ad
               ON ad.account_id = s.user_id
              AND ad.department_id = s.active_department_id
@@ -230,17 +229,22 @@ public class AuthSessionService {
             WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP(6)
             LIMIT 1
             """,
-            (resultSet, rowNum) -> new SessionUser(
-                resultSet.getString("user_id"),
-                resultSet.getString("username"),
-                resultSet.getString("display_name"),
-                resultSet.getString("role"),
-                resultSet.getString("role_label"),
-                resultSet.getString("active_department_id"),
-                resultSet.getString("department"),
-                resultSet.getBoolean("must_change_password"),
-                resultSet.getTimestamp("expires_at").toInstant()
-            ),
+            (resultSet, rowNum) -> {
+                String role = canonicalSessionRole(resultSet.getString("account_role"), resultSet.getString("role"));
+                String roleLabel = RoleCatalog.label(role);
+                if (roleLabel.isBlank()) roleLabel = resultSet.getString("role_label");
+                return new SessionUser(
+                    resultSet.getString("user_id"),
+                    resultSet.getString("username"),
+                    resultSet.getString("display_name"),
+                    role,
+                    roleLabel,
+                    resultSet.getString("active_department_id"),
+                    resultSet.getString("department"),
+                    resultSet.getBoolean("must_change_password"),
+                    resultSet.getTimestamp("expires_at").toInstant()
+                );
+            },
             sha256(token)
         );
         Optional<SessionUser> user = users.stream().findFirst();
@@ -268,6 +272,14 @@ public class AuthSessionService {
 
     static boolean isDisplayRole(String role) {
         return role != null && DISPLAY_ROLE.equalsIgnoreCase(role.trim());
+    }
+
+    static String canonicalSessionRole(String accountRole, String sessionRole) {
+        String fromAccount = RoleCatalog.canonicalize(accountRole);
+        if (RoleCatalog.isCanonical(fromAccount)) return fromAccount;
+        String fromSession = RoleCatalog.canonicalize(sessionRole);
+        if (RoleCatalog.isCanonical(fromSession)) return fromSession;
+        return fromAccount;
     }
 
     public void logout(String token) {
