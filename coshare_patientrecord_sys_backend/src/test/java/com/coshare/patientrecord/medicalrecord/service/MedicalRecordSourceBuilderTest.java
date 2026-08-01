@@ -74,6 +74,18 @@ class MedicalRecordSourceBuilderTest {
         assertThat(source.path("recordFields").path("pulseCondition").asText()).isEqualTo("目标病历脉象");
     }
 
+    @Test
+    void doctorSideRolesCanReadPreAiScopeDirectly() {
+        SessionUser lab = new SessionUser("user-1", "lab", "Lab", "lab", "Lab", "dept-lab", "Lab", false, Instant.now().plusSeconds(3600));
+        doReturn(1).when(jdbcTemplate).queryForObject(
+            eq("SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?"),
+            eq(Integer.class),
+            eq("encounter-1")
+        );
+
+        sourceBuilder.assertCanReadScope("preai:encounter-1", lab);
+    }
+
     private ObjectNode databaseWithRecord(String tongue, String pulseCondition) {
         ObjectNode db = objectMapper.createObjectNode();
         ArrayNode patients = db.putArray("patients");

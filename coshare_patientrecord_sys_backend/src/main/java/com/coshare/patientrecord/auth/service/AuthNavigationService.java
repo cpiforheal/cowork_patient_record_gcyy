@@ -50,12 +50,15 @@ public class AuthNavigationService {
         "VITAL_SIGNS", Set.of("nurse"),
         "COLONOSCOPY", Set.of("inspection")
     );
+    private static final Set<String> PRE_AI_FULL_OPERATOR_ROLES = Set.of(
+        "admin", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
+    );
     private static final Map<String, Set<String>> PRE_AI_CAPABILITY_ROLES = Map.of(
-        "preai:encounter:create", Set.of("admin", "frontdesk"),
+        "preai:encounter:create", setWith(PRE_AI_FULL_OPERATOR_ROLES, "frontdesk"),
         "preai:legacy:import", Set.of("frontdesk"),
-        "preai:review", Set.of("doctor"),
-        "preai:duties:manage", Set.of("frontdesk"),
-        "preai:surgery:confirm", Set.of("doctor")
+        "preai:review", PRE_AI_FULL_OPERATOR_ROLES,
+        "preai:duties:manage", setWith(PRE_AI_FULL_OPERATOR_ROLES, "frontdesk"),
+        "preai:surgery:confirm", PRE_AI_FULL_OPERATOR_ROLES
     );
     private final JdbcTemplate jdbcTemplate;
     private final List<NavigationMenu> menus = buildMenus();
@@ -132,7 +135,10 @@ public class AuthNavigationService {
     }
 
     public boolean canEditStage(String role, String stageCode) {
-        return STAGE_EDITORS.getOrDefault(normalize(stageCode), Set.of()).contains(normalizeRole(role));
+        String stage = normalize(stageCode);
+        String normalizedRole = normalizeRole(role);
+        if (PRE_AI_FULL_OPERATOR_ROLES.contains(normalizedRole) && STAGE_EDITORS.containsKey(stage)) return true;
+        return STAGE_EDITORS.getOrDefault(stage, Set.of()).contains(normalizedRole);
     }
 
     public boolean canCorrectStage(String role, String stageCode) {
@@ -141,12 +147,16 @@ public class AuthNavigationService {
     }
 
     public boolean canEditAuxiliary(String role, String taskType) {
-        return AUXILIARY_EDITORS.getOrDefault(normalize(taskType), Set.of()).contains(normalizeRole(role));
+        String task = normalize(taskType);
+        String normalizedRole = normalizeRole(role);
+        if (PRE_AI_FULL_OPERATOR_ROLES.contains(normalizedRole) && AUXILIARY_EDITORS.containsKey(task)) return true;
+        return AUXILIARY_EDITORS.getOrDefault(task, Set.of()).contains(normalizedRole);
     }
 
     public boolean canCreateAuxiliary(String role, String taskType) {
         String normalizedRole = normalizeRole(role);
         String normalizedTask = normalize(taskType);
+        if (PRE_AI_FULL_OPERATOR_ROLES.contains(normalizedRole) && AUXILIARY_EDITORS.containsKey(normalizedTask)) return true;
         if (Set.of("doctor", "reception").contains(normalizedRole)) return true;
         return AUXILIARY_EDITORS.getOrDefault(normalizedTask, Set.of()).contains(normalizedRole);
     }
@@ -185,7 +195,7 @@ public class AuthNavigationService {
         Map<String, AuxiliaryPermission> result = new LinkedHashMap<>();
         AUXILIARY_EDITORS.keySet().stream().sorted().forEach(task -> {
             boolean editable = canEditAuxiliary(role, task);
-            boolean returnable = "doctor".equals(normalizeRole(role));
+            boolean returnable = PRE_AI_FULL_OPERATOR_ROLES.contains(normalizeRole(role));
             result.put(task, new AuxiliaryPermission(true, editable, returnable));
         });
         return Map.copyOf(result);
@@ -214,6 +224,12 @@ public class AuthNavigationService {
 
     private static String normalizeRole(String value) {
         return RoleCatalog.canonicalize(value);
+    }
+
+    private static Set<String> setWith(Set<String> source, String... values) {
+        Set<String> result = new LinkedHashSet<>(source);
+        result.addAll(Arrays.asList(values));
+        return Set.copyOf(result);
     }
 
     private static List<NavigationShortcut> prioritizeShortcuts(String role, List<NavigationShortcut> source) {

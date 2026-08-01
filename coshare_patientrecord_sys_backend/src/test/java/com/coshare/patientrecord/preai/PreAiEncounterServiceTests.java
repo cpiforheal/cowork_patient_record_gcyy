@@ -59,23 +59,15 @@ class PreAiEncounterServiceTests {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void currentWorkflowStageGrantsVisibilityToResponsiblePost() throws Exception {
-        stubEncounter("INSPECTION");
-        doReturn(0).when(jdbcTemplate).queryForObject(
-            contains("pre_ai_encounter_department_grants"),
-            eq(Integer.class),
-            eq("encounter-1"),
-            eq("user-1")
-        );
-        doReturn(true).when(navigationService).canEditStage("inspection", "INSPECTION");
-
-        assertThat(canAccessEncounter("encounter-1", user("inspection"))).isTrue();
+    void fullOperationRoleCanAccessAnyEncounter() throws Exception {
+        assertThat(canAccessEncounter("encounter-1", user("doctor"))).isTrue();
+        assertThat(canAccessEncounter("encounter-1", user("lab"))).isTrue();
+        assertThat(canAccessEncounter("encounter-1", user("admin"))).isTrue();
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void activeQueueStageGrantsVisibilityBeforeCurrentStageAdvances() throws Exception {
+    void currentWorkflowStageGrantsVisibilityToNonFullResponsiblePost() throws Exception {
         stubEncounter("REGISTRATION");
         doReturn(0).when(jdbcTemplate).queryForObject(
             contains("pre_ai_encounter_department_grants"),
@@ -83,20 +75,14 @@ class PreAiEncounterServiceTests {
             eq("encounter-1"),
             eq("user-1")
         );
-        doReturn(false).when(navigationService).canEditStage("inspection", "REGISTRATION");
-        doReturn(List.of("INSPECTION")).when(jdbcTemplate).query(
-            contains("FROM clinic_queue_tickets"),
-            any(RowMapper.class),
-            eq("encounter-1")
-        );
-        doReturn(true).when(navigationService).canEditStage("inspection", "INSPECTION");
+        doReturn(true).when(navigationService).canEditStage("frontdesk", "REGISTRATION");
 
-        assertThat(canAccessEncounter("encounter-1", user("inspection"))).isTrue();
+        assertThat(canAccessEncounter("encounter-1", user("frontdesk"))).isTrue();
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void draftAuxiliaryTaskGrantsVisibilityToResponsibleRoom() throws Exception {
+    void unrelatedPostCannotSeeEncounterWithoutDepartmentDutyStageOrQueueAccess() throws Exception {
         stubEncounter("DOCTOR");
         doReturn(0).when(jdbcTemplate).queryForObject(
             contains("pre_ai_encounter_department_grants"),
@@ -104,33 +90,7 @@ class PreAiEncounterServiceTests {
             eq("encounter-1"),
             eq("user-1")
         );
-        doReturn(false).when(navigationService).canEditStage("ecg", "DOCTOR");
-        doReturn(List.of()).when(jdbcTemplate).query(
-            contains("FROM clinic_queue_tickets"),
-            any(RowMapper.class),
-            eq("encounter-1")
-        );
-        doReturn(List.of("ECG")).when(jdbcTemplate).query(
-            contains("FROM pre_ai_auxiliary_tasks"),
-            any(RowMapper.class),
-            eq("encounter-1")
-        );
-        doReturn(true).when(navigationService).canEditAuxiliary("ecg", "ECG");
-
-        assertThat(canAccessEncounter("encounter-1", user("ecg"))).isTrue();
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void unrelatedPostCannotSeeEncounterWithoutDepartmentDutyStageOrQueueAccess() throws Exception {
-        stubEncounter("REGISTRATION");
-        doReturn(0).when(jdbcTemplate).queryForObject(
-            contains("pre_ai_encounter_department_grants"),
-            eq(Integer.class),
-            eq("encounter-1"),
-            eq("user-1")
-        );
-        doReturn(false).when(navigationService).canEditStage("inspection", "REGISTRATION");
+        doReturn(false).when(navigationService).canEditStage("frontdesk", "DOCTOR");
         doReturn(List.of()).when(jdbcTemplate).query(
             contains("FROM clinic_queue_tickets"),
             any(RowMapper.class),
@@ -142,7 +102,7 @@ class PreAiEncounterServiceTests {
             eq("encounter-1")
         );
 
-        assertThat(canAccessEncounter("encounter-1", user("inspection"))).isFalse();
+        assertThat(canAccessEncounter("encounter-1", user("frontdesk"))).isFalse();
     }
 
     @SuppressWarnings("unchecked")

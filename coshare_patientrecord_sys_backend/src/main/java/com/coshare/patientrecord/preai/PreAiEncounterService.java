@@ -2,6 +2,7 @@ package com.coshare.patientrecord.preai;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.auth.service.AuthNavigationService;
+import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.coshare.patientrecord.common.exception.VersionConflictException;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
 import com.coshare.patientrecord.clinicqueue.ClinicQueueService;
@@ -55,6 +56,9 @@ public class PreAiEncounterService {
     private static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW");
     private static final Set<String> INVENTORY_CONSUMPTION_STAGES = Set.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound", "quality");
+    private static final Set<String> FULL_OPERATION_ROLES = Set.of(
+        "admin", "inspection", "reception", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
+    );
     private static final Set<String> DUTY_CODES = Set.of(
         "FRONT_DESK", "RECEPTION_DOCTOR", "TCM_DOCTOR", "INSPECTION_DOCTOR", "LAB_STAFF",
         "BASIC_NURSING", "ATTENDING_DOCTOR", "SURGEON", "OPERATING_ROOM_NURSE", "FINAL_REVIEW_DOCTOR"
@@ -2433,6 +2437,7 @@ public class PreAiEncounterService {
     }
 
     private void requireReadRole(SessionUser user) {
+        if (user != null && READ_ROLES.contains(RoleCatalog.canonicalize(user.role()))) return;
         if (user == null || !READ_ROLES.contains(user.role())) throw forbidden("当前账号无权查看前置病历");
     }
 
@@ -2496,7 +2501,8 @@ public class PreAiEncounterService {
 
     private void requireEncounterAccess(String encounterId, SessionUser user) {
         requireReadRole(user);
-        if (Set.of("admin", "quality").contains(user.role())) return;
+        String role = RoleCatalog.canonicalize(user.role());
+        if ("quality".equals(role) || hasFullPreAiOperationAccess(user)) return;
         if (!canAccessEncounter(encounterId, user)) {
             throw forbidden("当前账号不属于病历归属科室，且未获得该病历的跨科授权");
         }
@@ -2504,8 +2510,9 @@ public class PreAiEncounterService {
 
     private boolean canAccessEncounter(String encounterId, SessionUser user) {
         if (user == null || safe(encounterId).isBlank()) return false;
-        if (Set.of("admin", "quality").contains(user.role())) return true;
-        if (!READ_ROLES.contains(user.role())) return false;
+        String role = RoleCatalog.canonicalize(user.role());
+        if ("quality".equals(role) || hasFullPreAiOperationAccess(user)) return true;
+        if (!READ_ROLES.contains(role)) return false;
 
         ObjectNode encounter = loadEncounter(encounterId);
         if (!safe(user.activeDepartmentId()).isBlank()
@@ -2562,6 +2569,7 @@ public class PreAiEncounterService {
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {
         boolean policyAllowed = user != null && navigationService.canEditStage(user.role(), stage);
         if (!policyAllowed) throw forbidden("当前岗位无权维护" + stageLabel(stage));
+        if (hasFullPreAiOperationAccess(user)) return;
         Set<String> duties = STAGE_DUTIES.getOrDefault(stage, Set.of());
         if (hasConfiguredDuty(encounter, duties) && !hasAssignedDuty(encounter, user, duties)) {
             throw forbidden("本病例已指定" + stageLabel(stage) + "责任人，当前账号不在责任范围内");
@@ -2615,6 +2623,7 @@ public class PreAiEncounterService {
     private void requireAuxTaskEditor(ObjectNode encounter, String taskType, SessionUser user) {
         boolean baseRole = user != null && navigationService.canEditAuxiliary(user.role(), taskType);
         if (!baseRole) throw forbidden("当前岗位无权维护该辅助检查任务");
+        if (hasFullPreAiOperationAccess(user)) return;
         Set<String> duties = AUX_DUTIES.getOrDefault(taskType, Set.of());
         if (hasConfiguredDuty(encounter, duties) && !hasAssignedDuty(encounter, user, duties)) {
             throw forbidden("本病例已指定辅助任务责任人，当前账号不在责任范围内");
@@ -2633,6 +2642,7 @@ public class PreAiEncounterService {
     private void requireReviewer(ObjectNode encounter, SessionUser user) {
         boolean baseRole = user != null && navigationService.canEditStage(user.role(), "REVIEW");
         if (!baseRole) throw forbidden("当前岗位无权执行医生复核操作");
+        if (hasFullPreAiOperationAccess(user)) return;
         Set<String> duties = STAGE_DUTIES.get("REVIEW");
         if (hasConfiguredDuty(encounter, duties) && !hasAssignedDuty(encounter, user, duties)) {
             throw forbidden("本病例已指定最终复核医生，当前账号无权代为复核");
@@ -2640,7 +2650,18 @@ public class PreAiEncounterService {
     }
 
     private void requireRole(SessionUser user, String... roles) {
+        if (user != null) {
+            Set<String> allowedRoles = new LinkedHashSet<>();
+            for (String role : roles) allowedRoles.add(RoleCatalog.canonicalize(role));
+            String userRole = RoleCatalog.canonicalize(user.role());
+            if (allowedRoles.contains(userRole)) return;
+            if (hasFullPreAiOperationAccess(user) && !allowedRoles.equals(Set.of("admin"))) return;
+        }
         if (user == null || !Set.of(roles).contains(user.role())) throw forbidden("当前岗位无权执行此操作");
+    }
+
+    private boolean hasFullPreAiOperationAccess(SessionUser user) {
+        return user != null && FULL_OPERATION_ROLES.contains(RoleCatalog.canonicalize(user.role()));
     }
 
     private String normalizeStage(String value) {

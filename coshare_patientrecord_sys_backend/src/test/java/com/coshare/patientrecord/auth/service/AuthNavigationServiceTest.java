@@ -35,29 +35,23 @@ class AuthNavigationServiceTest {
     }
 
     @Test
-    void eachClinicalStageIsOwnedByItsResponsiblePost() {
-        for (String stage : List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "SURGERY")) {
-            assertThat(service.canEditStage("doctor", stage)).as(stage).isFalse();
+    void doctorSideAndAdminRolesCanEditEveryClinicalStage() {
+        for (String role : List.of("admin", "doctor", "lab", "ecg", "ultrasound", "inspection", "reception", "tcm", "nurse", "nursing")) {
+            for (String stage : List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW")) {
+                assertThat(service.canEditStage(role, stage)).as(role + "/" + stage).isTrue();
+            }
         }
         assertThat(service.canEditStage("frontdesk", "REGISTRATION")).isTrue();
-        assertThat(service.canEditStage("inspection", "INSPECTION")).isTrue();
-        assertThat(service.canEditStage("reception", "RECEPTION")).isTrue();
-        assertThat(service.canEditStage("tcm", "TCM")).isTrue();
-        assertThat(service.canEditStage("nurse", "SURGERY")).isTrue();
-        assertThat(service.canEditStage("nursing", "SURGERY")).isTrue();
-        assertThat(service.canEditStage("doctor", "DOCTOR")).isTrue();
-        assertThat(service.canCorrectStage("doctor", "DOCTOR")).isTrue();
-        assertThat(service.canEditStage("doctor", "REVIEW")).isTrue();
+        assertThat(service.canEditStage("frontdesk", "DOCTOR")).isFalse();
         assertThat(service.canCorrectStage("doctor", "REVIEW")).isFalse();
-        for (String stage : List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW")) {
-            assertThat(service.canEditStage("admin", stage)).as(stage).isFalse();
-        }
     }
 
     @Test
-    void auxiliaryResultsRemainOwnedByTheResponsiblePost() {
+    void doctorSideAndAdminRolesCanEditEveryAuxiliaryTask() {
         assertThat(service.canEditAuxiliary("lab", "LAB")).isTrue();
-        assertThat(service.canEditAuxiliary("doctor", "LAB")).isFalse();
+        assertThat(service.canEditAuxiliary("doctor", "LAB")).isTrue();
+        assertThat(service.canEditAuxiliary("admin", "ECG")).isTrue();
+        assertThat(service.canEditAuxiliary("ecg", "LAB")).isTrue();
         assertThat(service.canEditAuxiliary("inspection", "COLONOSCOPY")).isTrue();
         assertThat(service.canEditAuxiliary("ultrasound", "IMAGING")).isTrue();
         assertThat(service.canEditAuxiliary("frontdesk", "IMAGING")).isFalse();
@@ -70,13 +64,14 @@ class AuthNavigationServiceTest {
         NavigationResult doctor = service.navigationFor(user("doctor"));
         assertThat(doctor.policyVersion()).isEqualTo(AuthNavigationService.POLICY_VERSION);
         assertThat(doctor.capabilities()).contains(
+            "preai:encounter:create",
             "preai:review",
+            "preai:duties:manage",
+            "preai:stage:registration:edit",
             "preai:stage:doctor:edit",
             "preai:stage:doctor:correct",
+            "preai:auxiliary:lab:edit",
             "preai:auxiliary:lab:create"
-        );
-        assertThat(doctor.capabilities()).doesNotContain(
-            "preai:encounter:create", "preai:duties:manage", "preai:stage:registration:edit", "preai:auxiliary:lab:edit"
         );
         assertThat(service.hasCapability(user("doctor"), "preai:review")).isTrue();
         assertThat(service.hasCapability(user("doctor"), "preai:stage:doctor:edit")).isTrue();
@@ -110,9 +105,10 @@ class AuthNavigationServiceTest {
         assertThat(service.hasCapability(warehouse, "inventory:confirm")).isFalse();
 
         NavigationResult admin = service.navigationFor(user("admin"));
-        assertThat(admin.capabilities()).doesNotContain("preai:review", "preai:stage:doctor:edit", "inventory:issue");
+        assertThat(admin.capabilities()).doesNotContain("inventory:issue");
         assertThat(admin.capabilities()).contains(
-            "maintenance:purge", "maintenance:backup", "inventory:item:manage", "preai:encounter:create"
+            "maintenance:purge", "maintenance:backup", "inventory:item:manage", "preai:encounter:create",
+            "preai:review", "preai:stage:doctor:edit", "preai:auxiliary:lab:edit"
         );
         assertThat(service.hasCapability(user("admin"), "inventory:item:manage")).isTrue();
         assertThat(service.hasCapability(user("admin"), "inventory:issue")).isFalse();

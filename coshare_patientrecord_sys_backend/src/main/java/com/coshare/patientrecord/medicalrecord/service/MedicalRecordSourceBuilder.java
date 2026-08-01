@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.medicalrecord.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
 import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.medicalrecord.model.TargetField;
@@ -22,6 +23,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 @Profile("mysql")
 public class MedicalRecordSourceBuilder {
+
+    private static final List<String> PRE_AI_SCOPE_READ_ROLES = List.of(
+        "admin", "quality", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
+    );
 
     private final ObjectMapper objectMapper;
     private final ClinicDatabaseService databaseService;
@@ -265,7 +270,7 @@ public class MedicalRecordSourceBuilder {
         }
         if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
         String encounterId = safeScopeId.substring("preai:".length());
-        boolean globalRead = List.of("admin", "quality").contains(safe(user.role()));
+        boolean globalRead = PRE_AI_SCOPE_READ_ROLES.contains(RoleCatalog.canonicalize(user.role()));
         Integer count = globalRead
             ? jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?", Integer.class, encounterId)
             : jdbcTemplate.queryForObject(

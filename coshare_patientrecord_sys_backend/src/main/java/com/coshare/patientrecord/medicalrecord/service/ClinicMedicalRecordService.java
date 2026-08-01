@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.medicalrecord.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.coshare.patientrecord.medicalrecord.dto.DownloadFile;
 import com.coshare.patientrecord.medicalrecord.ooxml.DocxControlledEditor;
 import com.coshare.patientrecord.medicalrecord.ooxml.DocxNodeMapper;
@@ -77,6 +78,9 @@ public class ClinicMedicalRecordService {
     private static final List<String> ULTRASOUND_EDITORS = List.of("admin", "ultrasound");
     private static final List<String> NURSE_EDITORS = List.of("admin", "nurse", "nursing");
     private static final List<String> SCREENING_REVIEW_EDITORS = List.of("admin", "lab", "doctor", "nurse");
+    private static final Set<String> FULL_WORKSPACE_EDITOR_ROLES = Set.of(
+        "admin", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
+    );
     private static final List<TargetField> TARGET_FIELDS = buildTargetFields();
 
     private final MedicalRecordVersionRepository versionRepository;
@@ -153,8 +157,8 @@ public class ClinicMedicalRecordService {
     public Map<String, Object> saveWorkspace(WorkspaceSaveRequest request, SessionUser user) {
         requireWorkspaceRole(user);
         String patientId = safe(request == null ? "" : request.patientId());
-        if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
-        sourceBuilder.assertCanReadPatient(patientId, user);
+        String scopeId = generationScopeId(patientId, "");
+        sourceBuilder.assertCanReadScope(scopeId, user);
         JsonNode values = request == null || request.values() == null ? objectMapper.createObjectNode() : objectMapper.valueToTree(request.values());
         if (!values.isObject()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "目标病历字段必须是对象");
 
@@ -169,13 +173,12 @@ public class ClinicMedicalRecordService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前岗位没有可保存的目标病历字段");
         }
 
-        accepted.fields().forEachRemaining(entry -> versionRepository.upsertRecordField(patientId, entry.getKey(), entry.getValue().asText("")));
-        versionRepository.writeAudit(patientId, user, "保存医生目标病历填写", "medical-record.workspace.save", "保存 " + accepted.size() + " 个目标病历动态字段");
+        accepted.fields().forEachRemaining(entry -> versionRepository.upsertRecordField(scopeId, entry.getKey(), entry.getValue().asText("")));
+        versionRepository.writeAudit(scopeId, user, "保存医生目标病历填写", "medical-record.workspace.save", "保存 " + accepted.size() + " 个目标病历动态字段");
 
-        ObjectNode source = sourceBuilder.readPatientSource(patientId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
         ObjectNode result = objectMapper.createObjectNode();
         result.set("values", accepted);
-        result.set("missingItems", sourceBuilder.missingItems(source, outputTargetFields()));
+        result.set("missingItems", workspaceMissingItems(scopeId, user));
         result.put("disclaimer", DISCLAIMER);
         return objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
     }
@@ -945,7 +948,11 @@ public class ClinicMedicalRecordService {
 
     private Set<String> editableTargetFieldKeys(SessionUser user) {
         Set<String> keys = new HashSet<>();
-        String role = user == null ? "" : safe(user.role());
+        String role = user == null ? "" : RoleCatalog.canonicalize(user.role());
+        if (FULL_WORKSPACE_EDITOR_ROLES.contains(role)) {
+            outputTargetFields().forEach(field -> keys.add(field.key()));
+            return keys;
+        }
         outputTargetFields().forEach(field -> {
             if (field.editorRoles().contains(role)) {
                 keys.add(field.key());
@@ -967,25 +974,35 @@ public class ClinicMedicalRecordService {
     }
 
     private void requireWorkspaceRole(SessionUser user) {
-        requireRole(user, "当前账号无权维护目标病历", COLLABORATOR_ROLES.stream()
-            .filter(role -> !"admin".equals(role))
-            .toList());
+        requireRole(user, "当前账号无权维护目标病历", COLLABORATOR_ROLES);
     }
 
     private void requireGenerateRole(SessionUser user) {
-        requireRole(user, "当前账号无权生成目标病历", List.of("doctor"));
+        requireRole(user, "当前账号无权生成目标病历", List.copyOf(FULL_WORKSPACE_EDITOR_ROLES));
     }
 
     private void requireFinalizeRole(SessionUser user) {
-        requireRole(user, "当前账号无权定稿目标病历", List.of("doctor"));
+        requireRole(user, "当前账号无权定稿目标病历", List.copyOf(FULL_WORKSPACE_EDITOR_ROLES));
     }
 
     private void requireRole(SessionUser user, String message, List<String> allowedRoles) {
         if (user == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
         }
-        if (!allowedRoles.contains(safe(user.role()))) {
+        if (!allowedRoles.contains(RoleCatalog.canonicalize(user.role()))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, message);
+        }
+    }
+
+    private ArrayNode workspaceMissingItems(String scopeId, SessionUser user) {
+        try {
+            ObjectNode source = scopeId.startsWith("preai:")
+                ? sourceBuilder.readEncounterSource(scopeId.substring("preai:".length()), user, false, TEMPLATE_NAME, TEMPLATE_VERSION)
+                : sourceBuilder.readPatientSource(scopeId, user, false, TEMPLATE_NAME, TEMPLATE_VERSION);
+            return sourceBuilder.missingItems(source, outputTargetFields());
+        } catch (ResponseStatusException error) {
+            if (!scopeId.startsWith("preai:")) throw error;
+            return objectMapper.createArrayNode();
         }
     }
 
