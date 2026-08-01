@@ -777,6 +777,14 @@ const printPreview = async () => {
   min-width: 0;
 }
 
+.editor-panel {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+}
+
 .panel-title {
   display: flex;
   align-items: flex-start;
@@ -842,11 +850,17 @@ const printPreview = async () => {
 }
 
 .actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 14px;
+  margin: 14px -16px -16px;
+  padding: 12px 16px 16px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 88%), #ffffff 38%);
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 .ecg-uploader {

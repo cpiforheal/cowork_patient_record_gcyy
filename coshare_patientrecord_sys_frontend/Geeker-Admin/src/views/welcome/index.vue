@@ -55,11 +55,18 @@
     </section>
 
     <section class="summary-strip" aria-label="今日运行概况">
-      <article v-for="tile in tiles" :key="tile.label" class="summary-tile" :class="tile.tone">
+      <button
+        v-for="tile in tiles"
+        :key="tile.label"
+        class="summary-tile"
+        :class="[tile.tone, { 'is-clickable': tile.path }]"
+        type="button"
+        @click="openTile(tile)"
+      >
         <span class="tile-label">{{ tile.label }}</span>
         <strong class="tile-value">{{ tile.value }}</strong>
         <small class="tile-note">{{ tile.note }}</small>
-      </article>
+      </button>
     </section>
 
     <p class="welcome-footnote">数据每分钟自动更新 · 以各工作台实际业务为准</p>
@@ -71,14 +78,24 @@
 
 <script setup lang="ts" name="welcome">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { useUserStore } from "@/stores/modules/user";
 import { roleLabel } from "@/config/fieldPermissions";
 import { getHomeSummaryApi, type HomeSummary } from "@/api/modules/clinic/homeSummary";
 
+const router = useRouter();
 const userStore = useUserStore();
 const userName = computed(() => userStore.userInfo.name || "同事");
 const roleName = computed(() => roleLabel(userStore.userInfo.role));
 const department = computed(() => userStore.userInfo.department || "门诊");
+
+interface SummaryTile {
+  label: string;
+  value: string;
+  note: string;
+  tone: "tone-blue" | "tone-teal" | "tone-green" | "tone-amber" | "tone-plain";
+  path?: string;
+}
 
 /* ---------------- 时钟与问候 ---------------- */
 
@@ -233,16 +250,21 @@ async function loadSummary() {
   }
 }
 
-const tiles = computed(() => {
+const tiles = computed<SummaryTile[]>(() => {
   const value = (key: keyof Omit<HomeSummary, "serverTime">) => (summary.value === undefined ? "—" : String(summary.value[key]));
   return [
-    { label: "今日登记", value: value("todayRegistered"), note: "就诊登记", tone: "tone-blue" },
+    { label: "今日登记", value: value("todayRegistered"), note: "就诊登记", tone: "tone-blue", path: "/pre-ai/encounters" },
     { label: "当前候诊", value: value("queueWaiting"), note: "检查 + 接诊", tone: "tone-teal" },
     { label: "今日完成", value: value("queueCompletedToday"), note: "已完成就诊", tone: "tone-green" },
     { label: "待取药", value: value("tcmReady"), note: "中药房", tone: "tone-amber" },
     { label: "制作中", value: value("tcmInProgress"), note: "调剂 / 代煎", tone: "tone-plain" }
   ];
 });
+
+function openTile(tile: SummaryTile) {
+  if (!tile.path || splashing.value) return;
+  void router.push(tile.path);
+}
 
 /* ---------------- 忙闲节奏与关怀语 ---------------- */
 
@@ -680,9 +702,23 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(8px);
   box-shadow: 0 6px 18px rgba(15, 60, 80, 0.08);
+  appearance: none;
+  color: inherit;
+  font: inherit;
+  text-align: center;
   transition:
     background 3s ease,
-    border-color 3s ease;
+    border-color 3s ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+.summary-tile.is-clickable {
+  cursor: pointer;
+}
+.summary-tile.is-clickable:hover {
+  border-color: rgba(8, 127, 169, 0.28);
+  box-shadow: 0 10px 24px rgba(15, 60, 80, 0.12);
+  transform: translateY(-2px);
 }
 .tile-label {
   color: var(--el-text-color-secondary);

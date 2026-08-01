@@ -272,8 +272,8 @@ const roleActionConfig = computed(() => {
         desc: "录入基础信息、来院来源和分诊入口",
         count: "建档",
         level: "info",
-        actionText: "去患者列表",
-        path: "/patients/list"
+        actionText: "去前置病历",
+        path: "/pre-ai/encounters"
       },
       {
         id: "frontdesk-basic",
