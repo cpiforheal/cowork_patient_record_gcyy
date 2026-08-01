@@ -2521,7 +2521,8 @@ public class PreAiEncounterService {
         return (grantCount != null && grantCount > 0)
             || canAccessCurrentWorkflowStage(encounter, user)
             || hasAssignedDuty(encounter, user, DUTY_CODES)
-            || hasAccessibleQueueTask(encounterId, user);
+            || hasAccessibleQueueTask(encounterId, user)
+            || hasAccessibleAuxiliaryTask(encounterId, user);
     }
 
     private boolean canAccessCurrentWorkflowStage(ObjectNode encounter, SessionUser user) {
@@ -2542,6 +2543,20 @@ public class PreAiEncounterService {
             safe(encounterId)
         );
         return stages.stream().anyMatch(stage -> navigationService.canEditStage(user.role(), stage));
+    }
+
+    private boolean hasAccessibleAuxiliaryTask(String encounterId, SessionUser user) {
+        List<String> taskTypes = jdbcTemplate.query(
+            """
+            SELECT DISTINCT task_type
+            FROM pre_ai_auxiliary_tasks
+            WHERE encounter_id = ?
+              AND status IN ('DRAFT', 'RETURNED')
+            """,
+            (rs, rowNum) -> rs.getString("task_type"),
+            safe(encounterId)
+        );
+        return taskTypes.stream().anyMatch(taskType -> navigationService.canEditAuxiliary(user.role(), taskType));
     }
 
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {

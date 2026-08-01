@@ -96,6 +96,32 @@ class PreAiEncounterServiceTests {
 
     @Test
     @SuppressWarnings("unchecked")
+    void draftAuxiliaryTaskGrantsVisibilityToResponsibleRoom() throws Exception {
+        stubEncounter("DOCTOR");
+        doReturn(0).when(jdbcTemplate).queryForObject(
+            contains("pre_ai_encounter_department_grants"),
+            eq(Integer.class),
+            eq("encounter-1"),
+            eq("user-1")
+        );
+        doReturn(false).when(navigationService).canEditStage("ecg", "DOCTOR");
+        doReturn(List.of()).when(jdbcTemplate).query(
+            contains("FROM clinic_queue_tickets"),
+            any(RowMapper.class),
+            eq("encounter-1")
+        );
+        doReturn(List.of("ECG")).when(jdbcTemplate).query(
+            contains("FROM pre_ai_auxiliary_tasks"),
+            any(RowMapper.class),
+            eq("encounter-1")
+        );
+        doReturn(true).when(navigationService).canEditAuxiliary("ecg", "ECG");
+
+        assertThat(canAccessEncounter("encounter-1", user("ecg"))).isTrue();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void unrelatedPostCannotSeeEncounterWithoutDepartmentDutyStageOrQueueAccess() throws Exception {
         stubEncounter("REGISTRATION");
         doReturn(0).when(jdbcTemplate).queryForObject(
@@ -107,6 +133,11 @@ class PreAiEncounterServiceTests {
         doReturn(false).when(navigationService).canEditStage("inspection", "REGISTRATION");
         doReturn(List.of()).when(jdbcTemplate).query(
             contains("FROM clinic_queue_tickets"),
+            any(RowMapper.class),
+            eq("encounter-1")
+        );
+        doReturn(List.of()).when(jdbcTemplate).query(
+            contains("FROM pre_ai_auxiliary_tasks"),
             any(RowMapper.class),
             eq("encounter-1")
         );
