@@ -2519,7 +2519,29 @@ public class PreAiEncounterService {
             safe(user.id())
         );
         return (grantCount != null && grantCount > 0)
-            || hasAssignedDuty(encounter, user, DUTY_CODES);
+            || canAccessCurrentWorkflowStage(encounter, user)
+            || hasAssignedDuty(encounter, user, DUTY_CODES)
+            || hasAccessibleQueueTask(encounterId, user);
+    }
+
+    private boolean canAccessCurrentWorkflowStage(ObjectNode encounter, SessionUser user) {
+        String currentStage = text(encounter, "currentStage");
+        return !currentStage.isBlank() && navigationService.canEditStage(user.role(), currentStage);
+    }
+
+    private boolean hasAccessibleQueueTask(String encounterId, SessionUser user) {
+        List<String> stages = jdbcTemplate.query(
+            """
+            SELECT DISTINCT t.stage_code
+            FROM clinic_queue_tickets q
+            JOIN clinic_queue_tasks t ON t.ticket_id = q.id
+            WHERE q.encounter_id = ?
+              AND t.status NOT IN ('CANCELLED', 'INACTIVE')
+            """,
+            (rs, rowNum) -> rs.getString("stage_code"),
+            safe(encounterId)
+        );
+        return stages.stream().anyMatch(stage -> navigationService.canEditStage(user.role(), stage));
     }
 
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {
