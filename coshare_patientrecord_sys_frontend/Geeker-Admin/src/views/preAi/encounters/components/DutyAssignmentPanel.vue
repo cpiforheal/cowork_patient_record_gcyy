@@ -74,7 +74,7 @@ type DutyDefinition = {
   code: PreAiDutyCode;
   label: string;
   hint: string;
-  candidateRoles: UserRole[];
+  candidateRoles: string[];
 };
 
 const duties: DutyDefinition[] = [
@@ -132,14 +132,41 @@ const selectedUserIdsForDuty = (code: PreAiDutyCode) => {
   return new Set([row.responsibleUserId, ...(row.participantUserIds || [])].filter(Boolean) as string[]);
 };
 
+const normalizeText = (value?: string) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, "");
+
+const roleAliasMap: Partial<Record<UserRole, string[]>> = {
+  admin: ["系统管理员", "管理员", "admin"],
+  frontdesk: ["登记前台", "前台", "收费", "frontdesk", "registration", "cashier"],
+  reception: ["接诊岗位", "接诊", "reception"],
+  doctor: ["医生岗位", "医生", "doctor"],
+  tcm: ["中医岗位", "中医", "tcm"],
+  inspection: ["检查岗位", "检查", "肠镜", "inspection", "colonoscopy"],
+  lab: ["检验岗位", "化验", "检验", "lab"],
+  nurse: ["护理与手术", "护士", "护理", "nurse"],
+  nursing: ["护理部", "护理", "nursing"],
+  quality: ["质控与病案", "质控", "病案", "quality"]
+};
+
+const roleMatches = (user: PreAiDutyUserOption, roles: string[]) => {
+  const values = [user.role, user.roleLabel].map(normalizeText).filter(Boolean);
+  if (!values.length) return false;
+  return roles.some(role => {
+    const aliases = [role, ...(roleAliasMap[role as UserRole] || [])].map(normalizeText);
+    return aliases.some(alias => values.some(value => value === alias || value.includes(alias) || alias.includes(value)));
+  });
+};
+
 const usersForDuty = (code: PreAiDutyCode) => {
   const duty = dutyByCode.get(code);
   const selectedIds = selectedUserIdsForDuty(code);
-  const filtered = users.value.filter(user => {
-    const role = String(user.role || "").trim() as UserRole;
-    return selectedIds.has(user.id) || Boolean(duty?.candidateRoles.includes(role));
-  });
-  return Array.from(new Map(filtered.map(user => [user.id, user])).values());
+  const candidateRoles = duty?.candidateRoles || [];
+  const matched = users.value.filter(user => selectedIds.has(user.id) || roleMatches(user, candidateRoles));
+  const available = matched.length ? matched : users.value.filter(user => selectedIds.has(user.id));
+  return Array.from(new Map(available.map(user => [user.id, user])).values());
 };
 
 const userLabel = (user: PreAiDutyUserOption) => {
