@@ -30,7 +30,7 @@
             :disabled="disabled"
             @change="syncNames(duty.code)"
           >
-            <el-option v-for="user in users" :key="user.id" :label="userLabel(user)" :value="user.id" />
+            <el-option v-for="user in usersForDuty(duty.code)" :key="user.id" :label="userLabel(user)" :value="user.id" />
           </el-select>
         </label>
         <label>
@@ -44,7 +44,7 @@
             :disabled="disabled"
             @change="syncNames(duty.code)"
           >
-            <el-option v-for="user in users" :key="user.id" :label="userLabel(user)" :value="user.id" />
+            <el-option v-for="user in usersForDuty(duty.code)" :key="user.id" :label="userLabel(user)" :value="user.id" />
           </el-select>
         </label>
       </article>
@@ -60,6 +60,7 @@ import {
   type PreAiDutyCode,
   type PreAiDutyUserOption
 } from "@/api/modules/clinic";
+import type { UserRole } from "@/config/fieldPermissions";
 
 const props = defineProps<{
   assignments: PreAiDutyAssignment[];
@@ -69,18 +70,26 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (event: "save", assignments: PreAiDutyAssignment[]): void }>();
 
-const duties: Array<{ code: PreAiDutyCode; label: string; hint: string }> = [
-  { code: "FRONT_DESK", label: "前台/收费", hint: "登记与收费信息" },
-  { code: "RECEPTION_DOCTOR", label: "接诊医生", hint: "病史与初步处置" },
-  { code: "TCM_DOCTOR", label: "中医师", hint: "四诊与辨证" },
-  { code: "INSPECTION_DOCTOR", label: "检查/肠镜医师", hint: "专科检查与肠镜" },
-  { code: "LAB_STAFF", label: "化验人员", hint: "化验任务" },
-  { code: "BASIC_NURSING", label: "基础护理", hint: "生命体征" },
-  { code: "ATTENDING_DOCTOR", label: "主管医生", hint: "事实包最终版本责任人" },
-  { code: "SURGEON", label: "手术医生", hint: "术式、所见和步骤确认" },
-  { code: "OPERATING_ROOM_NURSE", label: "手术室护士", hint: "手术事实代录与交接" },
-  { code: "FINAL_REVIEW_DOCTOR", label: "最终复核医生", hint: "复核与版本锁定" }
+type DutyDefinition = {
+  code: PreAiDutyCode;
+  label: string;
+  hint: string;
+  candidateRoles: UserRole[];
+};
+
+const duties: DutyDefinition[] = [
+  { code: "FRONT_DESK", label: "前台/收费", hint: "登记与收费信息", candidateRoles: ["frontdesk"] },
+  { code: "RECEPTION_DOCTOR", label: "接诊医生", hint: "病史与初步处置", candidateRoles: ["reception", "doctor"] },
+  { code: "TCM_DOCTOR", label: "中医师", hint: "四诊与辨证", candidateRoles: ["tcm"] },
+  { code: "INSPECTION_DOCTOR", label: "检查/肠镜医师", hint: "专科检查与肠镜", candidateRoles: ["inspection"] },
+  { code: "LAB_STAFF", label: "化验人员", hint: "化验任务", candidateRoles: ["lab"] },
+  { code: "BASIC_NURSING", label: "基础护理", hint: "生命体征", candidateRoles: ["nurse", "nursing"] },
+  { code: "ATTENDING_DOCTOR", label: "主管医生", hint: "事实包最终版本责任人", candidateRoles: ["doctor"] },
+  { code: "SURGEON", label: "手术医生", hint: "术式、所见和步骤确认", candidateRoles: ["doctor"] },
+  { code: "OPERATING_ROOM_NURSE", label: "手术室护士", hint: "手术事实代录与交接", candidateRoles: ["nurse", "nursing"] },
+  { code: "FINAL_REVIEW_DOCTOR", label: "最终复核医生", hint: "复核与版本锁定", candidateRoles: ["doctor", "quality"] }
 ];
+const dutyByCode = new Map(duties.map(duty => [duty.code, duty]));
 
 const emptyAssignment = (dutyCode: PreAiDutyCode): PreAiDutyAssignment => ({
   dutyCode,
@@ -118,10 +127,27 @@ const users = computed<PreAiDutyUserOption[]>(() => {
   return Array.from(merged.values());
 });
 
+const selectedUserIdsForDuty = (code: PreAiDutyCode) => {
+  const row = draft[code];
+  return new Set([row.responsibleUserId, ...(row.participantUserIds || [])].filter(Boolean) as string[]);
+};
+
+const usersForDuty = (code: PreAiDutyCode) => {
+  const duty = dutyByCode.get(code);
+  const selectedIds = selectedUserIdsForDuty(code);
+  const filtered = users.value.filter(user => {
+    const role = String(user.role || "").trim() as UserRole;
+    return selectedIds.has(user.id) || Boolean(duty?.candidateRoles.includes(role));
+  });
+  return Array.from(new Map(filtered.map(user => [user.id, user])).values());
+};
+
 const userLabel = (user: PreAiDutyUserOption) => {
   const name = String(user.name || "").trim();
   const username = String(user.username || user.id).trim();
-  return name && name !== username ? `${name}（${username}）` : username;
+  const identity = name && name !== username ? `${name}（${username}）` : username;
+  const meta = [user.roleLabel, user.department].map(value => String(value || "").trim()).filter(Boolean).join(" · ");
+  return meta ? `${identity}｜${meta}` : identity;
 };
 
 const hydrate = (assignments: PreAiDutyAssignment[] = []) => {
@@ -136,11 +162,12 @@ const hydrate = (assignments: PreAiDutyAssignment[] = []) => {
 
 const syncNames = (code: PreAiDutyCode) => {
   const row = draft[code];
-  const responsible = users.value.find(user => user.id === row.responsibleUserId);
+  const dutyUsers = usersForDuty(code);
+  const responsible = dutyUsers.find(user => user.id === row.responsibleUserId);
   row.responsibleUserName = responsible?.name || responsible?.username || "";
   row.participantUserNames = (row.participantUserIds || [])
     .map(id => {
-      const user = users.value.find(item => item.id === id);
+      const user = dutyUsers.find(item => item.id === id);
       return user?.name || user?.username || "";
     })
     .filter(Boolean);
