@@ -6,6 +6,7 @@ import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
 import { staticRouter, errorRouter } from "@/routers/modules/staticRouter";
 import {
   INVENTORY_SYSTEM_DASHBOARD,
+  inventorySystemRoutes,
   inventorySystemPathForLegacy,
   isInventorySystemPath,
   isLegacyInventoryPath
@@ -57,7 +58,7 @@ const systemLandingFor = (path: string, authStore: ReturnType<typeof useAuthStor
  * */
 const router = createRouter({
   history: createHistory(),
-  routes: [...staticRouter, ...errorRouter],
+  routes: [...staticRouter, ...inventorySystemRoutes, ...errorRouter],
   strict: false,
   scrollBehavior: () => ({ left: 0, top: 0 })
 });
