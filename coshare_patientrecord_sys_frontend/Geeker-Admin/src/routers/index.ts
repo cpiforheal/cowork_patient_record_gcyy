@@ -4,6 +4,12 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { HOME_URL, LOGIN_URL, ROUTER_WHITE_LIST } from "@/config";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
 import { staticRouter, errorRouter } from "@/routers/modules/staticRouter";
+import {
+  INVENTORY_SYSTEM_DASHBOARD,
+  inventorySystemPathForLegacy,
+  isInventorySystemPath,
+  isLegacyInventoryPath
+} from "@/routers/modules/inventorySystem";
 import NProgress from "@/config/nprogress";
 
 const mode = import.meta.env.VITE_ROUTER_MODE;
@@ -25,6 +31,13 @@ const PROTECTED_BUSINESS_PATHS = [
 ];
 
 const unavailableRouteFor = (path: string) => (PROTECTED_BUSINESS_PATHS.some(pattern => pattern.test(path)) ? "/403" : "/404");
+
+const systemLandingFor = (path: string, authStore: ReturnType<typeof useAuthStore>) => {
+  if (path !== HOME_URL) return path;
+  if (authStore.hasInventorySystemAccessGet && !authStore.hasMedicalSystemAccessGet) return INVENTORY_SYSTEM_DASHBOARD;
+  if (authStore.hasInventorySystemAccessGet && authStore.hasMedicalSystemAccessGet) return "/system-select";
+  return path;
+};
 
 /**
  * @description 📚 路由参数配置简介
@@ -72,18 +85,26 @@ router.beforeEach(async to => {
 
   if (ROUTER_WHITE_LIST.includes(to.path)) return true;
   if (!userStore.token) return { path: LOGIN_URL, replace: true };
+  if (isLegacyInventoryPath(to.path)) return { path: inventorySystemPathForLegacy(to.path), replace: true };
 
   try {
     if (!authStore.authMenuListGet.length) {
       await initDynamicRouter();
-      const resolvedTarget = router.resolve(to.fullPath);
+      const targetPath = systemLandingFor(to.path, authStore);
+      const resolvedTarget = router.resolve(targetPath === to.path ? to.fullPath : targetPath);
       if (!resolvedTarget.matched.length || resolvedTarget.name === "notFound") {
         return { path: unavailableRouteFor(to.path), replace: true };
       }
-      return { path: to.fullPath, replace: true };
+      return { path: targetPath === to.path ? to.fullPath : targetPath, replace: true };
     }
 
     if (to.name === "notFound") return { path: unavailableRouteFor(to.path), replace: true };
+    if (isInventorySystemPath(to.path)) {
+      if (!authStore.hasInventorySystemAccessGet) return { path: "/403", replace: true };
+      authStore.setActiveSystem("inventory");
+    } else if (to.path !== "/system-select") {
+      authStore.setActiveSystem("medical");
+    }
     await authStore.setRouteName(String(to.name || ""));
     return true;
   } catch (error) {
@@ -99,7 +120,7 @@ router.beforeEach(async to => {
  * */
 export const resetRouter = () => {
   const authStore = useAuthStore();
-  const staticRouteNames = new Set(["login", "layout", "welcome", "home", "403", "404", "500"]);
+  const staticRouteNames = new Set(["login", "layout", "welcome", "home", "systemSelect", "403", "404", "500"]);
   authStore.flatMenuListGet.forEach(route => {
     const { name } = route;
     if (name && !staticRouteNames.has(String(name)) && router.hasRoute(name)) router.removeRoute(name);
@@ -108,6 +129,7 @@ export const resetRouter = () => {
   authStore.authMenuList = [];
   authStore.authButtonList = {};
   authStore.routeName = "";
+  authStore.activeSystem = "medical";
 };
 
 /**

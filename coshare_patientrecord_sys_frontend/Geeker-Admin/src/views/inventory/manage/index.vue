@@ -707,6 +707,17 @@ const tabRoutePathMap: Record<string, string> = {
   packages: "/inventory/packages",
   trace: "/inventory/trace"
 };
+const inventorySystemTabRoutePathMap: Record<string, string> = {
+  overview: "/inventory-system/dashboard",
+  executive: "/inventory-system/executive",
+  requests: "/inventory-system/requests",
+  stock: "/inventory-system/stock",
+  items: "/inventory-system/items",
+  weekly: "/inventory-system/weekly",
+  controls: "/inventory-system/controls",
+  packages: "/inventory-system/packages",
+  trace: "/inventory-system/trace"
+};
 const tabRouteNameMap: Record<string, string> = {
   overview: "inventoryOverview",
   executive: "inventoryExecutive",
@@ -729,7 +740,16 @@ const routeTabMap: Record<string, string> = {
   "/inventory/weekly": "weekly",
   "/inventory/controls": "controls",
   "/inventory/packages": "packages",
-  "/inventory/trace": "trace"
+  "/inventory/trace": "trace",
+  "/inventory-system/dashboard": "overview",
+  "/inventory-system/executive": "executive",
+  "/inventory-system/requests": "requests",
+  "/inventory-system/stock": "stock",
+  "/inventory-system/items": "items",
+  "/inventory-system/weekly": "weekly",
+  "/inventory-system/controls": "controls",
+  "/inventory-system/packages": "packages",
+  "/inventory-system/trace": "trace"
 };
 const categoryOptions = ["医用耗材", "办公物资", "消毒用品", "检验用品", "护理用品", "低值易耗"];
 const unitOptions = ["个", "盒", "包", "瓶", "支", "卷", "套", "箱"];
@@ -1510,7 +1530,7 @@ watch(
 );
 
 watch(activeTab, tab => {
-  const nextPath = tabRoutePathMap[tab];
+  const nextPath = (route.path.startsWith("/inventory-system/") ? inventorySystemTabRoutePathMap : tabRoutePathMap)[tab];
   if (nextPath && route.path !== nextPath) router.replace(nextPath);
 });
 

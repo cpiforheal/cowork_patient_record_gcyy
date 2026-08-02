@@ -3,6 +3,11 @@ import { getAuthNavigationApi, switchActiveDepartmentApi } from "@/api/modules/l
 import { AuthState } from "@/stores/interface";
 import { useUserStore } from "@/stores/modules/user";
 import { getAllBreadcrumbList, getFlatMenuList, getShowMenuList } from "@/utils";
+import {
+  getInventorySystemMenu,
+  hasInventorySystemAccess,
+  hasMedicalSystemAccess
+} from "@/routers/modules/inventorySystem";
 
 export const useAuthStore = defineStore({
   id: "geeker-auth",
@@ -17,15 +22,26 @@ export const useAuthStore = defineStore({
     capabilities: [],
     stagePermissions: {},
     auxiliaryPermissions: {},
-    routeName: ""
+    routeName: "",
+    activeSystem: "medical"
   }),
   getters: {
     authButtonListGet: state => state.authButtonList,
     authMenuListGet: state => state.authMenuList,
     shortcutsGet: state => state.shortcuts,
-    showMenuListGet: state => getShowMenuList(state.authMenuList),
+    showMenuListGet: state =>
+      state.activeSystem === "inventory"
+        ? getInventorySystemMenu(state.authButtonList, state.capabilities)
+        : getShowMenuList(state.authMenuList),
     flatMenuListGet: state => getFlatMenuList(state.authMenuList),
-    breadcrumbListGet: state => getAllBreadcrumbList(state.authMenuList)
+    breadcrumbListGet: state =>
+      getAllBreadcrumbList(
+        state.activeSystem === "inventory"
+          ? getInventorySystemMenu(state.authButtonList, state.capabilities)
+          : state.authMenuList
+      ),
+    hasInventorySystemAccessGet: state => hasInventorySystemAccess(state.authButtonList, state.capabilities),
+    hasMedicalSystemAccessGet: state => hasMedicalSystemAccess(state.authMenuList)
   },
   actions: {
     async getNavigation() {
@@ -59,6 +75,9 @@ export const useAuthStore = defineStore({
     },
     async setRouteName(name: string) {
       this.routeName = name;
+    },
+    setActiveSystem(system: "medical" | "inventory") {
+      this.activeSystem = system;
     }
   }
 });

@@ -47,6 +47,7 @@ export interface TabsState {
 /* AuthState */
 export interface AuthState {
   routeName: string;
+  activeSystem: "medical" | "inventory";
   navigationVersion: string;
   policyVersion: string;
   shortcuts: Array<{ title: string; desc: string; icon: string; path: string }>;
