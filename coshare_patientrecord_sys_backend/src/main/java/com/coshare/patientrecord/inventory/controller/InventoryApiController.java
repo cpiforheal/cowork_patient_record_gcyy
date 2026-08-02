@@ -338,6 +338,38 @@ public class InventoryApiController {
         return ApiResult.of(200, "package draft created", databaseService.asMap(databaseService.createMappingPackageDraft(toJson(payload), user)));
     }
 
+    @GetMapping("/inventory-api/mapping/aliases")
+    public ApiResult<Map<String, Object>> mappingAliases(
+        @RequestParam(required = false) String itemId,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String keyword
+    ) {
+        requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.mappingAliases(itemId, status, keyword)));
+    }
+
+    @PostMapping("/inventory-api/mapping/aliases")
+    public ApiResult<Map<String, Object>> saveMappingAliases(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireAnyCapability(List.of("inventory:item:manage", "inventory:rule"));
+        return ApiResult.of(200, "mapping aliases saved", databaseService.asMap(databaseService.saveMappingAliases(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/mapping/unit-conversions")
+    public ApiResult<Map<String, Object>> mappingUnitConversions(
+        @RequestParam(required = false) String itemId,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String keyword
+    ) {
+        requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.mappingUnitConversions(itemId, status, keyword)));
+    }
+
+    @PostMapping("/inventory-api/mapping/unit-conversions")
+    public ApiResult<Map<String, Object>> saveMappingUnitConversions(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireAnyCapability(List.of("inventory:item:manage", "inventory:rule"));
+        return ApiResult.of(200, "mapping unit conversions saved", databaseService.asMap(databaseService.saveMappingUnitConversions(toJson(payload), user)));
+    }
+
     @PostMapping("/inventory-api/packages")
     public ApiResult<Map<String, Object>> savePackage(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:rule");
@@ -371,6 +403,15 @@ public class InventoryApiController {
     private SessionUser requireCapability(String capability) {
         SessionUser user = InventoryPermission.currentUserOrThrow();
         if (!navigationService.hasCapability(user, capability)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前岗位无此库存操作权限");
+        }
+        return user;
+    }
+
+    private SessionUser requireAnyCapability(List<String> capabilities) {
+        SessionUser user = InventoryPermission.currentUserOrThrow();
+        boolean allowed = capabilities.stream().anyMatch(capability -> navigationService.hasCapability(user, capability));
+        if (!allowed) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前岗位无此库存操作权限");
         }
         return user;

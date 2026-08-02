@@ -174,6 +174,22 @@ public class InventoryDatabaseService {
         return mappingService.createPackageDraft(payload, user);
     }
 
+    public ObjectNode mappingAliases(String itemId, String status, String keyword) {
+        return mappingService.aliases(itemId, status, keyword);
+    }
+
+    public ObjectNode saveMappingAliases(JsonNode payload, SessionUser user) {
+        return mappingService.saveAliases(payload, user);
+    }
+
+    public ObjectNode mappingUnitConversions(String itemId, String status, String keyword) {
+        return mappingService.unitConversions(itemId, status, keyword);
+    }
+
+    public ObjectNode saveMappingUnitConversions(JsonNode payload, SessionUser user) {
+        return mappingService.saveUnitConversions(payload, user);
+    }
+
     public ObjectNode consumeEncounter(JsonNode payload, SessionUser user) {
         String departmentId = scopedDepartmentId(user, repository.text(payload, "departmentId"));
         String visitDate = repository.text(payload, "visitDate");

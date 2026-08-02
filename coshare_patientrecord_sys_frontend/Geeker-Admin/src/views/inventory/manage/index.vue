@@ -127,10 +127,18 @@
               v-model:keyword="itemFilters.keyword"
               v-model:category="itemFilters.category"
               :rows="filteredItemRows"
+              :items="db.items"
+              :aliases="itemAliases"
+              :unit-conversions="unitConversions"
               :category-options="categoryFilterOptions"
               :can-manage="hasInventoryAuth('inventory:item:manage')"
+              :can-manage-governance="canManageMappingGovernance"
+              :governance-loading="mappingGovernanceLoading"
               @create="openItemDialog()"
               @edit="openItemDialog"
+              @load-governance="loadMappingGovernance"
+              @save-aliases="saveItemAliases"
+              @save-unit-conversions="saveUnitConversions"
             />
           </template>
 
@@ -209,13 +217,22 @@
               :coverage="db.packageCoverage"
               :events="visibleConsumptionEvents"
               :items="db.items"
+              :mapping-summary="mappingSummary"
+              :mapping-entries="mappingEntries"
+              :mapping-total="mappingTotal"
+              :mapping-loading="mappingLoading"
               :department-options="departmentOptions"
               :can-manage="canManagePackages"
+              :can-manage-mapping="canManageMappingGovernance"
               :saving="saving"
               @save="savePackage"
               @enable="enablePackage"
               @disable="disablePackage"
               @retry="retryConsumptionEvent"
+              @load-mappings="loadMappings"
+              @confirm-mapping="confirmMapping"
+              @hold-mapping="holdMapping"
+              @create-mapping-draft="createMappingDraft"
             />
           </template>
 
@@ -255,6 +272,26 @@
             <el-option v-for="item in unitOptions" :key="item" :label="item" :value="item" />
           </el-select>
         </el-form-item>
+        <el-form-item label="基准单位">
+          <el-select v-model="itemForm.baseUnit" filterable allow-create placeholder="默认沿用单位">
+            <el-option v-for="item in unitOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="领用单位">
+          <el-select v-model="itemForm.issueUnit" filterable allow-create placeholder="默认沿用单位">
+            <el-option v-for="item in unitOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数量精度">
+          <el-input-number v-model="itemForm.quantityPrecision" :min="0" :max="6" :precision="0" />
+        </el-form-item>
+        <el-form-item label="规范化状态">
+          <el-select v-model="itemForm.normalizationStatus" placeholder="请选择">
+            <el-option label="标准" value="standard" />
+            <el-option label="待规范" value="pending" />
+            <el-option label="冲突" value="conflict" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="预警线">
           <el-input-number v-model="itemForm.lowStockThreshold" :min="0" :precision="2" />
         </el-form-item>
@@ -264,6 +301,7 @@
         <el-form-item label="管理要求">
           <el-checkbox v-model="itemForm.batchRequired">需要批号</el-checkbox>
           <el-checkbox v-model="itemForm.expiryRequired">需要效期</el-checkbox>
+          <el-checkbox v-model="itemForm.effectiveLifeManaged">效期治理</el-checkbox>
           <el-checkbox v-model="itemForm.sensitive">敏感物资</el-checkbox>
         </el-form-item>
       </el-form>
@@ -457,6 +495,8 @@ import {
   cancelInventoryRequestApi,
   confirmInventoryWeeklySnapshotApi,
   countInventoryApi,
+  confirmInventoryMappingEntriesApi,
+  createInventoryMappingPackageDraftApi,
   createInventoryRequestApi,
   deleteInventoryWeeklyStandardApi,
   downloadDepartmentUsageReportApi,
@@ -465,11 +505,16 @@ import {
   getInventoryConsumptionsApi,
   getInventoryDbApi,
   getInventoryExceptionsApi,
+  getInventoryItemAliasesApi,
   getInventoryLocationBalancesApi,
+  getInventoryMappingEntriesApi,
+  getInventoryMappingSummaryApi,
+  getInventoryUnitConversionsApi,
   getInventoryWeeklySnapshotApi,
   getInventoryWeeklySnapshotsApi,
   getInventoryWeeklyStandardsApi,
   getInventoryWorkbenchApi,
+  holdInventoryMappingEntriesApi,
   inboundInventoryApi,
   issueInventoryRequestApi,
   publishInventoryWeeklyStandardApi,
@@ -478,7 +523,9 @@ import {
   reviseInventoryWeeklySnapshotApi,
   returnOrScrapInventoryApi,
   saveInventoryItemApi,
+  saveInventoryItemAliasesApi,
   saveInventoryWeeklyStandardApi,
+  saveInventoryUnitConversionsApi,
   saveWeeklyConsumptionApi,
   saveInventoryPackageApi,
   enableInventoryPackageApi,
@@ -486,6 +533,7 @@ import {
   retryInventoryConsumptionEventApi,
   voidInventoryRequestApi,
   type DepartmentUsageReportParams,
+  type ConfirmInventoryMappingEntriesParams,
   type GenerateInventoryWeeklySnapshotParams,
   type InventoryBatch,
   type InventoryConsumptionEvent,
@@ -495,7 +543,12 @@ import {
   type InventoryItem,
   type InventoryCareType,
   type InventoryLocationBalance,
+  type InventoryItemAlias,
+  type InventoryMappingEntry,
+  type InventoryMappingEntryQueryParams,
+  type InventoryMappingSummary,
   type InventoryRequest,
+  type InventoryUnitConversion,
   type InventoryWeeklySnapshot,
   type InventoryWeeklyStandard,
   type InventoryWorkbench,
@@ -546,6 +599,13 @@ const reportLoading = ref<"" | "pdf" | "xlsx">("");
 const weeklyStandards = ref<InventoryWeeklyStandard[]>([]);
 const weeklySnapshots = ref<InventoryWeeklySnapshot[]>([]);
 const weeklyLoading = ref(false);
+const mappingSummary = ref<InventoryMappingSummary>();
+const mappingEntries = ref<InventoryMappingEntry[]>([]);
+const mappingTotal = ref(0);
+const mappingLoading = ref(false);
+const itemAliases = ref<InventoryItemAlias[]>([]);
+const unitConversions = ref<InventoryUnitConversion[]>([]);
+const mappingGovernanceLoading = ref(false);
 
 const itemDialogVisible = ref(false);
 const inboundDialogVisible = ref(false);
@@ -876,6 +936,7 @@ const canManagePackages = computed(() => hasInventoryAuth("inventory:approve"));
 const belongsToCurrentDepartment = (department?: string) =>
   canViewAllDepartments.value || !currentDepartment.value || !department || department === currentDepartment.value;
 const canViewAllPackages = computed(() => canViewAllDepartments.value);
+const canManageMappingGovernance = computed(() => hasAnyInventoryAuth(["inventory:item:manage", "inventory:rule"]));
 const visiblePackages = computed(() =>
   db.value.packages.filter(
     row => canViewAllPackages.value || !currentDepartment.value || row.department === currentDepartment.value
@@ -1544,17 +1605,59 @@ const loadWeekly = async (filters: { weekNo?: string; departmentId?: string } = 
   }
 };
 
+const currentMappingQuery = ref<InventoryMappingEntryQueryParams>({ page: 1, size: 20 });
+
+const loadMappings = async (params: InventoryMappingEntryQueryParams = currentMappingQuery.value) => {
+  mappingLoading.value = true;
+  currentMappingQuery.value = {
+    page: params.page || 1,
+    size: params.size || 20,
+    ruleType: params.ruleType || "",
+    status: params.status || "",
+    department: params.department || "",
+    keyword: params.keyword || ""
+  };
+  try {
+    const [summaryResult, entriesResult] = await Promise.all([
+      getInventoryMappingSummaryApi(),
+      getInventoryMappingEntriesApi(currentMappingQuery.value)
+    ]);
+    mappingSummary.value = summaryResult.data;
+    mappingEntries.value = entriesResult.data.list;
+    mappingTotal.value = entriesResult.data.total;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingLoading.value = false;
+  }
+};
+
+const loadMappingGovernance = async () => {
+  mappingGovernanceLoading.value = true;
+  try {
+    const [aliasesResult, conversionsResult] = await Promise.all([getInventoryItemAliasesApi(), getInventoryUnitConversionsApi()]);
+    itemAliases.value = aliasesResult.data;
+    unitConversions.value = conversionsResult.data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingGovernanceLoading.value = false;
+  }
+};
+
 const loadInventory = async () => {
   loading.value = true;
   const extendedLoad = loadExtendedInventory();
   const weeklyLoad = loadWeekly();
+  const mappingsLoad = loadMappings();
+  const governanceLoad = loadMappingGovernance();
   try {
     const { data } = await getInventoryDbApi();
     db.value = data;
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
-    await Promise.all([extendedLoad, weeklyLoad]);
+    await Promise.all([extendedLoad, weeklyLoad, mappingsLoad, governanceLoad]);
     loading.value = false;
   }
 };
@@ -1589,6 +1692,11 @@ const openItemDialog = (row?: InventoryItem) => {
     category: row?.category || "",
     spec: row?.spec || "",
     unit: row?.unit || "个",
+    baseUnit: row?.baseUnit || row?.unit || "个",
+    issueUnit: row?.issueUnit || row?.unit || "个",
+    quantityPrecision: row?.quantityPrecision ?? 2,
+    normalizationStatus: row?.normalizationStatus || "standard",
+    effectiveLifeManaged: row?.effectiveLifeManaged ?? false,
     location: row?.location || "",
     lowStockThreshold: row?.lowStockThreshold ?? 0,
     sensitive: row?.sensitive ?? false,
@@ -1615,12 +1723,103 @@ const saveItem = async () => {
   }
 };
 
+const saveItemAliases = async (rows: InventoryItemAlias[]) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  mappingGovernanceLoading.value = true;
+  try {
+    const result = await saveInventoryItemAliasesApi({ aliases: rows });
+    itemAliases.value = result.data.list || [];
+    ElMessage.success("物资别名已保存");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingGovernanceLoading.value = false;
+  }
+};
+
+const saveUnitConversions = async (rows: InventoryUnitConversion[]) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  mappingGovernanceLoading.value = true;
+  try {
+    const result = await saveInventoryUnitConversionsApi({ unitConversions: rows });
+    unitConversions.value = (result.data.list || []).map(row => ({ ...row, factor: Number(row.factor || 0) }));
+    ElMessage.success("单位换算已保存");
+    await loadMappings();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingGovernanceLoading.value = false;
+  }
+};
+
 const savePackage = async (payload: SaveInventoryPackageParams) => {
   if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "维护使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await saveInventoryPackageApi({ ...payload, operator: operatorName.value })).data;
     ElMessage.success("使用套餐草稿已保存");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const confirmMapping = async (payload: ConfirmInventoryMappingEntriesParams) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  saving.value = true;
+  try {
+    await confirmInventoryMappingEntriesApi(payload);
+    await loadMappings();
+    ElMessage.success("映射已确认");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const holdMapping = async (row: InventoryMappingEntry) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  saving.value = true;
+  try {
+    await holdInventoryMappingEntriesApi({ id: row.id, reason: "业务暂不导入，搁置待后续确认。" });
+    await loadMappings();
+    ElMessage.success("映射已搁置");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const createMappingDraft = async (row: InventoryMappingEntry) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  if (!row.canCreatePackageDraft) {
+    ElMessage.warning(row.cannotPublishReason || "该映射尚不能生成套餐草稿");
+    return;
+  }
+  saving.value = true;
+  try {
+    await createInventoryMappingPackageDraftApi({ id: row.id });
+    db.value = (await getInventoryDbApi()).data;
+    await loadMappings();
+    ElMessage.success("套餐草稿已生成，状态保持为 draft");
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {

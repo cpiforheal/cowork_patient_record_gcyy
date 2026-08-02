@@ -107,6 +107,97 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="映射待确认" name="mapping">
+        <div v-loading="mappingLoading" class="panel mapping-panel">
+          <div class="panel-head">
+            <div>
+              <h2>V18 耗材映射待确认</h2>
+              <p>只维护映射治理数据；仅患者单次套餐在满足物资、阶段、单位和数量后可生成 draft 套餐。</p>
+            </div>
+            <el-tag effect="plain">共 {{ mappingSummary?.total || mappingTotal || 0 }} 条</el-tag>
+          </div>
+
+          <div class="mapping-summary-grid">
+            <div v-for="card in mappingSummaryCards" :key="card.label" class="mapping-summary-card">
+              <span>{{ card.label }}</span>
+              <strong>{{ card.value }}</strong>
+            </div>
+          </div>
+
+          <div class="table-toolbar mapping-toolbar">
+            <el-select v-model="mappingFilters.department" clearable filterable placeholder="科室" @change="loadMappings(1)">
+              <el-option v-for="department in mappingDepartmentOptions" :key="department" :label="department" :value="department" />
+            </el-select>
+            <el-select v-model="mappingFilters.ruleType" clearable placeholder="规则类型" @change="loadMappings(1)">
+              <el-option label="患者单次套餐" value="患者单次套餐" />
+              <el-option label="条件套餐" value="条件套餐" />
+              <el-option label="固定运行消耗" value="固定运行消耗" />
+              <el-option label="按需申领" value="按需申领" />
+            </el-select>
+            <el-select v-model="mappingFilters.status" clearable placeholder="状态" @change="loadMappings(1)">
+              <el-option label="待确认" value="pending" />
+              <el-option label="已确认" value="confirmed" />
+              <el-option label="已搁置" value="held" />
+            </el-select>
+            <el-input
+              v-model="mappingFilters.keyword"
+              clearable
+              placeholder="物资、用法、备注"
+              @clear="loadMappings(1)"
+              @keyup.enter="loadMappings(1)"
+            />
+            <el-button @click="loadMappings(1)">筛选</el-button>
+          </div>
+
+          <el-table :data="mappingEntries" border max-height="560">
+            <el-table-column prop="department" label="科室" width="110" />
+            <el-table-column prop="ruleType" label="规则类型" width="126" />
+            <el-table-column label="状态" width="92">
+              <template #default="{ row }">
+                <el-tag :type="mappingStatusTag(row.status)" effect="light">{{ mappingStatusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="sourceItemName" label="原始物资" min-width="150" show-overflow-tooltip />
+            <el-table-column prop="sourceUsage" label="用法" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="sourceNote" label="备注" min-width="140" show-overflow-tooltip />
+            <el-table-column label="建议数量/单位" width="128">
+              <template #default="{ row }">{{ quantityLabel(row) }}</template>
+            </el-table-column>
+            <el-table-column label="匹配物资" min-width="160" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.matchedItemName || "未匹配" }}</template>
+            </el-table-column>
+            <el-table-column label="阶段" width="112">
+              <template #default="{ row }">{{ stageLabel(row.triggerStage) || row.importStatus || "-" }}</template>
+            </el-table-column>
+            <el-table-column prop="maturity" label="成熟度" width="112" />
+            <el-table-column prop="cannotPublishReason" label="不能发布原因" min-width="220" show-overflow-tooltip />
+            <el-table-column v-if="canManageMapping" label="操作" width="210" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openMappingConfirm(row)">确认</el-button>
+                <el-button link type="warning" @click="emitHoldMapping(row)">搁置</el-button>
+                <el-button link type="success" :disabled="!row.canCreatePackageDraft" @click="emitCreateMappingDraft(row)">
+                  生成草稿
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty><el-empty description="暂无映射记录" /></template>
+          </el-table>
+
+          <div class="mapping-pagination">
+            <el-pagination
+              background
+              layout="total, sizes, prev, pager, next"
+              :total="mappingTotal"
+              :page-size="mappingFilters.size"
+              :current-page="mappingFilters.page"
+              :page-sizes="[20, 50, 100, 200]"
+              @current-change="loadMappings"
+              @size-change="changeMappingPageSize"
+            />
+          </div>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane :label="`扣减失败任务${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
         <div class="panel event-panel">
           <div class="panel-head">
@@ -194,17 +285,65 @@
         <el-button type="primary" :loading="saving" @click="submit">保存草稿</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="mappingDialogVisible" title="确认耗材映射" width="720px" destroy-on-close>
+      <el-form :model="mappingForm" label-width="110px">
+        <div class="form-grid">
+          <el-form-item label="匹配物资">
+            <el-select v-model="mappingForm.itemId" filterable placeholder="选择系统物资">
+              <el-option v-for="item in items" :key="item.id" :label="`${item.name} / ${item.unit}`" :value="item.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="科室">
+            <el-select v-model="mappingForm.department" filterable allow-create placeholder="选择科室">
+              <el-option v-for="department in departmentOptions" :key="department" :label="department" :value="department" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="门诊/住院">
+            <el-radio-group v-model="mappingForm.careType">
+              <el-radio-button label="outpatient">门诊</el-radio-button>
+              <el-radio-button label="inpatient">住院</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="触发阶段">
+            <el-select v-model="mappingForm.triggerStage" placeholder="选择触发阶段">
+              <el-option label="检查完成" value="INSPECTION" />
+              <el-option label="中医完成" value="TCM" />
+              <el-option label="医生完成" value="DOCTOR" />
+              <el-option label="手术确认" value="SURGERY" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="数量">
+            <el-input-number v-model="mappingForm.suggestedQuantity" :min="0" :precision="2" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="单位">
+            <el-input v-model="mappingForm.suggestedUnit" placeholder="如 个、支、mL" />
+          </el-form-item>
+        </div>
+        <el-form-item label="备注">
+          <el-input v-model="mappingForm.note" type="textarea" :rows="3" placeholder="记录业务确认口径" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mappingDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitMappingConfirm">保存确认</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { Delete, Plus } from "@element-plus/icons-vue";
 import type { FormInstance, FormRules } from "element-plus";
 import type {
+  ConfirmInventoryMappingEntriesParams,
   InventoryCareType,
   InventoryConsumptionEvent,
   InventoryItem,
+  InventoryMappingEntry,
+  InventoryMappingEntryQueryParams,
+  InventoryMappingSummary,
   InventoryPackage,
   InventoryPackageCoverage,
   InventoryPackageLine,
@@ -218,8 +357,13 @@ const props = defineProps<{
   coverage: InventoryPackageCoverage[];
   events: InventoryConsumptionEvent[];
   items: InventoryItem[];
+  mappingSummary?: InventoryMappingSummary;
+  mappingEntries: InventoryMappingEntry[];
+  mappingTotal: number;
+  mappingLoading?: boolean;
   departmentOptions: string[];
   canManage: boolean;
+  canManageMapping: boolean;
   saving?: boolean;
 }>();
 
@@ -228,11 +372,26 @@ const emit = defineEmits<{
   enable: [row: InventoryPackage];
   disable: [row: InventoryPackage];
   retry: [row: InventoryConsumptionEvent];
+  "load-mappings": [params: InventoryMappingEntryQueryParams];
+  "confirm-mapping": [payload: ConfirmInventoryMappingEntriesParams];
+  "hold-mapping": [row: InventoryMappingEntry];
+  "create-mapping-draft": [row: InventoryMappingEntry];
 }>();
 
 const filters = reactive({ keyword: "", careType: "", status: "" });
+const mappingFilters = reactive<
+  Required<Pick<InventoryMappingEntryQueryParams, "page" | "size">> & Omit<InventoryMappingEntryQueryParams, "page" | "size">
+>({
+  ruleType: "",
+  status: "",
+  department: "",
+  keyword: "",
+  page: 1,
+  size: 20
+});
 const activeSection = ref("packages");
 const dialogVisible = ref(false);
+const mappingDialogVisible = ref(false);
 const editingId = ref("");
 const creatingVersion = ref(false);
 const formRef = ref<FormInstance>();
@@ -243,6 +402,16 @@ const form = reactive<SaveInventoryPackageParams & { lines: (InventoryPackageLin
   triggerStage: "INSPECTION",
   effectiveDate: "",
   lines: []
+});
+const mappingForm = reactive<ConfirmInventoryMappingEntriesParams>({
+  id: "",
+  itemId: "",
+  department: "",
+  careType: "outpatient",
+  triggerStage: "INSPECTION",
+  suggestedQuantity: 0,
+  suggestedUnit: "",
+  note: ""
 });
 const rules = reactive<FormRules>({
   name: [{ required: true, message: "请输入套餐名称", trigger: "blur" }],
@@ -264,15 +433,31 @@ const uncoveredCount = computed(() => props.coverage.filter(row => !row.covered)
 const displayEvents = computed(() =>
   [...props.events].sort((a, b) => Number(b.status === "failed") - Number(a.status === "failed"))
 );
+const mappingDepartmentOptions = computed(() =>
+  [...new Set([...props.departmentOptions, ...props.mappingEntries.map(row => row.department).filter(Boolean)])].sort()
+);
+const ruleCount = (ruleType: string) => props.mappingSummary?.byRuleType?.find(row => row.label === ruleType)?.total || 0;
+const mappingSummaryCards = computed(() => [
+  { label: "总数", value: props.mappingSummary?.total ?? props.mappingTotal ?? 0 },
+  { label: "患者单次", value: props.mappingSummary?.patientOnce ?? ruleCount("患者单次套餐") },
+  { label: "条件套餐", value: props.mappingSummary?.conditionalPackage ?? ruleCount("条件套餐") },
+  { label: "固定运行", value: props.mappingSummary?.fixedRunning ?? ruleCount("固定运行消耗") },
+  { label: "按需申领", value: props.mappingSummary?.onDemand ?? ruleCount("按需申领") },
+  { label: "可生成草稿", value: props.mappingSummary?.canCreatePackageDraft ?? 0 },
+  { label: "待补充", value: props.mappingSummary?.needsSupplement ?? 0 }
+]);
 
 const dialogTitle = computed(() => {
   if (creatingVersion.value) return "创建使用套餐新版本";
   return editingId.value ? "编辑使用套餐" : "新建使用套餐";
 });
 
-const careTypeLabel = (value: InventoryCareType | string) => (value === "inpatient" ? "住院" : "门诊");
-const stageLabel = (value: InventoryPackageCoverage["triggerStage"]) =>
-  ({ INSPECTION: "检查", TCM: "中医", DOCTOR: "医生", SURGERY: "手术" })[value];
+const careTypeLabel = (value?: InventoryCareType | string) =>
+  value === "inpatient" ? "住院" : value === "outpatient" ? "门诊" : value || "-";
+const stageLabel = (value?: InventoryPackageCoverage["triggerStage"] | string) =>
+  ({ INSPECTION: "检查", TCM: "中医", DOCTOR: "医生", SURGERY: "手术" })[value as InventoryPackageCoverage["triggerStage"]] ||
+  value ||
+  "-";
 const statusLabel = (value: InventoryPackageStatus) => ({ draft: "草稿", enabled: "已启用", disabled: "已停用" })[value];
 const statusTag = (value: InventoryPackageStatus) =>
   ({ draft: "info", enabled: "success", disabled: "warning" })[value] as "info" | "success" | "warning";
@@ -293,6 +478,42 @@ const newLine = (): InventoryPackageLine & { localId: string } => ({
 const emitEnable = (row: unknown) => emit("enable", row as InventoryPackage);
 const emitDisable = (row: unknown) => emit("disable", row as InventoryPackage);
 const emitRetry = (row: unknown) => emit("retry", row as InventoryConsumptionEvent);
+const mappingStatusLabel = (value?: string) =>
+  ({ pending: "待确认", confirmed: "已确认", held: "已搁置" })[value || ""] || value || "-";
+const mappingStatusTag = (value?: string) =>
+  ({ pending: "warning", confirmed: "success", held: "info" })[value || ""] as "warning" | "success" | "info";
+const quantityLabel = (row: InventoryMappingEntry) =>
+  row.suggestedQuantity === undefined || row.suggestedQuantity === null || row.suggestedQuantity === 0
+    ? "待补充" + (row.suggestedUnit ? " / " + row.suggestedUnit : "")
+    : String(row.suggestedQuantity) + (row.suggestedUnit || "");
+const loadMappings = (page = mappingFilters.page) => {
+  mappingFilters.page = page;
+  emit("load-mappings", { ...mappingFilters });
+};
+const changeMappingPageSize = (size: number) => {
+  mappingFilters.size = size;
+  loadMappings(1);
+};
+const openMappingConfirm = (row: InventoryMappingEntry) => {
+  Object.assign(mappingForm, {
+    id: row.id,
+    itemId: row.matchedItemId || "",
+    department: row.department,
+    departmentId: row.departmentId,
+    careType: row.careType === "inpatient" ? "inpatient" : "outpatient",
+    triggerStage: row.triggerStage && !["待确认", "待扩展", "不适用"].includes(String(row.triggerStage)) ? row.triggerStage : "INSPECTION",
+    suggestedQuantity: Number(row.suggestedQuantity || 0),
+    suggestedUnit: row.suggestedUnit || row.matchedItemUnit || "",
+    note: row.note || row.sourceNote || ""
+  });
+  mappingDialogVisible.value = true;
+};
+const submitMappingConfirm = () => {
+  emit("confirm-mapping", { ...mappingForm, suggestedQuantity: Number(mappingForm.suggestedQuantity || 0) });
+  mappingDialogVisible.value = false;
+};
+const emitHoldMapping = (row: unknown) => emit("hold-mapping", row as InventoryMappingEntry);
+const emitCreateMappingDraft = (row: unknown) => emit("create-mapping-draft", row as InventoryMappingEntry);
 
 const resetForm = () => {
   editingId.value = "";
@@ -367,6 +588,10 @@ const submit = async () => {
   });
   dialogVisible.value = false;
 };
+
+watch(activeSection, value => {
+  if (value === "mapping") loadMappings();
+});
 </script>
 
 <style scoped lang="scss">
@@ -417,6 +642,43 @@ const submit = async () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.mapping-toolbar {
+  grid-template-columns: repeat(3, minmax(120px, 160px)) minmax(220px, 1fr) 88px;
+}
+
+.mapping-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(96px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mapping-summary-card {
+  padding: 10px 12px;
+  border: 1px solid var(--inventory-line-soft);
+  border-radius: 6px;
+  background: #ffffff;
+
+  span {
+    display: block;
+    color: var(--inventory-muted);
+    font-size: 12px;
+  }
+
+  strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--inventory-text);
+    font-size: 18px;
+  }
+}
+
+.mapping-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .line-head {
   align-items: center;
   padding-top: 4px;
@@ -434,6 +696,8 @@ const submit = async () => {
 
 @media (max-width: 820px) {
   .table-toolbar,
+  .mapping-toolbar,
+  .mapping-summary-grid,
   .form-grid,
   .line-editor {
     grid-template-columns: 1fr;

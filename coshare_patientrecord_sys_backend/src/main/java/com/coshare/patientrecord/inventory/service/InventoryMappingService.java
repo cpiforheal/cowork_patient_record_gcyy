@@ -75,6 +75,25 @@ public class InventoryMappingService {
             byStatus
         );
         result.set("byStatus", byStatus);
+        result.put("patientOnce", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
+            plus(scope, "e.rule_type = ?", PATIENT_ONCE_PACKAGE).params()
+        ));
+        result.put("conditionalPackage", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
+            plus(scope, "e.rule_type = ?", "\u6761\u4ef6\u5957\u9910").params()
+        ));
+        result.put("fixedRunning", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
+            plus(scope, "e.rule_type = ?", "\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017").params()
+        ));
+        result.put("onDemand", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
+            plus(scope, "e.rule_type = ?", "\u6309\u9700\u7533\u9886").params()
+        ));
+        ObjectNode readiness = draftReadiness(scope);
+        result.put("canCreatePackageDraft", readiness.path("canCreatePackageDraft").asLong());
+        result.put("needsSupplement", readiness.path("needsSupplement").asLong());
         result.put("batchId", "inventory-mapping-batch-20260802");
         return result;
     }
@@ -125,6 +144,144 @@ public class InventoryMappingService {
         return result;
     }
 
+    public ObjectNode aliases(String itemId, String status, String keyword) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> params = new ArrayList<>();
+        if (itemId != null && !itemId.isBlank()) {
+            conditions.add("a.item_id = ?");
+            params.add(itemId);
+        }
+        if (status != null && !status.isBlank()) {
+            conditions.add("a.status = ?");
+            params.add(status);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String like = "%" + keyword.trim() + "%";
+            conditions.add("(a.alias_name LIKE ? OR a.normalized_alias LIKE ? OR i.name LIKE ?)");
+            params.add(like);
+            params.add(like);
+            params.add(like);
+        }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        ArrayNode list = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            """
+            SELECT a.id, a.item_id, a.alias_name, a.normalized_alias, a.source_name, a.status,
+                   a.raw_json, a.created_at, i.name item_name
+            FROM inventory_item_aliases a
+            LEFT JOIN inventory_items i ON i.id = a.item_id
+            """ + where + " ORDER BY a.status ASC, a.source_name ASC, a.alias_name ASC",
+            resultSet -> {
+                while (resultSet.next()) list.add(aliasRow(resultSet));
+                return null;
+            },
+            params.toArray()
+        );
+
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("total", list.size());
+        result.set("list", list);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode saveAliases(JsonNode payload, SessionUser user) {
+        for (ObjectNode alias : governanceRows(payload, "aliases")) {
+            String aliasName = text(alias, "aliasName");
+            if (aliasName.isBlank()) throw new IllegalArgumentException("Alias name is required.");
+            String id = text(alias, "id", "inventory-alias-" + UUID.randomUUID());
+            String normalized = text(alias, "normalizedAlias", normalizeAliasName(aliasName));
+            String source = text(alias, "sourceName", "manual");
+            String status = text(alias, "status", "active");
+            alias.put("id", id);
+            alias.put("aliasName", aliasName);
+            alias.put("normalizedAlias", normalized);
+            alias.put("sourceName", source);
+            alias.put("status", status);
+            alias.put("operator", user == null ? "" : user.name());
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_item_aliases
+                  (id, item_id, alias_name, normalized_alias, source_name, status, raw_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE item_id = VALUES(item_id), alias_name = VALUES(alias_name),
+                  status = VALUES(status), raw_json = VALUES(raw_json)
+                """,
+                id, emptyToNull(text(alias, "itemId")), aliasName, normalized, source, status, toJson(alias), now()
+            );
+        }
+        return aliases(text(payload, "itemId"), text(payload, "status"), text(payload, "keyword"));
+    }
+
+    public ObjectNode unitConversions(String itemId, String status, String keyword) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> params = new ArrayList<>();
+        if (itemId != null && !itemId.isBlank()) {
+            conditions.add("c.item_id = ?");
+            params.add(itemId);
+        }
+        if (status != null && !status.isBlank()) {
+            conditions.add("c.status = ?");
+            params.add(status);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String like = "%" + keyword.trim() + "%";
+            conditions.add("(c.source_unit LIKE ? OR c.target_unit LIKE ? OR i.name LIKE ?)");
+            params.add(like);
+            params.add(like);
+            params.add(like);
+        }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        ArrayNode list = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            """
+            SELECT c.id, c.item_id, c.source_unit, c.target_unit, c.factor, c.status,
+                   c.raw_json, c.created_at, i.name item_name
+            FROM inventory_unit_conversions c
+            LEFT JOIN inventory_items i ON i.id = c.item_id
+            """ + where + " ORDER BY c.status ASC, i.name ASC, c.source_unit ASC, c.target_unit ASC",
+            resultSet -> {
+                while (resultSet.next()) list.add(conversionRow(resultSet));
+                return null;
+            },
+            params.toArray()
+        );
+
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("total", list.size());
+        result.set("list", list);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode saveUnitConversions(JsonNode payload, SessionUser user) {
+        for (ObjectNode conversion : governanceRows(payload, "unitConversions")) {
+            String sourceUnit = text(conversion, "sourceUnit");
+            String targetUnit = text(conversion, "targetUnit");
+            if (sourceUnit.isBlank() || targetUnit.isBlank()) throw new IllegalArgumentException("Source and target units are required.");
+            BigDecimal factor = decimal(conversion, "factor", 6, BigDecimal.ONE);
+            if (factor.signum() <= 0) throw new IllegalArgumentException("Unit conversion factor must be greater than zero.");
+            String id = text(conversion, "id", "inventory-unit-conversion-" + UUID.randomUUID());
+            String status = text(conversion, "status", "active");
+            conversion.put("id", id);
+            conversion.put("sourceUnit", sourceUnit);
+            conversion.put("targetUnit", targetUnit);
+            putDecimal(conversion, "factor", factor, 6);
+            conversion.put("status", status);
+            conversion.put("operator", user == null ? "" : user.name());
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_unit_conversions
+                  (id, item_id, source_unit, target_unit, factor, status, raw_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE factor = VALUES(factor), status = VALUES(status), raw_json = VALUES(raw_json)
+                """,
+                id, emptyToNull(text(conversion, "itemId")), sourceUnit, targetUnit, factor, status, toJson(conversion), now()
+            );
+        }
+        return unitConversions(text(payload, "itemId"), text(payload, "status"), text(payload, "keyword"));
+    }
+
     @Transactional
     public ObjectNode confirm(JsonNode payload, SessionUser user) {
         List<String> ids = ids(payload);
@@ -153,6 +310,7 @@ public class InventoryMappingService {
             BigDecimal suggestedQuantity = payload.has("suggestedQuantity")
                 ? quantity(payload, "suggestedQuantity")
                 : quantity(row, "suggestedQuantity");
+            String note = text(payload, "note", text(row, "note"));
             String operator = user == null ? "" : user.name();
             String confirmedAt = now();
 
@@ -164,6 +322,7 @@ public class InventoryMappingService {
             putQuantity(row, "suggestedQuantity", suggestedQuantity);
             row.put("matchedItemId", matchedItemId);
             row.put("matchedItemName", matchedItemName);
+            row.put("note", note);
             row.put("status", "confirmed");
             row.put("operator", operator);
             row.put("confirmedAt", confirmedAt);
@@ -174,6 +333,7 @@ public class InventoryMappingService {
                 conversionExists(matchedItemId, suggestedUnit, matchedItemUnit(row))
             );
             row.put("cannotPublishReason", reason);
+            row.put("maturity", maturity(row, reason.isBlank()));
 
             jdbcTemplate.update(
                 """
@@ -207,6 +367,7 @@ public class InventoryMappingService {
             row.put("status", "held");
             row.put("cannotPublishReason", reason);
             row.put("operator", user == null ? "" : user.name());
+            row.put("maturity", maturity(row, false));
             jdbcTemplate.update(
                 """
                 UPDATE inventory_mapping_entries
@@ -362,6 +523,85 @@ public class InventoryMappingService {
         );
     }
 
+    private ObjectNode draftReadiness(QuerySpec scope) {
+        ObjectNode result = objectMapper.createObjectNode();
+        long canCreatePackageDraft = 0;
+        long needsSupplement = 0;
+        String from = """
+            FROM inventory_mapping_entries e
+            LEFT JOIN inventory_items i ON i.id = e.matched_item_id
+            """;
+        List<ObjectNode> rows = jdbcTemplate.query(
+            mappingSelect() + from + scope.where(),
+            (resultSet, rowNumber) -> decorate(row(resultSet)),
+            scope.params().toArray()
+        );
+        for (ObjectNode row : rows) {
+            if (row.path("canCreatePackageDraft").asBoolean(false)) {
+                canCreatePackageDraft++;
+            } else if (!"held".equals(text(row, "status"))) {
+                needsSupplement++;
+            }
+        }
+        result.put("canCreatePackageDraft", canCreatePackageDraft);
+        result.put("needsSupplement", needsSupplement);
+        return result;
+    }
+
+    private QuerySpec plus(QuerySpec scope, String condition, Object... values) {
+        List<Object> params = new ArrayList<>(scope.params());
+        for (Object value : values) params.add(value);
+        String where = scope.where().isBlank()
+            ? " WHERE " + condition + " "
+            : scope.where() + " AND " + condition + " ";
+        return new QuerySpec(where, params);
+    }
+
+    private ObjectNode aliasRow(ResultSet resultSet) throws SQLException {
+        ObjectNode row = readObject(resultSet.getString("raw_json"));
+        put(row, "id", resultSet.getString("id"));
+        put(row, "itemId", resultSet.getString("item_id"));
+        put(row, "itemName", resultSet.getString("item_name"));
+        put(row, "aliasName", resultSet.getString("alias_name"));
+        put(row, "normalizedAlias", resultSet.getString("normalized_alias"));
+        put(row, "sourceName", resultSet.getString("source_name"));
+        put(row, "status", resultSet.getString("status"));
+        put(row, "createdAt", resultSet.getString("created_at"));
+        return row;
+    }
+
+    private ObjectNode conversionRow(ResultSet resultSet) throws SQLException {
+        ObjectNode row = readObject(resultSet.getString("raw_json"));
+        put(row, "id", resultSet.getString("id"));
+        put(row, "itemId", resultSet.getString("item_id"));
+        put(row, "itemName", resultSet.getString("item_name"));
+        put(row, "sourceUnit", resultSet.getString("source_unit"));
+        put(row, "targetUnit", resultSet.getString("target_unit"));
+        BigDecimal factor = resultSet.getBigDecimal("factor");
+        if (factor != null) putDecimal(row, "factor", factor, 6);
+        put(row, "status", resultSet.getString("status"));
+        put(row, "createdAt", resultSet.getString("created_at"));
+        return row;
+    }
+
+    private List<ObjectNode> governanceRows(JsonNode payload, String arrayKey) {
+        JsonNode source = payload == null ? objectMapper.createObjectNode() : payload;
+        List<ObjectNode> rows = new ArrayList<>();
+        if (source.path(arrayKey).isArray()) {
+            source.path(arrayKey).forEach(row -> rows.add(object(row)));
+        } else if (source.isArray()) {
+            source.forEach(row -> rows.add(object(row)));
+        } else {
+            rows.add(object(source));
+        }
+        if (rows.isEmpty()) throw new IllegalArgumentException("At least one governance row is required.");
+        return rows;
+    }
+
+    private ObjectNode object(JsonNode node) {
+        return node != null && node.isObject() ? (ObjectNode) node.deepCopy() : objectMapper.createObjectNode();
+    }
+
     private long count(String sql, List<Object> params) {
         Long value = jdbcTemplate.query(sql, resultSet -> resultSet.next() ? resultSet.getLong(1) : 0L, params.toArray());
         return value == null ? 0L : value;
@@ -478,6 +718,7 @@ public class InventoryMappingService {
         );
         row.put("canCreatePackageDraft", reason.isBlank());
         row.put("cannotPublishReason", reason);
+        row.put("maturity", maturity(row, reason.isBlank()));
         return row;
     }
 
@@ -587,6 +828,20 @@ public class InventoryMappingService {
         return "outpatient".equals(careType) || "inpatient".equals(careType);
     }
 
+    static String maturity(JsonNode row, boolean canCreatePackageDraft) {
+        String ruleType = text(row, "ruleType");
+        String status = text(row, "status");
+        if (PATIENT_ONCE_PACKAGE.equals(ruleType)) return canCreatePackageDraft ? "\u53ef\u751f\u6210\u8349\u7a3f" : PENDING_STAGE;
+        if ("\u6761\u4ef6\u5957\u9910".equals(ruleType)) return "confirmed".equals(status) ? "\u4ec5\u9884\u6d4b" : PENDING_STAGE;
+        if ("\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017".equals(ruleType)) return "\u975e\u60a3\u8005\u8017\u7528";
+        if ("\u6309\u9700\u7533\u9886".equals(ruleType)) return "\u8d70\u7533\u9886";
+        return PENDING_STAGE;
+    }
+
+    static String normalizeAliasName(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", "").toLowerCase();
+    }
+
     private ObjectNode readObject(String rawJson) {
         try {
             JsonNode node = rawJson == null || rawJson.isBlank()
@@ -614,6 +869,10 @@ public class InventoryMappingService {
         if (value != null) row.set(field, DecimalNode.valueOf(value.setScale(2, RoundingMode.HALF_UP)));
     }
 
+    private static void putDecimal(ObjectNode row, String field, BigDecimal value, int scale) {
+        if (value != null) row.set(field, DecimalNode.valueOf(value.setScale(scale, RoundingMode.HALF_UP)));
+    }
+
     private static BigDecimal quantity(JsonNode node, String key) {
         JsonNode value = node.path(key);
         if (value.isNumber() || value.isTextual()) {
@@ -624,6 +883,18 @@ public class InventoryMappingService {
             }
         }
         return BigDecimal.ZERO;
+    }
+
+    private static BigDecimal decimal(JsonNode node, String key, int scale, BigDecimal fallback) {
+        JsonNode value = node.path(key);
+        if (value.isNumber() || value.isTextual()) {
+            try {
+                return new BigDecimal(value.asText()).setScale(scale, RoundingMode.HALF_UP);
+            } catch (Exception ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     private static String text(JsonNode node, String key) {
@@ -655,4 +926,3 @@ public class InventoryMappingService {
     private record QuerySpec(String where, List<Object> params) {}
     private record Department(String id, String name) {}
 }
-

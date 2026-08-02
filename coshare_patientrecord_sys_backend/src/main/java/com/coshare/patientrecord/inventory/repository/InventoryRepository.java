@@ -94,16 +94,21 @@ public class InventoryRepository {
     public void upsertItem(ObjectNode item) {
         jdbcTemplate.update("""
             INSERT INTO inventory_items (
-              id, name, category, spec, unit, location, low_stock_threshold, safety_stock,
+              id, name, category, spec, unit, base_unit, issue_unit, quantity_precision,
+              normalization_status, effective_life_managed, location, low_stock_threshold, safety_stock,
               is_sensitive, batch_required, expiry_required, enabled, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), category = VALUES(category), spec = VALUES(spec),
-              unit = VALUES(unit), location = VALUES(location), low_stock_threshold = VALUES(low_stock_threshold),
+              unit = VALUES(unit), base_unit = VALUES(base_unit), issue_unit = VALUES(issue_unit),
+              quantity_precision = VALUES(quantity_precision), normalization_status = VALUES(normalization_status),
+              effective_life_managed = VALUES(effective_life_managed), location = VALUES(location), low_stock_threshold = VALUES(low_stock_threshold),
               safety_stock = VALUES(safety_stock),
               is_sensitive = VALUES(is_sensitive), batch_required = VALUES(batch_required), expiry_required = VALUES(expiry_required),
               enabled = VALUES(enabled), raw_json = VALUES(raw_json)
             """,
             text(item, "id"), text(item, "name"), text(item, "category"), text(item, "spec"), text(item, "unit"),
+            text(item, "baseUnit"), text(item, "issueUnit"), item.path("quantityPrecision").asInt(2),
+            text(item, "normalizationStatus", "standard"), item.path("effectiveLifeManaged").asBoolean(false),
             text(item, "location"), quantity(item, "lowStockThreshold"), quantity(item, "safetyStock"), item.path("sensitive").asBoolean(false),
             item.path("batchRequired").asBoolean(false), item.path("expiryRequired").asBoolean(false),
             item.path("enabled").asBoolean(true), toJson(item)

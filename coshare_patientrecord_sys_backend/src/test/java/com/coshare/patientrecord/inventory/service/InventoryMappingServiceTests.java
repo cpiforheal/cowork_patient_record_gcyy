@@ -66,6 +66,30 @@ class InventoryMappingServiceTests {
     }
 
     @Test
+    void blocksMissingItemUnitAndPositiveQuantityForDrafts() {
+        ObjectNode row = confirmedPatientRow();
+        row.remove("matchedItemId");
+        assertEquals(
+            "Matched inventory item is required.",
+            InventoryMappingService.cannotCreatePackageDraftReason(row, true, "个", true)
+        );
+
+        row = confirmedPatientRow();
+        row.put("suggestedUnit", "");
+        assertEquals(
+            "Unit is required.",
+            InventoryMappingService.cannotCreatePackageDraftReason(row, true, "个", true)
+        );
+
+        row = confirmedPatientRow();
+        row.put("suggestedQuantity", BigDecimal.ZERO);
+        assertEquals(
+            "Quantity must be greater than zero.",
+            InventoryMappingService.cannotCreatePackageDraftReason(row, true, "个", true)
+        );
+    }
+
+    @Test
     void allowsConfirmedPatientMappingWhenUnitMatches() {
         ObjectNode row = confirmedPatientRow();
 
@@ -90,6 +114,30 @@ class InventoryMappingServiceTests {
             "Unit conversion is required before creating a package draft.",
             InventoryMappingService.cannotCreatePackageDraftReason(row, true, "个", false)
         );
+    }
+
+    @Test
+    void classifiesMappingMaturityWithoutEnablingAutomation() {
+        ObjectNode row = confirmedPatientRow();
+        assertEquals("可生成草稿", InventoryMappingService.maturity(row, true));
+        assertEquals(InventoryMappingService.PENDING_STAGE, InventoryMappingService.maturity(row, false));
+
+        row.put("ruleType", CONDITIONAL_PACKAGE);
+        assertEquals("仅预测", InventoryMappingService.maturity(row, false));
+
+        row.put("status", "pending");
+        assertEquals(InventoryMappingService.PENDING_STAGE, InventoryMappingService.maturity(row, false));
+
+        row.put("ruleType", FIXED_RUNNING);
+        assertEquals("非患者耗用", InventoryMappingService.maturity(row, false));
+
+        row.put("ruleType", ON_DEMAND);
+        assertEquals("走申领", InventoryMappingService.maturity(row, false));
+    }
+
+    @Test
+    void normalizesAliasNamesForGovernanceMatching() {
+        assertEquals("pvc手套", InventoryMappingService.normalizeAliasName(" PVC 手套 "));
     }
 
     @Test
@@ -123,4 +171,3 @@ class InventoryMappingServiceTests {
         for (int i = 0; i < count; i++) values.add(value);
     }
 }
-

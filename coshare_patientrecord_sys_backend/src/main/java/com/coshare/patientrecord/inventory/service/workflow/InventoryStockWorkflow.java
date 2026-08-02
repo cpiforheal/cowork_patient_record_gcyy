@@ -31,10 +31,26 @@ public class InventoryStockWorkflow {
         repository.applyOperator(item, user);
         if (repository.text(item, "id").isBlank()) item.put("id", "item-" + UUID.randomUUID());
         if (repository.text(item, "name").isBlank()) throw new IllegalArgumentException("物资名称不能为空");
+        applyItemCompatibilityDefaults(item);
         item.put("enabled", item.path("enabled").asBoolean(true));
         repository.upsertItem(item);
         repository.log(repository.text(item, "operator", "系统"), "维护物资档案", "item", repository.text(item, "name"), "新增或更新物资基础信息");
         return repository.readDbForUser(user);
+    }
+
+    static void applyItemCompatibilityDefaults(ObjectNode item) {
+        String unit = text(item, "unit");
+        if (text(item, "baseUnit").isBlank()) item.put("baseUnit", unit);
+        if (text(item, "issueUnit").isBlank()) item.put("issueUnit", unit);
+        if (!item.has("quantityPrecision") || !item.path("quantityPrecision").canConvertToInt()) item.put("quantityPrecision", 2);
+        if (text(item, "normalizationStatus").isBlank()) item.put("normalizationStatus", "standard");
+        item.put("effectiveLifeManaged", item.path("effectiveLifeManaged").asBoolean(false));
+    }
+
+    private static String text(JsonNode node, String key) {
+        if (node == null) return "";
+        JsonNode value = node.path(key);
+        return value.isMissingNode() || value.isNull() ? "" : value.asText();
     }
 
     @Transactional

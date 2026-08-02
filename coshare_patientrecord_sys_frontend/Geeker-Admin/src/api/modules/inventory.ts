@@ -9,6 +9,11 @@ export interface InventoryItem {
   category: string;
   spec: string;
   unit: string;
+  baseUnit?: string;
+  issueUnit?: string;
+  quantityPrecision?: number;
+  normalizationStatus?: "standard" | "pending" | "conflict";
+  effectiveLifeManaged?: boolean;
   location: string;
   lowStockThreshold: number;
   sensitive: boolean;
@@ -148,6 +153,119 @@ export interface InventoryPackageCoverage {
   packageVersion?: number;
   lineCount: number;
   covered: boolean;
+}
+
+export type InventoryMappingRuleType = "患者单次套餐" | "条件套餐" | "固定运行消耗" | "按需申领";
+export type InventoryMappingStatus = "pending" | "confirmed" | "held";
+
+export interface InventoryMappingCount {
+  label: string;
+  total: number;
+}
+
+export interface InventoryMappingSummary {
+  total: number;
+  patientOnce?: number;
+  conditionalPackage?: number;
+  fixedRunning?: number;
+  onDemand?: number;
+  canCreatePackageDraft?: number;
+  needsSupplement?: number;
+  batchId?: string;
+  byRuleType?: InventoryMappingCount[];
+  byStatus?: InventoryMappingCount[];
+}
+
+export interface InventoryMappingEntry {
+  id: string;
+  batchId?: string;
+  sourceSheet?: string;
+  sourceRow?: number;
+  department: string;
+  departmentId?: string;
+  sourceScenario?: string;
+  sourceItemName: string;
+  sourceUsage?: string;
+  sourceNote?: string;
+  ruleType: InventoryMappingRuleType | string;
+  careType?: InventoryCareType | string;
+  triggerStage?: InventoryTriggerStage | string;
+  condition?: string;
+  suggestedQuantity?: number;
+  suggestedUnit?: string;
+  matchedItemId?: string;
+  matchedItemName?: string;
+  matchedItemUnit?: string;
+  matchedItemEnabled?: boolean;
+  status: InventoryMappingStatus | string;
+  importStatus?: string;
+  suggestion?: string;
+  cannotPublishReason?: string;
+  canCreatePackageDraft?: boolean;
+  draftPackageId?: string;
+  maturity?: string;
+  note?: string;
+  operator?: string;
+  confirmedAt?: string;
+}
+
+export interface InventoryMappingEntriesPage {
+  total: number;
+  page: number;
+  size: number;
+  list: InventoryMappingEntry[];
+}
+
+export interface InventoryMappingEntryQueryParams {
+  ruleType?: string;
+  status?: string;
+  department?: string;
+  keyword?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface ConfirmInventoryMappingEntriesParams {
+  id?: string;
+  ids?: string[];
+  itemId?: string;
+  matchedItemId?: string;
+  department?: string;
+  departmentId?: string;
+  careType?: InventoryCareType | string;
+  triggerStage?: InventoryTriggerStage | string;
+  suggestedQuantity?: number;
+  suggestedUnit?: string;
+  note?: string;
+}
+
+export interface InventoryMappingActionParams {
+  id?: string;
+  ids?: string[];
+  reason?: string;
+  name?: string;
+}
+
+export interface InventoryItemAlias {
+  id?: string;
+  itemId?: string;
+  itemName?: string;
+  aliasName: string;
+  normalizedAlias?: string;
+  sourceName?: string;
+  status?: "pending" | "active" | "held" | string;
+  createdAt?: string;
+}
+
+export interface InventoryUnitConversion {
+  id?: string;
+  itemId?: string;
+  itemName?: string;
+  sourceUnit: string;
+  targetUnit: string;
+  factor: number;
+  status?: "active" | "inactive" | string;
+  createdAt?: string;
 }
 
 export interface InventoryConsumptionDetail {
@@ -732,6 +850,11 @@ const normalizeNumber = (value: unknown) => {
 const normalizeDb = (db: InventoryDb): InventoryDb => ({
   items: (db.items ?? []).map(item => ({
     ...item,
+    baseUnit: item.baseUnit || item.unit,
+    issueUnit: item.issueUnit || item.unit,
+    quantityPrecision: normalizeNumber(item.quantityPrecision ?? 2),
+    normalizationStatus: item.normalizationStatus || "standard",
+    effectiveLifeManaged: Boolean(item.effectiveLifeManaged),
     lowStockThreshold: normalizeNumber(item.lowStockThreshold),
     sensitive: Boolean(item.sensitive),
     batchRequired: Boolean(item.batchRequired),
@@ -1103,3 +1226,68 @@ export const disableInventoryPackageApi = async (params: InventoryPackageActionP
 
 export const retryInventoryConsumptionEventApi = async (params: InventoryPackageActionParams) =>
   response(await postInventory("/consumption-events/retry", params), "自动消耗事件已重试");
+
+const normalizeMappingEntry = (row: InventoryMappingEntry): InventoryMappingEntry => ({
+  ...row,
+  sourceRow: normalizeNumber(row.sourceRow),
+  suggestedQuantity: row.suggestedQuantity === undefined ? undefined : normalizeNumber(row.suggestedQuantity),
+  canCreatePackageDraft: Boolean(row.canCreatePackageDraft)
+});
+
+export const getInventoryMappingSummaryApi = async () => getInventoryData<InventoryMappingSummary>("/mapping/summary");
+
+export const getInventoryMappingEntriesApi = async (params: InventoryMappingEntryQueryParams = {}) => {
+  const result = await getInventoryData<InventoryMappingEntriesPage>("/mapping/entries", params as Record<string, unknown>);
+  return response<InventoryMappingEntriesPage>({
+    total: normalizeNumber(result.data.total),
+    page: normalizeNumber(result.data.page || params.page || 1),
+    size: normalizeNumber(result.data.size || params.size || 50),
+    list: (result.data.list || []).map(normalizeMappingEntry)
+  });
+};
+
+export const confirmInventoryMappingEntriesApi = async (params: ConfirmInventoryMappingEntriesParams) =>
+  postInventoryData<{ updated: number; list: InventoryMappingEntry[] }, ConfirmInventoryMappingEntriesParams>(
+    "/mapping/entries/confirm",
+    params
+  );
+
+export const holdInventoryMappingEntriesApi = async (params: InventoryMappingActionParams) =>
+  postInventoryData<{ updated: number; list: InventoryMappingEntry[] }, InventoryMappingActionParams>("/mapping/entries/hold", params);
+
+export const createInventoryMappingPackageDraftApi = async (params: InventoryMappingActionParams) =>
+  postInventoryData<
+    { created: boolean; draftPackageId: string; mappingCount: number; package?: InventoryPackage },
+    InventoryMappingActionParams
+  >("/mapping/entries/create-package-draft", params);
+
+export const getInventoryItemAliasesApi = async (params: { itemId?: string; status?: string; keyword?: string } = {}) => {
+  const result = await getInventoryData<InventoryApiList<InventoryItemAlias> & { total?: number }>(
+    "/mapping/aliases",
+    params as Record<string, unknown>
+  );
+  return response(result.data.list || []);
+};
+
+export const saveInventoryItemAliasesApi = async (params: { aliases: InventoryItemAlias[]; itemId?: string }) =>
+  postInventoryData<InventoryApiList<InventoryItemAlias> & { total?: number }, { aliases: InventoryItemAlias[]; itemId?: string }>(
+    "/mapping/aliases",
+    params
+  );
+
+export const getInventoryUnitConversionsApi = async (params: { itemId?: string; status?: string; keyword?: string } = {}) => {
+  const result = await getInventoryData<InventoryApiList<InventoryUnitConversion> & { total?: number }>(
+    "/mapping/unit-conversions",
+    params as Record<string, unknown>
+  );
+  return response((result.data.list || []).map(row => ({ ...row, factor: normalizeNumber(row.factor) })));
+};
+
+export const saveInventoryUnitConversionsApi = async (params: {
+  unitConversions: InventoryUnitConversion[];
+  itemId?: string;
+}) =>
+  postInventoryData<
+    InventoryApiList<InventoryUnitConversion> & { total?: number },
+    { unitConversions: InventoryUnitConversion[]; itemId?: string }
+  >("/mapping/unit-conversions", params);
