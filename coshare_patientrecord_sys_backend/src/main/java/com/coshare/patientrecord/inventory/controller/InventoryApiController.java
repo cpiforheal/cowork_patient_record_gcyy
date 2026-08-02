@@ -299,6 +299,45 @@ public class InventoryApiController {
         return ApiResult.of(200, "count saved", databaseService.asMap(databaseService.inventoryCount(toJson(payload), user)));
     }
 
+    @GetMapping("/inventory-api/mapping/summary")
+    public ApiResult<Map<String, Object>> mappingSummary() {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.mappingSummary(user)));
+    }
+
+    @GetMapping("/inventory-api/mapping/entries")
+    public ApiResult<Map<String, Object>> mappingEntries(
+        @RequestParam(required = false) String ruleType,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String department,
+        @RequestParam(required = false) String keyword,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "50") int size
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(
+            databaseService.mappingEntries(user, ruleType, status, department, keyword, page, size)
+        ));
+    }
+
+    @PostMapping("/inventory-api/mapping/entries/confirm")
+    public ApiResult<Map<String, Object>> confirmMappingEntries(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:rule");
+        return ApiResult.of(200, "mapping confirmed", databaseService.asMap(databaseService.confirmMappingEntries(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/mapping/entries/hold")
+    public ApiResult<Map<String, Object>> holdMappingEntries(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:rule");
+        return ApiResult.of(200, "mapping held", databaseService.asMap(databaseService.holdMappingEntries(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/mapping/entries/create-package-draft")
+    public ApiResult<Map<String, Object>> createMappingPackageDraft(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:rule");
+        return ApiResult.of(200, "package draft created", databaseService.asMap(databaseService.createMappingPackageDraft(toJson(payload), user)));
+    }
+
     @PostMapping("/inventory-api/packages")
     public ApiResult<Map<String, Object>> savePackage(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:rule");

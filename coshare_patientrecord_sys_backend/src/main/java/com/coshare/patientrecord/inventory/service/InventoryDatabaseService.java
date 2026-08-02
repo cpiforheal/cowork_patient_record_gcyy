@@ -29,6 +29,7 @@ public class InventoryDatabaseService {
     private final InventoryDepartmentReportService reportService;
     private final InventoryWeeklyService weeklyService;
     private final InventoryWeeklyExportService weeklyExportService;
+    private final InventoryMappingService mappingService;
 
     public InventoryDatabaseService(
         InventoryRepository repository,
@@ -40,7 +41,8 @@ public class InventoryDatabaseService {
         InventoryStageConsumptionService consumptionService,
         InventoryDepartmentReportService reportService,
         InventoryWeeklyService weeklyService,
-        InventoryWeeklyExportService weeklyExportService
+        InventoryWeeklyExportService weeklyExportService,
+        InventoryMappingService mappingService
     ) {
         this.repository = repository;
         this.requestWorkflow = requestWorkflow;
@@ -52,6 +54,7 @@ public class InventoryDatabaseService {
         this.reportService = reportService;
         this.weeklyService = weeklyService;
         this.weeklyExportService = weeklyExportService;
+        this.mappingService = mappingService;
     }
 
     public ObjectNode readDb() {
@@ -141,6 +144,34 @@ public class InventoryDatabaseService {
     public ObjectNode disablePackage(JsonNode payload, SessionUser user) {
         packageService.disable(repository.text(payload, "id"), user);
         return readDbForUser(user);
+    }
+
+    public ObjectNode mappingSummary(SessionUser user) {
+        return mappingService.summary(user);
+    }
+
+    public ObjectNode mappingEntries(
+        SessionUser user,
+        String ruleType,
+        String status,
+        String department,
+        String keyword,
+        int page,
+        int size
+    ) {
+        return mappingService.entries(user, ruleType, status, department, keyword, page, size);
+    }
+
+    public ObjectNode confirmMappingEntries(JsonNode payload, SessionUser user) {
+        return mappingService.confirm(payload, user);
+    }
+
+    public ObjectNode holdMappingEntries(JsonNode payload, SessionUser user) {
+        return mappingService.hold(payload, user);
+    }
+
+    public ObjectNode createMappingPackageDraft(JsonNode payload, SessionUser user) {
+        return mappingService.createPackageDraft(payload, user);
     }
 
     public ObjectNode consumeEncounter(JsonNode payload, SessionUser user) {
