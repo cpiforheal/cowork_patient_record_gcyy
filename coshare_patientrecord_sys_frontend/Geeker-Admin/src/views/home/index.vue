@@ -51,11 +51,6 @@
             <MiniBarChart title="处方状态分布" subtitle="中药房当前流水线" :items="pharmacyChartItems" unit=" 张" />
           </div>
         </template>
-        <template v-else-if="showInventoryBoard">
-          <div class="board-card">
-            <MiniBarChart title="库存工作概况" subtitle="本科室范围" :items="inventoryChartItems" unit=" 项" />
-          </div>
-        </template>
       </div>
 
       <aside class="workbench-side board-card">
@@ -107,7 +102,6 @@ import {
   type WorkReminder
 } from "@/api/modules/clinic";
 import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/tcmPharmacy";
-import { getInventoryWorkbenchApi, type InventoryWorkbench } from "@/api/modules/inventory";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -177,7 +171,6 @@ const backupEnabled = ref(true);
 const backupLoading = ref(false);
 const choosingBackupDir = ref(false);
 const tcmCounts = ref<TcmStatusCounts>();
-const inventoryStats = ref<InventoryWorkbench>();
 const stats = ref<OperationStats>({
   totalPatients: 0,
   pendingPatients: 0,
@@ -221,9 +214,6 @@ const firstEditableSection = computed(() => editableSections.value[0] ?? recordS
 const menuPaths = computed(() => new Set(authStore.flatMenuListGet.map(item => item.path)));
 const showPatientBoard = computed(() => menuPaths.value.has("/patients/list"));
 const showPharmacyBoard = computed(() => !showPatientBoard.value && menuPaths.value.has("/tcm-pharmacy/workbench"));
-const showInventoryBoard = computed(
-  () => !showPatientBoard.value && !showPharmacyBoard.value && menuPaths.value.has("/inventory/overview")
-);
 
 const {
   quickEntries,
@@ -527,51 +517,6 @@ const statCards = computed<StatCard[]>(() => {
       }
     ];
   }
-  if (showInventoryBoard.value) {
-    const workbench = inventoryStats.value;
-    return [
-      {
-        id: "issue",
-        label: "待发放",
-        count: workbench?.workflow.pendingIssue ?? 0,
-        desc: "已审批等待中央仓发放",
-        tone: "info",
-        path: "/inventory/requests"
-      },
-      {
-        id: "transit",
-        label: "在途",
-        count: workbench?.workflow.inTransit ?? 0,
-        desc: "已发放等待科室签收",
-        tone: "info",
-        path: "/inventory/requests"
-      },
-      {
-        id: "failed",
-        label: "异常任务",
-        count: workbench?.automation.failed ?? 0,
-        desc: "自动扣减失败待处理",
-        tone: (workbench?.automation.failed ?? 0) ? "danger" : "success",
-        path: "/inventory/overview"
-      },
-      {
-        id: "low",
-        label: "低库存",
-        count: workbench?.lowStockCount ?? 0,
-        desc: "低于安全库存的物资",
-        tone: (workbench?.lowStockCount ?? 0) ? "warning" : "success",
-        path: "/inventory/overview"
-      },
-      {
-        id: "expiry",
-        label: "临期物资",
-        count: workbench?.expirySoonCount ?? 0,
-        desc: "请优先安排使用或隔离",
-        tone: (workbench?.expirySoonCount ?? 0) ? "warning" : "success",
-        path: "/inventory/overview"
-      }
-    ];
-  }
   return [];
 });
 
@@ -633,18 +578,6 @@ const roleReminders = computed<WorkReminder[]>(() => {
       });
     }
   }
-  if (showInventoryBoard.value && inventoryStats.value) {
-    if (inventoryStats.value.automation.failed) {
-      reminders.push({
-        id: "inv-failed",
-        title: "扣减异常任务",
-        desc: "修复根因后重试原幂等任务",
-        count: inventoryStats.value.automation.failed,
-        level: "danger",
-        path: "/inventory/overview"
-      });
-    }
-  }
   return reminders;
 });
 
@@ -697,19 +630,6 @@ const pharmacyChartItems = computed(() => {
     { label: "代煎中", value: counts.decocting },
     { label: "待取药", value: counts.ready },
     { label: "今日已取", value: counts.collectedToday }
-  ];
-});
-
-const inventoryChartItems = computed(() => {
-  const workbench = inventoryStats.value;
-  if (!workbench) return [];
-  return [
-    { label: "待发放", value: workbench.workflow.pendingIssue ?? 0 },
-    { label: "在途", value: workbench.workflow.inTransit ?? 0 },
-    { label: "待签收", value: workbench.workflow.pendingReceipt ?? 0 },
-    { label: "异常任务", value: workbench.automation.failed ?? 0 },
-    { label: "低库存", value: workbench.lowStockCount ?? 0 },
-    { label: "临期", value: workbench.expirySoonCount ?? 0 }
   ];
 });
 
@@ -803,15 +723,6 @@ const loadPharmacyBoard = async () => {
   }
 };
 
-const loadInventoryBoard = async () => {
-  try {
-    const { data } = await getInventoryWorkbenchApi();
-    inventoryStats.value = data;
-  } catch (error) {
-    ElMessage.error((error as Error).message);
-  }
-};
-
 // 仅管理员拉取全院巡检/备份数据，其余岗位不发起这些无权请求。
 const loadMaintenanceDashboard = async (options: { fullMaintenanceScan?: boolean } = {}) => {
   if (!isAdmin.value) return;
@@ -836,7 +747,6 @@ const reloadAll = async () => {
   const jobs: Promise<unknown>[] = [];
   if (showPatientBoard.value) jobs.push(loadPrimaryDashboard());
   if (showPharmacyBoard.value) jobs.push(loadPharmacyBoard());
-  if (showInventoryBoard.value) jobs.push(loadInventoryBoard());
   if (isAdmin.value) jobs.push(loadMaintenanceDashboard());
   await Promise.allSettled(jobs);
 };

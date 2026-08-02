@@ -26,6 +26,7 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { TabsPaneContext, TabPaneName } from "element-plus";
 import MoreButton from "./components/MoreButton.vue";
 import { isInventorySystemPath, isLegacyInventoryPath } from "@/routers/modules/inventorySystem";
+import { getFlatMenuList } from "@/utils";
 
 const route = useRoute();
 const router = useRouter();
@@ -70,7 +71,7 @@ watch(
 
 // 初始化需要固定的 tabs
 const initTabs = () => {
-  authStore.flatMenuListGet.forEach(item => {
+  getFlatMenuList(authStore.showMenuListGet).forEach(item => {
     if (item.meta.isAffix && !item.meta.isHide && !item.meta.isFull) {
       const tabsParams = {
         icon: item.meta.icon,
