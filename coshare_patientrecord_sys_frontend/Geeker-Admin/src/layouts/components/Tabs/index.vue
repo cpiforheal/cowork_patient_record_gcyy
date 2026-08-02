@@ -25,6 +25,7 @@ import { useTabsStore } from "@/stores/modules/tabs";
 import { useAuthStore } from "@/stores/modules/auth";
 import { TabsPaneContext, TabPaneName } from "element-plus";
 import MoreButton from "./components/MoreButton.vue";
+import { isInventorySystemPath, isLegacyInventoryPath } from "@/routers/modules/inventorySystem";
 
 const route = useRoute();
 const router = useRouter();
@@ -33,7 +34,14 @@ const authStore = useAuthStore();
 const globalStore = useGlobalStore();
 
 const tabsMenuValue = ref(route.fullPath);
-const tabsMenuList = computed(() => tabStore.tabsMenuList);
+const tabsMenuList = computed(() =>
+  tabStore.tabsMenuList.filter(item => {
+    if (item.path === "/system-select") return false;
+    return authStore.activeSystem === "inventory"
+      ? isInventorySystemPath(item.path)
+      : !isInventorySystemPath(item.path) && !isLegacyInventoryPath(item.path);
+  })
+);
 const tabsIcon = computed(() => globalStore.tabsIcon);
 
 onMounted(() => {

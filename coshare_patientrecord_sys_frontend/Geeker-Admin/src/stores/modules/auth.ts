@@ -2,9 +2,10 @@ import { defineStore } from "pinia";
 import { getAuthNavigationApi, switchActiveDepartmentApi } from "@/api/modules/login";
 import { AuthState } from "@/stores/interface";
 import { useUserStore } from "@/stores/modules/user";
-import { getAllBreadcrumbList, getFlatMenuList, getShowMenuList } from "@/utils";
+import { getAllBreadcrumbList, getFlatMenuList } from "@/utils";
 import {
   getInventorySystemMenu,
+  getMedicalSystemMenu,
   hasInventorySystemAccess,
   hasMedicalSystemAccess
 } from "@/routers/modules/inventorySystem";
@@ -32,13 +33,13 @@ export const useAuthStore = defineStore({
     showMenuListGet: state =>
       state.activeSystem === "inventory"
         ? getInventorySystemMenu(state.authButtonList, state.capabilities)
-        : getShowMenuList(state.authMenuList),
+        : getMedicalSystemMenu(state.authMenuList),
     flatMenuListGet: state => getFlatMenuList(state.authMenuList),
     breadcrumbListGet: state =>
       getAllBreadcrumbList(
         state.activeSystem === "inventory"
           ? getInventorySystemMenu(state.authButtonList, state.capabilities)
-          : state.authMenuList
+          : getMedicalSystemMenu(state.authMenuList)
       ),
     hasInventorySystemAccessGet: state => hasInventorySystemAccess(state.authButtonList, state.capabilities),
     hasMedicalSystemAccessGet: state => hasMedicalSystemAccess(state.authMenuList)

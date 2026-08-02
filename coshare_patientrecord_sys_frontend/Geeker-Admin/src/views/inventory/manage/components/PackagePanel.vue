@@ -161,7 +161,7 @@
             <el-table-column prop="sourceUsage" label="用法" min-width="120" show-overflow-tooltip />
             <el-table-column prop="sourceNote" label="备注" min-width="140" show-overflow-tooltip />
             <el-table-column label="建议数量/单位" width="128">
-              <template #default="{ row }">{{ quantityLabel(row) }}</template>
+              <template #default="{ row }">{{ quantityLabel(row as InventoryMappingEntry) }}</template>
             </el-table-column>
             <el-table-column label="匹配物资" min-width="160" show-overflow-tooltip>
               <template #default="{ row }">{{ row.matchedItemName || "未匹配" }}</template>
@@ -173,7 +173,7 @@
             <el-table-column prop="cannotPublishReason" label="不能发布原因" min-width="220" show-overflow-tooltip />
             <el-table-column v-if="canManageMapping" label="操作" width="210" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openMappingConfirm(row)">确认</el-button>
+                <el-button link type="primary" @click="openMappingConfirm(row as InventoryMappingEntry)">确认</el-button>
                 <el-button link type="warning" @click="emitHoldMapping(row)">搁置</el-button>
                 <el-button link type="success" :disabled="!row.canCreatePackageDraft" @click="emitCreateMappingDraft(row)">
                   生成草稿

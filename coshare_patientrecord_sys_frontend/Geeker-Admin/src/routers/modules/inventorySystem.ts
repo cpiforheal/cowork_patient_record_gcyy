@@ -122,11 +122,22 @@ const filterInventoryMenu = (items: InventoryMenuItem[], buttonPermissions: Reco
 export const getInventorySystemMenu = (buttonPermissions: Record<string, string[]>, capabilities: string[]) =>
   getShowMenuList(filterInventoryMenu(inventoryMenu, buttonPermissions, capabilities));
 
+const filterMedicalMenu = (items: Menu.MenuOptions[]): Menu.MenuOptions[] =>
+  items.flatMap(item => {
+    if (isLegacyInventoryPath(item.path)) return [];
+    if (!item.children?.length) return [item];
+
+    const children = filterMedicalMenu(item.children);
+    return children.length ? [{ ...item, children }] : [];
+  });
+
+export const getMedicalSystemMenu = (items: Menu.MenuOptions[]) => getShowMenuList(filterMedicalMenu(items));
+
 export const hasInventorySystemAccess = (buttonPermissions: Record<string, string[]>, capabilities: string[]) =>
   capabilities.some(code => code.startsWith("inventory:")) || Object.keys(buttonPermissions).some(name => name.startsWith("inventory"));
 
 export const hasMedicalSystemAccess = (menus: Menu.MenuOptions[]) =>
-  menus.some(item => !item.path.startsWith("/inventory"));
+  getMedicalSystemMenu(menus).length > 0;
 
 export const isInventorySystemPath = (path: string) => path === INVENTORY_SYSTEM_PREFIX || path.startsWith(`${INVENTORY_SYSTEM_PREFIX}/`);
 
