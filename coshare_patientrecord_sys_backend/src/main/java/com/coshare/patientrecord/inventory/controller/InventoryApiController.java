@@ -2,6 +2,7 @@ package com.coshare.patientrecord.inventory.controller;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.auth.service.AuthNavigationService;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
 import com.coshare.patientrecord.security.InventoryPermission;
@@ -30,15 +31,18 @@ public class InventoryApiController {
     private final InventoryDatabaseService databaseService;
     private final ObjectMapper objectMapper;
     private final AuthNavigationService navigationService;
+    private final InventoryAccessService inventoryAccessService;
 
     public InventoryApiController(
         InventoryDatabaseService databaseService,
         ObjectMapper objectMapper,
-        AuthNavigationService navigationService
+        AuthNavigationService navigationService,
+        InventoryAccessService inventoryAccessService
     ) {
         this.databaseService = databaseService;
         this.objectMapper = objectMapper;
         this.navigationService = navigationService;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     @GetMapping("/inventory-api/db")
@@ -110,11 +114,12 @@ public class InventoryApiController {
         @RequestParam(required = false) List<String> departmentIds,
         @RequestParam(required = false) String itemId,
         @RequestParam(required = false) String category,
-        @RequestParam(required = false) String triggerStage
+        @RequestParam(required = false) String triggerStage,
+        @RequestParam(defaultValue = "false") boolean patientOnly
     ) {
-        SessionUser user = requireCapability("inventory:export");
+        SessionUser user = requireCapability("inventory:read");
         return ApiResult.success(databaseService.asMap(
-            databaseService.departmentUsageReport(user, from, to, safeList(departmentIds), itemId, category, triggerStage, "查询科室耗材报表")
+            databaseService.departmentUsageReport(user, from, to, safeList(departmentIds), itemId, category, triggerStage, patientOnly, "查询科室耗材报表")
         ));
     }
 
@@ -125,10 +130,11 @@ public class InventoryApiController {
         @RequestParam(required = false) List<String> departmentIds,
         @RequestParam(required = false) String itemId,
         @RequestParam(required = false) String category,
-        @RequestParam(required = false) String triggerStage
+        @RequestParam(required = false) String triggerStage,
+        @RequestParam(defaultValue = "false") boolean patientOnly
     ) {
         SessionUser user = requireCapability("inventory:export");
-        var report = databaseService.departmentUsageReport(user, from, to, safeList(departmentIds), itemId, category, triggerStage, "导出科室耗材XLSX");
+        var report = databaseService.departmentUsageReport(user, from, to, safeList(departmentIds), itemId, category, triggerStage, patientOnly, "导出科室耗材XLSX");
         return attachment(
             databaseService.exportDepartmentUsageXlsx(report),
             "department-usage-" + from + "-" + to + ".xlsx",
@@ -143,10 +149,11 @@ public class InventoryApiController {
         @RequestParam(required = false) List<String> departmentIds,
         @RequestParam(required = false) String itemId,
         @RequestParam(required = false) String category,
-        @RequestParam(required = false) String triggerStage
+        @RequestParam(required = false) String triggerStage,
+        @RequestParam(defaultValue = "false") boolean patientOnly
     ) {
         SessionUser user = requireCapability("inventory:export");
-        var report = databaseService.departmentUsageReport(user, from, to, safeList(departmentIds), itemId, category, triggerStage, "导出科室耗材PDF");
+        var report = databaseService.departmentUsageReport(user, from, to, safeList(departmentIds), itemId, category, triggerStage, patientOnly, "导出科室耗材PDF");
         return attachment(
             databaseService.exportDepartmentUsagePdf(report),
             "department-usage-" + from + "-" + to + ".pdf",
@@ -230,6 +237,29 @@ public class InventoryApiController {
         return ApiResult.of(200, "saved", databaseService.asMap(databaseService.saveItem(toJson(payload), user)));
     }
 
+    @GetMapping("/inventory-api/role-management")
+    public ApiResult<Map<String, Object>> roleManagement() {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(Map.of(
+            "roles", inventoryAccessService.roleCatalog(),
+            "accounts", inventoryAccessService.accountAssignments()
+        ));
+    }
+
+    @PostMapping("/inventory-api/role-management/assign")
+    public ApiResult<Map<String, Object>> assignInventoryRole(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        inventoryAccessService.assign(
+            String.valueOf(payload == null ? "" : payload.getOrDefault("accountId", "")),
+            String.valueOf(payload == null ? "" : payload.getOrDefault("roleCode", "")),
+            user
+        );
+        return ApiResult.of(200, "进销存岗位权限已保存", Map.of(
+            "roles", inventoryAccessService.roleCatalog(),
+            "accounts", inventoryAccessService.accountAssignments()
+        ));
+    }
+
     @PostMapping("/inventory-api/inbounds")
     public ApiResult<Map<String, Object>> inbound(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:issue");
@@ -309,6 +339,7 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> mappingEntries(
         @RequestParam(required = false) String ruleType,
         @RequestParam(required = false) String status,
+        @RequestParam(required = false) String businessGroup,
         @RequestParam(required = false) String department,
         @RequestParam(required = false) String keyword,
         @RequestParam(defaultValue = "1") int page,
@@ -316,7 +347,7 @@ public class InventoryApiController {
     ) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.success(databaseService.asMap(
-            databaseService.mappingEntries(user, ruleType, status, department, keyword, page, size)
+            databaseService.mappingEntries(user, ruleType, status, businessGroup, department, keyword, page, size)
         ));
     }
 

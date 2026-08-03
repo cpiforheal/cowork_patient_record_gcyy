@@ -155,7 +155,29 @@ export interface InventoryPackageCoverage {
   covered: boolean;
 }
 
-export type InventoryMappingRuleType = "患者单次套餐" | "条件套餐" | "固定运行消耗" | "按需申领";
+export interface InventoryRoleDescriptor {
+  code: string;
+  name: string;
+  responsibility: string;
+  dataScope: string;
+  permissions: string[];
+  memberCount: number;
+  systemAssigned: boolean;
+}
+
+export interface InventoryAccountAssignment {
+  id: string;
+  username: string;
+  name: string;
+  clinicalRole: string;
+  department: string;
+  status: string;
+  inventoryRole: string;
+  inventoryRoleLabel: string;
+  systemAssigned: boolean;
+}
+
+export type InventoryMappingRuleType = "患者单次套餐" | "条件套餐" | "待核定（非固定）" | "固定运行消耗" | "按需申领";
 export type InventoryMappingStatus = "pending" | "confirmed" | "held";
 
 export interface InventoryMappingCount {
@@ -169,6 +191,10 @@ export interface InventoryMappingSummary {
   conditionalPackage?: number;
   fixedRunning?: number;
   onDemand?: number;
+  pendingPatientBinding?: number;
+  patientVariableConfirmed?: number;
+  patientVariablePending?: number;
+  nonPatient?: number;
   canCreatePackageDraft?: number;
   needsSupplement?: number;
   batchId?: string;
@@ -219,6 +245,7 @@ export interface InventoryMappingEntriesPage {
 export interface InventoryMappingEntryQueryParams {
   ruleType?: string;
   status?: string;
+  businessGroup?: "automatic" | "pending" | "nonpatient" | "";
   department?: string;
   keyword?: string;
   page?: number;
@@ -634,11 +661,41 @@ export interface InventoryQueryParams {
   status?: string;
   from?: string;
   to?: string;
+  patientOnly?: boolean;
 }
 
 export interface DepartmentUsageReportParams extends InventoryQueryParams {
   departmentIds?: string[];
   format: "pdf" | "xlsx";
+}
+
+export interface InventoryDepartmentUsageReport {
+  from: string;
+  to: string;
+  triggerStage?: string;
+  patientOnly?: boolean;
+  summary: Array<{
+    departmentId: string;
+    department: string;
+    itemId: string;
+    itemName: string;
+    unit: string;
+    openingQuantity: number;
+    consumedQuantity: number;
+    reversalQuantity: number;
+    closingQuantity: number;
+  }>;
+  details: Array<{
+    departmentId: string;
+    department: string;
+    visitDate: string;
+    encounterId: string;
+    triggerStage: string;
+    itemId: string;
+    itemName: string;
+    unit: string;
+    quantity: number;
+  }>;
 }
 
 export interface InventoryReportDownload {
@@ -1142,6 +1199,15 @@ export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageRe
 export const saveInventoryItemApi = async (params: SaveInventoryItemParams) =>
   response(await postInventory("/items", params), "物资档案已保存");
 
+export const getInventoryRoleManagementApi = async () =>
+  getInventoryData<{ roles: InventoryRoleDescriptor[]; accounts: InventoryAccountAssignment[] }>("/role-management");
+
+export const assignInventoryAccountRoleApi = async (params: { accountId: string; roleCode: string }) =>
+  postInventoryData<{ roles: InventoryRoleDescriptor[]; accounts: InventoryAccountAssignment[] }, { accountId: string; roleCode: string }>(
+    "/role-management/assign",
+    params
+  );
+
 export const inboundInventoryApi = async (params: InventoryInboundParams) =>
   response(await postInventory("/inbounds", params), "入库记录已保存");
 
@@ -1243,6 +1309,14 @@ export const getInventoryMappingEntriesApi = async (params: InventoryMappingEntr
     page: normalizeNumber(result.data.page || params.page || 1),
     size: normalizeNumber(result.data.size || params.size || 50),
     list: (result.data.list || []).map(normalizeMappingEntry)
+  });
+};
+
+export const getInventoryDepartmentUsageReportApi = async (params: Omit<DepartmentUsageReportParams, "format">) => {
+  const { stage, ...filters } = params;
+  return getInventoryData<InventoryDepartmentUsageReport>("/reports/department-usage", {
+    ...filters,
+    triggerStage: stage
   });
 };
 

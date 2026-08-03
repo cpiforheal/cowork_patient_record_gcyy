@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository;
 import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository.Balance;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
@@ -22,10 +23,12 @@ public class InventoryLedgerService {
 
     private final InventoryLedgerRepository ledger;
     private final InventoryRepository legacy;
+    private final InventoryAccessService inventoryAccessService;
 
-    public InventoryLedgerService(InventoryLedgerRepository ledger, InventoryRepository legacy) {
+    public InventoryLedgerService(InventoryLedgerRepository ledger, InventoryRepository legacy, InventoryAccessService inventoryAccessService) {
         this.ledger = ledger;
         this.legacy = legacy;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     @Transactional
@@ -442,7 +445,7 @@ public class InventoryLedgerService {
     }
 
     private LocationScope locationScope(JsonNode payload, SessionUser user) {
-        if (!"warehouse".equals(user.role())) {
+        if (!inventoryAccessService.canViewAllDepartments(user)) {
             String departmentId = scopedDepartmentId(payload, user);
             return new LocationScope(ledger.departmentLocation(departmentId), departmentId);
         }
@@ -462,7 +465,7 @@ public class InventoryLedgerService {
     }
 
     private String scopedDepartmentId(JsonNode payload, SessionUser user) {
-        if (!"warehouse".equals(user.role())) {
+        if (!inventoryAccessService.canViewAllDepartments(user)) {
             if (user.activeDepartmentId() == null || user.activeDepartmentId().isBlank()) {
                 throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.FORBIDDEN,

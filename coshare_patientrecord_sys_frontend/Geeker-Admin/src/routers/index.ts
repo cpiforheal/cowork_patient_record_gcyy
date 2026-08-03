@@ -6,7 +6,6 @@ import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
 import { staticRouter, errorRouter } from "@/routers/modules/staticRouter";
 import {
   INVENTORY_SYSTEM_DASHBOARD,
-  inventorySystemRoutes,
   inventorySystemPathForLegacy,
   isInventorySystemPath,
   isLegacyInventoryPath
@@ -58,7 +57,7 @@ const systemLandingFor = (path: string, authStore: ReturnType<typeof useAuthStor
  * */
 const router = createRouter({
   history: createHistory(),
-  routes: [...staticRouter, ...inventorySystemRoutes, ...errorRouter],
+  routes: [...staticRouter, ...errorRouter],
   strict: false,
   scrollBehavior: () => ({ left: 0, top: 0 })
 });
@@ -85,7 +84,7 @@ router.beforeEach(async to => {
   }
 
   if (ROUTER_WHITE_LIST.includes(to.path)) return true;
-  if (!userStore.token) return { path: LOGIN_URL, replace: true };
+  if (!userStore.token) return { path: LOGIN_URL, query: { redirect: to.fullPath }, replace: true };
   if (isLegacyInventoryPath(to.path)) return { path: inventorySystemPathForLegacy(to.path), replace: true };
 
   try {
@@ -112,7 +111,7 @@ router.beforeEach(async to => {
     console.error("动态路由初始化失败", error);
     userStore.setToken("");
     resetRouter();
-    return { path: LOGIN_URL, replace: true };
+    return { path: LOGIN_URL, query: { redirect: to.fullPath }, replace: true };
   }
 });
 

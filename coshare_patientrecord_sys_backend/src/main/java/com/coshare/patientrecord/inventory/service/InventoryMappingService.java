@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryMappingService {
 
     static final String PATIENT_ONCE_PACKAGE = "\u60a3\u8005\u5355\u6b21\u5957\u9910";
+    static final String PENDING_PATIENT_BINDING = "\u5f85\u6838\u5b9a\uff08\u975e\u56fa\u5b9a\uff09";
     static final String PENDING_STAGE = "\u5f85\u786e\u8ba4";
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -36,19 +38,22 @@ public class InventoryMappingService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final InventoryPackageService packageService;
+    private final InventoryAccessService inventoryAccess;
 
     public InventoryMappingService(
         JdbcTemplate jdbcTemplate,
         ObjectMapper objectMapper,
-        InventoryPackageService packageService
+        InventoryPackageService packageService,
+        InventoryAccessService inventoryAccess
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.packageService = packageService;
+        this.inventoryAccess = inventoryAccess;
     }
 
     public ObjectNode summary(SessionUser user) {
-        QuerySpec scope = buildFilter(user, "", "", "", "");
+        QuerySpec scope = buildFilter(user, "", "", "", "", "");
         ObjectNode result = objectMapper.createObjectNode();
         result.put("total", count("SELECT COUNT(*) FROM inventory_mapping_entries e " + scope.where(), scope.params()));
 
@@ -91,6 +96,22 @@ public class InventoryMappingService {
             "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
             plus(scope, "e.rule_type = ?", "\u6309\u9700\u7533\u9886").params()
         ));
+        result.put("pendingPatientBinding", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
+            plus(scope, "e.rule_type = ?", PENDING_PATIENT_BINDING).params()
+        ));
+        result.put("patientVariableConfirmed", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(plus(scope, "e.rule_type = ?", PATIENT_ONCE_PACKAGE), "e.status = ?", "confirmed").where(),
+            plus(plus(scope, "e.rule_type = ?", PATIENT_ONCE_PACKAGE), "e.status = ?", "confirmed").params()
+        ));
+        result.put("patientVariablePending", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "(e.rule_type IN (?, ?) OR (e.rule_type = ? AND e.status <> ?))").where(),
+            plus(scope, "(e.rule_type IN (?, ?) OR (e.rule_type = ? AND e.status <> ?))", "条件套餐", PENDING_PATIENT_BINDING, PATIENT_ONCE_PACKAGE, "confirmed").params()
+        ));
+        result.put("nonPatient", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type IN (?, ?)").where(),
+            plus(scope, "e.rule_type IN (?, ?)", "固定运行消耗", "按需申领").params()
+        ));
         ObjectNode readiness = draftReadiness(scope);
         result.put("canCreatePackageDraft", readiness.path("canCreatePackageDraft").asLong());
         result.put("needsSupplement", readiness.path("needsSupplement").asLong());
@@ -102,6 +123,7 @@ public class InventoryMappingService {
         SessionUser user,
         String ruleType,
         String status,
+        String businessGroup,
         String department,
         String keyword,
         int page,
@@ -110,7 +132,7 @@ public class InventoryMappingService {
         int safePage = Math.max(1, page);
         int safeSize = Math.max(1, Math.min(MAX_PAGE_SIZE, size));
         int offset = (safePage - 1) * safeSize;
-        QuerySpec filter = buildFilter(user, ruleType, status, department, keyword);
+        QuerySpec filter = buildFilter(user, ruleType, status, businessGroup, department, keyword);
         List<Object> pageParams = new ArrayList<>(filter.params());
         pageParams.add(safeSize);
         pageParams.add(offset);
@@ -125,7 +147,7 @@ public class InventoryMappingService {
         jdbcTemplate.query(
             mappingSelect() + from + filter.where() + """
             ORDER BY
-              FIELD(e.rule_type, '\u60a3\u8005\u5355\u6b21\u5957\u9910', '\u6761\u4ef6\u5957\u9910', '\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017', '\u6309\u9700\u7533\u9886'),
+              FIELD(e.rule_type, '\u60a3\u8005\u5355\u6b21\u5957\u9910', '\u6761\u4ef6\u5957\u9910', '\u5f85\u6838\u5b9a\uff08\u975e\u56fa\u5b9a\uff09', '\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017', '\u6309\u9700\u7533\u9886'),
               e.source_sheet ASC, e.source_row ASC, e.id ASC
             LIMIT ? OFFSET ?
             """,
@@ -607,7 +629,7 @@ public class InventoryMappingService {
         return value == null ? 0L : value;
     }
 
-    private QuerySpec buildFilter(SessionUser user, String ruleType, String status, String department, String keyword) {
+    private QuerySpec buildFilter(SessionUser user, String ruleType, String status, String businessGroup, String department, String keyword) {
         List<String> conditions = new ArrayList<>();
         List<Object> params = new ArrayList<>();
         if (user != null && !canReadAll(user)) {
@@ -627,6 +649,21 @@ public class InventoryMappingService {
             conditions.add("e.status = ?");
             params.add(status);
         }
+        if ("automatic".equals(businessGroup)) {
+            conditions.add("e.rule_type = ? AND e.status = ?");
+            params.add(PATIENT_ONCE_PACKAGE);
+            params.add("confirmed");
+        } else if ("pending".equals(businessGroup)) {
+            conditions.add("(e.rule_type IN (?, ?) OR (e.rule_type = ? AND e.status <> ?))");
+            params.add("条件套餐");
+            params.add(PENDING_PATIENT_BINDING);
+            params.add(PATIENT_ONCE_PACKAGE);
+            params.add("confirmed");
+        } else if ("nonpatient".equals(businessGroup)) {
+            conditions.add("e.rule_type IN (?, ?)");
+            params.add("固定运行消耗");
+            params.add("按需申领");
+        }
         if (keyword != null && !keyword.isBlank()) {
             String like = "%" + keyword.trim() + "%";
             conditions.add("""
@@ -643,8 +680,8 @@ public class InventoryMappingService {
         return new QuerySpec(where, params);
     }
 
-    private static boolean canReadAll(SessionUser user) {
-        return user != null && List.of("admin", "quality", "manager", "warehouse").contains(user.role());
+    private boolean canReadAll(SessionUser user) {
+        return user != null && inventoryAccess.canViewAllDepartments(user);
     }
 
     private String mappingSelect() {
@@ -833,6 +870,7 @@ public class InventoryMappingService {
         String status = text(row, "status");
         if (PATIENT_ONCE_PACKAGE.equals(ruleType)) return canCreatePackageDraft ? "\u53ef\u751f\u6210\u8349\u7a3f" : PENDING_STAGE;
         if ("\u6761\u4ef6\u5957\u9910".equals(ruleType)) return "confirmed".equals(status) ? "\u4ec5\u9884\u6d4b" : PENDING_STAGE;
+        if (PENDING_PATIENT_BINDING.equals(ruleType)) return "\u5f85\u6838\u5b9a\u53e3\u5f84";
         if ("\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017".equals(ruleType)) return "\u975e\u60a3\u8005\u8017\u7528";
         if ("\u6309\u9700\u7533\u9886".equals(ruleType)) return "\u8d70\u7533\u9886";
         return PENDING_STAGE;

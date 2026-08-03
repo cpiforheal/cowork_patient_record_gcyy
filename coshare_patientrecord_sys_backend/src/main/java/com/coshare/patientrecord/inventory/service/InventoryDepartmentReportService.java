@@ -42,15 +42,16 @@ public class InventoryDepartmentReportService {
     }
 
     public ObjectNode query(
-        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage
+        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage, boolean patientOnly
     ) {
         if (from == null || to == null || to.isBefore(from)) throw new IllegalArgumentException("报表日期范围不正确");
         ObjectNode result = ledger.mapper().createObjectNode();
         result.put("from", from.toString());
         result.put("to", to.toString());
         result.put("triggerStage", triggerStage == null ? "" : triggerStage);
-        result.set("summary", summary(from, to, departmentIds, itemId, category, triggerStage));
-        result.set("details", details(from, to, departmentIds, itemId, category, triggerStage));
+        result.put("patientOnly", patientOnly);
+        result.set("summary", summary(from, to, departmentIds, itemId, category, triggerStage, patientOnly));
+        result.set("details", details(from, to, departmentIds, itemId, category, triggerStage, patientOnly));
         return result;
     }
 
@@ -83,13 +84,23 @@ public class InventoryDepartmentReportService {
             document.open();
             Font title = new Font(chineseBaseFont(), 14, Font.BOLD);
             Font body = new Font(chineseBaseFont(), 8, Font.NORMAL);
+            if (report.withArray("summary").isEmpty()) {
+                String reportTitle = report.path("patientOnly").asBoolean(false) ? "患者变量耗材日核表" : "科室耗材使用明细";
+                Paragraph heading = new Paragraph(reportTitle, title);
+                heading.setAlignment(Element.ALIGN_CENTER);
+                document.add(heading);
+                document.add(new Paragraph(report.path("from").asText() + " 至 " + report.path("to").asText(), body));
+                document.add(new Paragraph("本统计范围暂无符合条件的耗材记录。", body));
+                document.add(new Paragraph("科室确认：____________    仓库确认：____________    日期：____________", body));
+            }
             Set<String> completed = new HashSet<>();
             for (JsonNode row : report.withArray("summary")) {
                 String departmentId = row.path("departmentId").asText("");
                 if (!completed.add(departmentId)) continue;
                 if (completed.size() > 1) document.newPage();
                 Paragraph heading = new Paragraph(
-                    row.path("department").asText("未归属科室") + " 科室耗材使用明细",
+                    row.path("department").asText("未归属科室")
+                        + (report.path("patientOnly").asBoolean(false) ? " 患者变量耗材日核表" : " 科室耗材使用明细"),
                     title
                 );
                 heading.setAlignment(Element.ALIGN_CENTER);
@@ -151,11 +162,12 @@ public class InventoryDepartmentReportService {
     }
 
     private ArrayNode summary(
-        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage
+        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage, boolean patientOnly
     ) {
         SqlFilter filter = filter(departmentIds, itemId, category, "m");
         String normalizedStage = triggerStage == null || triggerStage.isBlank() ? null : triggerStage.trim().toUpperCase();
         String stageCondition = normalizedStage == null ? "" : " AND c.trigger_stage = ?";
+        String patientCondition = patientOnly ? " AND m.related_type = 'STAGE_COMMAND'" : "";
         String sql = """
             SELECT m.department_id departmentId, MAX(m.department_name_snapshot) department,
                    m.item_id itemId, MAX(i.name) itemName, MAX(i.unit) unit,
@@ -164,8 +176,8 @@ public class InventoryDepartmentReportService {
                        ELSE 0 END), 0) openingQuantity,
                    COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'TRANSFER_TO_DEPARTMENT' THEN m.quantity ELSE 0 END), 0) transferInQuantity,
                    COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'RETURN_TO_CENTRAL' THEN m.quantity ELSE 0 END), 0) returnQuantity,
-                   COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'CONSUMPTION' %s THEN m.quantity ELSE 0 END), 0) consumedQuantity,
-                   COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'CONSUMPTION_REVERSAL' %s THEN m.quantity ELSE 0 END), 0) reversalQuantity,
+                   COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'CONSUMPTION' %s %s THEN m.quantity ELSE 0 END), 0) consumedQuantity,
+                   COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'CONSUMPTION_REVERSAL' %s %s THEN m.quantity ELSE 0 END), 0) reversalQuantity,
                    COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type = 'SCRAP' THEN m.quantity ELSE 0 END), 0) scrapQuantity,
                    COALESCE(SUM(CASE WHEN m.occurred_at >= ? AND m.occurred_at < ? AND m.movement_type LIKE 'COUNT_ADJUSTMENT_%%'
                        THEN CASE WHEN m.movement_type = 'COUNT_ADJUSTMENT_IN' THEN m.quantity ELSE -m.quantity END ELSE 0 END), 0) adjustmentQuantity,
@@ -177,7 +189,7 @@ public class InventoryDepartmentReportService {
             JOIN inventory_locations l ON l.department_id = m.department_id AND l.location_type = 'DEPARTMENT'
             LEFT JOIN inventory_stage_consumption_commands c ON c.id = m.related_id AND m.related_type = 'STAGE_COMMAND'
             WHERE m.department_id IS NOT NULL AND m.occurred_at < ?
-            """.formatted(stageCondition, stageCondition) + filter.sql()
+            """.formatted(stageCondition, patientCondition, stageCondition, patientCondition) + filter.sql()
             + " GROUP BY m.department_id, m.item_id ORDER BY department, itemName";
         List<Object> expanded = new ArrayList<>();
         expanded.add(from);
@@ -196,7 +208,7 @@ public class InventoryDepartmentReportService {
     }
 
     private ArrayNode details(
-        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage
+        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage, boolean patientOnly
     ) {
         SqlFilter filter = filter(departmentIds, itemId, category, "e");
         List<Object> args = new ArrayList<>();
@@ -221,6 +233,7 @@ public class InventoryDepartmentReportService {
             LEFT JOIN inventory_packages p ON p.id = e.package_id
             LEFT JOIN pre_ai_encounters pe ON pe.id = e.encounter_id
             WHERE e.status = 'succeeded' AND e.visit_date >= ? AND e.visit_date <= ?
+            """ + (patientOnly ? " AND e.command_id IS NOT NULL" : "") + """
             """ + (triggerStage == null || triggerStage.isBlank() ? "" : " AND e.trigger_stage = ?")
             + filter.sql() + " ORDER BY e.department, e.visit_date, e.encounter_id, i.name",
             args.toArray()

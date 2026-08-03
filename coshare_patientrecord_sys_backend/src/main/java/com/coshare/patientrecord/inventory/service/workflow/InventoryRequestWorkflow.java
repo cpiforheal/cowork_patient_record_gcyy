@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.service.workflow;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
 import com.coshare.patientrecord.inventory.service.InventoryLedgerService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,10 +20,12 @@ public class InventoryRequestWorkflow {
 
     private final InventoryRepository repository;
     private final InventoryLedgerService ledgerService;
+    private final InventoryAccessService inventoryAccessService;
 
-    public InventoryRequestWorkflow(InventoryRepository repository, InventoryLedgerService ledgerService) {
+    public InventoryRequestWorkflow(InventoryRepository repository, InventoryLedgerService ledgerService, InventoryAccessService inventoryAccessService) {
         this.repository = repository;
         this.ledgerService = ledgerService;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     @Transactional
@@ -163,7 +166,7 @@ public class InventoryRequestWorkflow {
     }
 
     private void requireWarehouse(SessionUser user) {
-        if (user == null || !"warehouse".equals(user.role())) {
+        if (user == null || !inventoryAccessService.hasCapability(user, "inventory:approve")) {
             throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.FORBIDDEN,
                 "只有仓库岗位可以审核、发放或作废申领单"

@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.service.workflow;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
 import com.coshare.patientrecord.inventory.service.InventoryLedgerService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -18,10 +19,12 @@ public class InventoryStockWorkflow {
 
     private final InventoryRepository repository;
     private final InventoryLedgerService ledgerService;
+    private final InventoryAccessService inventoryAccessService;
 
-    public InventoryStockWorkflow(InventoryRepository repository, InventoryLedgerService ledgerService) {
+    public InventoryStockWorkflow(InventoryRepository repository, InventoryLedgerService ledgerService, InventoryAccessService inventoryAccessService) {
         this.repository = repository;
         this.ledgerService = ledgerService;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     @Transactional
@@ -152,7 +155,7 @@ public class InventoryStockWorkflow {
     }
 
     private void requireWarehouse(SessionUser user) {
-        if (user == null || !"warehouse".equals(user.role())) {
+        if (user == null || !inventoryAccessService.hasCapability(user, "inventory:issue")) {
             throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.FORBIDDEN,
                 "只有仓库岗位可以维护物资档案和中央仓库存"
@@ -161,7 +164,7 @@ public class InventoryStockWorkflow {
     }
 
     private void requireItemManager(SessionUser user) {
-        if (user == null || !List.of("admin", "warehouse").contains(user.role())) {
+        if (user == null || !inventoryAccessService.hasCapability(user, "inventory:item:manage")) {
             throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.FORBIDDEN,
                 "只有管理员和仓库岗位可以维护物资档案"

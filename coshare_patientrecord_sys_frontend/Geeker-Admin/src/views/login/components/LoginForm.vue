@@ -85,7 +85,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { HOME_URL } from "@/config";
 import { Login } from "@/api/interface";
 import { ElMessage, ElNotification } from "element-plus";
@@ -101,13 +101,16 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
+import { INVENTORY_SYSTEM_DASHBOARD } from "@/routers/modules/inventorySystem";
 import { CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
 import type { ElForm } from "element-plus";
 
 const router = useRouter();
+const route = useRoute();
 const userStore = useUserStore();
 const tabsStore = useTabsStore();
 const keepAliveStore = useKeepAliveStore();
+const WELCOME_SPLASH_SESSION_KEY = "welcome-splash-played";
 
 type FormInstance = InstanceType<typeof ElForm>;
 const loginFormRef = ref<FormInstance>();
@@ -122,6 +125,7 @@ const accountLoading = ref(false);
 const forcePasswordVisible = ref(false);
 const passwordChanging = ref(false);
 const accountOptions = ref<LoginAccountOption[]>([]);
+const allAccountOptions = ref<LoginAccountOption[]>([]);
 const departmentOptions = ref<string[]>([]);
 const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
   department: "",
@@ -133,19 +137,34 @@ const passwordChange = reactive({ newPassword: "", confirmPassword: "" });
 // 展示终端等受限角色没有 /home 权限，登录后需落到本岗位第一个可用页面。
 const resolveLandingPath = () => {
   const authStore = useAuthStore();
+  if (authStore.hasInventorySystemAccessGet && !authStore.hasMedicalSystemAccessGet) return INVENTORY_SYSTEM_DASHBOARD;
+  if (authStore.hasInventorySystemAccessGet && authStore.hasMedicalSystemAccessGet) return "/system-select";
   const pages = authStore.flatMenuListGet.filter(item => item.component);
   if (!pages.length || pages.some(item => item.path === HOME_URL)) return HOME_URL;
   return pages[0].path;
+};
+
+const resolveLoginRedirect = () => {
+  const redirect = route.query.redirect;
+  if (typeof redirect === "string" && redirect.startsWith("/") && !redirect.startsWith("//") && redirect !== "/login") {
+    return redirect;
+  }
+  return resolveLandingPath();
 };
 
 const completeLogin = async (data: Login.ResLogin) => {
   if (!data.userInfo) throw new Error("登录响应缺少用户信息");
   userStore.setToken(data.access_token);
   userStore.setUserInfo(data.userInfo);
+  try {
+    window.sessionStorage.removeItem(WELCOME_SPLASH_SESSION_KEY);
+  } catch {
+    // Storage may be unavailable in restricted browser modes; login should still continue.
+  }
   await initDynamicRouter();
   tabsStore.setTabs([]);
   keepAliveStore.setKeepAliveName([]);
-  await router.replace({ path: resolveLandingPath() });
+  await router.replace({ path: resolveLoginRedirect() });
   ElNotification({
     title: "登录成功",
     message: `${data.userInfo.department || "当前科室"}：仅显示本岗位已授权的功能`,
@@ -183,6 +202,17 @@ const completeForcedPasswordChange = async () => {
 
 const filteredAccountOptions = computed(() => accountOptions.value);
 
+const applyAccountOptions = (options: LoginAccountOption[]) => {
+  accountOptions.value = options;
+  loginForm.accountHandle = options.length === 1 ? options[0].accountHandle : "";
+};
+
+const getCachedAccounts = (department: string) => {
+  const normalizedDepartment = department.trim();
+  if (!normalizedDepartment) return allAccountOptions.value;
+  return allAccountOptions.value.filter(account => account.department.trim() === normalizedDepartment);
+};
+
 const syncDepartmentOptions = (departmentNames: string[]) => {
   const names = new Set<string>();
   departmentNames.forEach(name => {
@@ -195,9 +225,9 @@ const loadDepartments = async () => {
   departmentLoading.value = true;
   try {
     const { data } = await getLoginOptionsApi();
-    accountOptions.value = data.accounts ?? [];
+    allAccountOptions.value = data.accounts ?? [];
+    applyAccountOptions(allAccountOptions.value);
     syncDepartmentOptions(data.departments);
-    if (accountOptions.value.length === 1) loginForm.accountHandle = accountOptions.value[0].accountHandle;
   } catch (error) {
     ElNotification({
       title: "登录数据加载失败",
@@ -211,27 +241,29 @@ const loadDepartments = async () => {
 };
 
 const loadAccountsByDepartment = async (department: string) => {
+  const cachedAccounts = getCachedAccounts(department);
+  applyAccountOptions(cachedAccounts);
   accountLoading.value = true;
   try {
     const { data } = await getLoginAccountsApi(department);
-    accountOptions.value = data.accounts ?? [];
-    if (accountOptions.value.length === 1) loginForm.accountHandle = accountOptions.value[0].accountHandle;
+    const refreshedAccounts = data.accounts ?? [];
+    applyAccountOptions(refreshedAccounts.length > 0 ? refreshedAccounts : cachedAccounts);
   } catch (error) {
-    ElNotification({
-      title: "账号列表加载失败",
-      message: (error as Error).message,
-      type: "error",
-      duration: 3000
-    });
+    if (cachedAccounts.length === 0) {
+      ElNotification({
+        title: "账号列表加载失败",
+        message: (error as Error).message,
+        type: "error",
+        duration: 3000
+      });
+    }
   } finally {
     accountLoading.value = false;
   }
 };
 
 const handleDepartmentChange = async (department: string) => {
-  loginForm.accountHandle = "";
   loginForm.password = "";
-  accountOptions.value = [];
   await loadAccountsByDepartment(department);
 };
 

@@ -30,6 +30,7 @@ public class SecurityConfig {
                     "/encounters/**",
                     "/pre-ai/**",
                     "/inventory/**",
+                    "/inventory-system/**",
                     "/tcm-pharmacy/**",
                     "/favicon.ico",
                     "/assets/**",

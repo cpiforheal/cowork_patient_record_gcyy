@@ -13,7 +13,9 @@ const tabRouteNames: Record<string, string> = {
   weekly: "inventoryWeekly",
   controls: "inventoryControls",
   packages: "inventoryPackages",
-  trace: "inventoryTrace"
+  trace: "inventoryTrace",
+  daily: "inventoryDaily",
+  roles: "inventoryRoles"
 };
 
 const tabCapabilities: Record<string, readonly string[]> = {
@@ -24,14 +26,31 @@ const tabCapabilities: Record<string, readonly string[]> = {
   items: ["inventory:item:manage", "inventory:rule"],
   weekly: ["inventory:request", "inventory:approve", "inventory:count", "inventory:export"],
   controls: ["inventory:count", "inventory:receive"],
-  packages: ["inventory:read", "inventory:approve"],
-  trace: ["inventory:export", "inventory:issue", "inventory:count"]
+  packages: ["inventory:read", "inventory:approve", "inventory:rule"],
+  trace: ["inventory:export", "inventory:issue", "inventory:count"],
+  daily: ["inventory:read"],
+  roles: ["inventory:role:manage"]
 };
 
 type InventoryMenuItem = Omit<Menu.MenuOptions, "children"> & {
   tab?: string;
   children?: InventoryMenuItem[];
 };
+
+const departmentEntries = [
+  { key: "physiotherapy", title: "理疗室", icon: "Odometer" },
+  { key: "laboratory", title: "检验科", icon: "Histogram" },
+  { key: "nursing", title: "护理部", icon: "FirstAidKit" },
+  { key: "tcm", title: "中医科", icon: "Medicine" },
+  { key: "operating", title: "手术室", icon: "KnifeFork" },
+  { key: "anesthesia", title: "麻醉室", icon: "Monitor" },
+  { key: "endoscopy", title: "胃肠镜", icon: "View" },
+  { key: "inspection", title: "检查室", icon: "Search" },
+  { key: "logistics", title: "后勤保洁", icon: "Brush" },
+  { key: "western-pharmacy", title: "西药房", icon: "Shop" },
+  { key: "cashier", title: "收费室", icon: "Money" },
+  { key: "tcm-pharmacy", title: "中药房", icon: "Goods" }
+] as const;
 
 const meta = (title: string, icon: string, isHide = false) => ({
   icon,
@@ -48,49 +67,84 @@ const inventoryMenu: InventoryMenuItem[] = [
     path: INVENTORY_SYSTEM_DASHBOARD,
     name: "inventorySystemDashboard",
     tab: "overview",
-    meta: { ...meta("进销存驾驶舱", "DataBoard"), isAffix: true }
+    meta: meta("耗材总览", "DataBoard")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/departments`,
+    name: "inventorySystemDepartmentEntry",
+    meta: meta("科室耗材录入", "OfficeBuilding"),
+    children: departmentEntries.map(entry => ({
+      path: `${INVENTORY_SYSTEM_PREFIX}/departments/${entry.key}`,
+      name: `inventorySystemDepartment${entry.key.replace(/(^|-)([a-z])/g, (_, _dash, letter) => letter.toUpperCase())}`,
+      tab: "packages",
+      meta: meta(entry.title, entry.icon)
+    }))
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/materials`,
-    name: "inventorySystemMaterials",
-    meta: meta("库存管理", "Box"),
+    name: "inventorySystemMaterialsMenu",
+    meta: meta("库存与出入", "Goods"),
     children: [
-      { path: `${INVENTORY_SYSTEM_PREFIX}/stock`, name: "inventorySystemStock", tab: "stock", meta: meta("入库与库存", "Goods") },
-      { path: `${INVENTORY_SYSTEM_PREFIX}/items`, name: "inventorySystemItems", tab: "items", meta: meta("物资档案", "Document") }
-    ]
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/operations`,
-    name: "inventorySystemOperations",
-    meta: meta("申领与计划", "Tickets"),
-    children: [
-      { path: `${INVENTORY_SYSTEM_PREFIX}/requests`, name: "inventorySystemRequests", tab: "requests", meta: meta("申领与签收", "List") },
-      { path: `${INVENTORY_SYSTEM_PREFIX}/weekly`, name: "inventorySystemWeekly", tab: "weekly", meta: meta("周用量核对", "Calendar") }
+      { path: `${INVENTORY_SYSTEM_PREFIX}/stock`, name: "inventorySystemStock", tab: "stock", meta: meta("库存台账与入库", "Goods") },
+      { path: `${INVENTORY_SYSTEM_PREFIX}/requests`, name: "inventorySystemRequests", tab: "requests", meta: meta("科室申领与签收", "List") },
+      { path: `${INVENTORY_SYSTEM_PREFIX}/trace`, name: "inventorySystemTrace", tab: "trace", meta: meta("出入库明细", "TrendCharts") },
+      { path: `${INVENTORY_SYSTEM_PREFIX}/controls`, name: "inventorySystemControls", tab: "controls", meta: meta("盘点与损耗", "Checked") }
     ]
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/governance`,
-    name: "inventorySystemGovernance",
-    meta: meta("耗材治理", "SetUp"),
+    name: "inventorySystemPatientVolume",
+    meta: meta("患者量扣减", "Collection"),
     children: [
-      { path: `${INVENTORY_SYSTEM_PREFIX}/packages`, name: "inventorySystemPackages", tab: "packages", meta: meta("患者耗材套餐", "Collection") }
-    ]
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/audit`,
-    name: "inventorySystemAudit",
-    meta: meta("盘点与追溯", "Checked"),
-    children: [
-      { path: `${INVENTORY_SYSTEM_PREFIX}/controls`, name: "inventorySystemControls", tab: "controls", meta: meta("盘点与报损", "EditPen") },
-      { path: `${INVENTORY_SYSTEM_PREFIX}/trace`, name: "inventorySystemTrace", tab: "trace", meta: meta("出入库记录", "TrendCharts") }
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/consumable-entry`,
+        name: "inventorySystemConsumableEntry",
+        tab: "packages",
+        meta: meta("耗材规则录入", "EditPen")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/packages`,
+        name: "inventorySystemPackages",
+        tab: "packages",
+        meta: meta("扣减规则与异常", "Collection")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/weekly`,
+        name: "inventorySystemWeekly",
+        tab: "weekly",
+        meta: meta("周用量核对", "Calendar")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
+        name: "inventorySystemDailyVerification",
+        tab: "daily",
+        meta: meta("患者变量日核表", "Tickets")
+      }
     ]
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/analytics`,
-    name: "inventorySystemAnalytics",
-    meta: meta("统计与分析", "PieChart"),
+    name: "inventorySystemAnalyticsMenu",
+    meta: meta("物资设置与统计", "DataAnalysis"),
     children: [
-      { path: `${INVENTORY_SYSTEM_PREFIX}/executive`, name: "inventorySystemExecutive", tab: "executive", meta: meta("管理看板", "DataAnalysis") }
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/items`,
+        name: "inventorySystemItems",
+        tab: "items",
+        meta: meta("物资档案", "Document")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/executive`,
+        name: "inventorySystemExecutive",
+        tab: "executive",
+        meta: meta("管理看板", "DataAnalysis")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
+        name: "inventorySystemRoleManagement",
+        tab: "roles",
+        meta: meta("岗位与权限", "UserFilled")
+      }
     ]
   }
 ];
@@ -133,8 +187,9 @@ const filterMedicalMenu = (items: Menu.MenuOptions[]): Menu.MenuOptions[] =>
 
 export const getMedicalSystemMenu = (items: Menu.MenuOptions[]) => getShowMenuList(filterMedicalMenu(items));
 
-export const hasInventorySystemAccess = (buttonPermissions: Record<string, string[]>, capabilities: string[]) =>
-  capabilities.some(code => code.startsWith("inventory:")) || Object.keys(buttonPermissions).some(name => name.startsWith("inventory"));
+// 独立进销存系统暂只向具有岗位权限管理权的管理员开放；其他岗位仍只进入门诊管理平台。
+export const hasInventorySystemAccess = (buttonPermissions: Record<string, string[]>, _capabilities: string[]) =>
+  (buttonPermissions.inventoryRoles || []).includes("inventory:role:manage");
 
 export const hasMedicalSystemAccess = (menus: Menu.MenuOptions[]) =>
   getMedicalSystemMenu(menus).length > 0;
@@ -156,19 +211,29 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     path: INVENTORY_SYSTEM_DASHBOARD,
     name: "inventorySystemDashboard",
     component: inventoryView,
-    meta: { ...meta("进销存驾驶舱", "DataBoard"), isAffix: true }
+    meta: meta("耗材总览", "DataBoard")
   },
   { path: `${INVENTORY_SYSTEM_PREFIX}/materials`, name: "inventorySystemMaterials", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/stock`), meta: meta("库存管理", "Box") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/operations`, name: "inventorySystemOperations", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/requests`), meta: meta("申领与计划", "Tickets") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/governance`, name: "inventorySystemGovernance", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/packages`), meta: meta("耗材治理", "SetUp") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/operations`, name: "inventorySystemOperations", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/requests`), meta: meta("申领、计划与库存", "Tickets") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/governance`, name: "inventorySystemGovernance", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/packages`), meta: meta("患者量核算", "SetUp") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/departments`, name: "inventorySystemDepartments", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/departments/${departmentEntries[0].key}`), meta: meta("科室耗材录入", "OfficeBuilding") },
   { path: `${INVENTORY_SYSTEM_PREFIX}/audit`, name: "inventorySystemAudit", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/controls`), meta: meta("盘点与追溯", "Checked") },
   { path: `${INVENTORY_SYSTEM_PREFIX}/analytics`, name: "inventorySystemAnalytics", redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/executive`), meta: meta("统计与分析", "PieChart") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/stock`, name: "inventorySystemStock", component: inventoryView, meta: meta("入库与库存", "Goods") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/stock`, name: "inventorySystemStock", component: inventoryView, meta: meta("库存台账与入库", "Goods") },
   { path: `${INVENTORY_SYSTEM_PREFIX}/items`, name: "inventorySystemItems", component: inventoryView, meta: meta("物资档案", "Document") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/requests`, name: "inventorySystemRequests", component: inventoryView, meta: meta("申领与签收", "List") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/requests`, name: "inventorySystemRequests", component: inventoryView, meta: meta("科室申领与签收", "List") },
   { path: `${INVENTORY_SYSTEM_PREFIX}/weekly`, name: "inventorySystemWeekly", component: inventoryView, meta: meta("周用量核对", "Calendar") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/packages`, name: "inventorySystemPackages", component: inventoryView, meta: meta("患者耗材套餐", "Collection") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/controls`, name: "inventorySystemControls", component: inventoryView, meta: meta("盘点与报损", "EditPen") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/trace`, name: "inventorySystemTrace", component: inventoryView, meta: meta("出入库记录", "TrendCharts") },
-  { path: `${INVENTORY_SYSTEM_PREFIX}/executive`, name: "inventorySystemExecutive", component: inventoryView, meta: meta("管理看板", "DataAnalysis") }
+  { path: `${INVENTORY_SYSTEM_PREFIX}/consumable-entry`, name: "inventorySystemConsumableEntry", component: inventoryView, meta: meta("耗材规则录入", "EditPen") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/packages`, name: "inventorySystemPackages", component: inventoryView, meta: meta("扣减规则与异常", "Collection") },
+  ...departmentEntries.map(entry => ({
+    path: `${INVENTORY_SYSTEM_PREFIX}/departments/${entry.key}`,
+    name: `inventorySystemDepartment${entry.key.replace(/(^|-)([a-z])/g, (_, _dash, letter) => letter.toUpperCase())}`,
+    component: inventoryView,
+    meta: meta(entry.title, entry.icon)
+  })),
+  { path: `${INVENTORY_SYSTEM_PREFIX}/controls`, name: "inventorySystemControls", component: inventoryView, meta: meta("盘点与损耗", "EditPen") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/trace`, name: "inventorySystemTrace", component: inventoryView, meta: meta("出入库明细", "TrendCharts") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/executive`, name: "inventorySystemExecutive", component: inventoryView, meta: meta("管理看板", "DataAnalysis") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`, name: "inventorySystemDailyVerification", component: inventoryView, meta: meta("患者变量日核表", "Tickets") },
+  { path: `${INVENTORY_SYSTEM_PREFIX}/role-management`, name: "inventorySystemRoleManagement", component: inventoryView, meta: meta("岗位与权限", "UserFilled") }
 ];

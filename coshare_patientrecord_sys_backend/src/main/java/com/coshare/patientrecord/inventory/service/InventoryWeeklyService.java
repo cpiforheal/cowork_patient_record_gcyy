@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository;
 import com.coshare.patientrecord.inventory.repository.InventoryWeeklyRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -32,10 +33,16 @@ public class InventoryWeeklyService {
 
     private final InventoryWeeklyRepository weekly;
     private final InventoryLedgerRepository ledger;
+    private final InventoryAccessService inventoryAccess;
 
-    public InventoryWeeklyService(InventoryWeeklyRepository weekly, InventoryLedgerRepository ledger) {
+    public InventoryWeeklyService(
+        InventoryWeeklyRepository weekly,
+        InventoryLedgerRepository ledger,
+        InventoryAccessService inventoryAccess
+    ) {
         this.weekly = weekly;
         this.ledger = ledger;
+        this.inventoryAccess = inventoryAccess;
     }
 
     public ObjectNode listStandards() {
@@ -493,7 +500,7 @@ public class InventoryWeeklyService {
     }
 
     private boolean canCrossDepartment(SessionUser user) {
-        return List.of("admin", "quality", "manager").contains(user.role());
+        return inventoryAccess.canViewAllDepartments(user);
     }
 
     private static String normalizeCareType(String value) {

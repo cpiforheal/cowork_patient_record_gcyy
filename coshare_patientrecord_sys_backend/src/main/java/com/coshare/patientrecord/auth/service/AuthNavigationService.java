@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.07.28.2";
+    public static final String VERSION = "2026.08.03.1";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -57,10 +57,11 @@ public class AuthNavigationService {
         "preai:encounter:create", setWith(PRE_AI_FULL_OPERATOR_ROLES, "frontdesk"),
         "preai:legacy:import", Set.of("frontdesk"),
         "preai:review", PRE_AI_FULL_OPERATOR_ROLES,
-        "preai:duties:manage", setWith(PRE_AI_FULL_OPERATOR_ROLES, "frontdesk"),
+        "preai:duties:manage", Set.of("admin", "doctor"),
         "preai:surgery:confirm", PRE_AI_FULL_OPERATOR_ROLES
     );
     private final JdbcTemplate jdbcTemplate;
+    private final InventoryAccessService inventoryAccessService;
     private final List<NavigationMenu> menus = buildMenus();
     private final Map<String, RolePolicy> policies = buildPolicies();
     private final List<NavigationShortcut> shortcuts = List.of(
@@ -78,13 +79,14 @@ public class AuthNavigationService {
         shortcut("操作记录查询", "追踪关键资料改动", "Search", "/audit/log")
     );
 
-    public AuthNavigationService(JdbcTemplate jdbcTemplate) {
+    public AuthNavigationService(JdbcTemplate jdbcTemplate, InventoryAccessService inventoryAccessService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     public NavigationResult navigationFor(SessionUser user) {
-        RolePolicy policy = policies.get(normalizeRole(user.role()));
-        if (policy == null) {
+        RolePolicy basePolicy = policies.get(normalizeRole(user.role()));
+        if (basePolicy == null) {
             log.warn(
                 "SECURITY_AUDIT navigation denied for unknown role: userId={}, username={}, role={}",
                 user.id(),
@@ -93,6 +95,7 @@ public class AuthNavigationService {
             );
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号角色未配置导航权限，请联系系统管理员");
         }
+        RolePolicy policy = effectivePolicy(user, basePolicy);
 
         List<NavigationMenu> authorizedMenus = filterMenus(menus, effectiveMenuPaths(policy.menuPaths()));
         List<NavigationShortcut> authorizedShortcuts = prioritizeShortcuts(normalizeRole(user.role()), shortcuts.stream()
@@ -163,6 +166,7 @@ public class AuthNavigationService {
 
     public boolean hasCapability(SessionUser user, String capability) {
         if (user == null || capability == null || capability.isBlank()) return false;
+        if (capability.startsWith("inventory:")) return inventoryAccessService.hasCapability(user, capability);
         RolePolicy policy = policies.get(normalizeRole(user.role()));
         if (policy == null) return false;
         if (policy.buttonPermissions().values().stream()
@@ -181,6 +185,19 @@ public class AuthNavigationService {
             if (parts.length == 4 && "create".equals(parts[3])) return canCreateAuxiliary(user.role(), parts[2]);
         }
         return false;
+    }
+
+    private RolePolicy effectivePolicy(SessionUser user, RolePolicy basePolicy) {
+        InventoryAccessService.Access inventoryAccess = inventoryAccessService.accessFor(user);
+        Set<String> menuPaths = new LinkedHashSet<>(basePolicy.menuPaths());
+        if (!menuPaths.contains("*")) {
+            menuPaths.removeIf(path -> path.startsWith("/inventory/"));
+            menuPaths.addAll(inventoryAccess.menuPaths());
+        }
+        Map<String, List<String>> buttons = new LinkedHashMap<>(basePolicy.buttonPermissions());
+        buttons.entrySet().removeIf(entry -> entry.getValue().stream().anyMatch(value -> value.startsWith("inventory:")));
+        buttons.putAll(inventoryAccess.buttonPermissions());
+        return new RolePolicy(Set.copyOf(menuPaths), Map.copyOf(buttons));
     }
 
     private Map<String, StagePermission> stagePermissions(String role) {
@@ -328,6 +345,8 @@ public class AuthNavigationService {
                 page("/inventory/weekly", "inventoryWeekly", "/inventory/manage/index", "周用量核对", "DataLine", false, false, false),
                 page("/inventory/trace", "inventoryTrace", "/inventory/manage/index", "出入库记录", "Search", false, false, false),
                 page("/inventory/items", "inventoryItems", "/inventory/manage/index", "物资设置", "Goods", false, false, false),
+                page("/inventory/daily", "inventoryDaily", "/inventory/manage/index", "每日核验报表", "DocumentChecked", false, false, false),
+                page("/inventory/roles", "inventoryRoles", "/inventory/manage/index", "岗位与权限", "UserFilled", false, false, false),
                 redirect("/inventory/manage", "inventoryManageCompatibility", "/inventory/overview", "进销存兼容入口", "Link", true)
             ),
             page("/tcm-pharmacy/workbench", "tcmPharmacyWorkbench", "/tcmPharmacy/workbench/index", "中药房工作台", "FirstAidKit", false, false, false),
@@ -410,7 +429,9 @@ public class AuthNavigationService {
             "inventoryWeekly=inventory:read,inventory:export",
             "inventoryPackages=inventory:read",
             "inventoryControls=inventory:read,inventory:export",
-            "inventoryTrace=inventory:read,inventory:export"
+            "inventoryTrace=inventory:read,inventory:export",
+            "inventoryDaily=inventory:read,inventory:export",
+            "inventoryRoles=inventory:read,inventory:role:manage"
         );
         result.put("admin", new RolePolicy(Set.of("*"), administratorButtons));
 

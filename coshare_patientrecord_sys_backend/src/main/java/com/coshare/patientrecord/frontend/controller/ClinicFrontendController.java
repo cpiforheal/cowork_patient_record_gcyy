@@ -29,6 +29,7 @@ public class ClinicFrontendController {
         "/system/**",
         "/templates/**",
         "/inventory/**",
+        "/inventory-system/**",
         "/encounters/**",
         "/pre-ai/**",
         "/tcm-pharmacy/**"

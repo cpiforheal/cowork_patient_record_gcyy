@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.repository;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.service.builder.InventorySummaryBuilder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,15 +34,18 @@ public class InventoryRepository {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final InventorySummaryBuilder summaryBuilder;
+    private final InventoryAccessService inventoryAccessService;
 
     public InventoryRepository(
         JdbcTemplate jdbcTemplate,
         ObjectMapper objectMapper,
-        InventorySummaryBuilder summaryBuilder
+        InventorySummaryBuilder summaryBuilder,
+        InventoryAccessService inventoryAccessService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.summaryBuilder = summaryBuilder;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     public ObjectNode readDb() {
@@ -514,7 +518,7 @@ public class InventoryRepository {
     }
 
     public boolean isInventoryManager(SessionUser user) {
-        return "warehouse".equals(user.role());
+        return inventoryAccessService.canViewAllDepartments(user);
     }
 
     public boolean sameDepartment(SessionUser user, JsonNode row) {

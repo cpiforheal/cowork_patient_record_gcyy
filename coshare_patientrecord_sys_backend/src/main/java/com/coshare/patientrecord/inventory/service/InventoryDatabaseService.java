@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
 import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository;
 import com.coshare.patientrecord.inventory.service.workflow.InventoryRequestWorkflow;
@@ -30,6 +31,7 @@ public class InventoryDatabaseService {
     private final InventoryWeeklyService weeklyService;
     private final InventoryWeeklyExportService weeklyExportService;
     private final InventoryMappingService mappingService;
+    private final InventoryAccessService inventoryAccess;
 
     public InventoryDatabaseService(
         InventoryRepository repository,
@@ -42,7 +44,8 @@ public class InventoryDatabaseService {
         InventoryDepartmentReportService reportService,
         InventoryWeeklyService weeklyService,
         InventoryWeeklyExportService weeklyExportService,
-        InventoryMappingService mappingService
+        InventoryMappingService mappingService,
+        InventoryAccessService inventoryAccess
     ) {
         this.repository = repository;
         this.requestWorkflow = requestWorkflow;
@@ -55,6 +58,7 @@ public class InventoryDatabaseService {
         this.weeklyService = weeklyService;
         this.weeklyExportService = weeklyExportService;
         this.mappingService = mappingService;
+        this.inventoryAccess = inventoryAccess;
     }
 
     public ObjectNode readDb() {
@@ -154,12 +158,13 @@ public class InventoryDatabaseService {
         SessionUser user,
         String ruleType,
         String status,
+        String businessGroup,
         String department,
         String keyword,
         int page,
         int size
     ) {
-        return mappingService.entries(user, ruleType, status, department, keyword, page, size);
+        return mappingService.entries(user, ruleType, status, businessGroup, department, keyword, page, size);
     }
 
     public ObjectNode confirmMappingEntries(JsonNode payload, SessionUser user) {
@@ -279,9 +284,10 @@ public class InventoryDatabaseService {
         String itemId,
         String category,
         String triggerStage,
+        boolean patientOnly,
         String action
     ) {
-        ObjectNode result = reportService.query(from, to, departmentIds, itemId, category, triggerStage);
+        ObjectNode result = reportService.query(from, to, departmentIds, itemId, category, triggerStage, patientOnly);
         reportService.audit(user, action, from, to, departmentIds == null ? List.of() : departmentIds);
         return result;
     }
@@ -340,7 +346,7 @@ public class InventoryDatabaseService {
     }
 
     private String scopedDepartmentId(SessionUser user, String requestedDepartmentId) {
-        if (List.of("admin", "quality", "manager").contains(user.role())
+        if (inventoryAccess.canViewAllDepartments(user)
             && requestedDepartmentId != null && !requestedDepartmentId.isBlank()) {
             return ledgerRepository.resolveDepartmentId(requestedDepartmentId, requestedDepartmentId);
         }
