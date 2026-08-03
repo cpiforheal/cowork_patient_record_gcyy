@@ -4,6 +4,7 @@
       <div class="command-title">
         <span>{{ currentTabProfile.kicker }}</span>
         <h1>{{ currentTabProfile.title }}</h1>
+        <p>{{ currentTabProfile.desc }}</p>
       </div>
       <div class="command-actions">
         <el-tooltip content="查看进销存操作说明" placement="bottom">
@@ -222,7 +223,7 @@
               :mapping-total="mappingTotal"
               :mapping-loading="mappingLoading"
               :department-options="departmentOptions"
-              :focus-department="focusedDepartment"
+              :focus-department="effectiveFocusedDepartment"
               :standalone-mapping="isStandaloneConsumableEntry"
               :can-manage="canManagePackages"
               :can-manage-mapping="canManageMappingGovernance"
@@ -816,8 +817,10 @@ const routeTabMap: Record<string, string> = {
   "/inventory-system/daily-verification": "daily",
   "/inventory-system/role-management": "roles"
 };
+const isStandaloneConsumableEntry = computed(
+  () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
+);
 const focusedDepartment = computed(() => inventoryDepartmentRouteMap[route.path] || "");
-const isStandaloneConsumableEntry = computed(() => route.path === "/inventory-system/consumable-entry");
 const categoryOptions = ["医用耗材", "办公物资", "消毒用品", "检验用品", "护理用品", "低值易耗"];
 const unitOptions = ["个", "盒", "包", "瓶", "支", "卷", "套", "箱"];
 const returnTypeOptions = [
@@ -826,15 +829,15 @@ const returnTypeOptions = [
 ];
 const tabNavItems = [
   { tab: "overview", title: "今日待办" },
-  { tab: "executive", title: "管理看板" },
-  { tab: "requests", title: "申领与签收" },
-  { tab: "stock", title: "入库与库存" },
+  { tab: "executive", title: "运行分析" },
+  { tab: "requests", title: "领用发放" },
+  { tab: "stock", title: "耗材库存" },
   { tab: "controls", title: "盘点与报损" },
-  { tab: "packages", title: "患者耗材套餐" },
+  { tab: "packages", title: "科室耗材" },
   { tab: "weekly", title: "周用量核对" },
   { tab: "trace", title: "出入库记录" },
-  { tab: "items", title: "物资设置" },
-  { tab: "daily", title: "患者变量日核表" },
+  { tab: "items", title: "物资档案" },
+  { tab: "daily", title: "每日患者耗材核对" },
   { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
@@ -923,31 +926,31 @@ const tabProfiles = {
     taskDesc: "不用先翻明细，异常和待办会自动靠前。"
   },
   executive: {
-    kicker: "进销存管理 / 管理看板",
-    title: "管理看板",
-    desc: "用红绿灯、关键指标和科室消耗看清当前风险。",
+    kicker: "管理设置 / 运行分析",
+    title: "运行分析",
+    desc: "集中查看风险、处理进度和科室消耗趋势。",
     taskLabel: "当前结论",
     taskTitle: "先看红绿灯，再看待签字",
     taskDesc: "适合主任、质控和管理岗位快速复核。"
   },
   requests: {
-    kicker: "进销存管理 / 申领与签收",
-    title: "申领与签收",
+    kicker: "领用发放",
+    title: "领用发放",
     desc: "提交、审核、发放、签收按顺序闭环。",
     taskLabel: "当前重点",
     taskTitle: "处理待审核、待发放、待签收",
     taskDesc: "每张单只做当前状态允许的动作。"
   },
   stock: {
-    kicker: "进销存管理 / 入库与库存",
-    title: "入库与库存",
+    kicker: "耗材库存",
+    title: "库存台账与入库",
     desc: "看数量、批号、效期和位置。",
     taskLabel: "当前重点",
     taskTitle: "先看低库存和临期",
     taskDesc: "入库时补齐批次、效期和位置。"
   },
   items: {
-    kicker: "进销存管理 / 物资设置",
+    kicker: "耗材库存 / 物资档案",
     title: "物资设置",
     desc: "统一名称、规格、单位和规则。",
     taskLabel: "当前重点",
@@ -955,7 +958,7 @@ const tabProfiles = {
     taskDesc: "敏感、批号、效期、预警线提前定义。"
   },
   weekly: {
-    kicker: "进销存管理 / 周用量核对",
+    kicker: "核对打印 / 周用量核对",
     title: "周用量核对",
     desc: "按患者量核对预估耗用、实际扣减和差异。",
     taskLabel: "当前重点",
@@ -963,7 +966,7 @@ const tabProfiles = {
     taskDesc: "波动明显时补充原因。"
   },
   controls: {
-    kicker: "进销存管理 / 盘点与报损",
+    kicker: "核对打印 / 盘点与报损",
     title: "盘点与报损",
     desc: "处理盘点差异、科室退回和物资报废。",
     taskLabel: "当前重点",
@@ -971,15 +974,15 @@ const tabProfiles = {
     taskDesc: "每次处置都留下可复核记录。"
   },
   packages: {
-    kicker: "进销存管理 / 患者耗材套餐",
-    title: "患者耗材套餐",
-    desc: "维护科室门诊、住院关键阶段套餐，并处理自动扣减失败任务。",
+    kicker: "管理设置 / 患者扣减规则",
+    title: "患者扣减规则",
+    desc: "维护患者到诊后自动扣减的套餐、触发环节和异常记录。",
     taskLabel: "当前重点",
     taskTitle: "先确认启用版本，再处理失败事件",
     taskDesc: "仅最新启用且处于生效期的套餐参与匹配，草稿不会影响库存。"
   },
   trace: {
-    kicker: "进销存管理 / 出入库记录",
+    kicker: "核对打印 / 出入库记录",
     title: "出入库记录",
     desc: "倒查入库、发放、退回、报废和盘点。",
     taskLabel: "当前重点",
@@ -987,15 +990,15 @@ const tabProfiles = {
     taskDesc: "检查和复核时直接导出。"
   },
   daily: {
-    kicker: "进销存管理 / 患者变量耗材日核表",
-    title: "患者变量耗材日核表",
+    kicker: "核对打印 / 每日患者耗材核对",
+    title: "每日患者耗材核对",
     desc: "只展示已经由患者就诊环节自动触发的耗材扣减，便于每日纸质复核。",
     taskLabel: "统计口径",
     taskTitle: "按已完成就诊环节自动扣减",
     taskDesc: "固定消耗、按需申领和待确认规则不会混入本表。"
   },
   roles: {
-    kicker: "进销存管理 / 岗位与权限",
+    kicker: "管理设置 / 岗位与权限",
     title: "岗位与权限",
     desc: "将正式账号归入岗位，并按岗位控制可见入口和操作权限。",
     taskLabel: "维护提示",
@@ -1038,6 +1041,10 @@ const tabAuthMap: Record<string, readonly string[]> = {
 };
 const canViewAllDepartments = computed(() =>
   hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export", "inventory:report"])
+);
+const effectiveFocusedDepartment = computed(
+  () =>
+    focusedDepartment.value || (isStandaloneConsumableEntry.value && !canViewAllDepartments.value ? currentDepartment.value : "")
 );
 const canManagePackages = computed(() => hasInventoryAuth("inventory:approve"));
 const belongsToCurrentDepartment = (department?: string) =>
@@ -1105,7 +1112,20 @@ const activeRequestBatches = computed(() => {
   return db.value.batches.filter(batch => itemIds.has(batch.itemId) && Number(batch.quantity || 0) > 0);
 });
 
-const inventoryDepartmentOptions = ["理疗室", "检验科", "护理部", "中医科", "手术室", "麻醉室", "胃肠镜", "检查室", "后勤保洁", "西药房", "收费室", "中药房"];
+const inventoryDepartmentOptions = [
+  "理疗室",
+  "检验科",
+  "护理部",
+  "中医科",
+  "手术室",
+  "麻醉室",
+  "胃肠镜",
+  "检查室",
+  "后勤保洁",
+  "西药房",
+  "收费室",
+  "中药房"
+];
 
 const departmentOptions = computed(() =>
   Array.from(
@@ -1337,7 +1357,16 @@ const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item 
 const canSubmitReturnOrScrap = computed(() =>
   returnForm.type === "return" ? hasInventoryAuth("inventory:receive") : hasInventoryAuth("inventory:count")
 );
-const currentTabProfile = computed(() => tabProfiles[activeTab.value as keyof typeof tabProfiles] || tabProfiles.overview);
+const currentTabProfile = computed(() => {
+  if (activeTab.value === "packages" && isStandaloneConsumableEntry.value) {
+    return {
+      kicker: "科室耗材",
+      title: effectiveFocusedDepartment.value ? `${effectiveFocusedDepartment.value}耗材清单与录入` : "科室耗材清单与录入",
+      desc: "按科室维护耗材、用量和患者扣减口径；左侧筛选帮助您快速定位需要处理的项目。"
+    };
+  }
+  return tabProfiles[activeTab.value as keyof typeof tabProfiles] || tabProfiles.overview;
+});
 const currentTabActions = computed(() => {
   const actionsByTab: Record<string, { label: string; action: TabAction; auth: string; buttonProps: Record<string, unknown> }[]> =
     {
@@ -1610,9 +1639,21 @@ const goTab = (tab: string) => {
   if (Object.keys(authStore.authButtonListGet || {}).length) router.replace("/403");
 };
 
+const inventorySettingsRouteFallbacks: Record<string, string> = {
+  "/inventory-system/packages": "/inventory-system/consumable-entry",
+  "/inventory-system/executive": "/inventory-system/dashboard",
+  "/inventory-system/role-management": "/inventory-system/dashboard"
+};
+
 watch(
   () => route.path,
   path => {
+    const fallbackPath = inventorySettingsRouteFallbacks[path];
+    const permissionsReady = Object.keys(authStore.authButtonListGet || {}).length > 0;
+    if (fallbackPath && permissionsReady && !hasInventoryAuth("inventory:role:manage")) {
+      router.replace(fallbackPath);
+      return;
+    }
     const routeTab = routeTabMap[path] || (inventoryDepartmentRouteMap[path] ? "packages" : "");
     if (routeTab && activeTab.value !== routeTab) goTab(routeTab);
   },
@@ -1749,7 +1790,10 @@ const loadMappings = async (params: InventoryMappingEntryQueryParams = currentMa
 const loadMappingGovernance = async () => {
   mappingGovernanceLoading.value = true;
   try {
-    const [aliasesResult, conversionsResult] = await Promise.all([getInventoryItemAliasesApi(), getInventoryUnitConversionsApi()]);
+    const [aliasesResult, conversionsResult] = await Promise.all([
+      getInventoryItemAliasesApi(),
+      getInventoryUnitConversionsApi()
+    ]);
     itemAliases.value = aliasesResult.data;
     unitConversions.value = conversionsResult.data;
   } catch (error) {
@@ -1889,9 +1933,13 @@ const loadInventoryRoleManagement = async () => {
 const changeInventoryAccountRole = async ({ account, roleCode }: { account: InventoryAccountAssignment; roleCode: string }) => {
   if (account.inventoryRole === roleCode) return;
   try {
-    await ElMessageBox.confirm(`确认将“${account.name || account.username}”调整为该岗位？变更后需重新登录生效。`, "调整所属岗位", {
-      type: "warning"
-    });
+    await ElMessageBox.confirm(
+      `确认将“${account.name || account.username}”调整为该岗位？变更后需重新登录生效。`,
+      "调整所属岗位",
+      {
+        type: "warning"
+      }
+    );
     inventoryRoleSavingAccountId.value = account.id;
     await assignInventoryAccountRoleApi({ accountId: account.id, roleCode });
     await loadInventoryRoleManagement();
@@ -2541,13 +2589,13 @@ const exportWeeklyReport = () => {
 };
 
 onMounted(() => {
-	loadInventory();
-	if (activeTab.value === "daily") {
-		loadDailyVerification({ date: today(), departmentId: "" });
-	}
-	if (activeTab.value === "roles") {
-		loadInventoryRoleManagement();
-	}
+  loadInventory();
+  if (activeTab.value === "daily") {
+    loadDailyVerification({ date: today(), departmentId: "" });
+  }
+  if (activeTab.value === "roles") {
+    loadInventoryRoleManagement();
+  }
 });
 </script>
 
