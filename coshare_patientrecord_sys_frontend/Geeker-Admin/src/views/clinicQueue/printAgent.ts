@@ -1,6 +1,5 @@
 import type { QueuePrintPayload } from "@/api/modules/clinic/clinicQueue";
 
-const AGENT_BASE_URLS = ["http://127.0.0.1:18848", "http://localhost:18848"];
 const TERMINAL_STORAGE_KEY = "clinic-queue-print-terminal-id";
 
 export interface LocalPrintAgentStatus {
@@ -18,16 +17,23 @@ export interface LocalPrintResult {
   errorMessage?: string;
 }
 
+const AGENT_BASE_URLS = ["http://127.0.0.1:18848", "http://localhost:18848"];
+
+const fetchWithTimeout = (url: string, init?: RequestInit) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 6500);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => window.clearTimeout(timeoutId));
+};
+
 const fetchAgent = async <T>(path: string, init?: RequestInit): Promise<T> => {
   let lastError: unknown;
   for (const baseUrl of AGENT_BASE_URLS) {
     try {
-      const response = await fetch(`${baseUrl}${path}`, {
+      const response = await fetchWithTimeout(`${baseUrl}${path}`, {
         ...init,
         mode: "cors",
         cache: "no-store",
-        headers: { "Content-Type": "application/json; charset=utf-8", ...(init?.headers || {}) },
-        signal: AbortSignal.timeout(6500)
+        headers: { "Content-Type": "application/json; charset=utf-8", ...(init?.headers || {}) }
       });
       if (!response.ok) throw new Error((await response.text()) || `本机打印服务异常（${response.status}）`);
       return response.json() as Promise<T>;
