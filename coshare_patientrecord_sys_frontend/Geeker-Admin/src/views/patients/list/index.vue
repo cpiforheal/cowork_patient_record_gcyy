@@ -136,7 +136,15 @@
         </template>
 
         <template #operation="{ row }">
-          <el-button v-auth="'patient:read'" type="primary" link @click.stop="openPatientDetail(row.id)"> 打开档案 </el-button>
+          <el-button
+            v-auth="'patient:read'"
+            type="primary"
+            link
+            :loading="openingMedicalRecordId === row.id"
+            @click.stop="openPatientMedicalRecord(row)"
+          >
+            打开患者病历
+          </el-button>
           <el-button v-auth="'patient:update'" type="primary" link @click.stop="openPatientUpload(row)"> 上传资料 </el-button>
         </template>
       </ProTable>
@@ -187,9 +195,9 @@ import { CirclePlus, Refresh } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { createPatientApi, getPatientListApi, type CreatePatientParams, type PatientRow } from "@/api/modules/clinic";
+import { importLegacyPreAiEncounterApi } from "@/api/modules/clinic/preAi";
 import { recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
-import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 
 type DateScopeNode = {
@@ -204,11 +212,11 @@ type DateScopeNode = {
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
-const { openPatientDetail } = usePatientNavigation();
 const proTable = ref<ProTableInstance>();
 const createFormRef = ref<FormInstance>();
 const createDialogVisible = ref(false);
 const creating = ref(false);
+const openingMedicalRecordId = ref("");
 const activeDateScope = ref("");
 const selectedDateValue = ref("");
 const allPatients = ref<PatientRow[]>([]);
@@ -455,6 +463,18 @@ const openPatientUpload = (row: PatientRow) => {
   });
 };
 
+const openPatientMedicalRecord = async (row: Pick<PatientRow, "id">) => {
+  openingMedicalRecordId.value = row.id;
+  try {
+    const { data } = await importLegacyPreAiEncounterApi(row.id);
+    await router.push({ path: "/pre-ai/encounters", query: { encounterId: data.encounter.id } });
+  } catch (error) {
+    ElMessage.error((error as Error).message || "患者病历打开失败");
+  } finally {
+    openingMedicalRecordId.value = "";
+  }
+};
+
 const readQueryValue = (value: unknown) => (Array.isArray(value) ? value[0] : typeof value === "string" ? value : "");
 const queryDateScope = () => {
   const date = readQueryValue(route.query.date);
@@ -477,7 +497,7 @@ const submitCreatePatient = () => {
       ElMessage.success(msg || "患者已创建");
       createDialogVisible.value = false;
       await refreshPatients();
-      openPatientDetail(data.id);
+      await openPatientMedicalRecord(data);
     } catch (error) {
       ElMessage.error((error as Error).message);
     } finally {

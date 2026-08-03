@@ -60,7 +60,7 @@ import {
   type PreAiDutyCode,
   type PreAiDutyUserOption
 } from "@/api/modules/clinic";
-import type { UserRole } from "@/config/fieldPermissions";
+import { roleLabel, type UserRole } from "@/config/fieldPermissions";
 
 const props = defineProps<{
   assignments: PreAiDutyAssignment[];
@@ -173,7 +173,10 @@ const userLabel = (user: PreAiDutyUserOption) => {
   const name = String(user.name || "").trim();
   const username = String(user.username || user.id).trim();
   const identity = name && name !== username ? `${name}（${username}）` : username;
-  const meta = [user.roleLabel, user.department].map(value => String(value || "").trim()).filter(Boolean).join(" · ");
+  const meta = [user.roleLabel || roleLabel(user.role), user.department]
+    .map(value => String(value || "").trim())
+    .filter(Boolean)
+    .join(" · ");
   return meta ? `${identity}｜${meta}` : identity;
 };
 
@@ -211,6 +214,7 @@ const save = () => {
 };
 
 onMounted(async () => {
+  if (props.disabled) return;
   try {
     const { data } = await getPreAiDutyUserOptionsApi();
     directoryUsers.value = data.list;

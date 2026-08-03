@@ -72,17 +72,17 @@ public class PreAiEncounterService {
         "SURGERY", Set.of("SURGEON", "OPERATING_ROOM_NURSE"),
         "REVIEW", Set.of("FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR")
     );
-    private static final Map<String, String> DUTY_ROLES = Map.ofEntries(
-        Map.entry("FRONT_DESK", "frontdesk"),
-        Map.entry("RECEPTION_DOCTOR", "reception"),
-        Map.entry("TCM_DOCTOR", "tcm"),
-        Map.entry("INSPECTION_DOCTOR", "inspection"),
-        Map.entry("LAB_STAFF", "lab"),
-        Map.entry("BASIC_NURSING", "nurse"),
-        Map.entry("ATTENDING_DOCTOR", "doctor"),
-        Map.entry("SURGEON", "doctor"),
-        Map.entry("OPERATING_ROOM_NURSE", "nurse"),
-        Map.entry("FINAL_REVIEW_DOCTOR", "doctor")
+    private static final Map<String, Set<String>> DUTY_ROLES = Map.ofEntries(
+        Map.entry("FRONT_DESK", Set.of("frontdesk")),
+        Map.entry("RECEPTION_DOCTOR", Set.of("reception", "doctor")),
+        Map.entry("TCM_DOCTOR", Set.of("tcm")),
+        Map.entry("INSPECTION_DOCTOR", Set.of("inspection")),
+        Map.entry("LAB_STAFF", Set.of("lab")),
+        Map.entry("BASIC_NURSING", Set.of("nurse")),
+        Map.entry("ATTENDING_DOCTOR", Set.of("doctor")),
+        Map.entry("SURGEON", Set.of("doctor")),
+        Map.entry("OPERATING_ROOM_NURSE", Set.of("nurse")),
+        Map.entry("FINAL_REVIEW_DOCTOR", Set.of("doctor", "quality"))
     );
     private static final Map<String, Set<String>> ALLOWED_FIELDS = Map.of(
         "REGISTRATION", Set.of(
@@ -348,7 +348,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> importLegacy(String patientId, SessionUser user) {
-        requireRole(user, "frontdesk", "doctor");
+        requireRole(user, "admin", "frontdesk", "doctor");
         String sourcePatientId = safe(patientId);
         if (sourcePatientId.isBlank()) throw badRequest("缺少旧患者 ID");
         List<String> existing = jdbcTemplate.query(
@@ -603,13 +603,37 @@ public class PreAiEncounterService {
         return getWorkspace(encounterId, false, "", user);
     }
 
+    /** Returns enabled, department-authorized staff that may be assigned to a case duty. */
+    public Map<String, Object> listDutyUserOptions(SessionUser user) {
+        requireDutyAssignmentManager(user);
+        List<Map<String, Object>> users = jdbcTemplate.query(
+            """
+            SELECT a.id, a.username, a.role,
+                   COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.raw_json, '$.name')), ''), a.username) display_name,
+                   GROUP_CONCAT(DISTINCT d.name ORDER BY d.name SEPARATOR '、') department
+            FROM clinic_accounts a
+            JOIN clinic_account_departments ad ON ad.account_id = a.id AND ad.status = 'ACTIVE'
+            JOIN clinic_departments d ON d.id = ad.department_id AND d.status = 'ACTIVE'
+            WHERE a.status = '启用'
+            GROUP BY a.id, a.username, a.role, a.raw_json
+            ORDER BY a.role, a.username, a.id
+            """,
+            (rs, rowNum) -> Map.<String, Object>of(
+                "id", rs.getString("id"),
+                "name", rs.getString("display_name"),
+                "username", rs.getString("username"),
+                "role", RoleCatalog.canonicalize(rs.getString("role")),
+                "department", rs.getString("department")
+            )
+        ).stream().filter(account -> DUTY_ROLES.values().stream().anyMatch(roles -> roles.contains(account.get("role")))).toList();
+        return Map.of("list", users);
+    }
+
     @Transactional
     public Map<String, Object> saveDutyAssignments(String encounterId, DutyAssignmentsRequest request, SessionUser user) {
+        requireDutyAssignmentManager(user);
         requireEncounterAccess(encounterId, user);
-        ObjectNode encounter = loadEncounter(encounterId);
-        if (user == null || !Set.of("admin", "frontdesk", "doctor").contains(user.role())) {
-            throw forbidden("当前账号无权维护本病例岗位安排");
-        }
+        loadEncounter(encounterId);
         ArrayNode assignments = objectMapper.createArrayNode();
         Set<String> seen = new LinkedHashSet<>();
         if (request != null && request.dutyAssignments() != null) {
@@ -622,7 +646,7 @@ public class PreAiEncounterService {
                 clean.put("dutyCode", dutyCode);
                 String responsibleUserId = text(source, "responsibleUserId");
                 if (!responsibleUserId.isBlank()) {
-                    DutyAccount account = requireDutyAccount(responsibleUserId, dutyCode, text(encounter, "owningDepartmentId"));
+                    DutyAccount account = requireDutyAccount(responsibleUserId, dutyCode);
                     clean.put("responsibleUserId", account.id());
                     clean.put("responsibleUserName", account.name());
                 }
@@ -632,7 +656,7 @@ public class PreAiEncounterService {
                 for (JsonNode participant : source.path("participantUserIds")) {
                     String participantId = safe(participant.asText());
                     if (participantId.isBlank() || !participantSeen.add(participantId)) continue;
-                    DutyAccount account = requireDutyAccount(participantId, dutyCode, text(encounter, "owningDepartmentId"));
+                    DutyAccount account = requireDutyAccount(participantId, dutyCode);
                     participantIds.add(account.id());
                     participantNames.add(account.name());
                 }
@@ -645,25 +669,27 @@ public class PreAiEncounterService {
         return toMap(workspace(encounterId, user));
     }
 
-    private DutyAccount requireDutyAccount(String accountId, String dutyCode, String departmentId) {
-        String requiredRole = DUTY_ROLES.get(dutyCode);
+    private DutyAccount requireDutyAccount(String accountId, String dutyCode) {
+        Set<String> requiredRoles = DUTY_ROLES.get(dutyCode);
         List<DutyAccount> rows = jdbcTemplate.query(
             """
             SELECT a.id, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.raw_json, '$.name')), ''), a.username) display_name,
                    a.role
             FROM clinic_accounts a
-            JOIN clinic_account_departments ad ON ad.account_id = a.id AND ad.status = 'ACTIVE'
-            JOIN clinic_departments d ON d.id = ad.department_id AND d.status = 'ACTIVE'
-            WHERE a.id = ? AND a.status = 'ACTIVE' AND ad.department_id = ? AND a.role = ?
+            WHERE a.id = ? AND a.status = '启用'
+              AND EXISTS (
+                SELECT 1
+                FROM clinic_account_departments ad
+                JOIN clinic_departments d ON d.id = ad.department_id AND d.status = 'ACTIVE'
+                WHERE ad.account_id = a.id AND ad.status = 'ACTIVE'
+              )
             LIMIT 1
             """,
             (rs, rowNum) -> new DutyAccount(rs.getString("id"), rs.getString("display_name"), rs.getString("role")),
-            accountId,
-            departmentId,
-            requiredRole
+            accountId
         );
-        if (rows.isEmpty()) {
-            throw badRequest("岗位分配失败：账号未启用、岗位不匹配或未获当前科室授权（" + dutyCode + "）");
+        if (rows.isEmpty() || requiredRoles == null || !requiredRoles.contains(RoleCatalog.canonicalize(rows.get(0).role()))) {
+            throw badRequest("岗位分配失败：账号未启用、岗位不匹配或未获科室授权（" + dutyCode + "）");
         }
         return rows.get(0);
     }
@@ -2444,6 +2470,12 @@ public class PreAiEncounterService {
     private void requireEncounterCreator(SessionUser user) {
         if (user == null || !navigationService.hasCapability(user, "preai:encounter:create")) {
             throw forbidden("当前岗位无权新建病历");
+        }
+    }
+
+    private void requireDutyAssignmentManager(SessionUser user) {
+        if (user == null || !Set.of("admin", "doctor").contains(RoleCatalog.canonicalize(user.role()))) {
+            throw forbidden("仅管理员和医师可以维护病例岗位安排");
         }
     }
 

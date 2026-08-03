@@ -66,6 +66,11 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "旧患者资料已导入或复用现有前置病历", service.importLegacy(patientId, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/duty-users")
+    public ApiResult<Map<String, Object>> dutyUsers() {
+        return ApiResult.success(service.listDutyUserOptions(AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/{encounterId}")
     public ApiResult<Map<String, Object>> workspace(
         @PathVariable String encounterId,

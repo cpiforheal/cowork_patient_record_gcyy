@@ -339,7 +339,7 @@
 
     <el-dialog v-model="issueVisible" title="为已有就诊发号" width="760px">
       <el-form label-position="top">
-        <el-form-item label="选择当日就诊记录">
+        <el-form-item label="选择待发号就诊记录">
           <el-select v-model="issueForm.encounterId" filterable placeholder="患者姓名 / 就诊ID" style="width: 100%">
             <el-option
               v-for="item in encounters"
@@ -348,6 +348,24 @@
               :label="`${item.patientName} · ${visitTypeLabel(item.visitType)} · 第 ${item.visitNo} 次 · ${item.visitDate || '时间待补'}${item.visitReason ? ` · ${item.visitReason}` : ''}`"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item label="从患者档案查找并补齐本次登记">
+          <el-select
+            v-model="legacyPatientId"
+            filterable
+            clearable
+            placeholder="输入患者姓名、门诊号或住院号"
+            style="width: 100%"
+            @change="openLegacyPatientForIssue"
+          >
+            <el-option
+              v-for="patient in legacyPatients"
+              :key="patient.id"
+              :value="patient.id"
+              :label="`${patient.name} · ${patient.visitNo || '无就诊号'} · ${patient.visitDate || '日期待补'}`"
+            />
+          </el-select>
+          <div class="issue-form-hint">患者档案尚未形成待发号就诊时，从这里找到患者并补齐本次登记后即可发号。</div>
         </el-form-item>
         <el-alert
           :title="
@@ -359,7 +377,7 @@
           :closable="false"
           show-icon
         />
-        <el-alert title="这里只显示当日、登记已完成、未取消且尚未发号的就诊记录。" type="info" :closable="false" />
+        <el-alert title="这里显示登记已完成、未取消且尚未发号的就诊记录，可按姓名或就诊信息检索。" type="info" :closable="false" />
         <el-empty v-if="!encounters.length" :image-size="56" description="暂无已完成登记且可直接发号的记录" />
         <section v-if="blockedEncounters.length" class="blocked-encounters">
           <div class="blocked-heading">
@@ -499,8 +517,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStore } from "@/stores/modules/user";
+import { getPatientListApi, type PatientRow } from "@/api/modules/clinic";
 import {
   getPreAiWorkspaceApi,
+  importLegacyPreAiEncounterApi,
   registerAndIssueExistingPreAiEncounterApi,
   registerAndIssuePreAiEncounterApi
 } from "@/api/modules/clinic/preAi";
@@ -561,6 +581,8 @@ const selectedId = ref("");
 const workspace = ref<QueueWorkspace>();
 const encounters = ref<EligibleQueueEncounter[]>([]);
 const blockedEncounters = ref<EligibleQueueEncounter[]>([]);
+const legacyPatients = ref<PatientRow[]>([]);
+const legacyPatientId = ref("");
 const issueVisible = ref(false);
 const issueForm = reactive<{ encounterId: string; visitType: QueueVisitType }>({ encounterId: "", visitType: "FIRST_VISIT" });
 const selectedIssueEncounter = computed(() => encounters.value.find(item => item.encounterId === issueForm.encounterId));
@@ -605,7 +627,7 @@ const dashboard = reactive<QueueDashboard>({
   serverTime: ""
 });
 
-const canIssue = computed(() => ["admin", "frontdesk"].includes(role.value));
+const canIssue = computed(() => ["admin", "frontdesk", "doctor"].includes(role.value));
 const canFrontdeskIntervene = computed(() => ["admin", "frontdesk"].includes(role.value));
 const canContinueNextClinicalStage = computed(() => ["admin", "tcm"].includes(role.value));
 type TicketRecommendation = QueueDisplayRow & { stageCode: QueueStage };
@@ -784,12 +806,46 @@ async function select(id: string, acknowledge = true) {
   }
 }
 async function openIssue() {
-  const { data } = await getEligibleQueueEncountersApi();
-  encounters.value = data.list;
-  blockedEncounters.value = data.blocked || [];
+  const [eligibleResult, patientResult] = await Promise.all([
+    getEligibleQueueEncountersApi(),
+    getPatientListApi({ pageNum: 1, pageSize: 5000 })
+  ]);
+  encounters.value = eligibleResult.data.list;
+  blockedEncounters.value = eligibleResult.data.blocked || [];
+  legacyPatients.value = patientResult.data.list;
+  legacyPatientId.value = "";
   issueForm.encounterId = "";
   issueForm.visitType = "FIRST_VISIT";
   issueVisible.value = true;
+}
+
+async function openLegacyPatientForIssue(patientId: string) {
+  if (!patientId) return;
+  const patient = legacyPatients.value.find(item => item.id === patientId);
+  submitting.value = true;
+  try {
+    const { data } = await importLegacyPreAiEncounterApi(patientId);
+    const registration = data.stages.find(stage => stage.stageCode === "REGISTRATION");
+    await openRecovery({
+      encounterId: data.encounter.id,
+      caseToken: data.encounter.caseToken,
+      patientName: String(data.encounter.patient.patientName || patient?.name || "患者"),
+      visitDate: String(data.encounter.patient.visitDate || patient?.visitDate || ""),
+      visitNo: data.encounter.visitNo,
+      visitType: data.encounter.visitNo > 1 ? "FOLLOW_UP" : "FIRST_VISIT",
+      visitReason: data.encounter.visitMeta?.visitReason || "",
+      registrationStatus: registration?.status || "DRAFT",
+      registrationVersion: registration?.version || 0,
+      eligible: registration?.status === "COMPLETED",
+      blockReason: "请核对并补齐本次就诊登记后发号。",
+      updatedAt: data.encounter.updatedAt
+    });
+  } catch (error: any) {
+    ElMessage.error(error?.message || "患者档案加载失败");
+  } finally {
+    legacyPatientId.value = "";
+    submitting.value = false;
+  }
 }
 
 function patchRecoveryForm(key: string, value: any) {
@@ -1387,6 +1443,12 @@ onBeforeUnmount(() => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid #e1eee9;
+}
+.issue-form-hint {
+  margin-top: 6px;
+  color: #789089;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .blocked-heading {
   display: grid;

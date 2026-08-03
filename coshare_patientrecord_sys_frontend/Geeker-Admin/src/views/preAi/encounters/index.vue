@@ -244,7 +244,7 @@
                       本次检查
                     </button>
                     <button type="button" :class="{ active: inspectionView === 'HISTORY' }" @click="showInspectionTimeline">
-                      历史时间轴
+                      检查与复查时间轴
                     </button>
                   </div>
 
@@ -272,8 +272,13 @@
                           stageStatusLabel[node.inspectionStatus]
                         }}</el-tag>
                       </header>
+                      <div v-if="node.inspection.nextReviewAt || node.inspection.nextReviewNote" class="timeline-follow-up">
+                        <strong>复查安排</strong>
+                        <span v-if="node.inspection.nextReviewAt">下次复查：{{ humanValue(node.inspection.nextReviewAt) }}</span>
+                        <p v-if="node.inspection.nextReviewNote">{{ humanValue(node.inspection.nextReviewNote) }}</p>
+                      </div>
                       <div class="timeline-facts">
-                        <div v-for="entry in nonEmptyEntries(node.inspection)" :key="entry[0]">
+                        <div v-for="entry in inspectionTimelineEntries(node.inspection)" :key="entry[0]">
                           <span>{{ fieldLabel("INSPECTION", entry[0]) }}</span>
                           <p>{{ humanValue(entry[1]) }}</p>
                         </div>
@@ -1080,9 +1085,7 @@ const canImportLegacy = computed(() => hasCapability("preai:legacy:import"));
 const canReview = computed(() => hasCapability("preai:review") || hasAssignedDuty("FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR"));
 const canOpenLabWorkbench = computed(() => Boolean(authStore.auxiliaryPermissions.LAB?.editable) || hasAssignedDuty("LAB_STAFF"));
 const canCompleteLab = computed(() => Boolean(authStore.auxiliaryPermissions.LAB?.editable) || hasAssignedDuty("LAB_STAFF"));
-const canMaintainDuties = computed(
-  () => hasCapability("preai:duties:manage") || hasAssignedDuty("FRONT_DESK", "ATTENDING_DOCTOR", "FINAL_REVIEW_DOCTOR")
-);
+const canMaintainDuties = computed(() => hasCapability("preai:duties:manage"));
 const canConfirmSurgery = computed(() => hasCapability("preai:surgery:confirm") || hasAssignedDuty("SURGEON"));
 
 const encounters = ref<PreAiEncounterSummary[]>([]);
@@ -1137,6 +1140,8 @@ const editorMode = ref<"EDIT" | "PREVIEW">("EDIT");
 const inspectionView = ref<"CURRENT" | "HISTORY">("CURRENT");
 const inspectionTimeline = ref<InspectionTimelineNode[]>([]);
 const timelineLoading = ref(false);
+const inspectionTimelineEntries = (inspection: Record<string, any>) =>
+  nonEmptyEntries(inspection).filter(([key]) => key !== "nextReviewAt" && key !== "nextReviewNote");
 const workspaceImageUrls = reactive<Record<string, string>>({});
 const stageForms = reactive<Record<PreAiStageCode, Record<string, any>>>({
   REGISTRATION: {},
@@ -3644,6 +3649,19 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 18px;
   margin-top: 14px;
+}
+.timeline-follow-up {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--el-color-primary-dark-2);
+  background: var(--el-color-primary-light-9);
+}
+.timeline-follow-up span,
+.timeline-follow-up p {
+  margin: 0;
 }
 .timeline-facts p,
 .visit-meta-summary p {

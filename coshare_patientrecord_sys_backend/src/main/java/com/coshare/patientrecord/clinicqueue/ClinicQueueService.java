@@ -38,7 +38,8 @@ public class ClinicQueueService {
     private static final Set<String> STAGES = Set.of(INSPECTION, RECEPTION);
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "doctor");
     private static final Set<String> DISPLAY_ROLES = Set.of("frontdesk", "inspection", "reception", "doctor", "display");
-    private static final Set<String> ISSUE_ROLES = Set.of("frontdesk");
+    private static final Set<String> ISSUE_ROLES = Set.of("admin", "frontdesk", "doctor");
+    private static final Set<String> FRONTDESK_OVERRIDE_ROLES = Set.of("admin", "frontdesk");
     private static final Set<String> INSPECTION_ROLES = Set.of("inspection");
     private static final Set<String> RECEPTION_ROLES = Set.of("reception", "doctor");
     private static final Set<String> ROOM_CONTROL_ROLES = Set.of("frontdesk", "inspection", "reception", "doctor");
@@ -151,7 +152,6 @@ public class ClinicQueueService {
             LEFT JOIN clinic_queue_tickets q ON q.encounter_id = e.id
             WHERE e.status <> 'CANCELLED'
               AND q.id IS NULL
-              AND DATE(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.visitDate')), ''), e.created_at)) = CURDATE()
             ORDER BY CASE WHEN s.status = 'COMPLETED' THEN 0 ELSE 1 END, e.updated_at DESC
             LIMIT 300
             """, (RowCallbackHandler) rs -> {
@@ -1171,7 +1171,7 @@ public class ClinicQueueService {
 
     private void requireStageOrFrontdeskRole(String stage, String action, SessionUser user) {
         String normalized = safe(action).toUpperCase(Locale.ROOT);
-        if (Set.of("CANCEL", "LEAVE", "PRIORITIZE", "RESUME").contains(normalized) && ISSUE_ROLES.contains(user.role())) return;
+        if (Set.of("CANCEL", "LEAVE", "PRIORITIZE", "RESUME").contains(normalized) && FRONTDESK_OVERRIDE_ROLES.contains(user.role())) return;
         requireStageRole(stage, user);
     }
 

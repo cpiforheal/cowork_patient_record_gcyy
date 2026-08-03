@@ -1,5 +1,5 @@
 import { authHeaders, handleUnauthorizedResponse } from "@/api/modules/authToken";
-import { getDirectoryAccountsApi, type DirectoryAccountOption } from "@/api/modules/login";
+import type { DirectoryAccountOption } from "@/api/modules/login";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 import type { QueueWorkspace } from "./clinicQueue";
 
@@ -320,15 +320,14 @@ let dutyUserOptionsRequest: Promise<PreAiDutyUserOption[]> | undefined;
 
 export const getPreAiDutyUserOptionsApi = async () => {
   if (!dutyUserOptionsCache) {
-    dutyUserOptionsRequest ||= getDirectoryAccountsApi()
-      .then(({ data }) => data || [])
-      .then(accounts => {
-        dutyUserOptionsCache = accounts;
-        return accounts;
+    dutyUserOptionsRequest ||= clinicFetch("/pre-ai/encounters/duty-users", { headers: authHeaders() })
+      .then(parseClinicApiResponse<{ list: PreAiDutyUserOption[] }>)
+      .then(data => {
+        dutyUserOptionsCache = data.list || [];
+        return dutyUserOptionsCache;
       })
-      .catch(error => {
+      .finally(() => {
         dutyUserOptionsRequest = undefined;
-        throw error;
       });
     await dutyUserOptionsRequest;
   }

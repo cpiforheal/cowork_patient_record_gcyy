@@ -475,6 +475,21 @@ export const preAiStages: PreAiStageConfig[] = [
         overrideKey: "factualConclusionOverride",
         sourceHashKey: "factualConclusionSourceHash",
         confirmedKey: "factualConclusionConfirmed"
+      },
+      {
+        key: "nextReviewAt",
+        label: "下次复查时间",
+        kind: "datetime",
+        span: 1,
+        placeholder: "请选择明确的复查日期和时间"
+      },
+      {
+        key: "nextReviewNote",
+        label: "复查安排说明",
+        kind: "textarea",
+        rows: 2,
+        span: 1,
+        placeholder: "填写复查项目、注意事项或告知内容"
       }
     ]
   },
