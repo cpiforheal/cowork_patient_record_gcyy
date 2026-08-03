@@ -1,6 +1,13 @@
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 import { authHeaders } from "../authToken";
 
+const createClientRequestId = () => {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") return cryptoApi.randomUUID();
+
+  return `queue-print-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
 export type QueueStage = "INSPECTION" | "RECEPTION";
 export type QueueVisitType = "FIRST_VISIT" | "FOLLOW_UP";
 export type QueueTaskStatus =
@@ -280,7 +287,7 @@ export const createQueuePrintTaskApi = (
   ticketId: string,
   terminalId: string,
   reason = "",
-  clientRequestId = crypto.randomUUID()
+  clientRequestId = createClientRequestId()
 ) =>
   post<QueuePrintTask>(`/clinic-queue/tickets/${encodeURIComponent(ticketId)}/print-tasks`, {
     terminalId,
