@@ -162,7 +162,7 @@
                 <span>入队：{{ task.queueEnteredAt || "未激活" }}</span
                 ><span>叫号：{{ task.calledAt || "-" }}</span
                 ><span>开始：{{ task.serviceStartedAt || "-" }}</span
-                ><span v-if="task.queueEnteredAt && !['COMPLETED', 'CANCELLED'].includes(task.status)">
+                ><span v-if="task.queueEnteredAt && !['COMPLETED', 'SKIPPED', 'CANCELLED'].includes(task.status)">
                   已等待：{{ waitingDuration(task.queueEnteredAt) }}
                 </span>
               </div>
@@ -179,7 +179,7 @@
               </p>
               <div v-if="canOperate(task.stageCode) || canFrontdeskIntervene" class="task-actions">
                 <el-button
-                  v-if="canOperate(task.stageCode) && !['INACTIVE', 'COMPLETED', 'CANCELLED'].includes(task.status)"
+                  v-if="canOperate(task.stageCode) && !['INACTIVE', 'COMPLETED', 'SKIPPED', 'CANCELLED'].includes(task.status)"
                   type="primary"
                   plain
                   @click="openEncounter(workspace.ticket.encounterId, task.stageCode)"
@@ -263,14 +263,14 @@
                   >发起补检</el-button
                 >
                 <el-button
-                  v-if="canFrontdeskIntervene && !['COMPLETED', 'CANCELLED'].includes(task.status)"
+                  v-if="canFrontdeskIntervene && !['COMPLETED', 'SKIPPED', 'CANCELLED'].includes(task.status)"
                   type="danger"
                   plain
                   @click="taskAction(task, 'cancel', true)"
                   >取消</el-button
                 >
                 <el-button
-                  v-if="canFrontdeskIntervene && !['COMPLETED', 'CANCELLED'].includes(task.status)"
+                  v-if="canFrontdeskIntervene && !['COMPLETED', 'SKIPPED', 'CANCELLED'].includes(task.status)"
                   type="danger"
                   plain
                   @click="taskAction(task, 'leave', true)"
@@ -325,7 +325,7 @@
       <el-form label-position="top">
         <RegistrationFormFields :fields="registrationFields" :form="registrationForm" @patch="patchRegistrationForm" />
         <el-alert
-          title="一次提交完成患者保存、登记、发号和检查候诊；打印失败不会撤销号码，可稍后补打。"
+          title="常规诊疗进入检查候诊；选择胃肠镜检查/咨询后直接进入接诊室。打印失败不会撤销号码，可稍后补打。"
           type="info"
           :closable="false"
           show-icon
@@ -412,7 +412,7 @@
       <el-form label-position="top">
         <RegistrationFormFields :fields="registrationFields" :form="recoveryForm" @patch="patchRecoveryForm" />
         <el-alert
-          :title="recoveryEncounter?.blockReason || '补全登记后将直接生成号码并进入检查候诊。'"
+          :title="recoveryEncounter?.blockReason || '补全登记后将按来院目的进入检查候诊或直接接诊。'"
           type="warning"
           :closable="false"
           show-icon
@@ -669,7 +669,7 @@ const visibleTickets = computed(() => {
   });
 });
 const activeWorkspaceStage = computed<QueueStage | undefined>(() => {
-  const task = workspace.value?.tasks.find(item => !["INACTIVE", "COMPLETED", "CANCELLED"].includes(item.status));
+  const task = workspace.value?.tasks.find(item => !["INACTIVE", "COMPLETED", "SKIPPED", "CANCELLED"].includes(item.status));
   return task?.stageCode;
 });
 const metrics = computed(() => [
@@ -1198,6 +1198,7 @@ function taskStatusLabel(value: string) {
         ARRIVED: "已到场",
         IN_SERVICE: "办理中",
         COMPLETED: "已完成",
+        SKIPPED: "已跳过",
         MISSED: "已过号",
         TEMPORARILY_AWAY: "暂离",
         INTERRUPTED: "急症中断",
@@ -1217,7 +1218,7 @@ function statusType(value: string) {
         : "primary";
 }
 function taskStatusType(value: string) {
-  return value === "COMPLETED"
+  return ["COMPLETED", "SKIPPED"].includes(value)
     ? "success"
     : ["CALLED", "MISSED", "INTERRUPTED"].includes(value)
       ? "warning"

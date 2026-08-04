@@ -67,6 +67,7 @@ public class ClinicQueueService {
 
         EncounterPatient encounter = loadEncounterPatient(encounterId);
         String visitType = encounter.visitNo() > 1 ? "FOLLOW_UP" : "FIRST_VISIT";
+        boolean directReception = "ENDOSCOPY_DIRECT".equals(encounter.visitPurpose());
         LocalDate businessDate = LocalDate.now();
         String id = "cqt-" + UUID.randomUUID();
         String inspectionTaskId = "cqtask-" + UUID.randomUUID();
@@ -78,19 +79,20 @@ public class ClinicQueueService {
                 INSERT INTO clinic_queue_tickets (
                   id, encounter_id, business_date, public_no, visit_type, patient_id, patient_name, masked_name,
                   overall_status, version, created_by, created_by_role, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'WAITING_INSPECTION', 0, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
                 """, id, encounterId, businessDate, publicNo, visitType, encounter.patientId(), encounter.patientName(),
-                maskName(encounter.patientName()), user.name(), user.role(), timestamp, timestamp);
+                maskName(encounter.patientName()), directReception ? "WAITING_RECEPTION" : "WAITING_INSPECTION", user.name(), user.role(), timestamp, timestamp);
+            jdbcTemplate.update("""
+                INSERT INTO clinic_queue_tasks (
+                  id, ticket_id, stage_code, room_code, status, queue_entered_at, exception_reason, updated_by, updated_at
+                ) VALUES (?, ?, 'INSPECTION', 'INSPECTION_ROOM', ?, ?, ?, ?, ?)
+                """, inspectionTaskId, id, directReception ? "SKIPPED" : "WAITING", directReception ? null : timestamp,
+                directReception ? "登记选择胃肠镜检查/咨询，直达接诊室" : "", user.name(), timestamp);
             jdbcTemplate.update("""
                 INSERT INTO clinic_queue_tasks (
                   id, ticket_id, stage_code, room_code, status, queue_entered_at, updated_by, updated_at
-                ) VALUES (?, ?, 'INSPECTION', 'INSPECTION_ROOM', 'WAITING', ?, ?, ?)
-                """, inspectionTaskId, id, timestamp, user.name(), timestamp);
-            jdbcTemplate.update("""
-                INSERT INTO clinic_queue_tasks (
-                  id, ticket_id, stage_code, room_code, status, updated_by, updated_at
-                ) VALUES (?, ?, 'RECEPTION', 'RECEPTION_ROOM', 'INACTIVE', ?, ?)
-                """, receptionTaskId, id, user.name(), timestamp);
+                ) VALUES (?, ?, 'RECEPTION', 'RECEPTION_ROOM', ?, ?, ?, ?)
+                """, receptionTaskId, id, directReception ? "WAITING" : "INACTIVE", directReception ? timestamp : null, user.name(), timestamp);
         } catch (DuplicateKeyException error) {
             List<Map<String, Object>> concurrent = jdbcTemplate.queryForList(
                 "SELECT id FROM clinic_queue_tickets WHERE encounter_id = ? LIMIT 1", encounterId
@@ -98,8 +100,8 @@ public class ClinicQueueService {
             if (!concurrent.isEmpty()) return issueResult(String.valueOf(concurrent.get(0).get("id")), user, false);
             throw conflict("号码生成冲突，请重试");
         }
-        audit(id, inspectionTaskId, "INSPECTION_ROOM", "TICKET_ISSUED", "", "WAITING", user,
-            "前台发号：" + publicNo + "，" + visitTypeLabel(visitType));
+        audit(id, directReception ? receptionTaskId : inspectionTaskId, directReception ? "RECEPTION_ROOM" : "INSPECTION_ROOM", "TICKET_ISSUED", "", "WAITING", user,
+            "前台发号：" + publicNo + "，" + visitTypeLabel(visitType) + (directReception ? "，胃肠镜直达接诊室" : ""));
         return issueResult(id, user, true);
     }
 
@@ -844,7 +846,7 @@ public class ClinicQueueService {
                 return new EncounterPatient(
                     rs.getString("id"), safe(rs.getString("source_patient_id")),
                     text(patient, "patientName"), rs.getInt("visit_no"), rs.getString("status"),
-                    safe(rs.getString("registration_status")), text(patient, "visitDate")
+                    safe(rs.getString("registration_status")), text(patient, "visitDate"), text(patient, "visitPurpose")
                 );
             }, encounterId);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "就诊记录不存在");
@@ -1273,7 +1275,7 @@ public class ClinicQueueService {
     public record PrintTaskRequest(String terminalId, String reason, String clientRequestId) {}
     public record PrintResultRequest(String status, String printerName, String errorMessage, String executionToken) {}
     record EncounterPatient(String encounterId, String patientId, String patientName, int visitNo,
-                            String status, String registrationStatus, String visitDate) {}
+                            String status, String registrationStatus, String visitDate, String visitPurpose) {}
     public record Candidate(String taskId, String ticketId, String visitType, LocalDateTime enteredAt, boolean priorityLocked, String reason) {
         Candidate withReason(String nextReason) {
             return new Candidate(taskId, ticketId, visitType, enteredAt, priorityLocked, nextReason);

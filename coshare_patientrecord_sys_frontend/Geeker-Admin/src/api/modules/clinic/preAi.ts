@@ -225,9 +225,23 @@ export interface PreAiAuditLog {
   createdAt: string;
 }
 
+export interface PreAiAdmissionProfile {
+  encounterId: string;
+  status: "PENDING" | "COMPLETED" | "CANCELLED";
+  data: Record<string, any>;
+  version: number;
+  createdAt: string;
+  createdBy?: string;
+  updatedAt: string;
+  updatedBy?: string;
+  completedAt?: string;
+  completedBy?: string;
+}
+
 export interface PreAiWorkspace {
   encounter: PreAiEncounter;
   dutyAssignments: PreAiDutyAssignment[];
+  admissionProfile?: PreAiAdmissionProfile | null;
   stages: PreAiStageSubmission[];
   auxiliaryTasks: PreAiAuxiliaryTask[];
   labReports: LabReportSnapshot[];
@@ -401,6 +415,25 @@ export const savePreAiVisitMetaApi = (encounterId: string, visitMeta: VisitMeta)
 export const savePreAiDutyAssignmentsApi = (encounterId: string, dutyAssignments: PreAiDutyAssignment[]) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/duty-assignments`, "PUT", {
     dutyAssignments
+  });
+
+export const getPreAiAdmissionProfileApi = async (encounterId: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/admission-profile`, {
+    headers: authHeaders()
+  });
+  return clinicResponse(await parseClinicApiResponse<{ profile: PreAiAdmissionProfile | null }>(result));
+};
+
+export const savePreAiAdmissionProfileApi = (
+  encounterId: string,
+  data: Record<string, any>,
+  expectedVersion: number,
+  complete = false
+) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/admission-profile`, "PUT", {
+    data,
+    expectedVersion,
+    complete
   });
 
 export const importLegacyPreAiEncounterApi = (patientId: string) =>

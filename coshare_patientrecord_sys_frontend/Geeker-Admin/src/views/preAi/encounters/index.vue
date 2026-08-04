@@ -8,6 +8,7 @@
       </div>
       <div class="hero-actions">
         <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>
+        <el-button v-if="workspace?.admissionProfile" @click="openAdmissionProfile">住院补录</el-button>
         <el-button v-if="canImportLegacy" :icon="FolderOpened" @click="openLegacyDialog">导入进行中的旧患者</el-button>
         <el-button v-if="canCreateEncounter" type="primary" :icon="Plus" @click="openCreateDialog">就诊登记并发号</el-button>
       </div>
@@ -651,7 +652,7 @@
       <el-form label-position="top">
         <RegistrationFormFields :fields="registrationFields" :form="createForm" @patch="patchCreateForm" />
         <el-alert
-          title="提交后会完成前台登记、生成号码并进入检查候诊；检查完成后沿用原号码自动转入接诊。"
+          title="常规诊疗进入检查候诊；选择胃肠镜检查/咨询后会直接进入接诊室，号码全程不变。"
           type="info"
           :closable="false"
           show-icon
@@ -951,6 +952,38 @@
         >
       </template>
     </el-dialog>
+
+    <el-dialog v-model="admissionProfileDialogVisible" title="护士住院资料补录" width="760px" destroy-on-close>
+      <el-alert
+        :title="admissionProfile?.status === 'COMPLETED' ? '住院资料已完成；再次保存将回到待补录状态。' : '仅医生确认住院后创建；患者改回门诊时任务会关闭，已填写资料不会删除。'"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+      <el-form label-position="top" class="form-grid dialog-grid admission-profile-form">
+        <el-form-item label="联系人姓名"><el-input v-model="admissionProfileForm.contactName" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="联系人电话"><el-input v-model="admissionProfileForm.contactPhone" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="联系人关系"><el-input v-model="admissionProfileForm.contactRelation" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="籍贯"><el-input v-model="admissionProfileForm.nativePlace" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="出生地"><el-input v-model="admissionProfileForm.birthplace" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="婚姻状态"><el-input v-model="admissionProfileForm.maritalStatus" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="参保险种"><el-input v-model="admissionProfileForm.insuranceType" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="付费方式"><el-input v-model="admissionProfileForm.paymentMethod" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="病案号"><el-input v-model="admissionProfileForm.medicalRecordNo" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="住院号"><el-input v-model="admissionProfileForm.inpatientNo" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="病区"><el-input v-model="admissionProfileForm.ward" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="床号"><el-input v-model="admissionProfileForm.bedNo" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="第几次入院"><el-input v-model="admissionProfileForm.admissionCount" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="入院方式"><el-input v-model="admissionProfileForm.admissionMethod" :disabled="!canEditAdmissionProfile" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="admissionProfileDialogVisible = false">关闭</el-button>
+        <template v-if="canEditAdmissionProfile">
+          <el-button :loading="actionLoading" @click="saveAdmissionProfile(false)">保存草稿</el-button>
+          <el-button type="primary" :loading="actionLoading" @click="saveAdmissionProfile(true)">完成补录</el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1005,6 +1038,7 @@ import {
   returnPreAiAuxiliaryTaskApi,
   returnPreAiStageApi,
   savePreAiDutyAssignmentsApi,
+  savePreAiAdmissionProfileApi,
   savePreAiStageApi,
   uploadPreAiAttachmentApi,
   voidPreAiAttachmentApi,
@@ -1012,6 +1046,7 @@ import {
   type GeneratedMedicalRecord,
   type InspectionTimelineNode,
   type PreAiAttachment,
+  type PreAiAdmissionProfile,
   type PreAiDutyAssignment,
   type PreAiDutyCode,
   type PreAiEncounterStatus,
@@ -1126,6 +1161,10 @@ const historyPaneStyle = computed(() => ({
 let historyResizeObserver: ResizeObserver | undefined;
 let stopHistoryPointerResize: (() => void) | undefined;
 const actionLoading = ref(false);
+const admissionProfileDialogVisible = ref(false);
+const admissionProfileForm = reactive<Record<string, any>>({});
+const admissionProfile = computed<PreAiAdmissionProfile | null>(() => workspace.value?.admissionProfile || null);
+const canEditAdmissionProfile = computed(() => ["admin", "nurse", "nursing"].includes(currentRole.value));
 const activeLabReportId = ref("");
 const attachmentUpload = reactive({
   total: 0,
@@ -1223,6 +1262,25 @@ const createForm = reactive<Record<string, any>>({
 });
 const patchCreateForm = (key: string, value: any) => {
   createForm[key] = value;
+};
+
+const openAdmissionProfile = () => {
+  const profile = admissionProfile.value;
+  if (!profile) return;
+  Object.keys(admissionProfileForm).forEach(key => delete admissionProfileForm[key]);
+  Object.assign(admissionProfileForm, profile.data || {});
+  admissionProfileDialogVisible.value = true;
+};
+
+const saveAdmissionProfile = (complete: boolean) => {
+  const profile = admissionProfile.value;
+  if (!profile || !selectedEncounterId.value) return;
+  runAction(async () => {
+    const { data } = await savePreAiAdmissionProfileApi(selectedEncounterId.value, admissionProfileForm, profile.version, complete);
+    hydrateWorkspace(data);
+    admissionProfileDialogVisible.value = false;
+    ElMessage.success(complete ? "住院资料补录已完成" : "住院资料草稿已保存");
+  });
 };
 const openCreateDialog = () => {
   createRequestId.value = createClientRequestId();
@@ -1395,7 +1453,7 @@ const upstreamStages = computed(() => {
   });
 });
 const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
-  REGISTRATION: ["patientName", "gender", "age", "visitDate"],
+  REGISTRATION: ["patientName", "gender", "age", "visitDate", "visitPurpose", "registrationChiefComplaint", "visitProblem", "visitExpectation"],
   INSPECTION: ["diseaseDirections", "examinationTypes", "factualConclusion"],
   RECEPTION: ["chiefComplaint", "presentIllness", "physicalExam"],
   TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],

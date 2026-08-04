@@ -114,6 +114,19 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "病例岗位安排已保存", service.saveDutyAssignments(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/{encounterId}/admission-profile")
+    public ApiResult<Map<String, Object>> admissionProfile(@PathVariable String encounterId) {
+        return ApiResult.success(service.admissionProfile(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PutMapping("/{encounterId}/admission-profile")
+    public ApiResult<Map<String, Object>> saveAdmissionProfile(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.AdmissionProfileSaveRequest request
+    ) {
+        return ApiResult.of(200, "住院补录资料已保存", service.saveAdmissionProfile(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PutMapping("/{encounterId}/stages/{stageCode}")
     public ApiResult<Map<String, Object>> saveStage(
         @PathVariable String encounterId,

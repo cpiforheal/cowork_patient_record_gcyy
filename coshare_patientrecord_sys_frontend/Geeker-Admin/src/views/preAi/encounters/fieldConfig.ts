@@ -134,43 +134,6 @@ const ethnicityOptions = options([
   "其他",
   "未说明"
 ]);
-const provinceOptions = options([
-  "甘肃省",
-  "陕西省",
-  "四川省",
-  "青海省",
-  "宁夏回族自治区",
-  "新疆维吾尔自治区",
-  "北京市",
-  "天津市",
-  "河北省",
-  "山西省",
-  "内蒙古自治区",
-  "辽宁省",
-  "吉林省",
-  "黑龙江省",
-  "上海市",
-  "江苏省",
-  "浙江省",
-  "安徽省",
-  "福建省",
-  "江西省",
-  "山东省",
-  "河南省",
-  "湖北省",
-  "湖南省",
-  "广东省",
-  "广西壮族自治区",
-  "海南省",
-  "重庆市",
-  "贵州省",
-  "云南省",
-  "西藏自治区",
-  "香港特别行政区",
-  "澳门特别行政区",
-  "台湾省",
-  "其他"
-]);
 const durationOptions = options(["1天", "3天", "1周", "2周", "1月", "3月", "半年", "1年", "2年", "5年", "10年以上"]);
 const abnormalOptions = options(["正常", "偏高", "偏低", "异常", "危急值", "未判断"]);
 const surgeryOptions = options([
@@ -304,16 +267,17 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       { key: "identityNumber", label: "证件号", kind: "input", placeholder: "仅内部保存，不进入外部文档" },
       { key: "address", label: "常住地址", kind: "input", span: 2 },
-      { key: "contactName", label: "联系人姓名", kind: "input" },
-      {
-        key: "contactRelation",
-        label: "联系人关系",
-        kind: "select",
-        options: options(["配偶", "父亲", "母亲", "子女", "兄弟姐妹", "其他亲属", "朋友", "同事", "本人", "其他"]),
-        creatable: true
-      },
-      { key: "contactPhone", label: "联系人电话", kind: "input" },
       { key: "visitDate", label: "就诊时间", kind: "datetime", required: true },
+      {
+        key: "visitPurpose",
+        label: "来院目的",
+        kind: "select",
+        required: true,
+        options: [
+          { label: "常规诊疗", value: "GENERAL" },
+          { label: "胃肠镜检查/咨询", value: "ENDOSCOPY_DIRECT" }
+        ]
+      },
       {
         key: "inventoryCareType",
         label: "耗材统计口径",
@@ -332,39 +296,10 @@ export const preAiStages: PreAiStageConfig[] = [
         creatable: true
       },
       {
-        key: "nativePlace",
-        label: "籍贯",
-        kind: "select",
-        options: provinceOptions,
-        creatable: true
-      },
-      {
-        key: "birthplace",
-        label: "出生地",
-        kind: "select",
-        options: provinceOptions,
-        creatable: true
-      },
-      { key: "maritalStatus", label: "婚姻状态", kind: "select", options: options(["未婚", "已婚", "离异", "丧偶", "未说明"]) },
-      {
         key: "admissionMethod",
         label: "入院方式",
         kind: "select",
         options: options(["门诊", "急诊", "转院", "其他"]),
-        creatable: true
-      },
-      {
-        key: "insuranceType",
-        label: "参保险种",
-        kind: "select",
-        options: options(["职工医保", "城乡居民医保", "商业保险", "异地医保", "自费", "其他"]),
-        creatable: true
-      },
-      {
-        key: "paymentMethod",
-        label: "付费方式",
-        kind: "select",
-        options: options(["医保结算", "现金", "银行卡", "移动支付", "其他"]),
         creatable: true
       },
       {
@@ -374,17 +309,12 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["门诊转入", "急诊转入", "复诊", "院内转科", "外院转入", "体检发现", "其他"]),
         creatable: true
       },
-      { key: "medicalRecordNo", label: "病案号", kind: "input" },
-      { key: "inpatientNo", label: "住院号", kind: "input" },
-      {
-        key: "ward",
-        label: "病区",
-        kind: "select",
-        options: options(["肛肠科病区", "普通外科病区", "日间病房", "门诊观察区", "其他"]),
-        creatable: true
-      },
-      { key: "bedNo", label: "床号", kind: "input" },
-      { key: "admissionCount", label: "第几次入院", kind: "number" },
+      { key: "registrationChiefComplaint", label: "登记主诉", kind: "textarea", rows: 2, span: 2, required: true, placeholder: "患者当前最主要的不适或症状" },
+      { key: "visitProblem", label: "来院有什么问题", kind: "textarea", rows: 2, span: 2 },
+      { key: "visitExpectation", label: "希望解决什么问题", kind: "textarea", rows: 2, span: 2 },
+      { key: "registrationPastHistory", label: "既往病史", kind: "textarea", rows: 2, span: 2 },
+      { key: "registrationIllnessHistory", label: "患病史", kind: "textarea", rows: 2, span: 2 },
+      { key: "registrationPersonalHistory", label: "个人史", kind: "textarea", rows: 2, span: 2 },
       { key: "registrationNote", label: "登记备注", kind: "textarea", rows: 3, span: 2 }
     ]
   },

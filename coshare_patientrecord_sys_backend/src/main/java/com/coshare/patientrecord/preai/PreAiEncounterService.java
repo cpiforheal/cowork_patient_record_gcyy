@@ -87,7 +87,8 @@ public class PreAiEncounterService {
     private static final Map<String, Set<String>> ALLOWED_FIELDS = Map.of(
         "REGISTRATION", Set.of(
             "patientName", "gender", "birthDate", "age", "phone", "identityType", "identityNumber", "address",
-            "contactName", "contactRelation", "contactPhone", "visitDate", "patientSource", "registrationNote",
+            "contactName", "contactRelation", "contactPhone", "visitDate", "visitPurpose", "patientSource", "registrationNote",
+            "registrationChiefComplaint", "visitProblem", "visitExpectation", "registrationPastHistory", "registrationIllnessHistory", "registrationPersonalHistory",
             "visitNo", "admissionNo", "medicalRecordNo", "inpatientNo", "ward", "bedNo", "admissionCount",
             "nationality", "nativePlace", "birthplace", "maritalStatus", "admissionMethod", "insuranceType", "paymentMethod",
             "owningDepartmentId", "inventoryCareType"
@@ -133,6 +134,11 @@ public class PreAiEncounterService {
             "physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"
         ),
         "REVIEW", Set.of("reviewStatement")
+    );
+    private static final Set<String> ADMISSION_PROFILE_FIELDS = Set.of(
+        "contactName", "contactRelation", "contactPhone", "nativePlace", "birthplace", "maritalStatus",
+        "insuranceType", "paymentMethod", "medicalRecordNo", "inpatientNo", "ward", "bedNo", "admissionCount",
+        "admissionMethod"
     );
     private static final Map<String, String> AUX_OWNER_ROLES = Map.of(
         "LAB", "lab", "ECG", "ecg", "IMAGING", "ultrasound", "VITAL_SIGNS", "nursing", "COLONOSCOPY", "inspection"
@@ -230,6 +236,7 @@ public class PreAiEncounterService {
 
         String encounterId = text(created.path("encounter"), "id");
         updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(), 0);
+        applyRegistrationPurpose(encounterId, patient, user);
         audit(encounterId, "registration.complete-and-issue", "REGISTRATION", user, "就诊登记完成并生成检查接诊号码");
         refreshProgress(encounterId);
         return registerAndIssueResult(encounterId, user);
@@ -256,6 +263,7 @@ public class PreAiEncounterService {
         String visitDate = safe(request == null ? "" : request.visitDate());
         patient.put("visitDate", visitDate.isBlank() ? LocalDate.now().toString() : visitDate);
         if (text(patient, "inventoryCareType").isBlank()) patient.put("inventoryCareType", "outpatient");
+        if (text(patient, "visitPurpose").isBlank()) patient.put("visitPurpose", "GENERAL");
         validateStage("REGISTRATION", patient, null);
         List<ObjectNode> previous = jdbcTemplate.query(
             "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY visit_no DESC, created_at DESC LIMIT 1",
@@ -288,6 +296,7 @@ public class PreAiEncounterService {
         }
         String encounterId = text(created.path("encounter"), "id");
         updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(), 0);
+        applyRegistrationPurpose(encounterId, patient, user);
         jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", toJson(patient), now(), patientCaseId);
         audit(encounterId, "encounter.followup.register-and-issue", "REGISTRATION", user,
             "创建第 " + visitNo + " 次来访、完成登记并生成检查接诊号码");
@@ -331,6 +340,7 @@ public class PreAiEncounterService {
             if (changed != 1) throw conflict("该复诊正在由其他终端补登记，请刷新后重试");
             updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(),
                 request == null ? null : request.expectedVersion());
+            applyRegistrationPurpose(encounterId, patient, user);
             jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?",
                 toJson(patient), now(), text(encounter, "patientCaseId"));
             audit(encounterId, "registration.recover-and-issue", "REGISTRATION", user, "补全存量复诊登记并生成检查接诊号码");
@@ -859,6 +869,7 @@ public class PreAiEncounterService {
         String correctedStatus = "SURGERY".equals(stage) ? "PENDING_CONFIRMATION" : "COMPLETED";
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
         updateStageVersioned(encounterId, stage, correctedStatus, data, reason, user, now(), request == null ? null : request.expectedVersion());
+        if ("DOCTOR".equals(stage)) syncAdmissionProfile(encounterId, text(data, "finalRoute"), user);
         syncDiagnoses(encounterId, stage, data);
         long correctedVersion = loadStage(encounterId, stage).path("version").asLong();
         enqueueInventoryReversal(encounter, stage, correctedVersion, user, reason);
@@ -899,6 +910,8 @@ public class PreAiEncounterService {
         String completedStatus = "SURGERY".equals(stage) ? "PENDING_CONFIRMATION" : "COMPLETED";
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
         updateStageVersioned(encounterId, stage, completedStatus, data, "", user, now(), request == null ? null : request.expectedVersion());
+        if ("REGISTRATION".equals(stage)) applyRegistrationPurpose(encounterId, data, user);
+        if ("DOCTOR".equals(stage)) syncAdmissionProfile(encounterId, text(data, "finalRoute"), user);
         syncDiagnoses(encounterId, stage, data);
         if (!"SURGERY".equals(stage)) {
             enqueueInventoryConsumption(loadEncounter(encounterId), stage, loadStage(encounterId, stage).path("version").asLong(), user);
@@ -941,6 +954,39 @@ public class PreAiEncounterService {
         invalidateReview(encounterId, user, "手术医生完成独立确认");
         audit(encounterId, "surgery.physician.confirm", "SURGERY", user, "手术医生核对护理事实并完成医学确认");
         refreshProgress(encounterId);
+        return toMap(workspace(encounterId, user));
+    }
+
+    public Map<String, Object> admissionProfile(String encounterId, SessionUser user) {
+        requireReadRole(user);
+        requireEncounterAccess(encounterId, user);
+        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode profile = findAdmissionProfile(encounterId);
+        if (profile == null) result.putNull("profile");
+        else result.set("profile", profile);
+        return toMap(result);
+    }
+
+    @Transactional
+    public Map<String, Object> saveAdmissionProfile(String encounterId, AdmissionProfileSaveRequest request, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        requireAdmissionEditor(user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        if (!"INPATIENT".equals(text(encounter, "route"))) throw conflict("仅医生确认住院后可填写住院补录资料");
+        ObjectNode profile = findAdmissionProfile(encounterId);
+        if (profile == null || "CANCELLED".equals(text(profile, "status"))) throw conflict("当前没有可填写的住院补录任务");
+        Integer expectedVersion = request == null ? null : request.expectedVersion();
+        if (expectedVersion != null && expectedVersion != profile.path("version").asInt()) throw conflict("住院补录资料已被其他终端更新，请刷新后重试");
+        ObjectNode data = sanitizeAdmissionProfile(request == null ? null : request.data());
+        boolean complete = request != null && request.complete();
+        String status = complete ? "COMPLETED" : "PENDING";
+        String timestamp = now();
+        jdbcTemplate.update(
+            "UPDATE pre_ai_admission_profiles SET status = ?, data_json = CAST(? AS JSON), version = version + 1, updated_at = ?, updated_by = ?, completed_at = ?, completed_by = ? WHERE encounter_id = ?",
+            status, toJson(data), timestamp, user.name(), complete ? timestamp : null, complete ? user.name() : "", encounterId
+        );
+        audit(encounterId, complete ? "admission-profile.complete" : "admission-profile.save", "ADMISSION", user,
+            complete ? "护士完成住院资料补录" : "护士保存住院资料补录草稿");
         return toMap(workspace(encounterId, user));
     }
 
@@ -1597,6 +1643,9 @@ public class PreAiEncounterService {
         ObjectNode encounter = loadEncounter(encounterId);
         result.set("encounter", encounter);
         result.set("dutyAssignments", encounter.path("dutyAssignments").deepCopy());
+        ObjectNode admissionProfile = findAdmissionProfile(encounterId);
+        if (admissionProfile == null) result.putNull("admissionProfile");
+        else result.set("admissionProfile", admissionProfile);
         ArrayNode stages = result.putArray("stages");
         jdbcTemplate.query("SELECT * FROM pre_ai_stage_submissions WHERE encounter_id = ? ORDER BY FIELD(stage_code, 'REGISTRATION','INSPECTION','RECEPTION','TCM','DOCTOR','SURGERY','REVIEW')", (org.springframework.jdbc.core.RowCallbackHandler) rs -> stages.add(readStage(rs)), encounterId);
         ArrayNode auxiliaryTasks = result.putArray("auxiliaryTasks");
@@ -1657,8 +1706,11 @@ public class PreAiEncounterService {
                 required(data, missing, "gender", "性别");
                 if (text(data, "age").isBlank() && text(data, "birthDate").isBlank()) missing.add("年龄或出生日期");
                 required(data, missing, "visitDate", "就诊时间");
+                required(data, missing, "visitPurpose", "来院目的");
+                required(data, missing, "registrationChiefComplaint", "登记主诉");
                 required(data, missing, "inventoryCareType", "耗材统计口径（门诊/住院）");
                 if (!text(data, "inventoryCareType").isBlank()) normalizeInventoryCareType(text(data, "inventoryCareType"));
+                if (!text(data, "visitPurpose").isBlank()) normalizeEnum(text(data, "visitPurpose"), Set.of("GENERAL", "ENDOSCOPY_DIRECT"), "来院目的");
             }
             case "INSPECTION" -> {
                 required(data, missing, "examinationDirection", "检查方向");
@@ -1818,6 +1870,40 @@ public class PreAiEncounterService {
         }
     }
 
+    private void applyRegistrationPurpose(String encounterId, ObjectNode patient, SessionUser user) {
+        if (!"ENDOSCOPY_DIRECT".equals(text(patient, "visitPurpose"))) return;
+        ObjectNode inspection = loadStage(encounterId, "INSPECTION");
+        if (!Set.of("DRAFT", "RETURNED").contains(text(inspection, "status"))) return;
+        upsertStage(
+            encounterId,
+            "INSPECTION",
+            "SKIPPED",
+            inspection.path("version").asInt(0) + 1,
+            objectMapper.createObjectNode(),
+            "登记选择胃肠镜检查/咨询，直达接诊室",
+            user,
+            now()
+        );
+        audit(encounterId, "registration.endoscopy-direct", "INSPECTION", user, "检查室阶段已跳过，患者直接进入接诊室");
+    }
+
+    private void syncAdmissionProfile(String encounterId, String route, SessionUser user) {
+        String timestamp = now();
+        if ("INPATIENT".equals(route)) {
+            jdbcTemplate.update(
+                "INSERT INTO pre_ai_admission_profiles (encounter_id, status, data_json, version, created_at, created_by, updated_at, updated_by, completed_at, completed_by) VALUES (?, 'PENDING', JSON_OBJECT(), 0, ?, ?, ?, ?, NULL, '') ON DUPLICATE KEY UPDATE status = IF(status = 'CANCELLED', 'PENDING', status), updated_at = VALUES(updated_at), updated_by = VALUES(updated_by)",
+                encounterId, timestamp, user.name(), timestamp, user.name()
+            );
+            audit(encounterId, "admission-profile.open", "ADMISSION", user, "医生确认住院，已创建或恢复护士住院资料补录任务");
+            return;
+        }
+        int changed = jdbcTemplate.update(
+            "UPDATE pre_ai_admission_profiles SET status = 'CANCELLED', updated_at = ?, updated_by = ? WHERE encounter_id = ? AND status <> 'CANCELLED'",
+            timestamp, user.name(), encounterId
+        );
+        if (changed > 0) audit(encounterId, "admission-profile.close", "ADMISSION", user, "医生改为门诊，住院资料补录任务已关闭并保留记录");
+    }
+
     private void applySurgeryBranch(String encounterId, ObjectNode doctorData, SessionUser user) {
         ObjectNode surgery = loadStage(encounterId, "SURGERY");
         boolean surgical = "INPATIENT".equals(text(doctorData, "finalRoute")) && "SURGICAL".equals(text(doctorData, "treatmentPath"));
@@ -1860,6 +1946,25 @@ public class PreAiEncounterService {
         result.putArray("auditLogs");
         result.putArray("exports");
         return result;
+    }
+
+    private ObjectNode findAdmissionProfile(String encounterId) {
+        List<ObjectNode> rows = jdbcTemplate.query(
+            "SELECT * FROM pre_ai_admission_profiles WHERE encounter_id = ? LIMIT 1",
+            (rs, rowNum) -> readAdmissionProfile(rs),
+            encounterId
+        );
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private ObjectNode sanitizeAdmissionProfile(Map<String, Object> values) {
+        return sanitizeObject(values, ADMISSION_PROFILE_FIELDS);
+    }
+
+    private void requireAdmissionEditor(SessionUser user) {
+        if (user == null || !Set.of("admin", "nurse", "nursing").contains(user.role())) {
+            throw forbidden("仅护士或管理员可填写住院补录资料");
+        }
     }
 
     private void invalidateReview(String encounterId, SessionUser user, String reason) {
@@ -2297,6 +2402,21 @@ public class PreAiEncounterService {
         row.put("submittedByRole", safe(rs.getString("submitted_by_role")));
         row.put("completedAt", safe(rs.getString("completed_at")));
         row.put("updatedAt", rs.getString("updated_at"));
+        return row;
+    }
+
+    private ObjectNode readAdmissionProfile(ResultSet rs) throws SQLException {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("encounterId", rs.getString("encounter_id"));
+        row.put("status", rs.getString("status"));
+        row.set("data", readObject(rs.getString("data_json")));
+        row.put("version", rs.getInt("version"));
+        row.put("createdAt", rs.getString("created_at"));
+        row.put("createdBy", safe(rs.getString("created_by")));
+        row.put("updatedAt", rs.getString("updated_at"));
+        row.put("updatedBy", safe(rs.getString("updated_by")));
+        row.put("completedAt", safe(rs.getString("completed_at")));
+        row.put("completedBy", safe(rs.getString("completed_by")));
         return row;
     }
 
@@ -2894,6 +3014,7 @@ public class PreAiEncounterService {
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
     public record FollowUpRegisterAndIssueRequest(String visitDate, Map<String, Object> visitMeta, String clientRequestId) {}
     public record ExistingRegisterAndIssueRequest(Map<String, Object> patient, String clientRequestId, Integer expectedVersion) {}
+    public record AdmissionProfileSaveRequest(Map<String, Object> data, Integer expectedVersion, boolean complete) {}
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}
     public record DepartmentCorrectionRequest(String departmentId, String reason) {}
     public record EncounterGrantRequest(String accountId, String status, String reason) {}

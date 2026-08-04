@@ -17,6 +17,7 @@ export type QueueTaskStatus =
   | "ARRIVED"
   | "IN_SERVICE"
   | "COMPLETED"
+  | "SKIPPED"
   | "MISSED"
   | "TEMPORARILY_AWAY"
   | "INTERRUPTED"
