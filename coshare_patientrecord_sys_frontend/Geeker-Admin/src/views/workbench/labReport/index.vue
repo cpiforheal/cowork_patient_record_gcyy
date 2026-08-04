@@ -50,15 +50,22 @@
 
     <section class="workspace-layout">
       <aside class="template-sidebar">
+        <el-select v-model="templateStatusFilter" size="small" class="template-status-filter">
+          <el-option label="待填写 / 待补全" value="pending" />
+          <el-option label="全部报告" value="all" />
+          <el-option label="仅已填写" value="completed" />
+        </el-select>
         <button
-          v-for="item in labReportTemplates"
+          v-for="item in filteredTemplates"
           :key="item.id"
-          :class="{ active: activeTemplateId === item.id }"
+          :class="{ active: activeTemplateId === item.id, completed: templateCompletionState(item) === 'completed' }"
           @click="activeTemplateId = item.id"
         >
           <strong>{{ item.name }}</strong>
           <span>{{ item.subtitle }}</span>
+          <em :class="`template-status-${templateCompletionState(item)}`">{{ templateCompletionLabel(item) }}</em>
         </button>
+        <el-empty v-if="!filteredTemplates.length" :image-size="56" description="没有符合筛选条件的报告" />
       </aside>
 
       <main class="editor-preview-grid">
@@ -274,6 +281,7 @@ const matchedPatients = ref<LabPatientCandidate[]>([]);
 const selectedPatient = ref<LabPatientCandidate | null>(null);
 const patientGender = ref("");
 const referenceGender = ref("");
+const templateStatusFilter = ref<"all" | "pending" | "completed">("pending");
 const patientFieldValues = ref<Record<string, string>>({});
 const activeTemplateId = ref<LabTemplateId>(currentRole.value === "ecg" ? "ecgImage" : "bloodRoutine");
 const reportDate = ref(today());
@@ -323,6 +331,24 @@ const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounte
 };
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
+const templateCompletionState = (template: (typeof labReportTemplates)[number]) => {
+  if (template.id === "ecgImage") return patientFieldValues.value.ecgStatus ? "completed" : "pending";
+  const total = template.metrics.length;
+  const filled = template.metrics.filter(metric =>
+    String(patientFieldValues.value[metricStorageKey(template.id, metric.key)] || "").trim()
+  ).length;
+  return total > 0 && filled === total ? "completed" : "pending";
+};
+const templateCompletionLabel = (template: (typeof labReportTemplates)[number]) => {
+  if (template.id === "ecgImage") return templateCompletionState(template) === "completed" ? "已填写" : "待上传";
+  const filled = template.metrics.filter(metric =>
+    String(patientFieldValues.value[metricStorageKey(template.id, metric.key)] || "").trim()
+  ).length;
+  return filled ? `待补全 ${filled}/${template.metrics.length}` : "待填写";
+};
+const filteredTemplates = computed(() =>
+  labReportTemplates.filter(template => templateStatusFilter.value === "all" || templateCompletionState(template) === templateStatusFilter.value)
+);
 const hasGenderSpecificReference = computed(() =>
   activeTemplate.value.metrics.some(metric => Boolean(metric.maleReference || metric.femaleReference))
 );
@@ -792,6 +818,10 @@ const printPreview = async () => {
   border: 1px solid var(--el-border-color-light);
   border-radius: 8px;
 
+  .template-status-filter {
+    width: 100%;
+  }
+
   button {
     display: grid;
     gap: 4px;
@@ -808,10 +838,30 @@ const printPreview = async () => {
       border-color: var(--el-color-primary-light-5);
     }
 
+    &.completed:not(.active) {
+      background: var(--el-color-success-light-9);
+      border-color: var(--el-color-success-light-7);
+    }
+
     span {
       color: var(--el-text-color-regular);
       font-size: 12px;
       line-height: 1.4;
+    }
+
+    em {
+      width: fit-content;
+      padding: 1px 6px;
+      color: var(--el-color-warning-dark-2);
+      font-size: 12px;
+      font-style: normal;
+      background: var(--el-color-warning-light-9);
+      border-radius: 999px;
+
+      &.template-status-completed {
+        color: var(--el-color-success-dark-2);
+        background: var(--el-color-success-light-8);
+      }
     }
   }
 }
