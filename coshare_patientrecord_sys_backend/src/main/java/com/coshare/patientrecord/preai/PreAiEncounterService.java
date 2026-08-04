@@ -88,7 +88,7 @@ public class PreAiEncounterService {
         "REGISTRATION", Set.of(
             "patientName", "gender", "birthDate", "age", "phone", "identityType", "identityNumber", "address",
             "contactName", "contactRelation", "contactPhone", "visitDate", "visitPurpose", "patientSource", "registrationNote",
-            "registrationChiefComplaint", "visitProblem", "visitExpectation", "registrationPastHistory", "registrationIllnessHistory", "registrationPersonalHistory",
+            "registrationChiefComplaint", "visitProblem", "visitExpectation", "registrationPastHistory", "registrationIllnessHistory", "registrationPersonalHistory", "registrationCurrentIllness",
             "visitNo", "admissionNo", "medicalRecordNo", "inpatientNo", "ward", "bedNo", "admissionCount",
             "nationality", "nativePlace", "birthplace", "maritalStatus", "admissionMethod", "insuranceType", "paymentMethod",
             "owningDepartmentId", "inventoryCareType"

@@ -74,66 +74,6 @@ const examinationOptions = [
 ];
 
 const options = (values: string[]) => values.map(value => ({ label: value, value }));
-const ethnicityOptions = options([
-  "汉族",
-  "回族",
-  "藏族",
-  "蒙古族",
-  "维吾尔族",
-  "苗族",
-  "彝族",
-  "壮族",
-  "布依族",
-  "朝鲜族",
-  "满族",
-  "侗族",
-  "瑶族",
-  "白族",
-  "土家族",
-  "哈尼族",
-  "哈萨克族",
-  "傣族",
-  "黎族",
-  "傈僳族",
-  "佤族",
-  "畲族",
-  "高山族",
-  "拉祜族",
-  "水族",
-  "东乡族",
-  "纳西族",
-  "景颇族",
-  "柯尔克孜族",
-  "土族",
-  "达斡尔族",
-  "仫佬族",
-  "羌族",
-  "布朗族",
-  "撒拉族",
-  "毛南族",
-  "仡佬族",
-  "锡伯族",
-  "阿昌族",
-  "普米族",
-  "塔吉克族",
-  "怒族",
-  "乌孜别克族",
-  "俄罗斯族",
-  "鄂温克族",
-  "德昂族",
-  "保安族",
-  "裕固族",
-  "京族",
-  "塔塔尔族",
-  "独龙族",
-  "鄂伦春族",
-  "赫哲族",
-  "门巴族",
-  "珞巴族",
-  "基诺族",
-  "其他",
-  "未说明"
-]);
 const durationOptions = options(["1天", "3天", "1周", "2周", "1月", "3月", "半年", "1年", "2年", "5年", "10年以上"]);
 const abnormalOptions = options(["正常", "偏高", "偏低", "异常", "危急值", "未判断"]);
 const surgeryOptions = options([
@@ -289,33 +229,16 @@ export const preAiStages: PreAiStageConfig[] = [
         ]
       },
       {
-        key: "nationality",
-        label: "民族",
-        kind: "select",
-        options: ethnicityOptions,
-        creatable: true
-      },
-      {
-        key: "admissionMethod",
-        label: "入院方式",
-        kind: "select",
-        options: options(["门诊", "急诊", "转院", "其他"]),
-        creatable: true
-      },
-      {
         key: "patientSource",
-        label: "患者来源",
+        label: "来诊途径",
         kind: "select",
-        options: options(["门诊转入", "急诊转入", "复诊", "院内转科", "外院转入", "体检发现", "其他"]),
+        options: options(["自然就诊", "复诊", "门诊转入", "急诊转入", "院内转科", "外院转入", "体检发现", "其他"]),
         creatable: true
       },
-      { key: "registrationChiefComplaint", label: "登记主诉", kind: "textarea", rows: 2, span: 2, required: true, placeholder: "患者当前最主要的不适或症状" },
-      { key: "visitProblem", label: "来院有什么问题", kind: "textarea", rows: 2, span: 2 },
-      { key: "visitExpectation", label: "希望解决什么问题", kind: "textarea", rows: 2, span: 2 },
-      { key: "registrationPastHistory", label: "既往病史", kind: "textarea", rows: 2, span: 2 },
-      { key: "registrationIllnessHistory", label: "患病史", kind: "textarea", rows: 2, span: 2 },
-      { key: "registrationPersonalHistory", label: "个人史", kind: "textarea", rows: 2, span: 2 },
-      { key: "registrationNote", label: "登记备注", kind: "textarea", rows: 3, span: 2 }
+      { key: "registrationChiefComplaint", label: "主诉 / 来院问题", kind: "textarea", rows: 2, span: 2, required: true, placeholder: "患者有什么不适、此次想解决什么问题" },
+      { key: "registrationPastHistory", label: "既往史 / 其他病史 / 过敏史", kind: "textarea", rows: 2, span: 2, placeholder: "无可填写“无”" },
+      { key: "registrationCurrentIllness", label: "现病史", kind: "textarea", rows: 2, span: 2, placeholder: "本次症状的发生、持续或变化情况" },
+      { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 }
     ]
   },
   {

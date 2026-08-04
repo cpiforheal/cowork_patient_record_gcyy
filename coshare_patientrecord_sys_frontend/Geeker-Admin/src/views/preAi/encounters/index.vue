@@ -1453,7 +1453,7 @@ const upstreamStages = computed(() => {
   });
 });
 const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
-  REGISTRATION: ["patientName", "gender", "age", "visitDate", "visitPurpose", "registrationChiefComplaint", "visitProblem", "visitExpectation"],
+  REGISTRATION: ["patientName", "gender", "age", "visitDate", "visitPurpose", "patientSource", "registrationChiefComplaint", "registrationPastHistory", "registrationCurrentIllness"],
   INSPECTION: ["diseaseDirections", "examinationTypes", "factualConclusion"],
   RECEPTION: ["chiefComplaint", "presentIllness", "physicalExam"],
   TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],
