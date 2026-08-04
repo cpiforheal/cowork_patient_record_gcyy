@@ -265,7 +265,7 @@ const matchedPatients = ref<LabPatientCandidate[]>([]);
 const selectedPatient = ref<LabPatientCandidate | null>(null);
 const patientGender = ref("");
 const patientFieldValues = ref<Record<string, string>>({});
-const activeTemplateId = ref<LabTemplateId>("bloodRoutine");
+const activeTemplateId = ref<LabTemplateId>(currentRole.value === "ecg" ? "ecgImage" : "bloodRoutine");
 const reportDate = ref(today());
 const reportRemark = ref("");
 const formValues = reactive<Record<string, string>>({});
@@ -340,6 +340,14 @@ const hydrateTemplateValues = () => {
 };
 
 watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
+
+watch(
+  currentRole,
+  role => {
+    if (role === "ecg") activeTemplateId.value = "ecgImage";
+  },
+  { immediate: true }
+);
 
 const loadTodayPatients = async () => {
   if (todayPatientsLoaded.value || searching.value) return;

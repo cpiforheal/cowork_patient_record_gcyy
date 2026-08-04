@@ -4,6 +4,7 @@ export type LabTemplateId =
   | "hbvFive"
   | "infectious"
   | "crpSaa"
+  | "coagulation"
   | "urineRoutine"
   | "hba1c"
   | "postprandialGlucose"
@@ -128,6 +129,22 @@ export const labReportTemplates: LabTemplateDefinition[] = [
       { key: "na", name: "钠", shortName: "Na", unit: "mmol/L", input: "number", reference: "137-147" },
       { key: "cl", name: "氯", shortName: "CL", unit: "mmol/L", input: "number", reference: "99-110" },
       { key: "ca", name: "钙", shortName: "Ca", unit: "mmol/L", input: "number", reference: "2.11-2.52" }
+    ]
+  },
+  {
+    id: "coagulation",
+    name: "凝血四项",
+    subtitle: "PT / APTT / TT / FIB",
+    fieldKey: "coagulation",
+    statusKeys: ["coagulationStatus"],
+    documentType: "labCoagulation",
+    documentTypeLabel: "凝血四项模板报告",
+    description: "用于术前及凝血功能评估；参考范围以本院检验报告和仪器设定为准。",
+    metrics: [
+      { key: "pt", name: "凝血酶原时间", shortName: "PT", unit: "s", input: "number", reference: "11.0-14.5" },
+      { key: "aptt", name: "活化部分凝血活酶时间", shortName: "APTT", unit: "s", input: "number", reference: "28.0-43.5" },
+      { key: "tt", name: "凝血酶时间", shortName: "TT", unit: "s", input: "number", reference: "14.0-21.0" },
+      { key: "fib", name: "纤维蛋白原", shortName: "FIB", unit: "g/L", input: "number", reference: "2.0-4.0" }
     ]
   },
   {

@@ -257,7 +257,7 @@ const isInspectionMode = computed(() => currentRole.value === "inspection" || up
 watch(
   currentRole,
   role => {
-    if (role === "lab" && route.path === "/workbench/upload") router.replace("/workbench/lab-report");
+    if (["lab", "ecg"].includes(role) && route.path === "/workbench/upload") router.replace("/workbench/lab-report");
   },
   { immediate: true }
 );
