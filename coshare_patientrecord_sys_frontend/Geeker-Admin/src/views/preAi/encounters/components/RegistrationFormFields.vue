@@ -75,6 +75,20 @@ const update = (key: string, value: any) => emit("patch", key, value);
 
 let lastDerivedAge = "";
 
+const ageFromBirthDate = (birthDate: unknown, visitDate: unknown) => {
+  const normalized = String(birthDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return "";
+  const [year, month, day] = normalized.split("-").map(Number);
+  const reference = new Date(String(visitDate || new Date().toISOString().slice(0, 10)).replace(" ", "T"));
+  const birthday = new Date(year, month - 1, day);
+  if (!Number.isFinite(reference.getTime()) || birthday.getFullYear() !== year || birthday.getMonth() !== month - 1 || birthday.getDate() !== day || birthday > reference) {
+    return "";
+  }
+  let age = reference.getFullYear() - year;
+  if (reference.getMonth() < month - 1 || (reference.getMonth() === month - 1 && reference.getDate() < day)) age -= 1;
+  return String(age);
+};
+
 const ageFromResidentIdentity = (identityNumber: unknown, visitDate: unknown) => {
   const normalized = String(identityNumber || "").trim().toUpperCase();
   const birth = /^\d{15}$/.test(normalized)
@@ -83,17 +97,7 @@ const ageFromResidentIdentity = (identityNumber: unknown, visitDate: unknown) =>
       ? normalized.slice(6, 14)
       : "";
   if (!/^\d{8}$/.test(birth)) return "";
-  const year = Number(birth.slice(0, 4));
-  const month = Number(birth.slice(4, 6));
-  const day = Number(birth.slice(6, 8));
-  const reference = new Date(String(visitDate || "").replace(" ", "T"));
-  const birthday = new Date(year, month - 1, day);
-  if (!Number.isFinite(reference.getTime()) || birthday.getFullYear() !== year || birthday.getMonth() !== month - 1 || birthday.getDate() !== day || birthday > reference) {
-    return "";
-  }
-  let age = reference.getFullYear() - year;
-  if (reference.getMonth() < month - 1 || (reference.getMonth() === month - 1 && reference.getDate() < day)) age -= 1;
-  return String(age);
+  return ageFromBirthDate(`${birth.slice(0, 4)}-${birth.slice(4, 6)}-${birth.slice(6, 8)}`, visitDate);
 };
 
 const validResidentIdentityChecksum = (value: string) => {
@@ -104,10 +108,11 @@ const validResidentIdentityChecksum = (value: string) => {
 };
 
 watch(
-  () => [props.form.identityType, props.form.identityNumber, props.form.visitDate],
+  () => [props.form.identityType, props.form.identityNumber, props.form.birthDate, props.form.visitDate],
   () => {
-    if (props.form.identityType !== "居民身份证") return;
-    const derivedAge = ageFromResidentIdentity(props.form.identityNumber, props.form.visitDate);
+    const derivedAge =
+      (props.form.identityType === "居民身份证" && ageFromResidentIdentity(props.form.identityNumber, props.form.visitDate)) ||
+      ageFromBirthDate(props.form.birthDate, props.form.visitDate);
     const currentAge = String(props.form.age || "").trim();
     if (!derivedAge || (currentAge && currentAge !== lastDerivedAge)) return;
     lastDerivedAge = derivedAge;

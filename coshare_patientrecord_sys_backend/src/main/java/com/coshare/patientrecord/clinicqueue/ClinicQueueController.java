@@ -4,6 +4,7 @@ import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.security.AuthPermission;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.async.DeferredResult;
 
 @RestController
 @Profile("mysql")
@@ -33,6 +35,13 @@ public class ClinicQueueController {
     @GetMapping("/eligible-encounters")
     public ApiResult<Map<String, Object>> eligibleEncounters() {
         return ApiResult.success(service.eligibleEncounters(AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/updates/wait")
+    public DeferredResult<ResponseEntity<Void>> waitForUpdates(
+        @RequestParam(required = false, defaultValue = "0") long after
+    ) {
+        return service.waitForUpdate(after, AuthPermission.currentUserOrThrow());
     }
 
     @PostMapping("/tickets")

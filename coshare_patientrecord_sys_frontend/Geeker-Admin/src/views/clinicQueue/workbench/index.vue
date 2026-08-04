@@ -1240,12 +1240,16 @@ function shouldPausePolling() {
 function handleVisibilityChange() {
   if (document.visibilityState === "visible" && !shouldPausePolling()) void load(true);
 }
+function handleQueueUpdate() {
+  if (!shouldPausePolling()) void load(true);
+}
 onMounted(async () => {
   await Promise.all([load(), refreshPrintAgent()]);
   pollingTimer = setInterval(() => {
     if (!shouldPausePolling()) void load(true);
   }, 5000);
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("clinic-queue-updated", handleQueueUpdate);
   if (printAgent.value?.terminalId) {
     try {
       await registerQueuePrintTerminalApi({
@@ -1262,6 +1266,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (pollingTimer) clearInterval(pollingTimer);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
+  window.removeEventListener("clinic-queue-updated", handleQueueUpdate);
 });
 </script>
 

@@ -20,14 +20,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.context.request.async.DeferredResult;
 
 @Service
 @Profile("mysql")
@@ -50,6 +56,8 @@ public class ClinicQueueService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final AtomicLong updateVersion = new AtomicLong(1);
+    private final Set<DeferredResult<ResponseEntity<Void>>> updateWaiters = ConcurrentHashMap.newKeySet();
 
     public ClinicQueueService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
@@ -102,6 +110,7 @@ public class ClinicQueueService {
         }
         audit(id, directReception ? receptionTaskId : inspectionTaskId, directReception ? "RECEPTION_ROOM" : "INSPECTION_ROOM", "TICKET_ISSUED", "", "WAITING", user,
             "前台发号：" + publicNo + "，" + visitTypeLabel(visitType) + (directReception ? "，胃肠镜直达接诊室" : ""));
+        publishUpdateAfterCommit();
         return issueResult(id, user, true);
     }
 
@@ -178,6 +187,22 @@ public class ClinicQueueService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("list", plain(rows));
         result.put("blocked", plain(blocked));
+        return result;
+    }
+
+    public DeferredResult<ResponseEntity<Void>> waitForUpdate(long after, SessionUser user) {
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
+        DeferredResult<ResponseEntity<Void>> result = new DeferredResult<>(25_000L);
+        long current = updateVersion.get();
+        if (after != current) {
+            result.setResult(updateResponse(current, true));
+            return result;
+        }
+        updateWaiters.add(result);
+        result.onTimeout(() -> result.setResult(updateResponse(updateVersion.get(), false)));
+        result.onCompletion(() -> updateWaiters.remove(result));
+        current = updateVersion.get();
+        if (after != current) result.setResult(updateResponse(current, true));
         return result;
     }
 
@@ -320,6 +345,7 @@ public class ClinicQueueService {
         if ("COMPLETED".equals(text(task, "status"))) return queueHandoff(tickets.get(0), stage);
         if (Set.of("CANCELLED").contains(text(task, "status"))) throw conflict("排队任务已取消，无法完成临床交接");
         completeTaskAndAdvance(task, user, "临床阶段完成，自动同步排队状态");
+        publishUpdateAfterCommit();
         return queueHandoff(tickets.get(0), stage);
     }
 
@@ -1160,6 +1186,33 @@ public class ClinicQueueService {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, "cql-" + UUID.randomUUID(), safe(ticketId), safe(taskId), safe(roomCode), action, safe(from), safe(to),
             safe(user == null ? "system" : user.id()), user == null ? "system" : user.name(), user == null ? "system" : user.role(), safe(detail), now());
+    }
+
+    private void publishUpdateAfterCommit() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publishUpdate();
+                }
+            });
+            return;
+        }
+        publishUpdate();
+    }
+
+    private void publishUpdate() {
+        ResponseEntity<Void> response = updateResponse(updateVersion.incrementAndGet(), true);
+        for (DeferredResult<ResponseEntity<Void>> waiter : updateWaiters) {
+            waiter.setResult(response);
+        }
+    }
+
+    private ResponseEntity<Void> updateResponse(long version, boolean changed) {
+        return ResponseEntity.noContent()
+            .header("X-Clinic-Queue-Version", String.valueOf(version))
+            .header("X-Clinic-Queue-Changed", String.valueOf(changed))
+            .build();
     }
 
     private void optimisticUpdate(JsonNode row, String sql, Object... args) {

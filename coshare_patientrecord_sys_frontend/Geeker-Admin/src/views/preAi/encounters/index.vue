@@ -1632,6 +1632,12 @@ const loadEncounterList = async () => {
   }
 };
 
+let queueUpdateRefreshTimer: number | undefined;
+const refreshEncounterListAfterQueueUpdate = () => {
+  if (queueUpdateRefreshTimer) clearTimeout(queueUpdateRefreshTimer);
+  queueUpdateRefreshTimer = window.setTimeout(() => void loadEncounterList(), 120);
+};
+
 const clearWorkspaceImageUrls = () => {
   Object.values(workspaceImageUrls).forEach(url => URL.revokeObjectURL(url));
   Object.keys(workspaceImageUrls).forEach(key => delete workspaceImageUrls[key]);
@@ -2973,6 +2979,7 @@ onMounted(() => {
     historyResizeObserver.observe(workspaceShellRef.value);
   }
   void loadEncounterList();
+  window.addEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);
 });
 onActivated(async () => {
   if (!workspace.value) return;
@@ -3007,6 +3014,8 @@ onActivated(async () => {
 onDeactivated(cleanupTransientResources);
 onBeforeUnmount(cleanupTransientResources);
 onBeforeUnmount(() => {
+  window.removeEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);
+  if (queueUpdateRefreshTimer) clearTimeout(queueUpdateRefreshTimer);
   stopHistoryPointerResize?.();
   historyResizeObserver?.disconnect();
   historyResizeObserver = undefined;
