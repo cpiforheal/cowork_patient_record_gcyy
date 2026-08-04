@@ -59,6 +59,7 @@ public class ClinicVisibilityPolicy {
         "lab_coagulation_aptt",
         "lab_coagulation_tt",
         "lab_coagulation_fib",
+        "lab_coagulation_inr",
         "preOpEight",
         "preOpEightStatus",
         "lab_hbvFive_hbsag",

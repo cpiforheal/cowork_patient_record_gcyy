@@ -68,10 +68,19 @@
               <strong>{{ activeTemplate.name }}</strong>
               <span>{{ activeTemplate.description }}</span>
             </div>
-            <el-tag v-if="activeTemplate.id === 'biochemistry'" type="info" effect="plain">
-              参考范围：{{ patientGender || "未填写性别" }}
-            </el-tag>
-            <el-tag v-if="!canSaveActiveTemplate" type="warning" effect="plain">当前岗位只读</el-tag>
+            <div class="panel-tools">
+              <label v-if="hasGenderSpecificReference" class="reference-gender-filter">
+                <span>参考范围性别</span>
+                <el-select v-model="referenceGender" size="small" :disabled="!selectedPatient" placeholder="请选择">
+                  <el-option label="男" value="男" />
+                  <el-option label="女" value="女" />
+                </el-select>
+              </label>
+              <el-tag v-if="hasGenderSpecificReference" type="info" effect="plain">
+                登记性别：{{ patientGender || "未填写" }}
+              </el-tag>
+              <el-tag v-if="!canSaveActiveTemplate" type="warning" effect="plain">当前岗位只读</el-tag>
+            </div>
           </div>
 
           <div class="editor-scroll">
@@ -140,7 +149,7 @@
                     @change="syncNumberValue(metric.key)"
                   />
                   <el-input v-else v-model="formValues[metric.key]" :disabled="!canSaveActiveTemplate" placeholder="填写结果" />
-                  <small>参考：{{ metricReference(metric, patientGender) || "按报告单" }}</small>
+                  <small>参考：{{ metricReference(metric, referenceGender) || "按报告单" }}</small>
                 </article>
               </div>
             </el-form>
@@ -206,7 +215,7 @@
                   <td>{{ metric.shortName }}</td>
                   <td class="result-cell">{{ formValues[metric.key] || "" }}</td>
                   <td>{{ metric.unit || "" }}</td>
-                  <td>{{ metricReference(metric, patientGender) }}</td>
+                  <td>{{ metricReference(metric, referenceGender) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -264,6 +273,7 @@ const saving = ref(false);
 const matchedPatients = ref<LabPatientCandidate[]>([]);
 const selectedPatient = ref<LabPatientCandidate | null>(null);
 const patientGender = ref("");
+const referenceGender = ref("");
 const patientFieldValues = ref<Record<string, string>>({});
 const activeTemplateId = ref<LabTemplateId>(currentRole.value === "ecg" ? "ecgImage" : "bloodRoutine");
 const reportDate = ref(today());
@@ -313,6 +323,9 @@ const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounte
 };
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
+const hasGenderSpecificReference = computed(() =>
+  activeTemplate.value.metrics.some(metric => Boolean(metric.maleReference || metric.femaleReference))
+);
 const canSaveActiveTemplate = computed(() =>
   activeTemplate.value.id === "ecgImage"
     ? ["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)
@@ -340,6 +353,10 @@ const hydrateTemplateValues = () => {
 };
 
 watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
+
+watch(patientGender, gender => {
+  referenceGender.value = gender.includes("女") ? "女" : gender.includes("男") ? "男" : "";
+});
 
 watch(
   currentRole,
@@ -388,6 +405,7 @@ const clearPatientSelection = () => {
   selectedPatient.value = null;
   selectedPatientKey.value = "";
   patientGender.value = "";
+  referenceGender.value = "";
   patientFieldValues.value = {};
   resetTemplateValues();
 };
@@ -898,6 +916,27 @@ const printPreview = async () => {
   padding: 12px 16px 16px;
   background: linear-gradient(180deg, rgb(255 255 255 / 88%), #ffffff 38%);
   border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.panel-tools,
+.reference-gender-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.reference-gender-filter {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+
+  .el-select {
+    width: 84px;
+  }
 }
 
 .ecg-uploader {

@@ -249,6 +249,7 @@ export const labReportRecordFields: RecordField[] = [
   { key: "lab_coagulation_aptt", label: "APTT", value: "", kind: "input", inputType: "number", editors: labReportEditors },
   { key: "lab_coagulation_tt", label: "TT", value: "", kind: "input", inputType: "number", editors: labReportEditors },
   { key: "lab_coagulation_fib", label: "FIB", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "lab_coagulation_inr", label: "INR", value: "", kind: "input", inputType: "number", editors: labReportEditors },
   { key: "preOpEight", label: "术前筛查摘要", value: "", kind: "textarea", editors: labReportEditors },
   { key: "preOpEightStatus", label: "术前筛查状态", value: "", kind: "select", editors: labReportEditors },
   { key: "lab_hbvFive_hbsag", label: "HBsAg", value: "", kind: "select", editors: labReportEditors },
