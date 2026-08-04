@@ -349,6 +349,19 @@ const templateCompletionLabel = (template: (typeof labReportTemplates)[number]) 
 const filteredTemplates = computed(() =>
   labReportTemplates.filter(template => templateStatusFilter.value === "all" || templateCompletionState(template) === templateStatusFilter.value)
 );
+const mergePreAiLabReportValues = (reports: Array<{ templateId: string; reportDate: string; metrics: Array<{ key: string; value: string }> }>) => {
+  const values: Record<string, string> = {};
+  reports
+    .filter(report => report.reportDate === reportDate.value)
+    .forEach(report => {
+      const template = labReportTemplates.find(item => item.id === report.templateId);
+      if (!template) return;
+      report.metrics.forEach(metric => {
+        if (String(metric.value || "").trim()) values[metricStorageKey(template.id, metric.key)] = metric.value;
+      });
+    });
+  patientFieldValues.value = { ...patientFieldValues.value, ...values };
+};
 const hasGenderSpecificReference = computed(() =>
   activeTemplate.value.metrics.some(metric => Boolean(metric.maleReference || metric.femaleReference))
 );
@@ -442,6 +455,10 @@ const selectPatient = async (patient: LabPatientCandidate) => {
   patientGender.value = patient.preAiGender || "";
   patientFieldValues.value = {};
   if (!patient.legacyPatientId) {
+    if (patient.preAiEncounterId) {
+      const { data: workspace } = await getPreAiWorkspaceApi(patient.preAiEncounterId);
+      mergePreAiLabReportValues(workspace.labReports);
+    }
     hydrateTemplateValues();
     return;
   }
@@ -450,6 +467,10 @@ const selectPatient = async (patient: LabPatientCandidate) => {
     patientGender.value = data.fieldValues.gender || "";
     patient.legacyPatientAvailable = true;
     patientFieldValues.value = data.fieldValues || {};
+    if (patient.preAiEncounterId) {
+      const { data: workspace } = await getPreAiWorkspaceApi(patient.preAiEncounterId);
+      mergePreAiLabReportValues(workspace.labReports);
+    }
     hydrateTemplateValues();
   } catch {
     patient.legacyPatientAvailable = false;
@@ -497,6 +518,7 @@ const loadPatientFromRoute = async () => {
             preAiGender: workspace.encounter.patient.gender || detail.fieldValues.gender || ""
           };
           patientFieldValues.value = detail.fieldValues || {};
+          mergePreAiLabReportValues(workspace.labReports);
         } catch {
           candidate = { ...candidate, legacyPatientId: undefined, legacyPatientAvailable: false };
           patientFieldValues.value = {};
@@ -506,6 +528,7 @@ const loadPatientFromRoute = async () => {
       selectedPatientKey.value = patientPickerKey(candidate);
       matchedPatients.value = [candidate];
       patientGender.value = candidate.preAiGender || "";
+      mergePreAiLabReportValues(workspace.labReports);
       hydrateTemplateValues();
       return;
     }
@@ -650,7 +673,6 @@ const saveToArchive = async () => {
         operator: roleName.value,
         values: archiveValues
       });
-      patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
     }
     if (activeTemplate.value.id === "ecgImage" && legacyPatientId) {
       const documents = await Promise.all(
@@ -703,7 +725,7 @@ const saveToArchive = async () => {
           shortName: metric.shortName,
           value: String(formValues[metric.key] || "").trim(),
           unit: metric.unit || "",
-          reference: metricReference(metric, patientGender.value) || ""
+          reference: metricReference(metric, referenceGender.value) || ""
         }))
         .filter(metric => metric.value);
       await savePreAiLabReportApi(encounterId, {
@@ -715,6 +737,7 @@ const saveToArchive = async () => {
         expectedVersion
       });
     }
+    patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
     ElMessage.success(
       selectedPatient.value.preAiEncounterId ? "检验报告已保存，并同步到前置病历" : "检验报告已保存入档，并同步到附件索引与时间轴"
     );
