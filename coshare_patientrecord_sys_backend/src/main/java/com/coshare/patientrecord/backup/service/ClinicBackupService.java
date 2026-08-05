@@ -305,6 +305,9 @@ public class ClinicBackupService {
         command.add("--user=" + datasourceUsername);
         command.add("--single-transaction");
         command.add("--quick");
+        command.add("--skip-lock-tables");
+        command.add("--no-tablespaces");
+        command.add("--set-gtid-purged=OFF");
         command.add("--default-character-set=utf8mb4");
         command.add(jdbcTarget.database());
 
