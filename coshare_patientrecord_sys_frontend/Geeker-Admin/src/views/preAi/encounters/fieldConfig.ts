@@ -45,6 +45,8 @@ export interface PreAiFieldConfig {
   sourceHashKey?: string;
   confirmedKey?: string;
   addLabel?: string;
+  quickTemplates?: Array<{ label: string; value: string }>;
+  emphasis?: "priority";
 }
 
 export interface PreAiStageConfig {
@@ -220,7 +222,7 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       {
         key: "inventoryCareType",
-        label: "耗材统计口径",
+        label: "门诊/住院（耗材统计口径）",
         kind: "select",
         required: true,
         options: [
@@ -229,15 +231,45 @@ export const preAiStages: PreAiStageConfig[] = [
         ]
       },
       {
+        key: "careSituationDescription",
+        label: "就诊情况补充说明",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        placeholder: "可补充缴费、治疗需求、低保或其他需留意情况；不改变左侧耗材统计口径"
+      },
+      {
         key: "patientSource",
         label: "来诊途径",
         kind: "select",
         options: options(["自然就诊", "复诊", "门诊转入", "急诊转入", "院内转科", "外院转入", "体检发现", "其他"]),
         creatable: true
       },
-      { key: "registrationChiefComplaint", label: "主诉 / 来院问题", kind: "textarea", rows: 2, span: 2, required: true, placeholder: "患者有什么不适、此次想解决什么问题" },
-      { key: "registrationPastHistory", label: "既往史 / 其他病史 / 过敏史", kind: "textarea", rows: 2, span: 2, placeholder: "无可填写“无”" },
-      { key: "registrationCurrentIllness", label: "现病史", kind: "textarea", rows: 2, span: 2, placeholder: "本次症状的发生、持续或变化情况" },
+      {
+        key: "registrationChiefComplaint",
+        label: "主诉 / 来院问题",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        required: true,
+        placeholder: "患者有什么不适、此次想解决什么问题"
+      },
+      {
+        key: "registrationPastHistory",
+        label: "既往史 / 其他病史 / 过敏史",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        placeholder: "无可填写“无”"
+      },
+      {
+        key: "registrationCurrentIllness",
+        label: "现病史",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        placeholder: "本次症状的发生、持续或变化情况"
+      },
       { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 }
     ]
   },
@@ -318,6 +350,14 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2
       },
       {
+        key: "preliminaryDiagnosis",
+        label: "检查室初步诊断",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        placeholder: "根据检查所见填写倾向性诊断，供接诊室及时参考（可选）"
+      },
+      {
         key: "factualConclusion",
         label: "检查事实结论",
         kind: "template-text",
@@ -328,6 +368,14 @@ export const preAiStages: PreAiStageConfig[] = [
         overrideKey: "factualConclusionOverride",
         sourceHashKey: "factualConclusionSourceHash",
         confirmedKey: "factualConclusionConfirmed"
+      },
+      {
+        key: "inspectionSpecialDescription",
+        label: "检查补充说明",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        placeholder: "补充选择项无法完整表达的客观所见、特殊情况或交接说明"
       },
       {
         key: "nextReviewAt",
@@ -361,6 +409,7 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options([
           "肛周肿块",
           "肛周疼痛",
+          "肛周结节",
           "溢脓",
           "便血",
           "肿物脱出",
@@ -388,6 +437,14 @@ export const preAiStages: PreAiStageConfig[] = [
         required: true,
         span: 2,
         templateGenerator: "chiefComplaint"
+      },
+      {
+        key: "chiefComplaintSupplement",
+        label: "主诉补充说明",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        placeholder: "用于填写选择项不能完整表达的自然语言主诉"
       },
       {
         key: "onsetTrigger",
@@ -664,6 +721,14 @@ export const preAiStages: PreAiStageConfig[] = [
       { key: "historySupplement", label: "病史补充", kind: "textarea", rows: 3, span: 2 },
       { key: "specialCircumstances", label: "其他特殊情况", kind: "textarea", rows: 3, span: 2 },
       {
+        key: "receptionSpecialDescription",
+        label: "接诊补充说明",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        placeholder: "补充选择项和结构化病史无法完整表达的接诊事实"
+      },
+      {
         key: "reviewOpinion",
         label: "检查材料回看意见",
         kind: "select",
@@ -679,6 +744,14 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2
       },
       { key: "dispositionSuggestion", label: "建议门诊/住院", kind: "select", required: true, options: routeOptions },
+      {
+        key: "dispositionSupplement",
+        label: "就诊情况补充说明",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        placeholder: "可补充缴费、治疗需求、离院原因或其他需留意情况"
+      },
       {
         key: "recommendedAuxiliaryExams",
         label: "建议辅助检查",
@@ -795,6 +868,58 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["健脾祛湿", "益气托毒", "活血化瘀", "清热利湿", "润肠通便", "消肿止痛", "益气升提", "养阴生津"]),
         creatable: true,
         span: 2
+      },
+      {
+        key: "preoperativeAssessment",
+        label: "术前评估",
+        kind: "textarea",
+        required: true,
+        rows: 4,
+        span: 2,
+        emphasis: "priority",
+        placeholder: "请明确患者当前是否具备手术条件及需先处理的风险。",
+        quickTemplates: [
+          {
+            label: "可手术待完善检查",
+            value: "当前生命体征及基础情况可评估；建议结合检验、影像及麻醉评估后确定手术方案。"
+          },
+          {
+            label: "暂不具备手术指征",
+            value: "当前暂不具备手术指征，建议先行保守治疗/完善检查后复评。"
+          },
+          {
+            label: "先控制围术期风险",
+            value: "存在围手术期风险，建议先控制基础疾病并请相关专科评估。"
+          }
+        ]
+      },
+      {
+        key: "consultationOpinion",
+        label: "会诊意见",
+        kind: "textarea",
+        required: true,
+        rows: 4,
+        span: 2,
+        emphasis: "priority",
+        placeholder: "请明确是否需要会诊，以及会诊结论或下一步安排。",
+        quickTemplates: [
+          {
+            label: "暂不需会诊",
+            value: "当前无需院内会诊，按既定方案继续评估和处理。"
+          },
+          {
+            label: "建议麻醉科会诊",
+            value: "建议请麻醉科会诊，重点评估围手术期风险及麻醉耐受。"
+          },
+          {
+            label: "建议相关专科会诊",
+            value: "建议请相关专科会诊，明确合并症控制及治疗意见。"
+          },
+          {
+            label: "已完成会诊",
+            value: "已完成会诊，意见已纳入后续治疗与围手术期安排。"
+          }
+        ]
       },
       {
         key: "comorbidTcmItems",

@@ -3,7 +3,7 @@
     <section class="system-select-hero">
       <span class="eyebrow">工作台入口</span>
       <h1>选择要进入的业务系统</h1>
-      <p>前置病历与进销存使用独立导航和工作台，业务数据及权限仍沿用当前账号配置。</p>
+      <p>前置病历与进销存使用独立导航和工作台。你只会看到当前账号有权限进入的系统。</p>
     </section>
 
     <section class="system-cards" aria-label="业务系统选择">
@@ -29,7 +29,6 @@
 </template>
 
 <script setup lang="ts" name="systemSelect">
-import { computed, onMounted } from "vue";
 import { ArrowRight, Box, Document } from "@element-plus/icons-vue";
 import { HOME_URL } from "@/config";
 import { INVENTORY_SYSTEM_DASHBOARD } from "@/routers/modules/inventorySystem";
@@ -38,18 +37,9 @@ import { useAuthStore } from "@/stores/modules/auth";
 
 const router = useRouter();
 const authStore = useAuthStore();
-const availableSystemCount = computed(
-  () => Number(authStore.hasMedicalSystemAccessGet) + Number(authStore.hasInventorySystemAccessGet)
-);
-
 const enterMedical = () => router.push(HOME_URL);
 const enterInventory = () => router.push(INVENTORY_SYSTEM_DASHBOARD);
 
-onMounted(() => {
-  if (availableSystemCount.value !== 1) return;
-  if (authStore.hasInventorySystemAccessGet) enterInventory();
-  else enterMedical();
-});
 </script>
 
 <style scoped lang="scss">

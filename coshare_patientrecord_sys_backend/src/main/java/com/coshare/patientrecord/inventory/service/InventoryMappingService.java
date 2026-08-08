@@ -29,7 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryMappingService {
 
     static final String PATIENT_ONCE_PACKAGE = "\u60a3\u8005\u5355\u6b21\u5957\u9910";
+    static final String CONDITIONAL_PACKAGE = "\u6761\u4ef6\u5957\u9910";
     static final String PENDING_PATIENT_BINDING = "\u5f85\u6838\u5b9a\uff08\u975e\u56fa\u5b9a\uff09";
+    static final String FIXED_RUNNING = "\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017";
+    static final String ON_DEMAND = "\u6309\u9700\u7533\u9886";
     static final String PENDING_STAGE = "\u5f85\u786e\u8ba4";
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -97,6 +100,18 @@ public class InventoryMappingService {
             plus(scope, "e.rule_type = ?", "\u6309\u9700\u7533\u9886").params()
         ));
         result.put("pendingPatientBinding", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
+            plus(scope, "e.rule_type = ?", PENDING_PATIENT_BINDING).params()
+        ));
+        result.put("patientRelated", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type IN (?, ?)").where(),
+            plus(scope, "e.rule_type IN (?, ?)", PATIENT_ONCE_PACKAGE, CONDITIONAL_PACKAGE).params()
+        ));
+        result.put("nonPatientRelated", count(
+            "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type IN (?, ?, ?)").where(),
+            plus(scope, "e.rule_type IN (?, ?, ?)", PENDING_PATIENT_BINDING, FIXED_RUNNING, ON_DEMAND).params()
+        ));
+        result.put("reviewRequired", count(
             "SELECT COUNT(*) FROM inventory_mapping_entries e " + plus(scope, "e.rule_type = ?").where(),
             plus(scope, "e.rule_type = ?", PENDING_PATIENT_BINDING).params()
         ));
@@ -653,6 +668,18 @@ public class InventoryMappingService {
             conditions.add("e.rule_type = ? AND e.status = ?");
             params.add(PATIENT_ONCE_PACKAGE);
             params.add("confirmed");
+        } else if ("patient-related".equals(businessGroup)) {
+            conditions.add("e.rule_type IN (?, ?)");
+            params.add(PATIENT_ONCE_PACKAGE);
+            params.add(CONDITIONAL_PACKAGE);
+        } else if ("nonpatient-related".equals(businessGroup)) {
+            conditions.add("e.rule_type IN (?, ?, ?)");
+            params.add(PENDING_PATIENT_BINDING);
+            params.add(FIXED_RUNNING);
+            params.add(ON_DEMAND);
+        } else if ("review-required".equals(businessGroup)) {
+            conditions.add("e.rule_type = ?");
+            params.add(PENDING_PATIENT_BINDING);
         } else if ("pending".equals(businessGroup)) {
             conditions.add("(e.rule_type IN (?, ?) OR (e.rule_type = ? AND e.status <> ?))");
             params.add("条件套餐");
@@ -756,6 +783,11 @@ public class InventoryMappingService {
         row.put("canCreatePackageDraft", reason.isBlank());
         row.put("cannotPublishReason", reason);
         row.put("maturity", maturity(row, reason.isBlank()));
+        String ruleType = text(row, "ruleType");
+        row.put("consumptionScope", consumptionScope(ruleType));
+        row.put("sourceClassification", ruleType);
+        row.put("reviewRequired", reviewRequired(ruleType));
+        if (reviewRequired(ruleType)) row.put("reviewNote", "\u5c1a\u672a\u786e\u8ba4\u60a3\u8005\u6263\u51cf\u53e3\u5f84\uff0c\u4e0d\u53c2\u4e0e\u81ea\u52a8\u6263\u51cf");
         return row;
     }
 
@@ -874,6 +906,16 @@ public class InventoryMappingService {
         if ("\u56fa\u5b9a\u8fd0\u884c\u6d88\u8017".equals(ruleType)) return "\u975e\u60a3\u8005\u8017\u7528";
         if ("\u6309\u9700\u7533\u9886".equals(ruleType)) return "\u8d70\u7533\u9886";
         return PENDING_STAGE;
+    }
+
+    static String consumptionScope(String ruleType) {
+        return PATIENT_ONCE_PACKAGE.equals(ruleType) || CONDITIONAL_PACKAGE.equals(ruleType)
+            ? "PATIENT_RELATED"
+            : "NON_PATIENT_RELATED";
+    }
+
+    static boolean reviewRequired(String ruleType) {
+        return PENDING_PATIENT_BINDING.equals(ruleType);
     }
 
     static String normalizeAliasName(String value) {

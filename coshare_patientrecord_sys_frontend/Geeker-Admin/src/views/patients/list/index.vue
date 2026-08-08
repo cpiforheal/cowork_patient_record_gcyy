@@ -322,11 +322,20 @@ const addDays = (date: Date, days: number) => {
   return next;
 };
 
+const calendarDateKey = (value: unknown) => {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  if (!text) return "";
+  const parsed = new Date(text.replace(/-/g, "/"));
+  return Number.isNaN(parsed.getTime()) ? "" : toDateText(parsed);
+};
+
 const patientEncounterDates = (patient: PatientRow) => {
   const history = patient.encounterHistory?.length
     ? patient.encounterHistory
     : [{ visitDate: patient.visitDate, visitNo: patient.visitNo, visitType: patient.visitType, doctor: patient.doctor }];
-  return [...new Set(history.map(item => item.visitDate).filter(Boolean))];
+  return [...new Set(history.map(item => calendarDateKey(item.visitDate)).filter(Boolean))];
 };
 
 const countByDate = computed(() => {

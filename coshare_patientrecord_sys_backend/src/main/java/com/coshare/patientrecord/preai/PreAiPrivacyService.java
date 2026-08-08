@@ -37,14 +37,14 @@ public class PreAiPrivacyService {
         "identityNumber", "idNumber", "idCard", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
-        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "biopsyPerformed", "factualConclusion"),
+        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
         "RECEPTION", List.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
             "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness", "physicalExam",
             "pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory",
             "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
-            "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "recommendedAuxiliaryExams"
+            "chiefComplaintSupplement", "receptionSpecialDescription", "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "dispositionSupplement", "recommendedAuxiliaryExams", "specialCircumstances"
         ),
         "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "comorbidTcmItems", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
         "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "secondaryDiagnosisItems", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"),
@@ -290,16 +290,16 @@ public class PreAiPrivacyService {
         addViewRow(basic, "caseToken", "病案标识", metadata.path("caseToken"), false, "NORMAL");
         addViewRow(basic, "visitDate", "就诊日期", metadata.path("visitDate"), false, "NORMAL");
         addViewRow(basic, "route", "就诊分支", metadata.path("route"), false, "NORMAL");
-        addNodeRows(basic, patient, List.of("patientName", "gender", "age", "nationality", "maritalStatus", "nativePlace", "birthplace", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "admissionMethod", "admissionSeverity", "insuranceType", "paymentMethod", "registrationNote"), Set.of());
+        addNodeRows(basic, patient, List.of("patientName", "gender", "age", "nationality", "maritalStatus", "nativePlace", "birthplace", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "admissionMethod", "admissionSeverity", "insuranceType", "paymentMethod", "careSituationDescription", "registrationNote"), Set.of());
 
         ObjectNode complaint = addSection(sections, "02", "二、主诉");
-        addNodeRows(complaint, reception, List.of("chiefComplaint", "symptomDuration"), Set.of("chiefComplaint"));
+        addNodeRows(complaint, reception, List.of("chiefComplaint", "chiefComplaintSupplement", "symptomDuration"), Set.of("chiefComplaint"));
 
         ObjectNode present = addSection(sections, "03", "三、现病史");
         addNodeRows(present, reception, List.of("presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"), Set.of("presentIllness"));
 
         ObjectNode history = addSection(sections, "04", "四、既往史 / 个人史 / 婚育史 / 家族史");
-        addNodeRows(history, reception, List.of("pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement"), Set.of());
+        addNodeRows(history, reception, List.of("pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement", "receptionSpecialDescription", "specialCircumstances"), Set.of());
 
         ObjectNode tcmSection = addSection(sections, "05", "五、中医四诊与辨证");
         addNodeRows(tcmSection, tcm, List.of("inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"), Set.of("tcmDisease", "primarySyndrome"));
@@ -308,10 +308,11 @@ public class PreAiPrivacyService {
         addNodeRows(physicalExam, reception, List.of("physicalExam"), Set.of("physicalExam"));
 
         ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
-        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "biopsyPerformed", "factualConclusion"), Set.of("factualConclusion"));
+        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
 
         ObjectNode auxiliary = addSection(sections, "08", "八、辅助检查");
         addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
+        addViewRow(auxiliary, "dispositionSupplement", "就诊情况补充说明", reception.path("dispositionSupplement"), false, "NORMAL");
         int taskIndex = 0;
         for (JsonNode task : masked.path("auxiliaryTasks")) {
             String taskLabel = auxiliaryTaskLabel(text(task, "taskType")) + optionalSuffix(text(task, "title"));
@@ -745,14 +746,14 @@ public class PreAiPrivacyService {
             {"admissionMethod", "入院方式"}, {"admissionSeverity", "入院病情"}, {"insuranceType", "医保类型"}, {"paymentMethod", "付费方式"},
             {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"},
             {"lesionCount", "病灶数量"}, {"lesionSize", "病灶大小"}, {"lesionDepth", "病灶深度"}, {"lesionExtent", "累及范围"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
-            {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"factualConclusion", "检查事实结论"},
+            {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"inspectionSpecialDescription", "检查补充说明"}, {"factualConclusion", "检查事实结论"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
             {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
             {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
             {"presentIllness", "现病史最终文本"}, {"physicalExam", "体格检查"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
             {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
-            {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
-            {"dispositionSuggestion", "建议就诊分支"}, {"recommendedAuxiliaryExams", "建议辅助检查"},
+            {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"chiefComplaintSupplement", "主诉补充说明"}, {"receptionSpecialDescription", "接诊特殊补充说明"}, {"specialCircumstances", "特殊情况"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
+            {"dispositionSuggestion", "建议就诊分支"}, {"dispositionSupplement", "就诊情况补充说明"}, {"careSituationDescription", "登记就诊情况补充说明"}, {"recommendedAuxiliaryExams", "建议辅助检查"},
             {"tcmDisease", "中医病名"}, {"primarySyndrome", "主证"}, {"concurrentSyndrome", "兼证"}, {"comorbidTcmItems", "合并病中医辨证"}, {"inspection", "望诊"}, {"auscultationOlfaction", "闻诊"}, {"inquiry", "问诊"}, {"palpation", "切诊"},
             {"tongue", "舌象"}, {"pulse", "脉象"}, {"syndromeBasis", "辨证依据"}, {"treatmentPrinciple", "治法治则"},
             {"finalRoute", "最终就诊分支"}, {"primaryWesternDiagnosis", "西医主诊断"}, {"secondaryWesternDiagnoses", "西医次诊断"}, {"secondaryDiagnosisItems", "西医次诊断与合并症"}, {"diagnosisBasis", "诊断依据"}, {"differentialDiagnoses", "待排/鉴别诊断"},

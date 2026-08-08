@@ -80,6 +80,15 @@ public class PreAiEncounterController {
         return ApiResult.success(service.getWorkspace(encounterId, readOnly, patientCaseId, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/{encounterId}/responsibility-timeline")
+    public ApiResult<Map<String, Object>> responsibilityTimeline(
+        @PathVariable String encounterId,
+        @RequestParam(defaultValue = "0") int offset,
+        @RequestParam(defaultValue = "100") int limit
+    ) {
+        return ApiResult.success(service.responsibilityTimeline(encounterId, offset, limit, AuthPermission.currentUserOrThrow()));
+    }
+
     @PutMapping("/{encounterId}/visit-meta")
     public ApiResult<Map<String, Object>> updateVisitMeta(
         @PathVariable String encounterId,
@@ -143,6 +152,14 @@ public class PreAiEncounterController {
         @RequestBody(required = false) PreAiEncounterService.StageSaveRequest request
     ) {
         return ApiResult.of(200, "阶段已完成并交接", service.completeStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/reception/terminate")
+    public ApiResult<Map<String, Object>> terminateReception(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.EncounterTerminationRequest request
+    ) {
+        return ApiResult.of(200, "患者已离院，后续流程已终止", service.terminateReception(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/{encounterId}/stages/SURGERY/physician-confirm")

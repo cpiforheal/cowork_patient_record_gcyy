@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,8 +37,8 @@ public class AuthNavigationService {
     );
     private static final Map<String, Set<String>> STAGE_EDITORS = Map.of(
         "REGISTRATION", Set.of("frontdesk"),
-        "INSPECTION", Set.of("inspection"),
-        "RECEPTION", Set.of("reception"),
+        "INSPECTION", Set.of("inspection", "reception"),
+        "RECEPTION", Set.of("reception", "inspection"),
         "TCM", Set.of("tcm"),
         "DOCTOR", Set.of("doctor"),
         "SURGERY", Set.of("nurse"),
@@ -79,9 +80,14 @@ public class AuthNavigationService {
         shortcut("操作记录查询", "追踪关键资料改动", "Search", "/audit/log")
     );
 
+    @Autowired
     public AuthNavigationService(JdbcTemplate jdbcTemplate, InventoryAccessService inventoryAccessService) {
         this.jdbcTemplate = jdbcTemplate;
         this.inventoryAccessService = inventoryAccessService;
+    }
+
+    public AuthNavigationService(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, null);
     }
 
     public NavigationResult navigationFor(SessionUser user) {
@@ -166,7 +172,10 @@ public class AuthNavigationService {
 
     public boolean hasCapability(SessionUser user, String capability) {
         if (user == null || capability == null || capability.isBlank()) return false;
-        if (capability.startsWith("inventory:")) return inventoryAccessService.hasCapability(user, capability);
+        if (capability.startsWith("inventory:")) {
+            if (inventoryAccessService != null) return inventoryAccessService.hasCapability(user, capability);
+            return fallbackInventoryCapabilities(user).contains(capability);
+        }
         RolePolicy policy = policies.get(normalizeRole(user.role()));
         if (policy == null) return false;
         if (policy.buttonPermissions().values().stream()
@@ -187,7 +196,18 @@ public class AuthNavigationService {
         return false;
     }
 
+    private Set<String> fallbackInventoryCapabilities(SessionUser user) {
+        String role = normalizeRole(user == null ? "" : user.role());
+        if ("admin".equals(role)) return Set.of("inventory:read", "inventory:request", "inventory:receive", "inventory:approve", "inventory:count", "inventory:export", "inventory:item:manage", "inventory:rule", "inventory:confirm", "inventory:retry", "inventory:role:manage");
+        if ("manager".equals(role)) return Set.of("inventory:read", "inventory:export");
+        if ("quality".equals(role)) return Set.of("inventory:read", "inventory:export", "inventory:rule", "inventory:confirm", "inventory:retry");
+        if ("warehouse".equals(role)) return Set.of("inventory:read", "inventory:approve", "inventory:issue", "inventory:receive", "inventory:count", "inventory:export", "inventory:item:manage", "inventory:retry");
+        if ("department".equals(role)) return Set.of("inventory:read", "inventory:request", "inventory:receive");
+        return Set.of();
+    }
+
     private RolePolicy effectivePolicy(SessionUser user, RolePolicy basePolicy) {
+        if (inventoryAccessService == null) return basePolicy;
         InventoryAccessService.Access inventoryAccess = inventoryAccessService.accessFor(user);
         Set<String> menuPaths = new LinkedHashSet<>(basePolicy.menuPaths());
         if (!menuPaths.contains("*")) {

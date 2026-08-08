@@ -4,7 +4,7 @@ import { getShowMenuList } from "@/utils";
 export const INVENTORY_SYSTEM_PREFIX = "/inventory-system";
 export const INVENTORY_SYSTEM_DASHBOARD = `${INVENTORY_SYSTEM_PREFIX}/dashboard`;
 
-const tabRouteNames: Record<string, string> = {
+export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   overview: "inventoryOverview",
   executive: "inventoryExecutive",
   requests: "inventoryRequests",
@@ -18,8 +18,9 @@ const tabRouteNames: Record<string, string> = {
   roles: "inventoryRoles"
 };
 
-const tabCapabilities: Record<string, readonly string[]> = {
+export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   overview: [
+    "inventory:read",
     "inventory:request",
     "inventory:receive",
     "inventory:approve",
@@ -27,20 +28,21 @@ const tabCapabilities: Record<string, readonly string[]> = {
     "inventory:count",
     "inventory:export"
   ],
-  executive: ["inventory:report", "inventory:approve", "inventory:issue", "inventory:count"],
-  requests: ["inventory:request", "inventory:approve", "inventory:issue", "inventory:receive"],
-  stock: ["inventory:issue", "inventory:export", "inventory:item:manage"],
-  items: ["inventory:item:manage", "inventory:rule"],
-  weekly: ["inventory:request", "inventory:approve", "inventory:count", "inventory:export"],
-  controls: ["inventory:count", "inventory:receive"],
+  executive: ["inventory:read", "inventory:report", "inventory:approve", "inventory:issue", "inventory:count"],
+  requests: ["inventory:read", "inventory:request", "inventory:approve", "inventory:issue", "inventory:receive"],
+  stock: ["inventory:read", "inventory:issue", "inventory:export", "inventory:item:manage"],
+  items: ["inventory:read", "inventory:item:manage", "inventory:rule"],
+  weekly: ["inventory:read", "inventory:request", "inventory:approve", "inventory:count", "inventory:export"],
+  controls: ["inventory:read", "inventory:count", "inventory:receive"],
   packages: ["inventory:read", "inventory:approve", "inventory:rule"],
-  trace: ["inventory:export", "inventory:issue", "inventory:count"],
+  trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
   roles: ["inventory:role:manage"]
 };
 
 type InventoryMenuItem = Omit<Menu.MenuOptions, "children"> & {
   tab?: string;
+  menuCapabilities?: string[];
   children?: InventoryMenuItem[];
 };
 
@@ -74,12 +76,12 @@ const inventoryMenu: InventoryMenuItem[] = [
     path: INVENTORY_SYSTEM_DASHBOARD,
     name: "inventorySystemDashboard",
     tab: "overview",
-    meta: meta("今日要办", "DataBoard")
+    meta: meta("工作台", "DataBoard")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/materials`,
     name: "inventorySystemMaterialsMenu",
-    meta: meta("耗材库存", "Goods"),
+    meta: meta("库存台账", "Goods"),
     children: [
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/stock`,
@@ -87,56 +89,61 @@ const inventoryMenu: InventoryMenuItem[] = [
         tab: "stock",
         meta: meta("库存台账与入库", "Goods")
       },
-      { path: `${INVENTORY_SYSTEM_PREFIX}/items`, name: "inventorySystemItems", tab: "items", meta: meta("物资档案", "Document") }
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/items`,
+        name: "inventorySystemItems",
+        tab: "items",
+        meta: meta("物资目录", "Document")
+      }
     ]
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/requests`,
     name: "inventorySystemRequests",
     tab: "requests",
-    meta: meta("领用发放", "List")
+    meta: meta("申领与发放", "List")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/departments`,
     name: "inventorySystemDepartmentEntry",
-    meta: meta("科室耗材", "OfficeBuilding"),
+    meta: meta("患者相关耗用", "OfficeBuilding"),
     children: [
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/consumable-entry`,
         name: "inventorySystemConsumableEntry",
         tab: "packages",
-        meta: meta("耗材清单与录入", "EditPen")
+        meta: meta("患者耗用查询", "EditPen")
       }
     ]
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/audit`,
     name: "inventorySystemAuditMenu",
-    meta: meta("核对打印", "Checked"),
+    meta: meta("日常物资与追溯", "Checked"),
     children: [
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
         name: "inventorySystemDailyVerification",
         tab: "daily",
-        meta: meta("每日患者耗材核对", "Tickets")
+        meta: meta("患者耗用核对", "Tickets")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/weekly`,
         name: "inventorySystemWeekly",
         tab: "weekly",
-        meta: meta("周用量核对", "Calendar")
+        meta: meta("日常物资核对", "Calendar")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/controls`,
         name: "inventorySystemControls",
         tab: "controls",
-        meta: meta("盘点与报损", "Checked")
+        meta: meta("盘点、退回与报废", "Checked")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
         name: "inventorySystemTrace",
         tab: "trace",
-        meta: meta("出入库记录", "TrendCharts")
+        meta: meta("预警与追溯", "TrendCharts")
       }
     ]
   },
@@ -149,13 +156,15 @@ const inventoryMenu: InventoryMenuItem[] = [
         path: `${INVENTORY_SYSTEM_PREFIX}/packages`,
         name: "inventorySystemPackages",
         tab: "packages",
-        meta: meta("患者扣减规则", "Collection")
+        menuCapabilities: ["inventory:rule"],
+        meta: meta("患者耗用规则", "Collection")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/executive`,
         name: "inventorySystemExecutive",
         tab: "executive",
-        meta: meta("运行分析", "DataAnalysis")
+        menuCapabilities: ["inventory:report", "inventory:approve"],
+        meta: meta("运行总览", "DataAnalysis")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
@@ -167,30 +176,28 @@ const inventoryMenu: InventoryMenuItem[] = [
   }
 ];
 
-const canAccessTab = (tab: string, buttonPermissions: Record<string, string[]>, capabilities: string[]) => {
-  const required = tabCapabilities[tab] || [];
-  const granted = new Set([...(buttonPermissions[tabRouteNames[tab]] || []), ...capabilities]);
+export const canAccessInventoryTab = (tab: string, buttonPermissions: Record<string, string[]>, capabilities: string[]) => {
+  const required = INVENTORY_TAB_CAPABILITIES[tab] || [];
+  const routePermissions = buttonPermissions[INVENTORY_TAB_ROUTE_NAMES[tab]] || [];
+  const granted = new Set(routePermissions.length ? routePermissions : capabilities);
   return required.some(code => granted.has(code));
 };
 
 const filterInventoryMenu = (items: InventoryMenuItem[], buttonPermissions: Record<string, string[]>, capabilities: string[]) => {
   const result: Menu.MenuOptions[] = [];
+  const granted = new Set([...capabilities, ...Object.values(buttonPermissions).flat()]);
   items.forEach(item => {
-    const isSettingsMenu = item.name === "inventorySystemSettingsMenu";
-    const canManageRoles =
-      capabilities.includes("inventory:role:manage") ||
-      (buttonPermissions.inventoryRoles || []).includes("inventory:role:manage");
-    if (isSettingsMenu && !canManageRoles) return;
+    if (item.menuCapabilities?.length && !item.menuCapabilities.some(code => granted.has(code))) return;
     if (item.children?.length) {
       const children = filterInventoryMenu(item.children as InventoryMenuItem[], buttonPermissions, capabilities);
       if (children.length) {
-        const { tab: _tab, children: _children, ...menuItem } = item;
+        const { tab: _tab, menuCapabilities: _menuCapabilities, children: _children, ...menuItem } = item;
         result.push({ ...menuItem, children });
       }
       return;
     }
-    if (item.tab && !canAccessTab(item.tab, buttonPermissions, capabilities)) return;
-    const { tab: _tab, children: _children, ...menuItem } = item;
+    if (item.tab && !canAccessInventoryTab(item.tab, buttonPermissions, capabilities)) return;
+    const { tab: _tab, menuCapabilities: _menuCapabilities, children: _children, ...menuItem } = item;
     result.push(menuItem);
   });
   return result;
@@ -220,6 +227,24 @@ export const hasMedicalSystemAccess = (menus: Menu.MenuOptions[]) => getMedicalS
 export const isInventorySystemPath = (path: string) =>
   path === INVENTORY_SYSTEM_PREFIX || path.startsWith(`${INVENTORY_SYSTEM_PREFIX}/`);
 
+export const inventoryTabFromPath = (path: string) => {
+  const paths: Record<string, string> = {
+    "/inventory-system/dashboard": "overview",
+    "/inventory-system/executive": "executive",
+    "/inventory-system/requests": "requests",
+    "/inventory-system/stock": "stock",
+    "/inventory-system/items": "items",
+    "/inventory-system/weekly": "weekly",
+    "/inventory-system/controls": "controls",
+    "/inventory-system/packages": "packages",
+    "/inventory-system/consumable-entry": "packages",
+    "/inventory-system/trace": "trace",
+    "/inventory-system/daily-verification": "daily",
+    "/inventory-system/role-management": "roles"
+  };
+  return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
+};
+
 export const isLegacyInventoryPath = (path: string) => path === "/inventory" || path.startsWith("/inventory/");
 
 export const inventorySystemPathForLegacy = (path: string) => {
@@ -235,7 +260,7 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     path: INVENTORY_SYSTEM_DASHBOARD,
     name: "inventorySystemDashboard",
     component: inventoryView,
-    meta: meta("今日要办", "DataBoard")
+    meta: meta("库存工作台", "DataBoard")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/materials`,
@@ -247,13 +272,13 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     path: `${INVENTORY_SYSTEM_PREFIX}/operations`,
     name: "inventorySystemOperations",
     redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/requests`),
-    meta: meta("申领、计划与库存", "Tickets")
+    meta: meta("科室申领", "Tickets")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/governance`,
     name: "inventorySystemGovernance",
     redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/packages`),
-    meta: meta("患者量核算", "SetUp")
+    meta: meta("患者耗材规则", "SetUp")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/departments`,
@@ -265,31 +290,31 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     path: `${INVENTORY_SYSTEM_PREFIX}/audit`,
     name: "inventorySystemAudit",
     redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/daily-verification`),
-    meta: meta("核对打印", "Checked")
+    meta: meta("对账与追溯", "Checked")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/analytics`,
     name: "inventorySystemAnalytics",
     redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/executive`),
-    meta: meta("统计与分析", "PieChart")
+    meta: meta("管理设置", "PieChart")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/stock`,
     name: "inventorySystemStock",
     component: inventoryView,
-    meta: meta("库存台账与入库", "Goods")
+    meta: meta("库存总览与入库", "Goods")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/items`,
     name: "inventorySystemItems",
     component: inventoryView,
-    meta: meta("物资档案", "Document")
+    meta: meta("物资目录", "Document")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/requests`,
     name: "inventorySystemRequests",
     component: inventoryView,
-    meta: meta("科室申领与签收", "List")
+    meta: meta("科室申领", "List")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/weekly`,
@@ -301,13 +326,13 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     path: `${INVENTORY_SYSTEM_PREFIX}/consumable-entry`,
     name: "inventorySystemConsumableEntry",
     component: inventoryView,
-    meta: meta("耗材规则录入", "EditPen")
+    meta: meta("我的科室耗材", "EditPen")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/packages`,
     name: "inventorySystemPackages",
     component: inventoryView,
-    meta: meta("扣减规则与异常", "Collection")
+    meta: meta("患者耗材规则", "Collection")
   },
   ...departmentEntries.map(entry => ({
     path: `${INVENTORY_SYSTEM_PREFIX}/departments/${entry.key}`,
@@ -319,25 +344,25 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     path: `${INVENTORY_SYSTEM_PREFIX}/controls`,
     name: "inventorySystemControls",
     component: inventoryView,
-    meta: meta("盘点与损耗", "EditPen")
+    meta: meta("盘点与报损", "EditPen")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
     name: "inventorySystemTrace",
     component: inventoryView,
-    meta: meta("出入库明细", "TrendCharts")
+    meta: meta("出入库追溯", "TrendCharts")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/executive`,
     name: "inventorySystemExecutive",
     component: inventoryView,
-    meta: meta("管理看板", "DataAnalysis")
+    meta: meta("运行总览", "DataAnalysis")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
     name: "inventorySystemDailyVerification",
     component: inventoryView,
-    meta: meta("患者变量日核表", "Tickets")
+    meta: meta("每日耗材核对", "Tickets")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,

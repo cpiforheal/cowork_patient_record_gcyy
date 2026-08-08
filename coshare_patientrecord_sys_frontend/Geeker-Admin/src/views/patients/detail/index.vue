@@ -122,11 +122,11 @@
             @select="selectPatientFieldSearchItem"
           />
 
-          <el-button type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
+            <el-button v-if="!readOnly" type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
 
-          <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
+          <el-button v-if="archiveSubmitted && !readOnly" @click="revokeArchive">撤回草稿</el-button>
 
-          <el-button v-else type="primary" @click="submitArchive">提交档案审核</el-button>
+          <el-button v-else-if="!readOnly" type="primary" @click="submitArchive">提交档案审核</el-button>
 
           <el-button v-if="canGenerateMedicalRecord" :loading="medicalRecordLoading" @click="openMedicalRecord">
             生成目标病历
@@ -141,9 +141,9 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="preview" :icon="View">预览</el-dropdown-item>
 
-                <el-dropdown-item command="upload" :icon="Upload">补充图片</el-dropdown-item>
+                <el-dropdown-item v-if="!readOnly" command="upload" :icon="Upload">补充图片</el-dropdown-item>
 
-                <el-dropdown-item command="legacy" :icon="FolderOpened">导入旧共享资料</el-dropdown-item>
+                <el-dropdown-item v-if="!readOnly" command="legacy" :icon="FolderOpened">导入旧共享资料</el-dropdown-item>
 
                 <el-dropdown-item command="quality">档案审核</el-dropdown-item>
 
@@ -409,7 +409,7 @@
                       </label>
                     </div>
                     <div class="lab-report-supplement-actions">
-                      <el-button :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
+                      <el-button v-if="!readOnly" :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
                       <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
                     </div>
                   </section>
@@ -1694,6 +1694,8 @@ const activeSectionKey = ref(recordSections[0].key);
 
 const archiveSubmitted = ref(false);
 
+const readOnly = ref(false);
+
 const archiveVersion = ref("V0.3-预归档");
 
 const generatedAt = ref("2026-06-11 09:30:00");
@@ -2786,7 +2788,7 @@ const showLabReportOverview = computed(
     (currentRole.value === "lab" || (canUseRoleViewFilter.value && activeRoleView.value === "lab"))
 );
 
-const canEditLabSupplementNote = computed(() => ["doctor", "lab", "nurse"].includes(currentRole.value));
+const canEditLabSupplementNote = computed(() => !readOnly.value && ["doctor", "lab", "nurse"].includes(currentRole.value));
 
 const treatmentManagementRows = computed(() => [
   ["手术可行性评估", displayFieldValue("surgeryFeasibility")],
@@ -2891,7 +2893,7 @@ const medicalRecordFields = computed<MedicalRecordTemplateField[]>(() =>
   medicalRecordFieldSections.value.flatMap(section => ensureArray(section.fields))
 );
 
-const canGenerateMedicalRecord = computed(() => currentRole.value === "doctor");
+const canGenerateMedicalRecord = computed(() => !readOnly.value && currentRole.value === "doctor");
 
 const canEditMedicalRecordField = (field: MedicalRecordTemplateField) => {
   if (currentRole.value === "admin") return false;
@@ -3132,7 +3134,7 @@ const previewTimelineEvents = computed(() => {
 const shortTitle = (title: string) => title.replace(/^.*?、/, "");
 
 const isEditable = (field: RecordField) =>
-  field.enabled !== false && currentRole.value !== "admin" && ensureArray(field.editors).includes(currentRole.value);
+  !readOnly.value && field.enabled !== false && currentRole.value !== "admin" && ensureArray(field.editors).includes(currentRole.value);
 
 const canEditRecordSection = (section: RecordSection) => section.fields.some(isEditable);
 
@@ -4529,6 +4531,8 @@ const resetPatientDetailState = () => {
 
   patientInfo.value = undefined;
 
+  readOnly.value = false;
+
   currentAttachments.value = [];
 
   patientAuditLogs.value = [];
@@ -4603,6 +4607,8 @@ const loadPatientDetail = () =>
 
       patientInfo.value = data.patient;
 
+      readOnly.value = Boolean(data.readOnly);
+
       Object.assign(fieldValues, data.fieldValues || {});
 
       detailWorkspaceMode.value = "flow";
@@ -4671,6 +4677,10 @@ const isConflictError = (error: unknown) => {
 };
 
 const saveRecordValues = async (values: Record<string, string>, successText: string) => {
+  if (readOnly.value) {
+    ElMessage.info("历史病历为只读查看，不能保存修改");
+    return false;
+  }
   saving.value = true;
 
   try {

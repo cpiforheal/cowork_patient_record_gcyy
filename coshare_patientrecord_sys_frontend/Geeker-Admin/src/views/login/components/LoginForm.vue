@@ -101,7 +101,6 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
-import { INVENTORY_SYSTEM_DASHBOARD } from "@/routers/modules/inventorySystem";
 import { CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
 import type { ElForm } from "element-plus";
 
@@ -137,8 +136,9 @@ const passwordChange = reactive({ newPassword: "", confirmPassword: "" });
 // 展示终端等受限角色没有 /home 权限，登录后需落到本岗位第一个可用页面。
 const resolveLandingPath = () => {
   const authStore = useAuthStore();
-  if (authStore.hasInventorySystemAccessGet && !authStore.hasMedicalSystemAccessGet) return INVENTORY_SYSTEM_DASHBOARD;
-  if (authStore.hasInventorySystemAccessGet && authStore.hasMedicalSystemAccessGet) return "/system-select";
+  // The system selection page is the post-login home. It exposes only the
+  // systems present in the account capabilities.
+  if (authStore.hasInventorySystemAccessGet || authStore.hasMedicalSystemAccessGet) return "/system-select";
   const pages = authStore.flatMenuListGet.filter(item => item.component);
   if (!pages.length || pages.some(item => item.path === HOME_URL)) return HOME_URL;
   return pages[0].path;

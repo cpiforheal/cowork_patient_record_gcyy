@@ -12,18 +12,18 @@
     <section class="operations-overview">
       <header class="section-head">
         <div>
-          <span class="eyebrow">今日流转</span>
-          <h2>从入库到科室签收</h2>
+          <span class="eyebrow">今天要处理</span>
+          <h2>入库 · 申领 · 审核 · 发放 · 签收</h2>
         </div>
         <div class="head-actions">
-          <el-button v-if="canInbound" type="primary" @click="emit('workflow', 'inbound')">入库</el-button>
+          <el-button v-if="canInbound" type="primary" @click="emit('workflow', 'inbound')">登记入库</el-button>
           <el-button v-if="canRequest" @click="emit('workflow', 'request')">新增申领</el-button>
         </div>
       </header>
 
       <div class="metric-strip">
         <button :disabled="!canOpen('requests')" @click="emit('goTab', 'requests')">
-          <span>待审核</span><strong :class="{ warning: flow.pendingApproval }">{{ flow.pendingApproval }}</strong>
+          <span>待审核申领</span><strong :class="{ warning: flow.pendingApproval }">{{ flow.pendingApproval }}</strong>
         </button>
         <button :disabled="!canOpen('requests')" @click="emit('goTab', 'requests')">
           <span>待发放</span><strong>{{ flow.pendingIssue }}</strong>
@@ -32,9 +32,25 @@
           <span>待签收</span><strong>{{ flow.pendingReceipt }}</strong>
         </button>
         <button :disabled="!canOpen('packages')" @click="emit('goTab', 'packages')">
-          <span>扣减失败</span><strong :class="{ danger: automationFailed }">{{ automationFailed }}</strong>
+          <span>自动扣减异常</span><strong :class="{ danger: automationFailed }">{{ automationFailed }}</strong>
         </button>
       </div>
+
+      <section class="balance-summary" aria-label="当前科室耗材余额">
+        <div>
+          <span>可用余额</span>
+          <strong>{{ balanceSummary.available }}</strong>
+        </div>
+        <div>
+          <span>已预留</span>
+          <strong>{{ balanceSummary.reserved }}</strong>
+        </div>
+        <div>
+          <span>在途数量</span>
+          <strong>{{ balanceSummary.inTransit }}</strong>
+        </div>
+        <el-button v-if="canOpen('stock')" link type="primary" @click="emit('goTab', 'stock')">查看库存明细</el-button>
+      </section>
 
       <div class="todo-head">
         <h3>当前待办</h3>
@@ -127,6 +143,16 @@ const flow = computed(() => ({
 const automationFailed = computed(
   () => props.workbench?.automation?.failed ?? props.consumptions.filter(row => row.status === "failed").length
 );
+const balanceSummary = computed(() =>
+  props.balances.reduce(
+    (summary, row) => ({
+      available: summary.available + Number(row.availableQuantity || 0),
+      reserved: summary.reserved + Number(row.reservedQuantity || 0),
+      inTransit: summary.inTransit + Number(row.inTransitQuantity || 0)
+    }),
+    { available: 0, reserved: 0, inTransit: 0 }
+  )
+);
 </script>
 
 <style scoped lang="scss">
@@ -134,6 +160,32 @@ const automationFailed = computed(
 .operations-overview {
   display: grid;
   gap: 14px;
+}
+
+.balance-summary {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 14px;
+  background: #f6fbfa;
+  border: 1px solid #d8eee9;
+  border-radius: 6px;
+}
+
+.balance-summary div {
+  display: grid;
+  gap: 4px;
+  min-width: 88px;
+}
+
+.balance-summary span {
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
+
+.balance-summary strong {
+  color: var(--inventory-text);
+  font-size: 18px;
 }
 
 .operations-overview {

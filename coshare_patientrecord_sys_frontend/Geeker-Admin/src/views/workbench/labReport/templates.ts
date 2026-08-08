@@ -25,6 +25,17 @@ export interface LabMetricDefinition {
   defaultValue?: string;
 }
 
+export interface LabMetricSnapshotLike {
+  key: string;
+  name: string;
+  shortName: string;
+  value: string;
+  unit: string;
+  reference: string;
+  severity?: "NORMAL" | "ABNORMAL" | "CRITICAL";
+  critical?: boolean;
+}
+
 export interface LabTemplateDefinition {
   id: LabTemplateId;
   name: string;
@@ -59,6 +70,50 @@ export const metricStorageKey = (templateId: LabTemplateId, metricKey: string) =
 
 export const metricStoredValue = (values: Record<string, string>, templateId: LabTemplateId, metricKey: string) =>
   values[metricStorageKey(templateId, metricKey)] || values[`lab_${templateId}_${metricKey}`] || "";
+
+export const materializeLabMetrics = (
+  templateId: string,
+  metrics: Array<Partial<LabMetricSnapshotLike> & Pick<LabMetricSnapshotLike, "key">> = [],
+  gender = ""
+): LabMetricSnapshotLike[] => {
+  const template = labReportTemplates.find(item => item.id === templateId);
+  if (!template) return metrics.map(metric => ({
+    key: metric.key,
+    name: metric.name || "未命名指标",
+    shortName: metric.shortName || "",
+    value: metric.value || "",
+    unit: metric.unit || "",
+    reference: metric.reference || "",
+    severity: metric.severity,
+    critical: metric.critical
+  }));
+  const byKey = new Map(metrics.map(metric => [metric.key, metric]));
+  const known = new Set(template.metrics.map(metric => metric.key));
+  const completed = template.metrics.map(metric => {
+    const saved = byKey.get(metric.key);
+    return {
+      ...saved,
+      key: metric.key,
+      name: saved?.name || metric.name,
+      shortName: saved?.shortName || metric.shortName,
+      value: saved?.value || "",
+      unit: saved?.unit || metric.unit || "",
+      reference: saved?.reference || metricReference(metric, gender),
+      severity: saved?.value ? saved?.severity || "NORMAL" : "NORMAL",
+      critical: Boolean(saved?.value && saved?.critical)
+    };
+  });
+  return [...completed, ...metrics.filter(metric => !known.has(metric.key)).map(metric => ({
+    key: metric.key,
+    name: metric.name || "未命名指标",
+    shortName: metric.shortName || "",
+    value: metric.value || "",
+    unit: metric.unit || "",
+    reference: metric.reference || "",
+    severity: metric.severity,
+    critical: metric.critical
+  }))];
+};
 
 export const labReportTemplates: LabTemplateDefinition[] = [
   {

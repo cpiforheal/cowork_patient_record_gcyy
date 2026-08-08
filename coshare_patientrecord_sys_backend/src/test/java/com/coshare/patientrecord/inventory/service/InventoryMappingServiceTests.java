@@ -136,6 +136,17 @@ class InventoryMappingServiceTests {
     }
 
     @Test
+    void exposesOnlyTwoConsumptionScopesWhileKeepingReviewRequiredSeparate() {
+        assertEquals("PATIENT_RELATED", InventoryMappingService.consumptionScope(InventoryMappingService.PATIENT_ONCE_PACKAGE));
+        assertEquals("PATIENT_RELATED", InventoryMappingService.consumptionScope(CONDITIONAL_PACKAGE));
+        assertEquals("NON_PATIENT_RELATED", InventoryMappingService.consumptionScope(FIXED_RUNNING));
+        assertEquals("NON_PATIENT_RELATED", InventoryMappingService.consumptionScope(ON_DEMAND));
+        assertEquals("NON_PATIENT_RELATED", InventoryMappingService.consumptionScope(InventoryMappingService.PENDING_PATIENT_BINDING));
+        assertTrue(InventoryMappingService.reviewRequired(InventoryMappingService.PENDING_PATIENT_BINDING));
+        assertTrue(!InventoryMappingService.reviewRequired(InventoryMappingService.PATIENT_ONCE_PACKAGE));
+    }
+
+    @Test
     void normalizesAliasNamesForGovernanceMatching() {
         assertEquals("pvc手套", InventoryMappingService.normalizeAliasName(" PVC 手套 "));
     }

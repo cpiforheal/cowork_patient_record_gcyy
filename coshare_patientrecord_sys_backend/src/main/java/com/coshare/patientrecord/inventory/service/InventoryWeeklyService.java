@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +36,7 @@ public class InventoryWeeklyService {
     private final InventoryLedgerRepository ledger;
     private final InventoryAccessService inventoryAccess;
 
+    @Autowired
     public InventoryWeeklyService(
         InventoryWeeklyRepository weekly,
         InventoryLedgerRepository ledger,
@@ -43,6 +45,10 @@ public class InventoryWeeklyService {
         this.weekly = weekly;
         this.ledger = ledger;
         this.inventoryAccess = inventoryAccess;
+    }
+
+    public InventoryWeeklyService(InventoryWeeklyRepository weekly, InventoryLedgerRepository ledger) {
+        this(weekly, ledger, null);
     }
 
     public ObjectNode listStandards() {

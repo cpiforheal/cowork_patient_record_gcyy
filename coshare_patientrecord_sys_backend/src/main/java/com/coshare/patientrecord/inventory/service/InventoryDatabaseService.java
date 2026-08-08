@@ -272,6 +272,33 @@ public class InventoryDatabaseService {
         return result;
     }
 
+    public ObjectNode ledgerMovements(
+        SessionUser user,
+        String requestedDepartmentId,
+        String itemId,
+        String movementType,
+        LocalDate from,
+        LocalDate to,
+        int page,
+        int size
+    ) {
+        ArrayNode all = ledgerRepository.readLedgerMovements(
+            scopedDepartmentId(user, requestedDepartmentId), itemId, movementType, from, to
+        );
+        ObjectNode result = JsonNodeFactory.instance.objectNode();
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 200);
+        int fromIndex = Math.min((safePage - 1) * safeSize, all.size());
+        int toIndex = Math.min(fromIndex + safeSize, all.size());
+        ArrayNode list = JsonNodeFactory.instance.arrayNode();
+        for (int index = fromIndex; index < toIndex; index++) list.add(all.get(index));
+        result.put("page", safePage);
+        result.put("size", safeSize);
+        result.put("total", all.size());
+        result.set("list", list);
+        return result;
+    }
+
     public ObjectNode confirmOpening(JsonNode payload, SessionUser user) {
         return ledgerService.confirmOpening(payload, user);
     }

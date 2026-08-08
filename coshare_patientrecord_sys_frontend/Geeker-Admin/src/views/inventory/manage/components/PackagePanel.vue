@@ -1,12 +1,12 @@
 <template>
   <section class="package-layout">
     <el-tabs v-model="activeSection" class="package-tabs" :class="{ 'entry-only-tabs': standaloneMapping }">
-      <el-tab-pane label="门诊 / 住院套餐" name="packages">
+      <el-tab-pane label="患者耗材套餐" name="packages">
         <div class="panel package-panel">
           <div class="panel-head">
             <div>
-              <h2>门诊 / 住院使用套餐</h2>
-              <p>按科室、照护类型和关键阶段维护套餐，仅最新启用且处于生效期的版本参与匹配。</p>
+              <h2>患者耗材套餐</h2>
+              <p>按科室、照护类型和关键阶段维护套餐，仅最新启用且处于生效期的版本参与自动扣减匹配。</p>
             </div>
             <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建套餐</el-button>
           </div>
@@ -71,7 +71,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="套餐覆盖检查" name="coverage">
+      <el-tab-pane label="套餐覆盖情况" name="coverage">
         <div class="panel package-panel">
           <div class="panel-head">
             <div>
@@ -111,12 +111,12 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="映射待确认" name="mapping">
+      <el-tab-pane label="耗材用量待确认" name="mapping">
         <div v-loading="mappingLoading" class="panel mapping-panel">
           <div class="panel-head">
             <div>
-              <h2>{{ focusDepartment ? `${focusDepartment}耗材录入与患者量规则` : "耗材映射与患者量规则" }}</h2>
-              <p>患者量计量仅使用已确认的单次定额；待核定项已从自动扣减中剥离，与固定运行和按需申领分开管理。</p>
+              <h2>{{ focusDepartment ? `${focusDepartment}耗材录入与用量规则` : "耗材分类与用量规则" }}</h2>
+              <p>与患者有关的耗材在已确认并启用的规则触发后扣减；与患者无关的耗材继续走申领、发放、签收、盘点和报损流程。</p>
             </div>
             <el-tag effect="plain">共 {{ mappingSummary?.total || mappingTotal || 0 }} 条</el-tag>
           </div>
@@ -150,15 +150,15 @@
                 highlight-current
                 @node-click="selectMappingDepartment"
               />
-              <el-divider content-position="left">自动扣减口径</el-divider>
+              <el-divider content-position="left">耗用归属</el-divider>
               <el-radio-group v-model="mappingFilters.businessGroup" class="side-filter-options" @change="loadMappings(1)">
                 <el-radio label="">全部耗材</el-radio>
-                <el-radio label="automatic">可自动扣减</el-radio>
-                <el-radio label="pending">待科室确认</el-radio>
-                <el-radio label="nonpatient">不按患者扣减</el-radio>
+                <el-radio label="patient-related">与患者有关</el-radio>
+                <el-radio label="nonpatient-related">与患者无关</el-radio>
+                <el-radio label="review-required">待复核</el-radio>
               </el-radio-group>
-              <p class="side-filter-hint">“可自动扣减”是已确认的患者变量；生成并启用套餐后，患者完成对应环节即按标准自动扣减。</p>
-              <el-select v-model="mappingFilters.ruleType" clearable placeholder="规则细分（可选）" @change="loadMappings(1)">
+              <p class="side-filter-hint">待复核仅表示管理端需要确认扣减口径，不是第三种耗材分类，也不会参与自动扣减。</p>
+              <el-select v-if="canManageMapping" v-model="mappingFilters.ruleType" clearable placeholder="原始分类（管理）" @change="loadMappings(1)">
                 <el-option label="患者单次套餐" value="患者单次套餐" />
                 <el-option label="条件套餐" value="条件套餐" />
                 <el-option label="待核定（非固定）" value="待核定（非固定）" />
@@ -178,7 +178,12 @@
             <el-select v-model="mappingFilters.department" clearable filterable placeholder="科室" @change="loadMappings(1)">
               <el-option v-for="department in mappingDepartmentOptions" :key="department" :label="department" :value="department" />
             </el-select>
-            <el-select v-model="mappingFilters.ruleType" clearable placeholder="规则类型" @change="loadMappings(1)">
+            <el-select v-model="mappingFilters.businessGroup" clearable placeholder="耗用归属" @change="loadMappings(1)">
+              <el-option label="与患者有关" value="patient-related" />
+              <el-option label="与患者无关" value="nonpatient-related" />
+              <el-option label="待复核" value="review-required" />
+            </el-select>
+            <el-select v-if="canManageMapping" v-model="mappingFilters.ruleType" clearable placeholder="原始分类（管理）" @change="loadMappings(1)">
               <el-option label="患者单次套餐" value="患者单次套餐" />
               <el-option label="条件套餐" value="条件套餐" />
               <el-option label="待核定（非固定）" value="待核定（非固定）" />
@@ -213,8 +218,11 @@
                   <strong v-if="row.group" class="mapping-group-label">{{ row.department }}（{{ row.children?.length || 0 }} 项）</strong>
                   <span v-else>{{ row.sourceItemName }}</span>
                 </template>
-                <template #status="{ row }">
-                  <el-tag v-if="!row.group" :type="mappingBusinessTag(row as InventoryMappingEntry)" effect="light">{{ mappingBusinessLabel(row as InventoryMappingEntry) }}</el-tag>
+                <template #consumptionScope="{ row }">
+                  <template v-if="!row.group">
+                    <el-tag :type="mappingScopeTag(row as InventoryMappingEntry)" effect="light">{{ mappingScopeLabel(row as InventoryMappingEntry) }}</el-tag>
+                    <el-tag v-if="row.reviewRequired" type="warning" effect="plain">待复核</el-tag>
+                  </template>
                 </template>
                 <template #quantity="{ row }">
                   <span v-if="!row.group">{{ quantityLabel(row as InventoryMappingEntry) }}</span>
@@ -254,7 +262,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane :label="`扣减失败任务${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
+      <el-tab-pane :label="`自动扣减异常${failedEvents.length ? ` (${failedEvents.length})` : ''}`" name="exceptions">
         <div class="panel event-panel">
           <div class="panel-head">
             <div>
@@ -527,8 +535,8 @@ const mappingTreeRows = computed<MappingTreeRow[]>(() => {
 const mappingColumns = computed<ColumnProps<MappingTreeRow>[]>(() => [
   { type: "index", label: "序号", width: 64, isSetting: false },
   { prop: "sourceItemName", label: "耗材 / 科室", minWidth: 190 },
-  { prop: "ruleType", label: "规则细分", width: 126 },
-  { prop: "status", label: "患者扣减状态", width: 126 },
+  { prop: "consumptionScope", label: "耗用归属", width: 154 },
+  ...(props.canManageMapping ? [{ prop: "sourceClassification", label: "原始分类", width: 126 }] : []),
   { prop: "sourceUsage", label: "用法", minWidth: 120 },
   { prop: "quantity", label: "建议数量/单位", width: 132 },
   { prop: "matchedItemName", label: "匹配物资", minWidth: 160 },
@@ -539,11 +547,15 @@ const mappingColumns = computed<ColumnProps<MappingTreeRow>[]>(() => [
 ]);
 const mappingSummaryCards = computed(() => [
   { label: "总数", value: props.mappingSummary?.total ?? props.mappingTotal ?? 0 },
-  { label: "可自动扣减", value: props.mappingSummary?.patientVariableConfirmed ?? 0 },
-  { label: "待科室确认", value: props.mappingSummary?.patientVariablePending ?? 0 },
-  { label: "不按患者扣减", value: props.mappingSummary?.nonPatient ?? 0 },
-  { label: "待生成套餐", value: props.mappingSummary?.canCreatePackageDraft ?? 0 },
-  { label: "仍需补充资料", value: props.mappingSummary?.needsSupplement ?? 0 }
+  { label: "与患者有关", value: props.mappingSummary?.patientRelated ?? 0 },
+  { label: "与患者无关", value: props.mappingSummary?.nonPatientRelated ?? 0 },
+  { label: "待复核", value: props.mappingSummary?.reviewRequired ?? 0 },
+  ...(props.canManageMapping
+    ? [
+        { label: "待生成套餐", value: props.mappingSummary?.canCreatePackageDraft ?? 0 },
+        { label: "仍需补充资料", value: props.mappingSummary?.needsSupplement ?? 0 }
+      ]
+    : [])
 ]);
 
 const dialogTitle = computed(() => {
@@ -581,15 +593,10 @@ const mappingStatusLabel = (value?: string) =>
   ({ pending: "待确认", confirmed: "已确认", held: "已搁置" })[value || ""] || value || "-";
 const mappingStatusTag = (value?: string) =>
   ({ pending: "warning", confirmed: "success", held: "info" })[value || ""] as "warning" | "success" | "info";
-const mappingBusinessLabel = (row: InventoryMappingEntry) => {
-  if (row.ruleType === "患者单次套餐" && row.status === "confirmed") return "可自动扣减";
-  if (["固定运行消耗", "按需申领"].includes(String(row.ruleType))) return "不按患者扣减";
-  return "待科室确认";
-};
-const mappingBusinessTag = (row: InventoryMappingEntry) => {
-  const label = mappingBusinessLabel(row);
-  return (label === "可自动扣减" ? "success" : label === "待科室确认" ? "warning" : "info") as "success" | "warning" | "info";
-};
+const mappingScope = (row: InventoryMappingEntry) =>
+  row.consumptionScope || (["患者单次套餐", "条件套餐"].includes(String(row.ruleType)) ? "PATIENT_RELATED" : "NON_PATIENT_RELATED");
+const mappingScopeLabel = (row: InventoryMappingEntry) => (mappingScope(row) === "PATIENT_RELATED" ? "与患者有关" : "与患者无关");
+const mappingScopeTag = (row: InventoryMappingEntry) => (mappingScope(row) === "PATIENT_RELATED" ? "success" : "info") as "success" | "info";
 const quantityLabel = (row: InventoryMappingEntry) =>
   row.suggestedQuantity === undefined || row.suggestedQuantity === null || row.suggestedQuantity === 0
     ? "待补充" + (row.suggestedUnit ? " / " + row.suggestedUnit : "")

@@ -28,6 +28,7 @@ public class RuntimeHealthService {
 
     private final Instant startedAt = Instant.now();
     private final Environment environment;
+    private final String releaseId;
     private final ObjectProvider<DatabaseHealthService> databaseHealthService;
     private final ObjectProvider<ClinicBackupRepository> backupRepository;
     private final ClinicFileService fileService;
@@ -43,6 +44,7 @@ public class RuntimeHealthService {
 
     public RuntimeHealthService(
         Environment environment,
+        @Value("${clinic.release-id:}") String releaseId,
         ObjectProvider<DatabaseHealthService> databaseHealthService,
         ObjectProvider<ClinicBackupRepository> backupRepository,
         ClinicFileService fileService,
@@ -57,6 +59,7 @@ public class RuntimeHealthService {
         ObjectProvider<AiDocumentTaskService> aiDocumentTaskService
     ) {
         this.environment = environment;
+        this.releaseId = releaseId == null ? "" : releaseId;
         this.databaseHealthService = databaseHealthService;
         this.backupRepository = backupRepository;
         this.fileService = fileService;
@@ -83,6 +86,7 @@ public class RuntimeHealthService {
         response.put("status", overallStatus(components));
         response.put("service", "coshare-patientrecord-backend");
         response.put("profile", activeProfiles());
+        response.put("releaseId", releaseId);
         response.put("startedAt", startedAt.toString());
         response.put("uptimeSeconds", Duration.between(startedAt, Instant.now()).toSeconds());
         response.put("components", components);

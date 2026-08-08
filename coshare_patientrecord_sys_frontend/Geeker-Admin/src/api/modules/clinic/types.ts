@@ -34,6 +34,8 @@ export interface PatientDetail {
   archiveSubmitted: boolean;
   archiveVersion: string;
   generatedAt: string;
+  encounters?: PatientEncounter[];
+  readOnly?: boolean;
 }
 
 export interface OperationContext {

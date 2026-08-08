@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,10 +26,15 @@ public class InventoryLedgerService {
     private final InventoryRepository legacy;
     private final InventoryAccessService inventoryAccessService;
 
+    @Autowired
     public InventoryLedgerService(InventoryLedgerRepository ledger, InventoryRepository legacy, InventoryAccessService inventoryAccessService) {
         this.ledger = ledger;
         this.legacy = legacy;
         this.inventoryAccessService = inventoryAccessService;
+    }
+
+    public InventoryLedgerService(InventoryLedgerRepository ledger, InventoryRepository legacy) {
+        this(ledger, legacy, null);
     }
 
     @Transactional

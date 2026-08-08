@@ -6,7 +6,9 @@ import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
 import { staticRouter, errorRouter } from "@/routers/modules/staticRouter";
 import {
   INVENTORY_SYSTEM_DASHBOARD,
+  canAccessInventoryTab,
   inventorySystemPathForLegacy,
+  inventoryTabFromPath,
   isInventorySystemPath,
   isLegacyInventoryPath
 } from "@/routers/modules/inventorySystem";
@@ -34,9 +36,9 @@ const unavailableRouteFor = (path: string) => (PROTECTED_BUSINESS_PATHS.some(pat
 
 const systemLandingFor = (path: string, authStore: ReturnType<typeof useAuthStore>) => {
   if (path !== HOME_URL) return path;
-  if (authStore.hasInventorySystemAccessGet && !authStore.hasMedicalSystemAccessGet) return INVENTORY_SYSTEM_DASHBOARD;
-  if (authStore.hasInventorySystemAccessGet && authStore.hasMedicalSystemAccessGet) return "/system-select";
-  return path;
+  // Always land on the system boundary. The page renders only the systems
+  // allowed by the account, while the backend remains the authority for access.
+  return "/system-select";
 };
 
 /**
@@ -101,6 +103,10 @@ router.beforeEach(async to => {
     if (to.name === "notFound") return { path: unavailableRouteFor(to.path), replace: true };
     if (isInventorySystemPath(to.path)) {
       if (!authStore.hasInventorySystemAccessGet) return { path: "/403", replace: true };
+      const tab = inventoryTabFromPath(to.path);
+      if (tab && !canAccessInventoryTab(tab, authStore.authButtonListGet, authStore.capabilities || [])) {
+        return { path: "/403", replace: true };
+      }
       authStore.setActiveSystem("inventory");
     } else if (to.path !== "/system-select") {
       authStore.setActiveSystem("medical");

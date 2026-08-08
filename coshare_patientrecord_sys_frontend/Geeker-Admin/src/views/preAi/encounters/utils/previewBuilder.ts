@@ -2,6 +2,7 @@ import type { LabReportSnapshot, PreAiStageCode, PreAiWorkspace } from "@/api/mo
 import type { PreAiStageConfig } from "../fieldConfig";
 import type { DocumentPreviewLabMetric, DocumentPreviewLabReport, DocumentPreviewSection } from "../previewTypes";
 import { labMetricAbnormalLabel } from "./labResult";
+import { materializeLabMetrics } from "@/views/workbench/labReport/templates";
 
 export const nonEmptyEntries = (value: Record<string, any> = {}) =>
   Object.entries(value).filter(
@@ -26,15 +27,14 @@ export const humanValue = (value: any): string => {
 export const buildLabPreviewReports = (reports: LabReportSnapshot[]): DocumentPreviewLabReport[] =>
   reports
     .map(report => {
-      const metrics = report.metrics
-        .filter(metric => String(metric.value || "").trim())
+      const metrics = materializeLabMetrics(report.templateId, report.metrics)
         .map<DocumentPreviewLabMetric>((metric, index) => {
           const abnormal = labMetricAbnormalLabel(metric);
           return {
             key: `${report.id}-${metric.shortName || metric.name || index}`,
             name: metric.name || "未命名指标",
             shortName: metric.shortName || "",
-            value: String(metric.value || "未填写"),
+            value: String(metric.value || "待补充"),
             unit: metric.unit || "",
             reference: metric.reference || "",
             abnormal,
@@ -49,8 +49,7 @@ export const buildLabPreviewReports = (reports: LabReportSnapshot[]): DocumentPr
         abnormalMetrics: metrics.filter(metric => Boolean(metric.abnormal)),
         normalMetrics: metrics.filter(metric => !metric.abnormal)
       };
-    })
-    .filter(report => report.abnormalMetrics.length || report.normalMetrics.length);
+    });
 
 interface DocumentPreviewBuilderOptions {
   workspace: PreAiWorkspace;
@@ -122,7 +121,7 @@ export const buildDocumentPreviewSections = ({
 
   sections.push({
     key: "AUX",
-    title: "化验室检验报告",
+    title: "化验检验报告",
     note: "异常指标优先展示；正常指标默认收起，可按需展开核对。",
     rows: [],
     labReports: buildLabPreviewReports(workspace.labReports)

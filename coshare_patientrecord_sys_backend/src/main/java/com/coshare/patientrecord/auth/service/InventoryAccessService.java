@@ -36,6 +36,9 @@ public class InventoryAccessService {
 
     public Access accessFor(SessionUser user) {
         if (user == null) return Access.none();
+        // Inventory is an isolated subsystem. Only the clinical system administrator
+        // may enter it; inventory role assignments remain available for audit/history.
+        if (!"admin".equals(RoleCatalog.canonicalize(user.role()))) return Access.none();
         if ("admin".equals(RoleCatalog.canonicalize(user.role()))) return Access.of(profiles.get(ADMIN));
         String roleCode = jdbcTemplate.query(
             "SELECT role_code FROM inventory_account_roles WHERE account_id = ?",
@@ -76,14 +79,16 @@ public class InventoryAccessService {
     public List<Map<String, Object>> accountAssignments() {
         return jdbcTemplate.query(
             """
-            SELECT a.id, a.username, a.name, a.role, a.status, r.role_code,
+            SELECT a.id, a.username,
+                   MAX(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.raw_json, '$.name')), ''), a.username)) name,
+                   a.role, a.status, r.role_code,
                    GROUP_CONCAT(DISTINCT d.name ORDER BY d.name SEPARATOR '、') departments
             FROM clinic_accounts a
             LEFT JOIN inventory_account_roles r ON r.account_id = a.id
             LEFT JOIN clinic_account_departments ad ON ad.account_id = a.id AND ad.status = 'ACTIVE'
             LEFT JOIN clinic_departments d ON d.id = ad.department_id AND d.status = 'ACTIVE'
-            GROUP BY a.id, a.username, a.name, a.role, a.status, r.role_code
-            ORDER BY a.status DESC, a.name, a.username
+            GROUP BY a.id, a.username, a.role, a.status, r.role_code
+            ORDER BY a.status DESC, name, a.username
             """,
             (resultSet, ignored) -> accountRow(resultSet)
         );

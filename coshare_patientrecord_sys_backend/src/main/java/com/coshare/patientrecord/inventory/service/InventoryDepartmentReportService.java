@@ -55,6 +55,12 @@ public class InventoryDepartmentReportService {
         return result;
     }
 
+    public ObjectNode query(
+        LocalDate from, LocalDate to, List<String> departmentIds, String itemId, String category, String triggerStage
+    ) {
+        return query(from, to, departmentIds, itemId, category, triggerStage, false);
+    }
+
     public byte[] exportXlsx(ObjectNode report) {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             writeSheet(workbook.createSheet("全院汇总"), report.withArray("summary"));

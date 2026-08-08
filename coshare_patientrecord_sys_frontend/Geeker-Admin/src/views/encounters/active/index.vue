@@ -2,24 +2,44 @@
   <div class="table-box encounter-page">
     <section class="board-toolbar">
       <div>
-        <h2>患者进度</h2>
-        <p>查看患者当前诊疗阶段和下一责任岗位；{{ roleName }} 可填写 {{ editableSectionCount }} 个章节。</p>
+        <h2>患者流程进度</h2>
+        <p>以 Pre-AI 就诊流程的实时阶段为准，优先处理当前岗位、退回和异常病例。</p>
       </div>
       <div class="toolbar-actions">
         <el-radio-group v-model="viewMode" size="large">
           <el-radio-button label="kanban">看板</el-radio-button>
           <el-radio-button label="list">列表</el-radio-button>
         </el-radio-group>
-        <el-button :icon="Refresh" @click="refreshBoard">刷新</el-button>
+        <el-button :icon="Refresh" :loading="loading" @click="loadProgress">刷新</el-button>
       </div>
     </section>
 
-    <section v-if="viewMode === 'kanban'" class="kanban-board">
+    <section class="progress-summary">
+      <button v-for="item in summaryItems" :key="item.key" type="button" class="summary-item" :class="{ active: activeSummary === item.key }" @click="activeSummary = item.key">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.count }}</strong>
+      </button>
+    </section>
+
+    <section class="progress-filters">
+      <el-input v-model="filters.keyword" clearable placeholder="患者姓名、就诊号" />
+      <el-select v-model="filters.careType" clearable placeholder="就诊类型">
+        <el-option label="门诊" value="outpatient" />
+        <el-option label="住院" value="inpatient" />
+      </el-select>
+      <el-select v-model="filters.stage" clearable placeholder="当前阶段">
+        <el-option v-for="stage in workflowStages" :key="stage.key" :label="stage.title" :value="stage.key" />
+        <el-option label="待核验旧流程" value="LEGACY" />
+      </el-select>
+      <el-button v-if="hasFilters" text @click="clearFilters">清除筛选</el-button>
+    </section>
+
+    <section v-if="viewMode === 'kanban'" v-loading="loading" class="kanban-board">
       <article v-for="column in kanbanColumns" :key="column.key" class="kanban-column">
         <header>
           <span>{{ column.title }}</span>
           <el-tag effect="plain">{{ column.patients.length }}</el-tag>
-          <small>{{ column.department }}</small>
+          <small>{{ column.owner }}</small>
         </header>
         <div class="kanban-list">
           <button
@@ -27,570 +47,310 @@
             :key="patient.id"
             type="button"
             class="patient-card"
-            :class="{
-              timeout: isTimeout(patient),
-              current: isCurrentRoleFocus(patient),
-              [`risk-${patient.riskType || 'info'}`]: true
-            }"
-            @click="openPatient(patient.id)"
+            :class="riskClass(patient)"
+            @click="openPatient(patient)"
           >
             <div class="patient-card-head">
-              <strong>
-                <span class="patient-status-dot"></span>
-                {{ patient.name }}
-              </strong>
-              <el-tag :type="patient.riskType || 'info'" effect="plain">{{ patient.status }}</el-tag>
+              <strong><span class="patient-status-dot"></span>{{ patient.name }}</strong>
+              <el-tag :type="patient.riskType" effect="plain">{{ encounterStatusLabel(patient.status) }}</el-tag>
             </div>
-            <span>{{ patient.visitType }} · {{ patient.visitNo }}</span>
-            <span v-if="(patient.encounterCount || 1) > 1" class="encounter-count">累计 {{ patient.encounterCount }} 次就诊</span>
-            <small>{{ lifecycleInfo(patient).stage.title }} · {{ lifecycleInfo(patient).stage.owner }}</small>
-            <span class="next-owner">下一责任：{{ lifecycleInfo(patient).nextOwner }}</span>
-            <div class="closed-loop-progress" :class="`risk-${patient.riskType || 'info'}`">
-              <span><em :style="{ width: `${lifecycleInfo(patient).progressPercent}%` }"></em></span>
-              <small>{{ lifecycleInfo(patient).completed }}/{{ lifecycleInfo(patient).total }} 环</small>
+            <span>{{ careTypeLabel(patient.normalizedCareType) }} · {{ patient.visitNo || "未登记号" }}</span>
+            <small>{{ stageLabel(patient.currentStage) }} · {{ patient.nextOwner || "待分派" }}</small>
+            <span v-if="patient.returned" class="return-note">存在退回，需重新处理</span>
+            <span v-else-if="patient.skippedStages.includes('TCM')" class="encounter-count">门诊跳过中医</span>
+            <div class="closed-loop-progress" :class="riskClass(patient)">
+              <span><em :style="{ width: patient.progressPercent + '%' }"></em></span>
+              <small>{{ patient.completed }}/{{ patient.total }}</small>
             </div>
             <div class="stay-line" :class="{ timeout: isTimeout(patient) }">
-              <span>{{ stayDuration(patient.updatedAt) }}</span>
-              <em>{{ lifecycleInfo(patient).progressPercent }}%</em>
+              <span>{{ patient.updatedAt ? stayDuration(patient.updatedAt) : "等待核验" }}</span>
+              <em>{{ patient.progressPercent }}%</em>
             </div>
           </button>
-          <el-empty v-if="!column.patients.length" :image-size="70" description="暂无患者" />
+          <el-empty v-if="!column.patients.length" :image-size="54" description="暂无待处理病例" />
         </div>
       </article>
     </section>
 
-    <ProTable
-      v-else
-      ref="proTable"
-      :columns="columns"
-      :request-api="getEncounterList"
-      :data-callback="dataCallback"
-      :init-param="initParam"
-      :search-col="{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3 }"
-    >
-      <template #stageProgress="{ row }">
-        <div class="step-indicator lifecycle-indicator">
-          <el-tooltip v-for="stage in lifecycleInfo(row).steps" :key="stage.key" :content="stage.title" placement="top">
-            <span class="step-segment" :class="stage.status">
-              {{ stage.shortTitle }}
-            </span>
-          </el-tooltip>
-        </div>
-        <div class="progress-meta">
-          <span>{{ lifecycleInfo(row).completed }}/{{ lifecycleInfo(row).total }}</span>
-          <strong>{{ lifecycleInfo(row).stage.title }}</strong>
-          <em>{{ lifecycleInfo(row).nextOwner }}</em>
-        </div>
-        <div class="closed-loop-progress table-progress" :class="`risk-${row.riskType || 'info'}`">
-          <span><em :style="{ width: `${lifecycleInfo(row).progressPercent}%` }"></em></span>
-          <small>{{ lifecycleInfo(row).progressPercent }}%</small>
-        </div>
-      </template>
-
-      <template #status="{ row }">
-        <el-tag :type="row.riskType">{{ row.status }}</el-tag>
-      </template>
-
-      <template #operation="{ row }">
-        <el-button type="primary" :icon="ArrowRight" link @click.stop="openPatient(row.id)">进入详情</el-button>
-      </template>
-    </ProTable>
+    <section v-else v-loading="loading" class="progress-table-wrap">
+      <el-table :data="filteredPatients" row-key="id" max-height="calc(100vh - 330px)" @row-click="openTablePatient">
+        <el-table-column prop="name" label="患者" min-width="120" />
+        <el-table-column prop="visitNo" label="就诊号" min-width="130" />
+        <el-table-column label="就诊类型" width="110">
+          <template #default="{ row }">{{ careTypeLabel(row.normalizedCareType) }}</template>
+        </el-table-column>
+        <el-table-column label="当前阶段" min-width="135">
+          <template #default="{ row }"><el-tag effect="plain">{{ stageLabel(row.currentStage) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="流程" min-width="300">
+          <template #default="{ row }">
+            <div class="step-indicator">
+              <el-tooltip v-for="step in row.steps" :key="step.key" :content="step.title + (step.status === 'skipped' ? '（门诊跳过）' : '')">
+                <span class="step-segment" :class="step.status">{{ step.shortTitle }}</span>
+              </el-tooltip>
+            </div>
+            <div class="progress-meta"><span>{{ row.completed }}/{{ row.total }}</span><strong>{{ row.nextOwner || "待分派" }}</strong></div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }"><el-tag :type="row.riskType">{{ encounterStatusLabel(row.status) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="最近更新" min-width="160">
+          <template #default="{ row }">{{ row.updatedAt || "--" }}</template>
+        </el-table-column>
+        <el-table-column label="操作" fixed="right" width="100">
+          <template #default="{ row }"><el-button type="primary" :icon="ArrowRight" link @click.stop="openTablePatient(row)">进入</el-button></template>
+        </el-table-column>
+      </el-table>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts" name="encounterActive">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ArrowRight, Refresh } from "@element-plus/icons-vue";
-import ProTable from "@/components/ProTable/index.vue";
-import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
-import { getPatientListApi, type PatientRow } from "@/api/modules/clinic";
+import { useRouter } from "vue-router";
 import {
-  canEditSection,
-  isLifecycleStageSkipped,
-  patientLifecycleStages,
-  recordSections,
-  roleLabel,
-  type PatientLifecycleStage
-} from "@/config/fieldPermissions";
+  getPreAiPatientCasesApi,
+  type PreAiPatientCase,
+  type PreAiStageCode,
+  type PreAiStageStatus
+} from "@/api/modules/clinic/preAi";
 import { useUserStore } from "@/stores/modules/user";
 import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 
+type RiskType = "success" | "info" | "warning" | "danger";
+type ProgressStage = PreAiStageCode | "LEGACY";
+type ProgressStep = {
+  key: PreAiStageCode;
+  title: string;
+  shortTitle: string;
+  owner: string;
+  status: "done" | "active" | "waiting" | "skipped" | "returned";
+};
+type ProgressPatient = {
+  id: string;
+  sourcePatientId?: string;
+  encounterId?: string;
+  name: string;
+  visitNo: string;
+  status: string;
+  currentStage: ProgressStage;
+  skippedStages: PreAiStageCode[];
+  normalizedCareType?: "outpatient" | "inpatient";
+  nextOwner?: string;
+  updatedAt: string;
+  returned: boolean;
+  riskType: RiskType;
+  completed: number;
+  total: number;
+  progressPercent: number;
+  steps: ProgressStep[];
+};
+
+const workflowStages: Array<{ key: PreAiStageCode; title: string; shortTitle: string; owner: string; roles: string[] }> = [
+  { key: "REGISTRATION", title: "前台建档", shortTitle: "建档", owner: "前台", roles: ["frontdesk"] },
+  { key: "INSPECTION", title: "检查评估", shortTitle: "检查", owner: "检查医生", roles: ["inspection"] },
+  { key: "RECEPTION", title: "接诊", shortTitle: "接诊", owner: "接诊医生", roles: ["reception"] },
+  { key: "TCM", title: "中医辨证", shortTitle: "中医", owner: "中医医生", roles: ["tcm"] },
+  { key: "DOCTOR", title: "医生诊疗", shortTitle: "诊疗", owner: "主治医生", roles: ["doctor"] },
+  { key: "SURGERY", title: "手术处置", shortTitle: "手术", owner: "手术岗位", roles: ["surgeon"] },
+  { key: "REVIEW", title: "复盘归档", shortTitle: "归档", owner: "复核医生", roles: ["review"] }
+];
+
+const router = useRouter();
 const userStore = useUserStore();
 const { openPatientDetail } = usePatientNavigation();
-const proTable = ref<ProTableInstance>();
 const viewMode = ref<"kanban" | "list">("kanban");
-const patientRows = ref<PatientRow[]>([]);
+const loading = ref(false);
+const patientCases = ref<PreAiPatientCase[]>([]);
+const activeSummary = ref<"all" | "todo" | "returned" | "completed" | "legacy">("all");
+const filters = reactive({ keyword: "", careType: "", stage: "" });
 
-const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
-const roleName = computed(() => roleLabel(currentRole.value));
-const editableSectionCount = computed(() => recordSections.filter(section => canEditSection(currentRole.value, section)).length);
-const initParam = reactive({ sectionKey: "" });
-
-const kanbanColumns = computed(() => {
-  const base = patientLifecycleStages.map(stage => ({
-    key: stage.key,
-    title: stage.title,
-    department: stage.department,
-    patients: [] as PatientRow[]
-  }));
-  patientRows.value.forEach(patient => {
-    const info = lifecycleInfo(patient);
-    const column = base.find(item => item.key === info.stage.key) || base[0];
-    column.patients.push(patient);
-  });
-  return base;
-});
-
-const dataCallback = (data: { list: PatientRow[]; total: number; pageNum: number; pageSize: number }) => data;
-const getEncounterList = getPatientListApi;
-
-const columns = reactive<ColumnProps[]>([
-  { type: "index", label: "#", width: 70 },
-  { prop: "name", label: "患者姓名", search: { el: "input" }, width: 120 },
-  { prop: "visitNo", label: "门诊/住院号", search: { el: "input" }, width: 160 },
-  {
-    prop: "visitType",
-    label: "就诊类型",
-    width: 120,
-    enum: [
-      { label: "门诊", value: "门诊" },
-      { label: "门诊医保", value: "门诊医保" },
-      { label: "住院", value: "住院" }
-    ],
-    search: { el: "select" }
-  },
-  { prop: "encounterCount", label: "就诊次数", width: 110 },
-  { prop: "doctor", label: "接诊医生", width: 120 },
-  { prop: "currentStage", label: "当前节点", width: 130 },
-  { prop: "stageProgress", label: "档案流程", minWidth: 360 },
-  { prop: "status", label: "状态", width: 130 },
-  { prop: "operation", label: "操作", fixed: "right", width: 120 }
-]);
-
-type LifecycleStepView = PatientLifecycleStage & { status: "done" | "active" | "waiting" | "skipped" };
-
-const availableLifecycleStages = (patient: PatientRow) =>
-  patientLifecycleStages.filter(stage => !isLifecycleStageSkipped(stage, patient.visitType));
-
-const stageFirstSectionIndex = (stage: PatientLifecycleStage) => {
-  const indexes = stage.sectionKeys
-    .map(key => recordSections.findIndex(section => section.key === key))
-    .filter(index => index >= 0);
-  return indexes.length ? Math.min(...indexes) + 1 : recordSections.length + 1;
+const currentRole = computed(() => userStore.userInfo.role || "");
+const hasFilters = computed(() => Boolean(filters.keyword || filters.careType || filters.stage || activeSummary.value !== "all"));
+const stageLabel = (stage: ProgressStage) => {
+  if (stage === "LEGACY") return "待核验旧流程";
+  return workflowStages.find(item => item.key === stage)?.title || stage;
 };
+const careTypeLabel = (careType?: string) => (careType === "inpatient" ? "住院" : careType === "outpatient" ? "门诊" : "待核验");
+const encounterStatusLabel = (status: string) =>
+  ({ IN_PROGRESS: "处理中", PENDING_REVIEW: "待复核", REVIEWED: "已复核", EXPORTED: "已归档", CANCELLED: "已终止", LEGACY: "待核验" }[status] || status);
 
-const stageByCompletedCount = (patient: PatientRow, stages: PatientLifecycleStage[]) => {
-  const completedCount = patient.completedCount || 1;
-  return [...stages].reverse().find(stage => completedCount >= stageFirstSectionIndex(stage)) || stages[0];
-};
-
-const stageByCurrentText = (patient: PatientRow, stages: PatientLifecycleStage[]) => {
-  const text = `${patient.currentStage || ""} ${patient.status || ""}`;
-  return stages.find(stage => stage.stageKeywords.some(keyword => text.includes(keyword)));
-};
-
-const lifecycleInfo = (patient: PatientRow) => {
-  const stages = availableLifecycleStages(patient);
-  const stage = stageByCurrentText(patient, stages) || stageByCompletedCount(patient, stages) || stages[0];
-  const activeIndex = Math.max(
-    0,
-    stages.findIndex(item => item.key === stage.key)
-  );
-  const isClosed = patient.progressPercent >= 100 || String(patient.currentStage || "").includes("归档");
-  const completed = Math.min(activeIndex + (isClosed ? 1 : 0), stages.length);
-  const total = stages.length;
-  const progressPercent = total ? Math.round((completed / total) * 100) : 0;
-  const steps: LifecycleStepView[] = patientLifecycleStages.map(item => {
-    if (isLifecycleStageSkipped(item, patient.visitType)) return { ...item, status: "skipped" };
-    const index = stages.findIndex(stageItem => stageItem.key === item.key);
+const toProgressPatient = (patientCase: PreAiPatientCase): ProgressPatient => {
+  const encounter = patientCase.latestEncounter;
+  if (!encounter) {
     return {
-      ...item,
-      status: index < activeIndex || (isClosed && index === activeIndex) ? "done" : index === activeIndex ? "active" : "waiting"
+      id: "legacy-" + patientCase.id,
+      sourcePatientId: patientCase.sourcePatientId,
+      name: patientCase.patientName,
+      visitNo: "",
+      status: "LEGACY",
+      currentStage: "LEGACY",
+      skippedStages: [],
+      updatedAt: patientCase.updatedAt,
+      returned: false,
+      riskType: "info",
+      completed: 0,
+      total: 0,
+      progressPercent: 0,
+      steps: []
+    };
+  }
+  const statuses = encounter.effectiveStageStatuses || encounter.stageStatuses || {};
+  const skippedStages = encounter.skippedStages || [];
+  const currentStage = encounter.effectiveCurrentStage || encounter.currentStage;
+  const closed = ["REVIEWED", "EXPORTED"].includes(encounter.status) && statuses.REVIEW === "COMPLETED";
+  const steps: ProgressStep[] = workflowStages.map(stage => {
+    const stageStatus = statuses[stage.key] as PreAiStageStatus | undefined;
+    const skipped = skippedStages.includes(stage.key) || stageStatus === "SKIPPED";
+    const returned = stageStatus === "RETURNED";
+    return {
+      ...stage,
+      status: skipped ? "skipped" : returned ? "returned" : stageStatus === "COMPLETED" || (closed && stage.key === "REVIEW") ? "done" : stage.key === currentStage ? "active" : "waiting"
     };
   });
-  const nextStage = stages[activeIndex + 1] || stage;
+  const effectiveSteps = steps.filter(step => step.status !== "skipped");
+  const completed = effectiveSteps.filter(step => step.status === "done").length;
+  const returned = steps.some(step => step.status === "returned");
+  const timestamp = new Date(encounter.updatedAt.replace(/-/g, "/")).getTime();
+  const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 24 * 36e5;
+  const riskType: RiskType = returned ? "danger" : closed ? "success" : stale ? "warning" : "info";
   return {
-    stage,
+    id: encounter.id,
+    sourcePatientId: encounter.sourcePatientId || patientCase.sourcePatientId,
+    encounterId: encounter.id,
+    name: encounter.patientName || patientCase.patientName,
+    visitNo: String(encounter.visitNo || ""),
+    status: encounter.status,
+    currentStage,
+    skippedStages,
+    normalizedCareType: encounter.normalizedCareType || encounter.inventoryCareType,
+    nextOwner: encounter.nextOwner,
+    updatedAt: encounter.updatedAt,
+    returned,
+    riskType,
     completed,
-    total,
-    progressPercent,
-    nextOwner: activeIndex >= stages.length - 1 ? "已进入闭环" : nextStage.owner,
+    total: effectiveSteps.length,
+    progressPercent: effectiveSteps.length ? Math.round((completed / effectiveSteps.length) * 100) : 0,
     steps
   };
 };
 
+const progressPatients = computed(() => patientCases.value.map(toProgressPatient));
+const filteredPatients = computed(() =>
+  progressPatients.value.filter(patient => {
+    const keyword = filters.keyword.trim().toLowerCase();
+    if (keyword && !(patient.name + " " + patient.visitNo).toLowerCase().includes(keyword)) return false;
+    if (filters.careType && patient.normalizedCareType !== filters.careType) return false;
+    if (filters.stage && patient.currentStage !== filters.stage) return false;
+    if (activeSummary.value === "todo" && (patient.currentStage === "LEGACY" || ["REVIEWED", "EXPORTED", "CANCELLED"].includes(patient.status))) return false;
+    if (activeSummary.value === "returned" && !patient.returned) return false;
+    if (activeSummary.value === "completed" && !["REVIEWED", "EXPORTED"].includes(patient.status)) return false;
+    return !(activeSummary.value === "legacy" && patient.currentStage !== "LEGACY");
+  })
+);
+const summaryItems = computed(() => [
+  { key: "all" as const, label: "全部病例", count: progressPatients.value.length },
+  { key: "todo" as const, label: "待处理", count: progressPatients.value.filter(item => item.currentStage !== "LEGACY" && !["REVIEWED", "EXPORTED", "CANCELLED"].includes(item.status)).length },
+  { key: "returned" as const, label: "退回异常", count: progressPatients.value.filter(item => item.returned).length },
+  { key: "completed" as const, label: "已完成", count: progressPatients.value.filter(item => ["REVIEWED", "EXPORTED"].includes(item.status)).length },
+  { key: "legacy" as const, label: "待核验旧流程", count: progressPatients.value.filter(item => item.currentStage === "LEGACY").length }
+]);
+const kanbanColumns = computed(() => {
+  const columns = [...workflowStages, { key: "LEGACY" as const, title: "待核验旧流程", shortTitle: "核验", owner: "历史档案", roles: [] }].map(stage => ({ ...stage, patients: [] as ProgressPatient[] }));
+  filteredPatients.value.forEach(patient => {
+    const column = columns.find(item => item.key === patient.currentStage) || columns[columns.length - 1];
+    column.patients.push(patient);
+  });
+  return columns;
+});
+
+const riskClass = (patient: ProgressPatient) => ({ timeout: isTimeout(patient), current: isCurrentRoleFocus(patient), ["risk-" + patient.riskType]: true });
+const clearFilters = () => {
+  filters.keyword = "";
+  filters.careType = "";
+  filters.stage = "";
+  activeSummary.value = "all";
+};
 const stayDuration = (updatedAt: string) => {
   const timestamp = new Date(updatedAt.replace(/-/g, "/")).getTime();
+  if (!Number.isFinite(timestamp)) return "更新时间待补充";
   const hours = Math.max(1, Math.round((Date.now() - timestamp) / 36e5));
-  return hours >= 24 ? `停留 ${Math.round(hours / 24)} 天` : `停留 ${hours} 小时`;
+  return hours >= 24 ? "停留 " + Math.round(hours / 24) + " 天" : "停留 " + hours + " 小时";
 };
-
-const isTimeout = (patient: PatientRow) => Date.now() - new Date(patient.updatedAt.replace(/-/g, "/")).getTime() > 24 * 36e5;
-const isCurrentRoleFocus = (patient: PatientRow) => {
-  const info = lifecycleInfo(patient);
-  if (currentRole.value === "admin") return isTimeout(patient);
-  return (
-    Array.isArray(info.stage.roles) && info.stage.roles.includes(currentRole.value as PatientLifecycleStage["roles"][number])
-  );
+const isTimeout = (patient: ProgressPatient) => patient.riskType === "warning" || patient.riskType === "danger";
+const isCurrentRoleFocus = (patient: ProgressPatient) => workflowStages.find(stage => stage.key === patient.currentStage)?.roles.includes(currentRole.value) || false;
+const loadProgress = async () => {
+  loading.value = true;
+  try {
+    const { data } = await getPreAiPatientCasesApi();
+    patientCases.value = data.list || [];
+  } finally {
+    loading.value = false;
+  }
 };
-
-const loadBoard = async () => {
-  const { data } = await getPatientListApi({ pageNum: 1, pageSize: 100, sectionKey: initParam.sectionKey });
-  patientRows.value = data.list;
+const openPatient = (patient: ProgressPatient) => {
+  if (patient.encounterId) {
+    router.push({ path: "/pre-ai/encounters", query: { encounterId: patient.encounterId } });
+  } else if (patient.sourcePatientId) {
+    openPatientDetail(patient.sourcePatientId);
+  }
 };
+const openTablePatient = (row: unknown) => openPatient(row as ProgressPatient);
 
-const refreshBoard = () => {
-  loadBoard();
-  proTable.value?.getTableList();
-};
-
-const openPatient = (id: string) => {
-  openPatientDetail(id);
-};
-
-onMounted(loadBoard);
+onMounted(loadProgress);
 </script>
 
 <style scoped lang="scss">
-.encounter-page {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.board-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
-  background: var(--hos-panel);
-  border: 1px solid var(--hos-border);
-  border-radius: var(--hos-radius-card);
-  box-shadow: var(--hos-shadow-soft);
-  backdrop-filter: blur(16px) saturate(132%);
-  -webkit-backdrop-filter: blur(16px) saturate(132%);
-
-  h2,
-  p {
-    margin: 0;
-  }
-
-  h2 {
-    font-size: 20px;
-  }
-
-  p {
-    margin-top: 5px;
-    color: var(--el-text-color-regular);
-  }
-}
-
-.toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.kanban-board {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(220px, 1fr));
-  gap: 12px;
-  overflow-x: auto;
-}
-
-.kanban-column {
-  min-height: 520px;
-  padding: 12px;
-  background: var(--hos-glass);
-  border: 1px solid var(--hos-border);
-  border-radius: var(--hos-radius-card);
-  box-shadow: var(--hos-shadow-soft);
-  backdrop-filter: blur(14px) saturate(128%);
-  -webkit-backdrop-filter: blur(14px) saturate(128%);
-
-  header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 4px 8px;
-    margin-bottom: 10px;
-    font-weight: 600;
-
-    small {
-      grid-column: 1 / -1;
-      color: var(--hos-text-secondary);
-      font-size: 12px;
-      font-weight: 400;
-    }
-  }
-}
-
-.kanban-list {
-  display: grid;
-  gap: 8px;
-}
-
-.patient-card {
-  position: relative;
-  display: grid;
-  gap: 7px;
-  padding: 12px;
-  overflow: hidden;
-  text-align: left;
-  cursor: pointer;
-  background: var(--hos-panel);
-  border: 1px solid var(--hos-border-light);
-  border-radius: var(--hos-radius-lg);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 36%);
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-
-  &::before {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 4px;
-    content: "";
-    background: var(--hos-status-info);
-  }
-
-  &:hover {
-    border-color: var(--hos-border-interactive);
-    box-shadow: var(--hos-shadow-card-hover);
-    transform: translateY(-2px);
-  }
-
-  &.current {
-    border-color: var(--hos-border-interactive);
-    box-shadow:
-      0 0 0 3px rgb(var(--hos-primary-rgb) / 10%),
-      var(--hos-shadow-soft);
-  }
-
-  &.timeout {
-    border-color: var(--el-color-danger-light-5);
-    animation: timeout-pulse 1.8s ease-in-out infinite;
-  }
-
-  &.risk-success::before {
-    background: var(--hos-status-success);
-  }
-
-  &.risk-warning::before {
-    background: var(--hos-status-warning);
-  }
-
-  &.risk-danger::before {
-    background: var(--hos-status-danger);
-  }
-
-  strong {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--hos-text-primary);
-    font-size: 16px;
-  }
-
-  span,
-  small {
-    color: var(--hos-text-secondary);
-  }
-}
-
-.encounter-count {
-  width: fit-content;
-  padding: 2px 8px;
-  color: var(--hos-primary-deep) !important;
-  background: var(--hos-primary-soft);
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.next-owner {
-  width: fit-content;
-  padding: 2px 8px;
-  color: var(--hos-text-secondary) !important;
-  background: rgb(255 255 255 / 42%);
-  border: 1px solid var(--hos-border-light);
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.patient-status-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--hos-primary);
-  border: 1px solid rgb(255 255 255 / 70%);
-  border-radius: 999px;
-  box-shadow: 0 0 0 4px rgb(var(--hos-primary-rgb) / 10%);
-}
-
-.risk-success .patient-status-dot {
-  background: var(--hos-status-success);
-  box-shadow: 0 0 0 4px rgb(22 163 74 / 12%);
-}
-
-.risk-warning .patient-status-dot {
-  background: var(--hos-status-warning);
-  box-shadow: 0 0 0 4px rgb(217 119 6 / 12%);
-}
-
-.risk-danger .patient-status-dot {
-  background: var(--hos-status-danger);
-  box-shadow: 0 0 0 4px rgb(220 38 38 / 12%);
-}
-
-.closed-loop-progress {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-
-  > span {
-    height: 9px;
-    overflow: hidden;
-    background: rgb(255 255 255 / 46%);
-    border: 1px solid var(--hos-border-light);
-    border-radius: 999px;
-  }
-
-  em {
-    display: block;
-    height: 100%;
-    background: var(--hos-status-info);
-    border-radius: inherit;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 42%);
-    transition: width 220ms var(--liquid-ease, ease);
-  }
-
-  small {
-    color: var(--hos-text-secondary);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-  }
-
-  &.risk-success em {
-    background: var(--hos-status-success);
-  }
-
-  &.risk-warning em {
-    background: var(--hos-status-warning);
-  }
-
-  &.risk-danger em {
-    background: var(--hos-status-danger);
-  }
-}
-
-.table-progress {
-  max-width: 240px;
-  margin-top: 7px;
-}
-
-@keyframes timeout-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgb(248 113 113 / 0%);
-  }
-
-  50% {
-    box-shadow: 0 0 0 4px rgb(248 113 113 / 14%);
-  }
-}
-
-.patient-card-head,
-.stay-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.stay-line {
-  padding-top: 7px;
-  border-top: 1px solid var(--hos-border-light);
-
-  em {
-    color: var(--hos-primary-deep);
-    font-style: normal;
-    font-weight: 600;
-  }
-
-  &.timeout span {
-    color: var(--el-color-danger);
-    font-weight: 600;
-  }
-}
-
-.step-indicator {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(42px, 1fr));
-  gap: 3px;
-}
-
-.step-segment {
-  display: grid;
-  place-items: center;
-  min-height: 24px;
-  color: var(--hos-text-secondary);
-  background: var(--hos-glass);
-  border: 1px solid var(--hos-border-light);
-  border-radius: 4px;
-  font-size: 12px;
-
-  &.done {
-    color: var(--hos-status-success);
-    background: var(--hos-status-success-soft);
-    border-color: rgb(22 163 74 / 18%);
-  }
-
-  &.active {
-    color: var(--hos-status-warning);
-    background: var(--hos-status-warning-soft);
-    border-color: rgb(217 119 6 / 22%);
-  }
-
-  &.skipped {
-    color: var(--hos-text-muted);
-    background: rgb(255 255 255 / 30%);
-    border-style: dashed;
-    opacity: 0.64;
-  }
-}
-
-.progress-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
-  color: var(--el-text-color-regular);
-  font-size: 12px;
-
-  strong {
-    font-weight: 600;
-  }
-
-  em {
-    color: var(--hos-text-secondary);
-    font-style: normal;
-  }
-}
-
-@media (max-width: 980px) {
-  .board-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .toolbar-actions {
-    justify-content: flex-start;
-  }
-}
+.encounter-page { display: flex; flex-direction: column; min-height: 0; gap: 12px; }
+.board-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; background: var(--hos-panel); border: 1px solid var(--hos-border); border-radius: var(--hos-radius-card); box-shadow: var(--hos-shadow-soft); }
+.board-toolbar h2, .board-toolbar p { margin: 0; }
+.board-toolbar h2 { font-size: 20px; }
+.board-toolbar p { margin-top: 5px; color: var(--el-text-color-regular); }
+.toolbar-actions, .progress-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.progress-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.summary-item { display: flex; align-items: baseline; justify-content: space-between; min-width: 0; padding: 10px 12px; color: var(--hos-text-secondary); cursor: pointer; background: var(--hos-panel); border: 1px solid var(--hos-border); border-radius: var(--hos-radius-card); }
+.summary-item strong { color: var(--hos-text-primary); font-size: 20px; font-variant-numeric: tabular-nums; }
+.summary-item.active { border-color: var(--hos-border-interactive); box-shadow: 0 0 0 2px rgb(var(--hos-primary-rgb) / 10%); }
+.progress-filters { padding: 0 2px; }
+.progress-filters :deep(.el-input), .progress-filters :deep(.el-select) { width: min(100%, 210px); }
+.kanban-board { display: grid; grid-template-columns: repeat(8, minmax(220px, 1fr)); min-height: 0; gap: 12px; overflow-x: auto; }
+.kanban-column { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); padding: 12px; overflow: hidden; background: var(--hos-glass); border: 1px solid var(--hos-border); border-radius: var(--hos-radius-card); box-shadow: var(--hos-shadow-soft); }
+.kanban-column header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; margin-bottom: 10px; font-weight: 600; }
+.kanban-column header small { grid-column: 1 / -1; color: var(--hos-text-secondary); font-size: 12px; font-weight: 400; }
+.kanban-list { display: grid; min-height: 0; gap: 8px; padding-right: 4px; overflow-y: auto; overscroll-behavior: contain; }
+.kanban-list :deep(.el-empty) { min-height: 96px; padding: 12px 0; }
+.patient-card { position: relative; display: grid; min-width: 0; gap: 7px; padding: 12px; overflow: hidden; text-align: left; cursor: pointer; background: var(--hos-panel); border: 1px solid var(--hos-border-light); border-radius: var(--hos-radius-card); }
+.patient-card::before { position: absolute; top: 0; bottom: 0; left: 0; width: 4px; content: ""; background: var(--hos-status-info); }
+.patient-card:hover, .patient-card.current { border-color: var(--hos-border-interactive); box-shadow: var(--hos-shadow-card-hover); }
+.patient-card.timeout { border-color: var(--el-color-danger-light-5); }
+.patient-card.risk-success::before { background: var(--hos-status-success); }
+.patient-card.risk-warning::before { background: var(--hos-status-warning); }
+.patient-card.risk-danger::before { background: var(--hos-status-danger); }
+.patient-card strong { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--hos-text-primary); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.patient-card span, .patient-card small { overflow: hidden; color: var(--hos-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.patient-card-head, .stay-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.patient-status-dot { width: 10px; height: 10px; flex: 0 0 auto; background: var(--hos-primary); border-radius: 999px; }
+.encounter-count, .return-note { width: fit-content; padding: 2px 8px; color: var(--hos-primary-deep) !important; background: var(--hos-primary-soft); border-radius: 999px; font-size: 12px; }
+.return-note { color: var(--el-color-danger) !important; background: var(--el-color-danger-light-9); }
+.closed-loop-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.closed-loop-progress > span { height: 8px; overflow: hidden; background: rgb(255 255 255 / 46%); border: 1px solid var(--hos-border-light); border-radius: 999px; }
+.closed-loop-progress em { display: block; height: 100%; background: var(--hos-status-info); border-radius: inherit; }
+.closed-loop-progress.risk-success em { background: var(--hos-status-success); }
+.closed-loop-progress.risk-warning em { background: var(--hos-status-warning); }
+.closed-loop-progress.risk-danger em { background: var(--hos-status-danger); }
+.closed-loop-progress small { font-size: 12px; font-variant-numeric: tabular-nums; }
+.stay-line { padding-top: 7px; border-top: 1px solid var(--hos-border-light); }
+.stay-line em { color: var(--hos-primary-deep); font-style: normal; font-weight: 600; }
+.stay-line.timeout span { color: var(--el-color-danger); font-weight: 600; }
+.progress-table-wrap { min-height: 0; overflow: auto; }
+.step-indicator { display: grid; grid-template-columns: repeat(7, minmax(34px, 1fr)); gap: 3px; }
+.step-segment { display: grid; min-height: 24px; place-items: center; color: var(--hos-text-secondary); background: var(--hos-glass); border: 1px solid var(--hos-border-light); border-radius: 4px; font-size: 12px; }
+.step-segment.done { color: var(--hos-status-success); background: var(--hos-status-success-soft); }
+.step-segment.active { color: var(--hos-status-warning); background: var(--hos-status-warning-soft); }
+.step-segment.returned { color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
+.step-segment.skipped { color: var(--hos-text-muted); border-style: dashed; opacity: 0.65; }
+.progress-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; color: var(--el-text-color-regular); font-size: 12px; }
+@media (max-width: 980px) { .board-toolbar { align-items: flex-start; flex-direction: column; } .progress-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kanban-column { max-height: calc(100vh - 380px); } }
 </style>

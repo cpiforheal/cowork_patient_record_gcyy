@@ -179,6 +179,7 @@ export interface InventoryAccountAssignment {
 
 export type InventoryMappingRuleType = "患者单次套餐" | "条件套餐" | "待核定（非固定）" | "固定运行消耗" | "按需申领";
 export type InventoryMappingStatus = "pending" | "confirmed" | "held";
+export type InventoryConsumptionScope = "PATIENT_RELATED" | "NON_PATIENT_RELATED";
 
 export interface InventoryMappingCount {
   label: string;
@@ -195,6 +196,9 @@ export interface InventoryMappingSummary {
   patientVariableConfirmed?: number;
   patientVariablePending?: number;
   nonPatient?: number;
+  patientRelated?: number;
+  nonPatientRelated?: number;
+  reviewRequired?: number;
   canCreatePackageDraft?: number;
   needsSupplement?: number;
   batchId?: string;
@@ -214,6 +218,10 @@ export interface InventoryMappingEntry {
   sourceUsage?: string;
   sourceNote?: string;
   ruleType: InventoryMappingRuleType | string;
+  consumptionScope?: InventoryConsumptionScope;
+  sourceClassification?: InventoryMappingRuleType | string;
+  reviewRequired?: boolean;
+  reviewNote?: string;
   careType?: InventoryCareType | string;
   triggerStage?: InventoryTriggerStage | string;
   condition?: string;
@@ -245,7 +253,7 @@ export interface InventoryMappingEntriesPage {
 export interface InventoryMappingEntryQueryParams {
   ruleType?: string;
   status?: string;
-  businessGroup?: "automatic" | "pending" | "nonpatient" | "";
+  businessGroup?: "automatic" | "pending" | "nonpatient" | "patient-related" | "nonpatient-related" | "review-required" | "";
   department?: string;
   keyword?: string;
   page?: number;
@@ -325,6 +333,27 @@ export interface InventoryConsumptionEvent {
   operator?: string;
   createdAt?: string;
   details?: InventoryConsumptionDetail[];
+}
+
+export interface InventoryLedgerMovement {
+  id: string;
+  itemId: string;
+  itemName: string;
+  unit?: string;
+  batchId?: string;
+  batchNo?: string;
+  expiryDate?: string;
+  fromLocationId?: string;
+  fromLocationName?: string;
+  toLocationId?: string;
+  toLocationName?: string;
+  movementType: string;
+  quantity: number;
+  departmentId?: string;
+  department?: string;
+  operator?: string;
+  reason?: string;
+  occurredAt: string;
 }
 
 export interface InventoryAuditLog {
@@ -663,6 +692,22 @@ export interface InventoryQueryParams {
   to?: string;
   patientOnly?: boolean;
 }
+
+export interface InventoryLedgerMovementQuery {
+  departmentId?: string;
+  itemId?: string;
+  movementType?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
+}
+
+type InventoryLedgerMovementPageApi = InventoryApiList<InventoryLedgerMovement> & {
+  page?: number;
+  size?: number;
+  total?: number;
+};
 
 export interface DepartmentUsageReportParams extends InventoryQueryParams {
   departmentIds?: string[];
@@ -1165,6 +1210,19 @@ export const getInventoryConsumptionsApi = async (params: InventoryQueryParams =
     params as unknown as Record<string, unknown>
   );
   return response((result.data.list || []).map(normalizeConsumption));
+};
+
+export const getInventoryLedgerMovementsApi = async (params: InventoryLedgerMovementQuery = {}) => {
+  const result = await getInventoryData<InventoryLedgerMovementPageApi>(
+    "/ledger-movements",
+    params as unknown as Record<string, unknown>
+  );
+  return response({
+    page: result.data.page || 1,
+    size: result.data.size || params.size || 50,
+    total: result.data.total || 0,
+    list: result.data.list || []
+  });
 };
 
 const downloadInventoryFile = async (path: string, fallback: string): Promise<InventoryReportDownload> => {

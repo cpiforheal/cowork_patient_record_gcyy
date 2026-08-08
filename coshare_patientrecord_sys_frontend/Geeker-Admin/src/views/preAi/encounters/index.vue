@@ -8,6 +8,7 @@
       </div>
       <div class="hero-actions">
         <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>
+        <el-button v-if="workspace" @click="openResponsibilityTimeline">责任时间轴</el-button>
         <el-button v-if="workspace?.admissionProfile" @click="openAdmissionProfile">住院补录</el-button>
         <el-button v-if="canImportLegacy" :icon="FolderOpened" @click="openLegacyDialog">导入进行中的旧患者</el-button>
         <el-button v-if="canCreateEncounter" type="primary" :icon="Plus" @click="openCreateDialog">就诊登记并发号</el-button>
@@ -54,17 +55,22 @@
             <el-button link type="primary" @click="patientDrawerOpen = false">收起</el-button>
           </div>
           <el-input v-model="keyword" clearable placeholder="姓名/病例标识" :prefix-icon="Search" />
+          <el-select v-model="careSituationFilter" class="care-situation-filter" aria-label="就诊情况筛选">
+            <el-option label="全部就诊情况" value="ALL" />
+            <el-option label="门诊" value="OUTPATIENT" />
+            <el-option label="住院" value="INPATIENT" />
+            <el-option label="低保" value="LOW_INCOME" />
+          </el-select>
         </div>
         <el-scrollbar height="calc(100vh - 285px)">
-          <button
+          <article
             v-for="item in filteredPatientCases"
             :key="item.id"
-            type="button"
-            class="encounter-card"
+            class="encounter-row"
             :class="{ active: item.id === selectedPatientCaseId }"
-            @click="selectPatientCase(item)"
           >
-            <div class="encounter-card__head">
+            <button type="button" class="encounter-row-main" @click="selectPatientCase(item)">
+            <div class="encounter-row__head">
               <strong>{{ item.patientName || "待补姓名" }}</strong>
               <el-tag v-if="item.latestEncounter" size="small" :type="encounterStatusType(item.latestEncounter.status)">
                 {{ item.visitCount }} 次来访
@@ -72,6 +78,11 @@
             </div>
             <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
             <small>{{ item.latestEncounter?.visitDate || "待补就诊时间" }} · {{ routeLabel(item.latestEncounter?.route) }}</small>
+            <div v-if="item.latestEncounter?.careSituationTags" class="encounter-card__care-tags">
+              <el-tag v-for="tag in item.latestEncounter.careSituationTags.split(',')" :key="tag" size="small" effect="plain">{{
+                tag
+              }}</el-tag>
+            </div>
             <div v-if="item.latestEncounter" class="mini-steps">
               <i
                 v-for="stage in preAiStages"
@@ -80,8 +91,16 @@
                 :class="stageStatusClass(item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT')"
               ></i>
             </div>
-            <el-button v-if="canCreateEncounter" link type="primary" @click.stop="openFollowUpDialog(item)">新增复诊</el-button>
-          </button>
+            </button>
+            <button
+              v-if="canCreateEncounter"
+              type="button"
+              class="encounter-row-followup"
+              @click.stop="openFollowUpDialog(item)"
+            >
+              新增复诊
+            </button>
+          </article>
           <el-empty v-if="!filteredPatientCases.length" :image-size="72" description="暂无患者主档案" />
         </el-scrollbar>
       </aside>
@@ -373,7 +392,7 @@
                         :key="field.key"
                         :label="field.label"
                         :required="field.required"
-                        :class="{ 'span-2': field.span === 2 }"
+                        :class="{ 'span-2': field.span === 2, 'priority-field': field.emphasis === 'priority' }"
                       >
                         <StructuredField
                           v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
@@ -391,21 +410,37 @@
                           :type="field.kind === 'number' ? 'number' : 'text'"
                           :placeholder="field.placeholder"
                           :disabled="isStageFieldDisabled(field)"
+                          @update:model-value="markStageDirty(selectedStageCode)"
                         />
-                        <el-input
-                          v-else-if="field.kind === 'textarea'"
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          type="textarea"
-                          :rows="field.rows || 3"
-                          :placeholder="field.placeholder"
-                          :disabled="isStageFieldDisabled(field)"
-                        />
+                        <div v-else-if="field.kind === 'textarea'" class="textarea-field">
+                          <div v-if="field.quickTemplates?.length" class="quick-template-actions">
+                            <el-button
+                              v-for="template in field.quickTemplates"
+                              :key="template.label"
+                              size="small"
+                              plain
+                              :disabled="isStageFieldDisabled(field)"
+                              @click="applyQuickTemplate(field.key, template.value)"
+                            >
+                              {{ template.label }}
+                            </el-button>
+                          </div>
+                          <el-input
+                            v-model="stageForms[selectedStageCode][field.key]"
+                            type="textarea"
+                            :rows="field.rows || 3"
+                            :placeholder="field.placeholder"
+                            :disabled="isStageFieldDisabled(field)"
+                            @update:model-value="markStageDirty(selectedStageCode)"
+                          />
+                        </div>
                         <CreatableSelect
                           v-else-if="field.kind === 'select' && field.creatable"
                           v-model="stageForms[selectedStageCode][field.key]"
                           :options="fieldOptions(field)"
                           :placeholder="field.placeholder || `请选择或直接输入${field.label}`"
                           :disabled="isStageFieldDisabled(field)"
+                          @update:model-value="markStageDirty(selectedStageCode)"
                         />
                         <el-select
                           v-else-if="field.kind === 'select'"
@@ -415,6 +450,7 @@
                           default-first-option
                           :placeholder="field.placeholder || `请选择${field.label}`"
                           :disabled="isStageFieldDisabled(field)"
+                          @update:model-value="markStageDirty(selectedStageCode)"
                         >
                           <el-option
                             v-for="option in fieldOptions(field)"
@@ -433,6 +469,7 @@
                           default-first-option
                           :placeholder="field.placeholder || `请选择或输入${field.label}`"
                           :disabled="isStageFieldDisabled(field)"
+                          @update:model-value="markStageDirty(selectedStageCode)"
                         >
                           <el-option
                             v-for="option in fieldOptions(field)"
@@ -448,6 +485,7 @@
                           :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
                           :placeholder="`请选择${field.label}`"
                           :disabled="isStageFieldDisabled(field)"
+                          @update:model-value="markStageDirty(selectedStageCode)"
                         />
                       </el-form-item>
                     </div>
@@ -539,6 +577,14 @@
                       >完成并交接</el-button
                     >
                     <el-button
+                      v-if="canTerminateReception"
+                      type="danger"
+                      plain
+                      :loading="actionLoading"
+                      @click="terminateReception"
+                      >患者离院（不治疗）</el-button
+                    >
+                    <el-button
                       v-if="canPhysicianConfirmSelectedSurgery"
                       type="primary"
                       :loading="actionLoading"
@@ -589,11 +635,12 @@
                   :permissions="authStore.auxiliaryPermissions"
                   :current-user-id="currentUserId"
                   :current-user-name="currentUserName"
-                  :loading="actionLoading"
-                  :can-return="canReview"
-                  @updated="hydrateWorkspace"
-                  @return-task="returnAuxTask"
-                />
+                :loading="actionLoading"
+                :can-return="canReview"
+                @updated="hydrateWorkspace"
+                @return-task="returnAuxTask"
+                @draft-change="auxiliaryTasksDirty = $event"
+              />
                 <LabReportPanel
                   v-model:active-report-id="activeLabReportId"
                   :workspace="workspace"
@@ -955,26 +1002,58 @@
 
     <el-dialog v-model="admissionProfileDialogVisible" title="护士住院资料补录" width="760px" destroy-on-close>
       <el-alert
-        :title="admissionProfile?.status === 'COMPLETED' ? '住院资料已完成；再次保存将回到待补录状态。' : '仅医生确认住院后创建；患者改回门诊时任务会关闭，已填写资料不会删除。'"
+        :title="
+          admissionProfile?.status === 'COMPLETED'
+            ? '住院资料已完成；再次保存将回到待补录状态。'
+            : '仅医生确认住院后创建；患者改回门诊时任务会关闭，已填写资料不会删除。'
+        "
         type="info"
         :closable="false"
         show-icon
       />
       <el-form label-position="top" class="form-grid dialog-grid admission-profile-form">
-        <el-form-item label="联系人姓名"><el-input v-model="admissionProfileForm.contactName" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="联系人电话"><el-input v-model="admissionProfileForm.contactPhone" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="联系人关系"><el-input v-model="admissionProfileForm.contactRelation" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="籍贯"><el-input v-model="admissionProfileForm.nativePlace" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="出生地"><el-input v-model="admissionProfileForm.birthplace" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="婚姻状态"><el-input v-model="admissionProfileForm.maritalStatus" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="参保险种"><el-input v-model="admissionProfileForm.insuranceType" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="付费方式"><el-input v-model="admissionProfileForm.paymentMethod" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="病案号"><el-input v-model="admissionProfileForm.medicalRecordNo" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="住院号"><el-input v-model="admissionProfileForm.inpatientNo" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="病区"><el-input v-model="admissionProfileForm.ward" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="床号"><el-input v-model="admissionProfileForm.bedNo" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="第几次入院"><el-input v-model="admissionProfileForm.admissionCount" :disabled="!canEditAdmissionProfile" /></el-form-item>
-        <el-form-item label="入院方式"><el-input v-model="admissionProfileForm.admissionMethod" :disabled="!canEditAdmissionProfile" /></el-form-item>
+        <el-form-item label="联系人姓名"
+          ><el-input v-model="admissionProfileForm.contactName" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="联系人电话"
+          ><el-input v-model="admissionProfileForm.contactPhone" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="联系人关系"
+          ><el-input v-model="admissionProfileForm.contactRelation" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="籍贯"
+          ><el-input v-model="admissionProfileForm.nativePlace" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="出生地"
+          ><el-input v-model="admissionProfileForm.birthplace" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="婚姻状态"
+          ><el-input v-model="admissionProfileForm.maritalStatus" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="参保险种"
+          ><el-input v-model="admissionProfileForm.insuranceType" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="付费方式"
+          ><el-input v-model="admissionProfileForm.paymentMethod" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="病案号"
+          ><el-input v-model="admissionProfileForm.medicalRecordNo" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="住院号"
+          ><el-input v-model="admissionProfileForm.inpatientNo" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="病区"
+          ><el-input v-model="admissionProfileForm.ward" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="床号"
+          ><el-input v-model="admissionProfileForm.bedNo" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="第几次入院"
+          ><el-input v-model="admissionProfileForm.admissionCount" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
+        <el-form-item label="入院方式"
+          ><el-input v-model="admissionProfileForm.admissionMethod" :disabled="!canEditAdmissionProfile"
+        /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="admissionProfileDialogVisible = false">关闭</el-button>
@@ -984,6 +1063,38 @@
         </template>
       </template>
     </el-dialog>
+    <el-drawer v-model="responsibilityTimelineVisible" title="责任时间轴" size="480px">
+      <el-alert type="info" :closable="false" show-icon title="按实际提交顺序展示；历史记录未留存账号信息时会明确标注。" />
+      <el-timeline v-loading="responsibilityTimelineLoading" class="responsibility-timeline">
+        <el-timeline-item
+          v-for="group in responsibilityTimelineGroups"
+          :key="group.id"
+          :timestamp="group.firstAt"
+          placement="top"
+        >
+          <strong>{{ group.operatorLabel }}</strong>
+          <p>
+            {{ group.actionLabels.join("、") }} · {{ group.events.length }} 次操作
+            <template v-if="group.events.length > 1">（{{ group.firstAt }} - {{ group.lastAt }}）</template>
+          </p>
+          <small>
+            {{ group.events[group.events.length - 1]?.operator || "历史记录未留存账号信息" }}
+            <template v-if="group.department"> · {{ group.department }}</template>
+          </small>
+          <details v-if="group.events.length > 1" class="responsibility-group-details">
+            <summary>展开操作明细</summary>
+            <ul>
+              <li v-for="event in group.events" :key="event.id">
+                <span>{{ event.submittedAt || event.occurredAt || event.createdAt }}</span>
+                <strong>{{ responsibilityActionLabel(event.action) }}</strong>
+                <em>{{ event.detail || "无补充说明" }}</em>
+              </li>
+            </ul>
+          </details>
+        </el-timeline-item>
+        <el-empty v-if="!responsibilityTimelineLoading && !responsibilityTimeline.length" description="暂无责任操作记录" />
+      </el-timeline>
+    </el-drawer>
   </div>
 </template>
 
@@ -993,7 +1104,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
-import { useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { roleLabel } from "@/config/fieldPermissions";
 import {
   deleteMedicalRecordApi,
@@ -1029,6 +1140,7 @@ import {
   getPreAiAttachmentObjectUrlApi,
   getPreAiEncounterHistoryApi,
   getPreAiInspectionTimelineApi,
+  getPreAiResponsibilityTimelineApi,
   getPreAiPatientCasesApi,
   getPatientListApi,
   getPreAiReviewPreviewApi,
@@ -1040,6 +1152,7 @@ import {
   savePreAiDutyAssignmentsApi,
   savePreAiAdmissionProfileApi,
   savePreAiStageApi,
+  terminatePreAiReceptionApi,
   uploadPreAiAttachmentApi,
   voidPreAiAttachmentApi,
   type PatientRow,
@@ -1047,6 +1160,7 @@ import {
   type InspectionTimelineNode,
   type PreAiAttachment,
   type PreAiAdmissionProfile,
+  type PreAiAuditLog,
   type PreAiDutyAssignment,
   type PreAiDutyCode,
   type PreAiEncounterStatus,
@@ -1126,6 +1240,7 @@ const canConfirmSurgery = computed(() => hasCapability("preai:surgery:confirm") 
 const encounters = ref<PreAiEncounterSummary[]>([]);
 const patientCases = ref<PreAiPatientCase[]>([]);
 const keyword = ref("");
+const careSituationFilter = ref<"ALL" | "OUTPATIENT" | "INPATIENT" | "LOW_INCOME">("ALL");
 const selectedPatientCaseId = ref("");
 const patientDrawerOpen = ref(false);
 const selectedEncounterId = ref("");
@@ -1179,6 +1294,68 @@ const editorMode = ref<"EDIT" | "PREVIEW">("EDIT");
 const inspectionView = ref<"CURRENT" | "HISTORY">("CURRENT");
 const inspectionTimeline = ref<InspectionTimelineNode[]>([]);
 const timelineLoading = ref(false);
+const responsibilityTimelineVisible = ref(false);
+const responsibilityTimelineLoading = ref(false);
+const responsibilityTimeline = ref<PreAiAuditLog[]>([]);
+const responsibilityActionLabel = (action: string) =>
+  (
+    ({
+      "encounter.create": "创建病历",
+      "registration.complete-and-issue": "登记并发号",
+      "encounter.followup.register-and-issue": "复诊登记并发号",
+      "stage.save": "保存阶段草稿",
+      "stage.complete": "完成并交接阶段",
+      "stage.correct": "纠错并重新提交",
+      "stage.return": "退回阶段",
+      "attachment.upload": "上传附件",
+      "attachment.void": "作废附件",
+      "lab.report.save": "保存化验报告",
+      "lab.complete": "确认化验完成",
+      "review.confirm": "完成病历复核",
+      "export.generate": "生成病历导出",
+      "admission-profile.save": "保存住院补录",
+      "admission-profile.complete": "完成住院补录"
+    }) as Record<string, string>
+  )[action] || action;
+type ResponsibilityTimelineGroup = {
+  id: string;
+  roleKey: string;
+  operatorLabel: string;
+  department: string;
+  firstAt: string;
+  lastAt: string;
+  actionLabels: string[];
+  events: PreAiAuditLog[];
+};
+const responsibilityEventTime = (event: PreAiAuditLog) => event.submittedAt || event.occurredAt || event.createdAt || "";
+const responsibilityTimelineGroups = computed<ResponsibilityTimelineGroup[]>(() => {
+  const groups: ResponsibilityTimelineGroup[] = [];
+  responsibilityTimeline.value.forEach(event => {
+    const department = event.operatorDepartment || "";
+    const roleKey = `${event.operatorRole || "UNKNOWN"}|${department}`;
+    const operatorLabel = event.operatorRole ? roleLabel(event.operatorRole) : department || "历史操作";
+    const timestamp = responsibilityEventTime(event);
+    const previous = groups[groups.length - 1];
+    if (!previous || previous.roleKey !== roleKey) {
+      groups.push({
+        id: `${event.id}-${roleKey}`,
+        roleKey,
+        operatorLabel,
+        department,
+        firstAt: timestamp,
+        lastAt: timestamp,
+        actionLabels: [responsibilityActionLabel(event.action)],
+        events: [event]
+      });
+      return;
+    }
+    previous.events.push(event);
+    previous.lastAt = timestamp || previous.lastAt;
+    const actionLabel = responsibilityActionLabel(event.action);
+    if (!previous.actionLabels.includes(actionLabel)) previous.actionLabels.push(actionLabel);
+  });
+  return groups;
+});
 const inspectionTimelineEntries = (inspection: Record<string, any>) =>
   nonEmptyEntries(inspection).filter(([key]) => key !== "nextReviewAt" && key !== "nextReviewNote");
 const workspaceImageUrls = reactive<Record<string, string>>({});
@@ -1191,7 +1368,16 @@ const stageForms = reactive<Record<PreAiStageCode, Record<string, any>>>({
   SURGERY: {},
   REVIEW: {}
 });
-const auxForms = reactive<Record<string, { title: string; requiredBeforeExport: boolean; data: Record<string, any> }>>({});
+const stageDirty = reactive<Record<PreAiStageCode, boolean>>({
+  REGISTRATION: false,
+  INSPECTION: false,
+  RECEPTION: false,
+  TCM: false,
+  DOCTOR: false,
+  SURGERY: false,
+  REVIEW: false
+});
+const auxiliaryTasksDirty = ref(false);
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
@@ -1264,6 +1450,20 @@ const patchCreateForm = (key: string, value: any) => {
   createForm[key] = value;
 };
 
+const openResponsibilityTimeline = async () => {
+  if (!selectedEncounterId.value) return;
+  responsibilityTimelineVisible.value = true;
+  responsibilityTimelineLoading.value = true;
+  try {
+    const { data } = await getPreAiResponsibilityTimelineApi(selectedEncounterId.value);
+    responsibilityTimeline.value = data.events || [];
+  } catch (error: any) {
+    ElMessage.error(error.message || "责任时间轴加载失败");
+  } finally {
+    responsibilityTimelineLoading.value = false;
+  }
+};
+
 const openAdmissionProfile = () => {
   const profile = admissionProfile.value;
   if (!profile) return;
@@ -1276,7 +1476,12 @@ const saveAdmissionProfile = (complete: boolean) => {
   const profile = admissionProfile.value;
   if (!profile || !selectedEncounterId.value) return;
   runAction(async () => {
-    const { data } = await savePreAiAdmissionProfileApi(selectedEncounterId.value, admissionProfileForm, profile.version, complete);
+    const { data } = await savePreAiAdmissionProfileApi(
+      selectedEncounterId.value,
+      admissionProfileForm,
+      profile.version,
+      complete
+    );
     hydrateWorkspace(data);
     admissionProfileDialogVisible.value = false;
     ElMessage.success(complete ? "住院资料补录已完成" : "住院资料草稿已保存");
@@ -1298,10 +1503,17 @@ const followUpForm = reactive<Record<string, any>>({
 
 const filteredPatientCases = computed(() => {
   const value = keyword.value.trim().toLowerCase();
-  if (!value) return patientCases.value;
-  return patientCases.value.filter(item =>
-    `${item.patientName} ${item.latestEncounter?.caseToken || ""}`.toLowerCase().includes(value)
-  );
+  return patientCases.value.filter(item => {
+    const tags = item.latestEncounter?.careSituationTags || "";
+    const matchesSituation =
+      careSituationFilter.value === "ALL" ||
+      (careSituationFilter.value === "OUTPATIENT" && tags.includes("门诊")) ||
+      (careSituationFilter.value === "INPATIENT" && tags.includes("住院")) ||
+      (careSituationFilter.value === "LOW_INCOME" && tags.includes("低保"));
+    return (
+      matchesSituation && (!value || `${item.patientName} ${item.latestEncounter?.caseToken || ""}`.toLowerCase().includes(value))
+    );
+  });
 });
 const selectedPatientCase = computed(() => patientCases.value.find(item => item.id === selectedPatientCaseId.value));
 const canHandleStage = (stageCode: PreAiStageCode, ...duties: PreAiDutyCode[]) =>
@@ -1323,7 +1535,7 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "INSPECTION",
     title: "检查室",
     owner: "检查室",
-    editable: canHandleStage("INSPECTION", "INSPECTION_DOCTOR")
+    editable: canHandleStage("INSPECTION", "INSPECTION_DOCTOR", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR")
   },
   {
     key: "RECEPTION",
@@ -1332,14 +1544,14 @@ const workflowCards = computed<WorkflowCard[]>(() => [
     stageCode: "RECEPTION",
     title: "接诊评估",
     owner: "接诊室",
-    editable: canHandleStage("RECEPTION", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR")
+    editable: canHandleStage("RECEPTION", "RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR")
   },
   {
     key: "AUX",
     order: 4,
     kind: "AUX",
-    title: "化验室",
-    owner: "检验报告模板填写与交接",
+    title: "化验等辅助检查",
+    owner: "检验报告、心电、影像与其他辅助检查",
     editable: canOpenLabWorkbench.value
   },
   {
@@ -1402,15 +1614,15 @@ const registrationFields = computed(() => stageByCode("REGISTRATION").fields.fil
 const labTask = computed(() => workspace.value?.auxiliaryTasks.find(task => task.taskType === "LAB"));
 const legacyAuxiliaryTasks = computed(() => workspace.value?.auxiliaryTasks.filter(task => task.taskType !== "LAB") || []);
 const activeWorkflowTitle = computed(() =>
-  selectedPanel.value === "AUX" ? "化验室检验报告" : stageByCode(selectedStageCode.value).title
+  selectedPanel.value === "AUX" ? "化验等辅助检查" : stageByCode(selectedStageCode.value).title
 );
 const activeWorkflowOwner = computed(() =>
-  selectedPanel.value === "AUX" ? "责任岗位：化验室" : `责任岗位：${stageByCode(selectedStageCode.value).owner}`
+  selectedPanel.value === "AUX" ? "责任岗位：化验等辅助检查" : `责任岗位：${stageByCode(selectedStageCode.value).owner}`
 );
 const stageDutyCodes: Partial<Record<PreAiStageCode, PreAiDutyCode[]>> = {
   REGISTRATION: ["FRONT_DESK"],
-  INSPECTION: ["INSPECTION_DOCTOR"],
-  RECEPTION: ["RECEPTION_DOCTOR", "ATTENDING_DOCTOR"],
+  INSPECTION: ["INSPECTION_DOCTOR", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR"],
+  RECEPTION: ["RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR"],
   TCM: ["TCM_DOCTOR"],
   DOCTOR: ["ATTENDING_DOCTOR"],
   SURGERY: ["SURGEON", "OPERATING_ROOM_NURSE"],
@@ -1418,6 +1630,7 @@ const stageDutyCodes: Partial<Record<PreAiStageCode, PreAiDutyCode[]>> = {
 };
 const canEditSelectedStage = computed(() => {
   if (!workspace.value || selectedStageCode.value === "REVIEW") return false;
+  if (workspace.value.encounter.status === "CANCELLED") return false;
   const submission = selectedStageSubmission.value;
   const roleAllowed = Boolean(authStore.stagePermissions[selectedStageCode.value]?.editable);
   const dutyAllowed = hasAssignedDuty(...(stageDutyCodes[selectedStageCode.value] || []));
@@ -1433,11 +1646,18 @@ const canPhysicianConfirmSelectedSurgery = computed(
 );
 const canCorrectSelectedStage = computed(
   () =>
+    workspace.value?.encounter.status !== "CANCELLED" &&
     Boolean(authStore.stagePermissions[selectedStageCode.value]?.correctable) &&
     ["COMPLETED", "SKIPPED"].includes(selectedStageSubmission.value?.status || "") &&
     selectedStageCode.value !== "REVIEW"
 );
 const canModifySelectedStage = computed(() => canEditSelectedStage.value || canCorrectSelectedStage.value);
+const canTerminateReception = computed(
+  () =>
+    selectedStageCode.value === "RECEPTION" &&
+    canEditSelectedStage.value &&
+    ["admin", "inspection", "reception", "doctor"].includes(currentRole.value)
+);
 const canReturnSelectedStage = computed(
   () =>
     canReview.value &&
@@ -1453,8 +1673,18 @@ const upstreamStages = computed(() => {
   });
 });
 const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
-  REGISTRATION: ["patientName", "gender", "age", "visitDate", "visitPurpose", "patientSource", "registrationChiefComplaint", "registrationPastHistory", "registrationCurrentIllness"],
-  INSPECTION: ["diseaseDirections", "examinationTypes", "factualConclusion"],
+  REGISTRATION: [
+    "patientName",
+    "gender",
+    "age",
+    "visitDate",
+    "visitPurpose",
+    "patientSource",
+    "registrationChiefComplaint",
+    "registrationPastHistory",
+    "registrationCurrentIllness"
+  ],
+  INSPECTION: ["diseaseDirections", "examinationTypes", "preliminaryDiagnosis", "factualConclusion"],
   RECEPTION: ["chiefComplaint", "presentIllness", "physicalExam"],
   TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],
   DOCTOR: ["primaryWesternDiagnosis", "treatmentPath", "treatmentPlan"],
@@ -1587,7 +1817,25 @@ const templateSourceHash = (field: PreAiFieldConfig) => {
   if (field.kind !== "template-text" || !field.sourceHashKey) return "";
   return selectedStageTemplateSourceHash.value;
 };
-const patchStageForm = (code: PreAiStageCode, value: Record<string, any>) => Object.assign(stageForms[code], value);
+const markStageDirty = (code: PreAiStageCode) => {
+  stageDirty[code] = true;
+};
+const clearStageDirty = (code: PreAiStageCode) => {
+  stageDirty[code] = false;
+};
+const clearAllStageDirty = () => {
+  (Object.keys(stageDirty) as PreAiStageCode[]).forEach(code => clearStageDirty(code));
+};
+const hasUnsavedStageDrafts = computed(() => Object.values(stageDirty).some(Boolean));
+const hasUnsavedDrafts = computed(() => hasUnsavedStageDrafts.value || auxiliaryTasksDirty.value);
+const patchStageForm = (code: PreAiStageCode, value: Record<string, any>) => {
+  Object.assign(stageForms[code], value);
+  markStageDirty(code);
+};
+const applyQuickTemplate = (fieldKey: string, value: string) => {
+  stageForms[selectedStageCode.value][fieldKey] = value;
+  markStageDirty(selectedStageCode.value);
+};
 const isStageFieldDisabled = (field: PreAiFieldConfig) =>
   !canModifySelectedStage.value ||
   (selectedStageCode.value === "SURGERY" && field.key === "physicianConfirmed" && !canConfirmSurgery.value);
@@ -1754,6 +2002,11 @@ const cancelReviewRequest = () => {
 };
 
 const hydrateWorkspace = (value: PreAiWorkspace) => {
+  const switchedEncounter = workspace.value?.encounter.id !== value.encounter.id;
+  if (switchedEncounter) {
+    clearAllStageDirty();
+    auxiliaryTasksDirty.value = false;
+  }
   const keepInspectionImagesVisible =
     workspace.value?.encounter.id === value.encounter.id &&
     (editorMode.value === "PREVIEW" ||
@@ -1796,16 +2049,10 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
         normalized[field.key] = normalized[field.overrideKey];
       }
     });
-    Object.keys(stageForms[stage.stageCode]).forEach(key => delete stageForms[stage.stageCode][key]);
-    Object.assign(stageForms[stage.stageCode], normalized);
-  });
-  Object.keys(auxForms).forEach(key => delete auxForms[key]);
-  value.auxiliaryTasks.forEach(task => {
-    auxForms[task.id] = {
-      title: task.title,
-      requiredBeforeExport: task.requiredBeforeExport,
-      data: deepCopy(task.data)
-    };
+    if (!stageDirty[stage.stageCode]) {
+      Object.keys(stageForms[stage.stageCode]).forEach(key => delete stageForms[stage.stageCode][key]);
+      Object.assign(stageForms[stage.stageCode], normalized);
+    }
   });
   if (!value.labReports.some(report => report.id === activeLabReportId.value)) {
     activeLabReportId.value = value.labReports[0]?.id || "";
@@ -1915,6 +2162,17 @@ const openHistoricalComparison = async () => {
 const selectEncounter = async (id: string, preserveView = false) => {
   if (!preserveView && id === selectedEncounterId.value && workspace.value?.encounter.id === id && !workspaceLoading.value)
     return;
+  if (id !== selectedEncounterId.value && hasUnsavedDrafts.value) {
+    try {
+      await ElMessageBox.confirm("当前病例有未保存的填写内容，切换后将不再保留。", "确认切换病例", {
+        type: "warning",
+        confirmButtonText: "放弃并切换",
+        cancelButtonText: "继续填写"
+      });
+    } catch {
+      return;
+    }
+  }
 
   const requestSequence = ++workspaceRequestSequence;
   workspaceAbortController?.abort();
@@ -1988,10 +2246,15 @@ const refreshWorkspace = async () => {
 };
 
 const selectPatientCase = async (patientCase: PreAiPatientCase) => {
+  if (!patientCase.latestEncounter) {
+    selectedPatientCaseId.value = patientCase.id;
+    patientDrawerOpen.value = false;
+    return;
+  }
+  await selectEncounter(patientCase.latestEncounter.id);
+  if (selectedEncounterId.value !== patientCase.latestEncounter.id) return;
   selectedPatientCaseId.value = patientCase.id;
   patientDrawerOpen.value = false;
-  if (!patientCase.latestEncounter) return;
-  await selectEncounter(patientCase.latestEncounter.id);
 };
 
 const togglePatientDrawer = () => {
@@ -2205,6 +2468,7 @@ const saveSelectedStage = async () =>
       cleanStageForm(selectedStageCode.value),
       stageSubmission(selectedStageCode.value)?.version ?? 0
     );
+    clearStageDirty(selectedStageCode.value);
     hydrateWorkspace(data);
     ElMessage.success("阶段草稿已保存");
   });
@@ -2230,6 +2494,7 @@ const correctSelectedStage = async () => {
         stageSubmission(selectedStageCode.value)?.version ?? 0,
         value.trim()
       );
+      clearStageDirty(selectedStageCode.value);
       hydrateWorkspace(data);
       await loadEncounterList();
       ElMessage.success("纠错已保存，病例已转为待重新复核");
@@ -2247,6 +2512,7 @@ const completeSelectedStage = async () =>
       cleanStageForm(selectedStageCode.value),
       stageSubmission(selectedStageCode.value)?.version ?? 0
     );
+    clearStageDirty(selectedStageCode.value);
     hydrateWorkspace(data);
     await loadEncounterList();
     if (data.queueHandoff?.nextStage === "RECEPTION") {
@@ -2259,6 +2525,36 @@ const completeSelectedStage = async () =>
       ElMessage.success("本阶段已完成并交接");
     }
   });
+
+const terminateReception = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "将保留当前已填写的接诊内容，立即关闭排队与后续流转；此操作仅适用于患者明确离院且不继续治疗。",
+      "患者离院（不治疗）",
+      {
+        inputType: "textarea",
+        inputPlaceholder: "请填写离院或不治疗原因",
+        inputPattern: /\S+/,
+        inputErrorMessage: "离院原因不能为空",
+        confirmButtonText: "确认离院并终止流程",
+        cancelButtonText: "继续接诊"
+      }
+    );
+    await runAction(async () => {
+      const { data } = await terminatePreAiReceptionApi(
+        selectedEncounterId.value,
+        cleanStageForm("RECEPTION"),
+        stageSubmission("RECEPTION")?.version ?? 0,
+        value.trim()
+      );
+      hydrateWorkspace(data);
+      await loadEncounterList();
+      ElMessage.success("患者已离院，后续流程已终止；本次接诊记录已保留供回查");
+    });
+  } catch (error: any) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(error.message || "办理离院失败");
+  }
+};
 
 const confirmSelectedSurgery = async () =>
   runAction(async () => {
@@ -2401,7 +2697,7 @@ const completeLab = async () =>
     const { data } = await completePreAiLabApi(selectedEncounterId.value, labTask.value?.version ?? 0);
     hydrateWorkspace(data);
     await loadEncounterList();
-    ElMessage.success("化验室已完成并交接");
+    ElMessage.success("化验检验报告已完成并交接");
   });
 
 const returnAuxTask = async (taskId: string) => {
@@ -2427,7 +2723,6 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
   const files = Array.from(input.files || []);
   if (!files.length) return;
   const encounterId = selectedEncounterId.value;
-  const stageDraft = stageCode ? deepCopy(stageForms[stageCode]) : undefined;
   const timestamp = Date.now();
   const folderName = files[0]?.webkitRelativePath?.split("/")[0] || "";
   const batchId = `pre-att-${timestamp}`;
@@ -2471,10 +2766,6 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
     const { data } = await getPreAiWorkspaceApi(encounterId);
     if (selectedEncounterId.value === encounterId) {
       hydrateWorkspace(data);
-      if (stageCode && stageDraft) {
-        Object.keys(stageForms[stageCode]).forEach(key => delete stageForms[stageCode][key]);
-        Object.assign(stageForms[stageCode], stageDraft);
-      }
     }
     if (attachmentUpload.success) ElMessage.success(`已上传 ${attachmentUpload.success} 个附件；外部 DOCX 不会包含原图`);
     if (attachmentUpload.failed) ElMessage.warning(`${attachmentUpload.failed} 个文件因格式、大小或上传异常未成功`);
@@ -2933,7 +3224,8 @@ const runAction = async (action: () => Promise<void>) => {
   try {
     await action();
   } catch (error: any) {
-    ElMessage.error(error.message || "操作失败");
+    const message = error.message || "操作失败";
+    ElMessage.error(/版本|冲突|version|conflict/i.test(message) ? "远端数据已更新，未覆盖本地草稿，请核对后重新保存" : message);
   } finally {
     actionLoading.value = false;
   }
@@ -2956,6 +3248,17 @@ const cleanupTransientResources = () => {
   historyRequestSequence += 1;
   historyLoading.value = false;
 };
+
+const beforeUnloadWithUnsavedDrafts = (event: BeforeUnloadEvent) => {
+  if (!hasUnsavedDrafts.value) return;
+  event.preventDefault();
+  event.returnValue = "";
+};
+
+onBeforeRouteLeave(() => {
+  if (!hasUnsavedDrafts.value) return true;
+  return window.confirm("当前病例有未保存的填写内容，离开后将不再保留。确定离开吗？");
+});
 
 const refreshActiveWorkspace = async () => {
   const encounterId = selectedEncounterId.value;
@@ -2980,6 +3283,7 @@ onMounted(() => {
   }
   void loadEncounterList();
   window.addEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);
+  window.addEventListener("beforeunload", beforeUnloadWithUnsavedDrafts);
 });
 onActivated(async () => {
   if (!workspace.value) return;
@@ -3015,6 +3319,7 @@ onDeactivated(cleanupTransientResources);
 onBeforeUnmount(cleanupTransientResources);
 onBeforeUnmount(() => {
   window.removeEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);
+  window.removeEventListener("beforeunload", beforeUnloadWithUnsavedDrafts);
   if (queueUpdateRefreshTimer) clearTimeout(queueUpdateRefreshTimer);
   stopHistoryPointerResize?.();
   historyResizeObserver?.disconnect();
@@ -3382,6 +3687,9 @@ onBeforeUnmount(() => {
   gap: 10px;
   margin-bottom: 12px;
 }
+.care-situation-filter {
+  width: 100%;
+}
 .sidebar-title__head {
   display: flex;
   align-items: center;
@@ -3394,39 +3702,64 @@ onBeforeUnmount(() => {
 .sidebar-title strong {
   font-size: 17px;
 }
-.encounter-card {
+.encounter-row {
   width: 100%;
   display: grid;
-  gap: 7px;
-  margin-bottom: 9px;
-  padding: 13px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  margin-bottom: 4px;
+  padding: 6px;
   text-align: left;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
-  background: var(--el-fill-color-blank);
-  cursor: pointer;
-  transition: 0.2s;
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
 }
-.encounter-card:hover,
-.encounter-card.active {
+.encounter-row:hover,
+.encounter-row.active {
   border-color: var(--el-color-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgb(64 158 255 / 12%);
+  background: var(--el-color-primary-light-9);
 }
-.encounter-card.active {
-  background: color-mix(in srgb, var(--el-color-primary) 6%, var(--el-bg-color));
+.encounter-row.active {
+  border-left-color: var(--el-color-primary);
 }
-.encounter-card__head {
+.encounter-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.encounter-row-main:focus-visible,
+.encounter-row-followup:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
+}
+.encounter-row__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
 }
-.encounter-card span {
+.encounter-row span {
   color: var(--el-text-color-regular);
 }
-.encounter-card small {
+.encounter-row small {
   color: var(--el-text-color-secondary);
+}
+.encounter-row-followup {
+  align-self: end;
+  padding: 3px 5px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 .mini-steps {
   display: grid;
@@ -3716,6 +4049,81 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 18px;
   margin-top: 14px;
+}
+.encounter-card__care-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.responsibility-timeline {
+  --el-timeline-node-color: var(--el-color-primary-light-7);
+  margin-top: 18px;
+}
+.responsibility-timeline :deep(.el-timeline-item) {
+  padding-bottom: 14px;
+}
+.responsibility-timeline :deep(.el-timeline-item__tail) {
+  border-left-color: var(--el-color-primary-light-7);
+}
+.responsibility-timeline :deep(.el-timeline-item__node) {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary);
+  box-shadow: 0 0 0 3px var(--el-color-primary-light-9);
+}
+.responsibility-timeline :deep(.el-timeline-item__timestamp) {
+  margin-bottom: 6px;
+  color: var(--el-color-primary-dark-2);
+  font-weight: 600;
+}
+.responsibility-timeline :deep(.el-timeline-item__wrapper) {
+  top: -4px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  box-shadow: 0 6px 16px rgb(31 78 120 / 6%);
+}
+.responsibility-timeline p {
+  margin: 6px 0;
+}
+.responsibility-timeline small {
+  color: var(--el-text-color-secondary);
+}
+.responsibility-group-details {
+  margin-top: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.responsibility-group-details summary {
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.responsibility-group-details ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 16px;
+  margin: 8px 0 0;
+}
+.responsibility-group-details li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+}
+.responsibility-group-details li span {
+  white-space: nowrap;
+}
+.responsibility-group-details li strong {
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+}
+.responsibility-group-details li em {
+  min-width: 0;
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .timeline-follow-up {
   display: grid;
@@ -4096,6 +4504,28 @@ onBeforeUnmount(() => {
 }
 .upload-summary {
   display: block;
+}
+.priority-field {
+  padding: 14px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 8px;
+  background: var(--el-color-warning-light-9);
+}
+.priority-field :deep(.el-form-item__label) {
+  color: var(--el-color-warning-dark-2);
+  font-weight: 700;
+}
+.textarea-field {
+  display: grid;
+  gap: 8px;
+}
+.quick-template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quick-template-actions :deep(.el-button) {
+  margin-left: 0;
 }
 .template-preview-panel {
   padding: 18px;

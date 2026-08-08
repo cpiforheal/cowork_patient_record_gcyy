@@ -564,41 +564,28 @@ export const validatePatientRecord = (values: Record<string, string>, rules: Tem
 };
 
 export const getPatientListApi = async (params: PatientListParams) => {
-  const db = await readDb();
-  const sectionIndex = recordSections.findIndex(section => section.key === params.sectionKey);
-  const filtered = db.patients.filter(item => {
-    ensureEncounterHistory(item);
-    const nameMatched = !params.name || item.name.includes(params.name);
-    const visitNoMatched = !params.visitNo || patientVisitNos(item).some(visitNo => visitNo.includes(params.visitNo || ""));
-    const visitTypeMatched =
-      !params.visitType ||
-      item.visitType === params.visitType ||
-      item.encounterHistory?.some(encounter => encounter.visitType === params.visitType);
-    const dateMatched = (item.encounterHistory || []).some(encounter => {
-      const fromMatched = !params.visitDateFrom || encounter.visitDate >= params.visitDateFrom;
-      const toMatched = !params.visitDateTo || encounter.visitDate <= params.visitDateTo;
-      return fromMatched && toMatched;
-    });
-    const statusMatched = !params.status || item.status === params.status;
-    const sectionMatched = sectionIndex < 0 || item.completedCount >= sectionIndex;
-    return nameMatched && visitNoMatched && visitTypeMatched && dateMatched && statusMatched && sectionMatched;
-  });
-  return response(paginate(filtered, params.pageNum, params.pageSize));
+  const query = new URLSearchParams();
+  query.set("pageNum", String(params.pageNum || 1));
+  query.set("pageSize", String(params.pageSize || 50));
+  for (const [key, value] of Object.entries({
+    name: params.name,
+    visitNo: params.visitNo,
+    visitType: params.visitType,
+    status: params.status,
+    dateFrom: params.visitDateFrom,
+    dateTo: params.visitDateTo
+  })) {
+    if (value) query.set(key, value);
+  }
+  const result = await fetch(`${getClinicApiBaseUrl()}/patient-archives?${query.toString()}`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<{ list: PatientRow[]; total: number; pageNum: number; pageSize: number }>(result);
+  return response(data);
 };
 
 export const getPatientDetailApi = async (id: string) => {
-  const db = await readDb();
-  const patient = getPatientOrThrow(db, id);
-  ensureEncounterHistory(patient);
-  const archive = db.archive[id] ?? { submitted: false, version: "V0.1-草稿", generatedAt: now() };
-  return response<PatientDetail>({
-    patient,
-    fieldValues: db.records[id] ?? initialFieldValues(),
-    attachments: activeDocuments(db.documents?.[id] ?? []),
-    archiveSubmitted: archive.submitted,
-    archiveVersion: archive.version,
-    generatedAt: archive.generatedAt
-  });
+  const result = await fetch(`${getClinicApiBaseUrl()}/patient-archives/${encodeURIComponent(id)}`, { headers: authHeaders() });
+  const data = await parseClinicApiResponse<PatientDetail>(result);
+  return response(data);
 };
 
 export const createPatientApi = async (params: CreatePatientParams) => {

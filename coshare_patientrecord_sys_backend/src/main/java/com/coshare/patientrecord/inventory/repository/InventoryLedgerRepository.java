@@ -442,6 +442,53 @@ public class InventoryLedgerRepository {
         return queryJson(sql.toString(), args.toArray());
     }
 
+    public ArrayNode readLedgerMovements(
+        String departmentId,
+        String itemId,
+        String movementType,
+        LocalDate from,
+        LocalDate to
+    ) {
+        StringBuilder sql = new StringBuilder("""
+            SELECT m.id, m.item_id itemId, i.name itemName, i.unit,
+                   m.batch_id batchId, b.batch_no batchNo, b.expiry_date expiryDate,
+                   m.from_location_id fromLocationId, fl.name fromLocationName,
+                   m.to_location_id toLocationId, tl.name toLocationName,
+                   m.movement_type movementType, m.quantity,
+                   m.department_id departmentId, m.department_name_snapshot department,
+                   m.operator_name operator, m.reason, m.occurred_at occurredAt
+            FROM inventory_ledger_movements m
+            JOIN inventory_items i ON i.id = m.item_id
+            LEFT JOIN inventory_batches b ON b.id = m.batch_id
+            LEFT JOIN inventory_locations fl ON fl.id = m.from_location_id
+            LEFT JOIN inventory_locations tl ON tl.id = m.to_location_id
+            WHERE 1 = 1
+            """);
+        java.util.ArrayList<Object> args = new java.util.ArrayList<>();
+        if (departmentId != null && !departmentId.isBlank()) {
+            sql.append(" AND m.department_id = ?");
+            args.add(departmentId);
+        }
+        if (itemId != null && !itemId.isBlank()) {
+            sql.append(" AND m.item_id = ?");
+            args.add(itemId);
+        }
+        if (movementType != null && !movementType.isBlank()) {
+            sql.append(" AND m.movement_type = ?");
+            args.add(movementType.trim().toUpperCase());
+        }
+        if (from != null) {
+            sql.append(" AND m.occurred_at >= ?");
+            args.add(from.atStartOfDay());
+        }
+        if (to != null) {
+            sql.append(" AND m.occurred_at < ?");
+            args.add(to.plusDays(1).atStartOfDay());
+        }
+        sql.append(" ORDER BY m.occurred_at DESC, m.id DESC");
+        return queryJson(sql.toString(), args.toArray());
+    }
+
     public ArrayNode readConsumptions(String departmentId, LocalDate from, LocalDate to) {
         StringBuilder sql = new StringBuilder("""
             SELECT e.id, e.command_id commandId, e.encounter_id encounterId, e.case_token caseToken,

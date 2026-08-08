@@ -32,8 +32,17 @@
       </header>
 
       <div class="task-meta">
-        <el-input v-model="forms[task.id].title" :disabled="!canEdit(task)" placeholder="任务名称" />
-        <el-checkbox v-model="forms[task.id].requiredBeforeExport" :disabled="!canEdit(task)">复核前必须完成</el-checkbox>
+        <el-input
+          v-model="forms[task.id].title"
+          :disabled="!canEdit(task)"
+          placeholder="任务名称"
+          @update:model-value="markTaskDirty(task.id)"
+        />
+        <el-checkbox
+          v-model="forms[task.id].requiredBeforeExport"
+          :disabled="!canEdit(task)"
+          @update:model-value="markTaskDirty(task.id)"
+        >复核前必须完成</el-checkbox>
       </div>
 
       <div class="task-grid">
@@ -59,6 +68,7 @@
             v-model="forms[task.id].data[field.key]"
             :type="field.kind === 'number' ? 'number' : 'text'"
             :disabled="!canEdit(task)"
+            @update:model-value="markTaskDirty(task.id)"
           />
           <el-input
             v-else-if="field.kind === 'textarea'"
@@ -66,6 +76,7 @@
             type="textarea"
             :rows="field.rows || 3"
             :disabled="!canEdit(task)"
+            @update:model-value="markTaskDirty(task.id)"
           />
           <el-select
             v-else-if="field.kind === 'select' || field.kind === 'multi'"
@@ -75,6 +86,7 @@
             filterable
             :allow-create="field.creatable"
             :disabled="!canEdit(task)"
+            @update:model-value="markTaskDirty(task.id)"
           >
             <el-option
               v-for="option in fieldOptions(field, forms[task.id].data)"
@@ -89,9 +101,27 @@
             :type="field.kind === 'date' ? 'date' : 'datetime'"
             :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
             :disabled="!canEdit(task)"
+            @update:model-value="markTaskDirty(task.id)"
           />
         </el-form-item>
       </div>
+
+      <section class="task-attachments">
+        <div class="task-attachments__heading">
+          <strong>检查资料</strong>
+          <label v-if="canEdit(task)" class="task-upload-trigger">
+            <input type="file" multiple accept="image/*,.pdf" @change="event => uploadTaskAttachments(event, task)" />
+            <el-button plain size="small" :loading="uploadingTasks[task.id]">上传图片或 PDF</el-button>
+          </label>
+        </div>
+        <AttachmentPreviewGallery
+          v-if="taskAttachments(task.id).length"
+          :attachments="taskAttachments(task.id)"
+          compact
+          @download="downloadPreAiAttachmentApi"
+        />
+        <span v-else class="task-attachments__empty">暂未上传检查资料</span>
+      </section>
 
       <footer>
         <el-button v-if="canReturn" type="warning" plain @click="$emit('return-task', task.id)">退回</el-button>
@@ -109,12 +139,15 @@ import { computed, reactive, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   createPreAiAuxiliaryTaskApi,
+  downloadPreAiAttachmentApi,
   savePreAiAuxiliaryTaskApi,
+  uploadPreAiAttachmentApi,
   type PreAiAuxiliaryTask,
   type PreAiAuxiliaryTaskType,
   type PreAiWorkspace
 } from "@/api/modules/clinic";
 import StructuredField from "./StructuredField.vue";
+import AttachmentPreviewGallery from "./AttachmentPreviewGallery.vue";
 import { auxiliaryTaskFields, auxiliaryTaskLabel, type PreAiFieldConfig } from "../fieldConfig";
 import { buildColonoscopyConclusion, stableSourceHash } from "../utils/templateTextGenerator";
 
@@ -131,9 +164,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "updated", workspace: PreAiWorkspace): void;
   (event: "return-task", taskId: string): void;
+  (event: "draft-change", dirty: boolean): void;
 }>();
 
 const forms = reactive<Record<string, { title: string; requiredBeforeExport: boolean; data: Record<string, any> }>>({});
+const dirtyTasks = reactive<Record<string, boolean>>({});
+const uploadingTasks = reactive<Record<string, boolean>>({});
+let draftEncounterId = "";
 const editableTasks = computed(() => props.workspace.auxiliaryTasks.filter(task => task.taskType !== "LAB"));
 const taskDutyCodes: Partial<Record<PreAiAuxiliaryTaskType, string[]>> = {
   VITAL_SIGNS: ["BASIC_NURSING"],
@@ -168,7 +205,14 @@ const taskCreationOptions = computed(() => creationCandidates.filter(item => can
 const canCreate = computed(() => taskCreationOptions.value.length > 0);
 
 const hydrate = () => {
+  const switchedEncounter = draftEncounterId !== props.workspace.encounter.id;
+  if (switchedEncounter) {
+    Object.keys(forms).forEach(key => delete forms[key]);
+    Object.keys(dirtyTasks).forEach(key => delete dirtyTasks[key]);
+    draftEncounterId = props.workspace.encounter.id;
+  }
   for (const task of editableTasks.value) {
+    if (!switchedEncounter && dirtyTasks[task.id] && forms[task.id]) continue;
     forms[task.id] = {
       title: task.title,
       requiredBeforeExport: task.requiredBeforeExport,
@@ -193,9 +237,16 @@ const canEdit = (task: PreAiAuxiliaryTask) =>
 const fieldOptions = (field: PreAiFieldConfig, form: Record<string, any>) => field.optionsFor?.(form) || field.options || [];
 const visibleFields = (task: PreAiAuxiliaryTask) =>
   auxiliaryTaskFields[task.taskType].filter(field => !field.visible || field.visible(forms[task.id]?.data || {}));
-const patchForm = (taskId: string, value: Record<string, any>) => Object.assign(forms[taskId].data, value);
+const markTaskDirty = (taskId: string) => {
+  dirtyTasks[taskId] = true;
+};
+const patchForm = (taskId: string, value: Record<string, any>) => {
+  Object.assign(forms[taskId].data, value);
+  markTaskDirty(taskId);
+};
 const generatedText = (field: PreAiFieldConfig, form: Record<string, any>) =>
   field.templateGenerator === "colonoscopyConclusion" ? buildColonoscopyConclusion(form) : "";
+const taskAttachments = (taskId: string) => props.workspace.attachments.filter(attachment => attachment.taskId === taskId);
 
 const createTask = async (type: PreAiAuxiliaryTaskType) => {
   try {
@@ -239,6 +290,7 @@ const saveTask = async (task: PreAiAuxiliaryTask, complete: boolean) => {
       },
       complete
     );
+    dirtyTasks[task.id] = false;
     emit("updated", data);
     ElMessage.success(complete ? "辅助任务已完成" : "辅助任务草稿已保存");
   } catch (error: any) {
@@ -246,7 +298,41 @@ const saveTask = async (task: PreAiAuxiliaryTask, complete: boolean) => {
   }
 };
 
+const uploadTaskAttachments = async (event: Event, task: PreAiAuxiliaryTask) => {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  uploadingTasks[task.id] = true;
+  let succeeded = 0;
+  let failed = 0;
+  let latestWorkspace: PreAiWorkspace | undefined;
+  for (const file of files) {
+    const isAllowed = file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isAllowed || file.size > 50 * 1024 * 1024) {
+      failed += 1;
+      continue;
+    }
+    try {
+      const { data } = await uploadPreAiAttachmentApi(props.workspace.encounter.id, { taskId: task.id, file });
+      latestWorkspace = data;
+      succeeded += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  uploadingTasks[task.id] = false;
+  input.value = "";
+  if (latestWorkspace) emit("updated", latestWorkspace);
+  if (succeeded) ElMessage.success(`已上传 ${succeeded} 个检查资料`);
+  if (failed) ElMessage.warning(`${failed} 个文件因格式、大小或上传异常未成功`);
+};
+
 watch(() => props.workspace.auxiliaryTasks, hydrate, { immediate: true, deep: true });
+watch(
+  () => Object.values(dirtyTasks).some(Boolean),
+  dirty => emit("draft-change", dirty),
+  { immediate: true }
+);
 </script>
 
 <style scoped lang="scss">
@@ -297,6 +383,28 @@ watch(() => props.workspace.auxiliaryTasks, hydrate, { immediate: true, deep: tr
 
 .task-card > footer span {
   flex: 1;
+}
+
+.task-attachments {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.task-attachments__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-upload-trigger input {
+  display: none;
+}
+
+.task-attachments__empty {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 
 @media (max-width: 760px) {

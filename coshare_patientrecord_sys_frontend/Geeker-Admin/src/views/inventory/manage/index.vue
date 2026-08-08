@@ -7,8 +7,8 @@
         <p>{{ currentTabProfile.desc }}</p>
       </div>
       <div class="command-actions">
-        <el-tooltip content="查看进销存操作说明" placement="bottom">
-          <el-button :icon="QuestionFilled" circle aria-label="查看进销存操作说明" @click="helpVisible = true" />
+        <el-tooltip content="耗材管理操作说明" placement="bottom">
+          <el-button :icon="QuestionFilled" circle aria-label="耗材管理操作说明" @click="helpVisible = true" />
         </el-tooltip>
         <el-button :icon="Refresh" :loading="loading" @click="loadInventory">刷新</el-button>
         <el-button
@@ -38,8 +38,8 @@
     <el-alert
       v-if="activeTab === 'items' && !hasInventoryAuth('inventory:item:manage')"
       class="inventory-readonly-alert"
-      title="物资档案当前为只读模式"
-      description="您可以查看物资名称、规格和预警信息；物资档案维护仅向管理员和仓库岗位开放。"
+      title="物资目录当前为只读模式"
+      description="您可以查看物资名称、规格和预警信息；物资目录维护仅向管理员和仓库岗位开放。"
       type="info"
       :closable="false"
       show-icon
@@ -535,6 +535,7 @@ import {
   getInventoryDbApi,
   getInventoryExceptionsApi,
   getInventoryItemAliasesApi,
+  getInventoryLedgerMovementsApi,
   getInventoryLocationBalancesApi,
   getInventoryMappingEntriesApi,
   getInventoryMappingSummaryApi,
@@ -575,6 +576,7 @@ import {
   type InventoryAccountAssignment,
   type InventoryCareType,
   type InventoryLocationBalance,
+  type InventoryMovement,
   type InventoryItemAlias,
   type InventoryMappingEntry,
   type InventoryMappingEntryQueryParams,
@@ -628,6 +630,7 @@ const inventoryWorkbench = ref<InventoryWorkbench>();
 const locationBalances = ref<InventoryLocationBalance[]>([]);
 const inventoryExceptions = ref<InventoryException[]>([]);
 const inventoryConsumptions = ref<InventoryConsumptionRecord[]>([]);
+const inventoryLedgerMovements = ref<InventoryMovement[]>([]);
 const extendedDataReady = ref(false);
 const extendedDataErrors = ref<string[]>([]);
 const reportLoading = ref<"" | "pdf" | "xlsx">("");
@@ -828,16 +831,16 @@ const returnTypeOptions = [
   { label: "报废", value: "scrap", auth: "inventory:count" }
 ];
 const tabNavItems = [
-  { tab: "overview", title: "今日待办" },
-  { tab: "executive", title: "运行分析" },
-  { tab: "requests", title: "领用发放" },
-  { tab: "stock", title: "耗材库存" },
+  { tab: "overview", title: "库存工作台" },
+  { tab: "executive", title: "运行总览" },
+  { tab: "requests", title: "科室申领" },
+  { tab: "stock", title: "库存总览与入库" },
   { tab: "controls", title: "盘点与报损" },
-  { tab: "packages", title: "科室耗材" },
+  { tab: "packages", title: "患者耗材规则" },
   { tab: "weekly", title: "周用量核对" },
-  { tab: "trace", title: "出入库记录" },
-  { tab: "items", title: "物资档案" },
-  { tab: "daily", title: "每日患者耗材核对" },
+  { tab: "trace", title: "出入库追溯" },
+  { tab: "items", title: "物资目录" },
+  { tab: "daily", title: "每日耗材核对" },
   { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
@@ -918,89 +921,89 @@ type TabStat = {
 
 const tabProfiles = {
   overview: {
-    kicker: "进销存管理 / 今日待办",
-    title: "今日待办",
-    desc: "待办、风险、库存异常集中看。",
-    taskLabel: "当前重点",
+    kicker: "耗材库存管理 / 库存工作台",
+    title: "库存工作台",
+    desc: "今日待办、库存风险、异常集中查看。",
+    taskLabel: "当前待办",
     taskTitle: "先处理红黄提醒",
     taskDesc: "不用先翻明细，异常和待办会自动靠前。"
   },
   executive: {
-    kicker: "管理设置 / 运行分析",
-    title: "运行分析",
-    desc: "集中查看风险、处理进度和科室消耗趋势。",
+    kicker: "管理设置 / 运行总览",
+    title: "运行总览",
+    desc: "查看风险预警、申领处理进度和科室消耗趋势。",
     taskLabel: "当前结论",
-    taskTitle: "先看红绿灯，再看待签字",
-    taskDesc: "适合主任、质控和管理岗位快速复核。"
+    taskTitle: "先看红绿灯，再处理待签",
+    taskDesc: "适合主任、质控和管理人员快速复核。"
   },
   requests: {
-    kicker: "领用发放",
-    title: "领用发放",
-    desc: "提交、审核、发放、签收按顺序闭环。",
+    kicker: "科室申领",
+    title: "科室申领",
+    desc: "提交申领 → 审核 → 发放 → 签收，全程留痕。",
     taskLabel: "当前重点",
-    taskTitle: "处理待审核、待发放、待签收",
-    taskDesc: "每张单只做当前状态允许的动作。"
+    taskTitle: "按顺序处理待审核、待发放、待签收",
+    taskDesc: "每张单只做当前状态允许的操作。"
   },
   stock: {
-    kicker: "耗材库存",
-    title: "库存台账与入库",
-    desc: "看数量、批号、效期和位置。",
+    kicker: "库存管理 / 库存总览与入库",
+    title: "库存总览与入库",
+    desc: "查看库存数量、批号、效期和存放位置；在此登记入库。",
     taskLabel: "当前重点",
-    taskTitle: "先看低库存和临期",
-    taskDesc: "入库时补齐批次、效期和位置。"
+    taskTitle: "先查低库存和临期批次",
+    taskDesc: "登记入库时补齐批号、效期和位置。"
   },
   items: {
-    kicker: "耗材库存 / 物资档案",
-    title: "物资设置",
-    desc: "统一名称、规格、单位和规则。",
+    kicker: "库存管理 / 物资目录",
+    title: "物资目录",
+    desc: "统一物资名称、规格、单位和预警线。",
     taskLabel: "当前重点",
     taskTitle: "先建档，再申领",
-    taskDesc: "敏感、批号、效期、预警线提前定义。"
+    taskDesc: "批号管理、效期追踪、预警线在此设置。"
   },
   weekly: {
-    kicker: "核对打印 / 周用量核对",
+    kicker: "对账与追溯 / 周用量核对",
     title: "周用量核对",
     desc: "按患者量核对预估耗用、实际扣减和差异。",
     taskLabel: "当前重点",
-    taskTitle: "按周确认真实用量",
-    taskDesc: "波动明显时补充原因。"
+    taskTitle: "每周确认真实用量",
+    taskDesc: "用量波动明显时补充说明原因。"
   },
   controls: {
-    kicker: "核对打印 / 盘点与报损",
+    kicker: "对账与追溯 / 盘点与报损",
     title: "盘点与报损",
     desc: "处理盘点差异、科室退回和物资报废。",
     taskLabel: "当前重点",
     taskTitle: "补齐原因和处理人",
-    taskDesc: "每次处置都留下可复核记录。"
+    taskDesc: "每次处置都留下可追溯记录。"
   },
   packages: {
-    kicker: "管理设置 / 患者扣减规则",
-    title: "患者扣减规则",
-    desc: "维护患者到诊后自动扣减的套餐、触发环节和异常记录。",
+    kicker: "管理设置 / 患者耗材规则",
+    title: "患者耗材规则",
+    desc: "维护患者到诊后自动扣减的套餐、触发阶段和异常任务。",
     taskLabel: "当前重点",
-    taskTitle: "先确认启用版本，再处理失败事件",
-    taskDesc: "仅最新启用且处于生效期的套餐参与匹配，草稿不会影响库存。"
+    taskTitle: "先确认启用版本，再处理扣减失败",
+    taskDesc: "仅最新启用且在生效期内的套餐参与匹配，草稿不影响库存。"
   },
   trace: {
-    kicker: "核对打印 / 出入库记录",
-    title: "出入库记录",
-    desc: "倒查入库、发放、退回、报废和盘点。",
+    kicker: "对账与追溯 / 出入库追溯",
+    title: "出入库追溯",
+    desc: "倒查入库、发放、退回、报废和盘点记录。",
     taskLabel: "当前重点",
-    taskTitle: "按物资、科室、时间倒查",
-    taskDesc: "检查和复核时直接导出。"
+    taskTitle: "按物资、科室或时间段倒查",
+    taskDesc: "审核复核时可直接导出明细。"
   },
   daily: {
-    kicker: "核对打印 / 每日患者耗材核对",
-    title: "每日患者耗材核对",
-    desc: "只展示已经由患者就诊环节自动触发的耗材扣减，便于每日纸质复核。",
+    kicker: "对账与追溯 / 每日耗材核对",
+    title: "每日耗材核对",
+    desc: "展示当日已由就诊环节自动触发的耗材扣减，便于每日纸质复核。",
     taskLabel: "统计口径",
-    taskTitle: "按已完成就诊环节自动扣减",
+    taskTitle: "只含已完成就诊环节的自动扣减",
     taskDesc: "固定消耗、按需申领和待确认规则不会混入本表。"
   },
   roles: {
     kicker: "管理设置 / 岗位与权限",
     title: "岗位与权限",
-    desc: "将正式账号归入岗位，并按岗位控制可见入口和操作权限。",
+    desc: "将账号归入岗位，按岗位控制可见入口和操作权限。",
     taskLabel: "维护提示",
     taskTitle: "变更岗位后重新登录生效",
     taskDesc: "角色权限与门诊管理平台共享同一套账号体系。"
@@ -1013,8 +1016,10 @@ const itemUnit = (itemId?: string) => itemMap.value.get(itemId || "")?.unit || "
 const inventoryCapabilities = computed(() => new Set(authStore.capabilities || []));
 const hasInventoryAuth = (code: string) => inventoryCapabilities.value.has(code);
 const hasAnyInventoryAuth = (codes: readonly string[]) => codes.some(code => hasInventoryAuth(code));
-const hasInventoryAuthForTab = (tab: string, code: string) =>
-  new Set(authStore.authButtonListGet[tabRouteNameMap[tab]] || []).has(code);
+const hasInventoryAuthForTab = (tab: string, code: string) => {
+  const routePermissions = authStore.authButtonListGet[tabRouteNameMap[tab]] || [];
+  return routePermissions.length ? routePermissions.includes(code) : hasInventoryAuth(code);
+};
 const hasAnyInventoryAuthForTab = (tab: string, codes: readonly string[]) =>
   codes.some(code => hasInventoryAuthForTab(tab, code));
 const tabAuthMap: Record<string, readonly string[]> = {
@@ -1028,14 +1033,14 @@ const tabAuthMap: Record<string, readonly string[]> = {
     "inventory:report",
     "inventory:read"
   ],
-  executive: ["inventory:export", "inventory:report"],
+  executive: ["inventory:read", "inventory:export", "inventory:report"],
   requests: ["inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
   stock: ["inventory:read"],
   items: ["inventory:read"],
   weekly: ["inventory:read", "inventory:count", "inventory:approve", "inventory:export"],
-  controls: ["inventory:receive", "inventory:count"],
+  controls: ["inventory:read", "inventory:receive", "inventory:count"],
   packages: ["inventory:read", "inventory:approve", "inventory:rule"],
-  trace: ["inventory:export", "inventory:issue", "inventory:count"],
+  trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
   roles: ["inventory:role:manage"]
 };
@@ -1046,7 +1051,7 @@ const effectiveFocusedDepartment = computed(
   () =>
     focusedDepartment.value || (isStandaloneConsumableEntry.value && !canViewAllDepartments.value ? currentDepartment.value : "")
 );
-const canManagePackages = computed(() => hasInventoryAuth("inventory:approve"));
+const canManagePackages = computed(() => hasInventoryAuth("inventory:rule"));
 const belongsToCurrentDepartment = (department?: string) =>
   canViewAllDepartments.value || !currentDepartment.value || !department || department === currentDepartment.value;
 const canViewAllPackages = computed(() => canViewAllDepartments.value);
@@ -1361,8 +1366,8 @@ const currentTabProfile = computed(() => {
   if (activeTab.value === "packages" && isStandaloneConsumableEntry.value) {
     return {
       kicker: "科室耗材",
-      title: effectiveFocusedDepartment.value ? `${effectiveFocusedDepartment.value}耗材清单与录入` : "科室耗材清单与录入",
-      desc: "按科室维护耗材、用量和患者扣减口径；左侧筛选帮助您快速定位需要处理的项目。"
+      title: effectiveFocusedDepartment.value ? `${effectiveFocusedDepartment.value} · 耗材清单` : "我的科室耗材",
+      desc: "按科室维护耗材、用量和患者扣减口径；左侧筛选快速定位需处理的项目。"
     };
   }
   return tabProfiles[activeTab.value as keyof typeof tabProfiles] || tabProfiles.overview;
@@ -1721,23 +1726,48 @@ const validateIssueLines = () => {
 
 const loadExtendedInventory = async () => {
   const endpointLabels = ["工作台", "科室余额", "异常任务", "执行耗用"];
-  const [workbenchResult, balancesResult, exceptionsResult, consumptionsResult] = await Promise.allSettled([
+  const [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult] = await Promise.allSettled([
     getInventoryWorkbenchApi(),
     getInventoryLocationBalancesApi(),
     getInventoryExceptionsApi(),
-    getInventoryConsumptionsApi()
+    getInventoryConsumptionsApi(),
+    getInventoryLedgerMovementsApi({ size: 200 })
   ]);
   inventoryWorkbench.value = workbenchResult.status === "fulfilled" ? workbenchResult.value.data : undefined;
   locationBalances.value = balancesResult.status === "fulfilled" ? balancesResult.value.data : [];
   inventoryExceptions.value = exceptionsResult.status === "fulfilled" ? exceptionsResult.value.data : [];
   inventoryConsumptions.value = consumptionsResult.status === "fulfilled" ? consumptionsResult.value.data : [];
-  const results = [workbenchResult, balancesResult, exceptionsResult, consumptionsResult];
+  inventoryLedgerMovements.value =
+    ledgerResult.status === "fulfilled"
+      ? ledgerResult.value.data.list.map(row => ({
+          id: row.id,
+          itemId: row.itemId,
+          batchId: row.batchId || "",
+          type: String(row.movementType || "").toLowerCase() as InventoryMovement["type"],
+          quantity: Number(row.quantity || 0),
+          department: row.department || "",
+          operator: row.operator || "",
+          reason: row.reason || "",
+          relatedId: "",
+          createdAt: row.occurredAt
+        }))
+      : [];
+  const results = [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult];
   extendedDataErrors.value = results.flatMap((result, index) =>
     result.status === "rejected"
       ? [`${endpointLabels[index]}：${result.reason instanceof Error ? result.reason.message : "接口加载失败"}`]
       : []
   );
   extendedDataReady.value = results.every(result => result.status === "fulfilled");
+};
+
+const applyLedgerMovements = () => {
+  if (inventoryLedgerMovements.value.length) db.value.movements = inventoryLedgerMovements.value;
+};
+
+const refreshOperationalData = async () => {
+  await loadExtendedInventory();
+  applyLedgerMovements();
 };
 
 const loadWeekly = async (filters: { weekNo?: string; departmentId?: string } = {}) => {
@@ -1816,6 +1846,7 @@ const loadInventory = async () => {
     ElMessage.error((error as Error).message);
   } finally {
     await Promise.all([extendedLoad, weeklyLoad, mappingsLoad, governanceLoad]);
+    applyLedgerMovements();
     loading.value = false;
   }
 };
@@ -1987,7 +2018,7 @@ const saveUnitConversions = async (rows: InventoryUnitConversion[]) => {
 };
 
 const savePackage = async (payload: SaveInventoryPackageParams) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "维护使用套餐")) return;
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:rule", "维护使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await saveInventoryPackageApi({ ...payload, operator: operatorName.value })).data;
@@ -2056,7 +2087,7 @@ const createMappingDraft = async (row: InventoryMappingEntry) => {
 };
 
 const enablePackage = async (row: InventoryPackage) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "启用使用套餐")) return;
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:rule", "启用使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await enableInventoryPackageApi({ id: row.id, operator: operatorName.value })).data;
@@ -2069,7 +2100,7 @@ const enablePackage = async (row: InventoryPackage) => {
 };
 
 const disablePackage = async (row: InventoryPackage) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "停用使用套餐")) return;
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:rule", "停用使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await disableInventoryPackageApi({ id: row.id, operator: operatorName.value })).data;
@@ -2082,7 +2113,7 @@ const disablePackage = async (row: InventoryPackage) => {
 };
 
 const retryConsumptionEvent = async (row: InventoryConsumptionEvent) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "重试自动消耗")) return;
+  if (!requireInventoryAuth("inventory:retry", "重试自动消耗")) return;
   saving.value = true;
   try {
     db.value = (await retryInventoryConsumptionEventApi({ id: row.id, operator: operatorName.value })).data;
@@ -2120,6 +2151,7 @@ const saveInbound = async () => {
   saving.value = true;
   try {
     db.value = (await inboundInventoryApi({ ...inboundForm, operator: operatorName.value })).data;
+    void refreshOperationalData();
     ElMessage.success("入库记录已保存");
     inboundDialogVisible.value = false;
   } catch (error) {
@@ -2155,6 +2187,7 @@ const saveRequest = async () => {
         lines: requestForm.lines.map(line => ({ itemId: line.itemId, quantity: Number(line.quantity || 0) }))
       })
     ).data;
+    void refreshOperationalData();
     ElMessage.success("申领单已提交");
     requestDialogVisible.value = false;
   } catch (error) {
@@ -2169,6 +2202,7 @@ const approveRequest = async (row: InventoryRequest) => {
   saving.value = true;
   try {
     db.value = (await approveInventoryRequestApi({ id: row.id, operator: operatorName.value, owner: row.owner })).data;
+    void refreshOperationalData();
     flashRequestRow(row.id);
     ElMessage.success("申领单已审核");
   } catch (error) {
@@ -2211,6 +2245,7 @@ const issueRequest = async () => {
           .map(line => ({ id: line.id, itemId: line.itemId, issuedQuantity: Number(line.issuedQuantity || 0) }))
       })
     ).data;
+    void refreshOperationalData();
     flashRequestRow(issueForm.id);
     ElMessage.success("物资已发放");
     issueDialogVisible.value = false;
@@ -2228,6 +2263,7 @@ const receiveRequest = async (row: InventoryRequest) => {
     db.value = (
       await receiveInventoryRequestApi({ id: row.id, operator: operatorName.value, receiver: operatorName.value })
     ).data;
+    void refreshOperationalData();
     flashRequestRow(row.id);
     ElMessage.success("领取已确认");
   } catch (error) {
@@ -2324,7 +2360,7 @@ const saveWeekly = async () => {
 };
 
 const saveWeeklyStandard = async (payload: SaveInventoryWeeklyStandardParams) => {
-  if (!requireInventoryAuth("inventory:approve", "保存周度标准")) return;
+  if (!requireInventoryAuth("inventory:rule", "保存周度标准")) return;
   saving.value = true;
   try {
     await saveInventoryWeeklyStandardApi(payload);
@@ -2338,7 +2374,7 @@ const saveWeeklyStandard = async (payload: SaveInventoryWeeklyStandardParams) =>
 };
 
 const publishWeeklyStandard = async (row: InventoryWeeklyStandard) => {
-  if (!requireInventoryAuth("inventory:approve", "发布周度标准")) return;
+  if (!requireInventoryAuth("inventory:rule", "发布周度标准")) return;
   saving.value = true;
   try {
     await publishInventoryWeeklyStandardApi(row.id);
@@ -2352,7 +2388,7 @@ const publishWeeklyStandard = async (row: InventoryWeeklyStandard) => {
 };
 
 const deleteWeeklyStandard = async (row: InventoryWeeklyStandard) => {
-  if (!requireInventoryAuth("inventory:approve", "删除周度标准")) return;
+  if (!requireInventoryAuth("inventory:rule", "删除周度标准")) return;
   try {
     await ElMessageBox.confirm(`确认删除标准“${row.name}”草稿？`, "删除周度标准", {
       confirmButtonText: "删除",
@@ -2395,7 +2431,7 @@ const viewWeeklySnapshot = async (row: InventoryWeeklySnapshot) => {
 };
 
 const confirmWeeklySnapshot = async (row: InventoryWeeklySnapshot) => {
-  if (!requireInventoryAuth("inventory:approve", "确认周度快照")) return;
+  if (!requireInventoryAuth("inventory:confirm", "确认周度快照")) return;
   saving.value = true;
   try {
     await confirmInventoryWeeklySnapshotApi({ id: row.id, expectedRevision: row.revision, confirmationNote: "前端工作台确认" });
@@ -2413,7 +2449,7 @@ const reviseWeeklySnapshot = async (payload: {
   revisionReason: string;
   lines: Array<{ itemId: string; careType?: InventoryCareType; adjustedQuantity: number; adjustmentReason: string }>;
 }) => {
-  if (!requireInventoryAuth("inventory:approve", "更正周度快照")) return;
+  if (!requireInventoryAuth("inventory:confirm", "更正周度快照")) return;
   saving.value = true;
   try {
     await reviseInventoryWeeklySnapshotApi({
@@ -2470,6 +2506,7 @@ const submitReturnOrScrap = async () => {
   saving.value = true;
   try {
     db.value = (await returnOrScrapInventoryApi({ ...returnForm, operator: operatorName.value })).data;
+    void refreshOperationalData();
     ElMessage.success("库存变更已保存");
     Object.assign(returnForm, { quantity: 0, reason: "" });
   } catch (error) {
@@ -2498,6 +2535,7 @@ const saveCount = async () => {
   saving.value = true;
   try {
     db.value = (await countInventoryApi({ ...countForm, operator: operatorName.value })).data;
+    void refreshOperationalData();
     ElMessage.success("盘点结果已记录");
     countDialogVisible.value = false;
   } catch (error) {

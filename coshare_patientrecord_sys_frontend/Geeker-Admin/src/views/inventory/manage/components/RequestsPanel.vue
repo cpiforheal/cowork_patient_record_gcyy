@@ -3,7 +3,7 @@
     <div class="panel-head">
       <div>
         <h2>科室申领闭环</h2>
-        <p>提交、审核、发放、签收全部留痕，避免口头领用和纸质单据断链。</p>
+        <p>提交申领 → 审核 → 发放 → 签收，全程留痕，避免口头领用和纸质单据断链。</p>
       </div>
       <el-button v-if="canCreate" type="primary" :icon="Plus" @click="$emit('create')">新增申领</el-button>
     </div>
@@ -74,7 +74,7 @@
           <el-button v-if="row.status === 'pending' && canApprove" link type="primary" @click="emitApprove(row)">审核</el-button>
           <el-button v-if="row.status === 'approved' && canIssue" link type="primary" @click="emitIssue(row)">发放</el-button>
           <el-button v-if="row.status === 'partially_issued' && canIssue" link type="warning" @click="emitIssue(row)">
-            继续发
+            继续发放
           </el-button>
           <el-button v-if="row.status === 'issued' && canReceive" link type="success" @click="emitReceive(row)">签收</el-button>
           <el-button v-if="row.status === 'pending' && canApprove" link type="warning" @click="emitReject(row)">驳回</el-button>

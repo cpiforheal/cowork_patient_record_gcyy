@@ -40,6 +40,7 @@ export interface PreAiEncounterSummary {
   caseToken: string;
   route: PreAiEncounterRoute;
   inventoryCareType?: "outpatient" | "inpatient";
+  careSituationTags?: string;
   treatmentPath: PreAiTreatmentPath;
   status: PreAiEncounterStatus;
   currentStage: PreAiStageCode;
@@ -50,6 +51,12 @@ export interface PreAiEncounterSummary {
   createdAt: string;
   updatedAt: string;
   stageStatuses: Partial<Record<PreAiStageCode, PreAiStageStatus>>;
+  effectiveCurrentStage?: PreAiStageCode;
+  effectiveStageStatuses?: Partial<Record<PreAiStageCode, PreAiStageStatus>>;
+  skippedStages?: PreAiStageCode[];
+  nextOwner?: string;
+  normalizedCareType?: "outpatient" | "inpatient";
+  legacyProgressFallback?: boolean;
 }
 
 export interface PreAiEncounterHistoryItem extends PreAiEncounterSummary {
@@ -221,8 +228,19 @@ export interface PreAiAuditLog {
   stageCode?: PreAiStageCode;
   operator: string;
   operatorRole: string;
+  operatorId?: string;
+  operatorUsername?: string;
+  operatorDepartment?: string;
   detail: string;
   createdAt: string;
+  occurredAt?: string;
+  submittedAt?: string;
+}
+
+export interface PreAiResponsibilityTimeline {
+  encounterId: string;
+  total: number;
+  events: PreAiAuditLog[];
 }
 
 export interface PreAiAdmissionProfile {
@@ -424,6 +442,14 @@ export const getPreAiAdmissionProfileApi = async (encounterId: string) => {
   return clinicResponse(await parseClinicApiResponse<{ profile: PreAiAdmissionProfile | null }>(result));
 };
 
+export const getPreAiResponsibilityTimelineApi = async (encounterId: string, signal?: AbortSignal) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/responsibility-timeline`, {
+    headers: authHeaders(),
+    signal
+  });
+  return clinicResponse(await parseClinicApiResponse<PreAiResponsibilityTimeline>(result));
+};
+
 export const savePreAiAdmissionProfileApi = (
   encounterId: string,
   data: Record<string, any>,
@@ -459,6 +485,18 @@ export const completePreAiStageApi = (
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/stages/${stageCode}/complete`, "POST", {
     data,
     expectedVersion
+  });
+
+export const terminatePreAiReceptionApi = (
+  encounterId: string,
+  data: Record<string, any>,
+  expectedVersion: number,
+  reason: string
+) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/reception/terminate`, "POST", {
+    data,
+    expectedVersion,
+    reason
   });
 
 export const confirmPreAiSurgeryApi = (encounterId: string, expectedVersion: number) =>

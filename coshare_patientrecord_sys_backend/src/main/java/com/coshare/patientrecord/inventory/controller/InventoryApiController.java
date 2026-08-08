@@ -95,6 +95,22 @@ public class InventoryApiController {
         ));
     }
 
+    @GetMapping("/inventory-api/ledger-movements")
+    public ApiResult<Map<String, Object>> ledgerMovements(
+        @RequestParam(required = false) String departmentId,
+        @RequestParam(required = false) String itemId,
+        @RequestParam(required = false) String movementType,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "50") int size
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(
+            databaseService.ledgerMovements(user, departmentId, itemId, movementType, from, to, page, size)
+        ));
+    }
+
     @PostMapping("/inventory-api/department-openings/confirm")
     public ApiResult<Map<String, Object>> confirmDepartmentOpening(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:count");

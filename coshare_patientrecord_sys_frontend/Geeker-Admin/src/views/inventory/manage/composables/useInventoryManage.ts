@@ -91,11 +91,29 @@ export const useInventoryManage = (userInfo: ComputedRef<InventoryUserInfo>) => 
   const operatorName = computed(() => userInfo.value.name || userInfo.value.department || "当前账号");
   const currentDepartment = computed(() => userInfo.value.department || "");
 
-  const today = () => new Date().toISOString().slice(0, 10);
+  const shanghaiDate = (date = new Date()) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    })
+      .formatToParts(date)
+      .reduce<Record<string, string>>((parts, part) => ({ ...parts, [part.type]: part.value }), {});
+
+  const today = () => {
+    const parts = shanghaiDate();
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+
+  const dateSerial = (date: string) => {
+    const [year, month, day] = date.slice(0, 10).split("-").map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
 
   const currentWeekNo = () => {
-    const date = new Date();
-    const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const [year, month, dayOfMonth] = today().split("-").map(Number);
+    const utcDate = new Date(Date.UTC(year, month - 1, dayOfMonth));
     const day = utcDate.getUTCDay() || 7;
 
     utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
@@ -111,7 +129,7 @@ export const useInventoryManage = (userInfo: ComputedRef<InventoryUserInfo>) => 
   const createDerivedRows = ({ db, belongsToDepartment, itemName, itemUnit, movementTypeLabel }: InventoryDerivedRowsOptions) => {
     const daysFromToday = (date?: string) => {
       if (!date) return Number.POSITIVE_INFINITY;
-      return Math.ceil((new Date(date).getTime() - new Date(today()).getTime()) / 86400000);
+      return Math.ceil((dateSerial(date) - dateSerial(today())) / 86400000);
     };
 
     const normalizedRequestLines = (row: InventoryRequest): InventoryRequestLine[] => {

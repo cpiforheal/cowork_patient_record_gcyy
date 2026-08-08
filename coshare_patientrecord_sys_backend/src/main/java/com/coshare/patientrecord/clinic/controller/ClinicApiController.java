@@ -15,6 +15,7 @@ import com.coshare.patientrecord.ai.dto.TtsSpeakRequest;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.backup.service.ClinicBackupService;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
+import com.coshare.patientrecord.clinic.service.PatientArchiveQueryService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
 import com.coshare.patientrecord.file.model.ClinicStoredFile;
@@ -72,6 +73,7 @@ public class ClinicApiController {
     );
 
     private final ClinicDatabaseService databaseService;
+    private final PatientArchiveQueryService patientArchiveQueryService;
     private final ClinicFileService fileService;
     private final ClinicBackupService backupService;
     private final ClinicAiSummaryService aiSummaryService;
@@ -88,6 +90,7 @@ public class ClinicApiController {
 
     public ClinicApiController(
         ClinicDatabaseService databaseService,
+        PatientArchiveQueryService patientArchiveQueryService,
         ClinicFileService fileService,
         ClinicBackupService backupService,
         ClinicAiSummaryService aiSummaryService,
@@ -103,6 +106,7 @@ public class ClinicApiController {
         @Value("${clinic.medical-record.v2-enabled:false}") boolean medicalRecordV2Enabled
     ) {
         this.databaseService = databaseService;
+        this.patientArchiveQueryService = patientArchiveQueryService;
         this.fileService = fileService;
         this.backupService = backupService;
         this.aiSummaryService = aiSummaryService;
@@ -599,6 +603,27 @@ public class ClinicApiController {
                     .toString()
             )
             .body(download.resource());
+    }
+
+    @GetMapping("/clinic-api/patient-archives")
+    public ApiResult<Map<String, Object>> patientArchives(
+        @RequestParam(defaultValue = "1") int pageNum,
+        @RequestParam(defaultValue = "50") int pageSize,
+        @RequestParam(defaultValue = "") String name,
+        @RequestParam(defaultValue = "") String visitNo,
+        @RequestParam(defaultValue = "") String visitType,
+        @RequestParam(defaultValue = "") String status,
+        @RequestParam(defaultValue = "") String dateFrom,
+        @RequestParam(defaultValue = "") String dateTo
+    ) {
+        return ApiResult.success(patientArchiveQueryService.list(
+            pageNum, pageSize, name, visitNo, visitType, status, dateFrom, dateTo, AuthPermission.currentUserOrThrow()
+        ));
+    }
+
+    @GetMapping("/clinic-api/patient-archives/{id}")
+    public ApiResult<Map<String, Object>> patientArchive(@PathVariable String id) {
+        return ApiResult.success(patientArchiveQueryService.detail(id, AuthPermission.currentUserOrThrow()));
     }
 
     private void requireMedicalRecordV2Enabled() {

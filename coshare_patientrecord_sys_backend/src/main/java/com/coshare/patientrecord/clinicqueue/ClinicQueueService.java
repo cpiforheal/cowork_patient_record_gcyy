@@ -288,6 +288,37 @@ public class ClinicQueueService {
     }
 
     @Transactional
+    public void leaveEncounterFromReception(String encounterId, String reason, SessionUser user) {
+        requireRole(user, Set.of("admin", "inspection", "reception", "doctor"), "当前岗位无权办理患者离院");
+        List<ObjectNode> tickets = jdbcTemplate.query(
+            "SELECT * FROM clinic_queue_tickets WHERE encounter_id = ? FOR UPDATE",
+            (rs, rowNum) -> readTicket(rs), safe(encounterId)
+        );
+        for (ObjectNode ticket : tickets) {
+            String ticketId = text(ticket, "id");
+            List<ObjectNode> tasks = jdbcTemplate.query(
+                "SELECT * FROM clinic_queue_tasks WHERE ticket_id = ? ORDER BY updated_at DESC FOR UPDATE",
+                (rs, rowNum) -> readTask(rs), ticketId
+            );
+            ObjectNode auditTask = tasks.isEmpty() ? null : tasks.get(0);
+            jdbcTemplate.update("UPDATE clinic_queue_announcements SET status = 'SUPERSEDED' WHERE ticket_id = ? AND status = 'PENDING'", ticketId);
+            int cancelledTasks = jdbcTemplate.update("""
+                UPDATE clinic_queue_tasks SET status = 'CANCELLED', exception_reason = ?, version = version + 1,
+                  updated_by = ?, updated_at = ? WHERE ticket_id = ?
+                  AND status IN ('WAITING', 'CALLED', 'ARRIVED', 'IN_SERVICE', 'INTERRUPTED', 'ON_HOLD', 'MISSED', 'TEMPORARILY_AWAY')
+                """, reason, user.name(), now(), ticketId);
+            boolean ticketWasActive = !Set.of("COMPLETED", "CANCELLED", "LEFT").contains(text(ticket, "overallStatus"));
+            if (ticketWasActive || cancelledTasks > 0) {
+                jdbcTemplate.update("UPDATE clinic_queue_tickets SET overall_status = 'LEFT', version = version + 1, updated_at = ? WHERE id = ?",
+                    now(), ticketId);
+                audit(ticketId, auditTask == null ? "" : text(auditTask, "id"), auditTask == null ? "" : text(auditTask, "roomCode"),
+                    "LEFT", auditTask == null ? "" : text(auditTask, "status"), "LEFT", user, reason);
+            }
+        }
+        if (!tickets.isEmpty()) publishUpdateAfterCommit();
+    }
+
+    @Transactional
     public Map<String, Object> roomAction(String roomCode, String action, ActionRequest request, SessionUser user) {
         requireRole(user, ROOM_CONTROL_ROLES, "当前岗位无权控制房间状态");
         ObjectNode room = loadRoom(roomCode);
