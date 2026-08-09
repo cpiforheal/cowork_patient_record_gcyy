@@ -22,6 +22,74 @@ export interface InventoryItem {
   enabled: boolean;
 }
 
+export type InventoryDepartmentDraftCareType = "outpatient" | "inpatient" | "other";
+
+export interface InventoryDepartmentDraftLine {
+  id: string;
+  sourceRow?: number;
+  serviceGroup: string;
+  careType: InventoryDepartmentDraftCareType;
+  materialName: string;
+  unit: string;
+  standardQuantity: number | null;
+  unitPrice?: number | null;
+  volumeOverride?: number | null;
+}
+
+export interface InventoryDepartmentDailyDraft {
+  id?: string;
+  exists?: boolean;
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  templateVersion?: string;
+  monthDays?: number;
+  revision: number;
+  operator?: string;
+  updatedAt?: string;
+  groupVolumes?: Record<string, number>;
+  lines?: InventoryDepartmentDraftLine[];
+}
+
+export interface InventoryDepartmentDailyDraftSummary {
+  businessDate: string;
+  list: InventoryDepartmentDailyDraft[];
+}
+
+export interface InventoryPatientConsumptionDraftLine {
+  id: string;
+  serviceItemId: string;
+  serviceItemName: string;
+  materialName: string;
+  unit: string;
+  standardQuantity: number | null;
+  actualQuantity: number;
+  exceptionReason?: string;
+}
+
+export interface InventoryPatientConsumptionDraft {
+  id?: string;
+  exists?: boolean;
+  departmentKey: string;
+  departmentName: string;
+  patientId: string;
+  patientName?: string;
+  encounterId: string;
+  visitNo?: string;
+  businessDate: string;
+  serviceAt: string;
+  serviceItems: { id: string; name: string }[];
+  templateVersion: string;
+  revision: number;
+  operator?: string;
+  updatedAt?: string;
+  lines: InventoryPatientConsumptionDraftLine[];
+}
+
+export interface InventoryPatientConsumptionDraftList {
+  list: InventoryPatientConsumptionDraft[];
+}
+
 export interface InventoryBatch {
   id: string;
   itemId: string;
@@ -478,6 +546,7 @@ export interface InventoryConsumptionRecord {
   id: string;
   commandId?: string;
   encounterId?: string;
+  careType?: InventoryCareType | string;
   encounterNo?: string;
   patientDisplayName?: string;
   departmentId?: string;
@@ -670,6 +739,7 @@ type InventoryExceptionApi = Partial<Omit<InventoryException, "severity" | "stat
 
 type InventoryConsumptionApi = Partial<Omit<InventoryConsumptionRecord, "status">> & {
   triggerStage?: string;
+  route?: string;
   department?: string;
   createdAt?: string;
   eventKind?: string;
@@ -1035,6 +1105,15 @@ const postInventoryData = async <T, P extends object>(path: string, payload: P) 
   return response(await parseInventoryDataResponse<T>(result));
 };
 
+const putInventoryData = async <T, P extends object>(path: string, payload: P) => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  return response(await parseInventoryDataResponse<T>(result));
+};
+
 const response = <T>(data: T, msg = "成功") =>
   Promise.resolve({
     code: 200 as unknown as string,
@@ -1046,6 +1125,27 @@ export const getInventoryDbApi = async () => {
   const result = await fetch(`${INVENTORY_API_BASE_URL}/db`, { headers: authHeaders() });
   return response(await parseInventoryResponse(result));
 };
+
+export const getInventoryDepartmentDailyDraftApi = async (params: { departmentKey: string; date: string }) =>
+  getInventoryData<InventoryDepartmentDailyDraft>("/department-daily-drafts", params);
+
+export const getInventoryDepartmentDailyDraftSummaryApi = async (date: string) =>
+  getInventoryData<InventoryDepartmentDailyDraftSummary>("/department-daily-drafts/summary", { date });
+
+export const saveInventoryDepartmentDailyDraftApi = async (payload: InventoryDepartmentDailyDraft) =>
+  putInventoryData<InventoryDepartmentDailyDraft, InventoryDepartmentDailyDraft>("/department-daily-drafts", payload);
+
+export const getInventoryPatientConsumptionDraftApi = async (id: string) =>
+  getInventoryData<InventoryPatientConsumptionDraft>("/patient-consumption-drafts/detail", { id });
+
+export const listInventoryPatientConsumptionDraftsApi = async (params: {
+  departmentKey: string;
+  date?: string;
+  patientId?: string;
+}) => getInventoryData<InventoryPatientConsumptionDraftList>("/patient-consumption-drafts", params);
+
+export const saveInventoryPatientConsumptionDraftApi = async (payload: InventoryPatientConsumptionDraft) =>
+  putInventoryData<InventoryPatientConsumptionDraft, InventoryPatientConsumptionDraft>("/patient-consumption-drafts", payload);
 
 const normalizeLocationType = (value?: string): InventoryLocationBalance["locationType"] => {
   const normalized = String(value || "").toUpperCase();
@@ -1130,6 +1230,7 @@ const normalizeConsumption = (row: InventoryConsumptionApi): InventoryConsumptio
   id: row.id || row.commandId || "",
   commandId: row.commandId,
   encounterId: row.encounterId,
+  careType: row.careType || row.route,
   encounterNo: row.encounterNo,
   patientDisplayName: row.patientDisplayName,
   departmentId: row.departmentId,
@@ -1245,6 +1346,15 @@ const downloadInventoryFile = async (path: string, fallback: string): Promise<In
   };
 };
 
+export const downloadInventoryPatientConsumptionDraftsApi = async (
+  kind: "details" | "summary",
+  params: { departmentKey: string; date: string }
+) =>
+  downloadInventoryFile(
+    `/patient-consumption-drafts/export/${kind}${buildInventoryQuery(params)}`,
+    `patient-consumption-${kind}-${params.date}.csv`
+  );
+
 export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageReportParams): Promise<InventoryReportDownload> => {
   const { format, stage, ...filters } = params;
   const query = { ...filters, triggerStage: stage };
@@ -1261,10 +1371,10 @@ export const getInventoryRoleManagementApi = async () =>
   getInventoryData<{ roles: InventoryRoleDescriptor[]; accounts: InventoryAccountAssignment[] }>("/role-management");
 
 export const assignInventoryAccountRoleApi = async (params: { accountId: string; roleCode: string }) =>
-  postInventoryData<{ roles: InventoryRoleDescriptor[]; accounts: InventoryAccountAssignment[] }, { accountId: string; roleCode: string }>(
-    "/role-management/assign",
-    params
-  );
+  postInventoryData<
+    { roles: InventoryRoleDescriptor[]; accounts: InventoryAccountAssignment[] },
+    { accountId: string; roleCode: string }
+  >("/role-management/assign", params);
 
 export const inboundInventoryApi = async (params: InventoryInboundParams) =>
   response(await postInventory("/inbounds", params), "入库记录已保存");
@@ -1385,7 +1495,10 @@ export const confirmInventoryMappingEntriesApi = async (params: ConfirmInventory
   );
 
 export const holdInventoryMappingEntriesApi = async (params: InventoryMappingActionParams) =>
-  postInventoryData<{ updated: number; list: InventoryMappingEntry[] }, InventoryMappingActionParams>("/mapping/entries/hold", params);
+  postInventoryData<{ updated: number; list: InventoryMappingEntry[] }, InventoryMappingActionParams>(
+    "/mapping/entries/hold",
+    params
+  );
 
 export const createInventoryMappingPackageDraftApi = async (params: InventoryMappingActionParams) =>
   postInventoryData<
@@ -1402,10 +1515,10 @@ export const getInventoryItemAliasesApi = async (params: { itemId?: string; stat
 };
 
 export const saveInventoryItemAliasesApi = async (params: { aliases: InventoryItemAlias[]; itemId?: string }) =>
-  postInventoryData<InventoryApiList<InventoryItemAlias> & { total?: number }, { aliases: InventoryItemAlias[]; itemId?: string }>(
-    "/mapping/aliases",
-    params
-  );
+  postInventoryData<
+    InventoryApiList<InventoryItemAlias> & { total?: number },
+    { aliases: InventoryItemAlias[]; itemId?: string }
+  >("/mapping/aliases", params);
 
 export const getInventoryUnitConversionsApi = async (params: { itemId?: string; status?: string; keyword?: string } = {}) => {
   const result = await getInventoryData<InventoryApiList<InventoryUnitConversion> & { total?: number }>(
@@ -1415,10 +1528,7 @@ export const getInventoryUnitConversionsApi = async (params: { itemId?: string; 
   return response((result.data.list || []).map(row => ({ ...row, factor: normalizeNumber(row.factor) })));
 };
 
-export const saveInventoryUnitConversionsApi = async (params: {
-  unitConversions: InventoryUnitConversion[];
-  itemId?: string;
-}) =>
+export const saveInventoryUnitConversionsApi = async (params: { unitConversions: InventoryUnitConversion[]; itemId?: string }) =>
   postInventoryData<
     InventoryApiList<InventoryUnitConversion> & { total?: number },
     { unitConversions: InventoryUnitConversion[]; itemId?: string }

@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -93,6 +94,66 @@ public class InventoryApiController {
         return ApiResult.success(databaseService.asMap(
             databaseService.consumptionEvents(user, departmentId, from, to, page, size)
         ));
+    }
+
+    @GetMapping("/inventory-api/department-daily-drafts")
+    public ApiResult<Map<String, Object>> departmentDailyDraft(
+        @RequestParam String departmentKey,
+        @RequestParam LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.departmentDailyDraft(departmentKey, date, user)));
+    }
+
+    @GetMapping("/inventory-api/department-daily-drafts/summary")
+    public ApiResult<Map<String, Object>> departmentDailyDraftSummary(@RequestParam LocalDate date) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.departmentDailyDraftSummary(date, user)));
+    }
+
+    @PutMapping("/inventory-api/department-daily-drafts")
+    public ApiResult<Map<String, Object>> saveDepartmentDailyDraft(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "科室耗材日草稿已保存", databaseService.asMap(databaseService.saveDepartmentDailyDraft(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/patient-consumption-drafts/detail")
+    public ApiResult<Map<String, Object>> patientConsumptionDraft(@RequestParam String id) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.patientConsumptionDraft(id, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-consumption-drafts")
+    public ApiResult<Map<String, Object>> patientConsumptionDrafts(
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String patientId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.patientConsumptionDrafts(departmentKey, date, patientId, user)));
+    }
+
+    @PutMapping("/inventory-api/patient-consumption-drafts")
+    public ApiResult<Map<String, Object>> savePatientConsumptionDraft(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者耗用草稿已保存", databaseService.asMap(databaseService.savePatientConsumptionDraft(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/patient-consumption-drafts/export/{kind}")
+    public ResponseEntity<byte[]> exportPatientConsumptionDrafts(
+        @org.springframework.web.bind.annotation.PathVariable String kind,
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:export");
+        if (!"details".equals(kind) && !"summary".equals(kind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的患者耗用导出类型");
+        }
+        return attachment(
+            databaseService.exportPatientConsumptionDrafts(kind, departmentKey, date, user),
+            "patient-consumption-" + kind + ".csv",
+            "text/csv;charset=UTF-8"
+        );
     }
 
     @GetMapping("/inventory-api/ledger-movements")

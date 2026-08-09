@@ -76,95 +76,90 @@ const inventoryMenu: InventoryMenuItem[] = [
     path: INVENTORY_SYSTEM_DASHBOARD,
     name: "inventorySystemDashboard",
     tab: "overview",
-    meta: meta("工作台", "DataBoard")
+    meta: meta("今日耗用", "DataBoard")
   },
   {
-    path: `${INVENTORY_SYSTEM_PREFIX}/materials`,
-    name: "inventorySystemMaterialsMenu",
-    meta: meta("库存台账", "Goods"),
-    children: [
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/stock`,
-        name: "inventorySystemStock",
-        tab: "stock",
-        meta: meta("库存台账与入库", "Goods")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/items`,
-        name: "inventorySystemItems",
-        tab: "items",
-        meta: meta("物资目录", "Document")
-      }
-    ]
+    path: `${INVENTORY_SYSTEM_PREFIX}/departments`,
+    name: "inventorySystemDepartmentAccounting",
+    menuCapabilities: ["inventory:read"],
+    meta: meta("科室耗用核算", "OfficeBuilding"),
+    children: departmentEntries.map(entry => ({
+      path: `${INVENTORY_SYSTEM_PREFIX}/departments/${entry.key}`,
+      name: `inventorySystemDepartmentMenu${entry.key.replace(/(^|-)([a-z])/g, (_, _dash, letter) => letter.toUpperCase())}`,
+      menuCapabilities: ["inventory:read"],
+      meta: meta(entry.title, entry.icon)
+    }))
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/requests`,
     name: "inventorySystemRequests",
     tab: "requests",
-    meta: meta("申领与发放", "List")
+    meta: meta("本科室申领", "List")
   },
   {
-    path: `${INVENTORY_SYSTEM_PREFIX}/departments`,
-    name: "inventorySystemDepartmentEntry",
-    meta: meta("患者相关耗用", "OfficeBuilding"),
-    children: [
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/consumable-entry`,
-        name: "inventorySystemConsumableEntry",
-        tab: "packages",
-        meta: meta("患者耗用查询", "EditPen")
-      }
-    ]
+    path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
+    name: "inventorySystemDailyVerification",
+    tab: "daily",
+    meta: meta("每日核对与导出", "Checked")
   },
   {
-    path: `${INVENTORY_SYSTEM_PREFIX}/audit`,
-    name: "inventorySystemAuditMenu",
-    meta: meta("日常物资与追溯", "Checked"),
+    path: `${INVENTORY_SYSTEM_PREFIX}/admin-tools`,
+    name: "inventorySystemAdminTools",
+    menuCapabilities: [
+      "inventory:read",
+      "inventory:item:manage",
+      "inventory:count",
+      "inventory:rule",
+      "inventory:report",
+      "inventory:issue",
+      "inventory:export",
+      "inventory:receive",
+      "inventory:approve",
+      "inventory:role:manage"
+    ],
+    meta: meta("库存与管理", "SetUp"),
     children: [
       {
-        path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
-        name: "inventorySystemDailyVerification",
-        tab: "daily",
-        meta: meta("患者耗用核对", "Tickets")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/weekly`,
-        name: "inventorySystemWeekly",
-        tab: "weekly",
-        meta: meta("日常物资核对", "Calendar")
+        path: `${INVENTORY_SYSTEM_PREFIX}/stock`,
+        name: "inventorySystemStock",
+        tab: "stock",
+        menuCapabilities: ["inventory:issue", "inventory:count", "inventory:export"],
+        meta: meta("库存与批次", "Goods")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/controls`,
         name: "inventorySystemControls",
         tab: "controls",
-        meta: meta("盘点、退回与报废", "Checked")
+        menuCapabilities: ["inventory:count", "inventory:receive"],
+        meta: meta("盘点与报损", "Checked")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
         name: "inventorySystemTrace",
         tab: "trace",
-        meta: meta("预警与追溯", "TrendCharts")
-      }
-    ]
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/analytics`,
-    name: "inventorySystemSettingsMenu",
-    meta: meta("管理设置", "SetUp"),
-    children: [
+        menuCapabilities: ["inventory:export", "inventory:issue", "inventory:count"],
+        meta: meta("流水追溯", "TrendCharts")
+      },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/packages`,
         name: "inventorySystemPackages",
         tab: "packages",
         menuCapabilities: ["inventory:rule"],
-        meta: meta("患者耗用规则", "Collection")
+        meta: meta("套餐规则", "Collection")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/executive`,
         name: "inventorySystemExecutive",
         tab: "executive",
         menuCapabilities: ["inventory:report", "inventory:approve"],
-        meta: meta("运行总览", "DataAnalysis")
+        meta: meta("管理总览", "DataAnalysis")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/items`,
+        name: "inventorySystemItems",
+        tab: "items",
+        menuCapabilities: ["inventory:item:manage", "inventory:rule"],
+        meta: meta("物资设置", "Document")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,

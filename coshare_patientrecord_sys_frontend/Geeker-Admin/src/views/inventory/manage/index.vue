@@ -22,19 +22,6 @@
       </div>
     </section>
 
-    <section v-if="alertTabStats.length" class="status-ribbon" aria-label="待处理提醒">
-      <button
-        v-for="stat in alertTabStats"
-        :key="stat.label"
-        class="ribbon-metric"
-        :class="stat.tone"
-        @click="goTab(stat.tab || activeTab)"
-      >
-        <span>{{ stat.label }}</span>
-        <strong>{{ stat.value }}</strong>
-      </button>
-    </section>
-
     <el-alert
       v-if="activeTab === 'items' && !hasInventoryAuth('inventory:item:manage')"
       class="inventory-readonly-alert"
@@ -45,7 +32,7 @@
       show-icon
     />
 
-    <div v-loading="loading" class="inventory-workspace" element-loading-text="正在同步库存...">
+    <div v-loading="loading && !focusedDepartmentKey" class="inventory-workspace" element-loading-text="正在同步库存...">
       <div v-if="initialInventoryLoading" class="inventory-loading-skeleton">
         <el-skeleton animated :rows="12" />
       </div>
@@ -53,35 +40,7 @@
       <transition v-else name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
-            <OperationsHubPanel
-              :workbench="inventoryWorkbench"
-              :balances="locationBalances"
-              :exceptions="inventoryExceptions"
-              :consumptions="inventoryConsumptions"
-              :weekly-suggestions="inventoryWorkbench?.weeklySuggestions || []"
-              :weekly-suggestions-ready="Array.isArray(inventoryWorkbench?.weeklySuggestions)"
-              :todo-rows="todoRows"
-              :fallback-pending-approval="pendingRequestRows.length"
-              :fallback-pending-issue="approvedRequestRows.length + partiallyIssuedRequestRows.length"
-              :fallback-pending-receipt="issuedRequestRows.length"
-              :fallback-low-stock="lowStockRows.length"
-              :fallback-expiry-soon="expirySoonRows.length"
-              :extended-data-ready="extendedDataReady"
-              :extended-data-errors="extendedDataErrors"
-              :accessible-tabs="accessibleTabItems.map(item => item.tab)"
-              :can-inbound="hasInventoryAuth('inventory:issue')"
-              :can-request="hasInventoryAuth('inventory:request')"
-              :can-count="hasInventoryAuth('inventory:count')"
-              :can-report="canExportDepartmentUsage"
-              :report-loading="reportLoading"
-              :department-options="reportDepartmentOptions"
-              :item-options="reportItemOptions"
-              :category-options="categoryFilterOptions"
-              @go-tab="goTab"
-              @open-todo="openTodo"
-              @workflow="handleWorkflowStep"
-              @download-report="downloadDepartmentUsageReport"
-            />
+            <DepartmentConsumptionSummary :today="today()" @open-department="openDepartmentDraft" />
           </template>
 
           <template v-else-if="activeTab === 'executive'">
@@ -213,7 +172,22 @@
           </template>
 
           <template v-else-if="activeTab === 'packages'">
+            <template v-if="focusedDepartmentKey">
+              <el-radio-group v-model="departmentDraftMode" class="department-draft-mode">
+                <el-radio-button label="daily">科室日核算</el-radio-button>
+                <el-radio-button label="patient">患者耗用草稿</el-radio-button>
+              </el-radio-group>
+              <DepartmentConsumptionWorkspace
+                v-if="departmentDraftMode === 'daily'"
+                :department-key="focusedDepartmentKey"
+                :items="db.items"
+                :batches="db.batches"
+                :today="today()"
+              />
+              <PatientConsumptionDraftWorkspace v-else :department-key="focusedDepartmentKey" :today="today()" />
+            </template>
             <PackagePanel
+              v-else
               :packages="visiblePackages"
               :coverage="db.packageCoverage"
               :events="visibleConsumptionEvents"
@@ -370,9 +344,16 @@
     <el-dialog v-model="requestDialogVisible" title="新增科室申领" width="760px" destroy-on-close>
       <el-form ref="requestFormRef" :model="requestForm" :rules="requestFormRules" label-width="112px" status-icon>
         <el-form-item label="申领科室" prop="department">
-          <el-select v-model="requestForm.department" filterable allow-create placeholder="请选择或输入科室">
+          <el-select
+            v-if="canViewAllDepartments"
+            v-model="requestForm.department"
+            filterable
+            allow-create
+            placeholder="请选择或输入科室"
+          >
             <el-option v-for="item in departmentOptions" :key="item" :label="item" :value="item" />
           </el-select>
+          <el-input v-else v-model="requestForm.department" disabled />
         </el-form-item>
         <el-form-item label="申领明细" required>
           <div class="request-lines-editor">
@@ -513,7 +494,7 @@
 </template>
 
 <script setup lang="ts" name="inventoryManage">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Download, Plus, QuestionFilled, Refresh } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
@@ -598,7 +579,9 @@ import ControlsPanel from "./components/ControlsPanel.vue";
 import ExecutivePanel from "./components/ExecutivePanel.vue";
 import InventoryHelpDrawer from "./components/InventoryHelpDrawer.vue";
 import ItemsPanel from "./components/ItemsPanel.vue";
-import OperationsHubPanel from "./components/OperationsHubPanel.vue";
+import DepartmentConsumptionSummary from "./components/DepartmentConsumptionSummary.vue";
+import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWorkspace.vue";
+import PatientConsumptionDraftWorkspace from "./components/PatientConsumptionDraftWorkspace.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
@@ -619,9 +602,15 @@ const { operatorName, currentDepartment, today, currentWeekNo, newRequestLine, c
 
 const db = ref<InventoryDb>(createEmptyInventoryDb());
 const loading = ref(false);
+const departmentDraftMode = ref<"daily" | "patient">("daily");
 const initialInventoryLoading = computed(
   () =>
-    loading.value && !db.value.items.length && !db.value.batches.length && !db.value.requests.length && !db.value.movements.length
+    !focusedDepartmentKey.value &&
+    loading.value &&
+    !db.value.items.length &&
+    !db.value.batches.length &&
+    !db.value.requests.length &&
+    !db.value.movements.length
 );
 const saving = ref(false);
 const activeTab = ref("overview");
@@ -631,6 +620,7 @@ const locationBalances = ref<InventoryLocationBalance[]>([]);
 const inventoryExceptions = ref<InventoryException[]>([]);
 const inventoryConsumptions = ref<InventoryConsumptionRecord[]>([]);
 const inventoryLedgerMovements = ref<InventoryMovement[]>([]);
+const inventoryLedgerMovementsLoaded = ref(false);
 const extendedDataReady = ref(false);
 const extendedDataErrors = ref<string[]>([]);
 const reportLoading = ref<"" | "pdf" | "xlsx">("");
@@ -780,6 +770,20 @@ const inventoryDepartmentRouteMap: Record<string, string> = {
   "/inventory-system/departments/cashier": "收费室",
   "/inventory-system/departments/tcm-pharmacy": "中药房"
 };
+const inventoryDepartmentKeyRouteMap: Record<string, string> = {
+  "/inventory-system/departments/physiotherapy": "physiotherapy",
+  "/inventory-system/departments/laboratory": "laboratory",
+  "/inventory-system/departments/nursing": "nursing",
+  "/inventory-system/departments/tcm": "tcm",
+  "/inventory-system/departments/operating": "operating",
+  "/inventory-system/departments/anesthesia": "anesthesia",
+  "/inventory-system/departments/endoscopy": "endoscopy",
+  "/inventory-system/departments/inspection": "inspection",
+  "/inventory-system/departments/logistics": "logistics",
+  "/inventory-system/departments/western-pharmacy": "western-pharmacy",
+  "/inventory-system/departments/cashier": "cashier",
+  "/inventory-system/departments/tcm-pharmacy": "tcm-pharmacy"
+};
 const tabRouteNameMap: Record<string, string> = {
   overview: "inventoryOverview",
   executive: "inventoryExecutive",
@@ -824,6 +828,7 @@ const isStandaloneConsumableEntry = computed(
   () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
 );
 const focusedDepartment = computed(() => inventoryDepartmentRouteMap[route.path] || "");
+const focusedDepartmentKey = computed(() => inventoryDepartmentKeyRouteMap[route.path] || "");
 const categoryOptions = ["医用耗材", "办公物资", "消毒用品", "检验用品", "护理用品", "低值易耗"];
 const unitOptions = ["个", "盒", "包", "瓶", "支", "卷", "套", "箱"];
 const returnTypeOptions = [
@@ -833,14 +838,14 @@ const returnTypeOptions = [
 const tabNavItems = [
   { tab: "overview", title: "库存工作台" },
   { tab: "executive", title: "运行总览" },
-  { tab: "requests", title: "科室申领" },
+  { tab: "requests", title: "本科室申领" },
   { tab: "stock", title: "库存总览与入库" },
   { tab: "controls", title: "盘点与报损" },
   { tab: "packages", title: "患者耗材规则" },
   { tab: "weekly", title: "周用量核对" },
   { tab: "trace", title: "出入库追溯" },
   { tab: "items", title: "物资目录" },
-  { tab: "daily", title: "每日耗材核对" },
+  { tab: "daily", title: "每日核对与导出" },
   { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
@@ -921,12 +926,12 @@ type TabStat = {
 
 const tabProfiles = {
   overview: {
-    kicker: "耗材库存管理 / 库存工作台",
-    title: "库存工作台",
-    desc: "今日待办、库存风险、异常集中查看。",
-    taskLabel: "当前待办",
-    taskTitle: "先处理红黄提醒",
-    taskDesc: "不用先翻明细，异常和待办会自动靠前。"
+    kicker: "一线核算 / 今日耗用",
+    title: "今日耗用",
+    desc: "查看前置病历完成环节已入账的自动耗用；库存扣减细节由后台处理。",
+    taskLabel: "今日核算",
+    taskTitle: "先核对已入账结果",
+    taskDesc: "按日期查看已完成业务环节触发的耗用记录。"
   },
   executive: {
     kicker: "管理设置 / 运行总览",
@@ -937,9 +942,9 @@ const tabProfiles = {
     taskDesc: "适合主任、质控和管理人员快速复核。"
   },
   requests: {
-    kicker: "科室申领",
-    title: "科室申领",
-    desc: "提交申领 → 审核 → 发放 → 签收，全程留痕。",
+    kicker: "一线核算 / 本科室申领",
+    title: "本科室申领",
+    desc: "处理与患者数量无关的日常物资申领、发放和签收。",
     taskLabel: "当前重点",
     taskTitle: "按顺序处理待审核、待发放、待签收",
     taskDesc: "每张单只做当前状态允许的操作。"
@@ -993,12 +998,12 @@ const tabProfiles = {
     taskDesc: "审核复核时可直接导出明细。"
   },
   daily: {
-    kicker: "对账与追溯 / 每日耗材核对",
-    title: "每日耗材核对",
-    desc: "展示当日已由就诊环节自动触发的耗材扣减，便于每日纸质复核。",
+    kicker: "一线核算 / 每日核对与导出",
+    title: "每日核对与导出",
+    desc: "按单个业务日核对系统用量，并导出当日结果与库存流水复核。",
     taskLabel: "统计口径",
-    taskTitle: "只含已完成就诊环节的自动扣减",
-    taskDesc: "固定消耗、按需申领和待确认规则不会混入本表。"
+    taskTitle: "按实际完成业务汇总",
+    taskDesc: "患者相关耗用与日常申领分别保留，避免混算。"
   },
   roles: {
     kicker: "管理设置 / 岗位与权限",
@@ -1034,7 +1039,7 @@ const tabAuthMap: Record<string, readonly string[]> = {
     "inventory:read"
   ],
   executive: ["inventory:read", "inventory:export", "inventory:report"],
-  requests: ["inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
+  requests: ["inventory:read", "inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
   stock: ["inventory:read"],
   items: ["inventory:read"],
   weekly: ["inventory:read", "inventory:count", "inventory:approve", "inventory:export"],
@@ -1356,13 +1361,20 @@ const maxDepartmentConsumption = computed(() => Math.max(...departmentConsumptio
 const accessibleTabItems = computed(() =>
   tabNavItems.filter(item => hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || []))
 );
-const canExportDepartmentUsage = computed(() => hasAnyInventoryAuth(["inventory:report", "inventory:export"]));
+const canExportDepartmentUsage = computed(() => hasInventoryAuthForTab("daily", "inventory:export"));
 const canAccessTab = (tab: string) => accessibleTabItems.value.some(item => item.tab === tab);
 const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item => hasInventoryAuth(item.auth)));
 const canSubmitReturnOrScrap = computed(() =>
   returnForm.type === "return" ? hasInventoryAuth("inventory:receive") : hasInventoryAuth("inventory:count")
 );
 const currentTabProfile = computed(() => {
+  if (activeTab.value === "packages" && focusedDepartmentKey.value) {
+    return {
+      kicker: "科室耗用核算",
+      title: `${focusedDepartment.value} · 日核算草稿`,
+      desc: "按科室原始耗材表录入业务量并实时预览日、月使用量；保存不会影响正式库存。"
+    };
+  }
   if (activeTab.value === "packages" && isStandaloneConsumableEntry.value) {
     return {
       kicker: "科室耗材",
@@ -1631,6 +1643,12 @@ const alertTabStats = computed(() =>
       )
 );
 
+const departmentPathByKey = Object.fromEntries(Object.entries(inventoryDepartmentKeyRouteMap).map(([path, key]) => [key, path]));
+const openDepartmentDraft = (departmentKey: string) => {
+  const path = departmentPathByKey[departmentKey];
+  if (path) router.push(path);
+};
+
 const goTab = (tab: string) => {
   if (canAccessTab(tab)) {
     activeTab.value = tab;
@@ -1671,6 +1689,7 @@ watch(activeTab, tab => {
   if (nextPath && route.path !== nextPath) router.replace(nextPath);
   if (tab === "daily" && !dailyVerificationReport.value) loadDailyVerification({ date: today(), departmentId: "" });
   if (tab === "roles" && !inventoryRoles.value.length) loadInventoryRoleManagement();
+  void nextTick(() => loadTabBackgroundData());
 });
 
 watch(accessibleTabItems, () => goTab(activeTab.value), { immediate: true });
@@ -1725,7 +1744,7 @@ const validateIssueLines = () => {
 };
 
 const loadExtendedInventory = async () => {
-  const endpointLabels = ["工作台", "科室余额", "异常任务", "执行耗用"];
+  const endpointLabels = ["工作台", "科室余额", "异常任务", "执行耗用", "库存流水"];
   const [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult] = await Promise.allSettled([
     getInventoryWorkbenchApi(),
     getInventoryLocationBalancesApi(),
@@ -1752,6 +1771,7 @@ const loadExtendedInventory = async () => {
           createdAt: row.occurredAt
         }))
       : [];
+  inventoryLedgerMovementsLoaded.value = ledgerResult.status === "fulfilled";
   const results = [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult];
   extendedDataErrors.value = results.flatMap((result, index) =>
     result.status === "rejected"
@@ -1762,12 +1782,33 @@ const loadExtendedInventory = async () => {
 };
 
 const applyLedgerMovements = () => {
-  if (inventoryLedgerMovements.value.length) db.value.movements = inventoryLedgerMovements.value;
+  if (inventoryLedgerMovementsLoaded.value) db.value.movements = inventoryLedgerMovements.value;
 };
 
 const refreshOperationalData = async () => {
   await loadExtendedInventory();
   applyLedgerMovements();
+};
+
+const loadTabBackgroundData = () => {
+  if (focusedDepartmentKey.value) return;
+  if (["overview", "executive", "stock", "requests", "trace", "daily", "controls"].includes(activeTab.value)) {
+    void refreshOperationalData();
+  }
+  if (["weekly", "executive"].includes(activeTab.value)) void loadWeekly();
+  if (activeTab.value === "packages") void loadMappings();
+  if (activeTab.value === "items") void loadMappingGovernance();
+};
+
+const refreshDailyConsumption = async (date?: string) => {
+  loading.value = true;
+  try {
+    inventoryConsumptions.value = (await getInventoryConsumptionsApi(date ? { from: date, to: date } : {})).data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    loading.value = false;
+  }
 };
 
 const loadWeekly = async (filters: { weekNo?: string; departmentId?: string } = {}) => {
@@ -1835,19 +1876,14 @@ const loadMappingGovernance = async () => {
 
 const loadInventory = async () => {
   loading.value = true;
-  const extendedLoad = loadExtendedInventory();
-  const weeklyLoad = loadWeekly();
-  const mappingsLoad = loadMappings();
-  const governanceLoad = loadMappingGovernance();
   try {
     const { data } = await getInventoryDbApi();
     db.value = data;
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
-    await Promise.all([extendedLoad, weeklyLoad, mappingsLoad, governanceLoad]);
-    applyLedgerMovements();
     loading.value = false;
+    loadTabBackgroundData();
   }
 };
 
@@ -2782,6 +2818,10 @@ onMounted(() => {
   gap: 12px;
   min-width: 0;
   max-width: 100%;
+}
+
+.department-draft-mode {
+  justify-self: start;
 }
 
 .inventory-loading-skeleton {

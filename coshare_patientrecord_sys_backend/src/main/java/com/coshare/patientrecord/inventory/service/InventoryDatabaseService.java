@@ -32,6 +32,8 @@ public class InventoryDatabaseService {
     private final InventoryWeeklyExportService weeklyExportService;
     private final InventoryMappingService mappingService;
     private final InventoryAccessService inventoryAccess;
+    private final InventoryDepartmentDraftService departmentDraftService;
+    private final InventoryPatientConsumptionDraftService patientConsumptionDraftService;
 
     public InventoryDatabaseService(
         InventoryRepository repository,
@@ -45,7 +47,9 @@ public class InventoryDatabaseService {
         InventoryWeeklyService weeklyService,
         InventoryWeeklyExportService weeklyExportService,
         InventoryMappingService mappingService,
-        InventoryAccessService inventoryAccess
+        InventoryAccessService inventoryAccess,
+        InventoryDepartmentDraftService departmentDraftService,
+        InventoryPatientConsumptionDraftService patientConsumptionDraftService
     ) {
         this.repository = repository;
         this.requestWorkflow = requestWorkflow;
@@ -59,6 +63,8 @@ public class InventoryDatabaseService {
         this.weeklyExportService = weeklyExportService;
         this.mappingService = mappingService;
         this.inventoryAccess = inventoryAccess;
+        this.departmentDraftService = departmentDraftService;
+        this.patientConsumptionDraftService = patientConsumptionDraftService;
     }
 
     public ObjectNode readDb() {
@@ -216,6 +222,34 @@ public class InventoryDatabaseService {
         return readDbForUser(user);
     }
 
+    public ObjectNode departmentDailyDraft(String departmentKey, LocalDate businessDate, SessionUser user) {
+        return departmentDraftService.read(departmentKey, businessDate, user);
+    }
+
+    public ObjectNode departmentDailyDraftSummary(LocalDate businessDate, SessionUser user) {
+        return departmentDraftService.summary(businessDate, user);
+    }
+
+    public ObjectNode saveDepartmentDailyDraft(JsonNode payload, SessionUser user) {
+        return departmentDraftService.save(payload, user);
+    }
+
+    public ObjectNode patientConsumptionDraft(String id, SessionUser user) {
+        return patientConsumptionDraftService.read(id, user);
+    }
+
+    public ObjectNode patientConsumptionDrafts(String departmentKey, LocalDate businessDate, String patientId, SessionUser user) {
+        return patientConsumptionDraftService.list(departmentKey, businessDate, patientId, user);
+    }
+
+    public ObjectNode savePatientConsumptionDraft(JsonNode payload, SessionUser user) {
+        return patientConsumptionDraftService.save(payload, user);
+    }
+
+    public byte[] exportPatientConsumptionDrafts(String kind, String departmentKey, LocalDate businessDate, SessionUser user) {
+        return patientConsumptionDraftService.export(kind, departmentKey, businessDate, user);
+    }
+
     public ObjectNode workbench(SessionUser user, String requestedDepartmentId) {
         String departmentId = scopedDepartmentId(user, requestedDepartmentId);
         ObjectNode result = JsonNodeFactory.instance.objectNode();
@@ -314,8 +348,11 @@ public class InventoryDatabaseService {
         boolean patientOnly,
         String action
     ) {
-        ObjectNode result = reportService.query(from, to, departmentIds, itemId, category, triggerStage, patientOnly);
-        reportService.audit(user, action, from, to, departmentIds == null ? List.of() : departmentIds);
+        List<String> effectiveDepartmentIds = inventoryAccess.canViewAllDepartments(user)
+            ? (departmentIds == null ? List.of() : departmentIds)
+            : List.of(scopedDepartmentId(user, null));
+        ObjectNode result = reportService.query(from, to, effectiveDepartmentIds, itemId, category, triggerStage, patientOnly);
+        reportService.audit(user, action, from, to, effectiveDepartmentIds);
         return result;
     }
 
