@@ -24,6 +24,11 @@
           <el-button type="primary" plain :icon="Plus" @click="addLine">新增耗材</el-button>
         </div>
 
+        <div class="input-pane-secondary-actions">
+          <el-button plain :icon="EditPen" @click="openExpandedEditor">展开编辑</el-button>
+          <span>明细较多时，在浮层中完整浏览和修改</span>
+        </div>
+
         <div class="volume-grid">
           <label v-for="group in serviceGroups" :key="group" class="volume-field">
             <span>{{ group }}</span>
@@ -157,12 +162,126 @@
         </el-table>
       </section>
     </div>
+
+    <el-dialog
+      v-model="editorOpen"
+      class="consumption-editor-dialog"
+      title="耗材明细编辑"
+      width="min(1220px, calc(100vw - 32px))"
+      top="4vh"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+    >
+      <div class="editor-dialog-shell">
+        <div class="editor-dialog-toolbar">
+          <div>
+            <strong>完整明细编辑</strong>
+            <span>共 {{ draft.lines.length }} 条，浮层内可纵向滚动查看全部字段，修改会同步到右侧预览。</span>
+          </div>
+          <el-button type="primary" plain :icon="Plus" @click="addLine">新增耗材</el-button>
+        </div>
+
+        <div class="volume-grid editor-volume-grid">
+          <label v-for="group in serviceGroups" :key="`editor-${group}`" class="volume-field">
+            <span>{{ group }}</span>
+            <el-input-number
+              v-model="draft.groupVolumes[group]"
+              :min="0"
+              :precision="0"
+              controls-position="right"
+              @change="normalizeGroupVolume(group)"
+            />
+          </label>
+          <label class="volume-field month-days">
+            <span>本月天数</span>
+            <el-input-number
+              v-model="draft.monthDays"
+              :min="1"
+              :max="31"
+              :precision="0"
+              controls-position="right"
+              @change="normalizeMonthDays"
+            />
+          </label>
+        </div>
+
+        <div class="editor-table-wrap">
+          <el-table
+            :data="draft.lines"
+            class="input-table expanded-input-table"
+            height="calc(84vh - 300px)"
+            min-height="360"
+            table-layout="fixed"
+          >
+            <el-table-column label="服务项目 / 类型" min-width="190">
+              <template #default="{ row }">
+                <el-select v-model="row.serviceGroup" filterable allow-create default-first-option>
+                  <el-option v-for="group in serviceGroups" :key="group" :label="group" :value="group" />
+                </el-select>
+                <el-select v-model="row.careType" class="care-type-select">
+                  <el-option v-for="option in careTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="耗材" min-width="220">
+              <template #default="{ row }">
+                <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材">
+                  <el-option v-for="name in materialOptions" :key="name" :label="name" :value="name" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="单位" width="110">
+              <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" /></template>
+            </el-table-column>
+            <el-table-column label="每人次定额" width="138">
+              <template #default="{ row }">
+                <el-input-number v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
+              </template>
+            </el-table-column>
+            <el-table-column label="行内人次" width="138">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="row.volumeOverride"
+                  :min="0"
+                  :precision="0"
+                  controls-position="right"
+                  placeholder="跟随分组"
+                  @change="normalizeLineVolume(row)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="单价" width="126">
+              <template #default="{ row }">
+                <el-input-number v-model="row.unitPrice" :min="0" :precision="4" controls-position="right" />
+              </template>
+            </el-table-column>
+            <el-table-column width="60" align="center">
+              <template #default="{ $index }">
+                <el-tooltip content="删除本次草稿中的耗材行" placement="left">
+                  <el-button :icon="Delete" circle text type="danger" aria-label="删除耗材行" @click="removeLine($index)" />
+                </el-tooltip>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+      <template #footer>
+        <div class="editor-dialog-footer">
+          <span>当前修改尚未保存，关闭浮层不会自动提交。</span>
+          <div>
+            <el-button @click="editorOpen = false">关闭</el-button>
+            <el-button type="primary" :loading="saving" :icon="DocumentChecked" @click="saveDraft">保存草稿</el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Delete, DocumentChecked, Plus, RefreshLeft } from "@element-plus/icons-vue";
+import { Delete, DocumentChecked, EditPen, Plus, RefreshLeft } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import {
   getInventoryDepartmentDailyDraftApi,
@@ -193,6 +312,7 @@ const props = defineProps<{
 
 const businessDate = ref(props.today);
 const saving = ref(false);
+const editorOpen = ref(false);
 const latestLoadKey = ref("");
 const template = computed(() => departmentTemplateByKey.get(props.departmentKey));
 const careTypeOptions: { label: string; value: InventoryDepartmentDraftCareType }[] = [
@@ -316,6 +436,10 @@ const addLine = () => {
   });
 };
 
+const openExpandedEditor = () => {
+  editorOpen.value = true;
+};
+
 const removeLine = (index: number) => draft.value.lines.splice(index, 1);
 const formatQuantity = (value: number) => Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
 const formatMoney = (value: number) =>
@@ -424,6 +548,20 @@ watch(
   color: var(--inventory-muted);
   font-size: 13px;
 }
+.input-pane-secondary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--inventory-line);
+  border-radius: 6px;
+  background: #fbfdfd;
+}
+.input-pane-secondary-actions span {
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
 .toolbar-actions {
   flex-wrap: wrap;
 }
@@ -505,12 +643,64 @@ watch(
   color: var(--inventory-muted);
   font-size: 13px;
 }
+.editor-dialog-shell {
+  display: grid;
+  gap: 14px;
+}
+.editor-dialog-toolbar,
+.editor-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.editor-dialog-toolbar > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+.editor-dialog-toolbar strong {
+  color: var(--inventory-text);
+  font-size: 15px;
+}
+.editor-dialog-toolbar span,
+.editor-dialog-footer > span {
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
+.editor-volume-grid {
+  max-height: 126px;
+  padding: 10px 12px;
+  border: 1px solid var(--inventory-line);
+  border-radius: 6px;
+  background: #fbfdfd;
+}
+.editor-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--inventory-line);
+  border-radius: 6px;
+}
+.expanded-input-table {
+  min-width: 980px;
+}
+:global(.consumption-editor-dialog .el-dialog__body) {
+  padding: 0 20px 12px;
+}
+:global(.consumption-editor-dialog .el-dialog__footer) {
+  padding-top: 0;
+}
 @media (max-width: 1240px) {
   .department-workspace-grid {
     grid-template-columns: 1fr;
   }
 }
 @media (max-width: 680px) {
+  .input-pane-secondary-actions,
+  .editor-dialog-toolbar,
+  .editor-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
   .volume-grid,
   .preview-summary {
     grid-template-columns: 1fr;
