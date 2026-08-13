@@ -15,6 +15,7 @@ import {
 import NProgress from "@/config/nprogress";
 
 const mode = import.meta.env.VITE_ROUTER_MODE;
+const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
 
 const routerMode = {
   hash: () => createWebHashHistory(),
@@ -42,20 +43,17 @@ const systemLandingFor = (path: string, authStore: ReturnType<typeof useAuthStor
 };
 
 /**
- * @description 📚 路由参数配置简介
- * @param path ==> 路由菜单访问路径
- * @param name ==> 路由 name (对应页面组件 name, 可用作 KeepAlive 缓存标识 && 按钮权限筛选)
- * @param redirect ==> 路由重定向地址
- * @param component ==> 视图文件路径
- * @param meta ==> 路由菜单元信息
- * @param meta.icon ==> 菜单和面包屑对应的图标
- * @param meta.title ==> 路由标题 (用作 document.title || 菜单的名称)
- * @param meta.activeMenu ==> 当前路由为详情页时，需要高亮的菜单
- * @param meta.isLink ==> 路由外链时填写的访问地址
- * @param meta.isHide ==> 是否在菜单中隐藏 (通常列表详情页需要隐藏)
- * @param meta.isFull ==> 菜单是否全屏 (示例：数据大屏页面)
- * @param meta.isAffix ==> 菜单是否固定在标签页中 (首页通常是固定项)
- * @param meta.isKeepAlive ==> 当前路由是否缓存
+ * @description 馃摎 璺敱鍙傛暟閰嶇疆绠€浠? * @param path ==> 璺敱鑿滃崟璁块棶璺緞
+ * @param name ==> 璺敱 name (瀵瑰簲椤甸潰缁勪欢 name, 鍙敤浣?KeepAlive 缂撳瓨鏍囪瘑 && 鎸夐挳鏉冮檺绛涢€?
+ * @param redirect ==> 璺敱閲嶅畾鍚戝湴鍧€
+ * @param component ==> 瑙嗗浘鏂囦欢璺緞
+ * @param meta ==> 璺敱鑿滃崟鍏冧俊鎭? * @param meta.icon ==> 鑿滃崟鍜岄潰鍖呭睉瀵瑰簲鐨勫浘鏍? * @param meta.title ==> 璺敱鏍囬 (鐢ㄤ綔 document.title || 鑿滃崟鐨勫悕绉?
+ * @param meta.activeMenu ==> 褰撳墠璺敱涓鸿鎯呴〉鏃讹紝闇€瑕侀珮浜殑鑿滃崟
+ * @param meta.isLink ==> 璺敱澶栭摼鏃跺～鍐欑殑璁块棶鍦板潃
+ * @param meta.isHide ==> 鏄惁鍦ㄨ彍鍗曚腑闅愯棌 (閫氬父鍒楄〃璇︽儏椤甸渶瑕侀殣钘?
+ * @param meta.isFull ==> 鑿滃崟鏄惁鍏ㄥ睆 (绀轰緥锛氭暟鎹ぇ灞忛〉闈?
+ * @param meta.isAffix ==> 鑿滃崟鏄惁鍥哄畾鍦ㄦ爣绛鹃〉涓?(棣栭〉閫氬父鏄浐瀹氶」)
+ * @param meta.isKeepAlive ==> 褰撳墠璺敱鏄惁缂撳瓨
  * */
 const router = createRouter({
   history: createHistory(),
@@ -70,7 +68,7 @@ const setDocumentTitle = (to: RouteLocationNormalized) => {
 };
 
 /**
- * @description 路由拦截 beforeEach
+ * @description 璺敱鎷︽埅 beforeEach
  */
 router.beforeEach(async to => {
   const userStore = useUserStore();
@@ -103,6 +101,16 @@ router.beforeEach(async to => {
     if (to.name === "notFound") return { path: unavailableRouteFor(to.path), replace: true };
     if (isInventorySystemPath(to.path)) {
       if (!authStore.hasInventorySystemAccessGet) return { path: "/403", replace: true };
+      if (isInventoryPortal) {
+        const isAdministrator = (authStore.capabilities || []).includes("inventory:role:manage");
+        const departmentPath = "/inventory-system/departments/" + (authStore.activeDepartment?.id || "");
+        const portalLanding = isAdministrator ? "/inventory-system/daily-verification" : departmentPath;
+        const isMessageBoard = to.path === "/inventory-system/message-board";
+        const allowed = isAdministrator
+          ? isMessageBoard || to.path === "/inventory-system/daily-verification" || to.path === "/inventory-system/quota-governance" || to.path === "/inventory-system/role-management" || to.path.startsWith("/inventory-system/departments/")
+          : isMessageBoard || to.path === departmentPath;
+        if (!allowed) return { path: portalLanding, replace: true };
+      }
       const tab = inventoryTabFromPath(to.path);
       if (tab && !canAccessInventoryTab(tab, authStore.authButtonListGet, authStore.capabilities || [])) {
         return { path: "/403", replace: true };
@@ -114,7 +122,7 @@ router.beforeEach(async to => {
     await authStore.setRouteName(String(to.name || ""));
     return true;
   } catch (error) {
-    console.error("动态路由初始化失败", error);
+    console.error("鍔ㄦ€佽矾鐢卞垵濮嬪寲澶辫触", error);
     userStore.setToken("");
     resetRouter();
     return { path: LOGIN_URL, query: { redirect: to.fullPath }, replace: true };
@@ -122,7 +130,7 @@ router.beforeEach(async to => {
 });
 
 /**
- * @description 重置路由
+ * @description 閲嶇疆璺敱
  * */
 export const resetRouter = () => {
   const authStore = useAuthStore();
@@ -139,15 +147,15 @@ export const resetRouter = () => {
 };
 
 /**
- * @description 路由跳转错误
+ * @description 璺敱璺宠浆閿欒
  * */
 router.onError(error => {
   NProgress.done();
-  console.warn("路由错误", error.message);
+  console.warn("璺敱閿欒", error.message);
 });
 
 /**
- * @description 路由跳转结束
+ * @description 璺敱璺宠浆缁撴潫
  * */
 router.afterEach(() => {
   NProgress.done();
