@@ -365,7 +365,7 @@
       <template #footer>
         <div class="editor-dialog-footer">
           <span>当前修改尚未保存，关闭浮层不会自动提交。</span>
-          <div class="editor-dialog-actions" @mousedown.stop @click.stop>
+          <div class="editor-dialog-actions">
             <el-button :disabled="saving" @click="closeExpandedEditor">关闭</el-button>
             <el-button type="primary" :loading="saving" :icon="DocumentChecked" @click="saveDraft">保存草稿</el-button>
           </div>
