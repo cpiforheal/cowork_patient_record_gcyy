@@ -2,11 +2,11 @@
   <section v-if="template" class="department-consumption-workspace">
     <div class="department-toolbar">
       <div>
-        <h2>{{ template.department }}核算单</h2>
-        <p>患者人次会更新理论试算，不会自动修改实际使用量；草稿不扣库存、不生成流水。</p>
+        <h2>{{ template.department }}耗材填报</h2>
       </div>
       <div class="toolbar-actions">
         <el-date-picker v-model="businessDate" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="loadDraft" />
+        <el-button :icon="Refresh" :disabled="saving" @click="loadDraft">刷新</el-button>
         <el-tooltip v-if="!isInventoryPortal" content="恢复该科室的原始表格模板" placement="bottom">
           <el-button :icon="RefreshLeft" circle aria-label="恢复原始表格模板" @click="restoreTemplate" />
         </el-tooltip>
@@ -31,11 +31,7 @@
     >
       <section class="input-pane">
         <div class="pane-heading">
-          <div>
-            <h3>填写与修正</h3>
-            <p>患者人次会更新理论试算，不会自动修改实际使用量。</p>
-          </div>
-          <el-button type="primary" plain :icon="Plus" @click="addLine">新增耗材</el-button>
+          <h3>耗材明细</h3>
         </div>
 
         <div class="input-pane-secondary-actions">
@@ -46,17 +42,12 @@
               <el-option v-for="option in careTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </div>
-          <el-button plain :icon="EditPen" @click="openExpandedEditor">展开编辑</el-button>
-          <span>明细较多时，在浮层中完整浏览和修改；筛选不会删除明细</span>
+          <div class="input-pane-tools">
+            <el-button :icon="Plus" @click="addLine">新增耗材</el-button>
+            <el-button plain :icon="EditPen" @click="openExpandedEditor">展开编辑</el-button>
+          </div>
         </div>
 
-        <el-alert
-          class="decoupling-alert"
-          type="info"
-          :closable="false"
-          show-icon
-          title="患者人次会更新理论试算，不会自动修改实际使用量。"
-        />
 
         <div class="volume-grid">
           <label v-for="group in serviceGroups" :key="group" class="volume-field">
@@ -82,7 +73,7 @@
           </label>
         </div>
 
-        <el-table :data="visibleDraftLines" class="input-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed">
+        <el-table :data="visibleDraftLines" class="input-table" height="calc(100vh - 330px)" min-height="380" table-layout="fixed">
           <el-table-column label="服务项目 / 类型" min-width="180">
             <template #default="{ row }">
               <el-select v-model="row.serviceGroup" filterable allow-create default-first-option :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
@@ -161,10 +152,7 @@
 
       <section class="preview-pane">
         <div class="pane-heading">
-          <div>
-            <h3>实时预览</h3>
-            <p>参考试算与实际使用量分开显示；统计和下拨依据只读取明确填写的实际耗材。</p>
-          </div>
+          <h3>核对预览</h3>
           <span class="draft-state">{{ quotaVersionLabel }} · {{ draft.revision ? `已保存 v${draft.revision}` : "未保存" }}</span>
         </div>
 
@@ -177,11 +165,7 @@
             ><strong class="unit-summary">{{ dailyQuantitySummary || "暂无可汇总数量" }}</strong></span
           >
           <span
-            ><small>按实际外推月量（按单位）</small
-            ><strong class="unit-summary">{{ monthlyQuantitySummary || "暂无可汇总数量" }}</strong></span
-          >
-          <span
-            ><small>未填实际 / 无单位</small><strong>{{ excludedQuantityLineCount }} 行</strong></span
+            ><small>未填实际量</small><strong>{{ excludedQuantityLineCount }} 行</strong></span
           >
           <span
             ><small>按实际外推月金额</small
@@ -247,10 +231,6 @@
     >
       <div class="editor-dialog-shell">
         <div class="editor-dialog-toolbar">
-          <div>
-            <strong>完整明细编辑</strong>
-            <span>共 {{ draft.lines.length }} 条；筛选只影响显示，不会删除明细。</span>
-          </div>
           <div class="editor-filter">
             <span>服务类型</span>
             <el-select v-model="careTypeFilter" class="care-type-filter" aria-label="筛选服务类型">
@@ -364,7 +344,6 @@
       </div>
       <template #footer>
         <div class="editor-dialog-footer">
-          <span>当前修改尚未保存，关闭浮层不会自动提交。</span>
           <div class="editor-dialog-actions">
             <el-button :disabled="saving" @click="closeExpandedEditor">关闭</el-button>
             <el-button type="primary" :loading="saving" :icon="DocumentChecked" @click="saveDraft">保存草稿</el-button>
@@ -432,7 +411,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
-import { Delete, DocumentChecked, EditPen, Plus, RefreshLeft } from "@element-plus/icons-vue";
+import { Delete, DocumentChecked, EditPen, Plus, Refresh, RefreshLeft } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import {
   downloadInventoryDepartmentPeriodReportApi,
@@ -621,7 +600,6 @@ const quantitySummary = (field: "dailyQuantity" | "monthlyQuantity") => {
   return [...totals.entries()].map(([unit, quantity]) => `${formatQuantity(quantity)} ${unit}`).join(" · ");
 };
 const dailyQuantitySummary = computed(() => quantitySummary("dailyQuantity"));
-const monthlyQuantitySummary = computed(() => quantitySummary("monthlyQuantity"));
 const excludedQuantityLineCount = computed(
   () => visiblePreviewRows.value.filter(row => !row.actualFilled || !row.unit.trim()).length
 );
@@ -980,25 +958,15 @@ watch(
 .pane-heading h3 {
   font-size: 16px;
 }
-.department-toolbar p,
-.pane-heading p {
-  margin: 5px 0 0;
-  color: var(--inventory-muted);
-  font-size: 13px;
-}
 .input-pane-secondary-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 10px;
-  border: 1px dashed var(--inventory-line);
-  border-radius: 6px;
-  background: #fbfdfd;
 }
-.input-pane-secondary-actions span {
-  color: var(--inventory-muted);
-  font-size: 12px;
+.input-pane-tools {
+  display: inline-flex;
+  gap: 8px;
 }
 .toolbar-actions {
   flex-wrap: wrap;
@@ -1008,7 +976,7 @@ watch(
 }
 .department-workspace-grid {
   display: grid;
-  grid-template-columns: minmax(360px, var(--input-pane-width, 46%)) 10px minmax(420px, 1fr);
+  grid-template-columns: minmax(520px, var(--input-pane-width, 58%)) 10px minmax(360px, 1fr);
   gap: 0;
   min-width: 0;
 }
@@ -1042,9 +1010,9 @@ watch(
 .input-pane,
 .preview-pane {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid var(--inventory-line);
   border-radius: 6px;
   background: #fff;
@@ -1126,27 +1094,20 @@ watch(
 }
 .preview-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  border-block: 1px solid var(--inventory-line);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--inventory-line);
 }
 .preview-summary span {
   display: grid;
-  gap: 4px;
-  padding: 10px 12px;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 10px 8px;
   border-right: 1px solid var(--inventory-line);
 }
-.preview-summary span:last-child {
-  border-right: 0;
-}
-.preview-summary small {
-  color: var(--inventory-muted);
-  font-size: 12px;
-}
-.preview-summary strong {
-  color: var(--inventory-text);
-  font-size: 17px;
-  font-weight: 600;
-}
+.preview-summary span:first-child { padding-left: 0; }
+.preview-summary span:last-child { padding-right: 0; border-right: 0; }
+.preview-summary small { color: var(--inventory-muted); font-size: 12px; }
+.preview-summary strong { overflow: hidden; color: var(--inventory-text); font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .preview-summary .unit-summary {
   font-size: 14px;
   line-height: 1.45;
@@ -1193,18 +1154,8 @@ watch(
   gap: 10px;
   flex-wrap: wrap;
 }
-.editor-dialog-toolbar > div:first-child {
-  display: grid;
-  gap: 4px;
-}
-.editor-dialog-toolbar strong {
-  color: var(--inventory-text);
-  font-size: 15px;
-}
-.editor-dialog-toolbar span,
-.editor-dialog-footer > span {
-  color: var(--inventory-muted);
-  font-size: 12px;
+.editor-dialog-footer {
+  justify-content: flex-end;
 }
 .editor-volume-grid {
   max-height: 126px;

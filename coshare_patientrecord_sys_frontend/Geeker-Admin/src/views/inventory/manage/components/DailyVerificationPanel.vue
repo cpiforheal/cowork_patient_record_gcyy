@@ -1,25 +1,24 @@
 <template>
   <section class="daily-panel">
     <header class="daily-header">
-      <div><p>管理端专属核查</p><h2>理论使用量与实际使用量核查</h2><span>{{ periodLabel }} · 普通耗材以理论量为主口径，特殊耗材以实际量为主口径。</span></div>
-      <div class="daily-actions"><el-button :loading="loading" @click="emitLoad">查询</el-button><el-button type="primary" :disabled="!canExport" :loading="exportingCsv" @click="emit('export-csv', query)">导出 CSV</el-button><el-button type="success" :disabled="!canExport" :loading="exportingXlsx" @click="emit('export-xlsx', query)">导出 XLSX</el-button></div>
+      <h2>日报核查</h2>
+      <div class="daily-actions"><el-button :loading="loading" @click="emitLoad">查询</el-button><el-button type="primary" :disabled="!canExport" :loading="exportingCsv" @click="emit('export-csv', query)">导出 CSV</el-button><el-button :disabled="!canExport" :loading="exportingXlsx" @click="emit('export-xlsx', query)">导出 XLSX</el-button></div>
     </header>
     <div class="daily-toolbar">
-      <div class="export-date-filter">
-        <span class="export-date-filter__label">导出日期</span>
-        <el-date-picker v-model="selectedRange" class="export-date-filter__picker" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" :shortcuts="shortcuts" popper-class="inventory-export-date-popper" @change="emitLoad" />
-        <span class="export-date-filter__suffix" aria-hidden="true">⌄</span>
-      </div>
+      <label class="export-date-filter">
+        <span>导出日期</span>
+        <el-date-picker v-model="selectedRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" :shortcuts="shortcuts" @change="emitLoad" />
+      </label>
       <el-select v-model="filters.departmentKey" clearable placeholder="全部科室"><el-option v-for="department in report?.departments || []" :key="department.departmentKey" :label="department.departmentName" :value="department.departmentKey" /></el-select>
       <el-input v-model="filters.keyword" clearable placeholder="搜索耗材" />
       <el-select v-model="filters.riskLevel" clearable placeholder="全部核查状态"><el-option v-for="item in riskOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select>
       <el-select v-model="filters.special" clearable placeholder="普通与特殊"><el-option label="普通耗材" value="ordinary" /><el-option label="特殊耗材" value="special" /></el-select>
       <el-checkbox v-model="filters.unverifiedOnly">仅看未核验</el-checkbox>
     </div>
-    <el-alert v-if="report && !report.savedDepartmentCount" title="所选范围内暂无已保存日报" description="仍固定显示 12 个科室状态；未填写实际量不会被当作零。" type="warning" :closable="false" show-icon />
-    <div class="daily-stats"><div><span>纳入科室</span><strong>{{ report?.departmentCount || 12 }}</strong></div><div><span>已填报科室</span><strong>{{ report?.savedDepartmentCount || 0 }}</strong></div><div><span>待核验明细</span><strong>{{ unverifiedCount }}</strong></div><div><span>关注 / 异常</span><strong>{{ attentionCount }} / {{ abnormalCount }}</strong></div></div>
+    <el-alert v-if="report && !report.savedDepartmentCount" title="所选范围暂无已保存日报" type="warning" :closable="false" show-icon />
+    <div class="daily-stats"><span>纳入 <strong>{{ report?.departmentCount || 12 }}</strong> 科室</span><span>已填报 <strong>{{ report?.savedDepartmentCount || 0 }}</strong></span><span>待核验 <strong>{{ unverifiedCount }}</strong></span><span>关注 / 异常 <strong>{{ attentionCount }} / {{ abnormalCount }}</strong></span></div>
     <section class="panel-section">
-      <div class="section-heading"><h3>理论与实际汇总</h3><span>按耗材 + 单位合并。</span></div>
+      <div class="section-heading"><h3>理论与实际汇总</h3></div>
       <div class="inventory-table-shell"><el-table :data="report?.summary || []" border max-height="360" empty-text="所选范围内暂无可核查耗材明细">
         <el-table-column prop="materialName" label="耗材" min-width="210" show-overflow-tooltip /><el-table-column prop="unit" label="单位" width="90" align="center" />
         <el-table-column label="理论使用量" width="130" align="right"><template #default="{ row }">{{ number(row.theoreticalQuantity) }}</template></el-table-column>
@@ -30,7 +29,7 @@
       </el-table></div>
     </section>
     <section class="panel-section">
-      <div class="section-heading"><h3>逐日科室核查明细</h3><span>实际量“未填报”与明确填写 0 严格区分。</span></div>
+      <div class="section-heading"><h3>逐日科室核查明细</h3></div>
       <div class="inventory-table-shell"><el-table :data="filteredDetails" border max-height="560" :row-key="detailKey" empty-text="没有符合筛选条件的核查明细">
         <el-table-column prop="businessDate" label="业务日期" width="110" /><el-table-column prop="departmentName" label="科室" width="120" show-overflow-tooltip /><el-table-column prop="materialName" label="耗材" min-width="170" show-overflow-tooltip /><el-table-column prop="unit" label="单位" width="78" align="center" /><el-table-column prop="serviceGroup" label="业务组" width="115" show-overflow-tooltip />
         <el-table-column label="业务量" width="88" align="right"><template #default="{ row }">{{ number(row.volume) }}</template></el-table-column><el-table-column label="理论量" width="105" align="right"><template #default="{ row }">{{ number(row.theoreticalQuantity) }}</template></el-table-column><el-table-column label="实际量" width="112" align="right"><template #default="{ row }"><span :class="{ 'not-reported': row.actualStatus === 'UNVERIFIED' }">{{ row.actualStatus === 'UNVERIFIED' ? '未填报' : number(row.actualQuantity) }}</span></template></el-table-column><el-table-column label="差额" width="96" align="right"><template #default="{ row }">{{ row.difference == null ? '—' : number(row.difference) }}</template></el-table-column><el-table-column label="偏差率" width="102" align="right"><template #default="{ row }">{{ deviation(row.deviationRate) }}</template></el-table-column>
@@ -77,5 +76,25 @@ const dayOffset = (days: number) => { const date = new Date(); date.setHours(0, 
 const shortcuts = [{ text: "过去 3 天", value: () => [dayOffset(2), dayOffset(0)] }, { text: "过去 5 天", value: () => [dayOffset(4), dayOffset(0)] }, { text: "近一周", value: () => [dayOffset(6), dayOffset(0)] }, { text: "本月", value: () => { const now = dayOffset(0); return [new Date(now.getFullYear(), now.getMonth(), 1), now]; } }];
 </script>
 <style scoped lang="scss">
-.daily-panel{display:grid;gap:16px}.daily-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.daily-header p{margin:0 0 4px;color:var(--el-color-primary);font-weight:700;font-size:13px}.daily-header h2{margin:0 0 8px;font-size:20px}.daily-header span,.section-heading span{color:var(--el-text-color-secondary);font-size:13px}.daily-actions,.daily-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.daily-toolbar{justify-content:flex-end}.export-date-filter{display:grid;grid-template-columns:auto minmax(228px,1fr) 22px;align-items:center;min-height:40px;overflow:hidden;border:1px solid #5f6368;border-radius:4px;background:#2f2f2f;box-shadow:inset 0 0 0 1px rgb(255 255 255 / 3%)}.export-date-filter__label{align-self:stretch;display:flex;align-items:center;padding:0 14px;border-right:1px solid #5d5d5d;color:#f3f3f3;font-size:14px;white-space:nowrap}.export-date-filter :deep(.el-date-editor){width:100%;height:38px;border:0;border-radius:0;background:transparent;box-shadow:none}.export-date-filter :deep(.el-range-input){background:transparent;color:#f2f2f2;font-size:14px;text-align:left}.export-date-filter :deep(.el-range-separator){color:#c8c8c8;font-size:13px}.export-date-filter :deep(.el-range__icon),.export-date-filter :deep(.el-range__close-icon){display:none}.export-date-filter__suffix{display:flex;align-items:center;justify-content:center;height:100%;color:#d5d5d5;font-size:18px;pointer-events:none}.daily-toolbar :deep(.el-select),.daily-toolbar :deep(.el-input){width:160px}.daily-stats{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:12px}.daily-stats>div{padding:12px 14px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-fill-color-blank)}.daily-stats span{display:block;color:var(--el-text-color-secondary);font-size:12px}.daily-stats strong{display:block;margin-top:5px;color:var(--el-color-primary);font-size:22px}.panel-section{display:grid;gap:8px}.section-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px}.section-heading h3{margin:0;font-size:16px}.inventory-table-shell{border:1px solid var(--el-border-color-lighter);border-radius:10px;overflow:hidden}.department-list{line-height:1.8}.not-reported{color:var(--el-text-color-secondary)}.review-target{display:grid;gap:6px;margin-bottom:18px;padding:12px;border-radius:8px;background:var(--el-fill-color-light)}.review-target span{color:var(--el-text-color-secondary);font-size:13px}.daily-panel :deep(th.el-table__cell){background:var(--el-fill-color-light);font-weight:700}:global(.inventory-export-date-popper){border:1px solid #54575b!important;border-radius:4px!important;background:#2f2f2f!important;color:#f1f1f1!important;box-shadow:0 16px 36px rgb(0 0 0 / 34%)!important;overflow:hidden}:global(.inventory-export-date-popper .el-picker-panel__body-wrapper),:global(.inventory-export-date-popper .el-picker-panel__sidebar),:global(.inventory-export-date-popper .el-picker-panel__footer){background:#2f2f2f}:global(.inventory-export-date-popper .el-picker-panel__icon-btn),:global(.inventory-export-date-popper .el-date-picker__header-label),:global(.inventory-export-date-popper .el-date-range-picker__header){color:#e7e7e7}:global(.inventory-export-date-popper .el-date-range-picker__content.is-left){border-right-color:#54575b}:global(.inventory-export-date-popper .el-date-table th){border-bottom-color:#54575b;color:#aeb4bb}:global(.inventory-export-date-popper td.available .el-date-table-cell__text){color:#e7e7e7}:global(.inventory-export-date-popper td.disabled .el-date-table-cell__text){color:#70757a}:global(.inventory-export-date-popper td.available:hover .el-date-table-cell){background:#45484c}:global(.inventory-export-date-popper td.available:hover .el-date-table-cell__text),:global(.inventory-export-date-popper td.today .el-date-table-cell__text){color:#4da3e8}:global(.inventory-export-date-popper td.in-range .el-date-table-cell){background:#183d59}:global(.inventory-export-date-popper td.in-range .el-date-table-cell__text){color:#e7e7e7}:global(.inventory-export-date-popper td.start-date .el-date-table-cell),:global(.inventory-export-date-popper td.end-date .el-date-table-cell){background:#0e72bc}:global(.inventory-export-date-popper td.start-date .el-date-table-cell__text),:global(.inventory-export-date-popper td.end-date .el-date-table-cell__text){color:#fff}:global(.inventory-export-date-popper .el-picker-panel__footer){border-top-color:#54575b}:global(.inventory-export-date-popper .el-picker-panel__link-btn){color:#e7e7e7}:global(.inventory-export-date-popper .el-picker-panel__link-btn:hover){color:#4da3e8}:global(.inventory-export-date-popper .el-picker-panel__shortcut:hover){background:#45484c;color:#fff}@media(max-width:960px){.daily-header{flex-direction:column}.daily-toolbar{justify-content:flex-start}.export-date-filter{width:100%;box-sizing:border-box}.export-date-filter :deep(.el-date-editor),.daily-toolbar :deep(.el-select),.daily-toolbar :deep(.el-input){width:100%}.export-date-filter__label{min-width:64px}.daily-stats{grid-template-columns:repeat(2,minmax(110px,1fr))}.section-heading{align-items:flex-start;flex-direction:column;gap:3px}}
+.daily-panel { display: grid; gap: 12px; }
+.daily-header, .daily-actions, .daily-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.daily-header { justify-content: space-between; }
+.daily-header h2, .section-heading h3 { margin: 0; font-size: 18px; }
+.daily-toolbar { justify-content: flex-start; }
+.export-date-filter { display: inline-flex; align-items: center; gap: 8px; color: var(--el-text-color-regular); font-size: 14px; white-space: nowrap; }
+.export-date-filter :deep(.el-date-editor) { width: 260px; }
+.daily-toolbar :deep(.el-select), .daily-toolbar :deep(.el-input) { width: 160px; }
+.daily-stats { display: flex; flex-wrap: wrap; gap: 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.daily-stats span { padding: 0 12px; border-right: 1px solid var(--el-border-color-lighter); }
+.daily-stats span:first-child { padding-left: 0; }
+.daily-stats span:last-child { border-right: 0; }
+.daily-stats strong { color: var(--el-text-color-primary); font-size: 14px; }
+.panel-section { display: grid; gap: 6px; }
+.inventory-table-shell { overflow: hidden; border: 1px solid var(--el-border-color-lighter); border-radius: var(--el-border-radius-base); }
+.department-list { line-height: 1.8; }
+.not-reported { color: var(--el-text-color-secondary); }
+.review-target { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; background: var(--el-fill-color-light); border-radius: var(--el-border-radius-base); }
+.review-target span { color: var(--el-text-color-secondary); font-size: 13px; }
+.daily-panel :deep(th.el-table__cell) { background: var(--el-fill-color-light); font-weight: 700; }
+@media (max-width: 960px) { .daily-header { align-items: flex-start; flex-direction: column; } .export-date-filter { width: 100%; } .export-date-filter :deep(.el-date-editor), .daily-toolbar :deep(.el-select), .daily-toolbar :deep(.el-input) { width: 100%; } .daily-stats span { padding: 0 8px; } }
 </style>
