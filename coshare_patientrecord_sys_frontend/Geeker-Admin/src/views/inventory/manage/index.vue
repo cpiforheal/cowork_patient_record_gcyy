@@ -1,6 +1,6 @@
 <template>
   <div class="inventory-page">
-    <section class="inventory-command">
+    <section v-if="!focusedDepartmentKey" class="inventory-command">
       <div class="command-title">
         <span>{{ currentTabProfile.kicker }}</span>
         <h1>{{ currentTabProfile.title }}</h1>
