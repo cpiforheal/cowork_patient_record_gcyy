@@ -3,31 +3,60 @@
     <div class="department-toolbar">
       <div>
         <h2>{{ template.department }}核算单</h2>
-        <p>按原始科室用量表试算，保存的仅是核算草稿，不扣库存、不生成流水。</p>
+        <p>患者人次会更新理论试算，不会自动修改实际使用量；草稿不扣库存、不生成流水。</p>
       </div>
       <div class="toolbar-actions">
         <el-date-picker v-model="businessDate" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="loadDraft" />
-        <el-tooltip content="恢复该科室的原始表格模板" placement="bottom">
+        <el-tooltip v-if="!isInventoryPortal" content="恢复该科室的原始表格模板" placement="bottom">
           <el-button :icon="RefreshLeft" circle aria-label="恢复原始表格模板" @click="restoreTemplate" />
         </el-tooltip>
+        <el-select v-if="!isInventoryPortal" v-model="reportPeriod" class="report-period-select" :disabled="saving || Boolean(exporting)">
+          <el-option label="自然周报" value="week" />
+          <el-option label="自然月报" value="month" />
+        </el-select>
+        <el-button v-if="!isInventoryPortal" :loading="exporting === 'xlsx'" :disabled="saving" @click="exportPeriod('xlsx')">
+          导出{{ reportPeriod === "week" ? "周报" : "月报" }}
+        </el-button>
+        <el-button v-if="!isInventoryPortal" :loading="exporting === 'csv'" :disabled="saving" @click="exportPeriod('csv')">CSV 兼容包</el-button>
+        <el-button v-if="!isInventoryPortal" plain :disabled="saving" @click="openAllocationPlan">下拨量与预警</el-button>
         <el-button type="primary" :loading="saving" :icon="DocumentChecked" @click="saveDraft">保存日草稿</el-button>
       </div>
     </div>
 
-    <div class="department-workspace-grid">
+    <div
+      ref="workspaceGridRef"
+      class="department-workspace-grid"
+      :class="{ 'is-resizing': isResizing }"
+      :style="{ '--input-pane-width': inputPaneWidth ? inputPaneWidth + 'px' : undefined }"
+    >
       <section class="input-pane">
         <div class="pane-heading">
           <div>
             <h3>填写与修正</h3>
-            <p>业务量按服务项目填写一次；明细行可单独覆盖。</p>
+            <p>患者人次会更新理论试算，不会自动修改实际使用量。</p>
           </div>
           <el-button type="primary" plain :icon="Plus" @click="addLine">新增耗材</el-button>
         </div>
 
         <div class="input-pane-secondary-actions">
+          <div class="editor-filter">
+            <span>服务类型</span>
+            <el-select v-model="careTypeFilter" class="care-type-filter" aria-label="筛选服务类型">
+              <el-option label="全部" value="all" />
+              <el-option v-for="option in careTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+          </div>
           <el-button plain :icon="EditPen" @click="openExpandedEditor">展开编辑</el-button>
-          <span>明细较多时，在浮层中完整浏览和修改</span>
+          <span>明细较多时，在浮层中完整浏览和修改；筛选不会删除明细</span>
         </div>
+
+        <el-alert
+          class="decoupling-alert"
+          type="info"
+          :closable="false"
+          show-icon
+          title="患者人次会更新理论试算，不会自动修改实际使用量。"
+        />
 
         <div class="volume-grid">
           <label v-for="group in serviceGroups" :key="group" class="volume-field">
@@ -53,31 +82,49 @@
           </label>
         </div>
 
-        <el-table :data="draft.lines" class="input-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed">
+        <el-table :data="visibleDraftLines" class="input-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed">
           <el-table-column label="服务项目 / 类型" min-width="180">
             <template #default="{ row }">
-              <el-select v-model="row.serviceGroup" filterable allow-create default-first-option>
+              <el-select v-model="row.serviceGroup" filterable allow-create default-first-option :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
                 <el-option v-for="group in serviceGroups" :key="group" :label="group" :value="group" />
               </el-select>
-              <el-select v-model="row.careType" class="care-type-select">
+              <el-select v-model="row.careType" class="care-type-select" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
                 <el-option v-for="option in careTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
             </template>
           </el-table-column>
           <el-table-column label="耗材" min-width="190">
             <template #default="{ row }">
-              <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材">
+              <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
                 <el-option v-for="name in materialOptions" :key="name" :label="name" :value="name" />
               </el-select>
+              <div v-if="row.isSpecial" class="special-material-marker">
+                <el-tag type="warning" size="small" effect="plain">特殊耗材</el-tag>
+                <span>{{ row.specialAdminNote || "按实际量管理" }}</span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="单位" width="96">
-            <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" /></template>
+            <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" /></template>
           </el-table-column>
           <el-table-column label="每人次定额" width="122">
             <template #default="{ row }"
-              ><el-input-number v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right"
-            /></template>
+              ><el-input-number v-if="canEditQuota" v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
+              <span v-else class="readonly-quantity">{{ row.standardQuantity == null ? "待核定" : formatQuantity(row.standardQuantity) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="手工调整" width="122">
+            <template #default="{ row }"><el-input-number v-if="canEditQuota" v-model="row.manualAdjustment" :precision="6" controls-position="right" />
+              <span v-else class="readonly-quantity">{{ formatQuantity(row.manualAdjustment) }}</span></template>
+          </el-table-column>
+          <el-table-column label="实际耗材（科室填写）" width="140" header-class-name="actual-consumable-header">
+            <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="留空表示未填报" /></template>
+          </el-table-column>
+          <el-table-column label="特殊情况说明" min-width="190">
+            <template #default="{ row }">
+              <el-input v-if="row.isSpecial" v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="特殊耗材非零使用时必填" />
+              <span v-else class="special-note-placeholder">{{ row.isSpecial ? "实际量非零时填写" : "—" }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="行内人次" width="122">
             <template #default="{ row }"
@@ -92,50 +139,58 @@
           </el-table-column>
           <el-table-column label="单价" width="116">
             <template #default="{ row }"
-              ><el-input-number v-model="row.unitPrice" :min="0" :precision="4" controls-position="right"
+              ><el-input-number v-model="row.unitPrice" :min="0" :precision="4" controls-position="right" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental"
             /></template>
           </el-table-column>
           <el-table-column width="54" align="center">
-            <template #default="{ $index }">
+            <template #default="{ row }">
               <el-tooltip content="删除本次草稿中的耗材行" placement="left">
-                <el-button :icon="Delete" circle text type="danger" aria-label="删除耗材行" @click="removeLine($index)" />
+                <el-button :icon="Delete" circle text type="danger" aria-label="删除耗材行" @click="removeLine(row.id)" />
               </el-tooltip>
             </template>
           </el-table-column>
         </el-table>
       </section>
 
+      <div
+        class="workspace-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整填写区和预览区宽度"
+        @pointerdown="startResize"
+      />
+
       <section class="preview-pane">
         <div class="pane-heading">
           <div>
             <h3>实时预览</h3>
-            <p>原表计算口径：标准用量 × 业务量 × 本月天数。</p>
+            <p>参考试算与实际使用量分开显示；统计和下拨依据只读取明确填写的实际耗材。</p>
           </div>
-          <span class="draft-state">{{ draft.revision ? `已保存 v${draft.revision}` : "未保存" }}</span>
+          <span class="draft-state">{{ quotaVersionLabel }} · {{ draft.revision ? `已保存 v${draft.revision}` : "未保存" }}</span>
         </div>
 
         <div class="preview-summary">
           <span
-            ><small>耗材行</small><strong>{{ previewRows.length }}</strong></span
+            ><small>耗材行</small><strong>{{ visiblePreviewRows.length }}</strong></span
           >
           <span
-            ><small>日使用量（按单位）</small
+            ><small>实际使用量（按单位）</small
             ><strong class="unit-summary">{{ dailyQuantitySummary || "暂无可汇总数量" }}</strong></span
           >
           <span
-            ><small>月使用量（按单位）</small
+            ><small>按实际外推月量（按单位）</small
             ><strong class="unit-summary">{{ monthlyQuantitySummary || "暂无可汇总数量" }}</strong></span
           >
           <span
-            ><small>待核定/无单位</small><strong>{{ excludedQuantityLineCount }} 行</strong></span
+            ><small>未填实际 / 无单位</small><strong>{{ excludedQuantityLineCount }} 行</strong></span
           >
           <span
-            ><small>已核价月金额</small
+            ><small>按实际外推月金额</small
             ><strong>{{ pricedMonthlyAmount === null ? "未核价" : formatMoney(pricedMonthlyAmount) }}</strong></span
           >
         </div>
 
-        <el-table :data="previewRows" class="preview-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed">
+        <el-table :data="visiblePreviewRows" class="preview-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed">
           <el-table-column prop="serviceGroup" label="服务项目" min-width="140" show-overflow-tooltip />
           <el-table-column prop="materialName" label="耗材" min-width="178" show-overflow-tooltip />
           <el-table-column prop="standardQuantity" label="标准用量" width="104">
@@ -143,17 +198,35 @@
               row.standardQuantity === null ? "待核定" : formatQuantity(row.standardQuantity)
             }}</template>
           </el-table-column>
-          <el-table-column prop="volume" label="业务量" width="88" />
-          <el-table-column prop="dailyQuantity" label="日使用量" width="104">
-            <template #default="{ row }">{{ formatQuantity(row.dailyQuantity) }}</template>
+                    <el-table-column prop="manualAdjustment" label="手工调整" width="104">
+            <template #default="{ row }">{{ formatQuantity(row.manualAdjustment) }}</template>
           </el-table-column>
-          <el-table-column prop="monthlyQuantity" label="月使用量" width="104">
-            <template #default="{ row }">{{ formatQuantity(row.monthlyQuantity) }}</template>
+          <el-table-column prop="volume" label="业务量" width="88" />
+          <el-table-column prop="referenceQuantity" label="参考试算（不统计）" width="142">
+            <template #default="{ row }">{{ formatQuantity(row.referenceQuantity) }}</template>
+          </el-table-column>
+          <el-table-column prop="actualQuantity" label="实际使用量" width="112">
+            <template #default="{ row }">{{ row.actualFilled ? formatQuantity(row.dailyQuantity) : "未填报" }}</template>
+          </el-table-column>
+          <el-table-column prop="monthlyQuantity" label="按实际外推月量" width="132">
+            <template #default="{ row }">{{ row.actualFilled ? formatQuantity(row.monthlyQuantity) : "—" }}</template>
           </el-table-column>
           <el-table-column prop="monthlyAmount" label="月金额" width="104">
             <template #default="{ row }">{{ row.monthlyAmount === null ? "未核价" : formatMoney(row.monthlyAmount) }}</template>
           </el-table-column>
-          <el-table-column label="库存关联" width="118">
+          <el-table-column v-if="!isInventoryPortal" label="下拨结余 / 预警" width="154">
+            <template #default="{ row }">
+              <span v-if="allocationLineFor(row)" class="allocation-cell">
+                日余 {{ formatQuantity(allocationDailyRemaining(row)) }}<br />
+                月余 {{ formatQuantity(allocationLineFor(row)!.monthRemainingQuantity || 0) }}
+                <el-tag :type="allocationTagType(allocationLineFor(row)!.status)" size="small" effect="plain">
+                  {{ allocationStatusText(allocationLineFor(row)!.status) }}
+                </el-tag>
+              </span>
+              <el-tag v-else type="info" size="small" effect="plain">待设定</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="!isInventoryPortal" label="库存关联" width="118">
             <template #default="{ row }">
               <el-tag v-if="row.stock !== null" effect="plain" type="success">库存 {{ formatQuantity(row.stock) }}</el-tag>
               <el-tag v-else effect="plain" type="info">待关联</el-tag>
@@ -177,7 +250,14 @@
         <div class="editor-dialog-toolbar">
           <div>
             <strong>完整明细编辑</strong>
-            <span>共 {{ draft.lines.length }} 条，浮层内可纵向滚动查看全部字段，修改会同步到右侧预览。</span>
+            <span>共 {{ draft.lines.length }} 条；筛选只影响显示，不会删除明细。</span>
+          </div>
+          <div class="editor-filter">
+            <span>服务类型</span>
+            <el-select v-model="careTypeFilter" class="care-type-filter" aria-label="筛选服务类型">
+              <el-option label="全部" value="all" />
+              <el-option v-for="option in careTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
           </div>
           <el-button type="primary" plain :icon="Plus" @click="addLine">新增耗材</el-button>
         </div>
@@ -208,7 +288,7 @@
 
         <div class="editor-table-wrap">
           <el-table
-            :data="draft.lines"
+            :data="visibleDraftLines"
             class="input-table expanded-input-table"
             height="calc(84vh - 300px)"
             min-height="360"
@@ -216,29 +296,47 @@
           >
             <el-table-column label="服务项目 / 类型" min-width="190">
               <template #default="{ row }">
-                <el-select v-model="row.serviceGroup" filterable allow-create default-first-option>
+                <el-select v-model="row.serviceGroup" filterable allow-create default-first-option :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
                   <el-option v-for="group in serviceGroups" :key="group" :label="group" :value="group" />
                 </el-select>
-                <el-select v-model="row.careType" class="care-type-select">
+                <el-select v-model="row.careType" class="care-type-select" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
                   <el-option v-for="option in careTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
                 </el-select>
               </template>
             </el-table-column>
             <el-table-column label="耗材" min-width="220">
               <template #default="{ row }">
-                <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材">
+                <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
                   <el-option v-for="name in materialOptions" :key="name" :label="name" :value="name" />
                 </el-select>
+                <div v-if="row.isSpecial" class="special-material-marker">
+                  <el-tag type="warning" size="small" effect="plain">特殊耗材</el-tag>
+                  <span>{{ row.specialAdminNote || "按实际量管理" }}</span>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="单位" width="110">
-              <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" /></template>
+              <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" /></template>
             </el-table-column>
             <el-table-column label="每人次定额" width="138">
               <template #default="{ row }">
-                <el-input-number v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
+                <el-input-number v-if="canEditQuota" v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
+                <span v-else class="readonly-quantity">{{ row.standardQuantity == null ? "待核定" : formatQuantity(row.standardQuantity) }}</span>
               </template>
             </el-table-column>
+          <el-table-column label="手工调整" width="122">
+            <template #default="{ row }"><el-input-number v-if="canEditQuota" v-model="row.manualAdjustment" :precision="6" controls-position="right" />
+              <span v-else class="readonly-quantity">{{ formatQuantity(row.manualAdjustment) }}</span></template>
+          </el-table-column>
+          <el-table-column label="实际耗材（科室填写）" width="140" header-class-name="actual-consumable-header">
+            <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="留空表示未填报" /></template>
+          </el-table-column>
+          <el-table-column label="特殊情况说明" min-width="210">
+            <template #default="{ row }">
+              <el-input v-if="row.isSpecial" v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="特殊耗材非零使用时必填" />
+              <span v-else class="special-note-placeholder">{{ row.isSpecial ? "实际量非零时填写" : "—" }}</span>
+            </template>
+          </el-table-column>
             <el-table-column label="行内人次" width="138">
               <template #default="{ row }">
                 <el-input-number
@@ -253,13 +351,13 @@
             </el-table-column>
             <el-table-column label="单价" width="126">
               <template #default="{ row }">
-                <el-input-number v-model="row.unitPrice" :min="0" :precision="4" controls-position="right" />
+                <el-input-number v-model="row.unitPrice" :min="0" :precision="4" controls-position="right" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" />
               </template>
             </el-table-column>
-            <el-table-column width="60" align="center">
-              <template #default="{ $index }">
+            <el-table-column fixed="right" width="60" align="center">
+              <template #default="{ row }">
                 <el-tooltip content="删除本次草稿中的耗材行" placement="left">
-                  <el-button :icon="Delete" circle text type="danger" aria-label="删除耗材行" @click="removeLine($index)" />
+                  <el-button :icon="Delete" circle text type="danger" aria-label="删除耗材行" @click="removeLine(row.id)" />
                 </el-tooltip>
               </template>
             </el-table-column>
@@ -276,17 +374,77 @@
         </div>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-if="!isInventoryPortal"
+      v-model="allocationOpen"
+      class="allocation-plan-dialog"
+      title="科室耗材下拨量与预警"
+      width="min(1120px, calc(100vw - 32px))"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <div class="allocation-plan-note">
+        这是核对与预警计划，不扣库存、不生成库存流水。默认预警值为当前月已保存日草稿的平均日使用量 × 3；没有下拨量时显示“待设定”。
+      </div>
+      <el-table v-loading="allocationLoading" :data="allocationLines" max-height="480" table-layout="fixed">
+        <el-table-column prop="materialName" label="耗材" min-width="180" />
+        <el-table-column prop="unit" label="单位" width="92" />
+        <el-table-column label="下拨量" width="132">
+          <template #default="{ row }"><el-input-number v-model="row.allocatedQuantity" :min="0" :precision="6" controls-position="right" /></template>
+        </el-table-column>
+        <el-table-column label="来源" width="132">
+          <template #default="{ row }">
+            <el-select v-model="row.sourceType">
+              <el-option label="盘点表" value="COUNT" />
+              <el-option label="手工填写" value="MANUAL" />
+              <el-option label="上月实际建议" value="PREVIOUS_MONTH" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="上月实际建议" width="132">
+          <template #default="{ row }">{{ formatQuantity(row.previousMonthSuggestedQuantity || 0) }}</template>
+        </el-table-column>
+        <el-table-column label="盘点表引用" min-width="140">
+          <template #default="{ row }"><el-input v-model="row.countReference" placeholder="可选" /></template>
+        </el-table-column>
+        <el-table-column label="手工调整" width="132">
+          <template #default="{ row }"><el-input-number v-model="row.manualAdjustment" :precision="6" controls-position="right" /></template>
+        </el-table-column>
+        <el-table-column label="预警值" width="132">
+          <template #default="{ row }"><el-input-number v-model="row.warningThreshold" :min="0" :precision="6" controls-position="right" placeholder="三日建议" /></template>
+        </el-table-column>
+        <el-table-column label="月累计 / 月结余" width="148">
+          <template #default="{ row }">
+            {{ formatQuantity(row.monthUsedQuantity || 0) }} / {{ formatQuantity(row.monthRemainingQuantity || 0) }}
+            <el-tag :type="allocationTagType(row.status)" size="small" effect="plain">{{ allocationStatusText(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <span class="allocation-dialog-state">{{ allocation?.revision ? `已保存 v${allocation.revision}` : "未保存" }}</span>
+        <el-button @click="allocationOpen = false">关闭</el-button>
+        <el-button type="primary" :loading="allocationSaving" @click="saveAllocationPlan">保存下拨计划</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+
+const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
 import { Delete, DocumentChecked, EditPen, Plus, RefreshLeft } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import {
+  downloadInventoryDepartmentPeriodReportApi,
+  getInventoryDepartmentAllocationPlanApi,
   getInventoryDepartmentDailyDraftApi,
+  saveInventoryDepartmentAllocationPlanApi,
   saveInventoryDepartmentDailyDraftApi,
   type InventoryBatch,
+  type InventoryDepartmentAllocationPlan,
+  type InventoryDepartmentAllocationPlanLine,
   type InventoryDepartmentDailyDraft,
   type InventoryDepartmentDraftCareType,
   type InventoryDepartmentDraftLine,
@@ -294,9 +452,12 @@ import {
 } from "@/api/modules/inventory";
 import { departmentTemplateByKey, type DepartmentTemplate, type DepartmentTemplateLine } from "../departmentConsumptionTemplates";
 
-type DraftState = Required<Pick<InventoryDepartmentDailyDraft, "monthDays" | "revision" | "groupVolumes" | "lines">>;
+type DraftState = Required<Pick<InventoryDepartmentDailyDraft, "monthDays" | "revision" | "groupVolumes" | "lines">>
+  & Pick<InventoryDepartmentDailyDraft, "templateVersion" | "quotaVersionId" | "quotaVersionCode" | "quotaEffectiveDate" | "frozenQuota">;
 type PreviewRow = InventoryDepartmentDraftLine & {
   volume: number;
+  referenceQuantity: number;
+  actualFilled: boolean;
   dailyQuantity: number;
   monthlyQuantity: number;
   monthlyAmount: number | null;
@@ -312,14 +473,43 @@ const props = defineProps<{
 
 const businessDate = ref(props.today);
 const saving = ref(false);
+const exporting = ref<"xlsx" | "csv" | "">("");
 const editorOpen = ref(false);
+const allocationOpen = ref(false);
+const allocationLoading = ref(false);
+const allocationSaving = ref(false);
+const reportPeriod = ref<"week" | "month">("month");
+const allocation = ref<InventoryDepartmentAllocationPlan | null>(null);
+const careTypeFilter = ref<InventoryDepartmentDraftCareType | "all">("all");
+const canEditQuota = computed(() => !isInventoryPortal);
 const latestLoadKey = ref("");
+const workspaceGridRef = ref<HTMLElement>();
+const inputPaneWidth = ref<number>();
+const isResizing = ref(false);
+const workspaceWidthKey = "inventory-department-workspace-input-width";
+let resizeCleanup: (() => void) | undefined;
 const template = computed(() => departmentTemplateByKey.get(props.departmentKey));
 const careTypeOptions: { label: string; value: InventoryDepartmentDraftCareType }[] = [
   { label: "门诊", value: "outpatient" },
   { label: "住院", value: "inpatient" },
   { label: "其他", value: "other" }
 ];
+const normalizeSavedDraftLine = (line: InventoryDepartmentDraftLine): InventoryDepartmentDraftLine => {
+  const rawCareType = (line as { careType?: unknown }).careType;
+  const validCareType = careTypeOptions.some(option => option.value === rawCareType)
+    ? (rawCareType as InventoryDepartmentDraftCareType)
+    : null;
+  const sourceCareType = template.value?.lines.find(source => Number(source.sourceRow) === Number(line.sourceRow))?.careType;
+  return {
+    ...line,
+    careType: validCareType || sourceCareType || "other",
+    unitPrice: line.unitPrice ?? null,
+    volumeOverride: line.volumeOverride ?? null,
+    manualAdjustment: Number(line.manualAdjustment || 0),
+    actualQuantity: line.actualQuantity ?? null,
+    isSupplemental: Boolean(line.isSupplemental)
+  };
+};
 
 const lineFromTemplate = (line: DepartmentTemplateLine): InventoryDepartmentDraftLine => ({
   id: `source-${line.sourceRow}`,
@@ -330,7 +520,10 @@ const lineFromTemplate = (line: DepartmentTemplateLine): InventoryDepartmentDraf
   unit: line.unit,
   standardQuantity: line.standardQuantity,
   unitPrice: null,
-  volumeOverride: null
+  volumeOverride: null,
+  manualAdjustment: 0,
+  actualQuantity: null,
+  isSupplemental: false
 });
 
 const blankState = (source: DepartmentTemplate): DraftState => ({
@@ -339,13 +532,25 @@ const blankState = (source: DepartmentTemplate): DraftState => ({
   groupVolumes: Object.fromEntries(
     source.lines.reduce((groups, line) => groups.set(line.serviceGroup, line.defaultVolume), new Map<string, number>())
   ),
-  lines: source.lines.map(lineFromTemplate)
+  lines: source.lines.map(lineFromTemplate),
+  templateVersion: "xlsx-20260808",
+  frozenQuota: false
 });
 
 const draft = ref<DraftState>(
   template.value ? blankState(template.value) : { monthDays: 30, revision: 0, groupVolumes: {}, lines: [] }
 );
 const serviceGroups = computed(() => [...new Set(draft.value.lines.map(line => line.serviceGroup).filter(Boolean))]);
+const visibleDraftLines = computed(() =>
+  careTypeFilter.value === "all"
+    ? draft.value.lines
+    : draft.value.lines.filter(line => line.careType === careTypeFilter.value)
+);
+const quotaVersionLabel = computed(() =>
+  draft.value.frozenQuota && draft.value.quotaVersionCode
+    ? `定额 ${draft.value.quotaVersionCode}${draft.value.quotaEffectiveDate ? `（${draft.value.quotaEffectiveDate} 起）` : ""}`
+    : "未冻结定额"
+);
 const materialOptions = computed(() =>
   [...new Set(props.items.map(item => item.name).filter(Boolean))].sort((left, right) => left.localeCompare(right, "zh-CN"))
 );
@@ -361,20 +566,41 @@ const nonNegativeInteger = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
 };
+const combinedBusinessVolume = computed(() => {
+  const groups = new Set(
+    draft.value.lines
+      .filter(line => line.careType === "outpatient" || line.careType === "inpatient")
+      .map(line => line.serviceGroup)
+      .filter(Boolean)
+  );
+  return [...groups].reduce((sum, group) => sum + nonNegativeInteger(draft.value.groupVolumes[group]), 0);
+});
 const volumeFor = (line: InventoryDepartmentDraftLine) =>
-  nonNegativeInteger(line.volumeOverride ?? draft.value.groupVolumes[line.serviceGroup] ?? 0);
-const calculateQuantity = (quantity: number | null, volume: number) => Number(((quantity || 0) * volume).toFixed(6));
+  nonNegativeInteger(
+    line.volumeOverride ?? (line.measurementScope === "COMBINED" ? combinedBusinessVolume.value : draft.value.groupVolumes[line.serviceGroup]) ?? 0
+  );
+const calculateReferenceQuantity = (line: InventoryDepartmentDraftLine, volume: number) =>
+  Math.max(0, Number(((Number(line.standardQuantity || 0) * volume + Number(line.manualAdjustment || 0)).toFixed(6))));
+const actualQuantityFor = (line: InventoryDepartmentDraftLine) =>
+  line.actualQuantity === null || line.actualQuantity === undefined ? null : Math.max(0, Number(line.actualQuantity || 0));
 const previewRows = computed<PreviewRow[]>(() =>
   draft.value.lines.map(line => {
     const volume = volumeFor(line);
-    const dailyQuantity = calculateQuantity(line.standardQuantity, volume);
+    const referenceQuantity = calculateReferenceQuantity(line, volume);
+    const actualQuantity = actualQuantityFor(line);
+    const actualFilled = actualQuantity !== null;
+    const dailyQuantity = actualQuantity ?? 0;
     const monthlyQuantity = Number((dailyQuantity * draft.value.monthDays).toFixed(2));
     const monthlyAmount =
-      line.unitPrice === null || line.unitPrice === undefined ? null : Number((monthlyQuantity * line.unitPrice).toFixed(2));
+      !actualFilled || line.unitPrice === null || line.unitPrice === undefined
+        ? null
+        : Number((monthlyQuantity * line.unitPrice).toFixed(2));
     const item = itemByName.value.get(line.materialName);
     return {
       ...line,
       volume,
+      referenceQuantity,
+      actualFilled,
       dailyQuantity,
       monthlyQuantity,
       monthlyAmount,
@@ -382,11 +608,16 @@ const previewRows = computed<PreviewRow[]>(() =>
     };
   })
 );
+const visiblePreviewRows = computed(() =>
+  careTypeFilter.value === "all"
+    ? previewRows.value
+    : previewRows.value.filter(row => row.careType === careTypeFilter.value)
+);
 const quantitySummary = (field: "dailyQuantity" | "monthlyQuantity") => {
   const totals = new Map<string, number>();
-  previewRows.value.forEach(row => {
+  visiblePreviewRows.value.forEach(row => {
     const unit = row.unit.trim();
-    if (row.standardQuantity === null || !unit) return;
+    if (!row.actualFilled || !unit) return;
     totals.set(unit, Number(((totals.get(unit) || 0) + row[field]).toFixed(6)));
   });
   return [...totals.entries()].map(([unit, quantity]) => `${formatQuantity(quantity)} ${unit}`).join(" · ");
@@ -394,13 +625,27 @@ const quantitySummary = (field: "dailyQuantity" | "monthlyQuantity") => {
 const dailyQuantitySummary = computed(() => quantitySummary("dailyQuantity"));
 const monthlyQuantitySummary = computed(() => quantitySummary("monthlyQuantity"));
 const excludedQuantityLineCount = computed(
-  () => previewRows.value.filter(row => row.standardQuantity === null || !row.unit.trim()).length
+  () => visiblePreviewRows.value.filter(row => !row.actualFilled || !row.unit.trim()).length
 );
-const pricedMonthlyAmount = computed(() =>
-  previewRows.value.some(row => row.monthlyAmount === null)
-    ? null
-    : Number(previewRows.value.reduce((sum, row) => sum + Number(row.monthlyAmount || 0), 0).toFixed(2))
+const pricedMonthlyAmount = computed(() => {
+  const reportedRows = visiblePreviewRows.value.filter(row => row.actualFilled);
+  if (!reportedRows.length || reportedRows.some(row => row.monthlyAmount === null)) return null;
+  return Number(reportedRows.reduce((sum, row) => sum + Number(row.monthlyAmount || 0), 0).toFixed(2));
+});
+const allocationLines = computed(() => allocation.value?.lines || []);
+const allocationByMaterialUnit = computed(
+  () => new Map(allocationLines.value.map(line => [`${line.materialName}\u0000${line.unit}`, line]))
 );
+const allocationLineFor = (row: { materialName?: string; unit?: string }) =>
+  allocationByMaterialUnit.value.get(`${row.materialName || ""}\u0000${row.unit || ""}`);
+const allocationDailyRemaining = (row: { materialName?: string; unit?: string; dailyQuantity?: number }) => {
+  const line = allocationLineFor(row);
+  return (line?.allocatedQuantity || 0) + (line?.manualAdjustment || 0) - (row.dailyQuantity || 0);
+};
+const allocationTagType = (status?: InventoryDepartmentAllocationPlanLine["status"]) =>
+  status === "WARNING" ? "warning" : status === "PENDING" ? "info" : "success";
+const allocationStatusText = (status?: InventoryDepartmentAllocationPlanLine["status"]) =>
+  status === "WARNING" ? "预警" : status === "PENDING" || !status ? "待设定" : "正常";
 
 const restoreTemplate = () => {
   if (!template.value) return;
@@ -424,15 +669,19 @@ const normalizeMonthDays = () => {
 const addLine = () => {
   const group = serviceGroups.value[0] || "门诊患者";
   if (!(group in draft.value.groupVolumes)) draft.value.groupVolumes[group] = 0;
+  const supplemental = isInventoryPortal && !canEditQuota.value;
   draft.value.lines.push({
-    id: `manual-${Date.now()}-${draft.value.lines.length}`,
-    serviceGroup: group,
+    id: `${supplemental ? "supplement" : "manual"}-${Date.now()}-${draft.value.lines.length}`,
+    serviceGroup: supplemental ? "" : group,
     careType: "other",
     materialName: "",
     unit: "",
-    standardQuantity: 0,
+    standardQuantity: null,
     unitPrice: null,
-    volumeOverride: null
+    volumeOverride: null,
+    manualAdjustment: 0,
+    actualQuantity: null,
+    isSupplemental: supplemental
   });
 };
 
@@ -440,7 +689,15 @@ const openExpandedEditor = () => {
   editorOpen.value = true;
 };
 
-const removeLine = (index: number) => draft.value.lines.splice(index, 1);
+const removeLine = (lineId: string) => {
+  const index = draft.value.lines.findIndex(line => line.id === lineId);
+  if (index < 0) return;
+  if (isInventoryPortal && !canEditQuota.value && !draft.value.lines[index].isSupplemental) {
+    ElMessage.warning("科室只能删除自己新增的补充行");
+    return;
+  }
+  draft.value.lines.splice(index, 1);
+};
 const formatQuantity = (value: number) => Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
 const formatMoney = (value: number) =>
   `¥${Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -461,11 +718,12 @@ const loadDraft = async () => {
       monthDays: saved.monthDays || template.value.monthDays,
       revision: saved.revision || 0,
       groupVolumes: { ...blankState(template.value).groupVolumes, ...(saved.groupVolumes || {}) },
-      lines: (saved.lines || []).map(line => ({
-        ...line,
-        unitPrice: line.unitPrice ?? null,
-        volumeOverride: line.volumeOverride ?? null
-      }))
+      lines: (saved.lines || []).map(normalizeSavedDraftLine),
+      templateVersion: saved.templateVersion,
+      quotaVersionId: saved.quotaVersionId,
+      quotaVersionCode: saved.quotaVersionCode,
+      quotaEffectiveDate: saved.quotaEffectiveDate,
+      frozenQuota: saved.frozenQuota
     };
   } catch (error) {
     if (latestLoadKey.value !== requestKey) return;
@@ -475,19 +733,58 @@ const loadDraft = async () => {
 
 const saveDraft = async () => {
   if (!template.value) return;
+  if (isInventoryPortal && !canEditQuota.value) {
+    const invalid = draft.value.lines.find(
+      line =>
+        line.isSupplemental &&
+        (!line.materialName.trim() || !line.unit.trim() || !line.careType || line.actualQuantity == null)
+    );
+    if (invalid) {
+      ElMessage.warning("科室补充行必须填写耗材名称、单位、服务类型和实际数量");
+      return;
+    }
+    draft.value.lines.forEach(line => {
+      if (line.isSupplemental) {
+        line.standardQuantity = null;
+        line.manualAdjustment = 0;
+      }
+    });
+  }
+  const specialWithoutNote = draft.value.lines.find(
+    line => line.isSpecial && Number(line.actualQuantity || 0) > 0 && !line.specialDailyNote?.trim()
+  );
+  if (specialWithoutNote) {
+    ElMessage.warning(`${specialWithoutNote.materialName || "该耗材"}为特殊耗材，填写非零实际量时必须说明当日情况`);
+    return;
+  }
   saving.value = true;
   try {
     const response = await saveInventoryDepartmentDailyDraftApi({
       departmentKey: template.value.key,
       departmentName: template.value.department,
       businessDate: businessDate.value,
-      templateVersion: "xlsx-20260808",
+      templateVersion: draft.value.templateVersion || "xlsx-20260808",
+      quotaVersionId: draft.value.quotaVersionId,
+      quotaVersionCode: draft.value.quotaVersionCode,
+      quotaEffectiveDate: draft.value.quotaEffectiveDate,
+      frozenQuota: draft.value.frozenQuota,
       monthDays: draft.value.monthDays,
       revision: draft.value.revision,
       groupVolumes: draft.value.groupVolumes,
       lines: draft.value.lines
     });
-    draft.value.revision = response.data.revision;
+    const saved = response.data;
+    draft.value = {
+      monthDays: saved.monthDays || draft.value.monthDays,
+      revision: saved.revision || 0,
+      groupVolumes: { ...draft.value.groupVolumes, ...(saved.groupVolumes || {}) },
+      lines: (saved.lines || []).map(normalizeSavedDraftLine),
+      templateVersion: saved.templateVersion,
+      quotaVersionId: saved.quotaVersionId,
+      quotaVersionCode: saved.quotaVersionCode,
+      quotaEffectiveDate: saved.quotaEffectiveDate,
+      frozenQuota: saved.frozenQuota
+    };
     ElMessage.success("科室耗材日草稿已保存，未扣减库存");
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "保存科室日草稿失败");
@@ -496,6 +793,146 @@ const saveDraft = async () => {
   }
 };
 
+const exportPeriod = async (format: "xlsx" | "csv") => {
+  if (!template.value || !businessDate.value) return;
+  exporting.value = format;
+  try {
+    ElMessage.info("周/月报只统计已保存的科室日草稿；当前未保存编辑值不会写入报表。");
+    const { blob, filename } = await downloadInventoryDepartmentPeriodReportApi({
+      departmentKey: template.value.key,
+      periodType: reportPeriod.value,
+      anchorDate: businessDate.value,
+      format
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    ElMessage.success("周/月报已导出；文件包含汇总和每日审计，不扣减库存。");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "科室周/月报导出失败");
+  } finally {
+    exporting.value = "";
+  }
+};
+
+const openAllocationPlan = async () => {
+  if (!template.value || !businessDate.value) return;
+  allocationOpen.value = true;
+  allocationLoading.value = true;
+  try {
+    const response = await getInventoryDepartmentAllocationPlanApi({
+      departmentKey: template.value.key,
+      month: businessDate.value.slice(0, 7),
+      throughDate: businessDate.value
+    });
+    const saved = response.data;
+    const planLines = saved.lines.map(line => ({ ...line, warningThreshold: line.warningThreshold ?? undefined }));
+    const existing = new Set(planLines.map(line => `${line.materialName}\u0000${line.unit}`));
+    const currentUsage = new Map((saved.usage || []).map(line => [`${line.materialName}\u0000${line.unit}`, line.quantity]));
+    const previousUsage = new Map((saved.previousUsage || []).map(line => [`${line.materialName}\u0000${line.unit}`, line.quantity]));
+    planLines.forEach(line => {
+      line.previousMonthSuggestedQuantity = line.previousMonthSuggestedQuantity ?? previousUsage.get(`${line.materialName}\u0000${line.unit}`) ?? 0;
+    });
+    previewRows.value.forEach(row => {
+      const key = `${row.materialName}\u0000${row.unit}`;
+      if (!row.materialName || !row.unit || existing.has(key)) return;
+      existing.add(key);
+      planLines.push({
+        materialName: row.materialName,
+        unit: row.unit,
+        allocatedQuantity: 0,
+        sourceType: "MANUAL",
+        manualAdjustment: 0,
+        warningThreshold: undefined,
+        suggestedWarningThreshold: Number(((currentUsage.get(key) || 0) / Math.max(1, Number(businessDate.value.slice(8, 10))) * 3).toFixed(6)),
+        previousMonthSuggestedQuantity: previousUsage.get(key) || 0,
+        monthUsedQuantity: currentUsage.get(key) || 0,
+        monthRemainingQuantity: -(currentUsage.get(key) || 0),
+        status: "PENDING"
+      });
+    });
+    allocation.value = { ...saved, lines: planLines };
+  } catch (error) {
+    allocationOpen.value = false;
+    ElMessage.error(error instanceof Error ? error.message : "读取下拨计划失败");
+  } finally {
+    allocationLoading.value = false;
+  }
+};
+
+const saveAllocationPlan = async () => {
+  if (!allocation.value) return;
+  allocationSaving.value = true;
+  try {
+    const response = await saveInventoryDepartmentAllocationPlanApi({
+      ...allocation.value,
+      lines: allocation.value.lines.map(line => ({
+        ...line,
+        allocatedQuantity: Math.max(0, Number(line.allocatedQuantity || 0)),
+        manualAdjustment: Number(line.manualAdjustment || 0),
+        warningThreshold: line.warningThreshold === undefined ? null : Math.max(0, Number(line.warningThreshold || 0))
+      }))
+    });
+    allocation.value = response.data;
+    ElMessage.success("下拨计划已保存，仅用于核对和预警，未写入库存流水。");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "保存下拨计划失败");
+  } finally {
+    allocationSaving.value = false;
+  }
+};
+
+const clamp = (value: number, minimum: number, maximum: number) => Math.min(Math.max(value, minimum), maximum);
+const stopResize = () => {
+  resizeCleanup?.();
+  resizeCleanup = undefined;
+  if (isResizing.value) isResizing.value = false;
+  document.body.style.userSelect = "";
+};
+const startResize = (event: PointerEvent) => {
+  const grid = workspaceGridRef.value;
+  if (!grid || !window.matchMedia("(min-width: 1241px)").matches) return;
+  event.preventDefault();
+  const rect = grid.getBoundingClientRect();
+  const minInput = 360;
+  const minPreview = 420;
+  const divider = 10;
+  const updateWidth = (clientX: number) => {
+    const maximum = Math.max(minInput, rect.width - minPreview - divider);
+    inputPaneWidth.value = clamp(clientX - rect.left, minInput, maximum);
+  };
+  const onPointerMove = (moveEvent: PointerEvent) => updateWidth(moveEvent.clientX);
+  const onPointerUp = () => {
+    stopResize();
+    try {
+      if (inputPaneWidth.value) localStorage.setItem(workspaceWidthKey, String(Math.round(inputPaneWidth.value)));
+    } catch {
+      // 本机存储不可用时不影响拖动和保存草稿。
+    }
+  };
+  isResizing.value = true;
+  document.body.style.userSelect = "none";
+  updateWidth(event.clientX);
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp, { once: true });
+  resizeCleanup = () => {
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+  };
+};
+
+onMounted(() => {
+  try {
+    const saved = Number(localStorage.getItem(workspaceWidthKey));
+    if (Number.isFinite(saved) && saved >= 360) inputPaneWidth.value = saved;
+  } catch {
+    // 本机存储不可用时使用默认比例。
+  }
+});
+onBeforeUnmount(stopResize);
 watch(
   () => props.today,
   today => {
@@ -565,11 +1002,41 @@ watch(
 .toolbar-actions {
   flex-wrap: wrap;
 }
+.report-period-select {
+  width: 108px;
+}
 .department-workspace-grid {
   display: grid;
-  grid-template-columns: minmax(460px, 0.95fr) minmax(560px, 1.35fr);
-  gap: 18px;
+  grid-template-columns: minmax(360px, var(--input-pane-width, 46%)) 10px minmax(420px, 1fr);
+  gap: 0;
   min-width: 0;
+}
+.workspace-resizer {
+  position: relative;
+  min-width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.workspace-resizer::after {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 4px;
+  width: 2px;
+  content: "";
+  background: var(--inventory-line);
+  border-radius: 2px;
+  opacity: .75;
+  transition: background .16s ease, opacity .16s ease;
+}
+.workspace-resizer:hover::after,
+.department-workspace-grid.is-resizing .workspace-resizer::after {
+  background: var(--el-color-primary);
+  opacity: 1;
+}
+.department-workspace-grid.is-resizing,
+.department-workspace-grid.is-resizing * {
+  cursor: col-resize !important;
 }
 .input-pane,
 .preview-pane {
@@ -581,6 +1048,51 @@ watch(
   border-radius: 6px;
   background: #fff;
 }
+
+.editor-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
+.care-type-filter {
+  width: 116px;
+}
+.readonly-quantity {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  color: var(--inventory-text);
+  font-variant-numeric: tabular-nums;
+}
+.special-material-marker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--inventory-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.special-material-marker span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.special-note-placeholder {
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
+:deep(.actual-consumable-header) {
+  color: #b45309;
+  background: #fff7ed !important;
+}
+.input-table :deep(.el-table__body td:nth-child(6)) {
+  background: #fffbeb;
+}
+
 .volume-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -643,16 +1155,42 @@ watch(
   color: var(--inventory-muted);
   font-size: 13px;
 }
+.allocation-cell {
+  display: grid;
+  gap: 3px;
+  color: var(--inventory-text);
+  font-size: 12px;
+}
+.allocation-plan-note {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: var(--inventory-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  background: #fbfdfd;
+  border: 1px solid var(--inventory-line);
+  border-radius: 6px;
+}
+.allocation-dialog-state {
+  margin-right: auto;
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
+:global(.allocation-plan-dialog .el-dialog__footer) {
+  display: flex;
+  align-items: center;
+}
 .editor-dialog-shell {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 .editor-dialog-toolbar,
 .editor-dialog-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .editor-dialog-toolbar > div:first-child {
   display: grid;
@@ -681,17 +1219,20 @@ watch(
   border-radius: 6px;
 }
 .expanded-input-table {
-  min-width: 980px;
+  min-width: 1120px;
 }
 :global(.consumption-editor-dialog .el-dialog__body) {
-  padding: 0 20px 12px;
+  padding: 0 16px 10px;
 }
 :global(.consumption-editor-dialog .el-dialog__footer) {
   padding-top: 0;
 }
 @media (max-width: 1240px) {
   .department-workspace-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+  }
+  .workspace-resizer {
+    display: none;
   }
 }
 @media (max-width: 680px) {
