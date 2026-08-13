@@ -122,8 +122,7 @@
           </el-table-column>
           <el-table-column label="特殊情况说明" min-width="190">
             <template #default="{ row }">
-              <el-input v-if="row.isSpecial" v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="特殊耗材非零使用时必填" />
-              <span v-else class="special-note-placeholder">{{ row.isSpecial ? "实际量非零时填写" : "—" }}</span>
+              <el-input v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="可选填写当日特殊情况" />
             </template>
           </el-table-column>
           <el-table-column label="行内人次" width="122">
@@ -333,8 +332,7 @@
           </el-table-column>
           <el-table-column label="特殊情况说明" min-width="210">
             <template #default="{ row }">
-              <el-input v-if="row.isSpecial" v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="特殊耗材非零使用时必填" />
-              <span v-else class="special-note-placeholder">{{ row.isSpecial ? "实际量非零时填写" : "—" }}</span>
+              <el-input v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="可选填写当日特殊情况" />
             </template>
           </el-table-column>
             <el-table-column label="行内人次" width="138">
@@ -367,8 +365,8 @@
       <template #footer>
         <div class="editor-dialog-footer">
           <span>当前修改尚未保存，关闭浮层不会自动提交。</span>
-          <div>
-            <el-button @click="editorOpen = false">关闭</el-button>
+          <div class="editor-dialog-actions" @mousedown.stop @click.stop>
+            <el-button :disabled="saving" @click="closeExpandedEditor">关闭</el-button>
             <el-button type="primary" :loading="saving" :icon="DocumentChecked" @click="saveDraft">保存草稿</el-button>
           </div>
         </div>
@@ -687,6 +685,9 @@ const addLine = () => {
 
 const openExpandedEditor = () => {
   editorOpen.value = true;
+};
+const closeExpandedEditor = () => {
+  editorOpen.value = false;
 };
 
 const removeLine = (lineId: string) => {
@@ -1225,7 +1226,18 @@ watch(
   padding: 0 16px 10px;
 }
 :global(.consumption-editor-dialog .el-dialog__footer) {
+  position: relative;
+  z-index: 100;
   padding-top: 0;
+  background: #fff;
+  pointer-events: auto;
+}
+.editor-dialog-actions {
+  position: relative;
+  z-index: 101;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
 }
 @media (max-width: 1240px) {
   .department-workspace-grid {
