@@ -22,6 +22,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { HOME_URL } from "@/config";
+import { INVENTORY_SYSTEM_DASHBOARD } from "@/routers/modules/inventorySystem";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowRight } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -31,6 +32,8 @@ const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const globalStore = useGlobalStore();
+const systemLandingPath = computed(() => (authStore.activeSystem === "inventory" ? INVENTORY_SYSTEM_DASHBOARD : HOME_URL));
+const systemLandingTitle = computed(() => (authStore.activeSystem === "inventory" ? "进销存首页" : "首页"));
 
 const breadcrumbList = computed(() => {
   const currentRouteRecord = route.matched[route.matched.length - 1];
@@ -39,8 +42,8 @@ const breadcrumbList = computed(() => {
   let breadcrumbData = authStore.breadcrumbListGet[currentRouteRecord.path] ?? [];
   if (!breadcrumbData.length) return [];
   // 🙅‍♀️不需要首页面包屑可删除以下判断
-  if (breadcrumbData[0].path !== HOME_URL) {
-    breadcrumbData = [{ path: HOME_URL, meta: { icon: "HomeFilled", title: "首页" } }, ...breadcrumbData];
+  if (breadcrumbData[0].path !== systemLandingPath.value) {
+    breadcrumbData = [{ path: systemLandingPath.value, meta: { icon: "HomeFilled", title: systemLandingTitle.value } }, ...breadcrumbData];
   }
   return breadcrumbData;
 });

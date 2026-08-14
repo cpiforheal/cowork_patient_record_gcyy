@@ -3,7 +3,7 @@
     <el-sub-menu v-if="subItem.children?.length" :index="subItem.path">
       <template #title>
         <el-icon v-if="subItem.meta.icon">
-          <component :is="subItem.meta.icon"></component>
+          <component :is="resolveMenuIcon(subItem.meta.icon)"></component>
         </el-icon>
         <span class="sle">{{ subItem.meta.title }}</span>
       </template>
@@ -11,7 +11,7 @@
     </el-sub-menu>
     <el-menu-item v-else :index="subItem.path" @click="handleClickMenu(subItem)">
       <el-icon v-if="subItem.meta.icon">
-        <component :is="subItem.meta.icon"></component>
+        <component :is="resolveMenuIcon(subItem.meta.icon)"></component>
       </el-icon>
       <template #title>
         <span class="sle">{{ subItem.meta.title }}</span>
@@ -22,6 +22,7 @@
 
 <script setup lang="ts">
 import { useRouter } from "vue-router";
+import { resolveMenuIcon } from "@/plugins/elementIcons";
 
 defineProps<{ menuList: Menu.MenuOptions[] }>();
 

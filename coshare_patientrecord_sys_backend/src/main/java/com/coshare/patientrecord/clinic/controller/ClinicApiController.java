@@ -6,6 +6,7 @@ import com.coshare.patientrecord.ai.service.ClinicAiConfigService;
 import com.coshare.patientrecord.ai.service.ClinicAiDocumentService;
 import com.coshare.patientrecord.ai.service.ClinicAiSummaryService;
 import com.coshare.patientrecord.ai.service.ClinicDoubaoTtsService;
+import com.coshare.patientrecord.ai.service.AiDocumentTaskService;
 import com.coshare.patientrecord.ai.dto.AiAssistantRequest;
 import com.coshare.patientrecord.ai.dto.AiDocumentRequest;
 import com.coshare.patientrecord.ai.dto.AiSummaryRequest;
@@ -14,15 +15,19 @@ import com.coshare.patientrecord.ai.dto.TtsSpeakRequest;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.backup.service.ClinicBackupService;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
+import com.coshare.patientrecord.clinic.service.PatientArchiveQueryService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
 import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
 import com.coshare.patientrecord.medicalrecord.dto.FinalizeRequest;
 import com.coshare.patientrecord.medicalrecord.dto.GenerateRequest;
+import com.coshare.patientrecord.medicalrecord.dto.InpatientAiGenerateRequest;
+import com.coshare.patientrecord.medicalrecord.dto.MedicalRecordWorkflowSubmitRequest;
 import com.coshare.patientrecord.medicalrecord.dto.VoidRequest;
 import com.coshare.patientrecord.medicalrecord.dto.WorkspaceSaveRequest;
 import com.coshare.patientrecord.medicalrecord.service.ClinicMedicalRecordService;
+import com.coshare.patientrecord.medicalrecord.service.MedicalRecordWorkflowService;
 import com.coshare.patientrecord.security.AuthPermission;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,12 +41,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -50,6 +57,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @Profile("mysql")
@@ -65,6 +73,7 @@ public class ClinicApiController {
     );
 
     private final ClinicDatabaseService databaseService;
+    private final PatientArchiveQueryService patientArchiveQueryService;
     private final ClinicFileService fileService;
     private final ClinicBackupService backupService;
     private final ClinicAiSummaryService aiSummaryService;
@@ -73,11 +82,15 @@ public class ClinicApiController {
     private final ClinicAiConfigService aiConfigService;
     private final ClinicDoubaoTtsService doubaoTtsService;
     private final ClinicMedicalRecordService medicalRecordService;
+    private final MedicalRecordWorkflowService medicalRecordWorkflowService;
     private final ClinicAiDocumentService aiDocumentService;
+    private final AiDocumentTaskService aiDocumentTaskService;
     private final ObjectMapper objectMapper;
+    private final boolean medicalRecordV2Enabled;
 
     public ClinicApiController(
         ClinicDatabaseService databaseService,
+        PatientArchiveQueryService patientArchiveQueryService,
         ClinicFileService fileService,
         ClinicBackupService backupService,
         ClinicAiSummaryService aiSummaryService,
@@ -86,10 +99,14 @@ public class ClinicApiController {
         ClinicAiConfigService aiConfigService,
         ClinicDoubaoTtsService doubaoTtsService,
         ClinicMedicalRecordService medicalRecordService,
+        MedicalRecordWorkflowService medicalRecordWorkflowService,
         ClinicAiDocumentService aiDocumentService,
-        ObjectMapper objectMapper
+        AiDocumentTaskService aiDocumentTaskService,
+        ObjectMapper objectMapper,
+        @Value("${clinic.medical-record.v2-enabled:false}") boolean medicalRecordV2Enabled
     ) {
         this.databaseService = databaseService;
+        this.patientArchiveQueryService = patientArchiveQueryService;
         this.fileService = fileService;
         this.backupService = backupService;
         this.aiSummaryService = aiSummaryService;
@@ -98,8 +115,11 @@ public class ClinicApiController {
         this.aiConfigService = aiConfigService;
         this.doubaoTtsService = doubaoTtsService;
         this.medicalRecordService = medicalRecordService;
+        this.medicalRecordWorkflowService = medicalRecordWorkflowService;
         this.aiDocumentService = aiDocumentService;
+        this.aiDocumentTaskService = aiDocumentTaskService;
         this.objectMapper = objectMapper;
+        this.medicalRecordV2Enabled = medicalRecordV2Enabled;
     }
 
     @GetMapping("/clinic-api/db")
@@ -349,7 +369,17 @@ public class ClinicApiController {
 
     @PostMapping("/clinic-api/ai-document/generate")
     public ApiResult<Map<String, Object>> generateAiDocument(@RequestBody AiDocumentRequest request) {
-        return ApiResult.of(200, "AI文稿 docx 已生成", aiDocumentService.generate(request, AuthPermission.currentUserOrThrow()));
+        return ApiResult.of(202, "AI 文稿任务已提交", aiDocumentTaskService.submit(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/clinic-api/ai-document/tasks/{id}")
+    public ApiResult<Map<String, Object>> aiDocumentTask(@PathVariable String id) {
+        return ApiResult.success(aiDocumentTaskService.status(id, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/ai-document/tasks/{id}/retry")
+    public ApiResult<Map<String, Object>> retryAiDocumentTask(@PathVariable String id) {
+        return ApiResult.of(202, "AI 文稿任务已重新提交", aiDocumentTaskService.retry(id, AuthPermission.currentUserOrThrow()));
     }
 
     @GetMapping("/clinic-api/ai-document/download")
@@ -376,10 +406,11 @@ public class ClinicApiController {
 
     @GetMapping("/clinic-api/medical-record/versions")
     public ApiResult<Map<String, Object>> medicalRecordVersions(
-        @RequestParam String patientId,
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId,
         @RequestParam(required = false, defaultValue = "0") int limit
     ) {
-        return ApiResult.success(medicalRecordService.versions(patientId, AuthPermission.currentUserOrThrow(), limit));
+        return ApiResult.success(medicalRecordService.versions(patientId, encounterId, AuthPermission.currentUserOrThrow(), limit));
     }
 
     @PostMapping("/clinic-api/medical-record/precheck")
@@ -397,6 +428,130 @@ public class ClinicApiController {
         return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u5df2\u751f\u6210", medicalRecordService.generate(request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping(
+        value = "/clinic-api/medical-record/generate-inpatient-ai",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ApiResult<Map<String, Object>> generateInpatientAiMedicalRecord(
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId,
+        @RequestParam String sourceRecordId,
+        @RequestParam(required = false, defaultValue = "") String prompt,
+        @RequestParam("referenceDocument") MultipartFile referenceDocument
+    ) {
+        InpatientAiGenerateRequest request = new InpatientAiGenerateRequest(
+            patientId,
+            encounterId,
+            sourceRecordId,
+            prompt
+        );
+        return ApiResult.of(
+            200,
+            "AI 住院病历草稿已生成",
+            medicalRecordService.generateInpatientAi(
+                request,
+                referenceDocument,
+                AuthPermission.currentUserOrThrow()
+            )
+        );
+    }
+
+    @PostMapping(
+        value = "/clinic-api/medical-record/v2/inspect",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ApiResult<Map<String, Object>> inspectMedicalRecordDocument(
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId,
+        @RequestParam("document") MultipartFile document
+    ) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.success(medicalRecordWorkflowService.inspectUpload(
+            patientId,
+            encounterId,
+            document,
+            AuthPermission.currentUserOrThrow()
+        ));
+    }
+
+    @PostMapping("/clinic-api/medical-record/v2/tasks")
+    public ApiResult<Map<String, Object>> submitMedicalRecordTask(
+        @RequestBody MedicalRecordWorkflowSubmitRequest request
+    ) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.of(
+            202,
+            "病历生成任务已提交",
+            medicalRecordWorkflowService.submit(request, AuthPermission.currentUserOrThrow())
+        );
+    }
+
+    @GetMapping("/clinic-api/medical-record/v2/tasks/{id}")
+    public ApiResult<Map<String, Object>> medicalRecordTask(@PathVariable String id) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.success(medicalRecordWorkflowService.status(id, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/clinic-api/medical-record/v2/tasks/{id}/retry")
+    public ApiResult<Map<String, Object>> retryMedicalRecordTask(@PathVariable String id) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.of(
+            202,
+            "病历生成任务已重新提交",
+            medicalRecordWorkflowService.retry(id, AuthPermission.currentUserOrThrow())
+        );
+    }
+
+    @GetMapping("/clinic-api/medical-record/v2/tasks/{id}/mappings")
+    public ApiResult<Map<String, Object>> medicalRecordTaskMappings(@PathVariable String id) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.success(medicalRecordWorkflowService.mappings(id, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/clinic-api/medical-record/v2/versions")
+    public ApiResult<Map<String, Object>> medicalRecordV2Versions(
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId,
+        @RequestParam(required = false, defaultValue = "0") int limit
+    ) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.success(medicalRecordService.versions(
+            patientId,
+            encounterId,
+            AuthPermission.currentUserOrThrow(),
+            limit
+        ));
+    }
+
+    @PostMapping("/clinic-api/medical-record/v2/finalize")
+    public ApiResult<Map<String, Object>> finalizeMedicalRecordV2(@RequestBody FinalizeRequest request) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.of(
+            200,
+            "目标病历已定稿",
+            medicalRecordService.finalizeRecord(request, AuthPermission.currentUserOrThrow())
+        );
+    }
+
+    @GetMapping("/clinic-api/medical-record/v2/assets/{id}/download")
+    public ResponseEntity<FileSystemResource> downloadMedicalRecordAsset(@PathVariable String id) {
+        requireMedicalRecordV2Enabled();
+        com.coshare.patientrecord.medicalrecord.dto.DownloadFile download = medicalRecordWorkflowService.downloadAsset(
+            id,
+            AuthPermission.currentUserOrThrow()
+        );
+        return docxDownload(download);
+    }
+
+    @GetMapping({
+        "/clinic-api/medical-record/v2/records/{id}/download",
+        "/clinic-api/medical-record/v2/records/{id}/export"
+    })
+    public ResponseEntity<FileSystemResource> downloadOrExportMedicalRecordV2(@PathVariable String id) {
+        requireMedicalRecordV2Enabled();
+        return docxDownload(medicalRecordService.download(id, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/clinic-api/medical-record/finalize")
     public ApiResult<Map<String, Object>> finalizeMedicalRecord(@RequestBody FinalizeRequest request) {
         return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u5df2\u5b9a\u7a3f", medicalRecordService.finalizeRecord(request, AuthPermission.currentUserOrThrow()));
@@ -405,6 +560,15 @@ public class ClinicApiController {
     @PostMapping("/clinic-api/medical-record/void")
     public ApiResult<Map<String, Object>> voidMedicalRecord(@RequestBody VoidRequest request) {
         return ApiResult.of(200, "\u76ee\u6807\u75c5\u5386\u7248\u672c\u5df2\u4f5c\u5e9f", medicalRecordService.voidRecord(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @DeleteMapping("/clinic-api/medical-record/{id}")
+    public ApiResult<Map<String, Object>> deleteMedicalRecord(@PathVariable String id) {
+        return ApiResult.of(
+            200,
+            "目标病历历史版本及对应文件已删除",
+            medicalRecordService.deleteRecord(id, AuthPermission.currentUserOrThrow())
+        );
     }
 
     @GetMapping("/clinic-api/medical-record/download")
@@ -422,6 +586,53 @@ public class ClinicApiController {
                     .toString()
             )
             .body(download.resource());
+    }
+
+    private ResponseEntity<FileSystemResource> docxDownload(
+        com.coshare.patientrecord.medicalrecord.dto.DownloadFile download
+    ) {
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+            .cacheControl(CacheControl.noStore().cachePrivate())
+            .header(HttpHeaders.PRAGMA, "no-cache")
+            .header(
+                HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment()
+                    .filename(download.fileName(), StandardCharsets.UTF_8)
+                    .build()
+                    .toString()
+            )
+            .body(download.resource());
+    }
+
+    @GetMapping("/clinic-api/patient-archives")
+    public ApiResult<Map<String, Object>> patientArchives(
+        @RequestParam(defaultValue = "1") int pageNum,
+        @RequestParam(defaultValue = "50") int pageSize,
+        @RequestParam(defaultValue = "") String name,
+        @RequestParam(defaultValue = "") String visitNo,
+        @RequestParam(defaultValue = "") String visitType,
+        @RequestParam(defaultValue = "") String status,
+        @RequestParam(defaultValue = "") String dateFrom,
+        @RequestParam(defaultValue = "") String dateTo
+    ) {
+        return ApiResult.success(patientArchiveQueryService.list(
+            pageNum, pageSize, name, visitNo, visitType, status, dateFrom, dateTo, AuthPermission.currentUserOrThrow()
+        ));
+    }
+
+    @GetMapping("/clinic-api/patient-archives/{id}")
+    public ApiResult<Map<String, Object>> patientArchive(@PathVariable String id) {
+        return ApiResult.success(patientArchiveQueryService.detail(id, AuthPermission.currentUserOrThrow()));
+    }
+
+    private void requireMedicalRecordV2Enabled() {
+        if (!medicalRecordV2Enabled) {
+            throw new ResponseStatusException(
+                org.springframework.http.HttpStatus.NOT_FOUND,
+                "目标病历 V2 工作流尚未进入生产范围"
+            );
+        }
     }
 
     @PostMapping("/clinic-api/files")
@@ -481,19 +692,16 @@ public class ClinicApiController {
     }
 
     private void requireClinicAdmin() {
-        AuthPermission.requireAnyRole("\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u7cfb\u7edf\u7ba1\u7406\u6743\u9650", "admin", "quality");
+        AuthPermission.requireAnyRole("\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u7cfb\u7edf\u7ba1\u7406\u6743\u9650", "admin");
     }
 
     private void requireClinicContributor() {
         AuthPermission.requireAnyRole(
             "\u5f53\u524d\u8d26\u53f7\u65e0\u75c5\u5386\u5199\u5165\u6743\u9650",
-            "admin",
-            "quality",
             "frontdesk",
             "reception",
             "doctor",
             "nurse",
-            "nursing",
             "lab",
             "ecg",
             "ultrasound",

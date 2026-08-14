@@ -7,20 +7,6 @@
   "documents": {},
   "roles": [],
   "templateFieldRules": [],
-  "accounts": [
-    {
-      "id": "admin",
-      "username": "admin",
-      "password": "Init@Coshare2026!",
-      "name": "\u7ba1\u7406\u5458",
-      "department": "\u4fe1\u606f/\u9662\u529e",
-      "role": "admin",
-      "roleLabel": "\u7ba1\u7406\u5458",
-      "scope": "\u7cfb\u7edf\u5168\u5c40\u914d\u7f6e",
-      "status": "\u542f\u7528",
-      "createdAt": "2026-06-10 08:00:00",
-      "updatedAt": "2026-06-10 08:00:00"
-    }
-  ],
+  "accounts": [],
   "auditLogs": []
 }

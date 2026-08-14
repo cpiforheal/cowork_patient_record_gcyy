@@ -17,9 +17,9 @@
         <el-option v-for="department in departmentOptions" :key="department" :label="department" :value="department" />
       </el-select>
     </el-form-item>
-    <el-form-item prop="username">
+    <el-form-item prop="accountHandle">
       <el-select
-        v-model="loginForm.username"
+        v-model="loginForm.accountHandle"
         filterable
         :disabled="accountLoading || accountOptions.length === 0"
         :loading="accountLoading"
@@ -32,12 +32,12 @@
         </template>
         <el-option
           v-for="account in filteredAccountOptions"
-          :key="account.id"
-          :label="accountLabel(account)"
-          :value="account.username"
+          :key="account.accountHandle"
+          :label="account.label"
+          :value="account.accountHandle"
         >
           <div class="account-option">
-            <span class="account-name">{{ account.name }}</span>
+            <span class="account-name">{{ account.label }}</span>
             <span class="account-meta">{{ account.department }}</span>
           </div>
         </el-option>
@@ -59,48 +59,172 @@
       进入工作台
     </el-button>
   </div>
+  <el-button v-if="!isInventorySystem" class="inventory-entry" text type="success" @click="openInventorySystem">
+    <el-icon><Box /></el-icon>
+    进入进销存系统
+  </el-button>
+
+  <el-dialog
+    v-model="forcePasswordVisible"
+    title="首次登录必须修改密码"
+    width="420px"
+    :show-close="false"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+  >
+    <el-alert title="初始密码只能用于本次引导，修改后所有旧会话会立即失效。" type="warning" :closable="false" show-icon />
+    <el-form class="force-password-form" label-position="top">
+      <el-form-item label="新密码">
+        <el-input v-model="passwordChange.newPassword" type="password" show-password autocomplete="new-password" />
+      </el-form-item>
+      <el-form-item label="确认新密码">
+        <el-input v-model="passwordChange.confirmPassword" type="password" show-password autocomplete="new-password" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button type="primary" :loading="passwordChanging" @click="completeForcedPasswordChange">修改并进入系统</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { HOME_URL } from "@/config";
 import { Login } from "@/api/interface";
-import { ElNotification } from "element-plus";
-import { getLoginAccountsApi, getLoginOptionsApi, loginApi, type LoginAccountOption } from "@/api/modules/login";
+import { ElMessage, ElNotification } from "element-plus";
+import {
+  changePasswordApi,
+  getLoginAccountsApi,
+  getLoginOptionsApi,
+  loginApi,
+  type LoginAccountOption
+} from "@/api/modules/login";
 import { useUserStore } from "@/stores/modules/user";
+import { useAuthStore } from "@/stores/modules/auth";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
-import { CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
+import { Box, CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
 import type { ElForm } from "element-plus";
 
 const router = useRouter();
+const route = useRoute();
 const userStore = useUserStore();
 const tabsStore = useTabsStore();
 const keepAliveStore = useKeepAliveStore();
+const WELCOME_SPLASH_SESSION_KEY = "welcome-splash-played";
+const isInventorySystem = import.meta.env.VITE_PORTAL_MODE === "inventory";
+const openInventorySystem = () => {
+  const inventoryUrl = new URL(window.location.href);
+  inventoryUrl.port = "8849";
+  inventoryUrl.pathname = "/";
+  inventoryUrl.search = "";
+  inventoryUrl.hash = "";
+  window.location.assign(inventoryUrl.toString());
+};
 
 type FormInstance = InstanceType<typeof ElForm>;
 const loginFormRef = ref<FormInstance>();
 const loginRules = reactive({
-  username: [{ required: true, message: "请选择登录账号", trigger: "change" }],
+  accountHandle: [{ required: true, message: "请选择登录账号", trigger: "change" }],
   password: [{ required: true, message: "请输入登录密码", trigger: "blur" }]
 });
 
 const loading = ref(false);
 const departmentLoading = ref(false);
 const accountLoading = ref(false);
+const forcePasswordVisible = ref(false);
+const passwordChanging = ref(false);
 const accountOptions = ref<LoginAccountOption[]>([]);
+const allAccountOptions = ref<LoginAccountOption[]>([]);
 const departmentOptions = ref<string[]>([]);
 const loginForm = reactive<Login.ReqLoginForm & { department: string }>({
   department: "",
-  username: "",
+  accountHandle: "",
   password: ""
 });
+const passwordChange = reactive({ newPassword: "", confirmPassword: "" });
+
+// 展示终端等受限角色没有 /home 权限，登录后需落到本岗位第一个可用页面。
+const resolveLandingPath = () => {
+  const authStore = useAuthStore();
+  // The system selection page is the post-login home. It exposes only the
+  // systems present in the account capabilities.
+  if (authStore.hasInventorySystemAccessGet || authStore.hasMedicalSystemAccessGet) return "/system-select";
+  const pages = authStore.flatMenuListGet.filter(item => item.component);
+  if (!pages.length || pages.some(item => item.path === HOME_URL)) return HOME_URL;
+  return pages[0].path;
+};
+
+const resolveLoginRedirect = () => {
+  const redirect = route.query.redirect;
+  if (typeof redirect === "string" && redirect.startsWith("/") && !redirect.startsWith("//") && redirect !== "/login") {
+    return redirect;
+  }
+  return resolveLandingPath();
+};
+
+const completeLogin = async (data: Login.ResLogin) => {
+  if (!data.userInfo) throw new Error("登录响应缺少用户信息");
+  userStore.setToken(data.access_token);
+  userStore.setUserInfo(data.userInfo);
+  try {
+    window.sessionStorage.removeItem(WELCOME_SPLASH_SESSION_KEY);
+  } catch {
+    // Storage may be unavailable in restricted browser modes; login should still continue.
+  }
+  await initDynamicRouter();
+  tabsStore.setTabs([]);
+  keepAliveStore.setKeepAliveName([]);
+  await router.replace({ path: resolveLoginRedirect() });
+  ElNotification({
+    title: "登录成功",
+    message: `${data.userInfo.department || "当前科室"}：仅显示本岗位已授权的功能`,
+    type: "success",
+    duration: 3000
+  });
+};
+
+const completeForcedPasswordChange = async () => {
+  if (passwordChange.newPassword.length < 8) {
+    ElMessage.warning("新密码至少需要 8 位");
+    return;
+  }
+  if (passwordChange.newPassword !== passwordChange.confirmPassword) {
+    ElMessage.warning("两次输入的新密码不一致");
+    return;
+  }
+  passwordChanging.value = true;
+  try {
+    await changePasswordApi({ newPassword: passwordChange.newPassword });
+    const newPassword = passwordChange.newPassword;
+    userStore.setToken("");
+    const { data } = await loginApi({ accountHandle: loginForm.accountHandle?.trim(), password: newPassword });
+    forcePasswordVisible.value = false;
+    passwordChange.newPassword = "";
+    passwordChange.confirmPassword = "";
+    loginForm.password = "";
+    await completeLogin(data);
+  } catch (error) {
+    ElNotification({ title: "密码修改失败", message: (error as Error).message, type: "error", duration: 4000 });
+  } finally {
+    passwordChanging.value = false;
+  }
+};
 
 const filteredAccountOptions = computed(() => accountOptions.value);
 
-const accountLabel = (account: LoginAccountOption) => account.name;
+const applyAccountOptions = (options: LoginAccountOption[]) => {
+  accountOptions.value = options;
+  loginForm.accountHandle = options.length === 1 ? options[0].accountHandle : "";
+};
+
+const getCachedAccounts = (department: string) => {
+  const normalizedDepartment = department.trim();
+  if (!normalizedDepartment) return allAccountOptions.value;
+  return allAccountOptions.value.filter(account => account.department.trim() === normalizedDepartment);
+};
 
 const syncDepartmentOptions = (departmentNames: string[]) => {
   const names = new Set<string>();
@@ -114,9 +238,9 @@ const loadDepartments = async () => {
   departmentLoading.value = true;
   try {
     const { data } = await getLoginOptionsApi();
-    accountOptions.value = data.accounts ?? [];
+    allAccountOptions.value = data.accounts ?? [];
+    applyAccountOptions(allAccountOptions.value);
     syncDepartmentOptions(data.departments);
-    if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
   } catch (error) {
     ElNotification({
       title: "登录数据加载失败",
@@ -130,27 +254,29 @@ const loadDepartments = async () => {
 };
 
 const loadAccountsByDepartment = async (department: string) => {
+  const cachedAccounts = getCachedAccounts(department);
+  applyAccountOptions(cachedAccounts);
   accountLoading.value = true;
   try {
     const { data } = await getLoginAccountsApi(department);
-    accountOptions.value = data.accounts ?? [];
-    if (accountOptions.value.length === 1) loginForm.username = accountOptions.value[0].username;
+    const refreshedAccounts = data.accounts ?? [];
+    applyAccountOptions(refreshedAccounts.length > 0 ? refreshedAccounts : cachedAccounts);
   } catch (error) {
-    ElNotification({
-      title: "账号列表加载失败",
-      message: (error as Error).message,
-      type: "error",
-      duration: 3000
-    });
+    if (cachedAccounts.length === 0) {
+      ElNotification({
+        title: "账号列表加载失败",
+        message: (error as Error).message,
+        type: "error",
+        duration: 3000
+      });
+    }
   } finally {
     accountLoading.value = false;
   }
 };
 
 const handleDepartmentChange = async (department: string) => {
-  loginForm.username = "";
   loginForm.password = "";
-  accountOptions.value = [];
   await loadAccountsByDepartment(department);
 };
 
@@ -160,22 +286,15 @@ const login = (formEl: FormInstance | undefined) => {
     if (!valid) return;
     loading.value = true;
     try {
-      const { data } = await loginApi({ username: loginForm.username.trim(), password: loginForm.password });
-      const profile = data.userInfo || { name: "管理员", role: "admin", department: "信息/院办" };
+      const { data } = await loginApi({ accountHandle: loginForm.accountHandle?.trim(), password: loginForm.password });
       userStore.setToken(data.access_token);
-      userStore.setUserInfo(profile);
-
-      await initDynamicRouter();
-      tabsStore.setTabs([]);
-      keepAliveStore.setKeepAliveName([]);
-      await router.replace({ path: HOME_URL });
-
-      ElNotification({
-        title: "登录成功",
-        message: `${profile.department}：只显示本岗位需要处理的功能`,
-        type: "success",
-        duration: 3000
-      });
+      if (!data.userInfo) throw new Error("登录响应缺少用户信息");
+      userStore.setUserInfo(data.userInfo);
+      if (data.mustChangePassword) {
+        forcePasswordVisible.value = true;
+        return;
+      }
+      await completeLogin(data);
     } catch (error) {
       ElNotification({
         title: "登录失败",
@@ -200,7 +319,7 @@ onMounted(() => {
   loadDepartments();
   document.onkeydown = (e: KeyboardEvent) => {
     if (e.code === "Enter" || e.code === "enter" || e.code === "NumpadEnter") {
-      if (loading.value) return;
+      if (loading.value || forcePasswordVisible.value) return;
       login(loginFormRef.value);
     }
   };
@@ -334,6 +453,18 @@ onBeforeUnmount(() => {
     box-shadow: 0 18px 34px rgb(38 168 118 / 28%);
     transform: translateY(-1px);
   }
+}
+
+.inventory-entry {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 12px;
+  font-weight: 700;
+}
+
+.force-password-form {
+  margin-top: 18px;
 }
 
 @media screen and (width <= 600px) {

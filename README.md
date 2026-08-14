@@ -21,20 +21,23 @@ start-local.bat
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-local.ps1
 ```
 
+首次运行前先通过环境变量提供本机数据库密码和一次性管理员密码：
+
+```powershell
+$env:LOCAL_MYSQL_PASSWORD = Read-Host "Local MySQL password"
+$env:CLINIC_BOOTSTRAP_ADMIN_PASSWORD = Read-Host "One-time administrator password"
+```
+
 脚本会自动完成：
 
 1. 初始化并启动本机 MySQL `3307`
 2. 创建数据库 `hos_refactor`
-3. 创建数据库账号 `cowork / Cowork_2026!`
+3. 创建本机数据库账号（密码来自 `LOCAL_MYSQL_PASSWORD`）
 4. 启动后端 `http://localhost:8080/`
-5. 补齐管理员账号
+5. 空库时创建必须改密的一次性管理员账号
 6. 启动前端 `http://localhost:8848/`
 
-登录账号：
-
-```text
-admin / Init@Coshare2026!
-```
+首次登录账号为 `admin`，密码使用刚才输入的一次性密码；首次登录后必须立即修改。仓库不再提供固定凭据。
 
 ## 前置依赖
 
@@ -47,7 +50,9 @@ admin / Init@Coshare2026!
 
 当前机器已验证这些依赖可用。
 
-## 免环境便携包
+## 免环境便携包（仅开发/演示）
+
+便携包使用仅监听本机回环地址的内置 MySQL，便于离线演示，但不作为正式生产交付物。正式单机生产必须使用 `tools/package-pilot.ps1`，并按 `docs/production-single-node-runbook.md` 配置 TLS、低权限运行账号和独立迁移账号。
 
 如需部署到单位内网公用主机，可在开发机项目根目录执行：
 
@@ -135,7 +140,7 @@ cd .\coshare_patientrecord_sys_backend
 java -jar .\target\coshare_patientrecord_sys-0.0.1-SNAPSHOT.jar `
   --server.port=8080 `
   --spring.profiles.active=mysql `
-  --spring.datasource.url="jdbc:mysql://127.0.0.1:3307/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true" `
-  --spring.datasource.username=cowork `
-  --spring.datasource.password=Cowork_2026!
+  --spring.datasource.url="jdbc:mysql://127.0.0.1:3307/hos_refactor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=PREFERRED"
 ```
+
+数据库账号和密码应通过环境变量提供，不应写入命令行或提交到仓库。

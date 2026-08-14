@@ -410,7 +410,7 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
   }
 ];
 
-const roleCanEdit = (role: UserRole, roles: UserRole[]) => role === "admin" || roles.includes(role);
+const roleCanEdit = (role: UserRole, roles: UserRole[]) => role !== "admin" && roles.includes(role);
 
 const isValueFilled = (value: string) => {
   const normalized = String(value || "").trim();
@@ -474,7 +474,7 @@ const reportTitleByRole: Record<string, string> = {
 };
 
 const fieldEditableByRole = (field: MedicalRecordTemplateField, role: UserRole) => {
-  if (role === "admin") return true;
+  if (role === "admin") return false;
   if (!field.editorRoles?.length) return role === "doctor";
   return field.editorRoles.includes(role);
 };
@@ -949,7 +949,7 @@ export const usePatientRolePreview = ({
           section: section.title,
           value: String(fieldValues[field.key] || ""),
           source: "archive",
-          editable: currentRole.value === "admin" || field.editors.includes(currentRole.value),
+          editable: currentRole.value !== "admin" && field.editors.includes(currentRole.value),
           required: Boolean(field.required)
         }));
 
@@ -971,7 +971,7 @@ export const usePatientRolePreview = ({
           section: section.title,
           value: String(fieldValues[field.key] || ""),
           source: "archive",
-          editable: currentRole.value === "admin" || field.editors.includes(currentRole.value),
+          editable: currentRole.value !== "admin" && field.editors.includes(currentRole.value),
           required: false
         }));
       const contextMedicalItems = medicalFields

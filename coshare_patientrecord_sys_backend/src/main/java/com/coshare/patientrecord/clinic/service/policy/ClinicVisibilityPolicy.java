@@ -53,6 +53,13 @@ public class ClinicVisibilityPolicy {
         "lab_biochemistry_na",
         "lab_biochemistry_cl",
         "lab_biochemistry_ca",
+        "coagulation",
+        "coagulationStatus",
+        "lab_coagulation_pt",
+        "lab_coagulation_aptt",
+        "lab_coagulation_tt",
+        "lab_coagulation_fib",
+        "lab_coagulation_inr",
         "preOpEight",
         "preOpEightStatus",
         "lab_hbvFive_hbsag",
@@ -94,25 +101,35 @@ public class ClinicVisibilityPolicy {
     }
 
     public boolean isClinicAdmin(SessionUser user) {
-        return user != null && ("admin".equals(user.role()) || "quality".equals(user.role()));
+        return user != null && "admin".equals(user.role());
     }
 
     public ObjectNode filterDbForUser(ObjectNode db, SessionUser user) {
-        if (isClinicAdmin(user)) {
+        if (user != null && "admin".equals(user.role())) {
             return db;
         }
 
-        ObjectNode records = db.path("records").isObject() ? (ObjectNode) db.path("records") : objectMapper.createObjectNode();
+        if (user != null && "quality".equals(user.role())) {
+            db.set("accounts", hideVisibleAccountPasswords(currentAccountOnly(db.path("accounts"), user)));
+            db.set("roles", objectMapper.createArrayNode());
+            return db;
+        }
+
         ObjectNode documents = db.path("documents").isObject() ? (ObjectNode) db.path("documents") : objectMapper.createObjectNode();
+        filterReadableDocuments(documents, user);
+        Set<String> visiblePatientIds = visiblePatientIds(documents);
+        ObjectNode records = db.path("records").isObject() ? (ObjectNode) db.path("records") : objectMapper.createObjectNode();
+        retainPatientEntries(records, visiblePatientIds);
         db.set("archive", objectMapper.createObjectNode());
-        db.set("patients", filterPatients(db.path("patients"), records, documents));
+        db.set("patients", filterPatients(db.path("patients"), visiblePatientIds));
         db.set("accounts", hideVisibleAccountPasswords(currentAccountOnly(db.path("accounts"), user)));
         db.set("auditLogs", objectMapper.createArrayNode());
         return db;
     }
 
     public ObjectNode filterWritePayload(ObjectNode payload, SessionUser user, JsonNode templateFieldRules) {
-        if (isClinicAdmin(user)) {
+        if (user != null && "admin".equals(user.role())) {
+            payload.retain("accounts", "roles", "departments", "dictionaries", "templateFieldRules");
             return payload;
         }
 
@@ -186,16 +203,37 @@ public class ClinicVisibilityPolicy {
         }
     }
 
+    private void filterReadableDocuments(ObjectNode documents, SessionUser user) {
+        filterWritableDocuments(documents, user);
+    }
+
+    private Set<String> visiblePatientIds(JsonNode documents) {
+        Set<String> patientIds = new HashSet<>();
+        collectVisiblePatientIds(documents, patientIds);
+        return patientIds;
+    }
+
+    private void retainPatientEntries(ObjectNode rowsByPatient, Set<String> visiblePatientIds) {
+        Iterator<Map.Entry<String, JsonNode>> rows = rowsByPatient.fields();
+        while (rows.hasNext()) {
+            if (!visiblePatientIds.contains(rows.next().getKey())) rows.remove();
+        }
+    }
+
     private Set<String> allowedFieldKeys(JsonNode templateFieldRules, String role) {
         Set<String> allowedFields = new HashSet<>();
         if (templateFieldRules != null && templateFieldRules.isArray()) {
             for (JsonNode rule : templateFieldRules) {
                 if (!rule.path("enabled").asBoolean(true)) continue;
+                String fieldKey = text(rule, "fieldKey");
+                if ("doctor".equals(role)) {
+                    if (!fieldKey.isBlank()) allowedFields.add(fieldKey);
+                    continue;
+                }
                 JsonNode editors = rule.path("editors");
                 if (editors.isArray()) {
                     for (JsonNode editor : editors) {
                         if (role.equals(editor.asText())) {
-                            String fieldKey = text(rule, "fieldKey");
                             if (!fieldKey.isBlank()) allowedFields.add(fieldKey);
                             break;
                         }
@@ -212,11 +250,7 @@ public class ClinicVisibilityPolicy {
         return allowedFields;
     }
 
-    private ArrayNode filterPatients(JsonNode patients, JsonNode records, JsonNode documents) {
-        Set<String> visiblePatientIds = new HashSet<>();
-        collectVisiblePatientIds(records, visiblePatientIds);
-        collectVisiblePatientIds(documents, visiblePatientIds);
-
+    private ArrayNode filterPatients(JsonNode patients, Set<String> visiblePatientIds) {
         ArrayNode filtered = objectMapper.createArrayNode();
         if (patients == null || !patients.isArray() || visiblePatientIds.isEmpty()) return filtered;
         for (JsonNode patient : patients) {

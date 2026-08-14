@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.inventory.repository;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.service.builder.InventorySummaryBuilder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -8,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.DecimalNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.ResultSet;
@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Component;
@@ -33,24 +34,28 @@ public class InventoryRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
-    private final InventorySchemaInitializer schemaInitializer;
     private final InventorySummaryBuilder summaryBuilder;
+    private final InventoryAccessService inventoryAccessService;
+
+    @Autowired
+    public InventoryRepository(
+        JdbcTemplate jdbcTemplate,
+        ObjectMapper objectMapper,
+        InventorySummaryBuilder summaryBuilder,
+        InventoryAccessService inventoryAccessService
+    ) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
+        this.summaryBuilder = summaryBuilder;
+        this.inventoryAccessService = inventoryAccessService;
+    }
 
     public InventoryRepository(
         JdbcTemplate jdbcTemplate,
         ObjectMapper objectMapper,
-        InventorySchemaInitializer schemaInitializer,
         InventorySummaryBuilder summaryBuilder
     ) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.objectMapper = objectMapper;
-        this.schemaInitializer = schemaInitializer;
-        this.summaryBuilder = summaryBuilder;
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
+        this(jdbcTemplate, objectMapper, summaryBuilder, null);
     }
 
     public ObjectNode readDb() {
@@ -71,10 +76,11 @@ public class InventoryRepository {
         if (isInventoryManager(user)) {
             return db;
         }
+        String departmentId = user.activeDepartmentId();
         String department = user.department();
-        db.set("requests", filterByDepartment(db.path("requests"), department));
-        db.set("weeklyConsumptions", filterByDepartment(db.path("weeklyConsumptions"), department));
-        db.set("movements", filterByDepartment(db.path("movements"), department));
+        db.set("requests", filterByDepartment(db.path("requests"), departmentId, department));
+        db.set("weeklyConsumptions", filterByDepartment(db.path("weeklyConsumptions"), departmentId, department));
+        db.set("movements", filterByDepartment(db.path("movements"), departmentId, department));
         db.set("batches", objectMapper.createArrayNode());
         db.set("counts", objectMapper.createArrayNode());
         db.set("auditLogs", objectMapper.createArrayNode());
@@ -82,13 +88,17 @@ public class InventoryRepository {
         return db;
     }
 
-    private ArrayNode filterByDepartment(JsonNode rows, String department) {
+    private ArrayNode filterByDepartment(JsonNode rows, String departmentId, String department) {
         ArrayNode filtered = objectMapper.createArrayNode();
-        if (rows == null || !rows.isArray() || department == null || department.isBlank()) {
+        if (rows == null || !rows.isArray()) {
             return filtered;
         }
         for (JsonNode row : rows) {
-            if (department.equals(text(row, "department"))) {
+            String rowDepartmentId = text(row, "departmentId");
+            boolean stableIdMatches = departmentId != null && !departmentId.isBlank() && departmentId.equals(rowDepartmentId);
+            boolean legacyNameMatches = rowDepartmentId.isBlank()
+                && department != null && !department.isBlank() && department.equals(text(row, "department"));
+            if (stableIdMatches || legacyNameMatches) {
                 filtered.add(row);
             }
         }
@@ -98,16 +108,22 @@ public class InventoryRepository {
     public void upsertItem(ObjectNode item) {
         jdbcTemplate.update("""
             INSERT INTO inventory_items (
-              id, name, category, spec, unit, location, low_stock_threshold,
+              id, name, category, spec, unit, base_unit, issue_unit, quantity_precision,
+              normalization_status, effective_life_managed, location, low_stock_threshold, safety_stock,
               is_sensitive, batch_required, expiry_required, enabled, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), category = VALUES(category), spec = VALUES(spec),
-              unit = VALUES(unit), location = VALUES(location), low_stock_threshold = VALUES(low_stock_threshold),
+              unit = VALUES(unit), base_unit = VALUES(base_unit), issue_unit = VALUES(issue_unit),
+              quantity_precision = VALUES(quantity_precision), normalization_status = VALUES(normalization_status),
+              effective_life_managed = VALUES(effective_life_managed), location = VALUES(location), low_stock_threshold = VALUES(low_stock_threshold),
+              safety_stock = VALUES(safety_stock),
               is_sensitive = VALUES(is_sensitive), batch_required = VALUES(batch_required), expiry_required = VALUES(expiry_required),
               enabled = VALUES(enabled), raw_json = VALUES(raw_json)
             """,
             text(item, "id"), text(item, "name"), text(item, "category"), text(item, "spec"), text(item, "unit"),
-            text(item, "location"), quantity(item, "lowStockThreshold"), item.path("sensitive").asBoolean(false),
+            text(item, "baseUnit"), text(item, "issueUnit"), item.path("quantityPrecision").asInt(2),
+            text(item, "normalizationStatus", "standard"), item.path("effectiveLifeManaged").asBoolean(false),
+            text(item, "location"), quantity(item, "lowStockThreshold"), quantity(item, "safetyStock"), item.path("sensitive").asBoolean(false),
             item.path("batchRequired").asBoolean(false), item.path("expiryRequired").asBoolean(false),
             item.path("enabled").asBoolean(true), toJson(item)
         );
@@ -437,15 +453,21 @@ public class InventoryRepository {
         jdbcTemplate.update("""
             INSERT INTO inventory_weekly_consumption (
               id, week_no, department, item_id, consumed_quantity, remaining_quantity, next_week_quantity,
+              actual_consumed_quantity, suggested_quantity, adjusted_quantity, safety_stock, source_type,
               owner, abnormal_reason, confirmed_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE week_no = VALUES(week_no), department = VALUES(department), item_id = VALUES(item_id),
               consumed_quantity = VALUES(consumed_quantity), remaining_quantity = VALUES(remaining_quantity),
-              next_week_quantity = VALUES(next_week_quantity), owner = VALUES(owner), abnormal_reason = VALUES(abnormal_reason),
+              next_week_quantity = VALUES(next_week_quantity), actual_consumed_quantity = VALUES(actual_consumed_quantity),
+              suggested_quantity = VALUES(suggested_quantity), adjusted_quantity = VALUES(adjusted_quantity),
+              safety_stock = VALUES(safety_stock), source_type = VALUES(source_type),
+              owner = VALUES(owner), abnormal_reason = VALUES(abnormal_reason),
               confirmed_at = VALUES(confirmed_at), raw_json = VALUES(raw_json)
             """,
             text(row, "id"), text(row, "weekNo"), text(row, "department"), text(row, "itemId"),
             quantity(row, "consumedQuantity"), quantity(row, "remainingQuantity"), quantity(row, "nextWeekQuantity"),
+            quantity(row, "actualConsumedQuantity"), quantity(row, "suggestedQuantity"), quantity(row, "adjustedQuantity"),
+            quantity(row, "safetyStock"), text(row, "sourceType", "LEDGER"),
             text(row, "owner"), text(row, "abnormalReason"), text(row, "confirmedAt"), toJson(row)
         );
     }
@@ -501,14 +523,19 @@ public class InventoryRepository {
     }
 
     public void applyUserDepartment(ObjectNode row, SessionUser user) {
+        row.put("departmentId", user.activeDepartmentId());
         row.put("department", user.department());
     }
 
     public boolean isInventoryManager(SessionUser user) {
-        return "admin".equals(user.role()) || "quality".equals(user.role());
+        return inventoryAccessService.canViewAllDepartments(user);
     }
 
     public boolean sameDepartment(SessionUser user, JsonNode row) {
+        String rowDepartmentId = text(row, "departmentId");
+        if (!rowDepartmentId.isBlank()) {
+            return user.activeDepartmentId() != null && user.activeDepartmentId().equals(rowDepartmentId);
+        }
         String department = user.department();
         return department != null && department.equals(text(row, "department"));
     }

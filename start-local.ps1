@@ -2,7 +2,9 @@ param(
   [int]$MysqlPort = 3307,
   [int]$BackendPort = 8080,
   [int]$FrontendPort = 8848,
-  [string]$RuntimeRoot = "$env:USERPROFILE\hos_cowork_runtime"
+  [string]$RuntimeRoot = "$env:USERPROFILE\hos_cowork_runtime",
+  [string]$DbPassword = $env:LOCAL_MYSQL_PASSWORD,
+  [string]$AdminBootstrapPassword = $env:CLINIC_BOOTSTRAP_ADMIN_PASSWORD
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,12 +18,12 @@ $MysqlConfig = Join-Path $RuntimeRoot "mysql3307.ini"
 $AttachmentDir = Join-Path $RuntimeRoot "clinic-attachments"
 $LogDir = Join-Path $RuntimeRoot "logs"
 $DbName = "hos_refactor"
-$DbUser = "cowork"
-$DbPassword = "Cowork_2026!"
-$AdminUsername = "admin"
-$AdminPassword = "Init@Coshare2026!"
-$AdminPasswordHash = '$2a$10$YkQ1vqK4O8t/MhybAJoCiO4ZNF4ySvh0WiZ3IGCu5GNT2LDnJd9hy'
+$DbUser = "clinic_local"
 $AiSecretsPath = Join-Path $ProjectRoot "config\ai-secrets.local.env"
+
+if (-not $DbPassword) {
+  throw "Set LOCAL_MYSQL_PASSWORD or pass -DbPassword. No fixed development password is provided."
+}
 
 function New-UnicodeText([int[]]$CodePoints) {
   return -join ($CodePoints | ForEach-Object { [char]$_ })
@@ -89,15 +91,10 @@ function Invoke-Mysql($MysqlExe, $User, $Password, $Sql, $Database = "") {
   New-Directory $RuntimeRoot
   New-Directory $LogDir
 
-  $args = @(
-    "--host=127.0.0.1",
-    "--port=$MysqlPort",
-    "--user=$User",
-    "--default-character-set=utf8mb4",
-    "--batch",
-    "--skip-column-names"
-  )
-  if ($Password) { $args += "--password=$Password" }
+  $optionPath = Join-Path $RuntimeRoot ("mysql-client-" + [guid]::NewGuid().ToString("N") + ".cnf")
+  $optionContent = "[client]`nhost=127.0.0.1`nport=$MysqlPort`nuser=$User`npassword=$Password`n"
+  Write-Utf8NoBomFile $optionPath $optionContent
+  $args = @("--defaults-extra-file=$optionPath", "--default-character-set=utf8mb4", "--batch", "--skip-column-names")
   if ($Database) { $args += "--database=$Database" }
 
   $sqlPath = Join-Path $RuntimeRoot ("mysql-command-" + [guid]::NewGuid().ToString("N") + ".sql")
@@ -118,7 +115,7 @@ function Invoke-Mysql($MysqlExe, $User, $Password, $Sql, $Database = "") {
       Get-Content -LiteralPath $outPath
     }
   } finally {
-    Remove-Item -LiteralPath $sqlPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $sqlPath, $optionPath -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -169,13 +166,14 @@ pid-file=$mysqlPidPath
 }
 
 function Ensure-Database($MysqlExe) {
+  $dbPasswordSql = $DbPassword.Replace("'", "''")
   $setupSql = @"
 CREATE DATABASE IF NOT EXISTS $DbName CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$DbUser'@'127.0.0.1' IDENTIFIED BY '$DbPassword';
-ALTER USER '$DbUser'@'127.0.0.1' IDENTIFIED BY '$DbPassword';
+CREATE USER IF NOT EXISTS '$DbUser'@'127.0.0.1' IDENTIFIED BY '$dbPasswordSql';
+ALTER USER '$DbUser'@'127.0.0.1' IDENTIFIED BY '$dbPasswordSql';
 GRANT ALL PRIVILEGES ON $DbName.* TO '$DbUser'@'127.0.0.1';
-CREATE USER IF NOT EXISTS '$DbUser'@'localhost' IDENTIFIED BY '$DbPassword';
-ALTER USER '$DbUser'@'localhost' IDENTIFIED BY '$DbPassword';
+CREATE USER IF NOT EXISTS '$DbUser'@'localhost' IDENTIFIED BY '$dbPasswordSql';
+ALTER USER '$DbUser'@'localhost' IDENTIFIED BY '$dbPasswordSql';
 GRANT ALL PRIVILEGES ON $DbName.* TO '$DbUser'@'localhost';
 FLUSH PRIVILEGES;
 "@
@@ -241,14 +239,17 @@ function Start-Backend {
   }
 
   $java = Find-Executable "java.exe" @()
-  $jdbcUrl = "jdbc:mysql://127.0.0.1:$MysqlPort/$DbName`?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+  $jdbcUrl = "jdbc:mysql://127.0.0.1:$MysqlPort/$DbName`?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=PREFERRED"
+  $env:MYSQL_URL = $jdbcUrl
+  $env:MYSQL_USERNAME = $DbUser
+  $env:MYSQL_PASSWORD = $DbPassword
+  $env:MYSQL_MIGRATION_USERNAME = $DbUser
+  $env:MYSQL_MIGRATION_PASSWORD = $DbPassword
+  $env:CLINIC_BOOTSTRAP_ADMIN_PASSWORD = $AdminBootstrapPassword
   $args = @(
     "-jar", $BackendJar,
     "--server.port=$BackendPort",
     "--spring.profiles.active=mysql",
-    "--spring.datasource.url=$jdbcUrl",
-    "--spring.datasource.username=$DbUser",
-    "--spring.datasource.password=$DbPassword",
     "--clinic.attachment-dir=$AttachmentDir"
   )
 
@@ -257,36 +258,6 @@ function Start-Backend {
     -RedirectStandardOutput (Join-Path $LogDir "backend.out.log") `
     -RedirectStandardError (Join-Path $LogDir "backend.err.log") | Out-Null
   Wait-Port $BackendPort "Backend" 120
-}
-
-function Ensure-AdminAccount($MysqlExe) {
-  $textAdmin = New-UnicodeText @(0x7BA1, 0x7406, 0x5458)
-  $textDepartment = New-UnicodeText @(0x4FE1, 0x606F, 0x2F, 0x9662, 0x529E)
-  $textScope = New-UnicodeText @(0x7CFB, 0x7EDF, 0x5168, 0x5C40, 0x914D, 0x7F6E)
-  $textEnabled = New-UnicodeText @(0x542F, 0x7528)
-  $account = [ordered]@{
-    id = "admin";
-    username = $AdminUsername;
-    name = $textAdmin;
-    role = "admin";
-    roleLabel = $textAdmin;
-    department = $textDepartment;
-    scope = $textScope;
-    status = $textEnabled;
-    createdAt = "2026-06-10 08:00:00";
-    updatedAt = "2026-06-10 08:00:00";
-    passwordHash = $AdminPasswordHash;
-    currentPassword = $AdminPassword;
-  }
-  $json = ($account | ConvertTo-Json -Compress).Replace("'", "''")
-  $seedSql = @"
-SET NAMES utf8mb4;
-INSERT INTO clinic_accounts (id, username, role, status, raw_json)
-VALUES ('admin', '$AdminUsername', 'admin', '$textEnabled', CAST('$json' AS JSON))
-ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role), status = VALUES(status);
-"@
-  Invoke-Mysql $MysqlExe $DbUser $DbPassword $seedSql $DbName | Out-Null
-  Write-Host "[mysql] admin account ready: $AdminUsername / $AdminPassword"
 }
 
 function Start-Frontend {
@@ -331,7 +302,6 @@ Read-EnvFile $AiSecretsPath
 Start-LocalMysql $mysqld
 Ensure-Database $mysql
 Start-Backend
-Ensure-AdminAccount $mysql
 Start-Frontend
 
 Write-Host ""

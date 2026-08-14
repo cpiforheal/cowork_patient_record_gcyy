@@ -130,8 +130,4 @@ public class TcmPharmacyController {
         return ApiResult.of(200, "播报结果已确认", service.markAnnouncementPlayed(id, AuthPermission.currentUserOrThrow()));
     }
 
-    @PostMapping("/demo/reset")
-    public ApiResult<Map<String, Object>> resetDemo() {
-        return ApiResult.of(200, "中药房演示数据已重置", service.resetDemo(AuthPermission.currentUserOrThrow()));
-    }
 }

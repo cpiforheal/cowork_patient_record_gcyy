@@ -1,7 +1,7 @@
 <template>
   <section class="stage-panel auxiliary-panel">
     <div class="panel-heading">
-      <h3>化验室检验报告</h3>
+      <h3>化验检验报告</h3>
       <el-button v-if="canOpenWorkbench" type="primary" @click="$emit('open-workbench')">填写报告</el-button>
     </div>
     <el-alert
@@ -9,15 +9,15 @@
       type="warning"
       show-icon
       :closable="false"
-      title="医生已退回化验室，请补充或更正报告后重新完成交接。"
+      title="医生已退回检验报告，请补充或更正报告后重新完成交接。"
     />
     <el-empty v-if="!workspace.labReports.length" :image-size="72" description="尚未保存检验报告，请进入化验报告模板填写" />
-    <el-tabs
-      v-else
+    <div v-else class="lab-report-body">
+      <el-tabs
       :model-value="activeReportId"
       class="lab-report-tabs"
       @update:model-value="$emit('update:activeReportId', String($event))"
-    >
+      >
       <el-tab-pane
         v-for="report in workspace.labReports"
         :key="report.id"
@@ -47,7 +47,7 @@
             </thead>
             <tbody>
               <tr
-                v-for="metric in report.metrics"
+                v-for="metric in materializeLabMetrics(report.templateId, report.metrics, workspace.encounter.patient.gender)"
                 :key="metric.key"
                 :class="{
                   'abnormal-metric': isMetricAbnormal(metric),
@@ -57,11 +57,11 @@
                 <td>{{ metric.name }}</td>
                 <td>{{ metric.shortName }}</td>
                 <td>
-                  <strong>{{ metric.value }}</strong>
+                  <strong>{{ metric.value || "待补充" }}</strong>
                   <el-tag v-if="metric.severity === 'CRITICAL' || metric.critical" type="danger" size="small" effect="dark">
                     危急值
                   </el-tag>
-                  <el-tag v-else-if="isMetricAbnormal(metric)" type="warning" size="small" effect="dark">
+                  <el-tag v-else-if="metric.value && isMetricAbnormal(metric)" type="warning" size="small" effect="dark">
                     {{ abnormalLabel(metric) }}
                   </el-tag>
                 </td>
@@ -76,8 +76,8 @@
           </footer>
         </article>
       </el-tab-pane>
-    </el-tabs>
-    <section v-if="legacyTasks.length" class="legacy-auxiliary">
+      </el-tabs>
+      <section v-if="legacyTasks.length" class="legacy-auxiliary">
       <div class="section-caption">旧辅助资料（只读保留）</div>
       <div v-for="task in legacyTasks" :key="task.id" class="read-only-grid">
         <div>
@@ -85,15 +85,16 @@
           <p>{{ humanValue(task.data) }}</p>
         </div>
       </div>
-    </section>
-    <footer class="panel-actions compact-actions">
+      </section>
+    </div>
+    <footer class="panel-actions compact-actions sticky-actions">
       <el-button
         v-if="canReview && labTask?.status === 'COMPLETED'"
         type="warning"
         plain
         @click="$emit('return-task', labTask.id)"
       >
-        退回化验室
+        退回检验报告
       </el-button>
       <div></div>
       <el-button
@@ -110,6 +111,7 @@
 
 <script setup lang="ts">
 import type { LabReportMetricSnapshot, PreAiAuxiliaryTask, PreAiWorkspace } from "@/api/modules/clinic";
+import { materializeLabMetrics } from "@/views/workbench/labReport/templates";
 
 defineProps<{
   workspace: PreAiWorkspace;
@@ -135,6 +137,13 @@ defineEmits<{
 </script>
 
 <style scoped lang="scss">
+.auxiliary-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 156px);
+  overflow: hidden;
+}
 .panel-heading {
   display: flex;
   align-items: flex-start;
@@ -163,12 +172,41 @@ defineEmits<{
   margin-left: 0;
 }
 .compact-actions {
+  flex: 0 0 auto;
   margin-top: 10px;
+}
+.lab-report-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.lab-report-tabs {
+  min-height: 0;
+}
+.lab-report-tabs :deep(.el-tabs__content),
+.lab-report-tabs :deep(.el-tab-pane) {
+  min-height: 0;
+}
+.lab-report-tabs :deep(.el-tabs__content) {
+  overflow: visible;
+}
+.sticky-actions {
+  position: sticky;
+  z-index: 9;
+  bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
+  box-shadow: 0 -8px 26px rgb(31 78 120 / 10%);
+  backdrop-filter: blur(10px);
 }
 .lab-report-tabs {
   margin-top: 14px;
 }
 .lab-report-paper {
+  min-width: 680px;
   padding: 22px;
   color: #1f2937;
   border: 1px solid #d6dce5;

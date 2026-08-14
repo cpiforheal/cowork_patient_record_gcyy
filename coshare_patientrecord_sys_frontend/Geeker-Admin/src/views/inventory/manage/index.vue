@@ -1,12 +1,15 @@
 <template>
   <div class="inventory-page">
-    <section class="inventory-command">
+    <section v-if="!focusedDepartmentKey" class="inventory-command">
       <div class="command-title">
         <span>{{ currentTabProfile.kicker }}</span>
         <h1>{{ currentTabProfile.title }}</h1>
         <p>{{ currentTabProfile.desc }}</p>
       </div>
       <div class="command-actions">
+        <el-tooltip content="耗材管理操作说明" placement="bottom">
+          <el-button :icon="QuestionFilled" circle aria-label="耗材管理操作说明" @click="helpVisible = true" />
+        </el-tooltip>
         <el-button :icon="Refresh" :loading="loading" @click="loadInventory">刷新</el-button>
         <el-button
           v-for="action in currentTabActions"
@@ -19,38 +22,17 @@
       </div>
     </section>
 
-    <section class="status-ribbon">
-      <div class="ribbon-lead">
-        <span>{{ currentTabProfile.taskLabel }}</span>
-        <strong>{{ currentTabProfile.taskTitle }}</strong>
-        <small>{{ currentTabProfile.taskDesc }}</small>
-      </div>
-      <button
-        v-for="stat in currentTabStats"
-        :key="stat.label"
-        class="ribbon-metric"
-        :class="stat.tone"
-        @click="goTab(stat.tab || activeTab)"
-      >
-        <span>{{ stat.label }}</span>
-        <strong>{{ stat.value }}</strong>
-        <small>{{ stat.desc }}</small>
-      </button>
-    </section>
+    <el-alert
+      v-if="activeTab === 'items' && !hasInventoryAuth('inventory:item:manage')"
+      class="inventory-readonly-alert"
+      title="物资目录当前为只读模式"
+      description="您可以查看物资名称、规格和预警信息；物资目录维护仅向管理员和仓库岗位开放。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
 
-    <nav class="module-switcher" aria-label="进销存二级功能">
-      <button
-        v-for="item in visibleTabNavItems"
-        :key="item.tab"
-        :class="{ active: activeTab === item.tab }"
-        @click="goTab(item.tab)"
-      >
-        <span>{{ item.title }}</span>
-        <small>{{ item.desc }}</small>
-      </button>
-    </nav>
-
-    <div v-loading="loading" class="inventory-workspace" element-loading-text="正在同步库存...">
+    <div v-loading="loading && !focusedDepartmentKey" class="inventory-workspace" element-loading-text="正在同步库存...">
       <div v-if="initialInventoryLoading" class="inventory-loading-skeleton">
         <el-skeleton animated :rows="12" />
       </div>
@@ -58,20 +40,7 @@
       <transition v-else name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
-            <OverviewPanel
-              :active-tab="activeTab"
-              :executive-signal="executiveSignal"
-              :stats="currentTabStats"
-              :todo-rows="todoRows"
-              :workflow-steps="visibleWorkflowSteps"
-              :risk-rows="riskRows"
-              :role-entry-cards="visibleRoleEntryCards"
-              :can-export-risk="hasInventoryAuth('inventory:export')"
-              @go-tab="goTab"
-              @open-todo="openTodo"
-              @workflow="handleWorkflowStep"
-              @export-risk="exportCsv(riskRows, 'inventory-risk.csv')"
-            />
+            <DepartmentConsumptionSummary :today="today()" @open-department="openDepartmentDraft" />
           </template>
 
           <template v-else-if="activeTab === 'executive'">
@@ -118,10 +87,18 @@
               v-model:keyword="itemFilters.keyword"
               v-model:category="itemFilters.category"
               :rows="filteredItemRows"
+              :items="db.items"
+              :aliases="itemAliases"
+              :unit-conversions="unitConversions"
               :category-options="categoryFilterOptions"
-              :can-manage="hasInventoryAuth('inventory:issue')"
+              :can-manage="hasInventoryAuth('inventory:item:manage')"
+              :can-manage-governance="canManageMappingGovernance"
+              :governance-loading="mappingGovernanceLoading"
               @create="openItemDialog()"
               @edit="openItemDialog"
+              @load-governance="loadMappingGovernance"
+              @save-aliases="saveItemAliases"
+              @save-unit-conversions="saveUnitConversions"
             />
           </template>
 
@@ -150,7 +127,28 @@
           </template>
 
           <template v-else-if="activeTab === 'weekly'">
-            <WeeklyPanel :rows="weeklyRows" :can-create="hasInventoryAuth('inventory:request')" @create="openWeeklyDialog" />
+            <WeeklyPanel
+              :rows="weeklyRows"
+              :standards="weeklyStandards"
+              :snapshots="weeklySnapshots"
+              :items="db.items"
+              :department-options="weeklyDepartmentOptions"
+              :current-week-no="currentWeekNo()"
+              :can-approve="hasInventoryAuth('inventory:approve')"
+              :can-count="hasInventoryAuth('inventory:count')"
+              :can-export="hasInventoryAuth('inventory:export')"
+              :saving="saving"
+              :loading="weeklyLoading"
+              @refresh-weekly="loadWeekly"
+              @save-standard="saveWeeklyStandard"
+              @publish-standard="publishWeeklyStandard"
+              @delete-standard="deleteWeeklyStandard"
+              @generate-snapshot="generateWeeklySnapshot"
+              @view-snapshot="viewWeeklySnapshot"
+              @confirm-snapshot="confirmWeeklySnapshot"
+              @revise-snapshot="reviseWeeklySnapshot"
+              @export-snapshot="exportWeeklySnapshot"
+            />
           </template>
 
           <template v-else-if="activeTab === 'controls'">
@@ -174,17 +172,44 @@
           </template>
 
           <template v-else-if="activeTab === 'packages'">
+            <template v-if="focusedDepartmentKey">
+              <el-radio-group v-model="departmentDraftMode" class="department-draft-mode">
+                <el-radio-button label="daily">科室日核算</el-radio-button>
+                <el-radio-button label="patient">患者耗用草稿</el-radio-button>
+              </el-radio-group>
+              <DepartmentConsumptionWorkspace
+                v-if="departmentDraftMode === 'daily'"
+                :department-key="focusedDepartmentKey"
+                :items="db.items"
+                :batches="db.batches"
+                :today="today()"
+              />
+              <PatientConsumptionDraftWorkspace v-else :department-key="focusedDepartmentKey" :today="today()" />
+            </template>
             <PackagePanel
+              v-else
               :packages="visiblePackages"
+              :coverage="db.packageCoverage"
               :events="visibleConsumptionEvents"
               :items="db.items"
+              :mapping-summary="mappingSummary"
+              :mapping-entries="mappingEntries"
+              :mapping-total="mappingTotal"
+              :mapping-loading="mappingLoading"
               :department-options="departmentOptions"
+              :focus-department="effectiveFocusedDepartment"
+              :standalone-mapping="isStandaloneConsumableEntry"
               :can-manage="canManagePackages"
+              :can-manage-mapping="canManageMappingGovernance"
               :saving="saving"
               @save="savePackage"
               @enable="enablePackage"
               @disable="disablePackage"
               @retry="retryConsumptionEvent"
+              @load-mappings="loadMappings"
+              @confirm-mapping="confirmMapping"
+              @hold-mapping="holdMapping"
+              @create-mapping-draft="createMappingDraft"
             />
           </template>
 
@@ -200,9 +225,35 @@
               @export="exportCsv(traceRows, 'inventory-trace.csv')"
             />
           </template>
+
+          <template v-else-if="activeTab === 'daily'">
+            <DailyVerificationPanel
+              :report="dailyVerificationReport"
+              :loading="dailyVerificationLoading"
+              :exporting="reportLoading"
+              :today="today()"
+              :can-export="canExportDepartmentUsage"
+              :department-options="reportDepartmentOptions"
+              @load="loadDailyVerification"
+              @export="exportDailyVerification"
+            />
+          </template>
+
+          <template v-else-if="activeTab === 'roles'">
+            <InventoryRolePanel
+              :roles="inventoryRoles"
+              :accounts="inventoryAccounts"
+              :loading="inventoryRolesLoading"
+              :saving-account-id="inventoryRoleSavingAccountId"
+              @refresh="loadInventoryRoleManagement"
+              @change-role="changeInventoryAccountRole"
+            />
+          </template>
         </div>
       </transition>
     </div>
+
+    <InventoryHelpDrawer v-model="helpVisible" />
 
     <el-dialog v-model="itemDialogVisible" :title="itemForm.id ? '编辑物资' : '新增物资'" width="640px" destroy-on-close>
       <el-form ref="itemFormRef" :model="itemForm" :rules="itemFormRules" label-width="108px" status-icon>
@@ -222,6 +273,26 @@
             <el-option v-for="item in unitOptions" :key="item" :label="item" :value="item" />
           </el-select>
         </el-form-item>
+        <el-form-item label="基准单位">
+          <el-select v-model="itemForm.baseUnit" filterable allow-create placeholder="默认沿用单位">
+            <el-option v-for="item in unitOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="领用单位">
+          <el-select v-model="itemForm.issueUnit" filterable allow-create placeholder="默认沿用单位">
+            <el-option v-for="item in unitOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数量精度">
+          <el-input-number v-model="itemForm.quantityPrecision" :min="0" :max="6" :precision="0" />
+        </el-form-item>
+        <el-form-item label="规范化状态">
+          <el-select v-model="itemForm.normalizationStatus" placeholder="请选择">
+            <el-option label="标准" value="standard" />
+            <el-option label="待规范" value="pending" />
+            <el-option label="冲突" value="conflict" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="预警线">
           <el-input-number v-model="itemForm.lowStockThreshold" :min="0" :precision="2" />
         </el-form-item>
@@ -231,6 +302,7 @@
         <el-form-item label="管理要求">
           <el-checkbox v-model="itemForm.batchRequired">需要批号</el-checkbox>
           <el-checkbox v-model="itemForm.expiryRequired">需要效期</el-checkbox>
+          <el-checkbox v-model="itemForm.effectiveLifeManaged">效期治理</el-checkbox>
           <el-checkbox v-model="itemForm.sensitive">敏感物资</el-checkbox>
         </el-form-item>
       </el-form>
@@ -272,9 +344,16 @@
     <el-dialog v-model="requestDialogVisible" title="新增科室申领" width="760px" destroy-on-close>
       <el-form ref="requestFormRef" :model="requestForm" :rules="requestFormRules" label-width="112px" status-icon>
         <el-form-item label="申领科室" prop="department">
-          <el-select v-model="requestForm.department" filterable allow-create placeholder="请选择或输入科室">
+          <el-select
+            v-if="canViewAllDepartments"
+            v-model="requestForm.department"
+            filterable
+            allow-create
+            placeholder="请选择或输入科室"
+          >
             <el-option v-for="item in departmentOptions" :key="item" :label="item" :value="item" />
           </el-select>
+          <el-input v-else v-model="requestForm.department" disabled />
         </el-form-item>
         <el-form-item label="申领明细" required>
           <div class="request-lines-editor">
@@ -336,7 +415,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="weeklyDialogVisible" title="新增周消耗确认" width="640px" destroy-on-close>
+    <el-dialog v-model="weeklyDialogVisible" title="确认周计划" width="640px" destroy-on-close>
       <el-form ref="weeklyFormRef" :model="weeklyForm" :rules="weeklyFormRules" label-width="112px" status-icon>
         <el-form-item label="周次" prop="weekNo">
           <el-date-picker v-model="weeklyForm.weekNo" value-format="YYYY-[W]ww" type="week" format="YYYY 第 ww 周" />
@@ -353,27 +432,20 @@
         </el-form-item>
         <div v-if="selectedWeeklyItem" class="weekly-assist">
           <div>
-            <span>当前库存</span>
-            <strong>{{ weeklyItemStock }} {{ selectedWeeklyItem.unit }}</strong>
+            <span>实际耗用</span>
+            <strong>{{ selectedWeeklySuggestion?.actualConsumption || 0 }} {{ selectedWeeklyItem.unit }}</strong>
           </div>
           <div>
-            <span>本周已发放</span>
-            <strong>{{ weeklyIssuedThisWeek }} {{ selectedWeeklyItem.unit }}</strong>
+            <span>科室结存</span>
+            <strong>{{ selectedWeeklySuggestion?.availableQuantity ?? weeklyItemStock }} {{ selectedWeeklyItem.unit }}</strong>
           </div>
           <div>
-            <span>上次剩余</span>
-            <strong>{{ weeklyLastRecord ? `${weeklyLastRecord.remainingQuantity} ${selectedWeeklyItem.unit}` : "暂无" }}</strong>
+            <span>系统建议</span>
+            <strong>{{ selectedWeeklySuggestion?.suggestedQuantity || 0 }} {{ selectedWeeklyItem.unit }}</strong>
           </div>
-          <el-button size="small" plain @click="applyWeeklySuggestion">带入建议</el-button>
         </div>
-        <el-form-item label="本周消耗">
-          <el-input-number v-model="weeklyForm.consumedQuantity" :min="0" :precision="2" />
-        </el-form-item>
-        <el-form-item label="科室剩余">
-          <el-input-number v-model="weeklyForm.remainingQuantity" :min="0" :precision="2" />
-        </el-form-item>
-        <el-form-item label="下周预计">
-          <el-input-number v-model="weeklyForm.nextWeekQuantity" :min="0" :precision="2" />
+        <el-form-item label="最终调整量">
+          <el-input-number v-model="weeklyForm.adjustedQuantity" :min="0" :precision="2" />
         </el-form-item>
         <el-form-item label="负责人">
           <el-input v-model="weeklyForm.owner" />
@@ -384,7 +456,7 @@
       </el-form>
       <template #footer>
         <el-button @click="weeklyDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveWeekly">确认消耗</el-button>
+        <el-button type="primary" :loading="saving" @click="saveWeekly">确认计划</el-button>
       </template>
     </el-dialog>
 
@@ -422,48 +494,101 @@
 </template>
 
 <script setup lang="ts" name="inventoryManage">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
-import { Download, Plus, Refresh } from "@element-plus/icons-vue";
+import { Download, Plus, QuestionFilled, Refresh } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   approveInventoryRequestApi,
+  assignInventoryAccountRoleApi,
   cancelInventoryRequestApi,
+  confirmInventoryWeeklySnapshotApi,
   countInventoryApi,
+  confirmInventoryMappingEntriesApi,
+  createInventoryMappingPackageDraftApi,
   createInventoryRequestApi,
+  deleteInventoryWeeklyStandardApi,
+  downloadDepartmentUsageReportApi,
+  downloadInventoryWeeklySnapshotApi,
+  generateInventoryWeeklySnapshotApi,
+  getInventoryConsumptionsApi,
+  getInventoryDepartmentUsageReportApi,
   getInventoryDbApi,
+  getInventoryExceptionsApi,
+  getInventoryItemAliasesApi,
+  getInventoryLedgerMovementsApi,
+  getInventoryLocationBalancesApi,
+  getInventoryMappingEntriesApi,
+  getInventoryMappingSummaryApi,
+  getInventoryRoleManagementApi,
+  getInventoryUnitConversionsApi,
+  getInventoryWeeklySnapshotApi,
+  getInventoryWeeklySnapshotsApi,
+  getInventoryWeeklyStandardsApi,
+  getInventoryWorkbenchApi,
+  holdInventoryMappingEntriesApi,
   inboundInventoryApi,
   issueInventoryRequestApi,
+  publishInventoryWeeklyStandardApi,
   receiveInventoryRequestApi,
   rejectInventoryRequestApi,
+  reviseInventoryWeeklySnapshotApi,
   returnOrScrapInventoryApi,
   saveInventoryItemApi,
+  saveInventoryItemAliasesApi,
+  saveInventoryWeeklyStandardApi,
+  saveInventoryUnitConversionsApi,
   saveWeeklyConsumptionApi,
   saveInventoryPackageApi,
   enableInventoryPackageApi,
   disableInventoryPackageApi,
   retryInventoryConsumptionEventApi,
   voidInventoryRequestApi,
+  type DepartmentUsageReportParams,
+  type ConfirmInventoryMappingEntriesParams,
+  type GenerateInventoryWeeklySnapshotParams,
   type InventoryBatch,
+  type InventoryConsumptionEvent,
+  type InventoryConsumptionRecord,
   type InventoryDb,
+  type InventoryDepartmentUsageReport,
+  type InventoryException,
   type InventoryItem,
+  type InventoryAccountAssignment,
+  type InventoryCareType,
+  type InventoryLocationBalance,
+  type InventoryMovement,
+  type InventoryItemAlias,
+  type InventoryMappingEntry,
+  type InventoryMappingEntryQueryParams,
+  type InventoryMappingSummary,
   type InventoryRequest,
+  type InventoryRoleDescriptor,
+  type InventoryUnitConversion,
+  type InventoryWeeklySnapshot,
+  type InventoryWeeklyStandard,
+  type InventoryWorkbench,
   type ReturnOrScrapParams,
   type InventoryPackage,
   type SaveInventoryPackageParams,
-  type InventoryConsumptionEvent
+  type SaveInventoryWeeklyStandardParams
 } from "@/api/modules/inventory";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
 import ControlsPanel from "./components/ControlsPanel.vue";
 import ExecutivePanel from "./components/ExecutivePanel.vue";
+import InventoryHelpDrawer from "./components/InventoryHelpDrawer.vue";
 import ItemsPanel from "./components/ItemsPanel.vue";
-import OverviewPanel from "./components/OverviewPanel.vue";
+import DepartmentConsumptionSummary from "./components/DepartmentConsumptionSummary.vue";
+import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWorkspace.vue";
+import PatientConsumptionDraftWorkspace from "./components/PatientConsumptionDraftWorkspace.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
 import WeeklyPanel from "./components/WeeklyPanel.vue";
 import PackagePanel from "./components/PackagePanel.vue";
+import DailyVerificationPanel from "./components/DailyVerificationPanel.vue";
+import InventoryRolePanel from "./components/InventoryRolePanel.vue";
 import { createEmptyInventoryDb, useInventoryManage } from "./composables/useInventoryManage";
 import { exportCsv } from "./utils";
 
@@ -477,12 +602,44 @@ const { operatorName, currentDepartment, today, currentWeekNo, newRequestLine, c
 
 const db = ref<InventoryDb>(createEmptyInventoryDb());
 const loading = ref(false);
+const departmentDraftMode = ref<"daily" | "patient">("daily");
 const initialInventoryLoading = computed(
   () =>
-    loading.value && !db.value.items.length && !db.value.batches.length && !db.value.requests.length && !db.value.movements.length
+    !focusedDepartmentKey.value &&
+    loading.value &&
+    !db.value.items.length &&
+    !db.value.batches.length &&
+    !db.value.requests.length &&
+    !db.value.movements.length
 );
 const saving = ref(false);
 const activeTab = ref("overview");
+const helpVisible = ref(false);
+const inventoryWorkbench = ref<InventoryWorkbench>();
+const locationBalances = ref<InventoryLocationBalance[]>([]);
+const inventoryExceptions = ref<InventoryException[]>([]);
+const inventoryConsumptions = ref<InventoryConsumptionRecord[]>([]);
+const inventoryLedgerMovements = ref<InventoryMovement[]>([]);
+const inventoryLedgerMovementsLoaded = ref(false);
+const extendedDataReady = ref(false);
+const extendedDataErrors = ref<string[]>([]);
+const reportLoading = ref<"" | "pdf" | "xlsx">("");
+const weeklyStandards = ref<InventoryWeeklyStandard[]>([]);
+const weeklySnapshots = ref<InventoryWeeklySnapshot[]>([]);
+const weeklyLoading = ref(false);
+const mappingSummary = ref<InventoryMappingSummary>();
+const mappingEntries = ref<InventoryMappingEntry[]>([]);
+const mappingTotal = ref(0);
+const mappingLoading = ref(false);
+const itemAliases = ref<InventoryItemAlias[]>([]);
+const unitConversions = ref<InventoryUnitConversion[]>([]);
+const mappingGovernanceLoading = ref(false);
+const dailyVerificationReport = ref<InventoryDepartmentUsageReport>();
+const dailyVerificationLoading = ref(false);
+const inventoryRoles = ref<InventoryRoleDescriptor[]>([]);
+const inventoryAccounts = ref<InventoryAccountAssignment[]>([]);
+const inventoryRolesLoading = ref(false);
+const inventoryRoleSavingAccountId = ref("");
 
 const itemDialogVisible = ref(false);
 const inboundDialogVisible = ref(false);
@@ -529,9 +686,7 @@ const weeklyForm = reactive({
   weekNo: "",
   department: "",
   itemId: "",
-  consumedQuantity: 0,
-  remainingQuantity: 0,
-  nextWeekQuantity: 0,
+  adjustedQuantity: 0,
   owner: "",
   abnormalReason: "",
   operator: ""
@@ -584,7 +739,50 @@ const tabRoutePathMap: Record<string, string> = {
   weekly: "/inventory/weekly",
   controls: "/inventory/controls",
   packages: "/inventory/packages",
-  trace: "/inventory/trace"
+  trace: "/inventory/trace",
+  daily: "/inventory/daily",
+  roles: "/inventory/roles"
+};
+const inventorySystemTabRoutePathMap: Record<string, string> = {
+  overview: "/inventory-system/dashboard",
+  executive: "/inventory-system/executive",
+  requests: "/inventory-system/requests",
+  stock: "/inventory-system/stock",
+  items: "/inventory-system/items",
+  weekly: "/inventory-system/weekly",
+  controls: "/inventory-system/controls",
+  packages: "/inventory-system/packages",
+  trace: "/inventory-system/trace",
+  daily: "/inventory-system/daily-verification",
+  roles: "/inventory-system/role-management"
+};
+const inventoryDepartmentRouteMap: Record<string, string> = {
+  "/inventory-system/departments/physiotherapy": "理疗室",
+  "/inventory-system/departments/laboratory": "检验科",
+  "/inventory-system/departments/nursing": "护理部",
+  "/inventory-system/departments/tcm": "中医科",
+  "/inventory-system/departments/operating": "手术室",
+  "/inventory-system/departments/anesthesia": "麻醉室",
+  "/inventory-system/departments/endoscopy": "胃肠镜",
+  "/inventory-system/departments/inspection": "检查室",
+  "/inventory-system/departments/logistics": "后勤保洁",
+  "/inventory-system/departments/western-pharmacy": "西药房",
+  "/inventory-system/departments/cashier": "收费室",
+  "/inventory-system/departments/tcm-pharmacy": "中药房"
+};
+const inventoryDepartmentKeyRouteMap: Record<string, string> = {
+  "/inventory-system/departments/physiotherapy": "physiotherapy",
+  "/inventory-system/departments/laboratory": "laboratory",
+  "/inventory-system/departments/nursing": "nursing",
+  "/inventory-system/departments/tcm": "tcm",
+  "/inventory-system/departments/operating": "operating",
+  "/inventory-system/departments/anesthesia": "anesthesia",
+  "/inventory-system/departments/endoscopy": "endoscopy",
+  "/inventory-system/departments/inspection": "inspection",
+  "/inventory-system/departments/logistics": "logistics",
+  "/inventory-system/departments/western-pharmacy": "western-pharmacy",
+  "/inventory-system/departments/cashier": "cashier",
+  "/inventory-system/departments/tcm-pharmacy": "tcm-pharmacy"
 };
 const tabRouteNameMap: Record<string, string> = {
   overview: "inventoryOverview",
@@ -595,7 +793,9 @@ const tabRouteNameMap: Record<string, string> = {
   weekly: "inventoryWeekly",
   controls: "inventoryControls",
   packages: "inventoryPackages",
-  trace: "inventoryTrace"
+  trace: "inventoryTrace",
+  daily: "inventoryDaily",
+  roles: "inventoryRoles"
 };
 const routeTabMap: Record<string, string> = {
   "/inventory": "overview",
@@ -608,8 +808,27 @@ const routeTabMap: Record<string, string> = {
   "/inventory/weekly": "weekly",
   "/inventory/controls": "controls",
   "/inventory/packages": "packages",
-  "/inventory/trace": "trace"
+  "/inventory/trace": "trace",
+  "/inventory/daily": "daily",
+  "/inventory/roles": "roles",
+  "/inventory-system/dashboard": "overview",
+  "/inventory-system/executive": "executive",
+  "/inventory-system/requests": "requests",
+  "/inventory-system/stock": "stock",
+  "/inventory-system/items": "items",
+  "/inventory-system/weekly": "weekly",
+  "/inventory-system/consumable-entry": "packages",
+  "/inventory-system/controls": "controls",
+  "/inventory-system/packages": "packages",
+  "/inventory-system/trace": "trace",
+  "/inventory-system/daily-verification": "daily",
+  "/inventory-system/role-management": "roles"
 };
+const isStandaloneConsumableEntry = computed(
+  () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
+);
+const focusedDepartment = computed(() => inventoryDepartmentRouteMap[route.path] || "");
+const focusedDepartmentKey = computed(() => inventoryDepartmentKeyRouteMap[route.path] || "");
 const categoryOptions = ["医用耗材", "办公物资", "消毒用品", "检验用品", "护理用品", "低值易耗"];
 const unitOptions = ["个", "盒", "包", "瓶", "支", "卷", "套", "箱"];
 const returnTypeOptions = [
@@ -617,55 +836,26 @@ const returnTypeOptions = [
   { label: "报废", value: "scrap", auth: "inventory:count" }
 ];
 const tabNavItems = [
-  { tab: "overview", title: "主控台", desc: "待办与风险" },
-  { tab: "executive", title: "领导驾驶舱", desc: "红绿灯与指标" },
-  { tab: "requests", title: "申领审批", desc: "申请到签收" },
-  { tab: "stock", title: "库存看板", desc: "批次与效期" },
-  { tab: "items", title: "物资档案", desc: "字典与规则" },
-  { tab: "weekly", title: "周消耗", desc: "用量与预计" },
-  { tab: "controls", title: "盘点处置", desc: "退回与报废" },
-  { tab: "packages", title: "使用套餐", desc: "版本与自动扣减" },
-  { tab: "trace", title: "追溯流水", desc: "导出与复核" }
+  { tab: "overview", title: "库存工作台" },
+  { tab: "executive", title: "运行总览" },
+  { tab: "requests", title: "本科室申领" },
+  { tab: "stock", title: "库存总览与入库" },
+  { tab: "controls", title: "盘点与报损" },
+  { tab: "packages", title: "患者耗材规则" },
+  { tab: "weekly", title: "周用量核对" },
+  { tab: "trace", title: "出入库追溯" },
+  { tab: "items", title: "物资目录" },
+  { tab: "daily", title: "每日核对与导出" },
+  { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
-  { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:issue"] },
+  { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:item:manage"] },
   { title: "入库形成库存", desc: "记录数量、批号、效期和来源", action: "inbound", auth: ["inventory:issue"] },
   { title: "科室提交申领", desc: "填写用途、数量、负责人和周期", action: "request", auth: ["inventory:request"] },
   { title: "审核与发放", desc: "负责人审核，仓库按批次发放", action: "requests", auth: ["inventory:approve", "inventory:issue"] },
   { title: "科室签收确认", desc: "发放后由领取人确认闭环", action: "requests", auth: ["inventory:receive"] },
-  { title: "周消耗填报", desc: "记录本周使用和下周预计", action: "weekly", auth: ["inventory:request"] },
+  { title: "周计划确认", desc: "复核自动建议并填写异常调整", action: "weekly", auth: ["inventory:request"] },
   { title: "盘点与追溯", desc: "差异、退回、报废全部留痕", action: "controls", auth: ["inventory:count"] }
-] as const;
-
-const roleEntryCards = [
-  {
-    scene: "科室人员",
-    title: "我要申领或签收",
-    desc: "提交领用，确认收货",
-    tab: "requests",
-    auth: ["inventory:request", "inventory:receive"]
-  },
-  {
-    scene: "库管人员",
-    title: "我要入库或发放",
-    desc: "看库存，按单发放",
-    tab: "stock",
-    auth: ["inventory:issue"]
-  },
-  {
-    scene: "科室负责人",
-    title: "我要填周消耗",
-    desc: "填本周用量和下周预计",
-    tab: "weekly",
-    auth: ["inventory:request", "inventory:count"]
-  },
-  {
-    scene: "质控/领导",
-    title: "我要看异常追溯",
-    desc: "先看待办、风险和异常",
-    tab: "overview",
-    auth: ["inventory:export"]
-  }
 ] as const;
 
 const positiveNumberValidator = (_rule: unknown, value: unknown, callback: (error?: Error) => void) => {
@@ -736,88 +926,105 @@ type TabStat = {
 
 const tabProfiles = {
   overview: {
-    kicker: "进销存管理 / 主控台",
-    title: "今天需要处理什么",
-    desc: "待办、风险、库存异常集中看。",
-    taskLabel: "当前重点",
-    taskTitle: "先处理红黄提醒",
-    taskDesc: "不用先翻明细，异常和待办会自动靠前。"
+    kicker: "一线核算 / 今日耗用",
+    title: "今日耗用",
+    desc: "查看前置病历完成环节已入账的自动耗用；库存扣减细节由后台处理。",
+    taskLabel: "今日核算",
+    taskTitle: "先核对已入账结果",
+    taskDesc: "按日期查看已完成业务环节触发的耗用记录。"
   },
   executive: {
-    kicker: "进销存管理 / 领导驾驶舱",
-    title: "今天物资运行是否安全",
-    desc: "用红绿灯、关键指标和科室消耗看清当前风险。",
+    kicker: "管理设置 / 运行总览",
+    title: "运行总览",
+    desc: "查看风险预警、申领处理进度和科室消耗趋势。",
     taskLabel: "当前结论",
-    taskTitle: "先看红绿灯，再看待签字",
-    taskDesc: "适合主任、质控和管理岗位快速复核。"
+    taskTitle: "先看红绿灯，再处理待签",
+    taskDesc: "适合主任、质控和管理人员快速复核。"
   },
   requests: {
-    kicker: "进销存管理 / 科室申领审批",
-    title: "申领单流转",
-    desc: "提交、审核、发放、签收按顺序闭环。",
+    kicker: "一线核算 / 本科室申领",
+    title: "本科室申领",
+    desc: "处理与患者数量无关的日常物资申领、发放和签收。",
     taskLabel: "当前重点",
-    taskTitle: "处理待审核、待发放、待签收",
-    taskDesc: "每张单只做当前状态允许的动作。"
+    taskTitle: "按顺序处理待审核、待发放、待签收",
+    taskDesc: "每张单只做当前状态允许的操作。"
   },
   stock: {
-    kicker: "进销存管理 / 库存与批次",
-    title: "库存与批次",
-    desc: "看数量、批号、效期和位置。",
+    kicker: "库存管理 / 库存总览与入库",
+    title: "库存总览与入库",
+    desc: "查看库存数量、批号、效期和存放位置；在此登记入库。",
     taskLabel: "当前重点",
-    taskTitle: "先看低库存和临期",
-    taskDesc: "入库时补齐批次、效期和位置。"
+    taskTitle: "先查低库存和临期批次",
+    taskDesc: "登记入库时补齐批号、效期和位置。"
   },
   items: {
-    kicker: "进销存管理 / 物资档案",
-    title: "物资档案",
-    desc: "统一名称、规格、单位和规则。",
+    kicker: "库存管理 / 物资目录",
+    title: "物资目录",
+    desc: "统一物资名称、规格、单位和预警线。",
     taskLabel: "当前重点",
     taskTitle: "先建档，再申领",
-    taskDesc: "敏感、批号、效期、预警线提前定义。"
+    taskDesc: "批号管理、效期追踪、预警线在此设置。"
   },
   weekly: {
-    kicker: "进销存管理 / 周消耗预计",
-    title: "周消耗与预计",
-    desc: "记录本周使用、剩余和下周预计。",
+    kicker: "对账与追溯 / 周用量核对",
+    title: "周用量核对",
+    desc: "按患者量核对预估耗用、实际扣减和差异。",
     taskLabel: "当前重点",
-    taskTitle: "按周确认真实用量",
-    taskDesc: "波动明显时补充原因。"
+    taskTitle: "每周确认真实用量",
+    taskDesc: "用量波动明显时补充说明原因。"
   },
   controls: {
-    kicker: "进销存管理 / 盘点退回报废",
-    title: "盘点与处置",
-    desc: "记录差异、退回和报废。",
+    kicker: "对账与追溯 / 盘点与报损",
+    title: "盘点与报损",
+    desc: "处理盘点差异、科室退回和物资报废。",
     taskLabel: "当前重点",
     taskTitle: "补齐原因和处理人",
-    taskDesc: "每次处置都留下可复核记录。"
+    taskDesc: "每次处置都留下可追溯记录。"
   },
   packages: {
-    kicker: "进销存管理 / 使用套餐",
-    title: "按就诊量自动扣减",
-    desc: "维护科室的门诊、住院标准用量，并查看自动消耗事件。",
+    kicker: "管理设置 / 患者耗材规则",
+    title: "患者耗材规则",
+    desc: "维护患者到诊后自动扣减的套餐、触发阶段和异常任务。",
     taskLabel: "当前重点",
-    taskTitle: "先确认启用版本，再处理失败事件",
-    taskDesc: "套餐启用后才会参与自动计数，草稿不会影响库存。"
+    taskTitle: "先确认启用版本，再处理扣减失败",
+    taskDesc: "仅最新启用且在生效期内的套餐参与匹配，草稿不影响库存。"
   },
   trace: {
-    kicker: "进销存管理 / 追溯报表",
-    title: "追溯流水",
-    desc: "倒查入库、发放、退回、报废和盘点。",
+    kicker: "对账与追溯 / 出入库追溯",
+    title: "出入库追溯",
+    desc: "倒查入库、发放、退回、报废和盘点记录。",
     taskLabel: "当前重点",
-    taskTitle: "按物资、科室、时间倒查",
-    taskDesc: "检查和复核时直接导出。"
+    taskTitle: "按物资、科室或时间段倒查",
+    taskDesc: "审核复核时可直接导出明细。"
+  },
+  daily: {
+    kicker: "一线核算 / 每日核对与导出",
+    title: "每日核对与导出",
+    desc: "按单个业务日核对系统用量，并导出当日结果与库存流水复核。",
+    taskLabel: "统计口径",
+    taskTitle: "按实际完成业务汇总",
+    taskDesc: "患者相关耗用与日常申领分别保留，避免混算。"
+  },
+  roles: {
+    kicker: "管理设置 / 岗位与权限",
+    title: "岗位与权限",
+    desc: "将账号归入岗位，按岗位控制可见入口和操作权限。",
+    taskLabel: "维护提示",
+    taskTitle: "变更岗位后重新登录生效",
+    taskDesc: "角色权限与门诊管理平台共享同一套账号体系。"
   }
 } as const;
 
 const itemMap = computed(() => new Map(db.value.items.map(item => [item.id, item])));
 const itemName = (itemId?: string) => itemMap.value.get(itemId || "")?.name || itemId || "-";
 const itemUnit = (itemId?: string) => itemMap.value.get(itemId || "")?.unit || "";
-const currentAuthRouteName = computed(() => tabRouteNameMap[activeTab.value] || String(route.name || ""));
-const currentAuthButtons = computed(() => new Set(authStore.authButtonListGet[currentAuthRouteName.value] || []));
-const hasInventoryAuth = (code: string) => currentAuthButtons.value.has(code);
+const inventoryCapabilities = computed(() => new Set(authStore.capabilities || []));
+const hasInventoryAuth = (code: string) => inventoryCapabilities.value.has(code);
 const hasAnyInventoryAuth = (codes: readonly string[]) => codes.some(code => hasInventoryAuth(code));
-const hasInventoryAuthForTab = (tab: string, code: string) =>
-  new Set(authStore.authButtonListGet[tabRouteNameMap[tab]] || []).has(code);
+const hasInventoryAuthForTab = (tab: string, code: string) => {
+  const routePermissions = authStore.authButtonListGet[tabRouteNameMap[tab]] || [];
+  return routePermissions.length ? routePermissions.includes(code) : hasInventoryAuth(code);
+};
 const hasAnyInventoryAuthForTab = (tab: string, codes: readonly string[]) =>
   codes.some(code => hasInventoryAuthForTab(tab, code));
 const tabAuthMap: Record<string, readonly string[]> = {
@@ -827,28 +1034,33 @@ const tabAuthMap: Record<string, readonly string[]> = {
     "inventory:approve",
     "inventory:issue",
     "inventory:count",
-    "inventory:export"
+    "inventory:export",
+    "inventory:report",
+    "inventory:read"
   ],
-  executive: ["inventory:export"],
-  requests: ["inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
-  stock: ["inventory:issue", "inventory:export"],
-  items: ["inventory:issue"],
-  weekly: ["inventory:request", "inventory:count"],
-  controls: ["inventory:receive", "inventory:count"],
-  packages: ["inventory:read", "inventory:approve"],
-  trace: ["inventory:export", "inventory:issue", "inventory:count"]
+  executive: ["inventory:read", "inventory:export", "inventory:report"],
+  requests: ["inventory:read", "inventory:request", "inventory:receive", "inventory:approve", "inventory:issue"],
+  stock: ["inventory:read"],
+  items: ["inventory:read"],
+  weekly: ["inventory:read", "inventory:count", "inventory:approve", "inventory:export"],
+  controls: ["inventory:read", "inventory:receive", "inventory:count"],
+  packages: ["inventory:read", "inventory:approve", "inventory:rule"],
+  trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
+  daily: ["inventory:read"],
+  roles: ["inventory:role:manage"]
 };
-const canViewAllDepartments = computed(
+const canViewAllDepartments = computed(() =>
+  hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export", "inventory:report"])
+);
+const effectiveFocusedDepartment = computed(
   () =>
-    userStore.userInfo.role === "admin" ||
-    hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export"])
+    focusedDepartment.value || (isStandaloneConsumableEntry.value && !canViewAllDepartments.value ? currentDepartment.value : "")
 );
-const canManagePackages = computed(
-  () => userStore.userInfo.role === "admin" || userStore.userInfo.role === "quality" || hasInventoryAuth("inventory:approve")
-);
+const canManagePackages = computed(() => hasInventoryAuth("inventory:rule"));
 const belongsToCurrentDepartment = (department?: string) =>
   canViewAllDepartments.value || !currentDepartment.value || !department || department === currentDepartment.value;
-const canViewAllPackages = computed(() => ["admin", "quality", "manager"].includes(String(userStore.userInfo.role || "")));
+const canViewAllPackages = computed(() => canViewAllDepartments.value);
+const canManageMappingGovernance = computed(() => hasAnyInventoryAuth(["inventory:item:manage", "inventory:rule"]));
 const visiblePackages = computed(() =>
   db.value.packages.filter(
     row => canViewAllPackages.value || !currentDepartment.value || row.department === currentDepartment.value
@@ -910,9 +1122,25 @@ const activeRequestBatches = computed(() => {
   return db.value.batches.filter(batch => itemIds.has(batch.itemId) && Number(batch.quantity || 0) > 0);
 });
 
+const inventoryDepartmentOptions = [
+  "理疗室",
+  "检验科",
+  "护理部",
+  "中医科",
+  "手术室",
+  "麻醉室",
+  "胃肠镜",
+  "检查室",
+  "后勤保洁",
+  "西药房",
+  "收费室",
+  "中药房"
+];
+
 const departmentOptions = computed(() =>
   Array.from(
     new Set([
+      ...inventoryDepartmentOptions,
       currentDepartment.value,
       ...db.value.requests.map(row => row.department),
       ...db.value.weeklyConsumptions.map(row => row.department),
@@ -921,8 +1149,24 @@ const departmentOptions = computed(() =>
     ])
   ).filter(Boolean)
 );
+const weeklyDepartmentOptions = computed(() => departmentOptions.value.map(value => ({ value, label: value })));
 
 const categoryFilterOptions = computed(() => Array.from(new Set(db.value.items.map(row => row.category).filter(Boolean))));
+const reportDepartmentOptions = computed(() => {
+  const departments = new Map<string, string>();
+  const authorizedDepartments =
+    (authStore as unknown as { departments?: { id: string; name: string; status?: string }[] }).departments || [];
+  authorizedDepartments.forEach(row => {
+    if (row.id && row.status !== "INACTIVE") departments.set(row.id, row.name || row.id);
+  });
+  locationBalances.value.forEach(row => {
+    if (row.departmentId) departments.set(row.departmentId, row.departmentName || row.departmentId);
+  });
+  return Array.from(departments, ([value, label]) => ({ value, label }));
+});
+const reportItemOptions = computed(() =>
+  db.value.items.map(item => ({ value: item.id, label: `${item.name}${item.spec ? ` / ${item.spec}` : ""}` }))
+);
 
 const containsText = (values: unknown[], keyword: string) => {
   const normalized = keyword.trim().toLowerCase();
@@ -975,36 +1219,11 @@ const filteredTraceRows = computed(() =>
 );
 const selectedWeeklyItem = computed(() => itemMap.value.get(weeklyForm.itemId));
 const weeklyItemStock = computed(() => stockByItem.value[weeklyForm.itemId] || 0);
-const weeklyLastRecord = computed(
-  () =>
-    weeklyRows.value
-      .filter(
-        row => row.department === weeklyForm.department && row.itemId === weeklyForm.itemId && row.weekNo !== weeklyForm.weekNo
-      )
-      .sort((a, b) => String(b.weekNo || "").localeCompare(String(a.weekNo || "")))[0]
+const selectedWeeklySuggestion = computed(() =>
+  inventoryWorkbench.value?.weeklySuggestions?.find(
+    row => row.itemId === weeklyForm.itemId && row.departmentName === weeklyForm.department
+  )
 );
-const weeklyIssuedThisWeek = computed(() =>
-  traceRows.value
-    .filter(
-      row =>
-        row.type === "issue" &&
-        row.itemId === weeklyForm.itemId &&
-        row.department === weeklyForm.department &&
-        String(row.createdAt || "").slice(0, 10) >= today().slice(0, 8) + "01"
-    )
-    .reduce((sum, row) => sum + Number(row.quantity || 0), 0)
-);
-const applyWeeklySuggestion = () => {
-  if (!selectedWeeklyItem.value) return;
-  if (weeklyLastRecord.value) {
-    weeklyForm.remainingQuantity = Number(weeklyLastRecord.value.remainingQuantity || 0);
-    weeklyForm.nextWeekQuantity = Number(weeklyLastRecord.value.nextWeekQuantity || 0);
-    if (!weeklyForm.owner) weeklyForm.owner = weeklyLastRecord.value.owner || operatorName.value;
-    return;
-  }
-  if (!weeklyForm.nextWeekQuantity) weeklyForm.nextWeekQuantity = weeklyIssuedThisWeek.value;
-  if (!weeklyForm.owner) weeklyForm.owner = operatorName.value;
-};
 
 const executiveUrgentCount = computed(() => expiredRows.value.length + scrapRows.value.filter(row => !row.reason).length);
 const executiveAttentionCount = computed(
@@ -1139,19 +1358,32 @@ const departmentConsumptionTop = computed(() =>
     .slice(0, 6)
 );
 const maxDepartmentConsumption = computed(() => Math.max(...departmentConsumptionTop.value.map(row => row.value), 1));
-const visibleWorkflowSteps = computed(() => workflowSteps.filter(step => hasAnyInventoryAuth(step.auth)));
-const visibleRoleEntryCards = computed(() => roleEntryCards.filter(card => hasAnyInventoryAuth(card.auth)));
-const visibleTabNavItems = computed(() =>
-  tabNavItems.filter(
-    item => userStore.userInfo.role === "admin" || hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || [])
-  )
+const accessibleTabItems = computed(() =>
+  tabNavItems.filter(item => hasAnyInventoryAuthForTab(item.tab, tabAuthMap[item.tab] || []))
 );
-const canAccessTab = (tab: string) => visibleTabNavItems.value.some(item => item.tab === tab);
+const canExportDepartmentUsage = computed(() => hasInventoryAuthForTab("daily", "inventory:export"));
+const canAccessTab = (tab: string) => accessibleTabItems.value.some(item => item.tab === tab);
 const availableReturnTypeOptions = computed(() => returnTypeOptions.filter(item => hasInventoryAuth(item.auth)));
 const canSubmitReturnOrScrap = computed(() =>
   returnForm.type === "return" ? hasInventoryAuth("inventory:receive") : hasInventoryAuth("inventory:count")
 );
-const currentTabProfile = computed(() => tabProfiles[activeTab.value as keyof typeof tabProfiles] || tabProfiles.overview);
+const currentTabProfile = computed(() => {
+  if (activeTab.value === "packages" && focusedDepartmentKey.value) {
+    return {
+      kicker: "科室耗用核算",
+      title: `${focusedDepartment.value} · 日核算草稿`,
+      desc: "按科室原始耗材表录入业务量并实时预览日、月使用量；保存不会影响正式库存。"
+    };
+  }
+  if (activeTab.value === "packages" && isStandaloneConsumableEntry.value) {
+    return {
+      kicker: "科室耗材",
+      title: effectiveFocusedDepartment.value ? `${effectiveFocusedDepartment.value} · 耗材清单` : "我的科室耗材",
+      desc: "按科室维护耗材、用量和患者扣减口径；左侧筛选快速定位需处理的项目。"
+    };
+  }
+  return tabProfiles[activeTab.value as keyof typeof tabProfiles] || tabProfiles.overview;
+});
 const currentTabActions = computed(() => {
   const actionsByTab: Record<string, { label: string; action: TabAction; auth: string; buttonProps: Record<string, unknown> }[]> =
     {
@@ -1172,10 +1404,8 @@ const currentTabActions = computed(() => {
         { label: "新增申领", action: "request", auth: "inventory:request", buttonProps: { type: "primary", icon: Plus } }
       ],
       stock: [{ label: "入库", action: "inbound", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
-      items: [{ label: "新增物资", action: "item", auth: "inventory:issue", buttonProps: { type: "primary", icon: Plus } }],
-      weekly: [
-        { label: "新增周消耗", action: "weekly", auth: "inventory:request", buttonProps: { type: "primary", icon: Plus } }
-      ],
+      items: [{ label: "新增物资", action: "item", auth: "inventory:item:manage", buttonProps: { type: "primary", icon: Plus } }],
+      weekly: [],
       controls: [{ label: "新增盘点", action: "count", auth: "inventory:count", buttonProps: { type: "primary", icon: Plus } }],
       trace: [
         { label: "导出流水", action: "exportTrace", auth: "inventory:export", buttonProps: { type: "primary", icon: Download } }
@@ -1404,37 +1634,65 @@ const currentTabStats = computed<TabStat[]>(() => {
       ];
   }
 });
+const alertTabStats = computed(() =>
+  activeTab.value === "overview"
+    ? []
+    : currentTabStats.value.filter(
+        stat =>
+          (stat.tone === "warning" || stat.tone === "danger") && Number.parseFloat(String(stat.value).replace(/[^\d.-]/g, "")) > 0
+      )
+);
+
+const departmentPathByKey = Object.fromEntries(Object.entries(inventoryDepartmentKeyRouteMap).map(([path, key]) => [key, path]));
+const openDepartmentDraft = (departmentKey: string) => {
+  const path = departmentPathByKey[departmentKey];
+  if (path) router.push(path);
+};
 
 const goTab = (tab: string) => {
   if (canAccessTab(tab)) {
     activeTab.value = tab;
     return;
   }
-  activeTab.value = visibleTabNavItems.value[0]?.tab || "overview";
+  const fallback = accessibleTabItems.value[0];
+  if (fallback) {
+    activeTab.value = fallback.tab;
+    return;
+  }
+  if (Object.keys(authStore.authButtonListGet || {}).length) router.replace("/403");
+};
+
+const inventorySettingsRouteFallbacks: Record<string, string> = {
+  "/inventory-system/packages": "/inventory-system/consumable-entry",
+  "/inventory-system/executive": "/inventory-system/dashboard",
+  "/inventory-system/role-management": "/inventory-system/dashboard"
 };
 
 watch(
   () => route.path,
   path => {
-    const routeTab = routeTabMap[path];
+    const fallbackPath = inventorySettingsRouteFallbacks[path];
+    const permissionsReady = Object.keys(authStore.authButtonListGet || {}).length > 0;
+    if (fallbackPath && permissionsReady && !hasInventoryAuth("inventory:role:manage")) {
+      router.replace(fallbackPath);
+      return;
+    }
+    const routeTab = routeTabMap[path] || (inventoryDepartmentRouteMap[path] ? "packages" : "");
     if (routeTab && activeTab.value !== routeTab) goTab(routeTab);
   },
   { immediate: true }
 );
 
 watch(activeTab, tab => {
-  const nextPath = tabRoutePathMap[tab];
+  if (inventoryDepartmentRouteMap[route.path] && tab === "packages") return;
+  const nextPath = (route.path.startsWith("/inventory-system/") ? inventorySystemTabRoutePathMap : tabRoutePathMap)[tab];
   if (nextPath && route.path !== nextPath) router.replace(nextPath);
+  if (tab === "daily" && !dailyVerificationReport.value) loadDailyVerification({ date: today(), departmentId: "" });
+  if (tab === "roles" && !inventoryRoles.value.length) loadInventoryRoleManagement();
+  void nextTick(() => loadTabBackgroundData());
 });
 
-watch(
-  visibleTabNavItems,
-  items => {
-    if (!items.length) return;
-    if (!items.some(item => item.tab === activeTab.value)) activeTab.value = items[0].tab;
-  },
-  { immediate: true }
-);
+watch(accessibleTabItems, () => goTab(activeTab.value), { immediate: true });
 
 watch(
   availableReturnTypeOptions,
@@ -1451,12 +1709,7 @@ watch(
   () => {
     if (!weeklyForm.department || !weeklyForm.itemId) return;
     if (!weeklyForm.owner) weeklyForm.owner = operatorName.value;
-    if (!weeklyForm.remainingQuantity && weeklyLastRecord.value) {
-      weeklyForm.remainingQuantity = Number(weeklyLastRecord.value.remainingQuantity || 0);
-    }
-    if (!weeklyForm.nextWeekQuantity) {
-      weeklyForm.nextWeekQuantity = Number(weeklyLastRecord.value?.nextWeekQuantity || weeklyIssuedThisWeek.value || 0);
-    }
+    weeklyForm.adjustedQuantity = Number(selectedWeeklySuggestion.value?.suggestedQuantity || 0);
   }
 );
 
@@ -1490,6 +1743,137 @@ const validateIssueLines = () => {
   return false;
 };
 
+const loadExtendedInventory = async () => {
+  const endpointLabels = ["工作台", "科室余额", "异常任务", "执行耗用", "库存流水"];
+  const [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult] = await Promise.allSettled([
+    getInventoryWorkbenchApi(),
+    getInventoryLocationBalancesApi(),
+    getInventoryExceptionsApi(),
+    getInventoryConsumptionsApi(),
+    getInventoryLedgerMovementsApi({ size: 200 })
+  ]);
+  inventoryWorkbench.value = workbenchResult.status === "fulfilled" ? workbenchResult.value.data : undefined;
+  locationBalances.value = balancesResult.status === "fulfilled" ? balancesResult.value.data : [];
+  inventoryExceptions.value = exceptionsResult.status === "fulfilled" ? exceptionsResult.value.data : [];
+  inventoryConsumptions.value = consumptionsResult.status === "fulfilled" ? consumptionsResult.value.data : [];
+  inventoryLedgerMovements.value =
+    ledgerResult.status === "fulfilled"
+      ? ledgerResult.value.data.list.map(row => ({
+          id: row.id,
+          itemId: row.itemId,
+          batchId: row.batchId || "",
+          type: String(row.movementType || "").toLowerCase() as InventoryMovement["type"],
+          quantity: Number(row.quantity || 0),
+          department: row.department || "",
+          operator: row.operator || "",
+          reason: row.reason || "",
+          relatedId: "",
+          createdAt: row.occurredAt
+        }))
+      : [];
+  inventoryLedgerMovementsLoaded.value = ledgerResult.status === "fulfilled";
+  const results = [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult];
+  extendedDataErrors.value = results.flatMap((result, index) =>
+    result.status === "rejected"
+      ? [`${endpointLabels[index]}：${result.reason instanceof Error ? result.reason.message : "接口加载失败"}`]
+      : []
+  );
+  extendedDataReady.value = results.every(result => result.status === "fulfilled");
+};
+
+const applyLedgerMovements = () => {
+  if (inventoryLedgerMovementsLoaded.value) db.value.movements = inventoryLedgerMovements.value;
+};
+
+const refreshOperationalData = async () => {
+  await loadExtendedInventory();
+  applyLedgerMovements();
+};
+
+const loadTabBackgroundData = () => {
+  if (focusedDepartmentKey.value) return;
+  if (["overview", "executive", "stock", "requests", "trace", "daily", "controls"].includes(activeTab.value)) {
+    void refreshOperationalData();
+  }
+  if (["weekly", "executive"].includes(activeTab.value)) void loadWeekly();
+  if (activeTab.value === "packages") void loadMappings();
+  if (activeTab.value === "items") void loadMappingGovernance();
+};
+
+const refreshDailyConsumption = async (date?: string) => {
+  loading.value = true;
+  try {
+    inventoryConsumptions.value = (await getInventoryConsumptionsApi(date ? { from: date, to: date } : {})).data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    loading.value = false;
+  }
+};
+
+const loadWeekly = async (filters: { weekNo?: string; departmentId?: string } = {}) => {
+  weeklyLoading.value = true;
+  try {
+    const [standardsResult, snapshotsResult] = await Promise.all([
+      getInventoryWeeklyStandardsApi(),
+      getInventoryWeeklySnapshotsApi({
+        weekNo: filters.weekNo || currentWeekNo(),
+        departmentId: filters.departmentId || currentDepartment.value || undefined
+      })
+    ]);
+    weeklyStandards.value = standardsResult.data;
+    weeklySnapshots.value = snapshotsResult.data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    weeklyLoading.value = false;
+  }
+};
+
+const currentMappingQuery = ref<InventoryMappingEntryQueryParams>({ page: 1, size: 20 });
+
+const loadMappings = async (params: InventoryMappingEntryQueryParams = currentMappingQuery.value) => {
+  mappingLoading.value = true;
+  currentMappingQuery.value = {
+    page: params.page || 1,
+    size: params.size || 20,
+    ruleType: params.ruleType || "",
+    status: params.status || "",
+    businessGroup: params.businessGroup || "",
+    department: params.department || "",
+    keyword: params.keyword || ""
+  };
+  try {
+    const [summaryResult, entriesResult] = await Promise.all([
+      getInventoryMappingSummaryApi(),
+      getInventoryMappingEntriesApi(currentMappingQuery.value)
+    ]);
+    mappingSummary.value = summaryResult.data;
+    mappingEntries.value = entriesResult.data.list;
+    mappingTotal.value = entriesResult.data.total;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingLoading.value = false;
+  }
+};
+
+const loadMappingGovernance = async () => {
+  mappingGovernanceLoading.value = true;
+  try {
+    const [aliasesResult, conversionsResult] = await Promise.all([
+      getInventoryItemAliasesApi(),
+      getInventoryUnitConversionsApi()
+    ]);
+    itemAliases.value = aliasesResult.data;
+    unitConversions.value = conversionsResult.data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingGovernanceLoading.value = false;
+  }
+};
+
 const loadInventory = async () => {
   loading.value = true;
   try {
@@ -1499,17 +1883,45 @@ const loadInventory = async () => {
     ElMessage.error((error as Error).message);
   } finally {
     loading.value = false;
+    loadTabBackgroundData();
+  }
+};
+
+const downloadDepartmentUsageReport = async (params: DepartmentUsageReportParams) => {
+  if (!canExportDepartmentUsage.value) {
+    ElMessage.warning("当前岗位暂无科室耗材报表导出权限");
+    return;
+  }
+  reportLoading.value = params.format;
+  try {
+    const { blob, filename } = await downloadDepartmentUsageReportApi(params);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ElMessage.success("科室耗材报表已生成");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    reportLoading.value = "";
   }
 };
 
 const openItemDialog = (row?: InventoryItem) => {
-  if (!requireInventoryAuth("inventory:issue", "维护物资档案")) return;
+  if (!requireInventoryAuth("inventory:item:manage", "维护物资档案")) return;
   resetObject(itemForm, {
     id: row?.id,
     name: row?.name || "",
     category: row?.category || "",
     spec: row?.spec || "",
     unit: row?.unit || "个",
+    baseUnit: row?.baseUnit || row?.unit || "个",
+    issueUnit: row?.issueUnit || row?.unit || "个",
+    quantityPrecision: row?.quantityPrecision ?? 2,
+    normalizationStatus: row?.normalizationStatus || "standard",
+    effectiveLifeManaged: row?.effectiveLifeManaged ?? false,
     location: row?.location || "",
     lowStockThreshold: row?.lowStockThreshold ?? 0,
     sensitive: row?.sensitive ?? false,
@@ -1522,7 +1934,7 @@ const openItemDialog = (row?: InventoryItem) => {
 };
 
 const saveItem = async () => {
-  if (!requireInventoryAuth("inventory:issue", "保存物资档案")) return;
+  if (!requireInventoryAuth("inventory:item:manage", "保存物资档案")) return;
   if (!(await itemFormRef.value?.validate().catch(() => false))) return;
   saving.value = true;
   try {
@@ -1536,8 +1948,113 @@ const saveItem = async () => {
   }
 };
 
+const loadDailyVerification = async ({ date, departmentId }: { date: string; departmentId: string }) => {
+  dailyVerificationLoading.value = true;
+  try {
+    const { data } = await getInventoryDepartmentUsageReportApi({
+      from: date,
+      to: date,
+      departmentIds: departmentId ? [departmentId] : undefined,
+      patientOnly: true
+    });
+    dailyVerificationReport.value = data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    dailyVerificationLoading.value = false;
+  }
+};
+
+const exportDailyVerification = async ({
+  date,
+  departmentId,
+  format
+}: {
+  date: string;
+  departmentId: string;
+  format: "pdf" | "xlsx";
+}) => {
+  await downloadDepartmentUsageReport({
+    from: date,
+    to: date,
+    departmentIds: departmentId ? [departmentId] : undefined,
+    patientOnly: true,
+    format
+  });
+};
+
+const loadInventoryRoleManagement = async () => {
+  if (!hasInventoryAuth("inventory:role:manage")) return;
+  inventoryRolesLoading.value = true;
+  try {
+    const result = await getInventoryRoleManagementApi();
+    inventoryRoles.value = result.data.roles || [];
+    inventoryAccounts.value = result.data.accounts || [];
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    inventoryRolesLoading.value = false;
+  }
+};
+
+const changeInventoryAccountRole = async ({ account, roleCode }: { account: InventoryAccountAssignment; roleCode: string }) => {
+  if (account.inventoryRole === roleCode) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认将“${account.name || account.username}”调整为该岗位？变更后需重新登录生效。`,
+      "调整所属岗位",
+      {
+        type: "warning"
+      }
+    );
+    inventoryRoleSavingAccountId.value = account.id;
+    await assignInventoryAccountRoleApi({ accountId: account.id, roleCode });
+    await loadInventoryRoleManagement();
+    ElMessage.success("岗位已调整，账号重新登录后生效");
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") ElMessage.error((error as Error).message);
+  } finally {
+    inventoryRoleSavingAccountId.value = "";
+  }
+};
+
+const saveItemAliases = async (rows: InventoryItemAlias[]) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  mappingGovernanceLoading.value = true;
+  try {
+    const result = await saveInventoryItemAliasesApi({ aliases: rows });
+    itemAliases.value = result.data.list || [];
+    ElMessage.success("物资别名已保存");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingGovernanceLoading.value = false;
+  }
+};
+
+const saveUnitConversions = async (rows: InventoryUnitConversion[]) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  mappingGovernanceLoading.value = true;
+  try {
+    const result = await saveInventoryUnitConversionsApi({ unitConversions: rows });
+    unitConversions.value = (result.data.list || []).map(row => ({ ...row, factor: Number(row.factor || 0) }));
+    ElMessage.success("单位换算已保存");
+    await loadMappings();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    mappingGovernanceLoading.value = false;
+  }
+};
+
 const savePackage = async (payload: SaveInventoryPackageParams) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "维护使用套餐")) return;
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:rule", "维护使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await saveInventoryPackageApi({ ...payload, operator: operatorName.value })).data;
@@ -1549,8 +2066,64 @@ const savePackage = async (payload: SaveInventoryPackageParams) => {
   }
 };
 
+const confirmMapping = async (payload: ConfirmInventoryMappingEntriesParams) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  saving.value = true;
+  try {
+    await confirmInventoryMappingEntriesApi(payload);
+    await loadMappings();
+    ElMessage.success("映射已确认");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const holdMapping = async (row: InventoryMappingEntry) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  saving.value = true;
+  try {
+    await holdInventoryMappingEntriesApi({ id: row.id, reason: "业务暂不导入，搁置待后续确认。" });
+    await loadMappings();
+    ElMessage.success("映射已搁置");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const createMappingDraft = async (row: InventoryMappingEntry) => {
+  if (!canManageMappingGovernance.value) {
+    ElMessage.warning("当前岗位暂无映射治理权限");
+    return;
+  }
+  if (!row.canCreatePackageDraft) {
+    ElMessage.warning(row.cannotPublishReason || "该映射尚不能生成套餐草稿");
+    return;
+  }
+  saving.value = true;
+  try {
+    await createInventoryMappingPackageDraftApi({ id: row.id });
+    db.value = (await getInventoryDbApi()).data;
+    await loadMappings();
+    ElMessage.success("套餐草稿已生成，状态保持为 draft");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
 const enablePackage = async (row: InventoryPackage) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "启用使用套餐")) return;
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:rule", "启用使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await enableInventoryPackageApi({ id: row.id, operator: operatorName.value })).data;
@@ -1563,7 +2136,7 @@ const enablePackage = async (row: InventoryPackage) => {
 };
 
 const disablePackage = async (row: InventoryPackage) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "停用使用套餐")) return;
+  if (!canManagePackages.value || !requireInventoryAuth("inventory:rule", "停用使用套餐")) return;
   saving.value = true;
   try {
     db.value = (await disableInventoryPackageApi({ id: row.id, operator: operatorName.value })).data;
@@ -1576,7 +2149,7 @@ const disablePackage = async (row: InventoryPackage) => {
 };
 
 const retryConsumptionEvent = async (row: InventoryConsumptionEvent) => {
-  if (!canManagePackages.value || !requireInventoryAuth("inventory:approve", "重试自动消耗")) return;
+  if (!requireInventoryAuth("inventory:retry", "重试自动消耗")) return;
   saving.value = true;
   try {
     db.value = (await retryInventoryConsumptionEventApi({ id: row.id, operator: operatorName.value })).data;
@@ -1614,6 +2187,7 @@ const saveInbound = async () => {
   saving.value = true;
   try {
     db.value = (await inboundInventoryApi({ ...inboundForm, operator: operatorName.value })).data;
+    void refreshOperationalData();
     ElMessage.success("入库记录已保存");
     inboundDialogVisible.value = false;
   } catch (error) {
@@ -1649,6 +2223,7 @@ const saveRequest = async () => {
         lines: requestForm.lines.map(line => ({ itemId: line.itemId, quantity: Number(line.quantity || 0) }))
       })
     ).data;
+    void refreshOperationalData();
     ElMessage.success("申领单已提交");
     requestDialogVisible.value = false;
   } catch (error) {
@@ -1663,6 +2238,7 @@ const approveRequest = async (row: InventoryRequest) => {
   saving.value = true;
   try {
     db.value = (await approveInventoryRequestApi({ id: row.id, operator: operatorName.value, owner: row.owner })).data;
+    void refreshOperationalData();
     flashRequestRow(row.id);
     ElMessage.success("申领单已审核");
   } catch (error) {
@@ -1705,6 +2281,7 @@ const issueRequest = async () => {
           .map(line => ({ id: line.id, itemId: line.itemId, issuedQuantity: Number(line.issuedQuantity || 0) }))
       })
     ).data;
+    void refreshOperationalData();
     flashRequestRow(issueForm.id);
     ElMessage.success("物资已发放");
     issueDialogVisible.value = false;
@@ -1722,6 +2299,7 @@ const receiveRequest = async (row: InventoryRequest) => {
     db.value = (
       await receiveInventoryRequestApi({ id: row.id, operator: operatorName.value, receiver: operatorName.value })
     ).data;
+    void refreshOperationalData();
     flashRequestRow(row.id);
     ElMessage.success("领取已确认");
   } catch (error) {
@@ -1788,14 +2366,12 @@ const voidRequest = async (row: InventoryRequest) => {
 };
 
 const openWeeklyDialog = () => {
-  if (!requireInventoryAuth("inventory:request", "填报周消耗")) return;
+  if (!requireInventoryAuth("inventory:request", "确认周计划")) return;
   Object.assign(weeklyForm, {
     weekNo: currentWeekNo(),
     department: currentDepartment.value,
     itemId: "",
-    consumedQuantity: 0,
-    remainingQuantity: 0,
-    nextWeekQuantity: 0,
+    adjustedQuantity: 0,
     owner: operatorName.value,
     abnormalReason: "",
     operator: operatorName.value
@@ -1805,17 +2381,146 @@ const openWeeklyDialog = () => {
 };
 
 const saveWeekly = async () => {
-  if (!requireInventoryAuth("inventory:request", "确认周消耗")) return;
+  if (!requireInventoryAuth("inventory:request", "确认周计划")) return;
   if (!(await weeklyFormRef.value?.validate().catch(() => false))) return;
   saving.value = true;
   try {
     db.value = (await saveWeeklyConsumptionApi({ ...weeklyForm, operator: operatorName.value })).data;
-    ElMessage.success("周消耗已确认");
+    ElMessage.success("周计划已确认");
     weeklyDialogVisible.value = false;
   } catch (error) {
     ElMessage.error((error as Error).message);
   } finally {
     saving.value = false;
+  }
+};
+
+const saveWeeklyStandard = async (payload: SaveInventoryWeeklyStandardParams) => {
+  if (!requireInventoryAuth("inventory:rule", "保存周度标准")) return;
+  saving.value = true;
+  try {
+    await saveInventoryWeeklyStandardApi(payload);
+    await loadWeekly();
+    ElMessage.success("周度标准草稿已保存");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const publishWeeklyStandard = async (row: InventoryWeeklyStandard) => {
+  if (!requireInventoryAuth("inventory:rule", "发布周度标准")) return;
+  saving.value = true;
+  try {
+    await publishInventoryWeeklyStandardApi(row.id);
+    await loadWeekly();
+    ElMessage.success("周度标准已发布");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const deleteWeeklyStandard = async (row: InventoryWeeklyStandard) => {
+  if (!requireInventoryAuth("inventory:rule", "删除周度标准")) return;
+  try {
+    await ElMessageBox.confirm(`确认删除标准“${row.name}”草稿？`, "删除周度标准", {
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+    saving.value = true;
+    await deleteInventoryWeeklyStandardApi(row.id);
+    await loadWeekly();
+    ElMessage.success("周度标准草稿已删除");
+  } catch (error) {
+    if (error !== "cancel") ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const generateWeeklySnapshot = async (payload: GenerateInventoryWeeklySnapshotParams) => {
+  if (!requireInventoryAuth("inventory:count", "生成周度快照")) return;
+  saving.value = true;
+  try {
+    await generateInventoryWeeklySnapshotApi(payload);
+    await loadWeekly({ weekNo: payload.weekNo, departmentId: payload.departmentId });
+    ElMessage.success("周度快照已生成");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const viewWeeklySnapshot = async (row: InventoryWeeklySnapshot) => {
+  try {
+    const result = await getInventoryWeeklySnapshotApi(row.id);
+    const index = weeklySnapshots.value.findIndex(item => item.id === row.id);
+    if (index >= 0) weeklySnapshots.value[index] = result.data;
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
+};
+
+const confirmWeeklySnapshot = async (row: InventoryWeeklySnapshot) => {
+  if (!requireInventoryAuth("inventory:confirm", "确认周度快照")) return;
+  saving.value = true;
+  try {
+    await confirmInventoryWeeklySnapshotApi({ id: row.id, expectedRevision: row.revision, confirmationNote: "前端工作台确认" });
+    await loadWeekly({ weekNo: row.weekNo, departmentId: row.departmentId });
+    ElMessage.success("周度快照已确认");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const reviseWeeklySnapshot = async (payload: {
+  snapshot: InventoryWeeklySnapshot;
+  revisionReason: string;
+  lines: Array<{ itemId: string; careType?: InventoryCareType; adjustedQuantity: number; adjustmentReason: string }>;
+}) => {
+  if (!requireInventoryAuth("inventory:confirm", "更正周度快照")) return;
+  saving.value = true;
+  try {
+    await reviseInventoryWeeklySnapshotApi({
+      id: payload.snapshot.id,
+      expectedRevision: payload.snapshot.revision,
+      revisionReason: payload.revisionReason,
+      lines: payload.lines.map(line => ({
+        itemId: line.itemId,
+        careType: line.careType,
+        adjustedQuantity: Number(line.adjustedQuantity || 0),
+        adjustmentReason: line.adjustmentReason
+      }))
+    });
+    await loadWeekly({ weekNo: payload.snapshot.weekNo, departmentId: payload.snapshot.departmentId });
+    ElMessage.success("周度快照更正已生成新版本");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    saving.value = false;
+  }
+};
+
+const exportWeeklySnapshot = async (row: InventoryWeeklySnapshot, format: "xlsx" | "pdf" | "docx") => {
+  if (!requireInventoryAuth("inventory:export", "导出周度快照")) return;
+  try {
+    const { blob, filename } = await downloadInventoryWeeklySnapshotApi(row.id, format);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ElMessage.success("周度快照已导出");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
   }
 };
 
@@ -1837,6 +2542,7 @@ const submitReturnOrScrap = async () => {
   saving.value = true;
   try {
     db.value = (await returnOrScrapInventoryApi({ ...returnForm, operator: operatorName.value })).data;
+    void refreshOperationalData();
     ElMessage.success("库存变更已保存");
     Object.assign(returnForm, { quantity: 0, reason: "" });
   } catch (error) {
@@ -1865,6 +2571,7 @@ const saveCount = async () => {
   saving.value = true;
   try {
     db.value = (await countInventoryApi({ ...countForm, operator: operatorName.value })).data;
+    void refreshOperationalData();
     ElMessage.success("盘点结果已记录");
     countDialogVisible.value = false;
   } catch (error) {
@@ -1955,7 +2662,15 @@ const exportWeeklyReport = () => {
   exportCsv(rows, "inventory-weekly-report.csv");
 };
 
-onMounted(loadInventory);
+onMounted(() => {
+  loadInventory();
+  if (activeTab.value === "daily") {
+    loadDailyVerification({ date: today(), departmentId: "" });
+  }
+  if (activeTab.value === "roles") {
+    loadInventoryRoleManagement();
+  }
+});
 </script>
 
 <style scoped lang="scss">
@@ -1976,13 +2691,14 @@ onMounted(loadInventory);
   --inventory-success-soft: #edf8f2;
 
   display: grid;
+  min-width: 0;
+  max-width: 100%;
   gap: 12px;
   padding: 2px;
   color: var(--inventory-text);
 }
 
 .inventory-command,
-.ribbon-lead,
 .ribbon-metric,
 .panel {
   background: var(--inventory-panel);
@@ -2041,43 +2757,15 @@ onMounted(loadInventory);
 
 .status-ribbon {
   display: grid;
-  grid-template-columns: minmax(220px, 0.95fr) repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 220px));
   gap: 8px;
 }
 
-.ribbon-lead,
 .ribbon-metric {
   display: grid;
   gap: 3px;
   min-width: 0;
   padding: 10px 12px;
-}
-
-.ribbon-lead {
-  background: #f7fafb;
-
-  span,
-  strong,
-  small {
-    display: block;
-  }
-
-  span {
-    color: var(--inventory-primary);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  strong {
-    color: var(--inventory-text);
-    font-size: 15px;
-    line-height: 1.35;
-  }
-
-  small {
-    color: var(--el-text-color-secondary);
-    line-height: 1.35;
-  }
 }
 
 .ribbon-metric {
@@ -2125,71 +2813,15 @@ onMounted(loadInventory);
   }
 }
 
-.module-switcher {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 0;
-  overflow: hidden;
-  background: var(--inventory-panel);
-  border: 1px solid var(--inventory-line);
-  border-radius: 8px;
-
-  button {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-    padding: 9px 10px 8px;
-    text-align: left;
-    cursor: pointer;
-    background: transparent;
-    border: 0;
-    border-right: 1px solid var(--inventory-line-soft);
-    border-radius: 0;
-    transition:
-      background 0.16s ease,
-      color 0.16s ease;
-
-    &:hover,
-    &.active {
-      background: #f5fbfa;
-    }
-
-    &.active {
-      box-shadow: inset 0 -3px 0 var(--inventory-primary);
-
-      span {
-        color: var(--inventory-primary);
-      }
-    }
-
-    &:last-child {
-      border-right: 0;
-    }
-  }
-
-  span,
-  small {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  span {
-    color: var(--inventory-text);
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  small {
-    color: var(--inventory-muted);
-    font-size: 12px;
-  }
-}
-
 .inventory-workspace {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.department-draft-mode {
+  justify-self: start;
 }
 
 .inventory-loading-skeleton {
@@ -2202,6 +2834,8 @@ onMounted(loadInventory);
 .workspace-pane {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .inventory-fade-enter-active,
@@ -2222,10 +2856,14 @@ onMounted(loadInventory);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel {
   padding: 13px 14px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel-head {
@@ -2268,6 +2906,7 @@ onMounted(loadInventory);
   --el-table-text-color: var(--inventory-text);
 
   font-size: 13px;
+  max-width: 100%;
 
   th.el-table__cell {
     font-weight: 700;
@@ -2379,14 +3018,6 @@ onMounted(loadInventory);
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ribbon-lead {
-    grid-column: 1 / -1;
-  }
-
-  .module-switcher {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .request-line-editor,
   .issue-line-editor {
     grid-template-columns: 1fr;
@@ -2412,10 +3043,6 @@ onMounted(loadInventory);
     .el-button {
       flex: 1;
     }
-  }
-
-  .module-switcher {
-    grid-template-columns: 1fr;
   }
 
   .weekly-assist {

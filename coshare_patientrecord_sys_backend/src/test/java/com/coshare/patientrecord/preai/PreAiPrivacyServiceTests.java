@@ -10,11 +10,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -39,6 +35,9 @@ class PreAiPrivacyServiceTests {
         assertEquals("便血3月", masked.path("stages").path("RECEPTION").path("chiefComplaint").asText());
         assertEquals("否认输血史", masked.path("stages").path("RECEPTION").path("transfusionHistory").asText());
         assertEquals("适龄结婚", masked.path("stages").path("RECEPTION").path("maritalHistory").path(0).asText());
+        assertFalse(masked.path("stages").path("INSPECTION").has("lesionSize"));
+        assertFalse(masked.path("stages").path("INSPECTION").has("lesionDepth"));
+        assertFalse(masked.path("stages").path("INSPECTION").has("lesionExtent"));
         assertFalse(masked.toString().contains("411525199001011234"));
         assertFalse(masked.toString().contains("张医生"));
         assertFalse(masked.toString().contains("原始照片.jpg"));
@@ -54,11 +53,19 @@ class PreAiPrivacyServiceTests {
 
         assertTrue(docx.length > 1000);
         assertTrue(documentXml.contains("中医肛肠医院住院病历自动生成表"));
-        for (String heading : List.of(
-            "一、基础信息", "二、主诉", "三、现病史", "四、既往史 / 个人史 / 婚育史 / 家族史", "五、中医四诊", "六、专科检查",
-            "七、辅助检查", "八、中西医主诊断", "九、次诊断（已选择）", "十、合并病中医病名及证型", "十一、手术 / 操作信息", "十二、DIP 病组与治疗路径",
-            "十三、查房时序", "十四、自动生成文书范围", "十五、质控校验"
-        )) assertTrue(documentXml.contains(heading), heading);
+        List<String> headings = List.of(
+            "一、基础信息", "二、主诉", "三、现病史", "四、既往史 / 个人史 / 婚育史 / 家族史", "五、中医四诊与辨证", "六、体格检查",
+            "七、专科检查", "八、辅助检查", "九、中西医主诊断", "十、次诊断（已选择）", "十一、合并病中医病名及证型", "十二、手术 / 操作信息",
+            "十三、DIP 病组与治疗路径"
+        );
+        int previous = -1;
+        for (String heading : headings) {
+            int current = documentXml.indexOf(heading);
+            assertTrue(current > previous, heading);
+            previous = current;
+        }
+        assertFalse(documentXml.contains("十四、"));
+        assertFalse(documentXml.contains("十五、"));
         assertTrue(documentXml.contains("<w:tbl>"));
         assertTrue(documentXml.contains("便血3月"));
         assertTrue(documentXml.contains("周xx"));
@@ -66,6 +73,9 @@ class PreAiPrivacyServiceTests {
         assertFalse(documentXml.contains("VISUAL"));
         assertFalse(documentXml.contains("INPATIENT"));
         assertFalse(documentXml.contains("SURGICAL"));
+        assertFalse(documentXml.contains("病灶大小"));
+        assertFalse(documentXml.contains("病灶深度"));
+        assertFalse(documentXml.contains("累及范围"));
         assertTrue(documentXml.contains("输血史"));
         assertFalse(documentXml.contains("慢性病及重要既往史"));
         assertFalse(documentXml.contains("□"));
@@ -92,38 +102,32 @@ class PreAiPrivacyServiceTests {
         String documentXml = unzipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/document.xml");
 
         assertTrue(documentXml.contains("一、基础信息"));
-        assertTrue(documentXml.contains("七、辅助检查"));
-        assertTrue(documentXml.contains("十五、质控校验"));
+        assertTrue(documentXml.contains("八、辅助检查"));
+        assertTrue(documentXml.contains("十三、DIP 病组与治疗路径"));
+        assertFalse(documentXml.contains("十四、"));
         assertFalse(documentXml.contains("VISUAL"));
         assertFalse(documentXml.contains("未填写指标"));
     }
 
     @Test
-    void embedsReceptionImagesInDocxWhenAvailable() throws Exception {
+    void excludesSourceImagesFromFinalDocx() throws Exception {
         ObjectNode workspace = sampleWorkspace();
-        Path directory = Files.createTempDirectory("pre-ai-image-test");
-        Field field = PreAiPrivacyService.class.getDeclaredField("attachmentDirectory");
-        field.setAccessible(true);
-        Object previousDirectory = field.get(service);
-        try {
-            Files.write(directory.resolve("image.png"), Base64.getDecoder().decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-            ));
-            field.set(service, directory.toString());
-            ObjectNode attachment = workspace.withArray("attachments").addObject();
-            attachment.put("stageCode", "INSPECTION");
-            attachment.put("mimeType", "image/png");
-            attachment.put("storagePath", "image.png");
+        ObjectNode attachment = workspace.withArray("attachments").addObject();
+        attachment.put("stageCode", "INSPECTION");
+        attachment.put("mimeType", "image/png");
+        attachment.put("storagePath", "image.png");
 
-            String documentXml = unzipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/document.xml");
-            assertTrue(documentXml.contains("接诊/检查图片"));
-            assertTrue(documentXml.contains("rIdImage1"));
-            assertTrue(hasZipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/media/image1.png"));
-        } finally {
-            field.set(service, previousDirectory);
-            Files.deleteIfExists(directory.resolve("image.png"));
-            Files.deleteIfExists(directory);
-        }
+        byte[] docx = service.renderDocx(service.maskWorkspace(workspace), workspace);
+        String documentXml = unzipEntry(docx, "word/document.xml");
+        String relationships = unzipEntry(docx, "word/_rels/document.xml.rels");
+        String contentTypes = unzipEntry(docx, "[Content_Types].xml");
+
+        assertFalse(documentXml.contains("专科检查图片"));
+        assertFalse(documentXml.contains("rIdImage"));
+        assertFalse(relationships.contains("/relationships/image"));
+        assertFalse(contentTypes.contains("image/png"));
+        assertFalse(contentTypes.contains("image/jpeg"));
+        assertFalse(hasZipEntry(docx, "word/media/image1.png"));
     }
 
     @Test
@@ -205,6 +209,51 @@ class PreAiPrivacyServiceTests {
     }
 
     @Test
+    void documentViewContainsThirteenSectionsAndOnlyEffectiveRows() {
+        ObjectNode workspace = sampleWorkspace();
+        ((ObjectNode) workspace.path("stages").path(1).path("data")).put("historySupplement", "未填写");
+
+        ObjectNode view = service.buildDocumentView(service.maskWorkspace(workspace));
+
+        assertEquals(PreAiPrivacyService.TEMPLATE_VERSION, view.path("templateVersion").asText());
+        assertEquals(13, view.path("sections").size());
+        assertTrue(view.path("effectiveFieldCount").asInt() > 0);
+        assertFalse(view.path("sections").toString().contains("未填写"));
+        for (var section : view.path("sections")) {
+            for (var row : section.path("rows")) assertFalse(row.path("value").asText().isBlank());
+        }
+    }
+
+    @Test
+    void docxUsesDistinctFixedAndDynamicStyles() throws Exception {
+        byte[] docx = service.renderDocx(service.maskWorkspace(sampleWorkspace()), sampleWorkspace());
+        String stylesXml = unzipEntry(docx, "word/styles.xml");
+        String documentXml = unzipEntry(docx, "word/document.xml");
+
+        assertTrue(stylesXml.contains("w:styleId=\"TableLabel\""));
+        assertTrue(stylesXml.contains("w:styleId=\"TableText\""));
+        assertTrue(stylesXml.contains("w:sz w:val=\"19\""));
+        assertTrue(stylesXml.contains("w:sz w:val=\"21\""));
+        assertTrue(documentXml.contains("w:fill=\"F2F2F2\""));
+        assertTrue(documentXml.contains("w:fill=\"FFFFFF\""));
+    }
+
+    @Test
+    void versionedReferenceTemplateContainsStableSectionAndRowMarkers() throws Exception {
+        byte[] template;
+        try (var input = getClass().getResourceAsStream("/pre-ai-templates/pre-ai-final-template-v2.docx")) {
+            assertTrue(input != null);
+            template = input.readAllBytes();
+        }
+        String documentXml = unzipEntry(template, "word/document.xml");
+
+        for (int section = 1; section <= 13; section++) {
+            assertTrue(documentXml.contains("PREAI_S%02d".formatted(section)));
+        }
+        assertTrue(documentXml.contains("PREAI_S01_R001"));
+    }
+
+    @Test
     void masksCompoundSurnameAndShortContactValues() {
         assertEquals("欧阳xx", service.maskName("欧阳明"));
         assertEquals("已脱敏", service.maskPhone("12345"));
@@ -258,6 +307,7 @@ class PreAiPrivacyServiceTests {
         ObjectNode reception = objectMapper.createObjectNode();
         reception.put("chiefComplaint", "便血3月");
         reception.put("presentIllness", "周明华诉反复便血，联系电话13812345678。ZY20260710001");
+        reception.put("physicalExam", "神志清楚，查体合作。心肺听诊未闻及明显异常，腹软。");
         reception.put("transfusionHistory", "否认输血史");
         reception.putArray("personalHistory").add("生长于原籍").add("无烟酒嗜好");
         reception.putArray("maritalHistory").add("适龄结婚").add("配偶及子女体健");
@@ -265,6 +315,9 @@ class PreAiPrivacyServiceTests {
         addStage(stages, "RECEPTION", "COMPLETED", reception);
         ObjectNode inspection = objectMapper.createObjectNode();
         inspection.putArray("examinationTypes").add("VISUAL").add("DIGITAL");
+        inspection.put("lesionSize", "12mm");
+        inspection.put("lesionDepth", "5mm");
+        inspection.put("lesionExtent", "半周");
         inspection.put("factualConclusion", "截石位见肛缘肿物");
         addStage(stages, "INSPECTION", "COMPLETED", inspection);
         ObjectNode tcm = objectMapper.createObjectNode();

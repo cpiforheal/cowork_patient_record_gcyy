@@ -34,7 +34,9 @@
 <script setup lang="ts">
 import { inject, nextTick } from "vue";
 import { HOME_URL } from "@/config";
+import { INVENTORY_SYSTEM_DASHBOARD } from "@/routers/modules/inventorySystem";
 import { useTabsStore } from "@/stores/modules/tabs";
+import { useAuthStore } from "@/stores/modules/auth";
 import { useGlobalStore } from "@/stores/modules/global";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { useRoute, useRouter } from "vue-router";
@@ -42,6 +44,7 @@ import { useRoute, useRouter } from "vue-router";
 const route = useRoute();
 const router = useRouter();
 const tabStore = useTabsStore();
+const authStore = useAuthStore();
 const globalStore = useGlobalStore();
 const keepAliveStore = useKeepAliveStore();
 
@@ -72,10 +75,10 @@ const closeCurrentTab = () => {
 // Close All
 const closeAllTab = () => {
   tabStore.closeMultipleTab();
-  router.push(HOME_URL);
+  router.push(authStore.activeSystem === "inventory" ? INVENTORY_SYSTEM_DASHBOARD : HOME_URL);
 };
 </script>
 
 <style scoped lang="scss">
-@import "../index.scss";
+@use "../index.scss" as *;
 </style>

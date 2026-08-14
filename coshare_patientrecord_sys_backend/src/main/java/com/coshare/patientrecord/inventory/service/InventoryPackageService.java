@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,10 +43,15 @@ public class InventoryPackageService {
     public ArrayNode readPackages() {
         ArrayNode packages = objectMapper.createArrayNode();
         jdbcTemplate.query(
-            "SELECT raw_json FROM inventory_packages ORDER BY department ASC, care_type ASC, version_no DESC, created_at DESC",
+            """
+            SELECT id, name, department, department_id, care_type, trigger_stage, version_no, status,
+                   effective_date, operator_name, created_at, raw_json
+            FROM inventory_packages
+            ORDER BY department ASC, care_type ASC, trigger_stage ASC, version_no DESC, created_at DESC
+            """,
             resultSet -> {
                 while (resultSet.next()) {
-                    ObjectNode row = readObject(resultSet.getString("raw_json"));
+                    ObjectNode row = packageRow(resultSet);
                     row.set("lines", readPackageLines(row.path("id").asText()));
                     packages.add(row);
                 }
@@ -57,10 +64,17 @@ public class InventoryPackageService {
     public ArrayNode readConsumptionEvents() {
         ArrayNode events = objectMapper.createArrayNode();
         jdbcTemplate.query(
-            "SELECT raw_json FROM inventory_consumption_events ORDER BY created_at DESC, id DESC",
+            """
+            SELECT id, command_id, encounter_id, case_token, route, care_type, care_encounter_id,
+                   department, department_id, trigger_stage, completion_version, visit_date,
+                   package_id, package_version, status, error_message,
+                   event_kind, reversal_of_event_id, operator_name, created_at, raw_json
+            FROM inventory_consumption_events
+            ORDER BY created_at DESC, id DESC
+            """,
             resultSet -> {
                 while (resultSet.next()) {
-                    ObjectNode row = readObject(resultSet.getString("raw_json"));
+                    ObjectNode row = consumptionEventRow(resultSet);
                     row.set("details", readConsumptionDetails(row.path("id").asText()));
                     events.add(row);
                 }
@@ -70,12 +84,105 @@ public class InventoryPackageService {
         return events;
     }
 
+    public ArrayNode coverageMatrix() {
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            """
+            WITH care_types AS (
+              SELECT 'outpatient' care_type UNION ALL SELECT 'inpatient'
+            ), stages AS (
+              SELECT 'INSPECTION' trigger_stage UNION ALL SELECT 'TCM'
+              UNION ALL SELECT 'DOCTOR' UNION ALL SELECT 'SURGERY'
+            )
+            SELECT d.id department_id, d.name department_name, c.care_type, s.trigger_stage,
+                   p.id package_id, p.name package_name, p.version_no,
+                   COALESCE((SELECT COUNT(*) FROM inventory_package_lines l WHERE l.package_id = p.id AND l.quantity > 0), 0) line_count
+            FROM clinic_departments d
+            CROSS JOIN care_types c
+            CROSS JOIN stages s
+            LEFT JOIN inventory_packages p ON p.id = (
+              SELECT p2.id FROM inventory_packages p2
+              WHERE p2.department_id = d.id AND p2.care_type = c.care_type
+                AND p2.trigger_stage = s.trigger_stage AND p2.status = 'enabled'
+                AND (p2.effective_date IS NULL OR p2.effective_date = '' OR p2.effective_date <= CURRENT_DATE)
+              ORDER BY p2.version_no DESC, p2.updated_at DESC LIMIT 1
+            )
+            WHERE d.status = 'ACTIVE' AND d.id <> 'dept-unassigned'
+            ORDER BY d.name, c.care_type, FIELD(s.trigger_stage, 'INSPECTION', 'TCM', 'DOCTOR', 'SURGERY')
+            """,
+            resultSet -> {
+                ObjectNode row = rows.addObject();
+                row.put("departmentId", resultSet.getString("department_id"));
+                row.put("department", resultSet.getString("department_name"));
+                row.put("careType", resultSet.getString("care_type"));
+                row.put("triggerStage", resultSet.getString("trigger_stage"));
+                putText(row, "packageId", resultSet.getString("package_id"));
+                putText(row, "packageName", resultSet.getString("package_name"));
+                int version = resultSet.getInt("version_no");
+                if (!resultSet.wasNull()) row.put("packageVersion", version);
+                int lineCount = resultSet.getInt("line_count");
+                row.put("lineCount", lineCount);
+                row.put("covered", !row.path("packageId").asText("").isBlank() && lineCount > 0);
+            }
+        );
+        return rows;
+    }
+
+    private ObjectNode packageRow(ResultSet resultSet) throws SQLException {
+        ObjectNode row = readObject(resultSet.getString("raw_json"));
+        putText(row, "id", resultSet.getString("id"));
+        putText(row, "name", resultSet.getString("name"));
+        putText(row, "department", resultSet.getString("department"));
+        putText(row, "departmentId", resultSet.getString("department_id"));
+        putText(row, "careType", resultSet.getString("care_type"));
+        putText(row, "triggerStage", resultSet.getString("trigger_stage"));
+        row.put("version", resultSet.getInt("version_no"));
+        putText(row, "status", resultSet.getString("status"));
+        putText(row, "effectiveDate", resultSet.getString("effective_date"));
+        putText(row, "operator", resultSet.getString("operator_name"));
+        putText(row, "createdAt", resultSet.getString("created_at"));
+        return row;
+    }
+
+    private ObjectNode consumptionEventRow(ResultSet resultSet) throws SQLException {
+        ObjectNode row = readObject(resultSet.getString("raw_json"));
+        putText(row, "id", resultSet.getString("id"));
+        putText(row, "commandId", resultSet.getString("command_id"));
+        putText(row, "encounterId", resultSet.getString("encounter_id"));
+        putText(row, "caseToken", resultSet.getString("case_token"));
+        putText(row, "route", resultSet.getString("route"));
+        putText(row, "careType", resultSet.getString("care_type"));
+        putText(row, "careEncounterId", resultSet.getString("care_encounter_id"));
+        putText(row, "department", resultSet.getString("department"));
+        putText(row, "departmentId", resultSet.getString("department_id"));
+        putText(row, "triggerStage", resultSet.getString("trigger_stage"));
+        long completionVersion = resultSet.getLong("completion_version");
+        if (!resultSet.wasNull()) row.put("completionVersion", completionVersion);
+        putText(row, "visitDate", resultSet.getString("visit_date"));
+        putText(row, "packageId", resultSet.getString("package_id"));
+        int packageVersion = resultSet.getInt("package_version");
+        if (!resultSet.wasNull()) row.put("packageVersion", packageVersion);
+        putText(row, "status", resultSet.getString("status"));
+        putText(row, "errorMessage", resultSet.getString("error_message"));
+        putText(row, "eventKind", resultSet.getString("event_kind"));
+        putText(row, "reversalOfEventId", resultSet.getString("reversal_of_event_id"));
+        putText(row, "operator", resultSet.getString("operator_name"));
+        putText(row, "createdAt", resultSet.getString("created_at"));
+        return row;
+    }
+
+    private void putText(ObjectNode row, String field, String value) {
+        if (value != null) row.put(field, value);
+    }
+
     @Transactional
     public ObjectNode saveDraft(JsonNode payload, SessionUser user) {
         ObjectNode input = repository.object(payload).deepCopy();
         String department = repository.text(input, "department", user.department());
         if (!isManager(user) && !department.equals(user.department())) department = user.department();
         String careType = normalizeCareType(repository.text(input, "careType", repository.text(input, "route")));
+        String triggerStage = normalizeTriggerStage(repository.text(input, "triggerStage", "REVIEW"));
+        String departmentId = resolveDepartmentId(repository.text(input, "departmentId"), department);
         String name = repository.text(input, "name");
         ArrayNode lines = normalizeLines(input.path("lines"));
         if (department.isBlank()) throw new IllegalArgumentException("科室不能为空");
@@ -89,12 +196,14 @@ public class InventoryPackageService {
             throw new IllegalArgumentException("已启用套餐不能直接修改，请新建版本");
         }
         if (id.isBlank()) id = "pkg-" + UUID.randomUUID();
-        int version = existing == null ? nextVersion(department, careType) : existing.path("version").asInt(1);
+        int version = existing == null ? nextVersion(departmentId, careType, triggerStage) : existing.path("version").asInt(1);
         ObjectNode row = input.deepCopy();
         row.put("id", id);
         row.put("name", name);
         row.put("department", department);
+        row.put("departmentId", departmentId);
         row.put("careType", careType);
+        row.put("triggerStage", triggerStage);
         row.put("version", version);
         row.put("status", "draft");
         row.put("operator", user.name());
@@ -104,13 +213,14 @@ public class InventoryPackageService {
         jdbcTemplate.update(
             """
             INSERT INTO inventory_packages
-              (id, name, department, care_type, version_no, status, effective_date, operator_name, raw_json, created_at)
-            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)
+              (id, name, department, department_id, care_type, trigger_stage, version_no, status, effective_date, operator_name, raw_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), department = VALUES(department), care_type = VALUES(care_type),
+              department_id = VALUES(department_id), trigger_stage = VALUES(trigger_stage),
               version_no = VALUES(version_no), status = 'draft', effective_date = VALUES(effective_date),
               operator_name = VALUES(operator_name), raw_json = VALUES(raw_json)
             """,
-            id, name, department, careType, version, repository.text(row, "effectiveDate"), user.name(), toJson(row),
+            id, name, department, departmentId, careType, triggerStage, version, repository.text(row, "effectiveDate"), user.name(), toJson(row),
             repository.text(row, "createdAt")
         );
         jdbcTemplate.update("DELETE FROM inventory_package_lines WHERE package_id = ?", id);
@@ -136,12 +246,14 @@ public class InventoryPackageService {
         if (lines.isEmpty()) throw new IllegalArgumentException("套餐至少需要一项物资");
         validateConsumptionModes(lines);
         String department = repository.text(target, "department");
+        String departmentId = resolveDepartmentId(repository.text(target, "departmentId"), department);
         String careType = normalizeCareType(repository.text(target, "careType", repository.text(target, "route")));
-        jdbcTemplate.query("SELECT id FROM inventory_packages WHERE department = ? AND care_type = ? FOR UPDATE",
-            (resultSet, rowNumber) -> resultSet.getString("id"), department, careType);
+        String triggerStage = normalizeTriggerStage(repository.text(target, "triggerStage", "REVIEW"));
+        jdbcTemplate.query("SELECT id FROM inventory_packages WHERE department_id = ? AND care_type = ? AND trigger_stage = ? FOR UPDATE",
+            (resultSet, rowNumber) -> resultSet.getString("id"), departmentId, careType, triggerStage);
         jdbcTemplate.update(
-            "UPDATE inventory_packages SET status = 'disabled', raw_json = JSON_SET(raw_json, '$.status', 'disabled') WHERE department = ? AND care_type = ? AND status = 'enabled'",
-            department, careType
+            "UPDATE inventory_packages SET status = 'disabled', raw_json = JSON_SET(raw_json, '$.status', 'disabled') WHERE department_id = ? AND care_type = ? AND trigger_stage = ? AND status = 'enabled'",
+            departmentId, careType, triggerStage
         );
         jdbcTemplate.update(
             "UPDATE inventory_packages SET status = 'enabled', effective_date = COALESCE(NULLIF(effective_date, ''), ?), raw_json = JSON_SET(raw_json, '$.status', 'enabled', '$.effectiveDate', COALESCE(NULLIF(effective_date, ''), ?), '$.operator', ?) WHERE id = ?",
@@ -379,9 +491,26 @@ public class InventoryPackageService {
         return details;
     }
 
-    private int nextVersion(String department, String careType) {
-        Integer version = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(version_no), 0) + 1 FROM inventory_packages WHERE department = ? AND care_type = ?", Integer.class, department, careType);
+    private int nextVersion(String departmentId, String careType, String triggerStage) {
+        Integer version = jdbcTemplate.queryForObject(
+            "SELECT COALESCE(MAX(version_no), 0) + 1 FROM inventory_packages WHERE department_id = ? AND care_type = ? AND trigger_stage = ?",
+            Integer.class, departmentId, careType, triggerStage);
         return version == null ? 1 : version;
+    }
+
+    private String resolveDepartmentId(String departmentId, String department) {
+        if (departmentId != null && !departmentId.isBlank()) return departmentId;
+        List<String> rows = jdbcTemplate.query(
+            "SELECT id FROM clinic_departments WHERE name = ? ORDER BY id LIMIT 1",
+            (resultSet, rowNumber) -> resultSet.getString(1), department
+        );
+        if (rows.isEmpty()) throw new IllegalArgumentException("未找到套餐所属科室：" + department);
+        return rows.get(0);
+    }
+
+    static String normalizeTriggerStage(String stage) {
+        if (stage == null || stage.isBlank()) return "REVIEW";
+        return stage.trim().toUpperCase();
     }
 
     private boolean isManager(SessionUser user) {

@@ -39,10 +39,11 @@ import { Search } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useRouter } from "vue-router";
 import { useDebounceFn } from "@vueuse/core";
+import { getFlatMenuList } from "@/utils";
 
 const router = useRouter();
 const authStore = useAuthStore();
-const menuList = computed(() => authStore.flatMenuListGet.filter(item => !item.meta.isHide));
+const menuList = computed(() => getFlatMenuList(authStore.showMenuListGet).filter(item => !item.meta.isHide));
 
 const activePath = ref("");
 const mouseoverMenuItem = (menu: Menu.MenuOptions) => {

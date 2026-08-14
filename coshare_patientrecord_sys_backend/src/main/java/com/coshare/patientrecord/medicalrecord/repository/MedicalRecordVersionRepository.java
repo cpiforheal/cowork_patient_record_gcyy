@@ -62,7 +62,15 @@ public class MedicalRecordVersionRepository {
         row.put("operatorRole", user.role());
         row.put("generatedAt", generatedAt);
         row.put("finalizedAt", finalizedAt);
+        row.put("sourceEncounterId", text(sourceSnapshot, "sourceEncounterId"));
+        row.put("sourceDigest", text(sourceSnapshot, "sourceDigest"));
+        if (sourceSnapshot.has("sourceFactsRevision")) row.put("sourceFactsRevision", sourceSnapshot.path("sourceFactsRevision").asLong());
+        row.put("validityStatus", "CURRENT");
+        row.put("invalidatedAt", "");
+        row.put("invalidatedReason", "");
+        row.put("finalizedBy", "");
         row.put("voidedAt", "");
+        row.put("voidedBy", "");
         row.put("voidReason", "");
         row.set("sourceFieldSnapshot", sourceSnapshot);
         upsertRaw(row);
@@ -72,33 +80,50 @@ public class MedicalRecordVersionRepository {
     public void upsertRaw(ObjectNode row) {
         jdbcTemplate.update("""
             INSERT INTO clinic_generated_medical_records (
-              id, patient_id, version, status, content, content_hash, model, operator,
-              operator_role, generated_at, finalized_at, voided_at, void_reason,
+              id, patient_id, source_encounter_id, version, status, validity_status,
+              content, content_hash, source_digest, source_facts_revision, model, operator,
+              operator_role, generated_at, finalized_at, finalized_by, invalidated_at, invalidated_reason,
+              voided_at, voided_by, void_reason,
               source_snapshot, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               status = VALUES(status),
+              validity_status = VALUES(validity_status),
               content = VALUES(content),
               content_hash = VALUES(content_hash),
+              source_digest = VALUES(source_digest),
+              source_facts_revision = VALUES(source_facts_revision),
               model = VALUES(model),
               finalized_at = VALUES(finalized_at),
+              finalized_by = VALUES(finalized_by),
+              invalidated_at = VALUES(invalidated_at),
+              invalidated_reason = VALUES(invalidated_reason),
               voided_at = VALUES(voided_at),
+              voided_by = VALUES(voided_by),
               void_reason = VALUES(void_reason),
               source_snapshot = VALUES(source_snapshot),
               raw_json = VALUES(raw_json)
             """,
             text(row, "id"),
             text(row, "patientId"),
+            text(row, "sourceEncounterId"),
             row.path("version").asInt(1),
             text(row, "status"),
+            text(row, "validityStatus", "CURRENT"),
             text(row, "content"),
             text(row, "contentHash"),
+            text(row, "sourceDigest"),
+            row.has("sourceFactsRevision") ? row.path("sourceFactsRevision").asLong() : null,
             text(row, "model"),
             text(row, "operator"),
             text(row, "operatorRole"),
             text(row, "generatedAt"),
             text(row, "finalizedAt"),
+            text(row, "finalizedBy"),
+            text(row, "invalidatedAt"),
+            text(row, "invalidatedReason"),
             text(row, "voidedAt"),
+            text(row, "voidedBy"),
             text(row, "voidReason"),
             toJson(row.path("sourceFieldSnapshot")),
             toJson(row)
@@ -161,12 +186,19 @@ public class MedicalRecordVersionRepository {
         );
     }
 
+    public int deleteRecord(String id) {
+        if (safe(id).isBlank()) throw new IllegalArgumentException("缺少目标病历版本ID");
+        return jdbcTemplate.update("DELETE FROM clinic_generated_medical_records WHERE id = ?", id);
+    }
+
     public ObjectNode loadRecord(String id) {
         if (safe(id).isBlank()) throw new IllegalArgumentException("缺少目标病历版本ID");
         java.util.List<ObjectNode> rows = jdbcTemplate.query(
             """
-                SELECT id, patient_id, version, status, content, content_hash, model, operator,
-                       operator_role, generated_at, finalized_at, voided_at, void_reason, raw_json
+                SELECT id, patient_id, source_encounter_id, version, status, validity_status,
+                       content, content_hash, source_digest, source_facts_revision, model, operator,
+                       operator_role, generated_at, finalized_at, finalized_by, invalidated_at, invalidated_reason,
+                       voided_at, voided_by, void_reason, raw_json
                 FROM clinic_generated_medical_records WHERE id = ? LIMIT 1
                 """,
             (rs, rowNum) -> readStoredRecord(rs),
@@ -182,8 +214,10 @@ public class MedicalRecordVersionRepository {
     public ArrayNode versionsNode(String patientId, String templateVersion, String generatorName, int limit) {
         ArrayNode rows = objectMapper.createArrayNode();
         String sql = """
-                SELECT id, patient_id, version, status, content, content_hash, model, operator,
-                       operator_role, generated_at, finalized_at, voided_at, void_reason, raw_json
+                SELECT id, patient_id, source_encounter_id, version, status, validity_status,
+                       content, content_hash, source_digest, source_facts_revision, model, operator,
+                       operator_role, generated_at, finalized_at, finalized_by, invalidated_at, invalidated_reason,
+                       voided_at, voided_by, void_reason, raw_json
                 FROM clinic_generated_medical_records
                 WHERE patient_id = ?
                 ORDER BY version DESC, generated_at DESC
@@ -227,7 +261,15 @@ public class MedicalRecordVersionRepository {
         putIfMissing(row, "operatorRole", record.operatorRole());
         putIfMissing(row, "generatedAt", record.generatedAt());
         putIfMissing(row, "finalizedAt", record.finalizedAt());
+        putIfMissing(row, "sourceEncounterId", record.sourceEncounterId());
+        putIfMissing(row, "sourceDigest", record.sourceDigest());
+        if (!row.has("sourceFactsRevision") && record.sourceFactsRevision() != null) row.put("sourceFactsRevision", record.sourceFactsRevision());
+        putIfMissing(row, "validityStatus", record.validityStatus());
+        putIfMissing(row, "invalidatedAt", record.invalidatedAt());
+        putIfMissing(row, "invalidatedReason", record.invalidatedReason());
+        putIfMissing(row, "finalizedBy", record.finalizedBy());
         putIfMissing(row, "voidedAt", record.voidedAt());
+        putIfMissing(row, "voidedBy", record.voidedBy());
         putIfMissing(row, "voidReason", record.voidReason());
         if (!row.has("fileName")) row.put("fileName", "医生目标病历-V" + row.path("version").asInt(1) + ".docx");
         if (!row.has("downloadUrl")) row.put("downloadUrl", "/clinic-api/medical-record/download?id=" + text(row, "id"));
@@ -250,7 +292,15 @@ public class MedicalRecordVersionRepository {
             resultSet.getString("operator_role"),
             resultSet.getString("generated_at"),
             resultSet.getString("finalized_at"),
+            resultSet.getString("source_encounter_id"),
+            resultSet.getString("source_digest"),
+            resultSet.getObject("source_facts_revision") == null ? null : resultSet.getLong("source_facts_revision"),
+            resultSet.getString("validity_status"),
+            resultSet.getString("invalidated_at"),
+            resultSet.getString("invalidated_reason"),
+            resultSet.getString("finalized_by"),
             resultSet.getString("voided_at"),
+            resultSet.getString("voided_by"),
             resultSet.getString("void_reason"),
             resultSet.getString("raw_json")
         );
@@ -281,6 +331,11 @@ public class MedicalRecordVersionRepository {
 
     private String text(JsonNode node, String key) {
         return node == null ? "" : node.path(key).asText("");
+    }
+
+    private String text(JsonNode node, String key, String fallback) {
+        String value = text(node, key);
+        return value.isBlank() ? fallback : value;
     }
 
     private static String safe(String value) {

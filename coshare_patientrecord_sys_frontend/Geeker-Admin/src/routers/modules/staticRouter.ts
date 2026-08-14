@@ -1,5 +1,6 @@
 import { RouteRecordRaw } from "vue-router";
 import { HOME_URL, LOGIN_URL } from "@/config";
+import { inventorySystemRoutes } from "@/routers/modules/inventorySystem";
 
 /**
  * staticRouter (静态路由)
@@ -25,18 +26,47 @@ export const staticRouter: RouteRecordRaw[] = [
     children: [
       {
         path: HOME_URL,
-        name: "home",
-        component: () => import("@/views/home/index.vue"),
+        name: "welcome",
+        component: () => import("@/views/welcome/index.vue"),
         meta: {
           icon: "HomeFilled",
-          title: "我的待办",
+          title: "主页",
           isLink: "",
           isHide: false,
           isFull: false,
           isAffix: true,
           isKeepAlive: true
         }
-      }
+      },
+      {
+        path: "/home/index",
+        name: "home",
+        component: () => import("@/views/home/index.vue"),
+        meta: {
+          icon: "List",
+          title: "我的待办",
+          isLink: "",
+          isHide: false,
+          isFull: false,
+          isAffix: false,
+          isKeepAlive: true
+        }
+      },
+      {
+        path: "/system-select",
+        name: "systemSelect",
+        component: () => import("@/views/system-select/index.vue"),
+        meta: {
+          icon: "Grid",
+          title: "系统选择",
+          isLink: "",
+          isHide: true,
+          isFull: false,
+          isAffix: false,
+          isKeepAlive: false
+        }
+      },
+      ...inventorySystemRoutes
     ]
   }
 ];

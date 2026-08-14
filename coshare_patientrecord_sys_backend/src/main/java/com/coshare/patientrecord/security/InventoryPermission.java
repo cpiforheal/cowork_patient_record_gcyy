@@ -7,17 +7,19 @@ import org.springframework.web.server.ResponseStatusException;
 
 public final class InventoryPermission {
 
-    private static final Set<String> APPROVER_ROLES = Set.of("admin", "quality");
-    private static final Set<String> COUNTER_ROLES = Set.of("admin", "quality");
+    private static final Set<String> APPROVER_ROLES = Set.of("warehouse");
+    private static final Set<String> ITEM_MANAGER_ROLES = Set.of("admin", "warehouse");
+    private static final Set<String> COUNTER_ROLES = Set.of("warehouse", "quality");
     private static final Set<String> STAFF_ROLES = Set.of(
-        "admin", "quality", "nurse", "nursing", "doctor", "frontdesk", "reception", "lab", "ecg", "ultrasound", "inspection"
+        "admin", "quality", "manager", "warehouse", "nurse", "doctor", "frontdesk", "reception",
+        "lab", "ecg", "ultrasound", "inspection", "tcm_pharmacy"
     );
 
     private InventoryPermission() {}
 
     public static SessionUser requireAdmin() {
         SessionUser user = currentUserOrThrow();
-        if (!"admin".equals(user.role())) {
+        if (!"warehouse".equals(user.role())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无进销存管理权限");
         }
         return user;
@@ -40,13 +42,25 @@ public final class InventoryPermission {
     }
 
     public static SessionUser requireStockKeeper() {
-        return requireAdmin();
+        SessionUser user = currentUserOrThrow();
+        if (!ITEM_MANAGER_ROLES.contains(user.role())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无物资档案及库存维护权限");
+        }
+        return user;
     }
 
     public static SessionUser requireStaff() {
         SessionUser user = currentUserOrThrow();
         if (!STAFF_ROLES.contains(user.role())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无进销存操作权限");
+        }
+        return user;
+    }
+
+    public static SessionUser requireReportViewer() {
+        SessionUser user = currentUserOrThrow();
+        if (!Set.of("admin", "quality", "manager").contains(user.role())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无科室耗材报表权限");
         }
         return user;
     }

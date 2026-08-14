@@ -157,7 +157,7 @@ catch {
 try {
     $dbHealth = Test-HttpJson "$BackendUrl/health/db"
     $dbOk = $dbHealth.status -eq "ok"
-    Write-Check "Database health" $(if ($dbOk) { "PASS" } else { "FAIL" }) ($dbHealth | ConvertTo-Json -Compress) "Check MYSQL_URL, MYSQL_USERNAME, and MYSQL_PASSWORD in config\runtime.env."
+    Write-Check "Database health" $(if ($dbOk) { "PASS" } else { "FAIL" }) ($dbHealth | ConvertTo-Json -Compress) "Check MYSQL_URL plus the separate runtime and migration credentials in config\runtime.env."
 }
 catch {
     Write-Check "Database health" "FAIL" $_.Exception.Message "Backend is not running or database is unavailable."

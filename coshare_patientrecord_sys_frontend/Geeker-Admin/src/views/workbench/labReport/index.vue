@@ -2,7 +2,7 @@
   <div class="table-box lab-report-page">
     <section class="page-head">
       <div>
-        <h2>检验报告模板填写</h2>
+        <h2>检验报告填写</h2>
         <p>左侧填写可变指标，右侧按检验报告样式即时预览；保存后同步到健康档案、附件索引和时间轴。</p>
       </div>
       <el-tag effect="plain" size="large">{{ roleName }} · 检验室模板</el-tag>
@@ -50,15 +50,22 @@
 
     <section class="workspace-layout">
       <aside class="template-sidebar">
+        <el-select v-model="templateStatusFilter" size="small" class="template-status-filter">
+          <el-option label="待填写 / 待补全" value="pending" />
+          <el-option label="全部报告" value="all" />
+          <el-option label="仅已填写" value="completed" />
+        </el-select>
         <button
-          v-for="item in labReportTemplates"
+          v-for="item in filteredTemplates"
           :key="item.id"
-          :class="{ active: activeTemplateId === item.id }"
+          :class="{ active: activeTemplateId === item.id, completed: templateCompletionState(item) === 'completed' }"
           @click="activeTemplateId = item.id"
         >
           <strong>{{ item.name }}</strong>
           <span>{{ item.subtitle }}</span>
+          <em :class="`template-status-${templateCompletionState(item)}`">{{ templateCompletionLabel(item) }}</em>
         </button>
+        <el-empty v-if="!filteredTemplates.length" :image-size="56" description="没有符合筛选条件的报告" />
       </aside>
 
       <main class="editor-preview-grid">
@@ -68,12 +75,22 @@
               <strong>{{ activeTemplate.name }}</strong>
               <span>{{ activeTemplate.description }}</span>
             </div>
-            <el-tag v-if="activeTemplate.id === 'biochemistry'" type="info" effect="plain">
-              参考范围：{{ patientGender || "未填写性别" }}
-            </el-tag>
-            <el-tag v-if="!canSaveActiveTemplate" type="warning" effect="plain">当前岗位只读</el-tag>
+            <div class="panel-tools">
+              <label v-if="hasGenderSpecificReference" class="reference-gender-filter">
+                <span>参考范围性别</span>
+                <el-select v-model="referenceGender" size="small" :disabled="!selectedPatient" placeholder="请选择">
+                  <el-option label="男" value="男" />
+                  <el-option label="女" value="女" />
+                </el-select>
+              </label>
+              <el-tag v-if="hasGenderSpecificReference" type="info" effect="plain">
+                登记性别：{{ patientGender || "未填写" }}
+              </el-tag>
+              <el-tag v-if="!canSaveActiveTemplate" type="warning" effect="plain">当前岗位只读</el-tag>
+            </div>
           </div>
 
+          <div class="editor-scroll">
           <template v-if="activeTemplate.id === 'ecgImage'">
             <el-alert
               type="info"
@@ -139,11 +156,12 @@
                     @change="syncNumberValue(metric.key)"
                   />
                   <el-input v-else v-model="formValues[metric.key]" :disabled="!canSaveActiveTemplate" placeholder="填写结果" />
-                  <small>参考：{{ metricReference(metric, patientGender) || "按报告单" }}</small>
+                  <small>参考：{{ metricReference(metric, referenceGender) || "按报告单" }}</small>
                 </article>
               </div>
             </el-form>
           </template>
+          </div>
 
           <div class="actions">
             <el-button :icon="Refresh" :disabled="!canSaveActiveTemplate" @click="resetTemplateValues">重置当前模板</el-button>
@@ -204,7 +222,7 @@
                   <td>{{ metric.shortName }}</td>
                   <td class="result-cell">{{ formValues[metric.key] || "" }}</td>
                   <td>{{ metric.unit || "" }}</td>
-                  <td>{{ metricReference(metric, patientGender) }}</td>
+                  <td>{{ metricReference(metric, referenceGender) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -251,6 +269,7 @@ const canEditLabMetrics = computed(() => ["admin", "doctor", "lab"].includes(cur
 type LabPatientCandidate = PatientRow & {
   preAiEncounterId?: string;
   legacyPatientId?: string;
+  legacyPatientAvailable?: boolean;
   preAiGender?: string;
 };
 
@@ -261,8 +280,10 @@ const saving = ref(false);
 const matchedPatients = ref<LabPatientCandidate[]>([]);
 const selectedPatient = ref<LabPatientCandidate | null>(null);
 const patientGender = ref("");
+const referenceGender = ref("");
+const templateStatusFilter = ref<"all" | "pending" | "completed">("pending");
 const patientFieldValues = ref<Record<string, string>>({});
-const activeTemplateId = ref<LabTemplateId>("bloodRoutine");
+const activeTemplateId = ref<LabTemplateId>(currentRole.value === "ecg" ? "ecgImage" : "bloodRoutine");
 const reportDate = ref(today());
 const reportRemark = ref("");
 const formValues = reactive<Record<string, string>>({});
@@ -275,11 +296,17 @@ const patientPickerKey = (patient: LabPatientCandidate) =>
 
 const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounterSummary[]) => {
   const candidates = new Map<string, LabPatientCandidate>();
-  legacyPatients.forEach(patient => candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id }));
+  legacyPatients.forEach(patient =>
+    candidates.set(`legacy:${patient.id}`, { ...patient, legacyPatientId: patient.id, legacyPatientAvailable: true })
+  );
   encounters.forEach(encounter => {
     const linkedKey = encounter.sourcePatientId ? `legacy:${encounter.sourcePatientId}` : "";
     if (linkedKey && candidates.has(linkedKey)) {
-      Object.assign(candidates.get(linkedKey)!, { preAiEncounterId: encounter.id, preAiGender: encounter.gender });
+      Object.assign(candidates.get(linkedKey)!, {
+        preAiEncounterId: encounter.id,
+        preAiGender: encounter.gender,
+        legacyPatientAvailable: true
+      });
       return;
     }
     candidates.set(`preai:${encounter.id}`, {
@@ -304,6 +331,40 @@ const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounte
 };
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
+const templateCompletionState = (template: (typeof labReportTemplates)[number]) => {
+  if (template.id === "ecgImage") return patientFieldValues.value.ecgStatus ? "completed" : "pending";
+  const total = template.metrics.length;
+  const filled = template.metrics.filter(metric =>
+    String(patientFieldValues.value[metricStorageKey(template.id, metric.key)] || "").trim()
+  ).length;
+  return total > 0 && filled === total ? "completed" : "pending";
+};
+const templateCompletionLabel = (template: (typeof labReportTemplates)[number]) => {
+  if (template.id === "ecgImage") return templateCompletionState(template) === "completed" ? "已填写" : "待上传";
+  const filled = template.metrics.filter(metric =>
+    String(patientFieldValues.value[metricStorageKey(template.id, metric.key)] || "").trim()
+  ).length;
+  return filled ? `待补全 ${filled}/${template.metrics.length}` : "待填写";
+};
+const filteredTemplates = computed(() =>
+  labReportTemplates.filter(template => templateStatusFilter.value === "all" || templateCompletionState(template) === templateStatusFilter.value)
+);
+const mergePreAiLabReportValues = (reports: Array<{ templateId: string; reportDate: string; metrics: Array<{ key: string; value: string }> }>) => {
+  const values: Record<string, string> = {};
+  reports
+    .filter(report => report.reportDate === reportDate.value)
+    .forEach(report => {
+      const template = labReportTemplates.find(item => item.id === report.templateId);
+      if (!template) return;
+      report.metrics.forEach(metric => {
+        if (String(metric.value || "").trim()) values[metricStorageKey(template.id, metric.key)] = metric.value;
+      });
+    });
+  patientFieldValues.value = { ...patientFieldValues.value, ...values };
+};
+const hasGenderSpecificReference = computed(() =>
+  activeTemplate.value.metrics.some(metric => Boolean(metric.maleReference || metric.femaleReference))
+);
 const canSaveActiveTemplate = computed(() =>
   activeTemplate.value.id === "ecgImage"
     ? ["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)
@@ -331,6 +392,18 @@ const hydrateTemplateValues = () => {
 };
 
 watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
+
+watch(patientGender, gender => {
+  referenceGender.value = gender.includes("女") ? "女" : gender.includes("男") ? "男" : "";
+});
+
+watch(
+  currentRole,
+  role => {
+    if (role === "ecg") activeTemplateId.value = "ecgImage";
+  },
+  { immediate: true }
+);
 
 const loadTodayPatients = async () => {
   if (todayPatientsLoaded.value || searching.value) return;
@@ -371,6 +444,7 @@ const clearPatientSelection = () => {
   selectedPatient.value = null;
   selectedPatientKey.value = "";
   patientGender.value = "";
+  referenceGender.value = "";
   patientFieldValues.value = {};
   resetTemplateValues();
 };
@@ -381,15 +455,25 @@ const selectPatient = async (patient: LabPatientCandidate) => {
   patientGender.value = patient.preAiGender || "";
   patientFieldValues.value = {};
   if (!patient.legacyPatientId) {
+    if (patient.preAiEncounterId) {
+      const { data: workspace } = await getPreAiWorkspaceApi(patient.preAiEncounterId);
+      mergePreAiLabReportValues(workspace.labReports);
+    }
     hydrateTemplateValues();
     return;
   }
   try {
     const { data } = await getPatientDetailApi(patient.legacyPatientId);
     patientGender.value = data.fieldValues.gender || "";
+    patient.legacyPatientAvailable = true;
     patientFieldValues.value = data.fieldValues || {};
+    if (patient.preAiEncounterId) {
+      const { data: workspace } = await getPreAiWorkspaceApi(patient.preAiEncounterId);
+      mergePreAiLabReportValues(workspace.labReports);
+    }
     hydrateTemplateValues();
   } catch {
+    patient.legacyPatientAvailable = false;
     patientGender.value = "";
   }
 };
@@ -429,11 +513,14 @@ const loadPatientFromRoute = async () => {
           candidate = {
             ...detail.patient,
             legacyPatientId: detail.patient.id,
+            legacyPatientAvailable: true,
             preAiEncounterId: encounterId,
             preAiGender: workspace.encounter.patient.gender || detail.fieldValues.gender || ""
           };
           patientFieldValues.value = detail.fieldValues || {};
+          mergePreAiLabReportValues(workspace.labReports);
         } catch {
+          candidate = { ...candidate, legacyPatientId: undefined, legacyPatientAvailable: false };
           patientFieldValues.value = {};
         }
       }
@@ -441,11 +528,12 @@ const loadPatientFromRoute = async () => {
       selectedPatientKey.value = patientPickerKey(candidate);
       matchedPatients.value = [candidate];
       patientGender.value = candidate.preAiGender || "";
+      mergePreAiLabReportValues(workspace.labReports);
       hydrateTemplateValues();
       return;
     }
     const { data } = await getPatientDetailApi(routePatientId);
-    const candidate: LabPatientCandidate = { ...data.patient, legacyPatientId: data.patient.id };
+    const candidate: LabPatientCandidate = { ...data.patient, legacyPatientId: data.patient.id, legacyPatientAvailable: true };
     selectedPatient.value = candidate;
     selectedPatientKey.value = patientPickerKey(candidate);
     matchedPatients.value = [candidate];
@@ -543,7 +631,10 @@ const buildArchiveValues = () => {
 
 const validateBeforeSave = () => {
   if (!selectedPatient.value) return "请先选择患者";
-  if (activeTemplate.value.id === "ecgImage" && !selectedPatient.value.legacyPatientId)
+  if (
+    activeTemplate.value.id === "ecgImage" &&
+    (!selectedPatient.value.legacyPatientId || !selectedPatient.value.legacyPatientAvailable)
+  )
     return "心电图不属于本次前置病历化验室节点";
   if (!canSaveActiveTemplate.value) return "当前岗位只能查看该检验报告模板，不能保存检验数值";
   if (activeTemplate.value.id === "ecgImage" && !ecgFiles.value.length) return "请先选择心电图图片";
@@ -571,16 +662,19 @@ const saveToArchive = async () => {
   try {
     const batchId = `lab-${selectedPatient.value.id}-${Date.now()}`;
     const archiveValues = buildArchiveValues();
-    if (selectedPatient.value.legacyPatientId) {
+    const legacyPatientId =
+      selectedPatient.value.legacyPatientAvailable && selectedPatient.value.legacyPatientId
+        ? selectedPatient.value.legacyPatientId
+        : "";
+    if (legacyPatientId) {
       await savePatientRecordApi({
-        id: selectedPatient.value.legacyPatientId,
+        id: legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         values: archiveValues
       });
-      patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
     }
-    if (activeTemplate.value.id === "ecgImage" && selectedPatient.value.legacyPatientId) {
+    if (activeTemplate.value.id === "ecgImage" && legacyPatientId) {
       const documents = await Promise.all(
         ecgFiles.value.map(async file => ({
           type: activeTemplate.value.documentType,
@@ -591,7 +685,7 @@ const saveToArchive = async () => {
         }))
       );
       await uploadDocumentsApi({
-        patientId: selectedPatient.value.legacyPatientId,
+        patientId: legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         sourceRole: "ecg",
@@ -599,9 +693,9 @@ const saveToArchive = async () => {
         batchName: `${activeTemplate.value.name}-${reportDate.value}`,
         documents
       });
-    } else if (activeTemplate.value.id !== "ecgImage" && selectedPatient.value.legacyPatientId) {
+    } else if (activeTemplate.value.id !== "ecgImage" && legacyPatientId) {
       await uploadDocumentsApi({
-        patientId: selectedPatient.value.legacyPatientId,
+        patientId: legacyPatientId,
         role: currentRole.value,
         operator: roleName.value,
         sourceRole: "lab",
@@ -619,6 +713,11 @@ const saveToArchive = async () => {
       });
     }
     if (selectedPatient.value.preAiEncounterId && activeTemplate.value.id !== "ecgImage") {
+      const encounterId = selectedPatient.value.preAiEncounterId;
+      const { data: workspace } = await getPreAiWorkspaceApi(encounterId);
+      const expectedVersion = workspace.labReports
+        .filter(report => report.templateId === activeTemplate.value.id && report.reportDate === reportDate.value)
+        .reduce((version, report) => Math.max(version, report.version), 0);
       const metrics = activeTemplate.value.metrics
         .map(metric => ({
           key: metric.key,
@@ -626,17 +725,19 @@ const saveToArchive = async () => {
           shortName: metric.shortName,
           value: String(formValues[metric.key] || "").trim(),
           unit: metric.unit || "",
-          reference: metricReference(metric, patientGender.value) || ""
+          reference: metricReference(metric, referenceGender.value) || ""
         }))
         .filter(metric => metric.value);
-      await savePreAiLabReportApi(selectedPatient.value.preAiEncounterId, {
+      await savePreAiLabReportApi(encounterId, {
         templateId: activeTemplate.value.id,
         templateName: activeTemplate.value.name,
         reportDate: reportDate.value,
         remark: reportRemark.value,
-        metrics
+        metrics,
+        expectedVersion
       });
     }
+    patientFieldValues.value = { ...patientFieldValues.value, ...archiveValues };
     ElMessage.success(
       selectedPatient.value.preAiEncounterId ? "检验报告已保存，并同步到前置病历" : "检验报告已保存入档，并同步到附件索引与时间轴"
     );
@@ -740,6 +841,10 @@ const printPreview = async () => {
   border: 1px solid var(--el-border-color-light);
   border-radius: 8px;
 
+  .template-status-filter {
+    width: 100%;
+  }
+
   button {
     display: grid;
     gap: 4px;
@@ -756,10 +861,30 @@ const printPreview = async () => {
       border-color: var(--el-color-primary-light-5);
     }
 
+    &.completed:not(.active) {
+      background: var(--el-color-success-light-9);
+      border-color: var(--el-color-success-light-7);
+    }
+
     span {
       color: var(--el-text-color-regular);
       font-size: 12px;
       line-height: 1.4;
+    }
+
+    em {
+      width: fit-content;
+      padding: 1px 6px;
+      color: var(--el-color-warning-dark-2);
+      font-size: 12px;
+      font-style: normal;
+      background: var(--el-color-warning-light-9);
+      border-radius: 999px;
+
+      &.template-status-completed {
+        color: var(--el-color-success-dark-2);
+        background: var(--el-color-success-light-8);
+      }
     }
   }
 }
@@ -769,6 +894,22 @@ const printPreview = async () => {
   grid-template-columns: minmax(380px, 0.9fr) minmax(420px, 1.1fr);
   gap: 12px;
   min-width: 0;
+}
+
+.editor-panel {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+}
+
+.editor-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .panel-title {
@@ -836,11 +977,39 @@ const printPreview = async () => {
 }
 
 .actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 14px;
+  margin: 14px -16px -16px;
+  padding: 12px 16px 16px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 88%), #ffffff 38%);
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.panel-tools,
+.reference-gender-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.reference-gender-filter {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+
+  .el-select {
+    width: 84px;
+  }
 }
 
 .ecg-uploader {

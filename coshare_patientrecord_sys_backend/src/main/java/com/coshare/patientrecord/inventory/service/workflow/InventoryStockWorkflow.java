@@ -1,7 +1,9 @@
 package com.coshare.patientrecord.inventory.service.workflow;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.inventory.repository.InventoryRepository;
+import com.coshare.patientrecord.inventory.service.InventoryLedgerService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
@@ -16,25 +18,47 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryStockWorkflow {
 
     private final InventoryRepository repository;
+    private final InventoryLedgerService ledgerService;
+    private final InventoryAccessService inventoryAccessService;
 
-    public InventoryStockWorkflow(InventoryRepository repository) {
+    public InventoryStockWorkflow(InventoryRepository repository, InventoryLedgerService ledgerService, InventoryAccessService inventoryAccessService) {
         this.repository = repository;
+        this.ledgerService = ledgerService;
+        this.inventoryAccessService = inventoryAccessService;
     }
 
     @Transactional
     public ObjectNode saveItem(JsonNode payload, SessionUser user) {
+        requireItemManager(user);
         ObjectNode item = repository.object(payload).deepCopy();
         repository.applyOperator(item, user);
         if (repository.text(item, "id").isBlank()) item.put("id", "item-" + UUID.randomUUID());
         if (repository.text(item, "name").isBlank()) throw new IllegalArgumentException("物资名称不能为空");
+        applyItemCompatibilityDefaults(item);
         item.put("enabled", item.path("enabled").asBoolean(true));
         repository.upsertItem(item);
         repository.log(repository.text(item, "operator", "系统"), "维护物资档案", "item", repository.text(item, "name"), "新增或更新物资基础信息");
         return repository.readDbForUser(user);
     }
 
+    static void applyItemCompatibilityDefaults(ObjectNode item) {
+        String unit = text(item, "unit");
+        if (text(item, "baseUnit").isBlank()) item.put("baseUnit", unit);
+        if (text(item, "issueUnit").isBlank()) item.put("issueUnit", unit);
+        if (!item.has("quantityPrecision") || !item.path("quantityPrecision").canConvertToInt()) item.put("quantityPrecision", 2);
+        if (text(item, "normalizationStatus").isBlank()) item.put("normalizationStatus", "standard");
+        item.put("effectiveLifeManaged", item.path("effectiveLifeManaged").asBoolean(false));
+    }
+
+    private static String text(JsonNode node, String key) {
+        if (node == null) return "";
+        JsonNode value = node.path(key);
+        return value.isMissingNode() || value.isNull() ? "" : value.asText();
+    }
+
     @Transactional
     public ObjectNode inbound(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
         ObjectNode row = repository.object(payload).deepCopy();
         repository.applyOperator(row, user);
         String itemId = repository.text(row, "itemId");
@@ -57,6 +81,7 @@ public class InventoryStockWorkflow {
         batch.put("source", repository.text(row, "source"));
         if (repository.text(batch, "createdAt").isBlank()) batch.put("createdAt", repository.now());
         repository.upsertBatch(batch);
+        ledgerService.recordInbound(itemId, repository.text(batch, "id"), quantity, user, repository.text(row, "source"));
         repository.movement("inbound", itemId, repository.text(batch, "id"), quantity, "", repository.text(row, "operator"), repository.text(row, "source"), repository.text(batch, "id"));
         repository.log(repository.text(row, "operator"), "物资入库", "batch", repository.itemLabel(itemId), "入库 " + quantity + " " + repository.itemUnit(itemId));
         return repository.readDbForUser(user);
@@ -71,6 +96,7 @@ public class InventoryStockWorkflow {
         if (repository.text(row, "weekNo").isBlank()) throw new IllegalArgumentException("请选择周次");
         if (repository.text(row, "department").isBlank()) throw new IllegalArgumentException("请选择科室");
         if (repository.text(row, "itemId").isBlank()) throw new IllegalArgumentException("请选择物资");
+        ledgerService.populateWeeklySuggestion(row, user);
         row.put("id", repository.weeklyConsumptionId(row));
         row.put("confirmedAt", repository.now());
         repository.saveWeeklyConsumption(row);
@@ -95,18 +121,10 @@ public class InventoryStockWorkflow {
         BigDecimal quantity = repository.quantity(row, "quantity");
         if (itemId.isBlank() || quantity.signum() <= 0) throw new IllegalArgumentException("请选择物资并填写数量");
         if ("return".equals(type)) {
-            ObjectNode batch = repository.chooseBatchForPositiveAdjustment(itemId, repository.text(row, "batchId"), "退回补录");
-            repository.putQuantity(batch, "quantity", repository.quantity(batch, "quantity").add(quantity));
-            repository.upsertBatch(batch);
-            repository.movement("return", itemId, repository.text(batch, "id"), quantity, repository.text(row, "department"), repository.text(row, "operator"), repository.text(row, "reason"), "");
+            ledgerService.returnToCentral(row, user);
             repository.log(repository.text(row, "operator"), "物资退回", "movement", repository.itemLabel(itemId), repository.text(row, "department") + " 退回 " + quantity);
         } else {
-            ObjectNode batch = repository.chooseBatch(itemId, repository.text(row, "batchId"));
-            BigDecimal available = repository.quantity(batch, "quantity");
-            if (available.compareTo(quantity) < 0) throw new IllegalArgumentException("库存不足，无法报废");
-            repository.putQuantity(batch, "quantity", available.subtract(quantity));
-            repository.upsertBatch(batch);
-            repository.movement("scrap", itemId, repository.text(batch, "id"), quantity.negate(), repository.text(row, "department"), repository.text(row, "operator"), repository.text(row, "reason"), "");
+            ledgerService.scrap(row, user);
             repository.log(repository.text(row, "operator"), "物资报废", "movement", repository.itemLabel(itemId), "报废 " + quantity);
         }
         return repository.readDbForUser(user);
@@ -118,12 +136,12 @@ public class InventoryStockWorkflow {
         repository.applyOperator(row, user);
         String itemId = repository.text(row, "itemId");
         if (itemId.isBlank()) throw new IllegalArgumentException("请选择物资");
-        ObjectNode batch = repository.chooseBatchForPositiveAdjustment(itemId, repository.text(row, "batchId"), "盘点补录");
-        BigDecimal bookQuantity = repository.quantity(batch, "quantity");
-        BigDecimal actualQuantity = repository.quantity(row, "actualQuantity");
-        BigDecimal difference = actualQuantity.subtract(bookQuantity);
-        repository.putQuantity(batch, "quantity", actualQuantity);
-        repository.upsertBatch(batch);
+        InventoryLedgerService.CountResult result = ledgerService.count(row, user);
+        BigDecimal bookQuantity = result.bookQuantity();
+        BigDecimal actualQuantity = result.actualQuantity();
+        BigDecimal difference = result.difference();
+        ObjectNode batch = row.objectNode();
+        batch.put("id", result.batchId());
 
         row.put("id", "count-" + UUID.randomUUID());
         row.put("batchId", repository.text(batch, "id"));
@@ -132,8 +150,25 @@ public class InventoryStockWorkflow {
         repository.putQuantity(row, "differenceQuantity", difference);
         row.put("countedAt", repository.now());
         repository.saveInventoryCount(row, itemId, batch, bookQuantity, actualQuantity, difference);
-        repository.movement("count", itemId, repository.text(batch, "id"), difference, "", repository.text(row, "operator"), repository.text(row, "reason"), repository.text(row, "id"));
         repository.log(repository.text(row, "operator"), "库存盘点", "count", repository.itemLabel(itemId), "账面 " + bookQuantity + "，实盘 " + actualQuantity);
         return repository.readDbForUser(user);
+    }
+
+    private void requireWarehouse(SessionUser user) {
+        if (user == null || !inventoryAccessService.hasCapability(user, "inventory:issue")) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "只有仓库岗位可以维护物资档案和中央仓库存"
+            );
+        }
+    }
+
+    private void requireItemManager(SessionUser user) {
+        if (user == null || !inventoryAccessService.hasCapability(user, "inventory:item:manage")) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "只有管理员和仓库岗位可以维护物资档案"
+            );
+        }
     }
 }

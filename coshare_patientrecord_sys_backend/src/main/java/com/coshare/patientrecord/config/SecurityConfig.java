@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.config;
 
 import com.coshare.patientrecord.security.AuthTokenFilter;
+import com.coshare.patientrecord.security.InventoryPortalBoundaryFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
@@ -14,7 +15,7 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectProvider<AuthTokenFilter> authTokenFilter) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectProvider<AuthTokenFilter> authTokenFilter, ObjectProvider<InventoryPortalBoundaryFilter> inventoryPortalBoundaryFilter) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
@@ -28,7 +29,9 @@ public class SecurityConfig {
                     "/system/**",
                     "/templates/**",
                     "/encounters/**",
+                    "/pre-ai/**",
                     "/inventory/**",
+                    "/inventory-system/**",
                     "/tcm-pharmacy/**",
                     "/favicon.ico",
                     "/assets/**",
@@ -37,12 +40,20 @@ public class SecurityConfig {
                     "/auth/options",
                     "/auth/options/accounts"
                 ).permitAll()
-                .requestMatchers("/health/db", "/auth/logout", "/auth/password", "/clinic-api/**", "/inventory-api/**").authenticated()
+                .requestMatchers(
+                    "/health/db",
+                    "/auth/logout",
+                    "/auth/password",
+                    "/auth/navigation",
+                    "/clinic-api/**",
+                    "/inventory-api/**"
+                ).authenticated()
                 .anyRequest().authenticated()
             )
             .httpBasic(httpBasic -> httpBasic.disable())
             .formLogin(formLogin -> formLogin.disable());
-        authTokenFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
+        inventoryPortalBoundaryFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
+        authTokenFilter.ifAvailable(filter -> http.addFilterAfter(filter, InventoryPortalBoundaryFilter.class));
         return http.build();
     }
 

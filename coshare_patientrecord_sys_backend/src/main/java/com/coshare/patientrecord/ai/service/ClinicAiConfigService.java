@@ -4,13 +4,11 @@ import com.coshare.patientrecord.ai.entity.StoredAiConfig;
 import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
 import com.coshare.patientrecord.ai.model.EffectiveTtsConfig;
 import com.coshare.patientrecord.ai.repository.ClinicAiConfigRepository;
-import com.coshare.patientrecord.ai.repository.ClinicAiConfigSchemaInitializer;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -44,7 +42,6 @@ public class ClinicAiConfigService {
     private static final int GCM_TAG_BITS = 128;
     private static final int GCM_IV_BYTES = 12;
 
-    private final ClinicAiConfigSchemaInitializer schemaInitializer;
     private final ClinicAiConfigRepository configRepository;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -63,7 +60,6 @@ public class ClinicAiConfigService {
     private final byte[] encryptionKey;
 
     public ClinicAiConfigService(
-        ClinicAiConfigSchemaInitializer schemaInitializer,
         ClinicAiConfigRepository configRepository,
         ObjectMapper objectMapper,
         @Value("${clinic.ai.base-url:}") String defaultBaseUrl,
@@ -78,9 +74,9 @@ public class ClinicAiConfigService {
         @Value("${clinic.ai.doubao.tts.resource-id:}") String doubaoTtsDefaultResourceId,
         @Value("${clinic.ai.doubao.tts.voice-type:}") String doubaoTtsDefaultVoiceType,
         @Value("${clinic.ai.doubao.tts.speed-ratio:1.0}") double doubaoTtsDefaultSpeedRatio,
-        @Value("${clinic.ai.config-secret:}") String configSecret
+        @Value("${clinic.ai.config-secret:}") String configSecret,
+        @Value("${spring.profiles.active:}") String activeProfiles
     ) {
-        this.schemaInitializer = schemaInitializer;
         this.configRepository = configRepository;
         this.objectMapper = objectMapper;
         this.defaultBaseUrl = normalizeBaseUrl(defaultBaseUrl);
@@ -95,12 +91,7 @@ public class ClinicAiConfigService {
         this.doubaoTtsDefaultResourceId = safe(firstNonBlank(doubaoTtsDefaultResourceId, System.getenv("CLINIC_AI_DOUBAO_TTS_RESOURCE_ID")));
         this.doubaoTtsDefaultVoiceType = safe(firstNonBlank(doubaoTtsDefaultVoiceType, System.getenv("CLINIC_AI_DOUBAO_TTS_VOICE_TYPE")));
         this.doubaoTtsDefaultSpeedRatio = normalizeSpeedRatio(doubaoTtsDefaultSpeedRatio);
-        this.encryptionKey = deriveEncryptionKey(configSecret);
-    }
-
-    @PostConstruct
-    public void initializeSchema() {
-        schemaInitializer.initializeSchema();
+        this.encryptionKey = deriveEncryptionKey(configSecret, activeProfiles);
     }
 
     public ObjectNode status() {
@@ -118,7 +109,16 @@ public class ClinicAiConfigService {
     public ObjectNode statusFor(String configId) {
         AiDefaults defaults = defaultsFor(configId);
         StoredAiConfig stored = readStoredConfig(configId, defaults.model());
-        EffectiveAiConfig effective = resolveEffectiveConfig(configId);
+        String effectiveApiKey = defaults.apiKey();
+        boolean apiKeyDecryptable = true;
+        if (stored != null && !safe(stored.apiKeyCipher()).isBlank()) {
+            try {
+                effectiveApiKey = decrypt(stored.apiKeyCipher());
+            } catch (ResponseStatusException error) {
+                effectiveApiKey = "";
+                apiKeyDecryptable = false;
+            }
+        }
         ObjectNode status = objectMapper.createObjectNode();
         status.put("baseUrl", stored == null ? defaults.baseUrl() : stored.baseUrl());
         status.put("model", stored == null ? defaults.model() : stored.model());
@@ -126,8 +126,10 @@ public class ClinicAiConfigService {
         status.put("voiceType", stored == null ? defaults.voiceType() : stored.voiceType());
         status.put("speedRatio", stored == null ? defaults.speedRatio() : stored.speedRatio());
         status.put("enabled", stored == null || stored.enabled());
-        status.put("apiKeyConfigured", !effective.apiKey().isBlank());
-        status.put("apiKeyMasked", maskKey(effective.apiKey()));
+        status.put("apiKeyConfigured", !normalizeApiKey(effectiveApiKey).isBlank());
+        status.put("apiKeyMasked", maskKey(effectiveApiKey));
+        status.put("apiKeyDecryptable", apiKeyDecryptable);
+        status.put("apiKeyRequiresReset", stored != null && !apiKeyDecryptable);
         status.put("usingRuntimeConfig", stored != null);
         status.put("updatedAt", stored == null ? "" : stored.updatedAt());
         status.put("updatedBy", stored == null ? "" : stored.updatedBy());
@@ -249,6 +251,15 @@ public class ClinicAiConfigService {
             cipher = encrypt(apiKey);
         } else if (!keepExisting || cipher.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI API Key is required, or keep the existing key");
+        } else {
+            try {
+                decrypt(cipher);
+            } catch (ResponseStatusException error) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "现有 AI API Key 已无法解密，请取消保留现有 Key 并重新填写后保存"
+                );
+            }
         }
 
         String updatedAt = LocalDateTime.now().format(TIME_FORMATTER);
@@ -348,13 +359,22 @@ public class ClinicAiConfigService {
         return normalizeApiKey(defaults.apiKey());
     }
 
-    private byte[] deriveEncryptionKey(String configuredSecret) {
+    private byte[] deriveEncryptionKey(String configuredSecret, String activeProfiles) {
         String secret = safe(configuredSecret);
         if (secret.isBlank()) {
             secret = safe(System.getenv("AI_CONFIG_SECRET"));
         }
+        boolean persistentProfile = java.util.Arrays.stream(safe(activeProfiles).toLowerCase(java.util.Locale.ROOT).split("[,;\\s]+"))
+            .anyMatch(profile -> profile.equals("mysql") || profile.equals("prod") || profile.equals("production"));
+        if (secret.isBlank() && persistentProfile) {
+            throw new IllegalStateException(
+                "Persistent AI configuration requires AI_CONFIG_SECRET; refusing to use a temporary key that would break after restart"
+            );
+        }
         if (secret.isBlank()) {
-            secret = safe(System.getProperty("user.name")) + "|" + safe(System.getProperty("user.dir")) + "|clinic-ai-config-v1";
+            byte[] temporarySecret = new byte[32];
+            secureRandom.nextBytes(temporarySecret);
+            return temporarySecret;
         }
         try {
             return MessageDigest.getInstance("SHA-256").digest(secret.getBytes(StandardCharsets.UTF_8));
@@ -392,7 +412,11 @@ public class ClinicAiConfigService {
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(encryptionKey, "AES"), new GCMParameterSpec(GCM_TAG_BITS, iv));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (Exception error) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to decrypt AI API Key, please save the config again");
+            throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "病历 AI API Key 无法解密，请由管理员在 AI 配置页重新填写并保存 API Key",
+                error
+            );
         }
     }
 

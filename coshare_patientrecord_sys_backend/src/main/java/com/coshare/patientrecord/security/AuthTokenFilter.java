@@ -1,7 +1,7 @@
 package com.coshare.patientrecord.security;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
-import com.coshare.patientrecord.auth.service.AuthSessionService;
+import com.coshare.patientrecord.auth.service.PortalAuthenticationService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,11 +22,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Profile("mysql")
 public class AuthTokenFilter extends OncePerRequestFilter {
 
-    private final AuthSessionService authSessionService;
+    private final PortalAuthenticationService portalAuthenticationService;
     private final ObjectMapper objectMapper;
 
-    public AuthTokenFilter(AuthSessionService authSessionService, ObjectMapper objectMapper) {
-        this.authSessionService = authSessionService;
+    public AuthTokenFilter(PortalAuthenticationService portalAuthenticationService, ObjectMapper objectMapper) {
+        this.portalAuthenticationService = portalAuthenticationService;
         this.objectMapper = objectMapper;
     }
 
@@ -36,6 +36,10 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         return !path.equals("/health/db")
             && !path.equals("/auth/logout")
             && !path.equals("/auth/password")
+            && !path.equals("/auth/navigation")
+            && !path.equals("/auth/active-department")
+            && !path.startsWith("/auth/admin/")
+            && !path.startsWith("/auth/directory/")
             && !path.startsWith("/clinic-api/")
             && !path.startsWith("/inventory-api/");
     }
@@ -43,7 +47,7 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
         throws ServletException, IOException {
-        var sessionUser = authSessionService.authenticate(extractToken(request));
+        var sessionUser = portalAuthenticationService.authenticate(extractToken(request));
         if (sessionUser.isEmpty()) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType("application/json;charset=UTF-8");
@@ -56,6 +60,17 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         }
 
         SessionUser user = sessionUser.get();
+        String path = request.getRequestURI();
+        if (user.mustChangePassword() && !path.equals("/auth/password") && !path.equals("/auth/logout")) {
+            response.setStatus(HttpStatus.FORBIDDEN.value());
+            response.setContentType("application/json;charset=UTF-8");
+            var payload = new LinkedHashMap<String, Object>();
+            payload.put("code", 403);
+            payload.put("msg", "首次登录必须先修改密码");
+            payload.put("data", null);
+            objectMapper.writeValue(response.getWriter(), payload);
+            return;
+        }
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
             user,
             null,

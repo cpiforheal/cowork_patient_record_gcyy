@@ -9,7 +9,6 @@
       <div class="hero-actions">
         <el-button v-if="canCreatePrescription" type="primary" size="large" @click="openCreateDialog">新建电子处方</el-button>
         <el-button v-if="canViewDisplay" size="large" @click="openDisplay">打开取药大屏</el-button>
-        <el-button v-if="currentRole === 'admin'" size="large" plain @click="resetDemo">重置演示数据</el-button>
       </div>
     </header>
 
@@ -29,11 +28,11 @@
             <h2>处方与生产队列</h2>
           </div>
           <div class="filters">
-            <el-input v-model="keyword" clearable placeholder="患者 / 取药号 / 处方号" @keyup.enter="loadList" />
-            <el-select v-model="statusFilter" clearable placeholder="全部状态" @change="loadList">
+            <el-input v-model="keyword" clearable placeholder="患者 / 取药号 / 处方号" @keyup.enter="loadList()" />
+            <el-select v-model="statusFilter" clearable placeholder="全部状态" @change="loadList()">
               <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
-            <el-button @click="loadList">刷新</el-button>
+            <el-button @click="loadList()">刷新</el-button>
           </div>
         </div>
         <div v-loading="loading" class="prescription-list">
@@ -293,7 +292,7 @@
 </template>
 
 <script setup lang="ts" name="tcmPharmacyWorkbench">
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStore } from "@/stores/modules/user";
 import { getPatientListApi } from "@/api/modules/clinic/patients";
@@ -309,7 +308,6 @@ import {
   getTcmPrescriptionsApi,
   getTcmWorkspaceApi,
   markTcmExceptionApi,
-  resetTcmDemoApi,
   reviewTcmPrescriptionApi,
   submitTcmPrescriptionApi,
   type TcmPrescription,
@@ -321,19 +319,15 @@ import {
 
 const userStore = useUserStore();
 const currentRole = computed(() => userStore.userInfo.role || "frontdesk");
-const isAdmin = computed(() => currentRole.value === "admin");
-const isDedicatedPharmacyOperator = computed(() => currentRole.value === "tcmPharmacyOperator");
-const canCreatePrescription = computed(() => isAdmin.value || ["tcm", "doctor"].includes(currentRole.value));
-const canViewDisplay = computed(
-  () =>
-    isAdmin.value || ["tcm", "doctor", "tcmPharmacyOperator", "pharmacist", "pharmacy", "decoction"].includes(currentRole.value)
-);
-const canCharge = computed(() => isAdmin.value || currentRole.value === "frontdesk" || isDedicatedPharmacyOperator.value);
-const canReview = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canDispense = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canDecoct = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canPickup = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
-const canMarkException = computed(() => isAdmin.value || isDedicatedPharmacyOperator.value);
+const isDedicatedPharmacyOperator = computed(() => currentRole.value === "tcm_pharmacy");
+const canCreatePrescription = computed(() => ["tcm", "doctor"].includes(currentRole.value));
+const canViewDisplay = computed(() => ["tcm", "doctor", "tcm_pharmacy"].includes(currentRole.value));
+const canCharge = computed(() => currentRole.value === "frontdesk" || isDedicatedPharmacyOperator.value);
+const canReview = computed(() => isDedicatedPharmacyOperator.value);
+const canDispense = computed(() => isDedicatedPharmacyOperator.value);
+const canDecoct = computed(() => isDedicatedPharmacyOperator.value);
+const canPickup = computed(() => isDedicatedPharmacyOperator.value);
+const canMarkException = computed(() => isDedicatedPharmacyOperator.value);
 const loading = ref(false);
 const saving = ref(false);
 const patientLoading = ref(false);
@@ -655,15 +649,15 @@ async function loadDashboard() {
   const { data } = await getTcmDashboardApi();
   counts.value = data.counts;
 }
-async function loadList() {
-  loading.value = true;
+async function loadList(silent = false) {
+  if (!silent) loading.value = true;
   try {
     const { data } = await getTcmPrescriptionsApi({ status: statusFilter.value, keyword: keyword.value });
     rows.value = data.rows;
     counts.value = data.counts;
     if (!selected.value && rows.value[0]) await selectRow(rows.value[0].id);
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
   }
 }
 async function selectRow(id: string) {
@@ -674,7 +668,31 @@ async function refresh(id?: string) {
   await Promise.all([loadDashboard(), loadList()]);
   if (id) await selectRow(id);
 }
+
+// 多岗位（收费/审方/调剂/代煎）共用一条流水线，5 秒静默轮询保持列表与
+// 当前处方状态新鲜；操作中、弹窗打开或页面不可见时暂停（同门诊工作台策略）。
+const POLLING_INTERVAL_MS = 5000;
+const operationPending = ref(0);
+let pollingTimer = 0;
+
+function shouldPausePolling() {
+  return (
+    document.visibilityState !== "visible" || operationPending.value > 0 || loading.value || saving.value || createVisible.value
+  );
+}
+async function refreshSilently() {
+  try {
+    await Promise.all([loadDashboard(), loadList(true)]);
+    if (selected.value) await selectRow(selected.value.id);
+  } catch {
+    // 静默轮询失败不打扰操作，下一轮自动重试。
+  }
+}
+function handleVisibilityChange() {
+  if (document.visibilityState === "visible" && !shouldPausePolling()) void refreshSilently();
+}
 async function run(action: () => Promise<{ data: TcmWorkspace }>) {
+  operationPending.value += 1;
   try {
     const { data } = await action();
     workspace.value = data;
@@ -684,6 +702,8 @@ async function run(action: () => Promise<{ data: TcmWorkspace }>) {
   } catch (error: any) {
     ElMessage.error(error?.message || "操作失败");
     return undefined;
+  } finally {
+    operationPending.value -= 1;
   }
 }
 async function callPickup() {
@@ -695,11 +715,16 @@ async function review(decision: TcmReviewDecision) {
   await run(() => reviewTcmPrescriptionApi(selected.value!.id, decision));
 }
 async function reviewWithReason(decision: TcmReviewDecision) {
-  const { value } = await ElMessageBox.prompt(decision === "RETURN" ? "请输入退回原因" : "请输入挂起原因", "药师审方", {
-    inputPattern: /\S+/,
-    inputErrorMessage: "原因不能为空"
-  });
-  await run(() => reviewTcmPrescriptionApi(selected.value!.id, decision, value));
+  operationPending.value += 1;
+  try {
+    const { value } = await ElMessageBox.prompt(decision === "RETURN" ? "请输入退回原因" : "请输入挂起原因", "药师审方", {
+      inputPattern: /\S+/,
+      inputErrorMessage: "原因不能为空"
+    });
+    await run(() => reviewTcmPrescriptionApi(selected.value!.id, decision, value));
+  } finally {
+    operationPending.value -= 1;
+  }
 }
 async function dispense(action: "start" | "complete" | "verify") {
   await run(() => advanceTcmDispensingApi(selected.value!.id, action));
@@ -708,17 +733,16 @@ async function decoct(action: "soak" | "decoct" | "pack" | "complete" | "verify"
   await run(() => advanceTcmDecoctionApi(selected.value!.id, action));
 }
 async function markException() {
-  const { value } = await ElMessageBox.prompt("请输入缺药、设备或生产异常说明", "登记异常", {
-    inputPattern: /\S+/,
-    inputErrorMessage: "异常原因不能为空"
-  });
-  await run(() => markTcmExceptionApi(selected.value!.id, value));
-}
-async function resetDemo() {
-  await ElMessageBox.confirm("将清空当前中药房数据并恢复演示队列，是否继续？", "重置演示数据", { type: "warning" });
-  await resetTcmDemoApi();
-  workspace.value = undefined;
-  await refresh();
+  operationPending.value += 1;
+  try {
+    const { value } = await ElMessageBox.prompt("请输入缺药、设备或生产异常说明", "登记异常", {
+      inputPattern: /\S+/,
+      inputErrorMessage: "异常原因不能为空"
+    });
+    await run(() => markTcmExceptionApi(selected.value!.id, value));
+  } finally {
+    operationPending.value -= 1;
+  }
 }
 async function createPrescription() {
   if (!form.patientName.trim() || !form.items.length || form.items.some(item => !item.name.trim()))
@@ -736,7 +760,17 @@ async function createPrescription() {
   }
 }
 
-onMounted(() => refresh());
+onMounted(() => {
+  void refresh();
+  pollingTimer = window.setInterval(() => {
+    if (!shouldPausePolling()) void refreshSilently();
+  }, POLLING_INTERVAL_MS);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+});
+onBeforeUnmount(() => {
+  window.clearInterval(pollingTimer);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+});
 </script>
 
 <style scoped lang="scss">

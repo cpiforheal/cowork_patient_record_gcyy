@@ -11,6 +11,8 @@ config/ai-secrets.local.env
 **/target/
 **/.vite/
 **/.cache/
+**/playwright-report/
+**/test-results/
 
 $log
 outputs/edge-profile/

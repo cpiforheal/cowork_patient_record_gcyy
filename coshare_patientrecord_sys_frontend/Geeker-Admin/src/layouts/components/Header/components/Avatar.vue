@@ -11,6 +11,9 @@
         <el-dropdown-item @click="openDialog('passwordRef')">
           <el-icon><Edit /></el-icon>修改密码
         </el-dropdown-item>
+        <el-dropdown-item v-if="authStore.hasInventorySystemAccessGet && authStore.hasMedicalSystemAccessGet" @click="switchSystem">
+          <el-icon><Grid /></el-icon>切换系统
+        </el-dropdown-item>
         <el-dropdown-item divided @click="logout">
           <el-icon><SwitchButton /></el-icon>退出登录
         </el-dropdown-item>
@@ -31,6 +34,7 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { ElMessageBox, ElMessage } from "element-plus";
+import { Grid } from "@element-plus/icons-vue";
 import InfoDialog from "./InfoDialog.vue";
 import PasswordDialog from "./PasswordDialog.vue";
 
@@ -68,6 +72,8 @@ const openDialog = (refName: string) => {
   if (refName === "infoRef") infoRef.value?.openDialog();
   if (refName === "passwordRef") passwordRef.value?.openDialog();
 };
+
+const switchSystem = () => router.push("/system-select");
 </script>
 
 <style scoped lang="scss">

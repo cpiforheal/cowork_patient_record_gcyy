@@ -54,7 +54,7 @@
     <section class="table-box patient-list-page">
       <div class="date-scope-card">
         <div>
-          <span class="scope-eyebrow">当前回看范围</span>
+          <span class="scope-eyebrow">患者档案查询</span>
           <h2>{{ activeScopeTitle }}</h2>
           <p>{{ activeScopeDesc }}</p>
         </div>
@@ -75,10 +75,13 @@
       >
         <template #tableHeader>
           <div class="patient-table-header">
-            <el-button v-auth="'patient:create'" type="primary" :icon="CirclePlus" @click="createDialogVisible = true">
-              新建患者
+            <el-button v-if="router.hasRoute('preAiEncounters')" type="primary" @click="router.push('/pre-ai/encounters')">
+              去登记与事实采集
             </el-button>
-            <span class="patient-table-hint">新建后自动打开患者详情流程视图。</span>
+            <el-button v-auth="'patient:create'" plain :icon="CirclePlus" @click="createDialogVisible = true">
+              新建患者档案
+            </el-button>
+            <span class="patient-table-hint">本页用于历史患者和档案查询；日常接诊请从事实采集入口登记。</span>
           </div>
         </template>
 
@@ -133,12 +136,20 @@
         </template>
 
         <template #operation="{ row }">
-          <el-button v-auth="'patient:read'" type="primary" link @click.stop="openPatientDetail(row.id)"> 打开档案 </el-button>
+          <el-button
+            v-auth="'patient:read'"
+            type="primary"
+            link
+            :loading="openingMedicalRecordId === row.id"
+            @click.stop="openPatientMedicalRecord(row)"
+          >
+            打开患者病历
+          </el-button>
           <el-button v-auth="'patient:update'" type="primary" link @click.stop="openPatientUpload(row)"> 上传资料 </el-button>
         </template>
       </ProTable>
 
-      <el-dialog v-model="createDialogVisible" title="新建患者" width="560px" destroy-on-close>
+      <el-dialog v-model="createDialogVisible" title="新建患者档案" width="560px" destroy-on-close>
         <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="110px">
           <el-form-item label="患者姓名" prop="name">
             <el-input v-model="createForm.name" placeholder="请输入患者姓名" />
@@ -184,9 +195,9 @@ import { CirclePlus, Refresh } from "@element-plus/icons-vue";
 import ProTable from "@/components/ProTable/index.vue";
 import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import { createPatientApi, getPatientListApi, type CreatePatientParams, type PatientRow } from "@/api/modules/clinic";
+import { importLegacyPreAiEncounterApi } from "@/api/modules/clinic/preAi";
 import { recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
-import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 
 type DateScopeNode = {
@@ -201,11 +212,11 @@ type DateScopeNode = {
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
-const { openPatientDetail } = usePatientNavigation();
 const proTable = ref<ProTableInstance>();
 const createFormRef = ref<FormInstance>();
 const createDialogVisible = ref(false);
 const creating = ref(false);
+const openingMedicalRecordId = ref("");
 const activeDateScope = ref("");
 const selectedDateValue = ref("");
 const allPatients = ref<PatientRow[]>([]);
@@ -311,11 +322,20 @@ const addDays = (date: Date, days: number) => {
   return next;
 };
 
+const calendarDateKey = (value: unknown) => {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  if (!text) return "";
+  const parsed = new Date(text.replace(/-/g, "/"));
+  return Number.isNaN(parsed.getTime()) ? "" : toDateText(parsed);
+};
+
 const patientEncounterDates = (patient: PatientRow) => {
   const history = patient.encounterHistory?.length
     ? patient.encounterHistory
     : [{ visitDate: patient.visitDate, visitNo: patient.visitNo, visitType: patient.visitType, doctor: patient.doctor }];
-  return [...new Set(history.map(item => item.visitDate).filter(Boolean))];
+  return [...new Set(history.map(item => calendarDateKey(item.visitDate)).filter(Boolean))];
 };
 
 const countByDate = computed(() => {
@@ -452,6 +472,18 @@ const openPatientUpload = (row: PatientRow) => {
   });
 };
 
+const openPatientMedicalRecord = async (row: Pick<PatientRow, "id">) => {
+  openingMedicalRecordId.value = row.id;
+  try {
+    const { data } = await importLegacyPreAiEncounterApi(row.id);
+    await router.push({ path: "/pre-ai/encounters", query: { encounterId: data.encounter.id } });
+  } catch (error) {
+    ElMessage.error((error as Error).message || "患者病历打开失败");
+  } finally {
+    openingMedicalRecordId.value = "";
+  }
+};
+
 const readQueryValue = (value: unknown) => (Array.isArray(value) ? value[0] : typeof value === "string" ? value : "");
 const queryDateScope = () => {
   const date = readQueryValue(route.query.date);
@@ -474,7 +506,7 @@ const submitCreatePatient = () => {
       ElMessage.success(msg || "患者已创建");
       createDialogVisible.value = false;
       await refreshPatients();
-      openPatientDetail(data.id);
+      await openPatientMedicalRecord(data);
     } catch (error) {
       ElMessage.error((error as Error).message);
     } finally {

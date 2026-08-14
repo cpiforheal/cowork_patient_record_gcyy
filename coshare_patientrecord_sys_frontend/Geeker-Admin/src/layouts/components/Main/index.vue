@@ -20,9 +20,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onBeforeUnmount, provide, watch } from "vue";
+import { ref, onBeforeUnmount, onMounted, provide, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useDebounceFn } from "@vueuse/core";
+import { ElNotification } from "element-plus";
+import { authHeaders, handleUnauthorizedResponse } from "@/api/modules/authToken";
+import { clinicFetch } from "@/api/modules/clinic/http";
 import { useGlobalStore } from "@/stores/modules/global";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import Maximize from "./components/Maximize.vue";
@@ -39,6 +42,50 @@ const { keepAliveName } = storeToRefs(keepAliveStore);
 const isRouterShow = ref(true);
 const refreshCurrentPage = (val: boolean) => (isRouterShow.value = val);
 provide("refresh", refreshCurrentPage);
+
+let queueUpdateAbort: AbortController | undefined;
+let queueUpdateTimer: number | undefined;
+let queueUpdateVersion = 1;
+let queueUpdateActive = false;
+const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
+
+const scheduleQueueUpdateWait = (delay = 200) => {
+  if (!queueUpdateActive) return;
+  queueUpdateTimer = window.setTimeout(() => void waitForQueueUpdate(), delay);
+};
+
+const waitForQueueUpdate = async () => {
+  if (!queueUpdateActive) return;
+  if (document.visibilityState !== "visible") {
+    scheduleQueueUpdateWait(5000);
+    return;
+  }
+  queueUpdateAbort = new AbortController();
+  try {
+    const response = await clinicFetch(`/clinic-queue/updates/wait?after=${queueUpdateVersion}`, {
+      headers: authHeaders(),
+      signal: queueUpdateAbort.signal
+    });
+    if (response.status === 401) handleUnauthorizedResponse();
+    const nextVersion = Number(response.headers.get("X-Clinic-Queue-Version"));
+    const changed = response.headers.get("X-Clinic-Queue-Changed") === "true";
+    if (Number.isFinite(nextVersion) && nextVersion > queueUpdateVersion) queueUpdateVersion = nextVersion;
+    if (changed) {
+      window.dispatchEvent(new CustomEvent("clinic-queue-updated", { detail: { version: queueUpdateVersion } }));
+      ElNotification({ title: "业务待办已更新", message: "前台或岗位已更新患者流程，已同步最新待办。", type: "info", duration: 3200 });
+    }
+  } catch (error: any) {
+    if (error?.name !== "AbortError" && queueUpdateActive) scheduleQueueUpdateWait(3000);
+    return;
+  } finally {
+    queueUpdateAbort = undefined;
+  }
+  scheduleQueueUpdateWait();
+};
+
+const resumeQueueUpdateWait = () => {
+  if (document.visibilityState === "visible" && !queueUpdateAbort) scheduleQueueUpdateWait(0);
+};
 
 // 监听当前页面是否最大化，动态添加 class
 watch(
@@ -69,11 +116,21 @@ const listeningWindow = useDebounceFn(() => {
   if (isCollapse.value && screenWidth.value > 1200) globalStore.setGlobalState("isCollapse", false);
 }, 100);
 window.addEventListener("resize", listeningWindow, false);
+onMounted(() => {
+  if (isInventoryPortal) return;
+  queueUpdateActive = true;
+  scheduleQueueUpdateWait(0);
+  document.addEventListener("visibilitychange", resumeQueueUpdateWait);
+});
 onBeforeUnmount(() => {
   window.removeEventListener("resize", listeningWindow);
+  document.removeEventListener("visibilitychange", resumeQueueUpdateWait);
+  queueUpdateActive = false;
+  queueUpdateAbort?.abort();
+  if (queueUpdateTimer) clearTimeout(queueUpdateTimer);
 });
 </script>
 
 <style scoped lang="scss">
-@import "./index.scss";
+@use "./index.scss" as *;
 </style>

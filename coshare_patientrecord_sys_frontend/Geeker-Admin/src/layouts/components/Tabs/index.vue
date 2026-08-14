@@ -25,6 +25,8 @@ import { useTabsStore } from "@/stores/modules/tabs";
 import { useAuthStore } from "@/stores/modules/auth";
 import { TabsPaneContext, TabPaneName } from "element-plus";
 import MoreButton from "./components/MoreButton.vue";
+import { isInventorySystemPath, isLegacyInventoryPath } from "@/routers/modules/inventorySystem";
+import { getFlatMenuList } from "@/utils";
 
 const route = useRoute();
 const router = useRouter();
@@ -33,7 +35,14 @@ const authStore = useAuthStore();
 const globalStore = useGlobalStore();
 
 const tabsMenuValue = ref(route.fullPath);
-const tabsMenuList = computed(() => tabStore.tabsMenuList);
+const tabsMenuList = computed(() =>
+  tabStore.tabsMenuList.filter(item => {
+    if (item.path === "/system-select") return false;
+    return authStore.activeSystem === "inventory"
+      ? isInventorySystemPath(item.path)
+      : !isInventorySystemPath(item.path) && !isLegacyInventoryPath(item.path);
+  })
+);
 const tabsIcon = computed(() => globalStore.tabsIcon);
 
 onMounted(() => {
@@ -62,7 +71,7 @@ watch(
 
 // 初始化需要固定的 tabs
 const initTabs = () => {
-  authStore.flatMenuListGet.forEach(item => {
+  getFlatMenuList(authStore.showMenuListGet).forEach(item => {
     if (item.meta.isAffix && !item.meta.isHide && !item.meta.isFull) {
       const tabsParams = {
         icon: item.meta.icon,
@@ -104,5 +113,5 @@ const tabRemove = (fullPath: TabPaneName) => {
 </script>
 
 <style scoped lang="scss">
-@import "./index.scss";
+@use "./index.scss" as *;
 </style>

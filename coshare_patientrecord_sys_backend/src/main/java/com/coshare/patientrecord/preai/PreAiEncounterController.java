@@ -21,7 +21,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @Profile("mysql")
@@ -44,14 +47,46 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "前置病历就诊已创建", service.create(request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/register-and-issue")
+    public ApiResult<Map<String, Object>> registerAndIssue(@RequestBody PreAiEncounterService.RegisterAndIssueRequest request) {
+        return ApiResult.of(200, "就诊登记和发号已完成", service.registerAndIssue(request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/register-and-issue")
+    public ApiResult<Map<String, Object>> registerExistingAndIssue(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.ExistingRegisterAndIssueRequest request
+    ) {
+        return ApiResult.of(200, "复诊补登记和发号已完成",
+            service.registerExistingAndIssue(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/imports/{patientId}")
     public ApiResult<Map<String, Object>> importLegacy(@PathVariable String patientId) {
         return ApiResult.of(200, "旧患者资料已导入或复用现有前置病历", service.importLegacy(patientId, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/duty-users")
+    public ApiResult<Map<String, Object>> dutyUsers() {
+        return ApiResult.success(service.listDutyUserOptions(AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/{encounterId}")
-    public ApiResult<Map<String, Object>> workspace(@PathVariable String encounterId) {
-        return ApiResult.success(service.getWorkspace(encounterId, AuthPermission.currentUserOrThrow()));
+    public ApiResult<Map<String, Object>> workspace(
+        @PathVariable String encounterId,
+        @RequestParam(defaultValue = "false") boolean readOnly,
+        @RequestParam(defaultValue = "") String patientCaseId
+    ) {
+        return ApiResult.success(service.getWorkspace(encounterId, readOnly, patientCaseId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/{encounterId}/responsibility-timeline")
+    public ApiResult<Map<String, Object>> responsibilityTimeline(
+        @PathVariable String encounterId,
+        @RequestParam(defaultValue = "0") int offset,
+        @RequestParam(defaultValue = "100") int limit
+    ) {
+        return ApiResult.success(service.responsibilityTimeline(encounterId, offset, limit, AuthPermission.currentUserOrThrow()));
     }
 
     @PutMapping("/{encounterId}/visit-meta")
@@ -60,6 +95,45 @@ public class PreAiEncounterController {
         @RequestBody PreAiEncounterService.VisitMetaRequest request
     ) {
         return ApiResult.of(200, "来访及交费参考信息已保存", service.updateVisitMeta(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/owning-department/correct")
+    public ApiResult<Map<String, Object>> correctOwningDepartment(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.DepartmentCorrectionRequest request
+    ) {
+        return ApiResult.of(200, "病历归属科室已修正",
+            service.correctOwningDepartment(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/department-grants")
+    public ApiResult<Map<String, Object>> updateEncounterGrant(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.EncounterGrantRequest request
+    ) {
+        return ApiResult.of(200, "病历跨科协作授权已更新",
+            service.updateEncounterGrant(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PutMapping("/{encounterId}/duty-assignments")
+    public ApiResult<Map<String, Object>> saveDutyAssignments(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.DutyAssignmentsRequest request
+    ) {
+        return ApiResult.of(200, "病例岗位安排已保存", service.saveDutyAssignments(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/{encounterId}/admission-profile")
+    public ApiResult<Map<String, Object>> admissionProfile(@PathVariable String encounterId) {
+        return ApiResult.success(service.admissionProfile(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PutMapping("/{encounterId}/admission-profile")
+    public ApiResult<Map<String, Object>> saveAdmissionProfile(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.AdmissionProfileSaveRequest request
+    ) {
+        return ApiResult.of(200, "住院补录资料已保存", service.saveAdmissionProfile(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
     @PutMapping("/{encounterId}/stages/{stageCode}")
@@ -78,6 +152,32 @@ public class PreAiEncounterController {
         @RequestBody(required = false) PreAiEncounterService.StageSaveRequest request
     ) {
         return ApiResult.of(200, "阶段已完成并交接", service.completeStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/reception/terminate")
+    public ApiResult<Map<String, Object>> terminateReception(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.EncounterTerminationRequest request
+    ) {
+        return ApiResult.of(200, "患者已离院，后续流程已终止", service.terminateReception(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/stages/SURGERY/physician-confirm")
+    public ApiResult<Map<String, Object>> confirmSurgery(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.VersionRequest request
+    ) {
+        return ApiResult.of(200, "手术医生已完成独立确认", service.confirmSurgery(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/stages/{stageCode}/correct")
+    public ApiResult<Map<String, Object>> correctStage(
+        @PathVariable String encounterId,
+        @PathVariable String stageCode,
+        @RequestBody PreAiEncounterService.StageCorrectionRequest request
+    ) {
+        return ApiResult.of(200, "已完成阶段纠错已保存，原复核和导出已失效",
+            service.correctStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/{encounterId}/stages/{stageCode}/return")
@@ -133,16 +233,38 @@ public class PreAiEncounterController {
     }
 
     @PostMapping("/{encounterId}/lab/complete")
-    public ApiResult<Map<String, Object>> completeLab(@PathVariable String encounterId) {
-        return ApiResult.of(200, "化验室已完成并交接", service.completeLab(encounterId, AuthPermission.currentUserOrThrow()));
+    public ApiResult<Map<String, Object>> completeLab(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.VersionRequest request
+    ) {
+        return ApiResult.of(200, "化验室已完成并交接", service.completeLab(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
-    @PostMapping("/{encounterId}/attachments")
+    @PostMapping(path = "/{encounterId}/attachments", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ApiResult<Map<String, Object>> uploadAttachment(
         @PathVariable String encounterId,
         @RequestBody PreAiEncounterService.AttachmentUploadRequest request
     ) throws IOException {
         return ApiResult.of(200, "附件已上传", service.uploadAttachment(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping(path = "/{encounterId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<Map<String, Object>> uploadAttachmentMultipart(
+        @PathVariable String encounterId,
+        @RequestPart("file") MultipartFile file,
+        @RequestParam(defaultValue = "") String stageCode,
+        @RequestParam(defaultValue = "") String taskId,
+        @RequestParam(defaultValue = "") String description,
+        @RequestParam(defaultValue = "") String capturedAt,
+        @RequestParam(defaultValue = "") String batchId,
+        @RequestParam(defaultValue = "") String batchName,
+        @RequestParam(defaultValue = "") String relativePath,
+        @RequestParam(required = false) Integer sequenceNo
+    ) throws IOException {
+        PreAiEncounterService.AttachmentUploadRequest metadata = new PreAiEncounterService.AttachmentUploadRequest(
+            stageCode, taskId, file.getOriginalFilename(), null, description, capturedAt, batchId, batchName, relativePath, sequenceNo
+        );
+        return ApiResult.of(200, "附件已上传", service.uploadAttachment(encounterId, metadata, file, AuthPermission.currentUserOrThrow()));
     }
 
     @DeleteMapping("/{encounterId}/attachments/{attachmentId}")
@@ -206,5 +328,4 @@ public class PreAiEncounterController {
             .body(download.resource());
     }
 }
-
 

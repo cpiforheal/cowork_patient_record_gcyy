@@ -21,10 +21,6 @@ public class ClinicDatabaseService {
         this.repository = repository;
     }
 
-    public void initializeSchema() {
-        repository.initializeSchema();
-    }
-
     public ObjectNode readDb() {
         return repository.readDb();
     }

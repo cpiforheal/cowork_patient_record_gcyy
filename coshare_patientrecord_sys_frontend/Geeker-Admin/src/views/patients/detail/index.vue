@@ -122,11 +122,11 @@
             @select="selectPatientFieldSearchItem"
           />
 
-          <el-button type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
+            <el-button v-if="!readOnly" type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
 
-          <el-button v-if="archiveSubmitted" @click="revokeArchive">撤回草稿</el-button>
+          <el-button v-if="archiveSubmitted && !readOnly" @click="revokeArchive">撤回草稿</el-button>
 
-          <el-button v-else type="primary" @click="submitArchive">提交档案审核</el-button>
+          <el-button v-else-if="!readOnly" type="primary" @click="submitArchive">提交档案审核</el-button>
 
           <el-button v-if="canGenerateMedicalRecord" :loading="medicalRecordLoading" @click="openMedicalRecord">
             生成目标病历
@@ -141,17 +141,15 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="preview" :icon="View">预览</el-dropdown-item>
 
-                <el-dropdown-item command="upload" :icon="Upload">补充图片</el-dropdown-item>
+                <el-dropdown-item v-if="!readOnly" command="upload" :icon="Upload">补充图片</el-dropdown-item>
 
-                <el-dropdown-item command="legacy" :icon="FolderOpened">导入旧共享资料</el-dropdown-item>
+                <el-dropdown-item v-if="!readOnly" command="legacy" :icon="FolderOpened">导入旧共享资料</el-dropdown-item>
 
                 <el-dropdown-item command="quality">档案审核</el-dropdown-item>
 
                 <el-dropdown-item command="timeline" :icon="Clock">操作轨迹</el-dropdown-item>
 
                 <el-dropdown-item command="ai" :disabled="aiSummaryLoading">AI总结</el-dropdown-item>
-
-                <el-dropdown-item command="assistant" :icon="ChatDotRound">患者助手</el-dropdown-item>
 
                 <el-dropdown-item v-if="canUseRoleViewFilter" command="inspection">检查室视图</el-dropdown-item>
 
@@ -411,7 +409,7 @@
                       </label>
                     </div>
                     <div class="lab-report-supplement-actions">
-                      <el-button :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
+                      <el-button v-if="!readOnly" :loading="saving" @click="saveLabSupplementFields">保存补充信息</el-button>
                       <el-button text @click="switchDetailWorkspace('attachments')">查看附件索引</el-button>
                     </div>
                   </section>
@@ -1532,16 +1530,6 @@
           @select-version="selectMedicalRecordVersion"
         />
       </el-dialog>
-
-      <AiAssistantPanel
-        v-model="patientAssistantVisible"
-        assistant-type="patient"
-        title="患者助手"
-        :patient-id="patientId"
-        :default-prompt="patientAssistantPrompt"
-        :context="patientAssistantContext"
-        :attachment-ids="patientAssistantAttachmentIds"
-      />
     </div>
   </div>
 </template>
@@ -1566,9 +1554,7 @@ import { ElMessage } from "element-plus";
 
 import { useRoute, useRouter } from "vue-router";
 
-import { ArrowDown, ChatDotRound, Clock, DocumentCopy, FolderOpened, Printer, Upload, View } from "@element-plus/icons-vue";
-
-import AiAssistantPanel from "@/components/AiAssistantPanel/index.vue";
+import { ArrowDown, Clock, DocumentCopy, FolderOpened, Printer, Upload, View } from "@element-plus/icons-vue";
 
 import TreeFilter from "@/components/TreeFilter/index.vue";
 
@@ -1665,7 +1651,7 @@ const normalizeUserRole = (role?: string): UserRole => (USER_ROLES.includes(role
 const currentRole = computed<UserRole>(() => normalizeUserRole(userStore.userInfo.role));
 
 const roleName = computed(() => roleLabel(currentRole.value));
-const canManageMedicalRecordVersions = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
+const canManageMedicalRecordVersions = computed(() => currentRole.value === "doctor");
 
 const patientId = computed(() => String(route.params.id || "").trim());
 
@@ -1678,17 +1664,7 @@ type PatientFieldSearchItem = {
   typeLabel: string;
   keywords: string;
 };
-type PatientDetailMoreCommand =
-  | "preview"
-  | "upload"
-  | "legacy"
-  | "quality"
-  | "timeline"
-  | "ai"
-  | "assistant"
-  | "inspection"
-  | "lab"
-  | "copy";
+type PatientDetailMoreCommand = "preview" | "upload" | "legacy" | "quality" | "timeline" | "ai" | "inspection" | "lab" | "copy";
 
 const medicalRecordFirstRoles = new Set<UserRole>([
   "admin",
@@ -1718,6 +1694,8 @@ const activeSectionKey = ref(recordSections[0].key);
 
 const archiveSubmitted = ref(false);
 
+const readOnly = ref(false);
+
 const archiveVersion = ref("V0.3-预归档");
 
 const generatedAt = ref("2026-06-11 09:30:00");
@@ -1733,8 +1711,6 @@ const isHydratingRecord = ref(false);
 const savedSectionKey = ref("");
 
 const highlightedFieldKey = ref("");
-
-const patientAssistantVisible = ref(false);
 
 const medicalRecordVisible = ref(false);
 
@@ -2812,7 +2788,7 @@ const showLabReportOverview = computed(
     (currentRole.value === "lab" || (canUseRoleViewFilter.value && activeRoleView.value === "lab"))
 );
 
-const canEditLabSupplementNote = computed(() => ["admin", "doctor", "lab", "nurse", "quality"].includes(currentRole.value));
+const canEditLabSupplementNote = computed(() => !readOnly.value && ["doctor", "lab", "nurse"].includes(currentRole.value));
 
 const treatmentManagementRows = computed(() => [
   ["手术可行性评估", displayFieldValue("surgeryFeasibility")],
@@ -2917,10 +2893,10 @@ const medicalRecordFields = computed<MedicalRecordTemplateField[]>(() =>
   medicalRecordFieldSections.value.flatMap(section => ensureArray(section.fields))
 );
 
-const canGenerateMedicalRecord = computed(() => currentRole.value === "admin" || currentRole.value === "doctor");
+const canGenerateMedicalRecord = computed(() => !readOnly.value && currentRole.value === "doctor");
 
 const canEditMedicalRecordField = (field: MedicalRecordTemplateField) => {
-  if (currentRole.value === "admin") return true;
+  if (currentRole.value === "admin") return false;
   if (!field.editorRoles?.length) return currentRole.value === "doctor";
 
   return field.editorRoles.includes(currentRole.value);
@@ -3158,7 +3134,7 @@ const previewTimelineEvents = computed(() => {
 const shortTitle = (title: string) => title.replace(/^.*?、/, "");
 
 const isEditable = (field: RecordField) =>
-  field.enabled !== false && (currentRole.value === "admin" || ensureArray(field.editors).includes(currentRole.value));
+  !readOnly.value && field.enabled !== false && currentRole.value !== "admin" && ensureArray(field.editors).includes(currentRole.value);
 
 const canEditRecordSection = (section: RecordSection) => section.fields.some(isEditable);
 
@@ -3707,96 +3683,6 @@ const patientFieldSearchItems = computed<PatientFieldSearchItem[]>(() => {
   return [...fieldItems, ...attachmentItems, ...stageItems];
 });
 
-const patientAssistantPrompt = computed(
-  () => "请根据当前患者档案，帮我总结重点、缺失项、附件证据和下一步处理建议。请只给院内辅助建议，不要替代诊断。"
-);
-
-const patientAssistantAttachmentIds = computed(() =>
-  currentAttachments.value
-
-    .filter(attachment => attachment.status !== "voided")
-
-    .map(attachment => attachment.key || attachment.storagePath || attachment.fileName)
-
-    .filter(Boolean)
-);
-
-const patientAssistantContext = computed<Record<string, unknown>>(() => ({
-  role: currentRole.value,
-
-  roleName: roleName.value,
-
-  patientId: patientId.value,
-
-  patientName: fieldValues.patientName || patientInfo.value?.name || "",
-
-  visitNo: fieldValues.visitNo || patientInfo.value?.visitNo || patientId.value,
-
-  visitType: currentVisitType.value,
-
-  currentStage: patientInfo.value?.currentStage || activeLifecycleStage.value.title,
-
-  activeLifecycleStage: {
-    title: activeLifecycleStage.value.title,
-
-    owner: activeLifecycleStage.value.owner,
-
-    department: activeLifecycleStage.value.department,
-
-    nextOwner: nextLifecycleStage.value.owner
-  },
-
-  completion: {
-    percent: completionPercent.value,
-
-    completed: completionStats.value.completed,
-
-    total: completionStats.value.total,
-
-    lifecycleCompleted: lifecycleProgress.value.completed,
-
-    lifecycleTotal: lifecycleProgress.value.total
-  },
-
-  workflowHint: workflowHint.value,
-
-  missingOrInvalidItems: fieldIssues.value.slice(0, 30).map(issue => ({
-    section: issue.sectionTitle,
-
-    field: issue.fieldLabel,
-
-    level: issue.level,
-
-    message: issue.message
-  })),
-
-  attachments: currentAttachments.value.slice(0, 30).map(attachment => ({
-    key: attachment.key,
-
-    title: attachment.title,
-
-    field: attachment.fieldLabel,
-
-    department: attachment.department,
-
-    fileName: attachment.fileName,
-
-    status: attachment.status || "active",
-
-    uploadedAt: attachment.uploadedAt
-  })),
-
-  archive: {
-    submitted: archiveSubmitted.value,
-
-    version: archiveVersion.value,
-
-    lastSavedAt: lastSavedAt.value,
-
-    autoSaveStatus: autoSaveStatus.value
-  }
-}));
-
 const lifecycleRailSummary = computed(
   () => `${activeLifecycleStage.value.department} · ${lifecycleProgress.value.completed}/${lifecycleProgress.value.total} 环`
 );
@@ -4091,11 +3977,6 @@ const handleMoreAction = (command: PatientDetailMoreCommand) => {
     return;
   }
 
-  if (command === "assistant") {
-    patientAssistantVisible.value = true;
-    return;
-  }
-
   if (command === "inspection" || command === "lab") {
     openRoleView(command);
     return;
@@ -4377,7 +4258,7 @@ const generateMedicalRecord = async () => {
   if (!patientId.value) return;
 
   if (!canGenerateMedicalRecord.value) {
-    ElMessage.warning("当前岗位可维护目标病历字段，但生成 docx 需由医生或管理员操作");
+    ElMessage.warning("当前岗位可维护目标病历字段，但生成 docx 需由医生操作");
 
     return;
   }
@@ -4423,7 +4304,7 @@ const finalizeMedicalRecord = async () => {
   if (!currentMedicalRecord.value) return;
 
   if (!canGenerateMedicalRecord.value) {
-    ElMessage.warning("目标病历定稿需由医生或管理员操作");
+    ElMessage.warning("目标病历定稿需由医生操作");
 
     return;
   }
@@ -4449,7 +4330,7 @@ const voidMedicalRecord = async () => {
   if (!currentMedicalRecord.value) return;
 
   if (!canGenerateMedicalRecord.value) {
-    ElMessage.warning("目标病历作废需由医生或管理员操作");
+    ElMessage.warning("目标病历作废需由医生操作");
 
     return;
   }
@@ -4650,6 +4531,8 @@ const resetPatientDetailState = () => {
 
   patientInfo.value = undefined;
 
+  readOnly.value = false;
+
   currentAttachments.value = [];
 
   patientAuditLogs.value = [];
@@ -4724,6 +4607,8 @@ const loadPatientDetail = () =>
 
       patientInfo.value = data.patient;
 
+      readOnly.value = Boolean(data.readOnly);
+
       Object.assign(fieldValues, data.fieldValues || {});
 
       detailWorkspaceMode.value = "flow";
@@ -4792,6 +4677,10 @@ const isConflictError = (error: unknown) => {
 };
 
 const saveRecordValues = async (values: Record<string, string>, successText: string) => {
+  if (readOnly.value) {
+    ElMessage.info("历史病历为只读查看，不能保存修改");
+    return false;
+  }
   saving.value = true;
 
   try {

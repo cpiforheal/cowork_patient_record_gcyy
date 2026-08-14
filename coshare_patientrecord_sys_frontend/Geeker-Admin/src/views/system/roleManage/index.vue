@@ -1,141 +1,163 @@
 <template>
-  <div class="table-box">
-    <ProTable ref="proTable" :columns="columns" :request-api="getRoleListApi" :data-callback="dataCallback">
-      <template #tableHeader>
-        <el-button v-auth="'role:create'" type="primary" :icon="CirclePlus" @click="openRoleDialog()">新增角色</el-button>
-      </template>
+  <div class="role-policy-page">
+    <header class="page-header">
+      <div>
+        <h2>岗位权限</h2>
+        <p>岗位职责与访问范围由服务端统一控制，账号只能从此目录选择岗位。</p>
+      </div>
+      <el-button :icon="Refresh" :loading="loading" @click="loadRoles">刷新</el-button>
+    </header>
 
-      <template #permissions="{ row }">
-        <el-space wrap>
-          <el-tag v-for="permission in row.permissions" :key="permission" effect="plain">{{ permission }}</el-tag>
-        </el-space>
-      </template>
+    <el-alert type="info" :closable="false" show-icon>
+      <template #title>权限目录只读</template>
+      页面展示的是当前实际生效的岗位能力，不再使用历史权限标签。修改权限需要更新服务端策略并重新发布。
+    </el-alert>
 
-      <template #editableSections="{ row }">
-        <el-space wrap>
-          <el-tag v-for="section in row.editableSections" :key="section" type="success" effect="plain">{{ section }}</el-tag>
-        </el-space>
-      </template>
+    <section class="role-table-panel">
+      <div class="table-toolbar">
+        <el-input v-model="keyword" :prefix-icon="Search" clearable placeholder="搜索岗位、职责或入口" />
+        <span>共 {{ filteredRoles.length }} 个岗位</span>
+      </div>
 
-      <template #operation="{ row }">
-        <el-button v-auth="'role:update'" type="primary" link @click="openRoleDialog(row)">编辑</el-button>
-        <el-button v-auth="'role:grant'" type="primary" link @click="openRoleDialog(row)">授权</el-button>
-        <el-button
-          v-auth="'role:delete'"
-          type="danger"
-          link
-          :disabled="row.role === 'admin' || row.members > 0"
-          @click="deleteRole(row)"
-        >
-          删除
-        </el-button>
-      </template>
-    </ProTable>
-
-    <el-dialog v-model="dialogVisible" :title="roleForm.id ? '编辑角色权限' : '新增角色'" width="680px" destroy-on-close>
-      <el-form :model="roleForm" label-width="96px">
-        <el-form-item label="角色名称">
-          <el-input v-model="roleForm.name" />
-        </el-form-item>
-        <el-form-item label="角色编码">
-          <el-select v-model="roleForm.role">
-            <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="roleForm.desc" type="textarea" :rows="3" />
-        </el-form-item>
-        <el-form-item label="按钮权限">
-          <el-select v-model="roleForm.permissions" multiple filterable allow-create>
-            <el-option v-for="item in permissionOptions" :key="item" :label="item" :value="item" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="字段章节">
-          <el-select v-model="roleForm.editableSections" multiple filterable>
-            <el-option v-for="item in recordSections" :key="item.key" :label="item.title" :value="item.key" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveRole">保存</el-button>
-      </template>
-    </el-dialog>
+      <el-table v-loading="loading" :data="filteredRoles" row-key="role" stripe>
+        <el-table-column label="岗位" width="160" fixed="left">
+          <template #default="{ row }">
+            <strong class="role-name">{{ row.name }}</strong>
+            <code>{{ row.role }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column prop="responsibility" label="核心职责" min-width="220" />
+        <el-table-column label="可见入口" min-width="240">
+          <template #default="{ row }">
+            <el-space wrap>
+              <el-tag v-for="entry in row.entries" :key="entry" effect="plain">{{ entry }}</el-tag>
+              <span v-if="!row.entries.length" class="empty-value">无业务入口</span>
+            </el-space>
+          </template>
+        </el-table-column>
+        <el-table-column label="允许操作" min-width="280">
+          <template #default="{ row }">
+            <span class="plain-list">{{ row.actions.join("、") || "仅查看" }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="dataScope" label="数据范围" min-width="220" />
+        <el-table-column prop="memberCount" label="成员数" width="90" align="center" />
+      </el-table>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts" name="roleManage">
-import { computed, reactive, ref } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { CirclePlus } from "@element-plus/icons-vue";
-import ProTable from "@/components/ProTable/index.vue";
-import { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
-import { deleteRoleApi, getRoleListApi, saveRoleApi, type RoleRow } from "@/api/modules/clinic";
-import { USER_ROLE_OPTIONS, recordSections } from "@/config/fieldPermissions";
-import { useUserStore } from "@/stores/modules/user";
+import { computed, onMounted, ref } from "vue";
+import { ElMessage } from "element-plus";
+import { Refresh, Search } from "@element-plus/icons-vue";
+import { getAdminRoleCatalogApi, type RoleDescriptor } from "@/api/modules/authAdmin";
 
-const userStore = useUserStore();
-const proTable = ref<ProTableInstance>();
-const dialogVisible = ref(false);
-const roleForm = reactive<Partial<RoleRow>>({});
-const roleOptions = USER_ROLE_OPTIONS;
-const permissionOptions = [
-  "patient:create",
-  "patient:read",
-  "patient:update",
-  "field:read",
-  "field:edit",
-  "document:upload",
-  "document:download",
-  "document:restore",
-  "audit:read",
-  "audit:export",
-  "role:grant"
-];
-const operatorRole = computed(() => userStore.userInfo.role || "frontdesk");
-const operatorName = computed(() => roleOptions.find(item => item.value === operatorRole.value)?.label || "前台");
+const loading = ref(false);
+const keyword = ref("");
+const roles = ref<RoleDescriptor[]>([]);
 
-const columns = reactive<ColumnProps<RoleRow>[]>([
-  { type: "index", label: "#", width: 80 },
-  { prop: "name", label: "角色", width: 140, search: { el: "input" } },
-  { prop: "members", label: "成员数", width: 100 },
-  { prop: "desc", label: "说明", minWidth: 220 },
-  { prop: "permissions", label: "按钮权限", minWidth: 260 },
-  { prop: "editableSections", label: "可编辑章节", minWidth: 240 },
-  { prop: "operation", label: "操作", fixed: "right", width: 210 }
-]);
+const filteredRoles = computed(() => {
+  const query = keyword.value.trim().toLowerCase();
+  if (!query) return roles.value;
+  return roles.value.filter(role =>
+    [role.name, role.role, role.responsibility, role.dataScope, ...role.entries, ...role.actions]
+      .join(" ")
+      .toLowerCase()
+      .includes(query)
+  );
+});
 
-const dataCallback = (data: { list: RoleRow[]; total: number }) => data;
-
-const openRoleDialog = (row?: RoleRow) => {
-  Object.keys(roleForm).forEach(key => delete roleForm[key as keyof RoleRow]);
-  Object.assign(roleForm, row || { role: "frontdesk", permissions: [], editableSections: [] });
-  dialogVisible.value = true;
-};
-
-const saveRole = async () => {
-  await saveRoleApi({ ...roleForm, operator: operatorName.value, operatorRole: operatorRole.value });
-  ElMessage.success("角色权限已保存");
-  dialogVisible.value = false;
-  proTable.value?.getTableList();
-};
-
-const deleteRole = async (row: RoleRow) => {
-  if (row.role === "admin") {
-    ElMessage.warning("内置管理员角色不能删除");
-    return;
+const loadRoles = async () => {
+  loading.value = true;
+  try {
+    roles.value = await getAdminRoleCatalogApi();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    loading.value = false;
   }
-  if (row.members > 0) {
-    ElMessage.warning(`该角色仍有 ${row.members} 个账号使用，请先调整账号角色`);
-    return;
-  }
-  await ElMessageBox.confirm(`确定删除角色“${row.name}”吗？`, "删除角色", {
-    confirmButtonText: "删除",
-    cancelButtonText: "取消",
-    type: "warning"
-  });
-  await deleteRoleApi(row.id, { operator: operatorName.value, operatorRole: operatorRole.value });
-  ElMessage.success("角色已删除");
-  proTable.value?.getTableList();
 };
+
+onMounted(loadRoles);
 </script>
+
+<style scoped lang="scss">
+.role-policy-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  height: 100%;
+}
+
+.page-header,
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-header {
+  h2,
+  p {
+    margin: 0;
+  }
+
+  h2 {
+    font-size: 20px;
+    letter-spacing: 0;
+  }
+
+  p {
+    margin-top: 6px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.role-table-panel {
+  min-width: 0;
+  padding: 16px;
+  overflow: hidden;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+}
+
+.table-toolbar {
+  margin-bottom: 14px;
+  color: var(--el-text-color-secondary);
+
+  .el-input {
+    width: min(360px, 100%);
+  }
+}
+
+.role-name,
+code {
+  display: block;
+}
+
+code {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.plain-list {
+  line-height: 1.7;
+}
+
+.empty-value {
+  color: var(--el-text-color-placeholder);
+}
+
+@media (max-width: 720px) {
+  .page-header,
+  .table-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+</style>

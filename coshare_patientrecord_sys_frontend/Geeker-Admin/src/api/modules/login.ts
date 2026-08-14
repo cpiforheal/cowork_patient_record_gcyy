@@ -1,7 +1,5 @@
 import { Login, ResultData } from "@/api/interface/index";
-import authMenuList from "@/assets/json/authMenuList.json";
-import authButtonList from "@/assets/json/authButtonList.json";
-import { authHeaders } from "./authToken";
+import { authHeaders, handleUnauthorizedResponse } from "./authToken";
 
 const AUTH_API_BASE_URL = import.meta.env.VITE_AUTH_API_BASE_URL || "/auth";
 
@@ -16,15 +14,63 @@ const readJsonResult = async <T>(response: Response): Promise<ResultData<T>> => 
 };
 
 export interface LoginAccountOption {
+  accountHandle: string;
+  label: string;
+  department: string;
+}
+
+export interface DirectoryAccountOption {
   id: string;
   username: string;
   name: string;
   department: string;
+  role?: string;
+  roleLabel?: string;
 }
 
 export interface LoginOptions {
   departments: string[];
   accounts: LoginAccountOption[];
+}
+
+export interface NavigationShortcut {
+  title: string;
+  desc: string;
+  icon: string;
+  path: string;
+}
+
+export interface AuthDepartmentOption {
+  id: string;
+  code: string;
+  name: string;
+  primary: boolean;
+  status: "ACTIVE" | "INACTIVE";
+}
+
+export interface StagePermission {
+  readable: boolean;
+  editable: boolean;
+  correctable: boolean;
+}
+
+export interface AuxiliaryPermission {
+  readable: boolean;
+  editable: boolean;
+  returnable: boolean;
+}
+
+export interface NavigationResult {
+  version: string;
+  policyVersion: string;
+  menus: Menu.MenuOptions[];
+  buttonPermissions: Login.ResAuthButtons;
+  shortcuts: NavigationShortcut[];
+  activeDepartment?: AuthDepartmentOption;
+  departments: AuthDepartmentOption[];
+  capabilities: string[];
+  stagePermissions: Record<string, StagePermission>;
+  auxiliaryPermissions: Record<string, AuxiliaryPermission>;
 }
 
 export const loginApi = (params: Login.ReqLoginForm) => {
@@ -67,12 +113,37 @@ export const getLoginAccountsApi = (department: string) => {
     });
 };
 
-export const getAuthMenuListApi = () => {
-  return Promise.resolve(authMenuList as unknown as ResultData<Menu.MenuOptions[]>);
+export const getDirectoryAccountsApi = () => {
+  return fetch(`${AUTH_API_BASE_URL}/directory/accounts`, { headers: authHeaders() })
+    .then(async response => {
+      if (response.status === 401) handleUnauthorizedResponse();
+      const payload = await readJsonResult<DirectoryAccountOption[]>(response);
+      if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "人员目录加载失败");
+      return payload;
+    })
+    .catch(error => {
+      throw error instanceof Error ? error : new Error("人员目录服务未连通，请确认后端已启动");
+    });
 };
 
-export const getAuthButtonListApi = () => {
-  return Promise.resolve(authButtonList as unknown as ResultData<Login.ResAuthButtons>);
+export const getAuthNavigationApi = () => {
+  return fetch(`${AUTH_API_BASE_URL}/navigation`, { headers: authHeaders() }).then(async response => {
+    const payload = await readJsonResult<NavigationResult>(response);
+    if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "导航权限加载失败");
+    return payload;
+  });
+};
+
+export const switchActiveDepartmentApi = (departmentId: string) => {
+  return fetch(`${AUTH_API_BASE_URL}/active-department`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ departmentId })
+  }).then(async response => {
+    const payload = await readJsonResult<AuthDepartmentOption>(response);
+    if (!response.ok || String(payload.code) !== "200") throw new Error(payload.msg || "活动科室切换失败");
+    return payload;
+  });
 };
 
 export const logoutApi = () => {
@@ -86,7 +157,7 @@ export const logoutApi = () => {
   });
 };
 
-export const changePasswordApi = (params: { currentPassword: string; newPassword: string }) => {
+export const changePasswordApi = (params: { newPassword: string }) => {
   return fetch(`${AUTH_API_BASE_URL}/password`, {
     method: "POST",
     headers: {

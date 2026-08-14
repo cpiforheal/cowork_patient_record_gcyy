@@ -1,0 +1,395 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - complementary [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - img "logo" [ref=e8]
+          - generic [ref=e9]: 门诊信息管理平台
+        - menubar [ref=e13]:
+          - menuitem "我的待办" [ref=e14] [cursor=pointer]:
+            - img [ref=e16] [cursor=pointer]
+            - generic [ref=e18] [cursor=pointer]: 我的待办
+          - menuitem "前置病历" [ref=e19]:
+            - generic [ref=e20] [cursor=pointer]:
+              - img [ref=e22] [cursor=pointer]
+              - generic [ref=e24] [cursor=pointer]: 前置病历
+              - img [ref=e26] [cursor=pointer]
+          - menuitem "岗位上传" [ref=e28]:
+            - generic [ref=e29] [cursor=pointer]:
+              - img [ref=e31] [cursor=pointer]
+              - generic [ref=e33] [cursor=pointer]: 岗位上传
+              - img [ref=e35] [cursor=pointer]
+          - menuitem "今日患者" [ref=e37]:
+            - generic [ref=e38] [cursor=pointer]:
+              - img [ref=e40] [cursor=pointer]
+              - generic [ref=e42] [cursor=pointer]: 今日患者
+              - img [ref=e44] [cursor=pointer]
+          - menuitem "患者流程" [ref=e46]:
+            - generic [ref=e47] [cursor=pointer]:
+              - img [ref=e49] [cursor=pointer]
+              - generic [ref=e52] [cursor=pointer]: 患者流程
+              - img [ref=e54] [cursor=pointer]
+          - menuitem "模板工具" [ref=e56]:
+            - generic [ref=e57] [cursor=pointer]:
+              - img [ref=e59] [cursor=pointer]
+              - generic [ref=e61] [cursor=pointer]: 模板工具
+              - img [ref=e63] [cursor=pointer]
+          - menuitem "资料管控" [ref=e65]:
+            - generic [ref=e66] [cursor=pointer]:
+              - img [ref=e68] [cursor=pointer]
+              - generic [ref=e70] [cursor=pointer]: 资料管控
+              - img [ref=e72] [cursor=pointer]
+          - menuitem "质控审计" [ref=e74]:
+            - generic [ref=e75] [cursor=pointer]:
+              - img [ref=e77] [cursor=pointer]
+              - generic [ref=e79] [cursor=pointer]: 质控审计
+              - img [ref=e81] [cursor=pointer]
+          - menuitem "中药房" [ref=e83]:
+            - generic [ref=e84] [cursor=pointer]:
+              - generic [ref=e86] [cursor=pointer]: 中药房
+              - img [ref=e88] [cursor=pointer]
+          - menuitem "系统设置" [ref=e90]:
+            - generic [ref=e91] [cursor=pointer]:
+              - img [ref=e93] [cursor=pointer]
+              - generic [ref=e95] [cursor=pointer]: 系统设置
+              - img [ref=e97] [cursor=pointer]
+    - generic [ref=e99]:
+      - generic [ref=e100]:
+        - generic [ref=e101]:
+          - img [ref=e103] [cursor=pointer]
+          - navigation "面包屑" [ref=e106]:
+            - link "我的待办" [ref=e108]:
+              - generic [ref=e109]:
+                - img [ref=e111]
+                - generic [ref=e113]: 我的待办
+        - generic [ref=e114]:
+          - generic [ref=e115]:
+            - generic [ref=e117] [cursor=pointer]: 
+            - generic [ref=e119] [cursor=pointer]: 
+          - generic [ref=e120]: 管理员（信息/院办）
+          - button "avatar" [ref=e122] [cursor=pointer]:
+            - img "avatar" [ref=e123] [cursor=pointer]
+      - text: 
+      - generic [ref=e125]:
+        - generic [ref=e126]:
+          - tablist [ref=e130]:
+            - tab "我的待办" [selected] [ref=e131]:
+              - img [ref=e133]
+              - text: 我的待办
+          - generic:
+            - tabpanel "我的待办"
+        - button "" [ref=e136] [cursor=pointer]:
+          - generic [ref=e137] [cursor=pointer]: 
+      - main [ref=e138]:
+        - generic [ref=e139]:
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - generic [ref=e142]: 当前岗位
+              - strong [ref=e143]: 管理员
+              - generic [ref=e144]: 信息/院办
+            - generic [ref=e145]:
+              - paragraph [ref=e146]: 今天要处理什么
+              - heading "备份健康巡检" [level=1] [ref=e147]
+              - generic [ref=e148]: 15 MB / 2026-07-14T18:00:01Z
+            - button "进入第一项待办" [ref=e149] [cursor=pointer]:
+              - img [ref=e151] [cursor=pointer]
+              - generic [ref=e153] [cursor=pointer]: 进入第一项待办
+            - button "豆包助手" [ref=e154] [cursor=pointer]:
+              - img [ref=e156] [cursor=pointer]
+              - generic [ref=e159] [cursor=pointer]: 豆包助手
+          - generic [ref=e160]:
+            - button "待处理 1 人" [ref=e161] [cursor=pointer]:
+              - generic [ref=e162] [cursor=pointer]: 待处理
+              - strong [ref=e163] [cursor=pointer]: "1"
+              - generic [ref=e164] [cursor=pointer]: 今日未闭环
+            - button "待档案审核 0 人" [ref=e165] [cursor=pointer]:
+              - generic [ref=e166] [cursor=pointer]: 待档案审核
+              - strong [ref=e167] [cursor=pointer]: "0"
+              - generic [ref=e168] [cursor=pointer]: 需要复核
+            - button "退回整改 0 人" [ref=e169] [cursor=pointer]:
+              - generic [ref=e170] [cursor=pointer]: 退回整改
+              - strong [ref=e171] [cursor=pointer]: "0"
+              - generic [ref=e172] [cursor=pointer]: 优先补齐
+            - button "附件作废 0 份" [ref=e173] [cursor=pointer]:
+              - generic [ref=e174] [cursor=pointer]: 附件作废
+              - strong [ref=e175] [cursor=pointer]: "0"
+              - generic [ref=e176] [cursor=pointer]: 需要留痕
+            - button "可写章节 25 项" [ref=e177] [cursor=pointer]:
+              - generic [ref=e178] [cursor=pointer]: 可写章节
+              - strong [ref=e179] [cursor=pointer]: "25"
+              - generic [ref=e180] [cursor=pointer]: 管理员权限
+          - generic [ref=e181]:
+            - generic [ref=e182]:
+              - generic [ref=e183]:
+                - generic [ref=e184]:
+                  - generic [ref=e185]:
+                    - heading "我的待办" [level=2] [ref=e186]
+                    - paragraph [ref=e187]: 管理员登录后只看最该处理的动作，点击直接进入对应患者、章节或审核页。
+                  - button "刷新" [ref=e188] [cursor=pointer]:
+                    - img [ref=e190] [cursor=pointer]
+                    - generic [ref=e192] [cursor=pointer]: 刷新
+                - generic [ref=e193]:
+                  - button "管理员 3 备份健康巡检 15 MB / 2026-07-14T18:00:01Z 查看面板" [ref=e194] [cursor=pointer]:
+                    - generic [ref=e195] [cursor=pointer]: 管理员
+                    - strong [ref=e196] [cursor=pointer]: "3"
+                    - emphasis [ref=e197] [cursor=pointer]: 备份健康巡检
+                    - generic [ref=e198] [cursor=pointer]: 15 MB / 2026-07-14T18:00:01Z
+                    - generic [ref=e199] [cursor=pointer]: 查看面板
+                  - button "管理员 1 今日未闭环 关注超过规则时限仍未闭环的患者 看流程" [ref=e200] [cursor=pointer]:
+                    - generic [ref=e201] [cursor=pointer]: 管理员
+                    - strong [ref=e202] [cursor=pointer]: "1"
+                    - emphasis [ref=e203] [cursor=pointer]: 今日未闭环
+                    - generic [ref=e204] [cursor=pointer]: 关注超过规则时限仍未闭环的患者
+                    - generic [ref=e205] [cursor=pointer]: 看流程
+                  - button "管理员 0 审核与归档 跟进质控审核、退回整改和资料异常 去审核" [ref=e206] [cursor=pointer]:
+                    - generic [ref=e207] [cursor=pointer]: 管理员
+                    - strong [ref=e208] [cursor=pointer]: "0"
+                    - emphasis [ref=e209] [cursor=pointer]: 审核与归档
+                    - generic [ref=e210] [cursor=pointer]: 跟进质控审核、退回整改和资料异常
+                    - generic [ref=e211] [cursor=pointer]: 去审核
+                - button "测试患者 TMP20260706160844DUP3 档案补全 前台处理：前台/收费处 资料已上传" [ref=e213] [cursor=pointer]:
+                  - generic [ref=e214] [cursor=pointer]:
+                    - strong [ref=e215] [cursor=pointer]: 测试患者
+                    - generic [ref=e216] [cursor=pointer]: TMP20260706160844DUP3
+                  - generic [ref=e217] [cursor=pointer]:
+                    - emphasis [ref=e218] [cursor=pointer]: 档案补全
+                    - generic [ref=e219] [cursor=pointer]: 前台处理：前台/收费处
+                  - generic [ref=e221] [cursor=pointer]: 资料已上传
+              - generic [ref=e222]:
+                - generic [ref=e223]:
+                  - generic [ref=e224]:
+                    - generic [ref=e225]: 主控区 · 月历热力
+                    - heading "2026 年 7 月" [level=2] [ref=e226]
+                    - paragraph [ref=e227]: 本月收录 1 人，单日峰值 1 人
+                  - generic [ref=e228]:
+                    - button "上个月" [ref=e229] [cursor=pointer]:
+                      - img [ref=e231] [cursor=pointer]
+                    - button "本月" [ref=e233] [cursor=pointer]:
+                      - generic [ref=e234] [cursor=pointer]: 本月
+                    - button "整月" [ref=e235] [cursor=pointer]:
+                      - generic [ref=e236] [cursor=pointer]: 整月
+                    - button "下个月" [ref=e237] [cursor=pointer]:
+                      - img [ref=e239] [cursor=pointer]
+                - generic [ref=e241]:
+                  - generic [ref=e242]: 一
+                  - generic [ref=e243]: 二
+                  - generic [ref=e244]: 三
+                  - generic [ref=e245]: 四
+                  - generic [ref=e246]: 五
+                  - generic [ref=e247]: 六
+                  - generic [ref=e248]: 日
+                - generic [ref=e249]:
+                  - button "2026-07-01 收录 0 人" [ref=e250] [cursor=pointer]:
+                    - generic [ref=e251] [cursor=pointer]: "1"
+                    - generic [ref=e252] [cursor=pointer]: 空
+                  - button "2026-07-02 收录 0 人" [ref=e253] [cursor=pointer]:
+                    - generic [ref=e254] [cursor=pointer]: "2"
+                    - generic [ref=e255] [cursor=pointer]: 空
+                  - button "2026-07-03 收录 0 人" [ref=e256] [cursor=pointer]:
+                    - generic [ref=e257] [cursor=pointer]: "3"
+                    - generic [ref=e258] [cursor=pointer]: 空
+                  - button "2026-07-04 收录 0 人" [ref=e259] [cursor=pointer]:
+                    - generic [ref=e260] [cursor=pointer]: "4"
+                    - generic [ref=e261] [cursor=pointer]: 空
+                  - button "2026-07-05 收录 0 人" [ref=e262] [cursor=pointer]:
+                    - generic [ref=e263] [cursor=pointer]: "5"
+                    - generic [ref=e264] [cursor=pointer]: 空
+                  - button "2026-07-06 收录 1 人" [ref=e265] [cursor=pointer]:
+                    - generic [ref=e266] [cursor=pointer]: "6"
+                    - generic [ref=e267] [cursor=pointer]: 1 人
+                  - button "2026-07-07 收录 0 人" [ref=e268] [cursor=pointer]:
+                    - generic [ref=e269] [cursor=pointer]: "7"
+                    - generic [ref=e270] [cursor=pointer]: 空
+                  - button "2026-07-08 收录 0 人" [ref=e271] [cursor=pointer]:
+                    - generic [ref=e272] [cursor=pointer]: "8"
+                    - generic [ref=e273] [cursor=pointer]: 空
+                  - button "2026-07-09 收录 0 人" [ref=e274] [cursor=pointer]:
+                    - generic [ref=e275] [cursor=pointer]: "9"
+                    - generic [ref=e276] [cursor=pointer]: 空
+                  - button "2026-07-10 收录 0 人" [ref=e277] [cursor=pointer]:
+                    - generic [ref=e278] [cursor=pointer]: "10"
+                    - generic [ref=e279] [cursor=pointer]: 空
+                  - button "2026-07-11 收录 0 人" [ref=e280] [cursor=pointer]:
+                    - generic [ref=e281] [cursor=pointer]: "11"
+                    - generic [ref=e282] [cursor=pointer]: 空
+                  - button "2026-07-12 收录 0 人" [ref=e283] [cursor=pointer]:
+                    - generic [ref=e284] [cursor=pointer]: "12"
+                    - generic [ref=e285] [cursor=pointer]: 空
+                  - button "2026-07-13 收录 0 人" [ref=e286] [cursor=pointer]:
+                    - generic [ref=e287] [cursor=pointer]: "13"
+                    - generic [ref=e288] [cursor=pointer]: 空
+                  - button "2026-07-14 收录 0 人" [ref=e289] [cursor=pointer]:
+                    - generic [ref=e290] [cursor=pointer]: "14"
+                    - generic [ref=e291] [cursor=pointer]: 空
+                  - button "2026-07-15 收录 0 人" [ref=e292] [cursor=pointer]:
+                    - generic [ref=e293] [cursor=pointer]: 15今
+                    - generic [ref=e294] [cursor=pointer]: 空
+                  - button "2026-07-16 收录 0 人" [ref=e295] [cursor=pointer]:
+                    - generic [ref=e296] [cursor=pointer]: "16"
+                    - generic [ref=e297] [cursor=pointer]: 空
+                  - button "2026-07-17 收录 0 人" [ref=e298] [cursor=pointer]:
+                    - generic [ref=e299] [cursor=pointer]: "17"
+                    - generic [ref=e300] [cursor=pointer]: 空
+                  - button "2026-07-18 收录 0 人" [ref=e301] [cursor=pointer]:
+                    - generic [ref=e302] [cursor=pointer]: "18"
+                    - generic [ref=e303] [cursor=pointer]: 空
+                  - button "2026-07-19 收录 0 人" [ref=e304] [cursor=pointer]:
+                    - generic [ref=e305] [cursor=pointer]: "19"
+                    - generic [ref=e306] [cursor=pointer]: 空
+                  - button "2026-07-20 收录 0 人" [ref=e307] [cursor=pointer]:
+                    - generic [ref=e308] [cursor=pointer]: "20"
+                    - generic [ref=e309] [cursor=pointer]: 空
+                  - button "2026-07-21 收录 0 人" [ref=e310] [cursor=pointer]:
+                    - generic [ref=e311] [cursor=pointer]: "21"
+                    - generic [ref=e312] [cursor=pointer]: 空
+                  - button "2026-07-22 收录 0 人" [ref=e313] [cursor=pointer]:
+                    - generic [ref=e314] [cursor=pointer]: "22"
+                    - generic [ref=e315] [cursor=pointer]: 空
+                  - button "2026-07-23 收录 0 人" [ref=e316] [cursor=pointer]:
+                    - generic [ref=e317] [cursor=pointer]: "23"
+                    - generic [ref=e318] [cursor=pointer]: 空
+                  - button "2026-07-24 收录 0 人" [ref=e319] [cursor=pointer]:
+                    - generic [ref=e320] [cursor=pointer]: "24"
+                    - generic [ref=e321] [cursor=pointer]: 空
+                  - button "2026-07-25 收录 0 人" [ref=e322] [cursor=pointer]:
+                    - generic [ref=e323] [cursor=pointer]: "25"
+                    - generic [ref=e324] [cursor=pointer]: 空
+                  - button "2026-07-26 收录 0 人" [ref=e325] [cursor=pointer]:
+                    - generic [ref=e326] [cursor=pointer]: "26"
+                    - generic [ref=e327] [cursor=pointer]: 空
+                  - button "2026-07-27 收录 0 人" [ref=e328] [cursor=pointer]:
+                    - generic [ref=e329] [cursor=pointer]: "27"
+                    - generic [ref=e330] [cursor=pointer]: 空
+                  - button "2026-07-28 收录 0 人" [ref=e331] [cursor=pointer]:
+                    - generic [ref=e332] [cursor=pointer]: "28"
+                    - generic [ref=e333] [cursor=pointer]: 空
+                  - button "2026-07-29 收录 0 人" [ref=e334] [cursor=pointer]:
+                    - generic [ref=e335] [cursor=pointer]: "29"
+                    - generic [ref=e336] [cursor=pointer]: 空
+                  - button "2026-07-30 收录 0 人" [ref=e337] [cursor=pointer]:
+                    - generic [ref=e338] [cursor=pointer]: "30"
+                    - generic [ref=e339] [cursor=pointer]: 空
+                  - button "2026-07-31 收录 0 人" [ref=e340] [cursor=pointer]:
+                    - generic [ref=e341] [cursor=pointer]: "31"
+                    - generic [ref=e342] [cursor=pointer]: 空
+                - generic [ref=e343]:
+                  - generic [ref=e344]: 0 人
+                  - generic [ref=e350]: 1-3 人
+                  - generic [ref=e351]: 4+ 人
+            - generic [ref=e352]:
+              - generic [ref=e354]:
+                - heading "常用入口" [level=2] [ref=e355]
+                - paragraph [ref=e356]: 保留一线高频动作，系统配置入口靠后。
+              - generic [ref=e357]:
+                - button "患者流程看板 查看今日患者卡片" [ref=e358] [cursor=pointer]:
+                  - img [ref=e360] [cursor=pointer]
+                  - generic [ref=e363] [cursor=pointer]: 患者流程看板
+                  - generic [ref=e364] [cursor=pointer]: 查看今日患者卡片
+                - button "今日患者 按姓名和门诊号查询" [ref=e365] [cursor=pointer]:
+                  - img [ref=e367] [cursor=pointer]
+                  - generic [ref=e369] [cursor=pointer]: 今日患者
+                  - generic [ref=e370] [cursor=pointer]: 按姓名和门诊号查询
+                - button "上传资料 门诊号识别后一键上传" [ref=e371] [cursor=pointer]:
+                  - img [ref=e373] [cursor=pointer]
+                  - generic [ref=e375] [cursor=pointer]: 上传资料
+                  - generic [ref=e376] [cursor=pointer]: 门诊号识别后一键上传
+                - button "旧资料导入 迁移共享文件夹资料" [ref=e377] [cursor=pointer]:
+                  - img [ref=e379] [cursor=pointer]
+                  - generic [ref=e381] [cursor=pointer]: 旧资料导入
+                  - generic [ref=e382] [cursor=pointer]: 迁移共享文件夹资料
+                - button "字段权限 查看字段归属" [ref=e383] [cursor=pointer]:
+                  - img [ref=e385] [cursor=pointer]
+                  - generic [ref=e387] [cursor=pointer]: 字段权限
+                  - generic [ref=e388] [cursor=pointer]: 查看字段归属
+                - button "档案审核 退回整改或通过归档" [ref=e389] [cursor=pointer]:
+                  - img [ref=e391] [cursor=pointer]
+                  - generic [ref=e393] [cursor=pointer]: 档案审核
+                  - generic [ref=e394] [cursor=pointer]: 退回整改或通过归档
+                - button "操作日志 追踪资料改动" [ref=e395] [cursor=pointer]:
+                  - img [ref=e397] [cursor=pointer]
+                  - generic [ref=e399] [cursor=pointer]: 操作日志
+                  - generic [ref=e400] [cursor=pointer]: 追踪资料改动
+              - generic [ref=e401]:
+                - generic [ref=e402]:
+                  - generic [ref=e403]:
+                    - heading "生产提醒" [level=2] [ref=e404]
+                    - paragraph [ref=e405]: 面向内测运行的风险提示与数据维护入口。
+                  - button "巡检" [ref=e406] [cursor=pointer]:
+                    - img [ref=e408] [cursor=pointer]
+                    - generic [ref=e410] [cursor=pointer]: 巡检
+                - generic [ref=e411]:
+                  - button "审核退回 0 暂无退回整改" [ref=e412] [cursor=pointer]:
+                    - generic [ref=e413] [cursor=pointer]: 审核退回
+                    - strong [ref=e414] [cursor=pointer]: "0"
+                    - generic [ref=e415] [cursor=pointer]: 暂无退回整改
+                  - button "待档案审核 0 暂无待审核档案" [ref=e416] [cursor=pointer]:
+                    - generic [ref=e417] [cursor=pointer]: 待档案审核
+                    - strong [ref=e418] [cursor=pointer]: "0"
+                    - generic [ref=e419] [cursor=pointer]: 暂无待审核档案
+                  - button "超时未闭环 1 超过 24 小时未更新，建议查看是否遗漏资料" [ref=e420] [cursor=pointer]:
+                    - generic [ref=e421] [cursor=pointer]: 超时未闭环
+                    - strong [ref=e422] [cursor=pointer]: "1"
+                    - generic [ref=e423] [cursor=pointer]: 超过 24 小时未更新，建议查看是否遗漏资料
+                  - button "疑似重复患者 0 暂无疑似重复" [ref=e424] [cursor=pointer]:
+                    - generic [ref=e425] [cursor=pointer]: 疑似重复患者
+                    - strong [ref=e426] [cursor=pointer]: "0"
+                    - generic [ref=e427] [cursor=pointer]: 暂无疑似重复
+                  - button "附件完整性 0 附件引用正常" [ref=e428] [cursor=pointer]:
+                    - generic [ref=e429] [cursor=pointer]: 附件完整性
+                    - strong [ref=e430] [cursor=pointer]: "0"
+                    - generic [ref=e431] [cursor=pointer]: 附件引用正常
+                - generic [ref=e432]:
+                  - generic [ref=e433]:
+                    - generic [ref=e434]: 附件存储
+                    - strong [ref=e435]: 引用 25 个附件，点击巡检核对缺失
+                    - generic [ref=e436]: E:\新建文件夹\hos_cowork\cowork_patient_record_gcyy-main\release\clinic-portable\data\attachments
+                  - generic [ref=e437]:
+                    - generic [ref=e438]: 数据快照
+                    - strong [ref=e439]: 2 个快照
+                    - generic [ref=e440]: 2026-07-06T02:47:46Z
+                  - button "生成快照" [ref=e441] [cursor=pointer]:
+                    - generic [ref=e442] [cursor=pointer]: 生成快照
+                - generic [ref=e443]:
+                  - generic [ref=e444]:
+                    - generic [ref=e445]:
+                      - generic [ref=e446]: 物理备份
+                      - strong [ref=e447]: 15 MB / 2026-07-14T18:00:01Z
+                      - generic [ref=e448]: 每天 02:00，保留 7 天 / 4 周 / 12 月
+                    - generic [ref=e449]:
+                      - switch [checked]
+                      - generic [ref=e451] [cursor=pointer]: 停用
+                      - generic [ref=e455] [cursor=pointer]: 自动
+                  - generic [ref=e456]:
+                    - textbox "例如：\\\\192.168.1.10\\clinic-backup 或 D:\\clinic-backup" [ref=e458]: E:\新建文件夹\hos_cowork\cowork_patient_record_gcyy-main\release\clinic-portable\backups
+                    - button "选择目录" [ref=e461] [cursor=pointer]:
+                      - generic [ref=e462] [cursor=pointer]: 选择目录
+                  - generic [ref=e463]:
+                    - generic [ref=e464]: 3 个备份 / 44 MB，可用 300 GB
+                    - generic [ref=e465]: E:\新建文件夹\hos_cowork\cowork_patient_record_gcyy-main\release\clinic-portable\backups
+                  - generic [ref=e466]:
+                    - article [ref=e467]:
+                      - generic [ref=e469]: 最近结果
+                      - strong [ref=e470]: 备份完成
+                    - article [ref=e471]:
+                      - generic [ref=e473]: 数据库
+                      - strong [ref=e474]: 已纳入备份
+                    - article [ref=e475]:
+                      - generic [ref=e477]: 附件目录
+                      - strong [ref=e478]: 待巡检
+                    - article [ref=e479]:
+                      - generic [ref=e481]: 备份路径
+                      - strong [ref=e482]: 可写空间充足
+                  - generic [ref=e483]:
+                    - button "保存路径" [ref=e484] [cursor=pointer]:
+                      - generic [ref=e485] [cursor=pointer]: 保存路径
+                    - button "立即备份" [ref=e486] [cursor=pointer]:
+                      - generic [ref=e487] [cursor=pointer]: 立即备份
+      - generic [ref=e490]: 固始中医肛肠医院门诊电子信息管理系统
+  - button "豆包助手 院内问答" [ref=e491] [cursor=pointer]:
+    - img [ref=e494] [cursor=pointer]
+    - strong [ref=e497] [cursor=pointer]: 豆包助手
+    - generic [ref=e498] [cursor=pointer]: 院内问答
+```

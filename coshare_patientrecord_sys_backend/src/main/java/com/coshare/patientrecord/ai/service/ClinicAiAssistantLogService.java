@@ -2,7 +2,6 @@ package com.coshare.patientrecord.ai.service;
 
 import com.coshare.patientrecord.ai.model.AssistantLogDraft;
 import com.coshare.patientrecord.ai.repository.ClinicAiAssistantLogRepository;
-import com.coshare.patientrecord.ai.repository.ClinicAiAssistantLogSchemaInitializer;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.security.AuthPermission;
@@ -11,7 +10,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.annotation.PostConstruct;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -35,29 +33,21 @@ public class ClinicAiAssistantLogService {
     private static final int MAX_LOGS = 500;
 
     private final ClinicAiAssistantLogRepository logRepository;
-    private final ClinicAiAssistantLogSchemaInitializer schemaInitializer;
     private final ObjectMapper objectMapper;
     private final SensitiveDataMasker sensitiveDataMasker;
 
     public ClinicAiAssistantLogService(
         ClinicAiAssistantLogRepository logRepository,
-        ClinicAiAssistantLogSchemaInitializer schemaInitializer,
         ObjectMapper objectMapper,
         SensitiveDataMasker sensitiveDataMasker
     ) {
         this.logRepository = logRepository;
-        this.schemaInitializer = schemaInitializer;
         this.objectMapper = objectMapper;
         this.sensitiveDataMasker = sensitiveDataMasker;
     }
 
-    @PostConstruct
-    public void initializeSchema() {
-        tryEnsureSchema();
-    }
-
     private boolean tryEnsureSchema() {
-        return schemaInitializer.tryEnsureSchema();
+        return true;
     }
 
     public void record(AssistantLogDraft draft) {
@@ -231,7 +221,6 @@ public class ClinicAiAssistantLogService {
     }
 
     private ObjectNode findLog(String id) {
-        schemaInitializer.ensureSchema();
         return logRepository.findLog(id);
     }
 

@@ -1,88 +1,140 @@
 <template>
-  <main class="display-shell" :class="{ offline }">
-    <header class="display-header">
-      <div class="header-primary">
-        <img class="brand-logo" src="@/assets/images/logo.jpg" alt="医院标识" />
-        <strong class="brand-title">固始中医肛肠医院</strong>
-        <span class="header-divider"></span>
-        <strong class="system-title">检查接诊排队</strong>
-        <span class="header-divider"></span>
-        <strong class="clock-time">{{ clock }}</strong>
+  <DisplayShell
+    title="门诊候诊叫号"
+    subtitle="OUTPATIENT QUEUE DISPLAY"
+    :clock="clock"
+    :date-text="dateText"
+    :offline="offline"
+    :last-updated="lastUpdated"
+    :session-expired="sessionExpired"
+    :offline-since="offlineSince"
+    :audio-blocked="audioBlocked"
+    :audio-enabling="audioEnabling"
+    @enable-audio="enableAudio"
+  >
+    <template #subheader>
+      <div class="stage-flow-bar">
+        <span><b>01</b>检查室</span><i><em>检查完成 · 同号流转</em></i
+        ><span><b>02</b>接诊室</span>
       </div>
-      <span class="date-text">{{ dateText }}</span>
-    </header>
+    </template>
 
-    <section class="display-content">
-      <article v-for="panel in panels" :key="panel.stage" class="room-board" :class="roomClass(panel.room.room.status)">
+    <div class="display-content">
+      <article
+        v-for="panel in panels"
+        :key="panel.stage"
+        class="room-board"
+        :class="[
+          roomClass(panel.room.room.status),
+          panel.stage === 'INSPECTION' ? 'inspection-board' : 'reception-board',
+          panel.room.calling.length ? 'has-calling' : 'is-idle'
+        ]"
+      >
+        <div class="board-decoration" aria-hidden="true">
+          <svg class="colon-mascot" viewBox="0 0 96 96" fill="none">
+            <path
+              d="M29 18c-9 0-16 7-16 16v25c0 11 8 19 19 19h25c12 0 21-9 21-21V35c0-9-7-16-16-16H35c-6 0-10 4-10 10v24c0 6 4 10 10 10h17c6 0 10-4 10-10V38c0-4-3-7-7-7s-7 3-7 7v10"
+            />
+            <circle cx="34" cy="35" r="2.2" />
+            <circle cx="43" cy="35" r="2.2" />
+            <path d="M34 42c3 3 7 3 10 0" />
+            <path class="mascot-spark" d="m75 13 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" />
+          </svg>
+        </div>
         <div class="board-title">
-          <div>
-            <span class="section-seal">{{ panel.stage === "INSPECTION" ? "检" : "诊" }}</span>
-            <div>
-              <b>{{ panel.room.room.roomName }}</b>
-              <span>{{ roomStatusLabel(panel.room.room.status) }}</span>
-            </div>
+          <div class="room-identity">
+            <span class="stage-index">{{ panel.stage === "INSPECTION" ? "01" : "02" }}</span>
+            <span class="room-medical-icon">
+              <svg v-if="panel.stage === 'INSPECTION'" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <rect x="9" y="7" width="25" height="32" rx="5" />
+                <path d="M17 7.5V5h9v2.5M15 17h13M15 23h8" />
+                <circle cx="31" cy="31" r="7" />
+                <path d="m36 36 5 5" />
+              </svg>
+              <svg v-else viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <path d="M12 8v10c0 7 5 12 12 12s12-5 12-12V8" />
+                <path d="M8 8h8M32 8h8M24 30v3c0 5 4 9 9 9s9-4 9-9v-2" />
+                <circle cx="42" cy="27" r="4" />
+              </svg>
+            </span>
+            <b>{{ panel.room.room.roomName }}</b>
+            <span class="room-status-pill">{{ roomStatusLabel(panel.room.room.status) }}</span>
           </div>
-          <strong>{{ panel.room.waiting.length }}</strong>
+          <div class="waiting-count">
+            <span>等候</span><strong>{{ panel.room.waiting.length }}</strong
+            ><span>人</span>
+          </div>
         </div>
 
         <section class="calling-section">
-          <span class="section-caption">{{ panel.stage === "INSPECTION" ? "检查候诊区" : "接诊候诊区" }}</span>
-          <div class="room-focus-card">
-            <i>{{ panel.stage === "INSPECTION" ? "检" : "诊" }}</i>
-            <strong>{{ panel.stage === "INSPECTION" ? "请等候检查叫号" : "请等候接诊叫号" }}</strong>
-            <p>{{ roomEmptyText(panel.room.room.status) }}</p>
-            <span>叫号时将弹窗提示并语音播报</span>
+          <div class="section-caption">当前叫号</div>
+          <div class="room-focus-card" :class="{ empty: !panel.room.calling.length }">
+            <template v-if="panel.room.calling[0]">
+              <strong class="focus-number">{{ panel.room.calling[0].publicNo }}</strong>
+              <p class="focus-guide">请前往 {{ panel.room.room.roomName }}</p>
+            </template>
+            <template v-else
+              ><strong class="empty-state-title">{{ roomEmptyText(panel.room.room.status) }}</strong></template
+            >
           </div>
         </section>
 
         <section class="waiting-section">
           <div class="waiting-head">
-            <span>等待号码</span>
-            <em>请留意屏幕并保持安静</em>
+            <span>接下来</span><em>{{ panel.room.waiting.length }} 人等候</em>
           </div>
           <transition-group v-if="panel.room.waiting.length" name="queue-list" tag="div" class="waiting-grid">
-            <div v-for="row in panel.room.waiting.slice(0, 12)" :key="row.id" class="waiting-item">
-              <strong>{{ row.publicNo }}</strong>
-              <span :class="row.visitType === 'FOLLOW_UP' ? 'follow-up' : 'first-visit'">
+            <div
+              v-for="(row, index) in visibleWaiting(panel.room)"
+              :key="row.id"
+              class="waiting-item"
+              :class="{ next: index === 0 }"
+            >
+              <div class="waiting-number">
+                <small v-if="index === 0">下一位</small>
+                <strong>{{ row.publicNo }}</strong>
+              </div>
+              <span class="visit-tag" :class="row.visitType === 'FOLLOW_UP' ? 'follow-up' : 'first-visit'">
                 {{ visitTypeLabel(row.visitType) }}
               </span>
             </div>
+            <div v-if="overflowCount(panel.room)" key="waiting-overflow" class="waiting-item overflow">
+              <strong>…还有 {{ overflowCount(panel.room) }} 位</strong>
+            </div>
           </transition-group>
-          <div v-else class="waiting-empty">暂无等待患者</div>
+          <div v-else class="waiting-empty">当前暂无等候号码</div>
+          <div v-if="panel.room.missed?.length" class="missed-strip">
+            <b>过号</b>
+            <strong v-for="row in panel.room.missed" :key="row.id">{{ row.publicNo }}</strong>
+            <em>请到前台重新排队</em>
+          </div>
         </section>
       </article>
-    </section>
+    </div>
 
-    <footer class="display-footer">
-      <div class="footer-mark"><span>同号流转</span>检查完成后自动进入接诊队列</div>
-      <div class="status">
-        <span :class="offline ? 'bad' : 'good'"></span>
-        {{ offline ? "连接中断，正在自动重连" : `更新于 ${lastUpdated}` }}
-        <button v-if="audioBlocked" class="audio-enable-button" type="button" :disabled="audioEnabling" @click.stop="enableAudio">
-          {{ audioEnabling ? "正在开启…" : "开启叫号语音" }}
-        </button>
-        <b v-else class="audio-enabled-text">✓ 叫号语音已开启</b>
-        <em v-if="audioMessage" class="audio-message">{{ audioMessage }}</em>
-      </div>
-    </footer>
-
-    <transition name="call-overlay">
-      <div v-if="currentCall" class="calling-overlay">
-        <div class="calling-card">
-          <span class="calling-seal">请</span>
-          <em>{{ currentCall.stageCode === "INSPECTION" ? "检查室叫号" : "接诊室叫号" }}</em>
-          <p>{{ currentCall.publicNo }} 号</p>
-          <strong>请前往{{ currentCall.roomName }}</strong>
-          <h2>{{ currentCall.content }}</h2>
+    <template #overlay>
+      <transition name="call-overlay">
+        <div v-if="currentCall" class="calling-overlay">
+          <div class="calling-card">
+            <span class="calling-seal">请</span>
+            <em>{{ currentCall.stageCode === "INSPECTION" ? "检查室叫号" : "接诊室叫号" }}</em>
+            <p>{{ currentCall.publicNo }} 号</p>
+            <strong>请前往{{ currentCall.roomName }}</strong>
+            <h2>{{ currentCall.content }}</h2>
+          </div>
         </div>
-      </div>
-    </transition>
-  </main>
+      </transition>
+    </template>
+  </DisplayShell>
 </template>
 
 <script setup lang="ts" name="clinicQueueDisplay">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { speakAiSummaryApi } from "@/api/modules/clinic/ai";
+import { computed, onBeforeUnmount, onMounted, reactive } from "vue";
+import DisplayShell from "@/components/DisplayShell/index.vue";
+import { useDisplayClock } from "@/hooks/useDisplayClock";
+import { useDisplayPolling } from "@/hooks/useDisplayPolling";
+import { useAnnouncementPlayer } from "@/hooks/useAnnouncementPlayer";
+import { setAuthRedirectSuppressed } from "@/api/modules/authToken";
 import {
   getPendingQueueAnnouncementsApi,
   getQueueDisplayApi,
@@ -107,7 +159,8 @@ const emptyRoom = (roomCode: string, roomName: string, stageCode: QueueStage): Q
     updatedAt: ""
   },
   calling: [],
-  waiting: []
+  waiting: [],
+  missed: []
 });
 
 const snapshot = reactive<QueueDisplaySnapshot>({
@@ -125,48 +178,49 @@ const snapshot = reactive<QueueDisplaySnapshot>({
   refreshSeconds: 3
 });
 
-const clock = ref("");
-const dateText = ref("");
-const lastUpdated = ref("--:--");
-const offline = ref(false);
-const audioBlocked = ref(true);
-const audioEnabling = ref(false);
-const audioMessage = ref("请先点击开启语音");
-const currentCall = ref<QueueAnnouncement>();
-const played = new Set<string>();
-const CALL_POPUP_DURATION = 3800;
-const SPEECH_TIMEOUT = 10000;
-let refreshTimer = 0;
-let clockTimer = 0;
-let overlayTimer = 0;
-let callBusy = false;
-let audio: HTMLAudioElement | undefined;
-let deferredCall: QueueAnnouncement | undefined;
-let callChannel: BroadcastChannel | undefined;
-
 const panels = computed(() => [
   { stage: "INSPECTION" as QueueStage, room: snapshot.inspection },
   { stage: "RECEPTION" as QueueStage, room: snapshot.reception }
 ]);
 
-function tick() {
-  const now = new Date();
-  clock.value = now.toLocaleTimeString("zh-CN", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
-  dateText.value = now.toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    weekday: "long"
-  });
-}
+const { clock, dateText, calibrate } = useDisplayClock();
+
+const { offline, sessionExpired, lastUpdated, offlineSince, refreshNow, setIntervalSeconds } = useDisplayPolling({
+  // 连续离线 10 分钟后整页重载自愈（无人值守大屏的最后兜底）。
+  watchdogReloadSeconds: 600,
+  refresh: async () => {
+    const [{ data }, announcements] = await Promise.all([getQueueDisplayApi(), getPendingQueueAnnouncementsApi()]);
+    Object.assign(snapshot, data);
+    setIntervalSeconds(data.refreshSeconds);
+    calibrate(data.serverTime);
+    playIfNew(announcements.data.rows.find(item => !hasPlayed(item.id)));
+  }
+});
+
+const { currentCall, audioBlocked, audioEnabling, enableAudio, playIfNew, hasPlayed } = useAnnouncementPlayer<QueueAnnouncement>({
+  unlockStorageKey: "clinic-queue-audio-enabled",
+  markPlayed: markQueueAnnouncementPlayedApi,
+  requestRefresh: refreshNow,
+  popupDurationMs: 9000,
+  repeat: 2,
+  channelName: "clinic-queue-calls",
+  channelMessageType: "CLINIC_QUEUE_CALL_CREATED",
+  storageEventKey: "clinic-queue-call-event",
+  confirmationText: "检查接诊叫号语音已开启"
+});
 
 function visitTypeLabel(type: QueueVisitType) {
   return type === "FOLLOW_UP" ? "复诊" : "初诊";
+}
+
+// 等待网格 6 格：超出时末格显示"…还有 N 位"，避免第 7 人以为自己不在队。
+const WAITING_TILES = 6;
+function visibleWaiting(room: QueueDisplayRoom) {
+  if (room.waiting.length > WAITING_TILES) return room.waiting.slice(0, WAITING_TILES - 1);
+  return room.waiting.slice(0, WAITING_TILES);
+}
+function overflowCount(room: QueueDisplayRoom) {
+  return room.waiting.length > WAITING_TILES ? room.waiting.length - (WAITING_TILES - 1) : 0;
 }
 
 function roomStatusLabel(status: QueueRoom["status"]) {
@@ -192,775 +246,738 @@ function roomEmptyText(status: QueueRoom["status"]) {
   if (status === "MANUAL_PAUSED") return "房间临时暂停叫号";
   if (status === "CLOSED") return "房间当前已停诊";
   if (status === "OFFLINE") return "房间终端暂时离线";
-  return "请留意下一次叫号";
+  return "当前暂无叫号";
 }
 
-async function refresh() {
-  try {
-    const [{ data }, announcements] = await Promise.all([getQueueDisplayApi(), getPendingQueueAnnouncementsApi()]);
-    Object.assign(snapshot, data);
-    lastUpdated.value = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-    offline.value = false;
-    const next = announcements.data.rows.find(item => !played.has(item.id));
-    if (next && !callBusy) void playAnnouncement(next);
-  } catch {
-    offline.value = true;
-  }
-}
-
-function receiveCall(item?: QueueAnnouncement) {
-  if (!item || played.has(item.id) || callBusy) return;
-  void refresh();
-  void playAnnouncement(item);
-}
-
-function handleStorageCall(event: StorageEvent) {
-  if (event.key === "clinic-queue-call-event" && event.newValue) void refresh();
-}
-
-async function playAnnouncement(item: QueueAnnouncement) {
-  callBusy = true;
-  currentCall.value = item;
-  played.add(item.id);
-  window.clearTimeout(overlayTimer);
-  overlayTimer = window.setTimeout(() => {
-    if (currentCall.value?.id === item.id) currentCall.value = undefined;
-  }, CALL_POPUP_DURATION);
-
-  let spoken = false;
-  try {
-    if (audioBlocked.value) throw new Error("audio interaction required");
-    try {
-      const { data } = await speakAiSummaryApi({ text: item.content });
-      if (data.audioBase64) await playBase64(data.audioBase64, data.mimeType || "audio/mpeg");
-      else await browserSpeak(item.content);
-    } catch {
-      await browserSpeak(item.content);
-    }
-    spoken = true;
-  } catch {
-    deferredCall = item;
-    audioBlocked.value = true;
-  } finally {
-    if (spoken) {
-      deferredCall = undefined;
-      audioBlocked.value = false;
-      try {
-        await markQueueAnnouncementPlayedApi(item.id);
-      } catch {
-        // 播放确认失败不阻塞大屏，当前页面通过 played 集合避免重复播报。
-      }
-    }
-    callBusy = false;
-    void refresh();
-  }
-}
-
-async function playBase64(base64: string, mime: string) {
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  audio?.pause();
-  audio = new Audio(url);
-  audio.preload = "auto";
-  try {
-    await audio.play();
-    await new Promise<void>((resolve, reject) => {
-      if (!audio) return resolve();
-      const timeout = window.setTimeout(() => reject(new Error("audio timeout")), 15000);
-      audio.onended = () => {
-        window.clearTimeout(timeout);
-        resolve();
-      };
-      audio.onerror = () => {
-        window.clearTimeout(timeout);
-        reject(new Error("audio failed"));
-      };
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function browserSpeak(text: string) {
-  return new Promise<void>((resolve, reject) => {
-    if (!("speechSynthesis" in window)) return reject(new Error("unsupported"));
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    utterance.voice = voices.find(voice => /zh-CN/i.test(voice.lang)) || voices.find(voice => /^zh/i.test(voice.lang)) || null;
-    utterance.lang = "zh-CN";
-    utterance.rate = 0.88;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    const timeout = window.setTimeout(() => {
-      window.speechSynthesis.cancel();
-      reject(new Error("speech timeout"));
-    }, SPEECH_TIMEOUT);
-    utterance.onend = () => {
-      window.clearTimeout(timeout);
-      resolve();
-    };
-    utterance.onerror = () => {
-      window.clearTimeout(timeout);
-      reject(new Error("speech failed"));
-    };
-    window.speechSynthesis.speak(utterance);
-    window.setTimeout(() => {
-      if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-    }, 120);
-  });
-}
-
-async function unlockWebAudio() {
-  const safariWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
-  const AudioContextClass = window.AudioContext || safariWindow.webkitAudioContext;
-  if (!AudioContextClass) return;
-  const context = new AudioContextClass();
-  try {
-    if (context.state === "suspended") await context.resume();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    gain.gain.value = 0.0001;
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.03);
-  } finally {
-    window.setTimeout(() => void context.close(), 100);
-  }
-}
-
-async function enableAudio() {
-  if (audioEnabling.value) return;
-  audioEnabling.value = true;
-  audioMessage.value = "正在请求浏览器播放权限";
-
-  try {
-    await unlockWebAudio();
-    audioBlocked.value = false;
-    audioMessage.value = "语音已开启，可进行叫号测试";
-    window.sessionStorage.setItem("clinic-queue-audio-enabled", "1");
-
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-      const confirmation = new SpeechSynthesisUtterance("检查接诊叫号语音已开启");
-      confirmation.lang = "zh-CN";
-      confirmation.rate = 0.9;
-      confirmation.volume = 1;
-      window.speechSynthesis.speak(confirmation);
-    }
-
-    const pending = deferredCall;
-    deferredCall = undefined;
-    if (pending) {
-      played.delete(pending.id);
-      window.setTimeout(() => void playAnnouncement(pending), 800);
-    }
-  } catch {
-    audioBlocked.value = true;
-    audioMessage.value = "开启失败，请检查浏览器声音权限后重试";
-  } finally {
-    audioEnabling.value = false;
-  }
-}
-
-onMounted(() => {
-  tick();
-  if (window.sessionStorage.getItem("clinic-queue-audio-enabled") === "1") {
-    audioBlocked.value = false;
-    audioMessage.value = "语音已开启";
-  }
-  void refresh();
-  clockTimer = window.setInterval(tick, 1000);
-  refreshTimer = window.setInterval(refresh, 2000);
-  if ("BroadcastChannel" in window) {
-    callChannel = new BroadcastChannel("clinic-queue-calls");
-    callChannel.onmessage = event => {
-      if (event.data?.type === "CLINIC_QUEUE_CALL_CREATED") receiveCall(event.data.announcement as QueueAnnouncement);
-    };
-  }
-  window.addEventListener("storage", handleStorageCall);
-  window.addEventListener("focus", refresh);
-  document.addEventListener("visibilitychange", refresh);
-  window.speechSynthesis?.getVoices();
-});
-
-onBeforeUnmount(() => {
-  window.clearInterval(clockTimer);
-  window.clearInterval(refreshTimer);
-  window.clearTimeout(overlayTimer);
-  callChannel?.close();
-  window.removeEventListener("storage", handleStorageCall);
-  window.removeEventListener("focus", refresh);
-  document.removeEventListener("visibilitychange", refresh);
-  audio?.pause();
-  window.speechSynthesis?.cancel();
-});
+onMounted(() => setAuthRedirectSuppressed(true));
+onBeforeUnmount(() => setAuthRedirectSuppressed(false));
 </script>
 
 <style scoped lang="scss">
-.display-shell {
-  --paper-bg: #f6faf8;
-  --paper-card: #fbfdfc;
-  --paper-soft: #f0f7f4;
-  --paper-active: #e5f2ed;
-  --ink: #29453f;
-  --ink-muted: #789089;
-  --green: #5a9b81;
-  --green-soft: #79b79e;
-  --line: #e1eee9;
-  min-height: 100vh;
+.stage-flow-bar {
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  overflow: hidden;
-  color: var(--ink);
-  background: var(--paper-bg);
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-}
-
-.display-header {
-  position: relative;
-  display: flex;
+  grid-template-columns: 1fr minmax(240px, 0.7fr) 1fr;
   align-items: center;
-  justify-content: center;
-  min-height: 104px;
-  padding: 14px 42px;
-  border-bottom: 1px solid var(--line);
-  background: var(--paper-card);
-}
-
-.header-primary {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   gap: 18px;
+  padding: 10px 32px 0;
 }
-
-.brand-logo {
-  width: 62px;
-  height: 62px;
-  padding: 3px;
-  object-fit: cover;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #ffffff;
+.stage-flow-bar > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--dsp-ink);
+  font-size: 17px;
+  font-weight: 800;
 }
-
-.brand-title {
-  font-size: 29px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
+.stage-flow-bar > span:last-child {
+  justify-content: flex-end;
 }
-
-.system-title {
-  color: var(--green);
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-}
-
-.header-divider {
-  width: 1px;
-  height: 38px;
-  margin: 0 4px;
-  background: #d9eae3;
-}
-
-.clock-time {
-  color: var(--green);
-  font-size: 38px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
-  line-height: 1;
-}
-
-.date-text {
-  position: absolute;
-  right: 42px;
-  bottom: 14px;
-  color: var(--ink-muted);
+.stage-flow-bar b {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--dsp-mint);
   font-size: 13px;
-  letter-spacing: 0.04em;
 }
-
+.stage-flow-bar i {
+  position: relative;
+  height: 1px;
+  background: var(--dsp-accent-green);
+  font-style: normal;
+  opacity: 0.6;
+}
+.stage-flow-bar i::after {
+  position: absolute;
+  top: -4px;
+  right: -1px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 8px solid var(--dsp-accent-green);
+  content: "";
+}
+.stage-flow-bar em {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  padding: 0 8px;
+  color: var(--dsp-accent-green-deep);
+  background: var(--dsp-surface);
+  font-size: 12px;
+  font-style: normal;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
 .display-content {
+  height: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px;
+  gap: 24px;
   min-height: 0;
-  padding: 24px 42px;
+  padding: 12px 32px 22px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
-
 .room-board {
+  --stage-accent: var(--dsp-blue);
+  --stage-index-bg: rgba(11, 177, 234, 0.12);
+  --stage-index-color: var(--dsp-blue-deep);
+  position: relative;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(250px, 0.9fr) minmax(230px, 1.1fr);
+  grid-template-rows: clamp(64px, 14%, 100px) minmax(0, 36%) minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--paper-card);
-  box-shadow: 0 8px 24px rgba(55, 104, 86, 0.05);
-
-  &.paused .board-title {
-    background: #fff8e8;
-  }
-
-  &.emergency .board-title {
-    color: #9c4338;
-    background: #fff0ed;
-  }
-
-  &.closed {
-    filter: saturate(0.55);
-  }
+  border: 1px solid color-mix(in srgb, var(--stage-accent) 25%, var(--dsp-line-strong));
+  border-radius: var(--dsp-radius-card);
+  background: var(--dsp-surface);
+  box-shadow:
+    var(--dsp-shadow-card),
+    inset 0 4px 0 color-mix(in srgb, var(--stage-accent) 62%, transparent);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
 }
-
+.room-board.has-calling {
+  box-shadow:
+    0 20px 52px color-mix(in srgb, var(--stage-accent) 16%, transparent),
+    inset 0 4px 0 var(--stage-accent);
+}
+.room-board.reception-board {
+  --stage-accent: var(--dsp-accent-green);
+  --stage-index-bg: color-mix(in srgb, var(--dsp-mint) 50%, transparent);
+  --stage-index-color: var(--dsp-accent-green-deep);
+}
+.board-decoration {
+  position: absolute;
+  right: 14px;
+  bottom: 8px;
+  z-index: 0;
+  width: clamp(76px, 6.5vw, 108px);
+  color: var(--stage-accent);
+  opacity: 0.13;
+  pointer-events: none;
+  transform: rotate(-4deg);
+}
+.colon-mascot {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  stroke: currentColor;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.colon-mascot circle {
+  fill: currentColor;
+  stroke: none;
+}
+.colon-mascot .mascot-spark {
+  fill: color-mix(in srgb, var(--stage-accent) 42%, #ffd36a);
+  stroke: none;
+}
+.board-title,
+.calling-section,
+.waiting-section {
+  position: relative;
+  z-index: 1;
+}
+.room-board.paused {
+  border-color: var(--dsp-state-warn-line);
+  background: linear-gradient(180deg, var(--dsp-state-warn-bg), var(--dsp-surface) 60%);
+}
+.room-board.emergency {
+  border-color: var(--dsp-state-danger-line);
+  background: linear-gradient(180deg, var(--dsp-state-danger-bg), var(--dsp-surface) 60%);
+}
+.room-board.closed {
+  border-color: var(--dsp-state-closed-line);
+  background: var(--dsp-state-closed-bg);
+}
+/* 异常状态下让提示语接管焦点区：6 米外一眼可辨 */
+.room-board.paused .empty-state-title {
+  color: var(--dsp-state-warn);
+  font-size: clamp(30px, 2.6vw, 44px);
+}
+.room-board.emergency .empty-state-title {
+  color: var(--dsp-state-danger);
+  font-size: clamp(30px, 2.6vw, 44px);
+}
+.room-board.closed .empty-state-title {
+  color: var(--dsp-state-closed);
+  font-size: clamp(30px, 2.6vw, 44px);
+}
 .board-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 78px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--line);
-  background: var(--paper-soft);
-
-  > div {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-  }
-
-  > div > div {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  b {
-    color: #244f41;
-    font-size: clamp(30px, 2.6vw, 42px);
-    font-weight: 750;
-    letter-spacing: 0.12em;
-    text-shadow: 0 2px 0 rgba(255, 255, 255, 0.85);
-  }
-
-  span:not(.section-seal) {
-    color: var(--ink-muted);
-    font-size: 12px;
-  }
-
-  > strong {
-    color: var(--green);
-    font-size: 32px;
-    font-variant-numeric: tabular-nums;
-
-    &::after {
-      content: " 人等待";
-      color: var(--ink-muted);
-      font-size: 13px;
-      font-weight: 400;
-    }
-  }
+  padding: 0 26px;
+  border-bottom: 1px solid var(--dsp-line);
+  background:
+    radial-gradient(circle at 92% 22%, color-mix(in srgb, var(--stage-accent) 13%, transparent), transparent 25%),
+    linear-gradient(90deg, color-mix(in srgb, var(--stage-accent) 6%, transparent), transparent);
 }
-
-.section-seal {
+.room-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+.room-medical-icon {
   display: grid;
-  width: 54px;
-  height: 54px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   place-items: center;
-  border: 1px solid #cce3da;
-  border-radius: 15px;
-  color: #ffffff;
-  background: linear-gradient(145deg, #4f9277, #79b79e);
-  box-shadow: 0 8px 18px rgba(79, 146, 119, 0.18);
-  font:
-    29px "STSong",
-    "SimSun",
-    serif;
+  border: 1px solid color-mix(in srgb, var(--stage-accent) 28%, var(--dsp-line-strong));
+  border-radius: 50%;
+  color: var(--stage-index-color);
+  background: var(--dsp-tile);
+  box-shadow: 0 5px 13px color-mix(in srgb, var(--stage-accent) 12%, transparent);
 }
-
+.room-medical-icon svg {
+  width: 29px;
+  height: 29px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.stage-index {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--stage-index-color);
+  background: var(--stage-index-bg);
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.room-identity > b {
+  overflow: hidden;
+  font-size: var(--dsp-fs-room-title);
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-status-pill {
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--dsp-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.room-board.paused .room-status-pill {
+  border-color: var(--dsp-state-warn-line);
+  color: var(--dsp-state-warn);
+  background: var(--dsp-state-warn-bg);
+}
+.room-board.emergency .room-status-pill {
+  border-color: var(--dsp-state-danger-line);
+  color: var(--dsp-state-danger);
+  background: var(--dsp-state-danger-bg);
+}
+.room-board.closed .room-status-pill {
+  border-color: var(--dsp-state-closed-line);
+  color: var(--dsp-state-closed);
+  background: var(--dsp-state-closed-bg);
+}
+.waiting-count {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--dsp-muted);
+  font-size: 17px;
+  font-weight: 700;
+}
+.waiting-count strong {
+  color: var(--dsp-ink);
+  font-family: var(--dsp-font-numeric);
+  font-size: var(--dsp-fs-count);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
 .calling-section {
-  position: relative;
-  display: grid;
-  place-items: center;
-  padding: 36px 24px 24px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, #ffffff 0%, #fbfdfc 100%);
-}
-
-.section-caption {
-  position: absolute;
-  top: 16px;
-  left: 24px;
-  color: var(--ink-muted);
-  font-size: 13px;
-  letter-spacing: 0.12em;
-}
-
-.room-focus-card {
-  width: min(500px, 94%);
-  padding: 24px 30px 22px;
-  border: 1px solid #c8e2d7;
-  border-radius: 20px;
-  background: linear-gradient(145deg, #ffffff, var(--paper-active));
-  text-align: center;
-  box-shadow: 0 14px 34px rgba(70, 132, 106, 0.1);
-
-  i {
-    display: grid;
-    width: 72px;
-    height: 72px;
-    margin: 0 auto;
-    place-items: center;
-    border-radius: 22px;
-    color: #ffffff;
-    background: linear-gradient(145deg, #4f9277, #79b79e);
-    box-shadow: 0 10px 22px rgba(79, 146, 119, 0.2);
-    font:
-      normal 38px "STSong",
-      "SimSun",
-      serif;
-  }
-
-  strong {
-    display: block;
-    margin-top: 16px;
-    color: #315f50;
-    font-size: clamp(25px, 2.3vw, 36px);
-    letter-spacing: 0.1em;
-  }
-
-  p {
-    margin: 10px 0 0;
-    color: var(--ink);
-    font-size: 17px;
-  }
-
-  span {
-    display: block;
-    margin-top: 12px;
-    color: var(--ink-muted);
-    font-size: 13px;
-    letter-spacing: 0.05em;
-  }
-}
-
-.waiting-section {
+  display: flex;
   min-height: 0;
-  padding: 18px 22px 22px;
+  flex-direction: column;
+  padding: 16px 24px 18px;
+  border-bottom: 1px solid var(--dsp-line);
 }
-
+.section-caption,
 .waiting-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e7f1ed;
-
-  span {
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-  }
-
-  em {
-    color: var(--ink-muted);
-    font-size: 12px;
-    font-style: normal;
-  }
+  color: var(--dsp-ink);
+  font-size: var(--dsp-fs-caption);
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
-
-.waiting-grid {
+.section-caption {
+  padding-left: 10px;
+  border-left: 4px solid var(--stage-accent);
+}
+.waiting-head {
+  padding-left: 10px;
+  border-left: 4px solid var(--dsp-line-strong);
+}
+.waiting-head em {
+  color: var(--dsp-muted);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 600;
+}
+.room-focus-card {
+  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  max-height: calc(100% - 45px);
-  overflow: auto;
-  padding-top: 12px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(116, 169, 147, 0.24) transparent;
+  flex: 1;
+  place-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px 20px;
+  text-align: center;
+  border: 1px solid color-mix(in srgb, var(--stage-accent) 17%, var(--dsp-line));
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 12% 20%, color-mix(in srgb, var(--stage-accent) 10%, transparent), transparent 30%),
+    linear-gradient(135deg, var(--dsp-surface), color-mix(in srgb, var(--stage-accent) 5%, var(--dsp-surface)));
+  box-shadow: 0 7px 18px rgba(32, 92, 112, 0.045);
 }
-
+.focus-number {
+  display: block;
+  color: var(--dsp-blue-deep);
+  font-family: var(--dsp-font-numeric);
+  font-size: var(--dsp-fs-focus);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.reception-board .focus-number {
+  color: var(--dsp-accent-green-deep);
+}
+.focus-guide {
+  margin: 0;
+  overflow: hidden;
+  color: var(--dsp-muted);
+  font-size: var(--dsp-fs-focus-guide);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-focus-card.empty {
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  margin-top: 4px;
+  padding: 0;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--stage-accent) 3%, var(--dsp-surface));
+}
+.empty-state-title {
+  color: var(--dsp-muted);
+  font-size: clamp(24px, 2vw, 30px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.waiting-section {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px 22px;
+}
+.waiting-head {
+  margin-bottom: 12px;
+}
+.waiting-grid {
+  min-height: 0;
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(70px, 1fr));
+  gap: 12px;
+  overflow: hidden;
+}
 .waiting-item {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
-  min-height: 58px;
-  padding: 8px 12px;
-  border: 1px solid #e5f0ec;
-  border-radius: 12px;
-  background: #ffffff;
-
-  strong {
-    color: #568f79;
-    font-size: clamp(22px, 2vw, 31px);
-    font-variant-numeric: tabular-nums;
-  }
-
-  span {
-    padding: 4px 7px;
-    border-radius: 7px;
-    font-size: 11px;
-  }
-
-  .first-visit {
-    color: #658078;
-    background: #edf6f2;
-  }
-
-  .follow-up {
-    color: #926f32;
-    background: #fff4d9;
-  }
+  padding: 10px 15px;
+  overflow: hidden;
+  border: 1px solid var(--dsp-line);
+  border-radius: var(--dsp-radius-tile);
+  background: var(--dsp-tile);
+  box-shadow: var(--dsp-shadow-tile);
+  transition:
+    transform 160ms cubic-bezier(0.23, 1, 0.32, 1),
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
-
-.waiting-empty {
-  display: grid;
-  height: calc(100% - 45px);
-  min-height: 120px;
-  place-items: center;
-  color: rgba(105, 132, 123, 0.62);
-  font-size: 17px;
+.waiting-item.next {
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--stage-accent) 30%, var(--dsp-line-strong));
+  background: color-mix(in srgb, var(--stage-accent) 9%, var(--dsp-surface));
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--stage-accent) 10%, transparent);
 }
-
-.display-footer {
+.waiting-number {
+  min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 54px;
-  padding: 0 42px;
-  border-top: 1px solid var(--line);
-  color: var(--ink-muted);
-  background: #ffffff;
+  gap: 8px;
 }
-
-.footer-mark {
-  font-family: "STSong", "SimSun", serif;
-  letter-spacing: 0.08em;
-
-  span {
-    margin-right: 10px;
-    color: var(--green);
-  }
-}
-
-.status {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-
-  span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-
-  .good {
-    background: #82bca5;
-  }
-
-  .bad {
-    background: #cf6a5e;
-  }
-
-  b {
-    margin-left: 14px;
-    color: var(--green);
-    font-weight: 500;
-  }
-}
-
-.audio-enable-button {
-  min-width: 132px;
-  padding: 9px 17px;
-  border: 0;
-  border-radius: 999px;
-  color: #ffffff;
-  background: #4f9277;
-  box-shadow: 0 5px 14px rgba(79, 146, 119, 0.22);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 650;
-
-  &:active {
-    transform: translateY(1px);
-  }
-
-  &:disabled {
-    cursor: wait;
-    opacity: 0.72;
-  }
-}
-
-.audio-enabled-text {
-  color: #3d8067 !important;
-  font-weight: 650 !important;
-}
-
-.audio-message {
-  color: var(--ink-muted);
+.waiting-number small {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--dsp-blue-deep);
+  background: rgba(11, 177, 234, 0.1);
   font-size: 12px;
-  font-style: normal;
+  font-weight: 800;
 }
-
+.waiting-item strong {
+  overflow: hidden;
+  color: var(--dsp-ink);
+  font-family: var(--dsp-font-numeric);
+  font-size: var(--dsp-fs-list-number);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.visit-tag {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.waiting-item .first-visit {
+  color: var(--dsp-blue-deep);
+  background: rgba(11, 177, 234, 0.1);
+}
+.waiting-item .follow-up {
+  color: var(--dsp-accent-green-deep);
+  background: color-mix(in srgb, var(--dsp-mint) 45%, transparent);
+}
+.waiting-item.overflow {
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+}
+.waiting-item.overflow strong {
+  color: var(--dsp-muted);
+  font-family: var(--dsp-font-ui);
+  font-size: clamp(18px, 1.5vw, 24px);
+}
+.missed-strip {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 14px;
+  overflow: hidden;
+  border: 1px solid var(--dsp-state-warn-line);
+  border-radius: 10px;
+  color: var(--dsp-state-warn);
+  background: var(--dsp-state-warn-bg);
+  white-space: nowrap;
+}
+.missed-strip b {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #ffffff;
+  background: var(--dsp-state-warn);
+  font-size: 14px;
+}
+.missed-strip strong {
+  font-family: var(--dsp-font-numeric);
+  font-size: clamp(20px, 1.8vw, 28px);
+  font-variant-numeric: tabular-nums;
+}
+.missed-strip em {
+  overflow: hidden;
+  margin-left: auto;
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.waiting-empty {
+  min-height: 0;
+  display: grid;
+  flex: 1;
+  place-items: center;
+  color: var(--dsp-muted);
+  font-size: 19px;
+}
 .calling-overlay {
   position: fixed;
   inset: 0;
   z-index: 20;
   display: grid;
   place-items: center;
-  background: rgba(56, 91, 79, 0.46);
+  background: rgba(5, 52, 76, 0.62);
+  backdrop-filter: blur(8px);
 }
-
 .calling-card {
   position: relative;
   width: min(780px, 78vw);
-  padding: 68px 50px 62px;
-  border: 1px solid #c4dfd4;
-  border-radius: 24px;
-  background: #ffffff;
-  box-shadow: 0 24px 70px rgba(48, 91, 75, 0.12);
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: clamp(42px, 7vmin, 68px) clamp(24px, 5vmin, 50px) clamp(34px, 6vmin, 62px);
+  overflow: auto;
   text-align: center;
-
-  .calling-seal {
-    position: absolute;
-    top: 24px;
-    left: 28px;
-    display: grid;
-    width: 46px;
-    height: 46px;
-    place-items: center;
-    border: 1px solid #bdddd0;
-    border-radius: 12px;
-    color: var(--green);
-    font:
-      26px "STSong",
-      "SimSun",
-      serif;
-  }
-
-  em {
-    display: inline-block;
-    margin-bottom: 12px;
-    padding: 7px 18px;
-    border-radius: 999px;
-    color: #ffffff;
-    background: #4f9277;
-    font-size: 18px;
-    font-style: normal;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-  }
-
-  p {
-    margin: 0;
-    color: #4f9277;
-    font-size: 78px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.08em;
-  }
-
-  strong {
-    display: block;
-    margin-top: 18px;
-    font-size: 48px;
-    letter-spacing: 0.14em;
-  }
-
-  h2 {
-    margin: 30px 0 0;
-    padding-top: 24px;
-    border-top: 1px solid var(--line);
-    color: var(--ink-muted);
-    font-size: 27px;
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    line-height: 1.6;
+  border: 3px solid var(--dsp-blue);
+  border-radius: 30px;
+  background: var(--dsp-surface);
+  box-shadow: 0 30px 100px rgba(2, 49, 75, 0.25);
+  animation: calling-breathe 2.2s ease-in-out infinite;
+}
+@keyframes calling-breathe {
+  50% {
+    border-color: color-mix(in srgb, var(--dsp-blue) 45%, #ffffff);
+    box-shadow:
+      0 30px 100px rgba(2, 49, 75, 0.25),
+      0 0 0 10px color-mix(in srgb, var(--dsp-blue) 18%, transparent);
   }
 }
-
+.calling-card .calling-seal {
+  position: absolute;
+  top: 24px;
+  left: 28px;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid var(--dsp-line);
+  border-radius: 12px;
+  color: var(--dsp-blue-deep);
+  font-size: 26px;
+}
+.calling-card em {
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--dsp-blue-deep), var(--dsp-blue));
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+.calling-card p {
+  margin: 0;
+  color: var(--dsp-blue-deep);
+  font-family: var(--dsp-font-numeric);
+  font-size: var(--dsp-fs-overlay-number);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+.calling-card strong {
+  display: block;
+  margin-top: 18px;
+  font-size: var(--dsp-fs-overlay-guide);
+  letter-spacing: 0.14em;
+}
+.calling-card h2 {
+  margin: 30px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--dsp-line);
+  color: var(--dsp-muted);
+  font-size: clamp(18px, 3vmin, 27px);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+}
 .queue-list-enter-active,
-.queue-list-leave-active,
-.call-overlay-enter-active,
-.call-overlay-leave-active {
-  transition: 0.28s ease;
+.queue-list-leave-active {
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
-
 .queue-list-enter-from,
 .queue-list-leave-to {
   opacity: 0;
   transform: translateY(10px);
 }
-
+.call-overlay-enter-active {
+  transition: opacity 180ms ease-out;
+}
+.call-overlay-enter-active .calling-card {
+  transition:
+    opacity 220ms ease-out,
+    transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.call-overlay-enter-from .calling-card {
+  opacity: 0;
+  transform: scale(0.95) translateY(8px);
+}
+.call-overlay-leave-active {
+  transition: opacity 140ms ease-out;
+}
+.call-overlay-leave-to .calling-card {
+  opacity: 0;
+  transform: scale(0.98);
+}
 .call-overlay-enter-from,
 .call-overlay-leave-to {
   opacity: 0;
 }
-
-.offline::after {
-  content: "网络连接异常，正在自动恢复";
-  position: fixed;
-  top: 0;
-  left: 50%;
-  z-index: 30;
-  transform: translateX(-50%);
-  padding: 8px 20px;
-  border-radius: 0 0 8px 8px;
-  color: #ffffff;
-  background: #9b4038;
-}
-
 @media (max-width: 1280px) {
-  .display-shell {
-    overflow: auto;
-  }
-
-  .display-header,
-  .display-footer {
-    padding-right: 24px;
-    padding-left: 24px;
-  }
-
   .display-content {
-    grid-template-columns: 1fr;
-    padding: 20px 24px;
+    gap: 14px;
+    padding: 8px 18px 14px;
   }
-
   .room-board {
-    min-height: 680px;
+    grid-template-rows: clamp(60px, 14%, 82px) minmax(0, 35%) minmax(0, 1fr);
+    border-radius: 16px;
   }
-}
-
-@media (max-width: 800px) {
-  .brand-title,
-  .system-title,
-  .date-text {
-    display: none;
+  .board-title {
+    padding: 0 18px;
   }
-
-  .header-primary {
-    gap: 12px;
+  .room-identity {
+    gap: 9px;
   }
-
-  .clock-time {
+  .stage-index {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    font-size: 16px;
+  }
+  .room-identity > b {
+    font-size: clamp(25px, 2.5vw, 34px);
+  }
+  .waiting-count {
+    gap: 4px;
+    font-size: 14px;
+  }
+  .waiting-count strong {
     font-size: 30px;
   }
-
+  .calling-section,
+  .waiting-section {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+  .room-focus-card {
+    padding: 6px 10px;
+  }
+  .focus-number {
+    font-size: clamp(60px, 8vw, 110px);
+  }
+  .focus-guide {
+    font-size: clamp(16px, 1.6vw, 22px);
+  }
+  .waiting-grid {
+    gap: 8px;
+  }
+  .waiting-item {
+    padding: 8px 10px;
+  }
+  .waiting-item strong {
+    font-size: clamp(22px, 2.25vw, 30px);
+  }
+}
+@media (max-width: 800px) {
+  .display-content {
+    grid-template-columns: 1fr;
+    padding: 14px;
+    overflow: visible;
+  }
+  .room-board {
+    min-height: 790px;
+    grid-template-rows: 92px 260px minmax(400px, 1fr);
+    border-radius: 14px;
+  }
+  .board-title {
+    padding: 0 16px;
+  }
+  .room-identity > b {
+    font-size: 28px;
+  }
+  .room-focus-card {
+    padding: 16px;
+  }
+  .focus-number {
+    font-size: 96px;
+  }
+  .focus-guide {
+    font-size: 20px;
+  }
   .waiting-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(78px, 1fr));
   }
-
-  .display-footer {
-    align-items: flex-start;
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-    padding-top: 8px;
-    padding-bottom: 8px;
+  .waiting-number small {
+    display: none;
+  }
+  .waiting-item strong {
+    font-size: 27px;
+  }
+  .visit-tag {
+    margin-left: 5px;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+}
+@media (max-height: 760px) and (min-width: 801px) {
+  .stage-flow-bar {
+    padding: 3px 24px 0;
+  }
+  .stage-flow-bar b {
+    width: 25px;
+    height: 25px;
+  }
+  .stage-flow-bar em {
+    top: -16px;
+  }
+  .display-content {
+    gap: 12px;
+    padding: 6px 18px 10px;
+  }
+  .room-board,
+  .room-board.is-idle {
+    grid-template-rows: minmax(54px, 13%) minmax(0, 34%) minmax(0, 1fr);
+  }
+  .calling-section,
+  .waiting-section {
+    padding-top: 9px;
+    padding-bottom: 10px;
+  }
+  .section-caption,
+  .waiting-head {
+    font-size: 16px;
+  }
+  .waiting-head {
+    margin-bottom: 6px;
+  }
+  .room-focus-card {
+    margin-top: 3px;
+  }
+  .focus-number {
+    font-size: clamp(56px, 7.5vw, 96px);
+  }
+  .waiting-grid {
+    grid-template-rows: repeat(2, minmax(48px, 1fr));
+    gap: 5px;
+  }
+  .waiting-item {
+    padding: 5px 8px;
+  }
+  .waiting-item strong {
+    font-size: clamp(20px, 2vw, 27px);
   }
 }
 </style>

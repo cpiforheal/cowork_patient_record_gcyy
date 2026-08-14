@@ -30,7 +30,7 @@ const manualChunks = (id: string) => {
 
 // @see: https://vitejs.dev/config/
 export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
-  const root = process.cwd();
+  const root = resolve(__dirname);
   const env = loadEnv(mode, root);
   const viteEnv = wrapperEnv(env);
 
@@ -48,7 +48,8 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
     css: {
       preprocessorOptions: {
         scss: {
-          additionalData: `@import "@/styles/var.scss";`
+          api: "modern-compiler",
+          additionalData: `@use "@/styles/var.scss" as *;`
         }
       }
     },

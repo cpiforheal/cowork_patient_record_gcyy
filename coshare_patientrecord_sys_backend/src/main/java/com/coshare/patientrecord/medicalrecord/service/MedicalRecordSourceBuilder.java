@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.medicalrecord.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
 import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.medicalrecord.model.TargetField;
@@ -22,6 +23,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 @Profile("mysql")
 public class MedicalRecordSourceBuilder {
+
+    private static final List<String> PRE_AI_SCOPE_READ_ROLES = List.of(
+        "admin", "quality", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
+    );
 
     private final ObjectMapper objectMapper;
     private final ClinicDatabaseService databaseService;
@@ -50,13 +55,250 @@ public class MedicalRecordSourceBuilder {
         ObjectNode db = databaseService.readDbForUser(user);
         JsonNode patient = findPatient(db.path("patients"), patientId);
         if (patient == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
-        return buildSourceSnapshot(patient, db.path("records").path(patientId), db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
+        ObjectNode record = mergeReviewedPreAiTcmFacts(patientId, db.path("records").path(patientId));
+        ObjectNode source = buildSourceSnapshot(patient, record, db.path("documents").path(patientId), maskSensitive, templateName, templateVersion);
+        source.set("reviewedPreAiFacts", reviewedPreAiFacts(patientId, maskSensitive));
+        source.put("recordScopeType", "patient");
+        source.put("recordScopeId", patientId);
+        return source;
     }
 
-    public void assertCanReadPatient(String patientId) {
+    public ObjectNode readEncounterSource(
+        String encounterId,
+        SessionUser user,
+        boolean maskSensitive,
+        String templateName,
+        String templateVersion
+    ) {
+        String safeEncounterId = safe(encounterId);
+        if (safeEncounterId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少前置病例ID");
+        assertCanReadScope("preai:" + safeEncounterId, user);
+        List<ObjectNode> encounters = jdbcTemplate.query(
+            """
+                SELECT id, source_patient_id, patient_case_id, case_token, status, current_stage,
+                       patient_json, reviewed_at, updated_at, facts_revision, reviewed_facts_revision
+                FROM pre_ai_encounters
+                WHERE id = ?
+                LIMIT 1
+                """,
+            (resultSet, rowNum) -> {
+                ObjectNode encounter = objectMapper.createObjectNode();
+                encounter.put("encounterId", safe(resultSet.getString("id")));
+                encounter.put("sourcePatientId", safe(resultSet.getString("source_patient_id")));
+                encounter.put("patientCaseId", safe(resultSet.getString("patient_case_id")));
+                encounter.put("caseToken", safe(resultSet.getString("case_token")));
+                encounter.put("status", safe(resultSet.getString("status")));
+                encounter.put("currentStage", safe(resultSet.getString("current_stage")));
+                encounter.set("patient", readObject(resultSet.getString("patient_json")));
+                encounter.put("reviewedAt", safe(resultSet.getString("reviewed_at")));
+                encounter.put("updatedAt", safe(resultSet.getString("updated_at")));
+                encounter.put("factsRevision", resultSet.getLong("facts_revision"));
+                Object reviewedRevision = resultSet.getObject("reviewed_facts_revision");
+                if (reviewedRevision != null) encounter.put("reviewedFactsRevision", ((Number) reviewedRevision).longValue());
+                return encounter;
+            },
+            safeEncounterId
+        );
+        if (encounters.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "前置病例不存在或当前账号无权查看");
+        ObjectNode encounter = encounters.get(0);
+        if (!List.of("REVIEWED", "EXPORTED").contains(encounter.path("status").asText(""))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "请先完成最终医生复核");
+        }
+
+        ObjectNode patient = encounter.withObject("patient").deepCopy();
+        putIfIncomplete(patient, "name", patient.path("patientName").asText(""));
+        putIfIncomplete(patient, "patientName", patient.path("name").asText(""));
+        ObjectNode record = objectMapper.createObjectNode();
+        ArrayNode stages = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            """
+                SELECT stage_code, status, version, data_json, completed_at, updated_at
+                FROM pre_ai_stage_submissions
+                WHERE encounter_id = ? AND status = 'COMPLETED'
+                ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
+                """,
+            resultSet -> {
+                JsonNode data = readObject(resultSet.getString("data_json"));
+                mergeStageFacts(record, data);
+                ObjectNode stage = stages.addObject();
+                stage.put("stageCode", safe(resultSet.getString("stage_code")));
+                stage.put("status", safe(resultSet.getString("status")));
+                stage.put("version", resultSet.getInt("version"));
+                stage.set("facts", maskSensitive ? sensitiveDataMasker.maskJson(data) : data);
+                stage.put("completedAt", safe(resultSet.getString("completed_at")));
+            },
+            safeEncounterId
+        );
+        putIfIncomplete(record, "patientName", patient.path("patientName").asText(""));
+        putIfIncomplete(record, "gender", patient.path("gender").asText(""));
+        putIfIncomplete(record, "age", patient.path("age").asText(""));
+        putIfIncomplete(record, "patientAge", patient.path("age").asText(""));
+
+        ObjectNode source = buildSourceSnapshot(
+            patient,
+            record,
+            objectMapper.createArrayNode(),
+            maskSensitive,
+            templateName,
+            templateVersion
+        );
+        ObjectNode reviewedFacts = encounter.deepCopy();
+        reviewedFacts.remove("patient");
+        reviewedFacts.set("stages", stages);
+        source.set("reviewedPreAiFacts", reviewedFacts);
+        source.put("encounterId", safeEncounterId);
+        source.put("patientCaseId", encounter.path("patientCaseId").asText(""));
+        source.put("sourcePatientId", encounter.path("sourcePatientId").asText(""));
+        source.put("recordScopeType", "preai-encounter");
+        source.put("recordScopeId", "preai:" + safeEncounterId);
+        return source;
+    }
+
+    private void mergeStageFacts(ObjectNode target, JsonNode source) {
+        if (source == null || !source.isObject()) return;
+        source.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            if (value == null || value.isNull() || (value.isTextual() && value.asText("").isBlank())) return;
+            if (value.isValueNode()) target.set(entry.getKey(), value.deepCopy());
+            else target.put(entry.getKey(), value.toString());
+        });
+    }
+
+    public ObjectNode reviewedPreAiFacts(String patientId, boolean maskSensitive) {
+        List<ObjectNode> encounters = jdbcTemplate.query(
+            """
+                SELECT id, case_token, status, current_stage, reviewed_at, updated_at
+                FROM pre_ai_encounters
+                WHERE source_patient_id = ?
+                  AND status IN ('REVIEWED', 'EXPORTED')
+                ORDER BY reviewed_at DESC, updated_at DESC
+                LIMIT 1
+                """,
+            (resultSet, rowNum) -> {
+                ObjectNode encounter = objectMapper.createObjectNode();
+                encounter.put("encounterId", safe(resultSet.getString("id")));
+                encounter.put("caseToken", safe(resultSet.getString("case_token")));
+                encounter.put("status", safe(resultSet.getString("status")));
+                encounter.put("currentStage", safe(resultSet.getString("current_stage")));
+                encounter.put("reviewedAt", safe(resultSet.getString("reviewed_at")));
+                encounter.put("updatedAt", safe(resultSet.getString("updated_at")));
+                return encounter;
+            },
+            patientId
+        );
+        if (encounters.isEmpty()) return objectMapper.createObjectNode();
+
+        ObjectNode facts = encounters.get(0);
+        ArrayNode stages = facts.putArray("stages");
+        jdbcTemplate.query(
+            """
+                SELECT stage_code, status, version, data_json, completed_at, updated_at
+                FROM pre_ai_stage_submissions
+                WHERE encounter_id = ?
+                  AND status = 'COMPLETED'
+                ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
+                """,
+            resultSet -> {
+                ObjectNode stage = stages.addObject();
+                stage.put("stageCode", safe(resultSet.getString("stage_code")));
+                stage.put("status", safe(resultSet.getString("status")));
+                stage.put("version", resultSet.getInt("version"));
+                JsonNode data = readObject(resultSet.getString("data_json"));
+                stage.set("facts", maskSensitive ? sensitiveDataMasker.maskJson(data) : data);
+                stage.put("completedAt", safe(resultSet.getString("completed_at")));
+            },
+            facts.path("encounterId").asText("")
+        );
+        return facts;
+    }
+
+    private ObjectNode mergeReviewedPreAiTcmFacts(String patientId, JsonNode record) {
+        ObjectNode merged = record != null && record.isObject()
+            ? ((ObjectNode) record).deepCopy()
+            : objectMapper.createObjectNode();
+        List<ObjectNode> reviewedTcmRows = jdbcTemplate.query(
+            """
+                SELECT
+                  JSON_UNQUOTE(JSON_EXTRACT(s.data_json, '$.tongue')) AS tongue,
+                  JSON_UNQUOTE(JSON_EXTRACT(s.data_json, '$.pulse')) AS pulse
+                FROM pre_ai_encounters e
+                JOIN pre_ai_stage_submissions s
+                  ON s.encounter_id = e.id
+                 AND s.stage_code = 'TCM'
+                 AND s.status = 'COMPLETED'
+                WHERE e.source_patient_id = ?
+                  AND e.status IN ('REVIEWED', 'EXPORTED')
+                ORDER BY e.reviewed_at DESC, e.updated_at DESC
+                LIMIT 1
+                """,
+            (resultSet, rowNum) -> {
+                ObjectNode facts = objectMapper.createObjectNode();
+                facts.put("tongue", safe(resultSet.getString("tongue")));
+                facts.put("pulse", safe(resultSet.getString("pulse")));
+                return facts;
+            },
+            patientId
+        );
+        if (reviewedTcmRows.isEmpty()) return merged;
+
+        JsonNode tcm = reviewedTcmRows.get(0);
+        putIfIncomplete(merged, "tongue", tcm.path("tongue").asText(""));
+        putIfIncomplete(merged, "pulseCondition", tcm.path("pulse").asText(""));
+        return merged;
+    }
+
+    private void putIfIncomplete(ObjectNode target, String key, String fallbackValue) {
+        if (isIncomplete(target.path(key).asText("")) && !isIncomplete(fallbackValue)) {
+            target.put(key, fallbackValue.trim());
+        }
+    }
+
+    public void assertCanReadPatient(String patientId, SessionUser user) {
         if (safe(patientId).isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者ID");
-        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_patients WHERE id = ?", Integer.class, patientId);
-        if (count == null || count <= 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
+        JsonNode patients = databaseService.readDbForUser(user).path("patients");
+        if (findPatient(patients, patientId) == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在或当前账号无权查看");
+        }
+    }
+
+    public void assertCanReadScope(String scopeId, SessionUser user) {
+        String safeScopeId = safe(scopeId);
+        if (!safeScopeId.startsWith("preai:")) {
+            assertCanReadPatient(safeScopeId, user);
+            return;
+        }
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效，请重新登录");
+        String encounterId = safeScopeId.substring("preai:".length());
+        boolean globalRead = PRE_AI_SCOPE_READ_ROLES.contains(RoleCatalog.canonicalize(user.role()));
+        Integer count = globalRead
+            ? jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pre_ai_encounters WHERE id = ?", Integer.class, encounterId)
+            : jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM pre_ai_encounters e
+                WHERE e.id = ?
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM clinic_account_departments ad
+                      WHERE ad.account_id = ? AND ad.department_id = e.owning_department_id AND ad.status = 'ACTIVE'
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM pre_ai_encounter_department_grants g
+                      WHERE g.encounter_id = e.id AND g.account_id = ? AND g.status = 'ACTIVE'
+                    )
+                    OR JSON_SEARCH(e.duty_assignments_json, 'one', ?) IS NOT NULL
+                  )
+                """,
+                Integer.class,
+                encounterId,
+                user.id(),
+                user.id(),
+                user.id()
+            );
+        if (count == null || count <= 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "前置病例不存在或当前账号无权查看");
+        }
     }
 
     public ArrayNode missingItems(ObjectNode sourceSnapshot, List<TargetField> targetFields) {
@@ -144,6 +386,15 @@ public class MedicalRecordSourceBuilder {
             if (patientId.equals(text(patient, "id"))) return patient;
         }
         return null;
+    }
+
+    private JsonNode readObject(String rawJson) {
+        try {
+            JsonNode parsed = objectMapper.readTree(safe(rawJson));
+            return parsed != null && parsed.isObject() ? parsed : objectMapper.createObjectNode();
+        } catch (Exception ignored) {
+            return objectMapper.createObjectNode();
+        }
     }
 
     private void put(Map<String, String> values, String key, String value) {

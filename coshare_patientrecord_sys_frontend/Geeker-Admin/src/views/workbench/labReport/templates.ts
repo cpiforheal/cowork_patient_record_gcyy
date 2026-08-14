@@ -4,6 +4,7 @@ export type LabTemplateId =
   | "hbvFive"
   | "infectious"
   | "crpSaa"
+  | "coagulation"
   | "urineRoutine"
   | "hba1c"
   | "postprandialGlucose"
@@ -22,6 +23,17 @@ export interface LabMetricDefinition {
   femaleReference?: string;
   options?: string[];
   defaultValue?: string;
+}
+
+export interface LabMetricSnapshotLike {
+  key: string;
+  name: string;
+  shortName: string;
+  value: string;
+  unit: string;
+  reference: string;
+  severity?: "NORMAL" | "ABNORMAL" | "CRITICAL";
+  critical?: boolean;
 }
 
 export interface LabTemplateDefinition {
@@ -59,6 +71,50 @@ export const metricStorageKey = (templateId: LabTemplateId, metricKey: string) =
 export const metricStoredValue = (values: Record<string, string>, templateId: LabTemplateId, metricKey: string) =>
   values[metricStorageKey(templateId, metricKey)] || values[`lab_${templateId}_${metricKey}`] || "";
 
+export const materializeLabMetrics = (
+  templateId: string,
+  metrics: Array<Partial<LabMetricSnapshotLike> & Pick<LabMetricSnapshotLike, "key">> = [],
+  gender = ""
+): LabMetricSnapshotLike[] => {
+  const template = labReportTemplates.find(item => item.id === templateId);
+  if (!template) return metrics.map(metric => ({
+    key: metric.key,
+    name: metric.name || "未命名指标",
+    shortName: metric.shortName || "",
+    value: metric.value || "",
+    unit: metric.unit || "",
+    reference: metric.reference || "",
+    severity: metric.severity,
+    critical: metric.critical
+  }));
+  const byKey = new Map(metrics.map(metric => [metric.key, metric]));
+  const known = new Set(template.metrics.map(metric => metric.key));
+  const completed = template.metrics.map(metric => {
+    const saved = byKey.get(metric.key);
+    return {
+      ...saved,
+      key: metric.key,
+      name: saved?.name || metric.name,
+      shortName: saved?.shortName || metric.shortName,
+      value: saved?.value || "",
+      unit: saved?.unit || metric.unit || "",
+      reference: saved?.reference || metricReference(metric, gender),
+      severity: saved?.value ? saved?.severity || "NORMAL" : "NORMAL",
+      critical: Boolean(saved?.value && saved?.critical)
+    };
+  });
+  return [...completed, ...metrics.filter(metric => !known.has(metric.key)).map(metric => ({
+    key: metric.key,
+    name: metric.name || "未命名指标",
+    shortName: metric.shortName || "",
+    value: metric.value || "",
+    unit: metric.unit || "",
+    reference: metric.reference || "",
+    severity: metric.severity,
+    critical: metric.critical
+  }))];
+};
+
 export const labReportTemplates: LabTemplateDefinition[] = [
   {
     id: "bloodRoutine",
@@ -92,27 +148,27 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     documentTypeLabel: "生化肝肾功模板报告",
     description: "复刻参考单中的生化项目，肌酐、尿酸等参考范围按性别自动切换。",
     metrics: [
-      { key: "glu", name: "葡萄糖", shortName: "Glu", unit: "mmol/L", input: "number", reference: "3.9-6.1" },
-      { key: "tbil", name: "总胆红素", shortName: "T-Bil", unit: "umol/L", input: "number", reference: "5.0-21.0" },
-      { key: "dbil", name: "直接胆红素", shortName: "D-Bil", unit: "umol/L", input: "number", reference: "0-6.8" },
-      { key: "alt", name: "谷丙转氨酶", shortName: "ALT", unit: "U/L", input: "number", reference: "7-40" },
-      { key: "ast", name: "谷草转氨酶", shortName: "AST", unit: "U/L", input: "number", reference: "13-35" },
-      { key: "alp", name: "碱性磷酸酶", shortName: "ALP", unit: "U/L", input: "number", reference: "35-100" },
-      { key: "ggt", name: "γ-谷氨酰转肽酶", shortName: "γ-GT", unit: "U/L", input: "number", reference: "7-45" },
-      { key: "tp", name: "总蛋白", shortName: "TP", unit: "g/L", input: "number", reference: "65-85" },
-      { key: "alb", name: "白蛋白", shortName: "ALB", unit: "g/L", input: "number", reference: "40-55" },
-      { key: "glo", name: "球蛋白", shortName: "Glo", unit: "g/L", input: "number", reference: "20-40" },
-      { key: "ag", name: "白球比", shortName: "A/G", input: "number", reference: "1.2-2.4" },
-      { key: "tg", name: "甘油三酯", shortName: "TG", unit: "mmol/L", input: "number", reference: "0-1.70" },
-      { key: "tc", name: "总胆固醇", shortName: "TC", unit: "mmol/L", input: "number", reference: "0-5.18" },
+      { key: "glu", name: "葡萄糖", shortName: "Glu", unit: "mmol/L", input: "number", reference: "3.90-6.11" },
+      { key: "tbil", name: "总胆红素", shortName: "T-Bil", unit: "umol/L", input: "number", reference: "5.10-19.00" },
+      { key: "dbil", name: "直接胆红素", shortName: "D-Bil", unit: "umol/L", input: "number", reference: "1.70-6.80" },
+      { key: "alt", name: "谷丙转氨酶", shortName: "ALT", unit: "U/L", input: "number", maleReference: "9.0-50.0", femaleReference: "7.0-40.0" },
+      { key: "ast", name: "谷草转氨酶", shortName: "AST", unit: "U/L", input: "number", maleReference: "9.0-60.0", femaleReference: "7.0-45.0" },
+      { key: "alp", name: "碱性磷酸酶", shortName: "ALP", unit: "U/L", input: "number", maleReference: "45.0-125.0", femaleReference: "35.0-135.0" },
+      { key: "ggt", name: "γ-谷氨酰转肽酶", shortName: "γ-GT", unit: "U/L", input: "number", maleReference: "10.0-60.0", femaleReference: "7.0-45.0" },
+      { key: "tp", name: "总蛋白", shortName: "TP", unit: "g/L", input: "number", reference: "65.00-85.00" },
+      { key: "alb", name: "白蛋白", shortName: "ALB", unit: "g/L", input: "number", reference: "40.0-55.0" },
+      { key: "glo", name: "球蛋白", shortName: "Glo", unit: "g/L", input: "number" },
+      { key: "ag", name: "白球比", shortName: "A/G", input: "number" },
+      { key: "tg", name: "甘油三酯", shortName: "TG", unit: "mmol/L", input: "number", reference: "≤2.30" },
+      { key: "tc", name: "总胆固醇", shortName: "TC", unit: "mmol/L", input: "number", reference: "≤5.60" },
       {
         key: "crea",
         name: "肌酐",
         shortName: "CREA",
         unit: "umol/L",
         input: "number",
-        maleReference: "57-97",
-        femaleReference: "41-73"
+        maleReference: "70.0-115.0",
+        femaleReference: "44.0-80.0"
       },
       {
         key: "ua",
@@ -120,14 +176,31 @@ export const labReportTemplates: LabTemplateDefinition[] = [
         shortName: "UA",
         unit: "umol/L",
         input: "number",
-        maleReference: "208-428",
-        femaleReference: "155-357"
+        maleReference: "202.0-416.0",
+        femaleReference: "142.0-340.0"
       },
-      { key: "urea", name: "尿素", shortName: "UREA", unit: "mmol/L", input: "number", reference: "2.9-8.2" },
-      { key: "k", name: "钾", shortName: "K", unit: "mmol/L", input: "number", reference: "3.5-5.3" },
-      { key: "na", name: "钠", shortName: "Na", unit: "mmol/L", input: "number", reference: "137-147" },
-      { key: "cl", name: "氯", shortName: "CL", unit: "mmol/L", input: "number", reference: "99-110" },
-      { key: "ca", name: "钙", shortName: "Ca", unit: "mmol/L", input: "number", reference: "2.11-2.52" }
+      { key: "urea", name: "尿素", shortName: "UREA", unit: "mmol/L", input: "number", maleReference: "3.10-8.00", femaleReference: "2.60-7.50" },
+      { key: "k", name: "钾", shortName: "K", unit: "mmol/L", input: "number", reference: "3.50-5.30" },
+      { key: "na", name: "钠", shortName: "Na", unit: "mmol/L", input: "number", reference: "136.0-145.0" },
+      { key: "cl", name: "氯", shortName: "CL", unit: "mmol/L", input: "number", reference: "96.0-108.0" },
+      { key: "ca", name: "钙", shortName: "Ca", unit: "mmol/L", input: "number", reference: "2.10-2.80" }
+    ]
+  },
+  {
+    id: "coagulation",
+    name: "凝血四项",
+    subtitle: "PT / APTT / TT / FIB",
+    fieldKey: "coagulation",
+    statusKeys: ["coagulationStatus"],
+    documentType: "labCoagulation",
+    documentTypeLabel: "凝血四项模板报告",
+    description: "用于术前及凝血功能评估；参考范围按本院凝血报告单填写。",
+    metrics: [
+      { key: "aptt", name: "活化部分凝血活酶时间", shortName: "APTT", unit: "s", input: "number", reference: "21.5-39.5" },
+      { key: "pt", name: "凝血酶原时间", shortName: "PT", unit: "s", input: "number", reference: "9.0-14.0" },
+      { key: "tt", name: "凝血酶时间", shortName: "TT", unit: "s", input: "number", reference: "15.7-19.9" },
+      { key: "fib", name: "纤维蛋白原", shortName: "FIB", unit: "g/L", input: "number", reference: "1.8-4.0" },
+      { key: "inr", name: "国际标准化比值", shortName: "INR", input: "number", reference: "0.8-1.2" }
     ]
   },
   {

@@ -55,6 +55,12 @@ public class DatabaseHealthService {
                 response.put("result", result);
                 response.put("database", metadata.getDatabaseProductName());
                 response.put("version", metadata.getDatabaseProductVersion());
+                try (Statement migrationStatement = connection.createStatement();
+                     ResultSet migration = migrationStatement.executeQuery(
+                         "SELECT version FROM flyway_schema_history WHERE success = 1 ORDER BY installed_rank DESC LIMIT 1"
+                     )) {
+                    response.put("migrationVersion", migration.next() ? migration.getString(1) : "none");
+                }
                 response.put("durationMs", System.currentTimeMillis() - startedAt);
                 return response;
             }

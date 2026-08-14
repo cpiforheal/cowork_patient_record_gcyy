@@ -40,18 +40,21 @@ public class ClinicAiSummaryService {
     private final ClinicAiConfigService aiConfigService;
     private final ObjectMapper objectMapper;
     private final SensitiveDataMasker sensitiveDataMasker;
+    private final AiCallGuard aiCallGuard;
     private final HttpClient httpClient;
 
     public ClinicAiSummaryService(
         ClinicDatabaseService databaseService,
         ClinicAiConfigService aiConfigService,
         ObjectMapper objectMapper,
-        SensitiveDataMasker sensitiveDataMasker
+        SensitiveDataMasker sensitiveDataMasker,
+        AiCallGuard aiCallGuard
     ) {
         this.databaseService = databaseService;
         this.aiConfigService = aiConfigService;
         this.objectMapper = objectMapper;
         this.sensitiveDataMasker = sensitiveDataMasker;
+        this.aiCallGuard = aiCallGuard;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -92,7 +95,9 @@ public class ClinicAiSummaryService {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
                 .build();
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = aiCallGuard.execute(
+                () -> httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+            );
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, buildUpstreamErrorMessage(response.statusCode(), response.body()));
             }

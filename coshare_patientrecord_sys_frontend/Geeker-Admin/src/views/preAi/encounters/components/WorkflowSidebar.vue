@@ -39,7 +39,7 @@
             class="workflow-card"
             :class="{
               active: isActive(card),
-              mine: card.roles.includes(currentRole),
+              mine: card.editable,
               current: isCurrent(card),
               skipped: statusOf(card) === 'SKIPPED'
             }"
@@ -49,7 +49,7 @@
             <div class="workflow-card-main">
               <strong>{{ card.title }}</strong>
               <small>{{ card.owner }}</small>
-              <em v-if="card.roles.includes(currentRole)">当前岗位可办理</em>
+              <em v-if="card.editable">当前岗位可办理</em>
             </div>
             <el-tag size="small" :type="statusType(statusOf(card))">
               {{ statusLabel(card) }}
@@ -71,14 +71,13 @@ export interface WorkflowCard {
   kind: "STAGE" | "AUX";
   title: string;
   owner: string;
-  roles: string[];
+  editable: boolean;
   stageCode?: PreAiStageCode;
 }
 
 const props = defineProps<{
   workspace: PreAiWorkspace;
   cards: WorkflowCard[];
-  currentRole: string;
   encounterStatusLabel: Record<string, string>;
   encounterStatusType: (status: PreAiEncounterStatus) => "success" | "warning" | "info";
   routeLabel: (route?: string) => string;

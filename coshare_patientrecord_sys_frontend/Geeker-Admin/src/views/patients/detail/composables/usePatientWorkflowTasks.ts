@@ -412,10 +412,10 @@ export const usePatientWorkflowTasks = ({
             ? "owner"
             : rolesInclude(responsibility.collaboratorRoles, currentRole.value)
               ? "support"
-              : rolesInclude(responsibility.reviewerRoles, currentRole.value) || ["admin", "quality"].includes(currentRole.value)
+              : rolesInclude(responsibility.reviewerRoles, currentRole.value) || currentRole.value === "quality"
                 ? "review"
                 : "readonly"
-          : ["admin", "quality"].includes(currentRole.value)
+          : currentRole.value === "quality"
             ? "review"
             : canEdit
               ? "owner"
@@ -494,7 +494,7 @@ export const usePatientWorkflowTasks = ({
           stageTitle: task?.stageTitle || stage.title,
           department: section?.department || stage.department,
           required: Boolean(field?.required),
-          editable: field ? isFieldEditable(field) : currentRole.value === "admin",
+          editable: field ? isFieldEditable(field) : false,
           complete: field ? isFieldComplete(field) : false,
           attachmentCount: attachmentsByField.value[issue.fieldKey]?.length || 0,
           relation: task?.relation || "review",

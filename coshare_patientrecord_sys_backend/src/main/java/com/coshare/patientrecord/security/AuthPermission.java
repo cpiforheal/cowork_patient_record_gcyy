@@ -1,6 +1,8 @@
 package com.coshare.patientrecord.security;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.RoleCatalog;
+import java.util.HashSet;
 import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -21,8 +23,9 @@ public final class AuthPermission {
 
     public static void requireAnyRole(String message, String... roles) {
         SessionUser user = currentUserOrThrow();
-        Set<String> allowedRoles = Set.of(roles);
-        if (!allowedRoles.contains(user.role())) {
+        Set<String> allowedRoles = new HashSet<>();
+        for (String role : roles) allowedRoles.add(RoleCatalog.canonicalize(role));
+        if (!allowedRoles.contains(RoleCatalog.canonicalize(user.role()))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, message);
         }
     }

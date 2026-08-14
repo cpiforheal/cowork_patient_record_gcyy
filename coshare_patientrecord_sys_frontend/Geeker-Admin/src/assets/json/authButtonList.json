@@ -27,7 +27,7 @@
       "inventory:export"
     ],
     "inventoryStock": ["inventory:read", "inventory:issue", "inventory:export"],
-    "inventoryItems": ["inventory:read", "inventory:issue", "inventory:export"],
+    "inventoryItems": ["inventory:read", "inventory:item:manage", "inventory:issue", "inventory:export"],
     "inventoryWeekly": ["inventory:read", "inventory:request", "inventory:receive", "inventory:count", "inventory:export"],
     "inventoryControls": ["inventory:read", "inventory:receive", "inventory:count", "inventory:export"],
     "inventoryTrace": ["inventory:read", "inventory:export"],

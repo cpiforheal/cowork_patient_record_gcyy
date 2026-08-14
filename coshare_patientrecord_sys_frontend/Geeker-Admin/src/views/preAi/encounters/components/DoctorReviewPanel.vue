@@ -14,12 +14,12 @@
         <strong>{{ preview?.blockers?.length || 0 }}</strong>
       </div>
       <div>
-        <span>有效章节</span>
-        <strong>{{ sections.length }}</strong>
+        <span>有效字段</span>
+        <strong>{{ preview?.effectiveFieldCount || 0 }}</strong>
       </div>
       <div>
-        <span>历史导出</span>
-        <strong>{{ exports.length }}</strong>
+        <span>文档版本</span>
+        <strong>{{ targetVersions.length + exports.length }}</strong>
       </div>
     </div>
     <el-alert v-if="preview?.blockers?.length" type="warning" show-icon :closable="false" title="当前不能完成复核">
@@ -73,45 +73,28 @@
       </el-checkbox>
     </section>
     <div v-if="preview" class="masked-preview">
-      <section v-for="section in sections" :key="section.title" :class="{ 'lab-review-section': isLabSection(section) }">
+      <div class="template-meta">
+        <span>12 章标准模板</span>
+        <small>{{ preview.templateVersion || "当前版本" }}</small>
+      </div>
+      <section v-for="section in sections" :key="section.code">
         <h4>{{ section.title }}</h4>
-        <template v-if="isLabSection(section)">
-          <div class="lab-report-meta">
-            <div v-for="entry in labMetaEntries(section)" :key="entry[0]">
-              <span>{{ fieldLabel(entry[0]) }}</span>
-              <strong>{{ humanValue(entry[1]) }}</strong>
-            </div>
-          </div>
-          <div v-if="labMetrics(section).length" class="lab-metric-list">
-            <article
-              v-for="(metric, index) in labMetrics(section)"
-              :key="`${metric.name || 'metric'}-${index}`"
-              :class="{
-                abnormal: Boolean(metric.abnormal),
-                critical: metric.severity === 'CRITICAL'
-              }"
-            >
-              <div class="metric-name">
-                <strong>{{ metric.name || "未命名指标" }}</strong>
-                <small v-if="metric.shortName">{{ metric.shortName }}</small>
-              </div>
-              <div class="metric-value">
-                <strong>{{ metric.value || "未填写" }}{{ metric.unit || "" }}</strong>
-                <small v-if="metric.reference">参考：{{ metric.reference }}</small>
-              </div>
-              <el-tag v-if="metric.severity === 'CRITICAL'" type="danger" size="small" effect="dark">危急值</el-tag>
-              <el-tag v-else-if="metric.abnormal" type="warning" size="small" effect="dark">{{ metric.abnormal }}</el-tag>
-              <el-tag v-else type="success" size="small" effect="plain">正常</el-tag>
-            </article>
-          </div>
-          <p v-else class="lab-empty">本报告暂无已填写指标</p>
-        </template>
-        <div v-else class="read-only-grid">
-          <div v-for="entry in section.entries" :key="entry[0]">
-            <span>{{ fieldLabel(entry[0]) }}</span>
-            <p>{{ humanValue(entry[1]) }}</p>
+        <div v-if="section.rows.length" class="document-grid">
+          <div
+            v-for="row in section.rows"
+            :key="row.id"
+            class="document-row"
+            :class="{
+              emphasized: row.emphasis,
+              abnormal: row.severity === 'ABNORMAL',
+              critical: row.severity === 'CRITICAL'
+            }"
+          >
+            <span>{{ row.label }}</span>
+            <p>{{ row.value }}</p>
           </div>
         </div>
+        <p v-else class="section-empty">本节无有效内容</p>
       </section>
     </div>
     <el-input
@@ -122,77 +105,276 @@
       placeholder="复核说明（选填）"
       @update:model-value="$emit('update:statement', String($event))"
     />
-    <footer class="panel-actions">
-      <div></div>
+    <section class="review-status" :class="{ confirmed: reviewConfirmed }">
+      <div>
+        <strong>{{ reviewConfirmed ? "最终医生复核已确认" : "最终医生复核尚未确认" }}</strong>
+        <small>
+          {{
+            reviewConfirmed
+              ? "现在可以生成目标病历模板或脱敏前置资料。"
+              : "请先点击“确认事实无误”，确认成功后两个生成入口将自动启用。"
+          }}
+        </small>
+      </div>
+      <el-tag :type="reviewConfirmed ? 'success' : 'warning'" effect="dark">
+        {{ reviewConfirmed ? "已确认" : "待确认" }}
+      </el-tag>
+    </section>
+    <footer v-if="canReview" class="panel-actions review-actions">
       <el-button
-        v-if="canReview && !['REVIEWED', 'EXPORTED'].includes(encounterStatus)"
+        v-if="!reviewConfirmed"
         type="primary"
         :loading="loading"
         :disabled="!preview?.ready || Boolean(preview?.labSummary?.criticalCount && !criticalAcknowledged)"
         @click="$emit('confirm')"
         >确认事实无误</el-button
       >
-      <el-button
-        v-if="canReview && ['REVIEWED', 'EXPORTED'].includes(encounterStatus)"
-        type="success"
-        :loading="loading"
-        @click="$emit('generate')"
-        >生成脱敏 DOCX</el-button
-      >
+      <div v-else></div>
+      <div class="generate-actions">
+        <el-tooltip :disabled="targetGenerationAvailable" :content="targetGenerationDisabledReason" placement="top">
+          <span>
+            <el-button type="primary" :loading="loading" :disabled="!targetGenerationAvailable" @click="$emit('generateTarget')"
+              >生成目标病历新版本</el-button
+            >
+          </span>
+        </el-tooltip>
+        <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核" placement="top">
+          <span>
+            <el-button type="success" plain :loading="loading" :disabled="!reviewConfirmed" @click="$emit('generate')"
+              >生成脱敏资料新版本</el-button
+            >
+          </span>
+        </el-tooltip>
+      </div>
     </footer>
-    <section v-if="exports.length" class="export-list">
-      <div class="section-caption">历史导出版本（新版本不覆盖旧文件）</div>
-      <div v-for="version in exports" :key="version.id" class="export-row">
+    <section v-if="reviewConfirmed" class="version-control">
+      <header class="version-control-heading">
         <div>
-          <strong>{{ version.fileName }}</strong
-          ><small>{{ version.generatedAt }} · {{ version.generatedByRole || "医生" }}</small>
+          <strong>文档版本控制</strong>
+          <small>生成只建立新版本，不自动下载、不覆盖历史文件；确认版本后再下载。</small>
         </div>
-        <el-button type="primary" plain @click="$emit('download', version)">下载</el-button>
+        <el-tag type="info" effect="plain">共 {{ targetVersions.length + exports.length }} 个版本</el-tag>
+      </header>
+
+      <div v-if="latestTargetVersion" class="generation-result">
+        <span class="version-badge">V{{ latestTargetVersion.version }}</span>
+        <div>
+          <strong>目标病历新版本已建立</strong>
+          <small>{{ latestTargetVersion.fileName || "医生目标病历" }} · 已单独保存，可回看历史版本</small>
+        </div>
+        <el-button type="primary" @click="$emit('downloadTarget', latestTargetVersion)">下载此版本</el-button>
+      </div>
+      <div v-else-if="latestExportVersion" class="generation-result export-result">
+        <span class="version-badge">V{{ latestExportVersion.version }}</span>
+        <div>
+          <strong>脱敏资料新版本已建立</strong>
+          <small>{{ latestExportVersion.fileName }} · 已单独保存，可回看历史版本</small>
+        </div>
+        <el-button type="success" @click="$emit('download', latestExportVersion)">下载此版本</el-button>
+      </div>
+
+      <div class="version-groups">
+        <article class="version-group">
+          <header>
+            <div>
+              <strong>目标病历版本</strong>
+              <small>按患者保存，适用于正式目标病历的版本追溯</small>
+            </div>
+            <el-tag effect="plain">{{ targetVersions.length }}</el-tag>
+          </header>
+          <div v-if="versionLoading" class="version-empty">正在加载版本记录…</div>
+          <div v-else-if="!orderedTargetVersions.length" class="version-empty">尚未生成目标病历版本</div>
+          <template v-else>
+            <div
+              v-for="version in orderedTargetVersions"
+              :key="version.id"
+              class="version-row"
+              :class="{ latest: version.id === latestTargetVersionId }"
+            >
+              <span class="version-no">V{{ version.version }}</span>
+              <div class="version-detail">
+                <div>
+                  <strong>{{ version.fileName || `医生目标病历-V${version.version}.docx` }}</strong>
+                  <el-tag :type="targetStatusType(version.status)" size="small" effect="plain">
+                    {{ targetStatusLabel(version.status) }}
+                  </el-tag>
+                  <el-tag v-if="version.id === latestTargetVersionId" type="success" size="small" effect="dark">刚刚生成</el-tag>
+                </div>
+                <small>
+                  {{ version.generatedAt }} · {{ version.operatorRole || "医生" }} ·
+                  {{ version.templateVersion || version.templateName || "当前模板" }}
+                </small>
+              </div>
+              <div class="version-actions">
+                <el-button type="primary" plain :disabled="version.status === 'voided'" @click="$emit('downloadTarget', version)">
+                  下载
+                </el-button>
+                <el-button
+                  v-if="version.status !== 'finalized'"
+                  type="danger"
+                  plain
+                  :loading="deletingTargetVersionId === version.id"
+                  @click="$emit('deleteTarget', version)"
+                >
+                  删除
+                </el-button>
+              </div>
+            </div>
+          </template>
+        </article>
+
+        <article class="version-group">
+          <header>
+            <div>
+              <strong>脱敏前置资料版本</strong>
+              <small>按本次就诊保存，用于前置资料归档与复核</small>
+            </div>
+            <el-tag type="success" effect="plain">{{ exports.length }}</el-tag>
+          </header>
+          <div v-if="!orderedExports.length" class="version-empty">尚未生成脱敏资料版本</div>
+          <template v-else>
+            <div
+              v-for="version in orderedExports"
+              :key="version.id"
+              class="version-row"
+              :class="{ latest: version.id === latestExportVersionId }"
+            >
+              <span class="version-no export-version">V{{ version.version }}</span>
+              <div class="version-detail">
+                <div>
+                  <strong>{{ version.fileName }}</strong>
+                  <el-tag :type="exportStatusType(version.status)" size="small" effect="plain">
+                    {{ exportStatusLabel(version.status) }}
+                  </el-tag>
+                  <el-tag v-if="version.id === latestExportVersionId" type="success" size="small" effect="dark">刚刚生成</el-tag>
+                </div>
+                <small>
+                  {{ version.generatedAt }} · {{ version.generatedByRole || "医生" }} ·
+                  {{ version.templateVersion || "旧版模板" }}
+                </small>
+              </div>
+              <el-button type="success" plain @click="$emit('download', version)">下载</el-button>
+            </div>
+          </template>
+        </article>
       </div>
     </section>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { Refresh } from "@element-plus/icons-vue";
-import type { PreAiEncounterStatus, PreAiExportVersion, PreAiReviewPreview } from "@/api/modules/clinic";
+import type {
+  GeneratedMedicalRecord,
+  PreAiDocumentSection,
+  PreAiEncounterStatus,
+  PreAiExportVersion,
+  PreAiReviewPreview
+} from "@/api/modules/clinic";
 
-export interface MaskedReviewSection {
-  title: string;
-  entries: Array<[string, any]>;
-}
-
-defineProps<{
+const props = defineProps<{
   preview?: PreAiReviewPreview;
-  sections: MaskedReviewSection[];
+  sections: PreAiDocumentSection[];
   statement: string;
   canReview: boolean;
+  canGenerateTarget: boolean;
   criticalAcknowledged: boolean;
   loading: boolean;
+  versionLoading: boolean;
   encounterStatus: PreAiEncounterStatus;
   exports: PreAiExportVersion[];
-  fieldLabel: (key: string) => string;
-  humanValue: (value: any) => string;
+  targetVersions: GeneratedMedicalRecord[];
+  latestTargetVersionId: string;
+  latestExportVersionId: string;
+  deletingTargetVersionId: string;
 }>();
 
-const isLabSection = (section: MaskedReviewSection) => section.title.startsWith("化验报告");
-const labMetrics = (section: MaskedReviewSection) => {
-  const value = section.entries.find(([key]) => key === "metrics")?.[1];
-  return Array.isArray(value) ? (value as Array<Record<string, any>>) : [];
+const reviewConfirmed = computed(() => ["REVIEWED", "EXPORTED"].includes(props.encounterStatus));
+const targetGenerationAvailable = computed(() => reviewConfirmed.value && props.canGenerateTarget);
+const targetGenerationDisabledReason = computed(() => {
+  if (!reviewConfirmed.value) return "请先完成最终医生复核";
+  if (!props.canGenerateTarget) return "当前账号无权为该前置病例生成目标病历";
+  return "";
+});
+const orderedTargetVersions = computed(() => [...props.targetVersions].sort((left, right) => right.version - left.version));
+const orderedExports = computed(() => [...props.exports].sort((left, right) => right.version - left.version));
+const latestTargetVersion = computed(() => props.targetVersions.find(version => version.id === props.latestTargetVersionId));
+const latestExportVersion = computed(() => props.exports.find(version => version.id === props.latestExportVersionId));
+
+const targetStatusLabel = (status: GeneratedMedicalRecord["status"]) =>
+  ({ draft: "草稿", finalized: "已定稿", voided: "已作废" })[status] || status;
+const targetStatusType = (status: GeneratedMedicalRecord["status"]) => {
+  if (status === "finalized") return "success" as const;
+  if (status === "voided") return "danger" as const;
+  return "warning" as const;
 };
-const labMetaEntries = (section: MaskedReviewSection) => section.entries.filter(([key]) => key !== "metrics");
+const exportStatusLabel = (status: string) => {
+  const normalized = status.toUpperCase();
+  if (["INVALIDATED", "VOIDED"].includes(normalized)) return "已失效";
+  if (["GENERATED", "COMPLETED", "READY"].includes(normalized)) return "可下载";
+  return status || "已生成";
+};
+const exportStatusType = (status: string) =>
+  ["INVALIDATED", "VOIDED"].includes(status.toUpperCase()) ? ("danger" as const) : ("success" as const);
 
 defineEmits<{
   refresh: [];
   confirm: [];
   generate: [];
+  generateTarget: [];
   download: [version: PreAiExportVersion];
+  downloadTarget: [version: GeneratedMedicalRecord];
+  deleteTarget: [version: GeneratedMedicalRecord];
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
 }>();
 </script>
 
 <style scoped lang="scss">
+.review-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 10px;
+  background: var(--el-color-warning-light-9);
+
+  > div {
+    display: grid;
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+  }
+
+  small {
+    color: var(--el-text-color-secondary);
+    line-height: 1.6;
+  }
+
+  &.confirmed {
+    border-color: var(--el-color-success-light-5);
+    background: var(--el-color-success-light-9);
+  }
+}
+.review-actions {
+  align-items: center;
+}
+.version-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.generate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
 .panel-heading {
   display: flex;
   align-items: flex-start;
@@ -299,14 +481,72 @@ defineEmits<{
   gap: 14px;
   margin-top: 15px;
 }
+.template-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-regular);
+}
+.template-meta small {
+  color: var(--el-text-color-secondary);
+}
 .masked-preview section {
-  padding: 14px;
+  overflow: hidden;
   border: 1px solid var(--el-border-color-light);
   border-radius: 12px;
 }
 .masked-preview h4 {
-  margin: 0 0 10px;
-  color: var(--el-color-primary);
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--el-border-color-light);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+}
+.document-grid {
+  display: grid;
+}
+.document-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 24%) minmax(0, 1fr);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.document-row:last-child {
+  border-bottom: 0;
+}
+.document-row > span {
+  padding: 10px 14px;
+  background: var(--el-fill-color-lighter);
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.document-row > p {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.document-row.emphasized > p,
+.document-row.abnormal > p,
+.document-row.critical > p {
+  font-weight: 700;
+}
+.document-row.abnormal,
+.document-row.critical {
+  box-shadow: inset 3px 0 0 var(--el-text-color-primary);
+}
+.section-empty {
+  margin: 0;
+  padding: 11px 14px;
+  color: var(--el-text-color-placeholder);
+  font-size: 13px;
 }
 .lab-review-section {
   background: var(--el-fill-color-lighter);
@@ -389,27 +629,131 @@ defineEmits<{
 .panel-actions :deep(.el-button) {
   margin-left: 0;
 }
-.export-list {
+.version-control {
+  display: grid;
+  gap: 14px;
   margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 14px;
+  background: var(--el-fill-color-extra-light);
 }
-.section-caption {
-  margin-bottom: 10px;
-  font-weight: 700;
-}
-.export-row {
+.version-control-heading,
+.version-group > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
 }
-.export-row div {
+.version-control-heading > div,
+.version-group > header > div,
+.generation-result > div {
   display: grid;
   gap: 4px;
 }
-.export-row small {
+.version-control-heading strong {
+  font-size: 16px;
+}
+.version-control-heading small,
+.version-group small,
+.generation-result small {
   color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+.generation-result {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 14px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 12px;
+  background: var(--el-color-primary-light-9);
+}
+.generation-result.export-result {
+  border-color: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-9);
+}
+.version-badge,
+.version-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--el-color-primary);
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.version-badge {
+  min-width: 52px;
+  height: 42px;
+  font-size: 17px;
+}
+.version-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.version-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-bg-color);
+}
+.version-group > header {
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+}
+.version-empty {
+  padding: 24px 14px;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
+}
+.version-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.version-row:last-child {
+  border-bottom: 0;
+}
+.version-row.latest {
+  box-shadow: inset 3px 0 0 var(--el-color-success);
+  background: var(--el-color-success-light-9);
+}
+.version-no {
+  min-width: 42px;
+  height: 32px;
+  font-size: 13px;
+}
+.version-no.export-version,
+.export-result .version-badge {
+  background: var(--el-color-success);
+}
+.version-detail {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.version-detail > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.version-detail strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @media (max-width: 680px) {
   .panel-heading {
@@ -437,6 +781,15 @@ defineEmits<{
   .lab-report-meta {
     grid-template-columns: 1fr;
   }
+  .document-row {
+    grid-template-columns: 1fr;
+  }
+  .document-row > span {
+    padding-bottom: 4px;
+  }
+  .document-row > p {
+    padding-top: 4px;
+  }
   .lab-metric-list article {
     grid-template-columns: 1fr auto;
   }
@@ -446,6 +799,25 @@ defineEmits<{
   .lab-metric-list article :deep(.el-tag) {
     grid-column: 2;
     grid-row: 1 / span 2;
+  }
+  .version-control-heading,
+  .version-group > header {
+    align-items: flex-start;
+  }
+  .version-control-heading {
+    flex-direction: column;
+  }
+  .version-groups {
+    grid-template-columns: 1fr;
+  }
+  .generation-result,
+  .version-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .generation-result :deep(.el-button),
+  .version-row :deep(.el-button) {
+    width: 100%;
+    grid-column: 1 / -1;
   }
 }
 </style>

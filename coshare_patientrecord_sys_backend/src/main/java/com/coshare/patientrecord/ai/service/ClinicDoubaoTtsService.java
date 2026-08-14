@@ -36,11 +36,13 @@ public class ClinicDoubaoTtsService {
 
     private final ClinicAiConfigService aiConfigService;
     private final ObjectMapper objectMapper;
+    private final AiCallGuard aiCallGuard;
     private final HttpClient httpClient;
 
-    public ClinicDoubaoTtsService(ClinicAiConfigService aiConfigService, ObjectMapper objectMapper) {
+    public ClinicDoubaoTtsService(ClinicAiConfigService aiConfigService, ObjectMapper objectMapper, AiCallGuard aiCallGuard) {
         this.aiConfigService = aiConfigService;
         this.objectMapper = objectMapper;
+        this.aiCallGuard = aiCallGuard;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -121,7 +123,10 @@ public class ClinicDoubaoTtsService {
                 builder.header("X-Resource-Id", resourceId);
             }
 
-            HttpResponse<byte[]> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+            HttpRequest httpRequest = builder.build();
+            HttpResponse<byte[]> response = aiCallGuard.execute(
+                () -> httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray())
+            );
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, buildUpstreamErrorMessage(response.statusCode(), response.body()));
             }

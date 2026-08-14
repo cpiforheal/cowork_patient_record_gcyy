@@ -1,5 +1,11 @@
 <template>
   <div class="table-box">
+    <section class="recycle-head">
+      <div>
+        <h2>作废资料恢复</h2>
+        <p>查询并恢复误作废的患者资料；资料恢复不等同于诊疗流程回退。</p>
+      </div>
+    </section>
     <ProTable
       ref="proTable"
       :columns="columns"
@@ -78,3 +84,18 @@ const restoreDocument = async (row: RecycleDocumentRow) => {
   }
 };
 </script>
+
+<style scoped lang="scss">
+.recycle-head {
+  padding: 4px 0 18px;
+
+  h2 {
+    margin: 0;
+  }
+
+  p {
+    margin: 8px 0 0;
+    color: var(--el-text-color-secondary);
+  }
+}
+</style>

@@ -1,9 +1,6 @@
 <template>
   <el-dialog v-model="dialogVisible" title="修改密码" width="500px" draggable destroy-on-close>
     <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
-      <el-form-item label="当前密码" prop="currentPassword">
-        <el-input v-model="form.currentPassword" type="password" show-password autocomplete="current-password" />
-      </el-form-item>
       <el-form-item label="新密码" prop="newPassword">
         <el-input v-model="form.newPassword" type="password" show-password autocomplete="new-password" />
       </el-form-item>
@@ -30,13 +27,11 @@ const dialogVisible = ref(false);
 const submitting = ref(false);
 const formRef = ref<FormInstance>();
 const form = reactive({
-  currentPassword: "",
   newPassword: "",
   confirmPassword: ""
 });
 
 const rules = reactive<FormRules>({
-  currentPassword: [{ required: true, message: "请输入当前密码", trigger: "blur" }],
   newPassword: [
     { required: true, message: "请输入新密码", trigger: "blur" },
     { min: 6, message: "新密码至少 6 位", trigger: "blur" }
@@ -54,7 +49,6 @@ const rules = reactive<FormRules>({
 });
 
 const resetForm = () => {
-  form.currentPassword = "";
   form.newPassword = "";
   form.confirmPassword = "";
   formRef.value?.clearValidate();
@@ -69,10 +63,7 @@ const submit = async () => {
   await formRef.value?.validate();
   submitting.value = true;
   try {
-    await changePasswordApi({
-      currentPassword: form.currentPassword,
-      newPassword: form.newPassword
-    });
+    await changePasswordApi({ newPassword: form.newPassword });
     ElMessage.success("密码已修改");
     dialogVisible.value = false;
   } finally {
