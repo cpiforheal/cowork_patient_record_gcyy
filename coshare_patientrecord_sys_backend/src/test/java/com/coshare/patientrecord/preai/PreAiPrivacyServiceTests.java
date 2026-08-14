@@ -10,11 +10,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -39,6 +35,9 @@ class PreAiPrivacyServiceTests {
         assertEquals("便血3月", masked.path("stages").path("RECEPTION").path("chiefComplaint").asText());
         assertEquals("否认输血史", masked.path("stages").path("RECEPTION").path("transfusionHistory").asText());
         assertEquals("适龄结婚", masked.path("stages").path("RECEPTION").path("maritalHistory").path(0).asText());
+        assertFalse(masked.path("stages").path("INSPECTION").has("lesionSize"));
+        assertFalse(masked.path("stages").path("INSPECTION").has("lesionDepth"));
+        assertFalse(masked.path("stages").path("INSPECTION").has("lesionExtent"));
         assertFalse(masked.toString().contains("411525199001011234"));
         assertFalse(masked.toString().contains("张医生"));
         assertFalse(masked.toString().contains("原始照片.jpg"));
@@ -74,6 +73,9 @@ class PreAiPrivacyServiceTests {
         assertFalse(documentXml.contains("VISUAL"));
         assertFalse(documentXml.contains("INPATIENT"));
         assertFalse(documentXml.contains("SURGICAL"));
+        assertFalse(documentXml.contains("病灶大小"));
+        assertFalse(documentXml.contains("病灶深度"));
+        assertFalse(documentXml.contains("累及范围"));
         assertTrue(documentXml.contains("输血史"));
         assertFalse(documentXml.contains("慢性病及重要既往史"));
         assertFalse(documentXml.contains("□"));
@@ -108,33 +110,24 @@ class PreAiPrivacyServiceTests {
     }
 
     @Test
-    void embedsReceptionImagesInDocxWhenAvailable() throws Exception {
+    void excludesSourceImagesFromFinalDocx() throws Exception {
         ObjectNode workspace = sampleWorkspace();
-        Path directory = Files.createTempDirectory("pre-ai-image-test");
-        Field field = PreAiPrivacyService.class.getDeclaredField("attachmentDirectory");
-        field.setAccessible(true);
-        Object previousDirectory = field.get(service);
-        try {
-            Files.write(directory.resolve("image.png"), Base64.getDecoder().decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-            ));
-            field.set(service, directory.toString());
-            ObjectNode attachment = workspace.withArray("attachments").addObject();
-            attachment.put("stageCode", "INSPECTION");
-            attachment.put("mimeType", "image/png");
-            attachment.put("storagePath", "image.png");
+        ObjectNode attachment = workspace.withArray("attachments").addObject();
+        attachment.put("stageCode", "INSPECTION");
+        attachment.put("mimeType", "image/png");
+        attachment.put("storagePath", "image.png");
 
-            String documentXml = unzipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/document.xml");
-            assertTrue(documentXml.contains("专科检查图片"));
-            assertTrue(documentXml.contains("rIdImage1"));
-            assertTrue(documentXml.indexOf("七、专科检查") < documentXml.indexOf("专科检查图片"));
-            assertTrue(documentXml.indexOf("专科检查图片") < documentXml.indexOf("八、辅助检查"));
-            assertTrue(hasZipEntry(service.renderDocx(service.maskWorkspace(workspace), workspace), "word/media/image1.png"));
-        } finally {
-            field.set(service, previousDirectory);
-            Files.deleteIfExists(directory.resolve("image.png"));
-            Files.deleteIfExists(directory);
-        }
+        byte[] docx = service.renderDocx(service.maskWorkspace(workspace), workspace);
+        String documentXml = unzipEntry(docx, "word/document.xml");
+        String relationships = unzipEntry(docx, "word/_rels/document.xml.rels");
+        String contentTypes = unzipEntry(docx, "[Content_Types].xml");
+
+        assertFalse(documentXml.contains("专科检查图片"));
+        assertFalse(documentXml.contains("rIdImage"));
+        assertFalse(relationships.contains("/relationships/image"));
+        assertFalse(contentTypes.contains("image/png"));
+        assertFalse(contentTypes.contains("image/jpeg"));
+        assertFalse(hasZipEntry(docx, "word/media/image1.png"));
     }
 
     @Test
@@ -322,6 +315,9 @@ class PreAiPrivacyServiceTests {
         addStage(stages, "RECEPTION", "COMPLETED", reception);
         ObjectNode inspection = objectMapper.createObjectNode();
         inspection.putArray("examinationTypes").add("VISUAL").add("DIGITAL");
+        inspection.put("lesionSize", "12mm");
+        inspection.put("lesionDepth", "5mm");
+        inspection.put("lesionExtent", "半周");
         inspection.put("factualConclusion", "截石位见肛缘肿物");
         addStage(stages, "INSPECTION", "COMPLETED", inspection);
         ObjectNode tcm = objectMapper.createObjectNode();

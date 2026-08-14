@@ -3,8 +3,12 @@ package com.coshare.patientrecord.inventory.controller;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.auth.service.AuthNavigationService;
 import com.coshare.patientrecord.auth.service.InventoryAccessService;
+import com.coshare.patientrecord.auth.service.InventoryPortalAccountAdminService;
 import com.coshare.patientrecord.common.api.ApiResult;
+import com.coshare.patientrecord.config.PortalMode;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
+import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
+import com.coshare.patientrecord.inventory.service.InventoryQuotaGovernanceService;
 import com.coshare.patientrecord.security.InventoryPermission;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,17 +37,29 @@ public class InventoryApiController {
     private final ObjectMapper objectMapper;
     private final AuthNavigationService navigationService;
     private final InventoryAccessService inventoryAccessService;
+    private final InventoryPortalAccountAdminService portalAccountAdminService;
+    private final InventoryMessageBoardService messageBoardService;
+    private final InventoryQuotaGovernanceService quotaGovernanceService;
+    private final PortalMode portalMode;
 
     public InventoryApiController(
         InventoryDatabaseService databaseService,
         ObjectMapper objectMapper,
         AuthNavigationService navigationService,
-        InventoryAccessService inventoryAccessService
+        InventoryAccessService inventoryAccessService,
+        InventoryPortalAccountAdminService portalAccountAdminService,
+        InventoryMessageBoardService messageBoardService,
+        InventoryQuotaGovernanceService quotaGovernanceService,
+        PortalMode portalMode
     ) {
         this.databaseService = databaseService;
         this.objectMapper = objectMapper;
         this.navigationService = navigationService;
         this.inventoryAccessService = inventoryAccessService;
+        this.portalAccountAdminService = portalAccountAdminService;
+        this.messageBoardService = messageBoardService;
+        this.quotaGovernanceService = quotaGovernanceService;
+        this.portalMode = portalMode;
     }
 
     @GetMapping("/inventory-api/db")
@@ -108,13 +124,299 @@ public class InventoryApiController {
     @GetMapping("/inventory-api/department-daily-drafts/summary")
     public ApiResult<Map<String, Object>> departmentDailyDraftSummary(@RequestParam LocalDate date) {
         SessionUser user = requireCapability("inventory:read");
+        if (portalMode.isInventoryPortal()) requireCapability("inventory:role:manage");
         return ApiResult.success(databaseService.asMap(databaseService.departmentDailyDraftSummary(date, user)));
+    }
+
+    @GetMapping("/inventory-api/department-daily-drafts/admin-rollup")
+    public ApiResult<Map<String, Object>> adminDepartmentDailyRollup(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        LocalDate[] period = resolveDailyRollupPeriod(date, from, to);
+        return ApiResult.success(databaseService.asMap(databaseService.adminDepartmentDailyRollup(period[0], period[1], user)));
+    }
+
+    @GetMapping("/inventory-api/quota-governance")
+    public ApiResult<Map<String, Object>> inventoryQuotaGovernance(@RequestParam(required = false) LocalDate date) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(objectMapper.convertValue(quotaGovernanceService.governance(date), Map.class));
+    }
+
+    @PostMapping("/inventory-api/quota-governance/versions")
+    public ApiResult<Map<String, Object>> createInventoryQuotaVersion(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额版本已创建", objectMapper.convertValue(quotaGovernanceService.createVersion(toJson(payload), user), Map.class));
+    }
+
+    @PutMapping("/inventory-api/quota-governance/rules/{ruleId}")
+    public ApiResult<Map<String, Object>> updateInventoryQuotaRule(
+        @org.springframework.web.bind.annotation.PathVariable String ruleId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已更新", objectMapper.convertValue(quotaGovernanceService.updateRule(ruleId, toJson(payload)), Map.class));
+    }
+
+    @PutMapping("/inventory-api/quota-governance/special-rules")
+    public ApiResult<Map<String, Object>> updateInventorySpecialMaterialRule(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "特殊耗材规则已更新", objectMapper.convertValue(quotaGovernanceService.upsertSpecial(toJson(payload), user), Map.class));
+    }
+
+    @PutMapping("/inventory-api/quota-governance/reviews")
+    public ApiResult<Map<String, Object>> saveInventoryQuotaReview(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "复核记录已保存", objectMapper.convertValue(quotaGovernanceService.saveReview(toJson(payload), user), Map.class));
+    }
+
+    @GetMapping("/inventory-api/portal-accounts")
+    public ApiResult<Map<String, Object>> inventoryPortalAccounts() {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(portalAccountAdminService.accounts());
+    }
+
+    @PutMapping("/inventory-api/portal-accounts/{accountId}")
+    public ApiResult<Map<String, Object>> updateInventoryPortalAccount(
+        @org.springframework.web.bind.annotation.PathVariable String accountId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        portalAccountAdminService.update(accountId, toJson(payload), user);
+        return ApiResult.of(200, "进销存门户账号已更新", portalAccountAdminService.accounts());
+    }
+
+    @PostMapping("/inventory-api/portal-accounts/{accountId}/reset-password")
+    public ApiResult<Map<String, Object>> resetInventoryPortalAccountPassword(
+        @org.springframework.web.bind.annotation.PathVariable String accountId
+    ) {
+        requireCapability("inventory:role:manage");
+        portalAccountAdminService.resetPassword(accountId);
+        return ApiResult.of(200, "密码已重置为 123456，账号下次登录必须修改密码", portalAccountAdminService.accounts());
+    }
+
+    @GetMapping("/inventory-api/message-board/posts")
+    public ApiResult<Map<String, Object>> inventoryMessageBoardPosts(
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) String category,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(defaultValue = "false") boolean onlyMine,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "20") int size
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(messageBoardService.posts(
+            user, navigationService.hasCapability(user, "inventory:role:manage"), keyword, category, status, departmentKey, onlyMine, page, size
+        ));
+    }
+
+    @GetMapping("/inventory-api/message-board/posts/{postId}")
+    public ApiResult<Map<String, Object>> inventoryMessageBoardPost(
+        @org.springframework.web.bind.annotation.PathVariable String postId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(messageBoardService.postDetail(
+            postId, user, navigationService.hasCapability(user, "inventory:role:manage")
+        ));
+    }
+
+    @PostMapping("/inventory-api/message-board/posts")
+    public ApiResult<Map<String, Object>> createInventoryMessageBoardPost(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "需求或建议已发布", messageBoardService.createPost(
+            toJson(payload), user, navigationService.hasCapability(user, "inventory:role:manage")
+        ));
+    }
+
+    @PutMapping("/inventory-api/message-board/posts/{postId}")
+    public ApiResult<Map<String, Object>> updateInventoryMessageBoardPost(
+        @org.springframework.web.bind.annotation.PathVariable String postId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "主题内容已更新", messageBoardService.updatePost(
+            postId, toJson(payload), user, navigationService.hasCapability(user, "inventory:role:manage")
+        ));
+    }
+
+    @PostMapping("/inventory-api/message-board/posts/{postId}/withdraw")
+    public ApiResult<Map<String, Object>> withdrawInventoryMessageBoardPost(
+        @org.springframework.web.bind.annotation.PathVariable String postId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        messageBoardService.withdrawPost(postId, user);
+        return ApiResult.of(200, "主题已撤回", Map.of("id", postId, "withdrawn", true));
+    }
+
+    @PostMapping("/inventory-api/message-board/posts/{postId}/replies")
+    public ApiResult<Map<String, Object>> createInventoryMessageBoardReply(
+        @org.springframework.web.bind.annotation.PathVariable String postId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "回复已发布", messageBoardService.createReply(
+            postId, toJson(payload), user, navigationService.hasCapability(user, "inventory:role:manage")
+        ));
+    }
+
+    @PutMapping("/inventory-api/message-board/replies/{replyId}")
+    public ApiResult<Map<String, Object>> updateInventoryMessageBoardReply(
+        @org.springframework.web.bind.annotation.PathVariable String replyId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "回复已更新", messageBoardService.updateReply(
+            replyId, toJson(payload), user, navigationService.hasCapability(user, "inventory:role:manage")
+        ));
+    }
+
+    @PostMapping("/inventory-api/message-board/replies/{replyId}/withdraw")
+    public ApiResult<Map<String, Object>> withdrawInventoryMessageBoardReply(
+        @org.springframework.web.bind.annotation.PathVariable String replyId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        messageBoardService.withdrawReply(replyId, user);
+        return ApiResult.of(200, "回复已撤回", Map.of("id", replyId, "withdrawn", true));
+    }
+
+    @PutMapping("/inventory-api/message-board/admin/posts/{postId}/status")
+    public ApiResult<Map<String, Object>> updateInventoryMessageBoardStatus(
+        @org.springframework.web.bind.annotation.PathVariable String postId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "处理状态已更新", messageBoardService.updateStatus(postId, toJson(payload), user));
+    }
+
+    @PutMapping("/inventory-api/message-board/admin/posts/{postId}/pin")
+    public ApiResult<Map<String, Object>> updateInventoryMessageBoardPinned(
+        @org.springframework.web.bind.annotation.PathVariable String postId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "置顶状态已更新", messageBoardService.updatePinned(postId, toJson(payload).path("pinned").asBoolean(false), user));
+    }
+
+    @PutMapping("/inventory-api/message-board/admin/posts/{postId}/visibility")
+    public ApiResult<Map<String, Object>> updateInventoryMessageBoardPostVisibility(
+        @org.springframework.web.bind.annotation.PathVariable String postId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "主题可见性已更新", messageBoardService.updatePostVisibility(postId, toJson(payload).path("hidden").asBoolean(false), user));
+    }
+
+    @PutMapping("/inventory-api/message-board/admin/replies/{replyId}/visibility")
+    public ApiResult<Map<String, Object>> updateInventoryMessageBoardReplyVisibility(
+        @org.springframework.web.bind.annotation.PathVariable String replyId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "回复可见性已更新", messageBoardService.updateReplyVisibility(replyId, toJson(payload).path("hidden").asBoolean(false), user));
+    }
+
+    @GetMapping("/inventory-api/message-board/admin/audit-logs")
+    public ApiResult<Map<String, Object>> inventoryMessageBoardAuditLogs(
+        @RequestParam(required = false) String targetType,
+        @RequestParam(required = false) String targetId,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "20") int size
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(messageBoardService.auditLogs(targetType, targetId, page, size));
+    }
+
+    @GetMapping("/inventory-api/department-daily-drafts/admin-rollup/export")
+    public ResponseEntity<byte[]> exportAdminDepartmentDailyRollup(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        LocalDate[] period = resolveDailyRollupPeriod(date, from, to);
+        return attachment(
+            databaseService.exportAdminDepartmentDailyRollup(period[0], period[1], user),
+            "管理员12科室耗材日报-" + periodFilename(period) + ".csv",
+            "text/csv;charset=UTF-8"
+        );
+    }
+
+    @GetMapping("/inventory-api/department-daily-drafts/admin-rollup/export.xlsx")
+    public ResponseEntity<byte[]> exportAdminDepartmentDailyRollupXlsx(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        LocalDate[] period = resolveDailyRollupPeriod(date, from, to);
+        return attachment(
+            databaseService.exportAdminDepartmentDailyRollupXlsx(period[0], period[1], user),
+            "管理员12科室耗材日报-" + periodFilename(period) + ".xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
     }
 
     @PutMapping("/inventory-api/department-daily-drafts")
     public ApiResult<Map<String, Object>> saveDepartmentDailyDraft(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.of(200, "科室耗材日草稿已保存", databaseService.asMap(databaseService.saveDepartmentDailyDraft(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/department-daily-drafts/export/{kind}")
+    public ResponseEntity<byte[]> exportDepartmentDailyDraft(
+        @org.springframework.web.bind.annotation.PathVariable String kind,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:export");
+        if (!"details".equals(kind) && !"summary".equals(kind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的科室日核算导出类型");
+        }
+        return attachment(
+            databaseService.exportDepartmentDailyDraft(kind, toJson(payload), user),
+            "department-daily-" + kind + ".csv",
+            "text/csv;charset=UTF-8"
+        );
+    }
+
+    @GetMapping("/inventory-api/department-period-reports")
+    public ApiResult<Map<String, Object>> departmentPeriodReport(
+        @RequestParam String departmentKey,
+        @RequestParam String periodType,
+        @RequestParam LocalDate anchorDate
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.departmentPeriodReport(departmentKey, periodType, anchorDate, user)));
+    }
+
+    @GetMapping("/inventory-api/department-period-reports/export")
+    public ResponseEntity<byte[]> exportDepartmentPeriodReport(
+        @RequestParam String departmentKey,
+        @RequestParam String periodType,
+        @RequestParam LocalDate anchorDate,
+        @RequestParam(defaultValue = "xlsx") String format
+    ) {
+        SessionUser user = requireCapability("inventory:export");
+        var file = databaseService.exportDepartmentPeriodReport(departmentKey, periodType, anchorDate, format, user);
+        return attachment(file.body(), file.filename(), file.mediaType());
+    }
+
+    @GetMapping("/inventory-api/department-allocation-plans")
+    public ApiResult<Map<String, Object>> departmentAllocationPlan(
+        @RequestParam String departmentKey,
+        @RequestParam String month,
+        @RequestParam(required = false) LocalDate throughDate
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.departmentAllocationPlan(departmentKey, month, throughDate, user)));
+    }
+
+    @PutMapping("/inventory-api/department-allocation-plans")
+    public ApiResult<Map<String, Object>> saveDepartmentAllocationPlan(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "Department allocation plan saved without inventory movement", databaseService.asMap(databaseService.saveDepartmentAllocationPlan(toJson(payload), user)));
     }
 
     @GetMapping("/inventory-api/patient-consumption-drafts/detail")
@@ -531,6 +833,21 @@ public class InventoryApiController {
 
     private static List<String> safeList(List<String> values) {
         return values == null ? List.of() : values.stream().filter(value -> value != null && !value.isBlank()).toList();
+    }
+
+    private static LocalDate[] resolveDailyRollupPeriod(LocalDate date, LocalDate from, LocalDate to) {
+        if (date != null && (from != null || to != null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "日期参数不能混用");
+        }
+        if (date != null) return new LocalDate[] { date, date };
+        if (from == null || to == null || from.isAfter(to)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请提供有效的查询日期范围");
+        }
+        return new LocalDate[] { from, to };
+    }
+
+    private static String periodFilename(LocalDate[] period) {
+        return period[0].equals(period[1]) ? period[0].toString() : period[0] + "至" + period[1];
     }
 
     private static ResponseEntity<byte[]> attachment(byte[] body, String filename, String mediaType) {

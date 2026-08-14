@@ -1,108 +1,56 @@
 <template>
   <section class="role-panel">
-    <el-alert
-      title="岗位决定可见入口与可执行动作"
-      description="这里单独配置进销存岗位，不会改动账号的门诊岗位、科室归属或患者数据权限；保存后重新登录即可按新权限进入进销存。"
-      type="info"
-      :closable="false"
-      show-icon
-    />
+    <el-alert title="进销存门户账号管理" description="仅维护独立进销存门户的 13 个预置账号；不会读取、展示或修改病历端账号。账号变更或重置密码后，原会话会立即失效。" type="info" :closable="false" show-icon />
 
     <div class="panel-heading">
-      <div>
-        <p>岗位权限</p>
-        <h2>按岗位分配进销存职责</h2>
-      </div>
-      <el-button :loading="loading" :icon="Refresh" @click="$emit('refresh')">刷新</el-button>
+      <div><p>按岗位分组</p><h2>进销存门户账号</h2></div>
+      <el-button :loading="loading" :icon="Refresh" @click="emit('refresh')">刷新</el-button>
     </div>
 
-    <div class="role-cards">
-      <article v-for="role in roles" :key="role.code" class="role-card">
-        <div class="role-card-top">
-          <strong>{{ role.name }}</strong>
-          <el-tag size="small" effect="plain">{{ role.memberCount }} 人</el-tag>
-        </div>
-        <p>{{ role.responsibility || '按系统配置执行相应职责。' }}</p>
-        <span>{{ role.dataScope || '按账号所属科室' }}</span>
-        <div class="permission-tags">
-          <el-tag v-for="permission in role.permissions" :key="permission" size="small" effect="plain">{{ permission }}</el-tag>
-        </div>
-      </article>
-    </div>
-
-    <div class="panel-heading account-heading">
-      <div>
-        <p>账号归属</p>
-        <h2>所属岗位与科室</h2>
-      </div>
-    </div>
-    <el-table :data="accounts" v-loading="loading" class="role-table" max-height="460">
-      <el-table-column prop="name" label="人员" min-width="120" />
-      <el-table-column prop="username" label="登录账号" min-width="140" />
-      <el-table-column prop="department" label="所属科室" min-width="140">
-        <template #default="{ row }">{{ row.department || '未设置' }}</template>
+    <el-table :data="treeRows" row-key="id" :tree-props="{ children: 'children' }" v-loading="loading" class="role-table" max-height="560">
+      <el-table-column prop="name" label="岗位 / 科室 / 姓名" min-width="190">
+        <template #default="{ row }"><strong v-if="row.isGroup">{{ row.name }}</strong><span v-else>{{ row.department || row.name }}</span></template>
       </el-table-column>
-      <el-table-column prop="clinicalRole" label="门诊岗位" min-width="120" />
-      <el-table-column label="当前岗位" min-width="180">
-        <template #default="{ row }">
-          <el-select
-            :model-value="row.inventoryRole"
-            size="small"
-            :disabled="row.systemAssigned || savingAccountId === row.id"
-            @change="changeRole(row, $event)"
-          >
-            <el-option label="未开通进销存" value="" />
-            <el-option
-              v-for="role in roles.filter(item => !item.systemAssigned)"
-              :key="role.code"
-              :label="role.name"
-              :value="role.code"
-            />
-          </el-select>
-          <el-tag v-if="row.systemAssigned" size="small" type="success">管理员自动拥有</el-tag>
-        </template>
+      <el-table-column prop="username" label="登录账号" min-width="130"><template #default="{ row }">{{ row.isGroup ? '—' : row.username }}</template></el-table-column>
+      <el-table-column label="岗位" width="142">
+        <template #default="{ row }"><span v-if="row.isGroup">{{ row.memberCount }} 个账号</span><el-select v-else :model-value="row.portalRole" size="small" :disabled="savingAccountId === row.id" @change="changeRole(row, $event)"><el-option label="进销存管理员" value="admin" /><el-option label="科室填报员" value="inventory_reporter" /></el-select></template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.status === '启用' ? 'success' : 'info'" size="small">
-            {{ row.status }}
-          </el-tag>
-        </template>
+      <el-table-column label="科室绑定" min-width="150">
+        <template #default="{ row }"><span v-if="row.isGroup">—</span><el-select v-else :model-value="row.departmentKey" size="small" :disabled="row.portalRole === 'admin' || savingAccountId === row.id" @change="changeDepartment(row, $event)"><el-option v-for="department in departments" :key="department.key" :label="department.name" :value="department.key" /></el-select></template>
+      </el-table-column>
+      <el-table-column label="状态" width="110" align="center"><template #default="{ row }"><el-tag v-if="!row.isGroup" :type="row.status === '启用' ? 'success' : 'info'" size="small">{{ row.status }}</el-tag></template></el-table-column>
+      <el-table-column label="操作" width="220" fixed="right">
+        <template #default="{ row }"><template v-if="!row.isGroup"><el-button link type="primary" :loading="savingAccountId === row.id" @click="toggleStatus(row)">{{ row.status === '启用' ? '停用' : '启用' }}</el-button><el-button link type="warning" :loading="savingAccountId === row.id" @click="emit('reset-password', asAccount(row))">重置密码</el-button></template></template>
       </el-table-column>
     </el-table>
+    <p class="panel-tip">重置后的初始密码为 <code>123456</code>，账号将在下次登录时强制修改密码。管理员岗位固定绑定“管理端”。</p>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { Refresh } from "@element-plus/icons-vue";
-import type { InventoryAccountAssignment, InventoryRoleDescriptor } from "@/api/modules/inventory";
+import type { InventoryPortalAccount } from "@/api/modules/inventory";
 
-defineProps<{
-  roles: InventoryRoleDescriptor[];
-  accounts: InventoryAccountAssignment[];
-  loading: boolean;
-  savingAccountId: string;
-}>();
-
-const emit = defineEmits<{
-  refresh: [];
-  "change-role": [{ account: InventoryAccountAssignment; roleCode: string }];
-}>();
-
-const changeRole = (account: unknown, roleCode: string) => emit("change-role", { account: account as InventoryAccountAssignment, roleCode });
+type TreeRow = InventoryPortalAccount & { isGroup?: boolean; memberCount?: number; children?: TreeRow[] };
+const props = defineProps<{ accounts: InventoryPortalAccount[]; departments: Array<{ key: string; name: string }>; loading: boolean; savingAccountId: string }>();
+const emit = defineEmits<{ refresh: []; update: [{ account: InventoryPortalAccount; changes: Partial<Pick<InventoryPortalAccount, "portalRole" | "departmentKey" | "status">> }]; "reset-password": [account: InventoryPortalAccount] }>();
+const treeRows = computed<TreeRow[]>(() => [
+  { id: "group-admin", name: "进销存管理员", username: "", departmentKey: "", department: "", portalRole: "admin", portalRoleLabel: "进销存管理员", status: "启用", mustChangePassword: false, displayOrder: 0, isGroup: true, memberCount: props.accounts.filter(account => account.portalRole === "admin").length, children: props.accounts.filter(account => account.portalRole === "admin") },
+  { id: "group-reporter", name: "科室填报员", username: "", departmentKey: "", department: "", portalRole: "inventory_reporter", portalRoleLabel: "科室填报员", status: "启用", mustChangePassword: false, displayOrder: 1, isGroup: true, memberCount: props.accounts.filter(account => account.portalRole !== "admin").length, children: props.accounts.filter(account => account.portalRole !== "admin") }
+]);
+const asAccount = (row: unknown) => row as InventoryPortalAccount;
+const changeRole = (row: unknown, role: string) => {
+  const account = asAccount(row);
+  emit("update", { account, changes: { portalRole: role as InventoryPortalAccount["portalRole"], departmentKey: role === "admin" ? "inventory-admin" : account.departmentKey } });
+};
+const changeDepartment = (row: unknown, departmentKey: string) => emit("update", { account: asAccount(row), changes: { departmentKey } });
+const toggleStatus = (row: unknown) => {
+  const account = asAccount(row);
+  emit("update", { account, changes: { status: account.status === "启用" ? "停用" : "启用" } });
+};
 </script>
 
 <style scoped lang="scss">
-.role-panel { display: grid; gap: 16px; }
-.panel-heading { display: flex; align-items: center; justify-content: space-between; }
-.panel-heading p { margin: 0 0 4px; color: var(--el-color-primary); font-size: 13px; font-weight: 700; }
-.panel-heading h2 { margin: 0; color: var(--el-text-color-primary); font-size: 20px; }
-.role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-.role-card { min-height: 130px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 10px; background: #fff; }
-.role-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.role-card p { min-height: 38px; margin: 12px 0; color: var(--el-text-color-regular); font-size: 13px; line-height: 1.5; }
-.role-card span { color: var(--el-text-color-secondary); font-size: 12px; }
-.permission-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.account-heading { margin-top: 8px; }
-.role-table { border: 1px solid var(--el-border-color-lighter); border-radius: 10px; }
+.role-panel { display: grid; gap: 16px; }.panel-heading { display:flex; align-items:center; justify-content:space-between; }.panel-heading p { margin:0 0 4px; color:var(--el-color-primary); font-size:13px; font-weight:700; }.panel-heading h2 { margin:0; font-size:20px; }.role-table { border:1px solid var(--el-border-color-lighter); border-radius:10px; }.panel-tip { margin:0; color:var(--el-text-color-secondary); font-size:12px; }code { padding:1px 4px; border-radius:4px; color:var(--el-color-primary); background:var(--el-fill-color-light); }
 </style>

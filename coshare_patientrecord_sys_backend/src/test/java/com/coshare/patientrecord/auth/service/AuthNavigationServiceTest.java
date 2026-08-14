@@ -5,12 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 
 import com.coshare.patientrecord.auth.dto.NavigationMenu;
 import com.coshare.patientrecord.auth.dto.NavigationResult;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.config.PortalMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -260,6 +263,33 @@ class AuthNavigationServiceTest {
         assertThat(service.navigationFor(user("manager")).shortcuts().get(0).path()).isEqualTo("/inventory/overview");
         assertThat(service.navigationFor(user("quality")).shortcuts())
             .noneMatch(item -> "/pre-ai/encounters".equals(item.path()));
+    }
+
+    @Test
+    void inventoryPortalPublishesOnlyTheDailyReportNavigation() {
+        InventoryAccessService accessService = mock(InventoryAccessService.class);
+        InventoryAccessService.Profile profile = new InventoryAccessService.Profile(
+            InventoryAccessService.DEPARTMENT_REPORTER,
+            "reporter",
+            "daily report",
+            false,
+            Set.of("/inventory/daily"),
+            Map.of("inventoryDaily", List.of("inventory:read")),
+            Set.of("inventory:read"),
+            List.of("read")
+        );
+        doReturn(new InventoryAccessService.Access(profile)).when(accessService).accessFor(any());
+        AuthNavigationService inventoryPortal = new AuthNavigationService(jdbcTemplate, accessService, new PortalMode("inventory"));
+
+        NavigationResult navigation = inventoryPortal.navigationFor(user("inventory_reporter"));
+
+        assertThat(navigation.menus()).hasSize(1);
+        assertThat(navigation.menus().get(0).path()).isEqualTo("/inventory");
+        assertThat(navigation.menus().get(0).children()).extracting(NavigationMenu::path).containsExactly("/inventory/daily");
+        assertThat(navigation.capabilities()).containsExactly("inventory:read");
+        assertThat(navigation.buttonPermissions()).containsOnlyKeys("inventoryDaily");
+        assertThat(navigation.departments()).hasSize(1);
+        assertThat(navigation.departments().get(0).id()).isEqualTo("dept-1");
     }
 
     @Test

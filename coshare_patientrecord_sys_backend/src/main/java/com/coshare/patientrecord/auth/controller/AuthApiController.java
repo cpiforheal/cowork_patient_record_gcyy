@@ -15,7 +15,7 @@ import com.coshare.patientrecord.auth.dto.PasswordResetRequest;
 import com.coshare.patientrecord.auth.dto.RoleDescriptor;
 import com.coshare.patientrecord.auth.service.AuthAccountAdminService;
 import com.coshare.patientrecord.auth.service.AuthNavigationService;
-import com.coshare.patientrecord.auth.service.AuthSessionService;
+import com.coshare.patientrecord.auth.service.PortalAuthenticationService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.security.AuthPermission;
 import com.coshare.patientrecord.security.AuthTokenFilter;
@@ -36,16 +36,16 @@ import org.springframework.web.bind.annotation.RestController;
 @Profile("mysql")
 public class AuthApiController {
 
-    private final AuthSessionService authSessionService;
+    private final PortalAuthenticationService portalAuthenticationService;
     private final AuthNavigationService authNavigationService;
     private final AuthAccountAdminService authAccountAdminService;
 
     public AuthApiController(
-        AuthSessionService authSessionService,
+        PortalAuthenticationService portalAuthenticationService,
         AuthNavigationService authNavigationService,
         AuthAccountAdminService authAccountAdminService
     ) {
-        this.authSessionService = authSessionService;
+        this.portalAuthenticationService = portalAuthenticationService;
         this.authNavigationService = authNavigationService;
         this.authAccountAdminService = authAccountAdminService;
     }
@@ -55,22 +55,22 @@ public class AuthApiController {
         @RequestBody LoginRequest request,
         HttpServletRequest servletRequest
     ) {
-        return ApiResult.success(authSessionService.login(request, clientIp(servletRequest)));
+        return ApiResult.success(portalAuthenticationService.login(request, clientIp(servletRequest)));
     }
 
     @GetMapping("/auth/options")
     public ApiResult<LoginOptions> options() {
-        return ApiResult.success(authSessionService.loginOptions());
+        return ApiResult.success(portalAuthenticationService.loginOptions());
     }
 
     @GetMapping("/auth/options/accounts")
     public ApiResult<LoginAccountOptions> accounts(@RequestParam String department) {
-        return ApiResult.success(authSessionService.loginAccounts(department));
+        return ApiResult.success(portalAuthenticationService.loginAccounts(department));
     }
 
     @PostMapping("/auth/logout")
     public ApiResult<Map<String, Boolean>> logout(HttpServletRequest request) {
-        authSessionService.logout(AuthTokenFilter.extractToken(request));
+        portalAuthenticationService.logout(AuthTokenFilter.extractToken(request));
         return ApiResult.success(Map.of("ok", true));
     }
 
@@ -84,7 +84,7 @@ public class AuthApiController {
         @RequestBody ActiveDepartmentRequest request,
         HttpServletRequest servletRequest
     ) {
-        return ApiResult.success(authSessionService.switchActiveDepartment(
+        return ApiResult.success(portalAuthenticationService.switchActiveDepartment(
             AuthTokenFilter.extractToken(servletRequest),
             AuthPermission.currentUserOrThrow(),
             request == null ? "" : request.departmentId()
@@ -93,7 +93,7 @@ public class AuthApiController {
 
     @PostMapping("/auth/password")
     public ApiResult<Map<String, Boolean>> changePassword(@RequestBody PasswordChangeRequest request) {
-        authSessionService.changePassword(AuthPermission.currentUserOrThrow(), request);
+        portalAuthenticationService.changePassword(AuthPermission.currentUserOrThrow(), request);
         return ApiResult.success(Map.of("ok", true));
     }
 
@@ -125,6 +125,12 @@ public class AuthApiController {
     public ApiResult<AccountSummary> createAccount(@RequestBody AccountUpsertRequest request) {
         requireAdministrator();
         return ApiResult.success(authAccountAdminService.create(request));
+    }
+
+    @PostMapping("/auth/admin/accounts/department-test-batch")
+    public ApiResult<List<AccountSummary>> createDepartmentTestAccounts() {
+        requireAdministrator();
+        return ApiResult.success(authAccountAdminService.createDepartmentTestAccounts(AuthPermission.currentUserOrThrow().id()));
     }
 
     @PutMapping("/auth/admin/accounts/{accountId}")

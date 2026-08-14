@@ -91,19 +91,22 @@ public class PreAiEncounterService {
             "registrationChiefComplaint", "visitProblem", "visitExpectation", "registrationPastHistory", "registrationIllnessHistory", "registrationPersonalHistory", "registrationCurrentIllness",
             "visitNo", "admissionNo", "medicalRecordNo", "inpatientNo", "ward", "bedNo", "admissionCount",
             "nationality", "nativePlace", "birthplace", "maritalStatus", "admissionMethod", "insuranceType", "paymentMethod",
-            "owningDepartmentId", "inventoryCareType", "careSituationDescription"
+            "owningDepartmentId", "inventoryCareType", "careSituationDescription",
+            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt"
         ),
         "INSPECTION", Set.of(
             "examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition",
             "lesionSize", "lesionExtent", "lesionDepth", "visualFindings", "digitalExamFindings", "anoscopyFindings",
-            "otherFindings", "preliminaryDiagnosis", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
-            "inspectionSpecialDescription", "nextReviewAt", "nextReviewNote"
+            "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
+            "inspectionSpecialDescription", "nextReviewAt", "nextReviewNote",
+            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt"
         ),
         "RECEPTION", Set.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
             "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "chiefComplaintText", "presentIllness",
             "presentIllnessOverride", "presentIllnessSourceHash", "presentIllnessConfirmed", "chronicDiseaseItems", "surgicalHistoryItems",
+            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt",
             "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory",
             "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
             "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "dispositionSupplement", "recommendedAuxiliaryExams", "specialCircumstances",

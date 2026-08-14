@@ -7,25 +7,25 @@
         <div class="login-logo">
           <img class="login-icon" src="@/assets/images/logo.jpg" alt="" />
           <div>
-            <p class="logo-kicker">门诊协同入口</p>
-            <h1 class="logo-text">欢迎回来！</h1>
+            <p class="logo-kicker">{{ portalBrand.kicker }}</p>
+            <h1 class="logo-text">{{ portalBrand.title }}</h1>
           </div>
         </div>
-        <p class="form-intro">请正确选择您的岗位并输入密码，进入对应工作台。</p>
+        <p class="form-intro">{{ portalBrand.intro }}</p>
         <LoginForm />
       </section>
 
       <section class="login-panel panel-hello">
         <div class="hello-brand">
           <img class="hello-brand-icon" src="@/assets/images/logo.jpg" alt="" />
-          <span>门诊协同入口</span>
+          <span>{{ portalBrand.helloBrand }}</span>
         </div>
         <div class="hello-copy">
-          <span class="hello-kicker">Clinic Workbench</span>
-          <h2>门诊信息统一管理平台</h2>
-          <h3>让工作 更便捷</h3>
+          <span class="hello-kicker">{{ portalBrand.helloKicker }}</span>
+          <h2>{{ portalBrand.helloTitle }}</h2>
+          <h3>{{ portalBrand.helloSubtitle }}</h3>
           <el-button class="hello-action" round size="large" @click="isFormMode ? showWelcome() : showForm()">
-            {{ isFormMode ? "返回欢迎页" : "进入登录" }}
+            {{ isFormMode ? portalBrand.formSwitchBack : portalBrand.loginAction }}
           </el-button>
         </div>
 
@@ -72,9 +72,36 @@
 </template>
 
 <script setup lang="ts" name="login">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import LoginForm from "./components/LoginForm.vue";
 import SwitchDark from "@/components/SwitchDark/index.vue";
+
+const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
+const portalBrand = computed(() =>
+  isInventoryPortal
+    ? {
+        kicker: "进销存门户",
+        title: "欢迎回来",
+        intro: "请正确选择您的科室或管理端并输入密码，进入耗材日报工作台。",
+        helloKicker: "Inventory Workbench",
+        helloTitle: "进销存管理平台",
+        helloSubtitle: "耗材日报填报与汇总",
+        helloBrand: "进销存门户",
+        formSwitchBack: "返回欢迎页",
+        loginAction: "进入登录"
+      }
+    : {
+        kicker: "门诊协同入口",
+        title: "欢迎回来！",
+        intro: "请正确选择您的岗位并输入密码，进入对应工作台。",
+        helloKicker: "Clinic Workbench",
+        helloTitle: "门诊信息统一管理平台",
+        helloSubtitle: "让工作更便捷",
+        helloBrand: "门诊协同入口",
+        formSwitchBack: "返回欢迎页",
+        loginAction: "进入登录"
+      }
+);
 
 const isFormMode = ref(false);
 

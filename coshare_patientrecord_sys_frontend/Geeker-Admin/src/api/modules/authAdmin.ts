@@ -68,6 +68,9 @@ export const createAdminAccountApi = (payload: AccountUpsertRequest) =>
     body: JSON.stringify(payload)
   });
 
+export const createDepartmentTestAccountsApi = () =>
+  request<AdminAccountSummary[]>("/admin/accounts/department-test-batch", { method: "POST" });
+
 export const updateAdminAccountApi = (id: string, payload: AccountUpsertRequest) =>
   request<AdminAccountSummary>(`/admin/accounts/${encodeURIComponent(id)}`, {
     method: "PUT",

@@ -5,7 +5,6 @@ import { HOME_URL, LOGIN_URL, ROUTER_WHITE_LIST } from "@/config";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
 import { staticRouter, errorRouter } from "@/routers/modules/staticRouter";
 import {
-  INVENTORY_SYSTEM_DASHBOARD,
   canAccessInventoryTab,
   inventorySystemPathForLegacy,
   inventoryTabFromPath,
@@ -35,7 +34,7 @@ const PROTECTED_BUSINESS_PATHS = [
 
 const unavailableRouteFor = (path: string) => (PROTECTED_BUSINESS_PATHS.some(pattern => pattern.test(path)) ? "/403" : "/404");
 
-const systemLandingFor = (path: string, authStore: ReturnType<typeof useAuthStore>) => {
+const systemLandingFor = (path: string) => {
   if (path !== HOME_URL) return path;
   // Always land on the system boundary. The page renders only the systems
   // allowed by the account, while the backend remains the authority for access.
@@ -85,12 +84,13 @@ router.beforeEach(async to => {
 
   if (ROUTER_WHITE_LIST.includes(to.path)) return true;
   if (!userStore.token) return { path: LOGIN_URL, query: { redirect: to.fullPath }, replace: true };
+  if (to.path === "/inventory-system/quota-governance") return { path: "/inventory-system/department-materials", replace: true };
   if (isLegacyInventoryPath(to.path)) return { path: inventorySystemPathForLegacy(to.path), replace: true };
 
   try {
     if (!authStore.authMenuListGet.length) {
       await initDynamicRouter();
-      const targetPath = systemLandingFor(to.path, authStore);
+      const targetPath = systemLandingFor(to.path);
       const resolvedTarget = router.resolve(targetPath === to.path ? to.fullPath : targetPath);
       if (!resolvedTarget.matched.length || resolvedTarget.name === "notFound") {
         return { path: unavailableRouteFor(to.path), replace: true };
@@ -106,9 +106,16 @@ router.beforeEach(async to => {
         const departmentPath = "/inventory-system/departments/" + (authStore.activeDepartment?.id || "");
         const portalLanding = isAdministrator ? "/inventory-system/daily-verification" : departmentPath;
         const isMessageBoard = to.path === "/inventory-system/message-board";
+        const isDepartmentMaterials = to.path === "/inventory-system/department-materials";
+        const isPackageRoute = to.path === "/inventory-system/packages" || isDepartmentMaterials;
+        const hasPackageAccess = canAccessInventoryTab("packages", authStore.authButtonListGet, authStore.capabilities || []);
         const allowed = isAdministrator
-          ? isMessageBoard || to.path === "/inventory-system/daily-verification" || to.path === "/inventory-system/quota-governance" || to.path === "/inventory-system/role-management" || to.path.startsWith("/inventory-system/departments/")
-          : isMessageBoard || to.path === departmentPath;
+          ? isMessageBoard ||
+            (isPackageRoute && hasPackageAccess) ||
+            to.path === "/inventory-system/daily-verification" ||
+            to.path === "/inventory-system/role-management" ||
+            to.path.startsWith("/inventory-system/departments/")
+          : isMessageBoard || to.path === departmentPath || (isPackageRoute && hasPackageAccess);
         if (!allowed) return { path: portalLanding, replace: true };
       }
       const tab = inventoryTabFromPath(to.path);

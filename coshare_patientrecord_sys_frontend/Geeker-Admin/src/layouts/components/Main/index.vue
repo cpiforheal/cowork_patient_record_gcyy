@@ -47,6 +47,7 @@ let queueUpdateAbort: AbortController | undefined;
 let queueUpdateTimer: number | undefined;
 let queueUpdateVersion = 1;
 let queueUpdateActive = false;
+const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
 
 const scheduleQueueUpdateWait = (delay = 200) => {
   if (!queueUpdateActive) return;
@@ -116,6 +117,7 @@ const listeningWindow = useDebounceFn(() => {
 }, 100);
 window.addEventListener("resize", listeningWindow, false);
 onMounted(() => {
+  if (isInventoryPortal) return;
   queueUpdateActive = true;
   scheduleQueueUpdateWait(0);
   document.addEventListener("visibilitychange", resumeQueueUpdateWait);

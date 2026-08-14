@@ -59,6 +59,10 @@
       进入工作台
     </el-button>
   </div>
+  <el-button v-if="!isInventorySystem" class="inventory-entry" text type="success" @click="openInventorySystem">
+    <el-icon><Box /></el-icon>
+    进入进销存系统
+  </el-button>
 
   <el-dialog
     v-model="forcePasswordVisible"
@@ -101,7 +105,7 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { useTabsStore } from "@/stores/modules/tabs";
 import { useKeepAliveStore } from "@/stores/modules/keepAlive";
 import { initDynamicRouter } from "@/routers/modules/dynamicRouter";
-import { CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
+import { Box, CircleClose, OfficeBuilding, UserFilled } from "@element-plus/icons-vue";
 import type { ElForm } from "element-plus";
 
 const router = useRouter();
@@ -110,6 +114,15 @@ const userStore = useUserStore();
 const tabsStore = useTabsStore();
 const keepAliveStore = useKeepAliveStore();
 const WELCOME_SPLASH_SESSION_KEY = "welcome-splash-played";
+const isInventorySystem = import.meta.env.VITE_PORTAL_MODE === "inventory";
+const openInventorySystem = () => {
+  const inventoryUrl = new URL(window.location.href);
+  inventoryUrl.port = "8849";
+  inventoryUrl.pathname = "/";
+  inventoryUrl.search = "";
+  inventoryUrl.hash = "";
+  window.location.assign(inventoryUrl.toString());
+};
 
 type FormInstance = InstanceType<typeof ElForm>;
 const loginFormRef = ref<FormInstance>();
@@ -440,6 +453,14 @@ onBeforeUnmount(() => {
     box-shadow: 0 18px 34px rgb(38 168 118 / 28%);
     transform: translateY(-1px);
   }
+}
+
+.inventory-entry {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 12px;
+  font-weight: 700;
 }
 
 .force-password-form {

@@ -1,7 +1,7 @@
 package com.coshare.patientrecord.security;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
-import com.coshare.patientrecord.auth.service.AuthSessionService;
+import com.coshare.patientrecord.auth.service.PortalAuthenticationService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,11 +22,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Profile("mysql")
 public class AuthTokenFilter extends OncePerRequestFilter {
 
-    private final AuthSessionService authSessionService;
+    private final PortalAuthenticationService portalAuthenticationService;
     private final ObjectMapper objectMapper;
 
-    public AuthTokenFilter(AuthSessionService authSessionService, ObjectMapper objectMapper) {
-        this.authSessionService = authSessionService;
+    public AuthTokenFilter(PortalAuthenticationService portalAuthenticationService, ObjectMapper objectMapper) {
+        this.portalAuthenticationService = portalAuthenticationService;
         this.objectMapper = objectMapper;
     }
 
@@ -47,7 +47,7 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
         throws ServletException, IOException {
-        var sessionUser = authSessionService.authenticate(extractToken(request));
+        var sessionUser = portalAuthenticationService.authenticate(extractToken(request));
         if (sessionUser.isEmpty()) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType("application/json;charset=UTF-8");

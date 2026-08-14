@@ -69,9 +69,6 @@ export const buildInspectionConclusion = (form: Record<string, any>) => {
   const parts = [
     form.lesionLocation && `病变位于${form.lesionLocation}`,
     form.clockPosition && `钟点位${form.clockPosition}`,
-    measurementText(form.lesionSize) && `大小${measurementText(form.lesionSize)}`,
-    measurementText(form.lesionExtent) && `范围${measurementText(form.lesionExtent)}`,
-    measurementText(form.lesionDepth) && `深度${measurementText(form.lesionDepth)}`,
     join(form.visualFindings) && `视诊见${join(form.visualFindings)}`,
     join(form.digitalExamFindings) && `指诊见${join(form.digitalExamFindings)}`,
     join(form.anoscopyFindings) && `肛门镜见${join(form.anoscopyFindings)}`,

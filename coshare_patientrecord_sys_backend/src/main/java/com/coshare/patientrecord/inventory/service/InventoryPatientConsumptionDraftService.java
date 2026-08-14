@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,6 +60,7 @@ public class InventoryPatientConsumptionDraftService {
         );
         if (result == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者耗用草稿不存在");
         requireDepartment(result.path("departmentKey").asText(), user);
+        result.set("lines", loadLines(id));
         result.put("exists", true);
         return result;
     }
@@ -145,17 +148,17 @@ public class InventoryPatientConsumptionDraftService {
         if (current == null) {
             jdbcTemplate.update(
                 "INSERT INTO inventory_patient_consumption_drafts "
-                    + "(id, department_key, department_name, patient_id, encounter_id, patient_name, visit_no, business_date, service_at, template_version, revision, operator_name, raw_json) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CAST(? AS JSON))",
+                    + "(id, department_key, department_name, patient_id, encounter_id, patient_name, visit_no, business_date, service_at, template_version, revision, operator_name, operator_username, raw_json) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, CAST(? AS JSON))",
                 id, departmentKey, departmentName, patient.id(), patient.encounterId(), patient.name(), patient.visitNo(), businessDate, serviceAt,
-                templateVersion, user.name(), json(stored)
+                templateVersion, user.name(), user.username(), json(stored)
             );
         } else {
             jdbcTemplate.update(
                 "UPDATE inventory_patient_consumption_drafts SET department_key = ?, department_name = ?, patient_id = ?, encounter_id = ?, patient_name = ?, visit_no = ?, "
-                    + "business_date = ?, service_at = ?, template_version = ?, revision = revision + 1, operator_name = ?, raw_json = CAST(? AS JSON) WHERE id = ?",
+                    + "business_date = ?, service_at = ?, template_version = ?, revision = revision + 1, operator_name = ?, operator_username = ?, raw_json = CAST(? AS JSON) WHERE id = ?",
                 departmentKey, departmentName, patient.id(), patient.encounterId(), patient.name(), patient.visitNo(), businessDate, serviceAt,
-                templateVersion, user.name(), json(stored), id
+                templateVersion, user.name(), user.username(), json(stored), id
             );
             jdbcTemplate.update("DELETE FROM inventory_patient_consumption_draft_lines WHERE draft_id = ?", id);
         }
@@ -166,15 +169,15 @@ public class InventoryPatientConsumptionDraftService {
 
     @Transactional(readOnly = true)
     public byte[] exportDetails(String departmentKey, LocalDate businessDate, SessionUser user) {
-        ArrayNode drafts = (ArrayNode) list(departmentKey, businessDate, "", user).path("list");
         List<String[]> rows = new ArrayList<>();
-        rows.add(new String[] { "科室", "服务日期", "服务时间", "患者", "就诊号", "服务项目", "耗材", "单位", "模板定额", "实际数量", "例外原因", "操作人" });
-        drafts.forEach(draft -> draft.path("lines").forEach(line -> rows.add(new String[] {
-            draft.path("departmentName").asText(), draft.path("businessDate").asText(), draft.path("serviceAt").asText(),
-            draft.path("patientName").asText(), draft.path("visitNo").asText(), line.path("serviceItemName").asText(),
-            line.path("materialName").asText(), line.path("unit").asText(), quantityText(line.path("standardQuantity")),
-            quantityText(line.path("actualQuantity")), line.path("exceptionReason").asText(), draft.path("operator").asText()
-        })));
+        List<PatientExportLine> lines = queryExportLines(departmentKey, businessDate, user);
+        addExportMetadata(rows, "患者耗用明细", departmentKey, businessDate, lines.size(), lines.stream().map(PatientExportLine::draftId).distinct().count(), user);
+        rows.add(new String[] { "草稿ID", "科室", "业务日期", "服务时间", "患者ID", "患者", "就诊记录ID", "就诊号", "服务项目", "耗材", "单位", "模板定额", "实际数量", "例外原因", "操作账号", "责任人" });
+        lines.forEach(line -> rows.add(new String[] {
+            line.draftId(), line.departmentName(), line.businessDate(), line.serviceAt(), line.patientId(), line.patientName(),
+            line.encounterId(), line.visitNo(), line.serviceItemName(), line.materialName(), line.unit(), quantityText(line.standardQuantity()),
+            quantityText(line.actualQuantity()), line.exceptionReason(), line.operatorUsername(), line.operatorName()
+        }));
         return csv(rows);
     }
 
@@ -187,24 +190,101 @@ public class InventoryPatientConsumptionDraftService {
 
     @Transactional(readOnly = true)
     public byte[] exportSummary(String departmentKey, LocalDate businessDate, SessionUser user) {
-        ArrayNode drafts = (ArrayNode) list(departmentKey, businessDate, "", user).path("list");
         Map<String, SummaryLine> summary = new LinkedHashMap<>();
-        drafts.forEach(draft -> draft.path("lines").forEach(line -> {
-            String unit = line.path("unit").asText().trim();
-            String material = line.path("materialName").asText().trim();
+        List<PatientExportLine> lines = queryExportLines(departmentKey, businessDate, user);
+        lines.forEach(line -> {
+            String unit = line.unit().trim();
+            String material = line.materialName().trim();
             if (unit.isBlank() || material.isBlank()) return;
-            String key = draft.path("departmentName").asText() + "\u0000" + material + "\u0000" + unit;
+            String key = line.departmentName() + "\u0000" + material + "\u0000" + unit;
             SummaryLine current = summary.get(key);
-            if (current == null) current = new SummaryLine(draft.path("departmentName").asText(), material, unit, 0, 0);
+            if (current == null) current = new SummaryLine(line.departmentName(), material, unit, 0, 0);
             summary.put(key, new SummaryLine(current.departmentName(), current.materialName(), current.unit(),
-                current.actualQuantity() + line.path("actualQuantity").asDouble(0), current.serviceCount() + 1));
-        }));
+                current.actualQuantity() + line.actualQuantity(), current.serviceCount() + 1));
+        });
         List<String[]> rows = new ArrayList<>();
-        rows.add(new String[] { "科室", "耗材", "单位", "实际用量", "耗材明细行数", "服务日期" });
+        addExportMetadata(rows, "患者耗用科室汇总", departmentKey, businessDate, lines.size(), lines.stream().map(PatientExportLine::draftId).distinct().count(), user);
+        rows.add(new String[] { "科室", "耗材", "单位", "实际用量", "耗材明细行数", "业务日期" });
         summary.values().forEach(line -> rows.add(new String[] {
             line.departmentName(), line.materialName(), line.unit(), quantityText(line.actualQuantity()), String.valueOf(line.serviceCount()), businessDate == null ? "" : businessDate.toString()
         }));
         return csv(rows);
+    }
+
+    private List<PatientExportLine> queryExportLines(String departmentKey, LocalDate businessDate, SessionUser user) {
+        String requiredDepartment = departmentKey == null ? "" : departmentKey.trim();
+        String departmentName = requiredDepartment.isBlank() ? "" : requireDepartment(requiredDepartment, user);
+        StringBuilder sql = new StringBuilder(
+            "SELECT d.id draft_id, d.department_name, d.patient_id, d.patient_name, d.encounter_id, d.visit_no, "
+                + "d.business_date, d.service_at, d.operator_name, d.operator_username, "
+                + "l.service_item_name, l.material_name, l.unit, l.standard_quantity, l.actual_quantity, l.exception_reason "
+                + "FROM inventory_patient_consumption_drafts d "
+                + "JOIN inventory_patient_consumption_draft_lines l ON l.draft_id = d.id WHERE 1 = 1"
+        );
+        List<Object> params = new ArrayList<>();
+        if (!departmentName.isBlank()) {
+            sql.append(" AND d.department_key = ?");
+            params.add(requiredDepartment);
+        } else if (!inventoryAccess.canViewAllDepartments(user)) {
+            sql.append(" AND d.department_name = ?");
+            params.add(user.department());
+        }
+        if (businessDate != null) {
+            sql.append(" AND d.business_date = ?");
+            params.add(businessDate);
+        }
+        sql.append(" ORDER BY d.service_at DESC, d.updated_at DESC, l.line_no");
+        return jdbcTemplate.query(sql.toString(), (resultSet, rowNum) -> new PatientExportLine(
+            resultSet.getString("draft_id"), resultSet.getString("department_name"), resultSet.getDate("business_date").toLocalDate().toString(),
+            resultSet.getString("service_at"), resultSet.getString("patient_id"), resultSet.getString("patient_name"),
+            resultSet.getString("encounter_id"), resultSet.getString("visit_no"), resultSet.getString("service_item_name"),
+            resultSet.getString("material_name"), resultSet.getString("unit"), nullableDouble(resultSet, "standard_quantity"),
+            resultSet.getDouble("actual_quantity"), resultSet.getString("exception_reason"), resultSet.getString("operator_username"),
+            resultSet.getString("operator_name")
+        ), params.toArray());
+    }
+
+    private ArrayNode loadLines(String draftId) {
+        ArrayNode lines = JsonNodeFactory.instance.arrayNode();
+        jdbcTemplate.query(
+            "SELECT id, service_item_id, service_item_name, material_name, unit, standard_quantity, actual_quantity, exception_reason "
+                + "FROM inventory_patient_consumption_draft_lines WHERE draft_id = ? ORDER BY line_no",
+            resultSet -> {
+                while (resultSet.next()) {
+                    ObjectNode line = JsonNodeFactory.instance.objectNode();
+                    line.put("id", resultSet.getString("id"));
+                    line.put("serviceItemId", resultSet.getString("service_item_id"));
+                    line.put("serviceItemName", resultSet.getString("service_item_name"));
+                    line.put("materialName", resultSet.getString("material_name"));
+                    line.put("unit", resultSet.getString("unit"));
+                    Double standard = nullableDouble(resultSet, "standard_quantity");
+                    if (standard == null) line.putNull("standardQuantity"); else line.put("standardQuantity", standard);
+                    line.put("actualQuantity", resultSet.getDouble("actual_quantity"));
+                    line.put("exceptionReason", resultSet.getString("exception_reason"));
+                    lines.add(line);
+                }
+                return null;
+            },
+            draftId
+        );
+        return lines;
+    }
+
+    private static Double nullableDouble(ResultSet resultSet, String column) throws SQLException {
+        double value = resultSet.getDouble(column);
+        return resultSet.wasNull() ? null : value;
+    }
+
+    private void addExportMetadata(List<String[]> rows, String exportName, String departmentKey, LocalDate businessDate, int lineCount, long draftCount, SessionUser user) {
+        rows.add(new String[] { "导出类型", exportName });
+        rows.add(new String[] { "科室编码", departmentKey == null ? "" : departmentKey });
+        rows.add(new String[] { "业务日期", businessDate == null ? "" : businessDate.toString() });
+        rows.add(new String[] { "导出时间", OffsetDateTime.now(ZoneId.systemDefault()).toString() });
+        rows.add(new String[] { "操作账号", user.username() });
+        rows.add(new String[] { "责任人", user.name() });
+        rows.add(new String[] { "草稿数量", String.valueOf(draftCount) });
+        rows.add(new String[] { "草稿明细行数", String.valueOf(lineCount) });
+        rows.add(new String[] {});
     }
 
     private void saveLines(String draftId, ArrayNode lines) {
@@ -264,6 +344,7 @@ public class InventoryPatientConsumptionDraftService {
         result.put("templateVersion", resultSet.getString("template_version"));
         result.put("revision", resultSet.getInt("revision"));
         result.put("operator", resultSet.getString("operator_name"));
+        result.put("operatorUsername", resultSet.getString("operator_username"));
         result.put("updatedAt", resultSet.getTimestamp("updated_at").toLocalDateTime().toString());
         return result;
     }
@@ -348,5 +429,10 @@ public class InventoryPatientConsumptionDraftService {
 
     private record DraftVersion(String id, int revision, String departmentKey) {}
     private record PatientSnapshot(String id, String name, String encounterId, String visitNo, String visitDate, String visitType, String doctor) {}
+    private record PatientExportLine(
+        String draftId, String departmentName, String businessDate, String serviceAt, String patientId, String patientName,
+        String encounterId, String visitNo, String serviceItemName, String materialName, String unit, Double standardQuantity,
+        double actualQuantity, String exceptionReason, String operatorUsername, String operatorName
+    ) {}
     private record SummaryLine(String departmentName, String materialName, String unit, double actualQuantity, int serviceCount) {}
 }

@@ -2,8 +2,8 @@
   <section class="panel">
     <div class="panel-head">
       <div>
-        <h2>科室申领闭环</h2>
-        <p>提交申领 → 审核 → 发放 → 签收，全程留痕，避免口头领用和纸质单据断链。</p>
+        <h2>本科室申领</h2>
+        <p>处理与患者人数无关的日常物资。每张单只显示当前状态、下一责任岗位和可执行操作。</p>
       </div>
       <el-button v-if="canCreate" type="primary" :icon="Plus" @click="$emit('create')">新增申领</el-button>
     </div>
@@ -40,34 +40,19 @@
         <template #default="{ row }">
           <div class="request-line-summary">
             <strong>{{ row.itemSummary || row.itemName }}</strong>
-            <small>{{ row.itemCount || row.lines?.length || 1 }} 项，合计 {{ row.quantity }}</small>
+            <small>{{ row.itemCount || row.lines?.length || 1 }} 项，数量按物资单位分别计量</small>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="发放" width="120">
-        <template #default="{ row }">{{ row.issuedQuantity || 0 }} / {{ row.quantity }}</template>
-      </el-table-column>
       <el-table-column prop="reason" label="理由" min-width="220" />
       <el-table-column prop="owner" label="负责人" width="110" />
-      <el-table-column label="闭环进度" min-width="250">
-        <template #default="{ row }">
-          <el-steps
-            class="request-steps"
-            :active="requestStepActive(row.status)"
-            finish-status="success"
-            process-status="process"
-            simple
-          >
-            <el-step title="审核" />
-            <el-step title="发放" />
-            <el-step title="签收" />
-          </el-steps>
-        </template>
-      </el-table-column>
       <el-table-column label="状态" width="120">
         <template #default="{ row }">
           <el-tag :type="requestStatusMeta(row.status).type" effect="plain">{{ requestStatusMeta(row.status).label }}</el-tag>
         </template>
+      </el-table-column>
+      <el-table-column label="下一步" min-width="150">
+        <template #default="{ row }">{{ nextAction(row.status, row.owner) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }">
@@ -137,15 +122,18 @@ const requestStatusMeta = (status: string): { label: string; type: InventoryTagT
   return meta as { label: string; type: InventoryTagType };
 };
 
-const requestStepActive = (status: string) => {
-  const stepMap: Record<string, number> = {
-    pending: 0,
-    approved: 1,
-    partially_issued: 2,
-    issued: 2,
-    received: 3
-  };
-  return stepMap[status] ?? 0;
+const nextAction = (status: string, owner?: string) => {
+  const next = {
+    pending: "等待审核",
+    approved: "等待发放",
+    partially_issued: "等待继续发放",
+    issued: "等待签收",
+    received: "已完成",
+    rejected: "已驳回",
+    cancelled: "已撤销",
+    void: "已作废"
+  }[status] || "等待处理";
+  return owner ? `${next} · ${owner}` : next;
 };
 
 const updateKeyword = (value: string | number) => emit("update:keyword", String(value || ""));
@@ -199,10 +187,6 @@ const emitVoid = (row: unknown) => emit("void", toRequestRow(row));
   }
 }
 
-.request-steps {
-  min-width: 220px;
-}
-
 .request-line-summary {
   display: grid;
   gap: 3px;
@@ -218,13 +202,6 @@ const emitVoid = (row: unknown) => emit("void", toRequestRow(row));
     color: var(--el-text-color-secondary);
     font-size: 12px;
   }
-}
-
-:deep(.request-steps.el-steps--simple) {
-  padding: 6px 8px;
-  background: rgb(248 250 252 / 92%);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
 }
 
 :deep(.row-flash) {

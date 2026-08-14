@@ -34,6 +34,18 @@ export interface InventoryDepartmentDraftLine {
   standardQuantity: number | null;
   unitPrice?: number | null;
   volumeOverride?: number | null;
+  manualAdjustment?: number;
+  fixedAdjustment?: number;
+  measurementScope?: "OUTPATIENT" | "INPATIENT" | "COMBINED" | "OTHER";
+  lineKey?: string;
+  actualQuantity?: number | null;
+  referenceQuantity?: number;
+  calculatedQuantity?: number;
+  volume?: number;
+  isSupplemental?: boolean;
+  isSpecial?: boolean;
+  specialAdminNote?: string;
+  specialDailyNote?: string;
 }
 
 export interface InventoryDepartmentDailyDraft {
@@ -43,17 +55,248 @@ export interface InventoryDepartmentDailyDraft {
   departmentName: string;
   businessDate: string;
   templateVersion?: string;
+  quotaVersionId?: string;
+  quotaVersionCode?: string;
+  quotaEffectiveDate?: string;
+  frozenQuota?: boolean;
   monthDays?: number;
   revision: number;
   operator?: string;
+  operatorUsername?: string;
   updatedAt?: string;
   groupVolumes?: Record<string, number>;
   lines?: InventoryDepartmentDraftLine[];
 }
 
+export interface InventoryDepartmentDailyDraftExportPayload {
+  id?: string;
+  exists?: boolean;
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  templateVersion?: string;
+  monthDays: number;
+  revision: number;
+  groupVolumes: Record<string, number>;
+  lines: InventoryDepartmentDraftLine[];
+}
+
 export interface InventoryDepartmentDailyDraftSummary {
   businessDate: string;
   list: InventoryDepartmentDailyDraft[];
+}
+
+export interface InventoryDailyRollupQuery {
+  [key: string]: string | undefined;
+  date?: string;
+  from?: string;
+  to?: string;
+}
+
+export type InventoryAdminRiskLevel =
+  | "NORMAL"
+  | "ATTENTION"
+  | "ABNORMAL"
+  | "UNVERIFIED"
+  | "SPECIAL"
+  | "SPECIAL_PENDING_NOTE"
+  | "HISTORICAL_UNFROZEN";
+
+export type InventoryDepartmentDayStatus = "MISSING" | "ZERO_VOLUME" | "SUBMITTED" | "ATTENTION" | "ABNORMAL";
+
+export interface InventoryAdminMaterialSummary {
+  materialName: string;
+  unit: string;
+  theoreticalQuantity: number;
+  actualQuantity: number | null;
+  mainQuantity: number;
+  specialLineCount: number;
+  lineCount: number;
+  reportedLineCount: number;
+  filledActualLineCount: number;
+  unverifiedCount: number;
+  attentionCount: number;
+  abnormalCount: number;
+  specialPendingNoteCount: number;
+  pricedLineCount: number;
+  pricedActualLineCount: number;
+  unpricedLineCount: number;
+  actualCoverageRate: number;
+  pricingCoverageRate: number;
+  theoreticalPricingCoverageRate: number;
+  theoreticalAmount: number | null;
+  actualAmount: number | null;
+  mainAmount: number | null;
+  amountDifference: number | null;
+  amountDeviationRate: number | null;
+  departmentCount: number;
+  departments: string[];
+}
+
+export interface InventoryAdminDepartmentDailyRollup {
+  /** Single-day compatibility field; empty for a multi-day range. */
+  businessDate: string;
+  periodStart: string;
+  periodEnd: string;
+  departmentCount: number;
+  savedDepartmentCount: number;
+  savedDraftCount?: number;
+  missingDepartments: string[];
+  departments: Array<{
+    departmentKey: string;
+    departmentName: string;
+    status: "SUBMITTED" | "MISSING";
+    submittedDayCount?: number;
+    businessVolume: number | null;
+    operator?: string;
+    operatorUsername?: string;
+    updatedAt?: string;
+  }>;
+  departmentDays: Array<{
+    businessDate: string;
+    departmentKey: string;
+    departmentName: string;
+    status: InventoryDepartmentDayStatus;
+    businessVolume: number | null;
+    riskCount: number;
+    unverifiedCount: number;
+    attentionCount: number;
+    abnormalCount: number;
+    specialPendingNoteCount: number;
+    operator?: string;
+    updatedAt?: string;
+  }>;
+  summary: InventoryAdminMaterialSummary[];
+  details: Array<{
+    businessDate: string;
+    departmentKey: string;
+    departmentName: string;
+    lineKey: string;
+    materialName: string;
+    unit: string;
+    serviceGroup?: string;
+    careType?: string;
+    measurementScope?: string;
+    volume?: number;
+    standardQuantity?: number | null;
+    fixedAdjustment?: number;
+    theoreticalQuantity: number;
+    actualQuantity?: number | null;
+    mainQuantity?: number;
+    unitPrice?: number | null;
+    theoreticalAmount?: number | null;
+    actualAmount?: number | null;
+    mainAmount?: number | null;
+    actualStatus: "UNVERIFIED" | "REPORTED";
+    difference?: number | null;
+    deviationRate?: number | null;
+    riskLevel: InventoryAdminRiskLevel;
+    isSpecial?: boolean;
+    specialAdminNote?: string;
+    specialDailyNote?: string;
+    quotaVersionCode?: string;
+    frozenQuota?: boolean;
+    reviewStatus?: "PENDING" | "EXPLAINED" | "REVIEWED" | "CLOSED";
+    reviewNote?: string;
+    reviewerUsername?: string;
+    reviewerName?: string;
+    reviewedAt?: string;
+    isSupplemental?: boolean;
+    operator?: string;
+    operatorUsername?: string;
+    updatedAt?: string;
+  }>;
+  dashboard: {
+    periodStart: string;
+    periodEnd: string;
+    expectedDepartmentDays: number;
+    submittedDepartmentDays: number;
+    completionRate: number;
+    missingDepartmentDays: number;
+    zeroVolumeDepartmentDays: number;
+    unverifiedCount: number;
+    attentionCount: number;
+    abnormalCount: number;
+    specialPendingNoteCount: number;
+    reportedLineCount: number;
+    pricedActualLineCount: number;
+    actualAmount: number | null;
+    pricingCoverageRate: number;
+    dailyTrend: Array<{
+      businessDate: string;
+      expectedDepartmentDays: number;
+      submittedDepartmentDays: number;
+      missingDepartmentDays: number;
+      zeroVolumeDepartmentDays: number;
+      completionRate: number;
+      lineCount: number;
+      reportedLineCount: number;
+      pricedLineCount: number;
+      pricedActualLineCount: number;
+      unpricedLineCount: number;
+      unverifiedCount: number;
+      attentionCount: number;
+      abnormalCount: number;
+      specialPendingNoteCount: number;
+      pricingCoverageRate: number;
+      theoreticalAmount: number | null;
+      actualAmount: number | null;
+    }>;
+    departmentRisk: Array<{
+      departmentKey: string;
+      departmentName: string;
+      unverifiedCount: number;
+      attentionCount: number;
+      abnormalCount: number;
+      specialPendingNoteCount: number;
+      riskTotal: number;
+    }>;
+    materialAmountTop: InventoryAdminMaterialSummary[];
+    materialDeviationTop: InventoryAdminMaterialSummary[];
+  };
+}
+
+export interface InventoryDepartmentPeriodReport {
+  departmentKey: string;
+  departmentName: string;
+  periodType: "week" | "month";
+  periodStart: string;
+  periodEnd: string;
+  savedDraftCount: number;
+  outpatientVolume: number;
+  inpatientVolume: number;
+  summary: Array<{ materialName: string; unit: string; quantity: number; activeDays: number }>;
+  dailyAudit: Array<Record<string, string | number>>;
+}
+
+export interface InventoryDepartmentAllocationPlanLine {
+  materialName: string;
+  unit: string;
+  allocatedQuantity: number;
+  sourceType: "COUNT" | "MANUAL" | "PREVIOUS_MONTH";
+  countReference?: string;
+  manualAdjustment: number;
+  warningThreshold?: number | null;
+  suggestedWarningThreshold?: number;
+  previousMonthSuggestedQuantity?: number;
+  monthUsedQuantity?: number;
+  monthRemainingQuantity?: number;
+  status?: "PENDING" | "NORMAL" | "WARNING";
+}
+
+export interface InventoryDepartmentAllocationPlan {
+  departmentKey: string;
+  departmentName: string;
+  month: string;
+  throughDate: string;
+  exists: boolean;
+  revision: number;
+  operator?: string;
+  operatorUsername?: string;
+  updatedAt?: string;
+  lines: InventoryDepartmentAllocationPlanLine[];
+  usage?: Array<{ materialName: string; unit: string; quantity: number; activeDays?: number }>;
+  previousUsage?: Array<{ materialName: string; unit: string; quantity: number; activeDays?: number }>;
 }
 
 export interface InventoryPatientConsumptionDraftLine {
@@ -82,6 +325,7 @@ export interface InventoryPatientConsumptionDraft {
   templateVersion: string;
   revision: number;
   operator?: string;
+  operatorUsername?: string;
   updatedAt?: string;
   lines: InventoryPatientConsumptionDraftLine[];
 }
@@ -245,6 +489,101 @@ export interface InventoryAccountAssignment {
   systemAssigned: boolean;
 }
 
+export interface InventoryPortalAccount {
+  id: string;
+  username: string;
+  name: string;
+  departmentKey: string;
+  department: string;
+  portalRole: "admin" | "inventory_reporter";
+  portalRoleLabel: string;
+  status: "启用" | "停用";
+  mustChangePassword: boolean;
+  displayOrder: number;
+}
+
+export interface InventoryPortalAccountCatalog {
+  accounts: InventoryPortalAccount[];
+  departments: Array<{ key: string; name: string }>;
+}
+
+export type InventoryMessageBoardCategory = "NEW_ITEM" | "DATA_CORRECTION" | "SUGGESTION" | "OTHER";
+export type InventoryMessageBoardStatus = "PENDING" | "FOLLOWING" | "COMPLETED" | "REJECTED";
+
+export interface InventoryMessageBoardPost {
+  id: string;
+  title: string;
+  content: string;
+  category: InventoryMessageBoardCategory;
+  status: InventoryMessageBoardStatus;
+  handlingNote?: string;
+  authorId: string;
+  authorUsername: string;
+  authorName: string;
+  departmentKey: string;
+  departmentName: string;
+  pinned: boolean;
+  hidden: boolean;
+  withdrawn: boolean;
+  replyCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt: string;
+  mine: boolean;
+  canEdit: boolean;
+  canWithdraw: boolean;
+}
+
+export interface InventoryMessageBoardReply {
+  id: string;
+  postId: string;
+  content: string;
+  authorId: string;
+  authorUsername: string;
+  authorName: string;
+  departmentKey: string;
+  departmentName: string;
+  hidden: boolean;
+  withdrawn: boolean;
+  createdAt: string;
+  updatedAt: string;
+  mine: boolean;
+  canEdit: boolean;
+  canWithdraw: boolean;
+}
+
+export interface InventoryMessageBoardPage {
+  list: InventoryMessageBoardPost[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface InventoryMessageBoardDetail {
+  post: InventoryMessageBoardPost;
+  replies: InventoryMessageBoardReply[];
+}
+
+export interface InventoryMessageBoardAuditLog {
+  id: number;
+  targetType: "POST" | "REPLY";
+  targetId: string;
+  action: string;
+  operatorId: string;
+  operatorUsername: string;
+  operatorName: string;
+  departmentKey: string;
+  departmentName: string;
+  detail: Record<string, unknown> | string;
+  createdAt: string;
+}
+
+export interface InventoryMessageBoardAuditPage {
+  list: InventoryMessageBoardAuditLog[];
+  total: number;
+  page: number;
+  size: number;
+}
 export type InventoryMappingRuleType = "患者单次套餐" | "条件套餐" | "待核定（非固定）" | "固定运行消耗" | "按需申领";
 export type InventoryMappingStatus = "pending" | "confirmed" | "held";
 export type InventoryConsumptionScope = "PATIENT_RELATED" | "NON_PATIENT_RELATED";
@@ -1132,8 +1471,36 @@ export const getInventoryDepartmentDailyDraftApi = async (params: { departmentKe
 export const getInventoryDepartmentDailyDraftSummaryApi = async (date: string) =>
   getInventoryData<InventoryDepartmentDailyDraftSummary>("/department-daily-drafts/summary", { date });
 
+export const getInventoryDepartmentDailyRollupApi = async (query: InventoryDailyRollupQuery) =>
+  getInventoryData<InventoryAdminDepartmentDailyRollup>("/department-daily-drafts/admin-rollup", query);
+
+export const saveInventoryQuotaReviewApi = async (payload: {
+  businessDate: string;
+  departmentKey: string;
+  lineKey: string;
+  materialName: string;
+  unit: string;
+  reviewStatus: "PENDING" | "EXPLAINED" | "REVIEWED" | "CLOSED";
+  reviewNote?: string;
+}) => putInventoryData<Record<string, string>, typeof payload>("/quota-governance/reviews", payload);
+
 export const saveInventoryDepartmentDailyDraftApi = async (payload: InventoryDepartmentDailyDraft) =>
   putInventoryData<InventoryDepartmentDailyDraft, InventoryDepartmentDailyDraft>("/department-daily-drafts", payload);
+
+export const getInventoryDepartmentPeriodReportApi = async (params: {
+  departmentKey: string;
+  periodType: "week" | "month";
+  anchorDate: string;
+}) => getInventoryData<InventoryDepartmentPeriodReport>("/department-period-reports", params);
+
+export const getInventoryDepartmentAllocationPlanApi = async (params: {
+  departmentKey: string;
+  month: string;
+  throughDate?: string;
+}) => getInventoryData<InventoryDepartmentAllocationPlan>("/department-allocation-plans", params);
+
+export const saveInventoryDepartmentAllocationPlanApi = async (payload: InventoryDepartmentAllocationPlan) =>
+  putInventoryData<InventoryDepartmentAllocationPlan, InventoryDepartmentAllocationPlan>("/department-allocation-plans", payload);
 
 export const getInventoryPatientConsumptionDraftApi = async (id: string) =>
   getInventoryData<InventoryPatientConsumptionDraft>("/patient-consumption-drafts/detail", { id });
@@ -1346,6 +1713,27 @@ const downloadInventoryFile = async (path: string, fallback: string): Promise<In
   };
 };
 
+const downloadInventoryPostFile = async <T>(path: string, payload: T, fallback: string): Promise<InventoryReportDownload> => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  if (result.status === 401) handleUnauthorizedResponse();
+  if (!result.ok) {
+    const text = await result.text();
+    let message = text;
+    try {
+      const error = JSON.parse(text) as { msg?: string; message?: string };
+      message = error.msg || error.message || text;
+    } catch {
+      // Keep the server text when the response is not JSON.
+    }
+    throw new Error(message || `文件导出失败: ${result.status}`);
+  }
+  return { blob: await result.blob(), filename: readDownloadFilename(result, fallback) };
+};
+
 export const downloadInventoryPatientConsumptionDraftsApi = async (
   kind: "details" | "summary",
   params: { departmentKey: string; date: string }
@@ -1353,6 +1741,41 @@ export const downloadInventoryPatientConsumptionDraftsApi = async (
   downloadInventoryFile(
     `/patient-consumption-drafts/export/${kind}${buildInventoryQuery(params)}`,
     `patient-consumption-${kind}-${params.date}.csv`
+  );
+
+export const downloadInventoryDepartmentDailyDraftApi = async (
+  kind: "details" | "summary",
+  payload: InventoryDepartmentDailyDraftExportPayload
+) =>
+  downloadInventoryPostFile(
+    `/department-daily-drafts/export/${kind}`,
+    payload,
+    `department-daily-${kind}-${payload.businessDate}.csv`
+  );
+
+const inventoryDailyRollupFilename = (query: InventoryDailyRollupQuery) => query.date || `${query.from || ""}至${query.to || ""}`;
+
+export const downloadInventoryDepartmentDailyRollupApi = async (query: InventoryDailyRollupQuery) =>
+  downloadInventoryFile(
+    `/department-daily-drafts/admin-rollup/export${buildInventoryQuery(query)}`,
+    `管理员12科室耗材日报-${inventoryDailyRollupFilename(query)}.csv`
+  );
+
+export const downloadInventoryDepartmentDailyRollupXlsxApi = async (query: InventoryDailyRollupQuery) =>
+  downloadInventoryFile(
+    `/department-daily-drafts/admin-rollup/export.xlsx${buildInventoryQuery(query)}`,
+    `管理员12科室耗材日报-${inventoryDailyRollupFilename(query)}.xlsx`
+  );
+
+export const downloadInventoryDepartmentPeriodReportApi = async (params: {
+  departmentKey: string;
+  periodType: "week" | "month";
+  anchorDate: string;
+  format?: "xlsx" | "csv";
+}) =>
+  downloadInventoryFile(
+    `/department-period-reports/export${buildInventoryQuery({ ...params, format: params.format || "xlsx" })}`,
+    `department-${params.periodType}-${params.anchorDate}.${params.format === "csv" ? "zip" : "xlsx"}`
   );
 
 export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageReportParams): Promise<InventoryReportDownload> => {
@@ -1366,6 +1789,105 @@ export const downloadDepartmentUsageReportApi = async (params: DepartmentUsageRe
 
 export const saveInventoryItemApi = async (params: SaveInventoryItemParams) =>
   response(await postInventory("/items", params), "物资档案已保存");
+
+export const getInventoryPortalAccountsApi = async () => getInventoryData<InventoryPortalAccountCatalog>("/portal-accounts");
+
+export const updateInventoryPortalAccountApi = async (
+  accountId: string,
+  payload: Pick<InventoryPortalAccount, "portalRole" | "status" | "departmentKey">
+) =>
+  putInventoryData<InventoryPortalAccountCatalog, Pick<InventoryPortalAccount, "portalRole" | "status" | "departmentKey">>(
+    `/portal-accounts/${accountId}`,
+    payload
+  );
+
+export const resetInventoryPortalAccountPasswordApi = async (accountId: string) =>
+  postInventoryData<InventoryPortalAccountCatalog, Record<string, never>>(`/portal-accounts/${accountId}/reset-password`, {});
+
+export const getInventoryMessageBoardPostsApi = async (
+  params: {
+    keyword?: string;
+    category?: InventoryMessageBoardCategory | "";
+    status?: InventoryMessageBoardStatus | "";
+    departmentKey?: string;
+    onlyMine?: boolean;
+    page?: number;
+    size?: number;
+  } = {}
+) => getInventoryData<InventoryMessageBoardPage>("/message-board/posts", params as Record<string, unknown>);
+
+export const getInventoryMessageBoardPostApi = async (postId: string) =>
+  getInventoryData<InventoryMessageBoardDetail>(`/message-board/posts/${encodeURIComponent(postId)}`);
+
+export const createInventoryMessageBoardPostApi = async (payload: {
+  title: string;
+  content: string;
+  category: InventoryMessageBoardCategory;
+}) => postInventoryData<InventoryMessageBoardPost, typeof payload>("/message-board/posts", payload);
+
+export const updateInventoryMessageBoardPostApi = async (
+  postId: string,
+  payload: { title: string; content: string; category: InventoryMessageBoardCategory }
+) => putInventoryData<InventoryMessageBoardPost, typeof payload>(`/message-board/posts/${encodeURIComponent(postId)}`, payload);
+
+export const withdrawInventoryMessageBoardPostApi = async (postId: string) =>
+  postInventoryData<{ id: string; withdrawn: boolean }, Record<string, never>>(
+    `/message-board/posts/${encodeURIComponent(postId)}/withdraw`,
+    {}
+  );
+
+export const createInventoryMessageBoardReplyApi = async (postId: string, content: string) =>
+  postInventoryData<InventoryMessageBoardReply, { content: string }>(
+    `/message-board/posts/${encodeURIComponent(postId)}/replies`,
+    { content }
+  );
+
+export const updateInventoryMessageBoardReplyApi = async (replyId: string, content: string) =>
+  putInventoryData<InventoryMessageBoardReply, { content: string }>(`/message-board/replies/${encodeURIComponent(replyId)}`, {
+    content
+  });
+
+export const withdrawInventoryMessageBoardReplyApi = async (replyId: string) =>
+  postInventoryData<{ id: string; withdrawn: boolean }, Record<string, never>>(
+    `/message-board/replies/${encodeURIComponent(replyId)}/withdraw`,
+    {}
+  );
+
+export const updateInventoryMessageBoardStatusApi = async (
+  postId: string,
+  payload: { status: InventoryMessageBoardStatus; handlingNote: string }
+) =>
+  putInventoryData<InventoryMessageBoardPost, typeof payload>(
+    `/message-board/admin/posts/${encodeURIComponent(postId)}/status`,
+    payload
+  );
+
+export const updateInventoryMessageBoardPinApi = async (postId: string, pinned: boolean) =>
+  putInventoryData<InventoryMessageBoardPost, { pinned: boolean }>(
+    `/message-board/admin/posts/${encodeURIComponent(postId)}/pin`,
+    { pinned }
+  );
+
+export const updateInventoryMessageBoardPostVisibilityApi = async (postId: string, hidden: boolean) =>
+  putInventoryData<InventoryMessageBoardPost, { hidden: boolean }>(
+    `/message-board/admin/posts/${encodeURIComponent(postId)}/visibility`,
+    { hidden }
+  );
+
+export const updateInventoryMessageBoardReplyVisibilityApi = async (replyId: string, hidden: boolean) =>
+  putInventoryData<InventoryMessageBoardReply, { hidden: boolean }>(
+    `/message-board/admin/replies/${encodeURIComponent(replyId)}/visibility`,
+    { hidden }
+  );
+
+export const getInventoryMessageBoardAuditLogsApi = async (
+  params: {
+    targetType?: "POST" | "REPLY";
+    targetId?: string;
+    page?: number;
+    size?: number;
+  } = {}
+) => getInventoryData<InventoryMessageBoardAuditPage>("/message-board/admin/audit-logs", params as Record<string, unknown>);
 
 export const getInventoryRoleManagementApi = async () =>
   getInventoryData<{ roles: InventoryRoleDescriptor[]; accounts: InventoryAccountAssignment[] }>("/role-management");

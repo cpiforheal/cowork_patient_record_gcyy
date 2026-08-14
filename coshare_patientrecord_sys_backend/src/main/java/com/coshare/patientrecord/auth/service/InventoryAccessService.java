@@ -23,6 +23,7 @@ public class InventoryAccessService {
     public static final String ADMIN = "inventory_admin";
     private static final String WAREHOUSE = "inventory_warehouse";
     private static final String DEPARTMENT = "inventory_department";
+    public static final String DEPARTMENT_REPORTER = "inventory_department_reporter";
     private static final String AUDITOR = "inventory_auditor";
     private static final String VIEWER = "inventory_viewer";
     private static final String NO_ACCESS = "";
@@ -36,9 +37,6 @@ public class InventoryAccessService {
 
     public Access accessFor(SessionUser user) {
         if (user == null) return Access.none();
-        // Inventory is an isolated subsystem. Only the clinical system administrator
-        // may enter it; inventory role assignments remain available for audit/history.
-        if (!"admin".equals(RoleCatalog.canonicalize(user.role()))) return Access.none();
         if ("admin".equals(RoleCatalog.canonicalize(user.role()))) return Access.of(profiles.get(ADMIN));
         String roleCode = jdbcTemplate.query(
             "SELECT role_code FROM inventory_account_roles WHERE account_id = ?",
@@ -158,6 +156,11 @@ public class InventoryAccessService {
             DEPARTMENT, "科室领用员", "查看本科室物资，提交申领并签收；不可维护库存或扣减规则。", false,
             paths("/inventory/overview", "/inventory/requests", "/inventory/weekly"),
             permissions("inventoryOverview=inventory:read,inventory:request,inventory:receive", "inventoryRequests=inventory:read,inventory:request,inventory:receive", "inventoryWeekly=inventory:read")
+        ));
+        result.put(DEPARTMENT_REPORTER, profile(
+            DEPARTMENT_REPORTER, "科室耗材填报员", "仅填写本部门耗材日报。", false,
+            paths("/inventory/daily"),
+            permissions("inventoryDaily=inventory:read")
         ));
         result.put(AUDITOR, profile(
             AUDITOR, "耗材质控员", "维护患者变量规则，复核日核表并导出全院耗材报表。", true,

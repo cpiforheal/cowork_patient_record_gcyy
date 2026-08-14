@@ -24,6 +24,7 @@
     "build-only:dev": "vite build --mode development",
     "build-only:test": "vite build --mode test",
     "build-only:pro": "vite build --mode production",
+    "build-only:inventory": "vite build --mode inventory",
     "build:dev": "pnpm validate && pnpm build-only:dev",
     "build:test": "pnpm validate && pnpm build-only:test",
     "build:pro": "pnpm validate && pnpm build-only:pro",
@@ -48,6 +49,7 @@
     "@vueuse/core": "^10.11.0",
     "axios": "^1.7.2",
     "dayjs": "^1.11.11",
+    "echarts": "6.0.0",
     "element-plus": "2.14.2",
     "mitt": "^3.0.1",
     "nprogress": "^0.2.0",
@@ -57,6 +59,7 @@
     "screenfull": "^6.0.2",
     "sortablejs": "^1.15.2",
     "vue": "3.5.38",
+    "vue-echarts": "8.0.1",
     "vue-router": "4.6.4"
   },
   "devDependencies": {

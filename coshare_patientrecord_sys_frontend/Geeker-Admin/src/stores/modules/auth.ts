@@ -32,13 +32,13 @@ export const useAuthStore = defineStore({
     shortcutsGet: state => state.shortcuts,
     showMenuListGet: state =>
       state.activeSystem === "inventory"
-        ? getInventorySystemMenu(state.authButtonList, state.capabilities)
+        ? getInventorySystemMenu(state.authButtonList, state.capabilities, state.activeDepartment?.id)
         : getMedicalSystemMenu(state.authMenuList),
     flatMenuListGet: state => getFlatMenuList(state.authMenuList),
     breadcrumbListGet: state =>
       getAllBreadcrumbList(
         state.activeSystem === "inventory"
-          ? getInventorySystemMenu(state.authButtonList, state.capabilities)
+          ? getInventorySystemMenu(state.authButtonList, state.capabilities, state.activeDepartment?.id)
           : getMedicalSystemMenu(state.authMenuList)
       ),
     hasInventorySystemAccessGet: state => hasInventorySystemAccess(state.authButtonList, state.capabilities),

@@ -492,13 +492,13 @@ public class InventoryLedgerRepository {
     public ArrayNode readConsumptions(String departmentId, LocalDate from, LocalDate to) {
         StringBuilder sql = new StringBuilder("""
             SELECT e.id, e.command_id commandId, e.encounter_id encounterId, e.case_token caseToken,
-                   e.department_id departmentId, e.department department,
+                   e.department_id departmentId, e.department department, e.care_type careType,
                    e.trigger_stage triggerStage, e.completion_version completionVersion,
                    e.event_kind eventKind, e.status, e.visit_date visitDate,
                    e.package_id packageId, e.reversal_of_event_id reversalOfEventId,
                    d.item_id itemId, i.name itemName, i.unit, d.batch_id batchId,
                    b.batch_no batchNo, b.expiry_date expiryDate, d.quantity,
-                   e.created_at createdAt
+                   e.visit_date consumedAt, e.created_at createdAt
             FROM inventory_consumption_events e
             JOIN inventory_consumption_details d ON d.event_id = e.id
             JOIN inventory_items i ON i.id = d.item_id

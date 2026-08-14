@@ -7,6 +7,7 @@ import com.coshare.patientrecord.auth.dto.NavigationMeta;
 import com.coshare.patientrecord.auth.dto.NavigationResult;
 import com.coshare.patientrecord.auth.dto.NavigationShortcut;
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.config.PortalMode;
 import com.coshare.patientrecord.auth.dto.StagePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,6 +64,7 @@ public class AuthNavigationService {
     );
     private final JdbcTemplate jdbcTemplate;
     private final InventoryAccessService inventoryAccessService;
+    private final PortalMode portalMode;
     private final List<NavigationMenu> menus = buildMenus();
     private final Map<String, RolePolicy> policies = buildPolicies();
     private final List<NavigationShortcut> shortcuts = List.of(
@@ -81,16 +83,18 @@ public class AuthNavigationService {
     );
 
     @Autowired
-    public AuthNavigationService(JdbcTemplate jdbcTemplate, InventoryAccessService inventoryAccessService) {
+    public AuthNavigationService(JdbcTemplate jdbcTemplate, InventoryAccessService inventoryAccessService, PortalMode portalMode) {
         this.jdbcTemplate = jdbcTemplate;
         this.inventoryAccessService = inventoryAccessService;
+        this.portalMode = portalMode;
     }
 
     public AuthNavigationService(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, null);
+        this(jdbcTemplate, null, null);
     }
 
     public NavigationResult navigationFor(SessionUser user) {
+        if (portalMode != null && portalMode.isInventoryPortal()) return inventoryPortalNavigation(user);
         RolePolicy basePolicy = policies.get(normalizeRole(user.role()));
         if (basePolicy == null) {
             log.warn(
@@ -140,6 +144,27 @@ public class AuthNavigationService {
             List.copyOf(capabilities),
             stagePermissions,
             auxiliaryPermissions
+        );
+    }
+
+    private NavigationResult inventoryPortalNavigation(SessionUser user) {
+        if (inventoryAccessService == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Inventory portal permission service unavailable");
+        }
+        InventoryAccessService.Access access = inventoryAccessService.accessFor(user);
+        if (access.capabilities().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account has no inventory portal permission");
+        }
+        DepartmentOption activeDepartment = new DepartmentOption(
+            user.activeDepartmentId(), user.activeDepartmentId(), user.department(), true, "ACTIVE"
+        );
+        List<NavigationMenu> portalMenus = List.of(group(
+            "/inventory", "inventory", "/inventory/daily", "Inventory Management", "Box",
+            page("/inventory/daily", "inventoryDaily", "/inventory/manage/index", "Daily Report", "EditPen", false, false, false)
+        ));
+        return new NavigationResult(
+            VERSION, POLICY_VERSION, portalMenus, access.buttonPermissions(), List.of(),
+            activeDepartment, List.of(activeDepartment), List.copyOf(access.capabilities()), Map.of(), Map.of()
         );
     }
 
@@ -558,6 +583,7 @@ public class AuthNavigationService {
         result.put("warehouse", role(union(paths("/welcome/index", "/home/index"), inventoryWarehouse), mergePermissions(
             permissions("home=view"), inventoryWarehouseButtons
         )));
+        result.put("inventory_reporter", role(paths("/welcome/index", "/home/index"), permissions("home=view")));
         return Map.copyOf(result);
     }
 

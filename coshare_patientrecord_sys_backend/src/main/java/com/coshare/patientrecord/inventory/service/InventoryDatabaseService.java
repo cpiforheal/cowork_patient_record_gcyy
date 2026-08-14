@@ -34,6 +34,7 @@ public class InventoryDatabaseService {
     private final InventoryAccessService inventoryAccess;
     private final InventoryDepartmentDraftService departmentDraftService;
     private final InventoryPatientConsumptionDraftService patientConsumptionDraftService;
+    private final InventoryDepartmentPeriodService departmentPeriodService;
 
     public InventoryDatabaseService(
         InventoryRepository repository,
@@ -49,7 +50,8 @@ public class InventoryDatabaseService {
         InventoryMappingService mappingService,
         InventoryAccessService inventoryAccess,
         InventoryDepartmentDraftService departmentDraftService,
-        InventoryPatientConsumptionDraftService patientConsumptionDraftService
+        InventoryPatientConsumptionDraftService patientConsumptionDraftService,
+        InventoryDepartmentPeriodService departmentPeriodService
     ) {
         this.repository = repository;
         this.requestWorkflow = requestWorkflow;
@@ -65,6 +67,7 @@ public class InventoryDatabaseService {
         this.inventoryAccess = inventoryAccess;
         this.departmentDraftService = departmentDraftService;
         this.patientConsumptionDraftService = patientConsumptionDraftService;
+        this.departmentPeriodService = departmentPeriodService;
     }
 
     public ObjectNode readDb() {
@@ -230,8 +233,54 @@ public class InventoryDatabaseService {
         return departmentDraftService.summary(businessDate, user);
     }
 
+    public ObjectNode adminDepartmentDailyRollup(LocalDate businessDate, SessionUser user) {
+        return departmentDraftService.adminDailyRollup(businessDate, user);
+    }
+
+    public ObjectNode adminDepartmentDailyRollup(LocalDate from, LocalDate to, SessionUser user) {
+        return departmentDraftService.adminDailyRollup(from, to, user);
+    }
+
+    public byte[] exportAdminDepartmentDailyRollup(LocalDate businessDate, SessionUser user) {
+        return departmentDraftService.exportAdminDailyRollup(businessDate, user);
+    }
+
+    public byte[] exportAdminDepartmentDailyRollup(LocalDate from, LocalDate to, SessionUser user) {
+        return departmentDraftService.exportAdminDailyRollup(from, to, user);
+    }
+
+    public byte[] exportAdminDepartmentDailyRollupXlsx(LocalDate businessDate, SessionUser user) {
+        return departmentDraftService.exportAdminDailyRollupXlsx(businessDate, user);
+    }
+
+    public byte[] exportAdminDepartmentDailyRollupXlsx(LocalDate from, LocalDate to, SessionUser user) {
+        return departmentDraftService.exportAdminDailyRollupXlsx(from, to, user);
+    }
+
     public ObjectNode saveDepartmentDailyDraft(JsonNode payload, SessionUser user) {
         return departmentDraftService.save(payload, user);
+    }
+
+    public byte[] exportDepartmentDailyDraft(String kind, JsonNode payload, SessionUser user) {
+        return departmentDraftService.export(kind, payload, user);
+    }
+
+    public ObjectNode departmentPeriodReport(String departmentKey, String periodType, LocalDate anchorDate, SessionUser user) {
+        return departmentPeriodService.report(departmentKey, periodType, anchorDate, user);
+    }
+
+    public InventoryDepartmentPeriodService.ExportFile exportDepartmentPeriodReport(
+        String departmentKey, String periodType, LocalDate anchorDate, String format, SessionUser user
+    ) {
+        return departmentPeriodService.export(departmentKey, periodType, anchorDate, format, user);
+    }
+
+    public ObjectNode departmentAllocationPlan(String departmentKey, String month, LocalDate throughDate, SessionUser user) {
+        return departmentPeriodService.allocation(departmentKey, month, throughDate, user);
+    }
+
+    public ObjectNode saveDepartmentAllocationPlan(JsonNode payload, SessionUser user) {
+        return departmentPeriodService.saveAllocation(payload, user);
     }
 
     public ObjectNode patientConsumptionDraft(String id, SessionUser user) {

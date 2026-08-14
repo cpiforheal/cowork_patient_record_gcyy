@@ -135,7 +135,10 @@
           <el-table-column prop="exceptionReason" label="例外原因" min-width="150" show-overflow-tooltip />
         </el-table>
         <div class="recent-heading">
-          <h3>当日已保存草稿</h3>
+          <div>
+            <h3>当日已保存草稿（{{ savedDrafts.length }}）</h3>
+            <span v-if="savedDrafts.length === 0" class="empty-export-hint">当前日期暂无草稿；导出文件会保留元数据并标记草稿数量为 0。</span>
+          </div>
           <el-button text @click="loadDrafts">刷新</el-button>
         </div>
         <el-table :data="savedDrafts" height="calc(100vh - 610px)" min-height="160" table-layout="fixed" @row-click="openDraft">
@@ -396,6 +399,14 @@ watch(
 .recent-heading h3 {
   margin: 0;
   color: var(--inventory-text);
+}
+.recent-heading > div {
+  display: grid;
+  gap: 3px;
+}
+.empty-export-hint {
+  color: var(--inventory-muted);
+  font-size: 12px;
 }
 .patient-toolbar h2 {
   font-size: 20px;

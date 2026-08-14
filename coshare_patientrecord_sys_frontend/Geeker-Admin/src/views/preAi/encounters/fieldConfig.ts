@@ -10,7 +10,8 @@ export type PreAiFieldKind =
   | "number"
   | "measurement"
   | "repeatable"
-  | "template-text";
+  | "template-text"
+  | "diagnosis";
 
 export type PreAiTemplateGenerator =
   | "chiefComplaint"
@@ -46,6 +47,7 @@ export interface PreAiFieldConfig {
   confirmedKey?: string;
   addLabel?: string;
   quickTemplates?: Array<{ label: string; value: string }>;
+  supplementKey?: string;
   emphasis?: "priority";
 }
 
@@ -91,6 +93,8 @@ const surgeryOptions = options([
 ]);
 const diseaseOptions = options([
   "痔",
+  "混合痔",
+  "内痔",
   "肛裂",
   "肛瘘",
   "肛周脓肿",
@@ -103,6 +107,8 @@ const diseaseOptions = options([
 ]);
 const visualByDisease: Record<string, string[]> = {
   痔: ["肛缘皮赘样隆起", "蹲位或努挣时肛内肿物脱出", "可自行还纳", "需手托还纳"],
+  混合痔: ["肛缘皮赘样隆起", "蹲位或努挣时肛内肿物脱出", "可自行还纳", "需手托还纳"],
+  内痔: ["蹲位或努挣时肛内肿物脱出", "可自行还纳", "需手托还纳"],
   肛裂: ["可见裂口", "裂口色鲜红", "裂口灰白", "边缘增厚", "伴前哨痔", "伴肛乳头肥大"],
   肛瘘: ["肛周可见外口", "乳头状隆起", "外口凹陷", "外口溢脓", "挤压可见脓性分泌物", "周围皮肤色素沉着"],
   肛周脓肿: ["局部红肿隆起", "皮温高", "触痛明显", "无破溃", "已破溃流脓"],
@@ -278,7 +284,7 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "检查室",
     shortTitle: "检查",
     owner: "检查室",
-    description: "只记录客观所见，不填写最终诊断。先选检查类型，再出现对应字段。",
+    description: "只记录客观所见，不填写最终诊断。可按病种套用观察项，再按实际修改位置、钟点位和所见。",
     fields: [
       {
         key: "examinationDirection",
@@ -311,9 +317,6 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"]),
         creatable: true
       },
-      { key: "lesionSize", label: "病灶大小", kind: "measurement", unitOptions: ["mm", "cm"], abnormalOptions },
-      { key: "lesionExtent", label: "病灶范围", kind: "measurement", unitOptions: ["mm", "cm"], abnormalOptions },
-      { key: "lesionDepth", label: "病灶深度", kind: "measurement", unitOptions: ["mm", "cm"], abnormalOptions },
       {
         key: "visualFindings",
         label: "外观所见",
@@ -352,10 +355,20 @@ export const preAiStages: PreAiStageConfig[] = [
       {
         key: "preliminaryDiagnosis",
         label: "检查室初步诊断",
-        kind: "textarea",
-        rows: 3,
+        kind: "diagnosis",
         span: 2,
-        placeholder: "根据检查所见填写倾向性诊断，供接诊室及时参考（可选）"
+        supplementKey: "preliminaryDiagnosisNote",
+        options: options([
+          "未见明显异常",
+          "考虑炎症性改变",
+          "考虑痔病相关改变",
+          "考虑肛裂相关改变",
+          "考虑肛瘘或脓肿相关改变",
+          "考虑息肉或占位性病变",
+          "建议结合影像或病理进一步判断"
+        ]),
+        creatable: true,
+        placeholder: "选择常用诊断，也可直接输入其他结论"
       },
       {
         key: "factualConclusion",

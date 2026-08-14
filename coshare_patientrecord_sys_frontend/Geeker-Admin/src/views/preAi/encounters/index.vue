@@ -381,6 +381,14 @@
                     </div>
                   </section>
 
+                  <ClinicalTemplateToolbar
+                    v-if="['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
+                    :model-value="clinicalTemplateIds(selectedStageCode)"
+                    :disabled="!canModifySelectedStage"
+                    @update:model-value="value => setClinicalTemplateIds(selectedStageCode, value)"
+                    @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
+                  />
+
                   <el-form
                     v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
                     label-position="top"
@@ -430,6 +438,34 @@
                             type="textarea"
                             :rows="field.rows || 3"
                             :placeholder="field.placeholder"
+                            :disabled="isStageFieldDisabled(field)"
+                            @update:model-value="markStageDirty(selectedStageCode)"
+                          />
+                        </div>
+                        <div v-else-if="field.kind === 'diagnosis'" class="diagnosis-field">
+                          <el-select
+                            v-model="stageForms[selectedStageCode][field.key]"
+                            filterable
+                            allow-create
+                            default-first-option
+                            clearable
+                            :placeholder="field.placeholder || `请选择${field.label}`"
+                            :disabled="isStageFieldDisabled(field)"
+                            @update:model-value="markStageDirty(selectedStageCode)"
+                          >
+                            <el-option
+                              v-for="option in fieldOptions(field)"
+                              :key="option.value"
+                              :label="option.label"
+                              :value="option.value"
+                            />
+                          </el-select>
+                          <el-input
+                            v-if="field.supplementKey"
+                            v-model="stageForms[selectedStageCode][field.supplementKey]"
+                            type="textarea"
+                            :rows="2"
+                            placeholder="需要时补充一句自然语言所见或判断依据（可选）"
                             :disabled="isStageFieldDisabled(field)"
                             @update:model-value="markStageDirty(selectedStageCode)"
                           />
@@ -697,6 +733,11 @@
 
     <el-dialog v-model="createDialogVisible" title="就诊登记并发号" width="760px" destroy-on-close>
       <el-form label-position="top">
+        <ClinicalTemplateToolbar
+          v-model="createTemplateIds"
+          :disabled="actionLoading"
+          @apply="applyCreateClinicalTemplate"
+        />
         <RegistrationFormFields :fields="registrationFields" :form="createForm" @patch="patchCreateForm" />
         <el-alert
           title="常规诊疗进入检查候诊；选择胃肠镜检查/咨询后会直接进入接诊室，号码全程不变。"
@@ -1182,6 +1223,7 @@ import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
 import StructuredField from "./components/StructuredField.vue";
 import CreatableSelect from "./components/CreatableSelect.vue";
 import RegistrationFormFields from "./components/RegistrationFormFields.vue";
+import ClinicalTemplateToolbar from "./components/ClinicalTemplateToolbar.vue";
 import EncounterHistoryPanel from "./components/EncounterHistoryPanel.vue";
 import AttachmentPreviewGallery from "./components/AttachmentPreviewGallery.vue";
 import { getLocalPrintAgentStatus, printQueueTicketLocally } from "../../clinicQueue/printAgent";
@@ -1210,6 +1252,11 @@ import {
   buildTreatmentPlan,
   stableSourceHash
 } from "./utils/templateTextGenerator";
+import {
+  applyClinicalTemplate,
+  clinicalTemplateIdsForDiseases,
+  type ClinicalTemplateMode
+} from "./utils/clinicalTemplateCatalog";
 
 const userStore = useUserStore();
 const authStore = useAuthStore();
@@ -1446,8 +1493,62 @@ const createForm = reactive<Record<string, any>>({
   visitDate: currentLocalDateTime(),
   inventoryCareType: "outpatient"
 });
+const createTemplateIds = ref<string[]>([]);
 const patchCreateForm = (key: string, value: any) => {
   createForm[key] = value;
+};
+
+const clinicalTemplateIds = (code: PreAiStageCode) => {
+  const saved = stageForms[code].clinicalTemplateIds;
+  if (Array.isArray(saved) && saved.length) return saved.map(String);
+  if (code === "INSPECTION") return clinicalTemplateIdsForDiseases(stageForms[code].diseaseDirections);
+  if (code === "RECEPTION") {
+    return clinicalTemplateIdsForDiseases(stageForms.INSPECTION.diseaseDirections).length
+      ? clinicalTemplateIdsForDiseases(stageForms.INSPECTION.diseaseDirections)
+      : clinicalTemplateIdsForDiseases(stageForms.REGISTRATION.clinicalTemplateDiseases);
+  }
+  return [];
+};
+
+const setClinicalTemplateIds = (code: PreAiStageCode, ids: string[]) => {
+  stageForms[code].clinicalTemplateIds = ids;
+  markStageDirty(code);
+};
+
+const confirmClinicalTemplateApply = async (mode: ClinicalTemplateMode) => {
+  if (mode === "fill") return true;
+  try {
+    await ElMessageBox.confirm(
+      mode === "overwrite"
+        ? "将覆盖本模板关联字段中的现有内容，覆盖后需要重新确认自动结论。是否继续？"
+        : "将把模板内容追加到现有内容中。请确认追加前已核对重复内容。",
+      mode === "overwrite" ? "覆盖模板字段" : "追加模板",
+      { type: "warning", confirmButtonText: "继续", cancelButtonText: "取消" }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTemplateMode, ids: string[]) => {
+  if (!ids.length || !(await confirmClinicalTemplateApply(mode))) return;
+  Object.assign(stageForms[code], applyClinicalTemplate(code, stageForms[code], ids, mode));
+  if (code === "INSPECTION" && mode !== "fill") {
+    const conclusion = buildInspectionConclusion(stageForms.INSPECTION);
+    stageForms.INSPECTION.factualConclusion = conclusion;
+    stageForms.INSPECTION.factualConclusionOverride = conclusion;
+    stageForms.INSPECTION.factualConclusionConfirmed = false;
+  }
+  markStageDirty(code);
+  ElMessage.success(mode === "fill" ? "已填充空白字段，可继续修改" : "模板内容已更新，请核对后保存");
+};
+
+const applyCreateClinicalTemplate = async (mode: ClinicalTemplateMode, ids: string[]) => {
+  if (!ids.length || !(await confirmClinicalTemplateApply(mode))) return;
+  Object.assign(createForm, applyClinicalTemplate("REGISTRATION", createForm, ids, mode));
+  createTemplateIds.value = ids;
+  ElMessage.success(mode === "fill" ? "已填充空白字段，可继续修改" : "模板内容已更新，请核对后登记");
 };
 
 const openResponsibilityTimeline = async () => {
@@ -2054,6 +2155,27 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
       Object.assign(stageForms[stage.stageCode], normalized);
     }
   });
+  if (!stageDirty.RECEPTION) {
+    const registration = stageForms.REGISTRATION;
+    const reception = stageForms.RECEPTION;
+    const registrationComplaint = String(registration.registrationChiefComplaint || "").trim();
+    const registrationIllness = String(registration.registrationCurrentIllness || "").trim();
+    if (!String(reception.chiefComplaintSupplement || "").trim() && registrationComplaint) {
+      reception.chiefComplaintSupplement = `前台登记主诉：${registrationComplaint}`;
+    }
+    if (!String(reception.presentIllnessOverride || reception.presentIllness || "").trim() && registrationIllness) {
+      reception.presentIllness = registrationIllness;
+      reception.presentIllnessOverride = registrationIllness;
+      reception.presentIllnessConfirmed = false;
+    }
+    if (!Array.isArray(reception.clinicalTemplateIds) || !reception.clinicalTemplateIds.length) {
+      reception.clinicalTemplateIds = clinicalTemplateIdsForDiseases(
+        stageForms.INSPECTION.diseaseDirections?.length
+          ? stageForms.INSPECTION.diseaseDirections
+          : registration.clinicalTemplateDiseases
+      );
+    }
+  }
   if (!value.labReports.some(report => report.id === activeLabReportId.value)) {
     activeLabReportId.value = value.labReports[0]?.id || "";
   }
@@ -2584,6 +2706,10 @@ const cleanStageForm = (code: PreAiStageCode) => {
       if (metadataValue !== undefined && metadataValue !== null && metadataValue !== "") result[key] = metadataValue;
     }
   });
+  for (const key of ["clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt"]) {
+    const metadataValue = stageForms[code][key];
+    if (hasFormValue(metadataValue)) result[key] = metadataValue;
+  }
   return result;
 };
 
@@ -2621,6 +2747,7 @@ const createEncounter = async () =>
     Object.keys(createForm).forEach(key => delete createForm[key]);
     createForm.visitDate = currentLocalDateTime();
     createForm.inventoryCareType = "outpatient";
+    createTemplateIds.value = [];
     createRequestId.value = "";
     await loadEncounterList();
     selectedPatientCaseId.value = encounterWorkspace.encounter.patientCaseId;
@@ -4514,6 +4641,15 @@ onBeforeUnmount(() => {
 .priority-field :deep(.el-form-item__label) {
   color: var(--el-color-warning-dark-2);
   font-weight: 700;
+}
+.diagnosis-field {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.diagnosis-field :deep(.el-select),
+.diagnosis-field :deep(.el-input) {
+  width: 100%;
 }
 .textarea-field {
   display: grid;

@@ -5,10 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -19,7 +16,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -27,7 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class PreAiPrivacyService {
 
-    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v3-20260802";
+    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v4-20260810";
 
     private static final Pattern MOBILE_PATTERN = Pattern.compile("(?<!\\d)(1[3-9]\\d{9})(?!\\d)");
     private static final Pattern ID_CARD_PATTERN = Pattern.compile("(?<!\\d)\\d{6}(?:19|20)\\d{2}\\d{7}[0-9Xx](?![0-9Xx])");
@@ -37,7 +33,7 @@ public class PreAiPrivacyService {
         "identityNumber", "idNumber", "idCard", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
-        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
+        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
         "RECEPTION", List.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
@@ -53,9 +49,6 @@ public class PreAiPrivacyService {
     private static final Map<String, String> FIELD_LABELS = buildFieldLabels();
 
     private final ObjectMapper objectMapper;
-    @Value("${clinic.attachment-dir:${java.io.tmpdir}/clinic-attachments}")
-    private String attachmentDirectory;
-
     public PreAiPrivacyService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
@@ -161,8 +154,7 @@ public class PreAiPrivacyService {
     }
 
     public byte[] renderDocx(ObjectNode maskedWorkspace, ObjectNode rawWorkspace) {
-        List<EmbeddedImage> images = loadEmbeddedImages(rawWorkspace);
-        String documentXml = buildDocumentXml(maskedWorkspace, images);
+        String documentXml = buildDocumentXml(maskedWorkspace);
         assertNoLeak(documentXml, rawWorkspace);
         try (ByteArrayOutputStream output = new ByteArrayOutputStream();
              ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
@@ -173,11 +165,7 @@ public class PreAiPrivacyService {
             addEntry(zip, "word/document.xml", documentXml);
             addEntry(zip, "word/styles.xml", stylesXml());
             addEntry(zip, "word/settings.xml", settingsXml());
-            for (int index = 0; index < images.size(); index++) {
-                EmbeddedImage image = images.get(index);
-                addEntry(zip, "word/media/image" + (index + 1) + image.extension(), image.bytes());
-            }
-            addEntry(zip, "word/_rels/document.xml.rels", documentRelationshipsXml(images));
+            addEntry(zip, "word/_rels/document.xml.rels", documentRelationshipsXml());
             zip.finish();
             return output.toByteArray();
         } catch (Exception error) {
@@ -308,7 +296,7 @@ public class PreAiPrivacyService {
         addNodeRows(physicalExam, reception, List.of("physicalExam"), Set.of("physicalExam"));
 
         ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
-        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionSize", "lesionDepth", "lesionExtent", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
+        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
 
         ObjectNode auxiliary = addSection(sections, "08", "八、辅助检查");
         addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
@@ -404,10 +392,6 @@ public class PreAiPrivacyService {
     }
 
     private String buildDocumentXml(ObjectNode masked) {
-        return buildDocumentXml(masked, List.of());
-    }
-
-    private String buildDocumentXml(ObjectNode masked, List<EmbeddedImage> images) {
         ObjectNode view = buildDocumentView(masked);
         StringBuilder body = new StringBuilder();
         body.append(paragraph("中医肛肠医院住院病历自动生成表", "Title"));
@@ -419,12 +403,6 @@ public class PreAiPrivacyService {
                 rows.add(row(text(item, "label"), text(item, "value"), item.path("emphasis").asBoolean(false) || !"NORMAL".equals(text(item, "severity"))));
             }
             if (!rows.isEmpty()) addTable(body, rows);
-            if ("07".equals(text(section, "code")) && !images.isEmpty()) {
-                for (int index = 0; index < images.size(); index++) {
-                    body.append(paragraph("专科检查图片 " + (index + 1), "ImageCaption"));
-                    body.append(imageDrawing(index + 1, images.get(index)));
-                }
-            }
         }
         JsonNode footer = view.path("reviewFooter");
         body.append(paragraph("医生复核：" + text(footer, "reviewerRole") + optionalSuffix(text(footer, "reviewedAt")), "ReviewFooter"));
@@ -598,8 +576,6 @@ public class PreAiPrivacyService {
             + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
             + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
             + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
-            + "<Default Extension=\"png\" ContentType=\"image/png\"/>"
-            + "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"
             + "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
             + "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
             + "<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/>"
@@ -618,52 +594,10 @@ public class PreAiPrivacyService {
     }
 
     private String documentRelationshipsXml() {
-        return documentRelationshipsXml(List.of());
-    }
-
-    private String documentRelationshipsXml(List<EmbeddedImage> images) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
             + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
             + "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/>"
-            + imageRelationships(images)
             + "</Relationships>";
-    }
-
-    private String imageRelationships(List<EmbeddedImage> images) {
-        StringBuilder result = new StringBuilder();
-        for (int index = 0; index < images.size(); index++) {
-            result.append("<Relationship Id=\"rIdImage").append(index + 1)
-                .append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image")
-                .append(index + 1).append(images.get(index).extension()).append("\"/>");
-        }
-        return result.toString();
-    }
-
-    private List<EmbeddedImage> loadEmbeddedImages(ObjectNode rawWorkspace) {
-        List<EmbeddedImage> images = new java.util.ArrayList<>();
-        Path root = Path.of(safe(attachmentDirectory)).toAbsolutePath().normalize();
-        for (JsonNode attachment : rawWorkspace.path("attachments")) {
-            String stage = text(attachment, "stageCode");
-            String mimeType = text(attachment, "mimeType").toLowerCase(java.util.Locale.ROOT);
-            if (!("INSPECTION".equals(stage) || "RECEPTION".equals(stage)) || !(mimeType.contains("png") || mimeType.contains("jpeg") || mimeType.contains("jpg"))) continue;
-            String storagePath = text(attachment, "storagePath");
-            if (storagePath.isBlank()) continue;
-            Path target = root.resolve(storagePath).normalize();
-            if (!target.startsWith(root) || !Files.isRegularFile(target)) continue;
-            try {
-                byte[] bytes = Files.readAllBytes(target);
-                if (bytes.length == 0 || bytes.length > 8 * 1024 * 1024) continue;
-                images.add(new EmbeddedImage(mimeType, bytes));
-                if (images.size() == 4) break;
-            } catch (IOException ignored) {
-                // Missing images must not block export of the clinical facts.
-            }
-        }
-        return images;
-    }
-
-    private String imageDrawing(int index, EmbeddedImage image) {
-        return "<w:p><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"5486400\" cy=\"3200400\"/><wp:docPr id=\"" + index + "\" name=\"接诊图片" + index + "\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"" + index + "\" name=\"image" + index + image.extension() + "\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"rIdImage" + index + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"5486400\" cy=\"3200400\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>";
     }
 
     private String stylesXml() {
@@ -673,7 +607,6 @@ public class PreAiPrivacyService {
             + "<w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"140\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"28\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\"><w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"200\"/></w:pPr><w:rPr><w:color w:val=\"666666\"/><w:sz w:val=\"19\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"90\"/><w:shd w:val=\"clear\" w:fill=\"E7E6E6\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"8\" w:color=\"808080\"/></w:pBdr><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"22\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
-            + "<w:style w:type=\"paragraph\" w:styleId=\"ImageCaption\"><w:name w:val=\"Image Caption\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"80\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"19\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"TableText\"><w:name w:val=\"Table Text\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"0\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:rFonts w:eastAsia=\"宋体\"/><w:sz w:val=\"21\"/><w:color w:val=\"000000\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"TableLabel\"><w:name w:val=\"Table Label\"/><w:basedOn w:val=\"TableText\"/><w:rPr><w:rFonts w:eastAsia=\"宋体\"/><w:sz w:val=\"19\"/><w:color w:val=\"666666\"/></w:rPr></w:style>"
             + "<w:style w:type=\"paragraph\" w:styleId=\"TableHeader\"><w:name w:val=\"Table Header\"/><w:basedOn w:val=\"TableText\"/><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:rPr><w:b/><w:color w:val=\"000000\"/></w:rPr></w:style>"
@@ -745,8 +678,8 @@ public class PreAiPrivacyService {
             {"contactName", "联系人"}, {"contactRelation", "联系人关系"}, {"contactPhone", "联系人电话"}, {"patientSource", "患者来源"}, {"registrationNote", "登记备注"},
             {"admissionMethod", "入院方式"}, {"admissionSeverity", "入院病情"}, {"insuranceType", "医保类型"}, {"paymentMethod", "付费方式"},
             {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"},
-            {"lesionCount", "病灶数量"}, {"lesionSize", "病灶大小"}, {"lesionDepth", "病灶深度"}, {"lesionExtent", "累及范围"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
-            {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"inspectionSpecialDescription", "检查补充说明"}, {"factualConclusion", "检查事实结论"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
+            {"lesionCount", "病灶数量"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
+            {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"preliminaryDiagnosis", "检查室初步诊断"}, {"preliminaryDiagnosisNote", "检查室诊断补充"}, {"inspectionSpecialDescription", "检查补充说明"}, {"factualConclusion", "检查事实结论"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
             {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
             {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
@@ -802,11 +735,5 @@ public class PreAiPrivacyService {
 
     private record DocumentRow(String label, String value, boolean abnormal) {}
 
-    private record EmbeddedImage(String mimeType, byte[] bytes) {
-        private String extension() {
-            return mimeType.contains("png") ? ".png" : ".jpg";
-        }
-    }
 }
-
 

@@ -7,6 +7,9 @@
       </div>
       <el-space>
         <el-button :icon="Refresh" :loading="loading" @click="loadPageData">刷新</el-button>
+        <el-button v-auth="'user:create'" :loading="creatingDepartmentTests" @click="createDepartmentTestAccounts">
+          创建 12 个科室测试账号
+        </el-button>
         <el-button v-auth="'user:create'" type="primary" :icon="CirclePlus" @click="openAccountDrawer()">新增账号</el-button>
       </el-space>
     </header>
@@ -123,6 +126,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { CirclePlus, Refresh, Search } from "@element-plus/icons-vue";
 import {
   createAdminAccountApi,
+  createDepartmentTestAccountsApi,
   getAdminAccountsApi,
   getAdminRoleCatalogApi,
   resetAdminAccountPasswordApi,
@@ -137,6 +141,7 @@ type AccountForm = Partial<AdminAccountSummary> & { password?: string };
 
 const loading = ref(false);
 const saving = ref(false);
+const creatingDepartmentTests = ref(false);
 const drawerVisible = ref(false);
 const accounts = ref<AdminAccountSummary[]>([]);
 const roles = ref<RoleDescriptor[]>([]);
@@ -239,6 +244,28 @@ const saveAccount = async () => {
     ElMessage.error((error as Error).message);
   } finally {
     saving.value = false;
+  }
+};
+
+const createDepartmentTestAccounts = async () => {
+  try {
+    await ElMessageBox.confirm(
+      "将为 12 个科室分别创建或保留一个仅限本科室的耗材填报测试账号。系统不会展示通用密码；创建后请用“重置密码”为各账号设定密码。",
+      "创建科室测试账号",
+      { confirmButtonText: "创建", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  creatingDepartmentTests.value = true;
+  try {
+    const created = await createDepartmentTestAccountsApi();
+    ElMessage.success(`已处理 ${created.length} 个科室测试账号；请逐一设置或重置密码后再登录测试。`);
+    await loadPageData();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    creatingDepartmentTests.value = false;
   }
 };
 

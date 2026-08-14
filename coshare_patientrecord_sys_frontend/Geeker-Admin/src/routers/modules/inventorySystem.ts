@@ -141,11 +141,10 @@ const inventoryMenu: InventoryMenuItem[] = [
         meta: meta("流水追溯", "TrendCharts")
       },
       {
-        path: `${INVENTORY_SYSTEM_PREFIX}/packages`,
-        name: "inventorySystemPackages",
-        tab: "packages",
+        path: `${INVENTORY_SYSTEM_PREFIX}/department-materials`,
+        name: "inventorySystemDepartmentMaterials",
         menuCapabilities: ["inventory:rule"],
-        meta: meta("套餐规则", "Collection")
+        meta: meta("科室套餐", "Collection")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/executive`,
@@ -232,6 +231,7 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/weekly": "weekly",
     "/inventory-system/controls": "controls",
     "/inventory-system/packages": "packages",
+    "/inventory-system/department-materials": "packages",
     "/inventory-system/consumable-entry": "packages",
     "/inventory-system/trace": "trace",
     "/inventory-system/daily-verification": "daily",
@@ -272,7 +272,7 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/governance`,
     name: "inventorySystemGovernance",
-    redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/packages`),
+    redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/department-materials`),
     meta: meta("患者耗材规则", "SetUp")
   },
   {
@@ -326,8 +326,14 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/packages`,
     name: "inventorySystemPackages",
+    redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/department-materials`),
+    meta: meta("科室套餐", "Collection")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/department-materials`,
+    name: "inventorySystemDepartmentMaterials",
     component: inventoryView,
-    meta: meta("患者耗材规则", "Collection")
+    meta: meta("科室套餐", "Collection")
   },
   ...departmentEntries.map(entry => ({
     path: `${INVENTORY_SYSTEM_PREFIX}/departments/${entry.key}`,

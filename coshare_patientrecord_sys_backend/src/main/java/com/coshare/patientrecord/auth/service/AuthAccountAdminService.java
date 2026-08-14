@@ -115,6 +115,45 @@ public class AuthAccountAdminService {
         return save(UUID.randomUUID().toString(), request, true);
     }
 
+    /** Creates reset-required, least-privilege accounts without exposing a shared password. */
+    @Transactional
+    public List<AccountSummary> createDepartmentTestAccounts(String operatorId) {
+        Map<String, String> departments = Map.ofEntries(
+            Map.entry("physiotherapy", "理疗室"), Map.entry("laboratory", "检验科"), Map.entry("nursing", "护理部"),
+            Map.entry("tcm", "中医科"), Map.entry("operating", "手术室"), Map.entry("anesthesia", "麻醉室"),
+            Map.entry("endoscopy", "胃肠镜"), Map.entry("inspection", "检查室"), Map.entry("logistics", "后勤保洁"),
+            Map.entry("western-pharmacy", "西药房"), Map.entry("cashier", "收费室"), Map.entry("tcm-pharmacy", "中药房")
+        );
+        List<AccountSummary> result = new ArrayList<>();
+        List<String> missingDepartments = new ArrayList<>();
+        for (Map.Entry<String, String> entry : departments.entrySet()) {
+            String departmentId = jdbcTemplate.query(
+                "SELECT id FROM clinic_departments WHERE (name = ? OR code = ?) AND status = 'ACTIVE' LIMIT 1",
+                rows -> rows.next() ? rows.getString(1) : "", entry.getValue(), entry.getKey()
+            );
+            if (departmentId.isBlank()) {
+                missingDepartments.add(entry.getKey());
+                continue;
+            }
+            String username = "dept_" + entry.getKey().replace('-', '_') + "_test";
+            Integer existing = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_accounts WHERE LOWER(username) = LOWER(?)", Integer.class, username);
+            if (existing != null && existing > 0) continue;
+            AccountSummary account = save(UUID.randomUUID().toString(), new AccountUpsertRequest(
+                username, entry.getValue() + "测试账号", "inventory_reporter", "启用",
+                UUID.randomUUID() + "Aa!", List.of(departmentId), departmentId, "仅本部门耗材填报、患者草稿和周/月报表"
+            ), true);
+            jdbcTemplate.update(
+                "INSERT INTO inventory_account_roles (account_id, role_code, assigned_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE role_code = VALUES(role_code), assigned_by = VALUES(assigned_by)",
+                account.id(), InventoryAccessService.DEPARTMENT_REPORTER, operatorId == null ? "" : operatorId
+            );
+            result.add(account);
+        }
+        if (!missingDepartments.isEmpty()) {
+            throw badRequest("缺少启用的科室，无法完整创建测试账号：" + String.join("、", missingDepartments));
+        }
+        return result;
+    }
+
     @Transactional
     public AccountSummary update(String accountId, AccountUpsertRequest request, String operatorId) {
         requireExisting(accountId);

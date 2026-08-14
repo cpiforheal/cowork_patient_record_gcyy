@@ -10,7 +10,7 @@ class RoleCatalogTest {
     void exposesExactlyTheCanonicalPostsInWorkflowOrder() {
         assertThat(RoleCatalog.definitions().stream().map(RoleCatalog.RoleDefinition::role)).containsExactly(
             "admin", "manager", "quality", "display", "frontdesk", "reception", "inspection", "tcm",
-            "doctor", "nurse", "lab", "ecg", "ultrasound", "warehouse", "tcm_pharmacy"
+            "doctor", "nurse", "lab", "ecg", "ultrasound", "warehouse", "inventory_reporter", "tcm_pharmacy"
         );
     }
 
@@ -29,6 +29,6 @@ class RoleCatalogTest {
         assertThat(RoleCatalog.canonicalize("护理")).isEqualTo("nurse");
         assertThat(RoleCatalog.canonicalize("中药房")).isEqualTo("tcm_pharmacy");
         assertThat(RoleCatalog.isCanonical("nursing")).isFalse();
-        assertThat(RoleCatalog.roles()).hasSize(15);
+        assertThat(RoleCatalog.roles()).hasSize(16);
     }
 }
