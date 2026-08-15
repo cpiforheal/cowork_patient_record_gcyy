@@ -16,6 +16,7 @@
         <el-select v-model="selectedVersionId" size="small" filterable class="version-select" placeholder="切换查看版本">
           <el-option v-for="version in versions" :key="version.id" :value="version.id" :label="`${version.versionCode}（${version.effectiveDate} 生效）`" />
         </el-select>
+        <el-button link type="primary" size="small" :disabled="!previousVersion" @click="openDiff">对比上一版本</el-button>
       </div>
       <div class="console-actions">
         <el-tooltip content="保存后立即为当日尚未填报的科室按新定额预播种草稿；已填报科室不受影响" placement="top">
@@ -171,6 +172,44 @@
         <el-button type="primary" @click="appendCreate">加入待保存</el-button>
       </template>
     </el-drawer>
+
+    <el-drawer v-model="diffOpen" :title="diffTitle" size="min(560px, 100%)" destroy-on-close>
+      <div v-loading="diffLoading">
+        <el-alert
+          v-if="!diffLoading && diffRows.length"
+          type="info"
+          :closable="false"
+          show-icon
+          :title="`新增 ${diffSummary.added} 项 · 删除 ${diffSummary.removed} 项 · 修改 ${diffSummary.changed} 项（按科室 + 耗材 + 单位对齐）`"
+        />
+        <el-alert
+          v-else-if="!diffLoading"
+          type="success"
+          :closable="false"
+          show-icon
+          title="两个版本的定额规则完全一致"
+        />
+        <el-table v-if="diffRows.length" :data="diffRows" border stripe height="calc(100vh - 220px)">
+          <el-table-column prop="departmentName" label="科室" width="96" />
+          <el-table-column prop="materialName" label="耗材" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="unit" label="单位" width="64" />
+          <el-table-column label="类型" width="76" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.kind === 'added' ? 'success' : row.kind === 'removed' ? 'danger' : 'warning'" effect="plain">
+                {{ row.kind === "added" ? "新增" : row.kind === "removed" ? "删除" : "修改" }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="变更明细" min-width="220">
+            <template #default="{ row }">
+              <div v-for="(change, index) in row.changes" :key="index" class="diff-line">
+                {{ change.label }}：{{ change.from }} → {{ change.to }}
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-drawer>
   </section>
 </template>
 
@@ -237,6 +276,91 @@ const viewVersion = computed(() => {
   return governance.value?.activeVersion || null;
 });
 const isEditable = computed(() => Boolean(viewVersion.value && viewVersion.value.effectiveDate > today));
+
+type DiffChange = { label: string; from: string; to: string };
+type DiffRow = {
+  departmentName: string;
+  materialName: string;
+  unit: string;
+  kind: "added" | "removed" | "changed";
+  changes: DiffChange[];
+};
+
+const diffOpen = ref(false);
+const diffLoading = ref(false);
+const diffRows = ref<DiffRow[]>([]);
+const scopeLabels: Record<string, string> = {
+  OUTPATIENT: "门诊人次",
+  INPATIENT: "住院床日",
+  COMBINED: "门诊+住院",
+  OTHER: "手工人次"
+};
+const previousVersion = computed(() => {
+  const currentId = selectedVersionId.value || governance.value?.activeVersion?.id || "";
+  const index = versions.value.findIndex(version => version.id === currentId);
+  return index >= 0 && index + 1 < versions.value.length ? versions.value[index + 1] : null;
+});
+const diffTitle = computed(() =>
+  previousVersion.value && viewVersion.value
+    ? `版本对比：${previousVersion.value.versionCode} → ${viewVersion.value.versionCode}`
+    : "版本对比"
+);
+const diffSummary = computed(() => ({
+  added: diffRows.value.filter(row => row.kind === "added").length,
+  removed: diffRows.value.filter(row => row.kind === "removed").length,
+  changed: diffRows.value.filter(row => row.kind === "changed").length
+}));
+
+const ruleKeyOf = (rule: InventoryQuotaRule) => `${rule.departmentKey}\u0000${rule.materialName.trim()}\u0000${rule.unit.trim()}`;
+const scopeLabel = (scope: string) => scopeLabels[scope] || scope || "-";
+
+const buildDiffRows = (current: InventoryQuotaRule[], previous: InventoryQuotaRule[]): DiffRow[] => {
+  const previousByKey = new Map(previous.map(rule => [ruleKeyOf(rule), rule]));
+  const currentByKey = new Map(current.map(rule => [ruleKeyOf(rule), rule]));
+  const rows: DiffRow[] = [];
+  for (const rule of current) {
+    const before = previousByKey.get(ruleKeyOf(rule));
+    if (!before) {
+      rows.push({ departmentName: rule.departmentName, materialName: rule.materialName, unit: rule.unit, kind: "added", changes: [] });
+      continue;
+    }
+    const changes: DiffChange[] = [];
+    if ((before.standardQuantity ?? null) !== (rule.standardQuantity ?? null))
+      changes.push({ label: "每人次定额", from: before.standardQuantity ?? "未设", to: rule.standardQuantity ?? "未设" });
+    if ((before.fixedAdjustment ?? 0) !== (rule.fixedAdjustment ?? 0))
+      changes.push({ label: "固定调整", from: String(before.fixedAdjustment ?? 0), to: String(rule.fixedAdjustment ?? 0) });
+    if (before.measurementScope !== rule.measurementScope)
+      changes.push({ label: "计量范围", from: scopeLabel(before.measurementScope), to: scopeLabel(rule.measurementScope) });
+    if (before.serviceGroup !== rule.serviceGroup)
+      changes.push({ label: "服务项目", from: before.serviceGroup || "-", to: rule.serviceGroup || "-" });
+    if (before.enabled !== rule.enabled)
+      changes.push({ label: "状态", from: before.enabled ? "启用" : "停用", to: rule.enabled ? "启用" : "停用" });
+    if (changes.length)
+      rows.push({ departmentName: rule.departmentName, materialName: rule.materialName, unit: rule.unit, kind: "changed", changes });
+  }
+  for (const rule of previous) {
+    if (!currentByKey.has(ruleKeyOf(rule)))
+      rows.push({ departmentName: rule.departmentName, materialName: rule.materialName, unit: rule.unit, kind: "removed", changes: [] });
+  }
+  return rows;
+};
+
+const openDiff = async () => {
+  const base = previousVersion.value;
+  if (!base) return;
+  diffOpen.value = true;
+  diffLoading.value = true;
+  try {
+    const previous = await loadVersion(base.id);
+    diffRows.value = buildDiffRows(governance.value?.rules || [], previous.rules || []);
+  } catch (error) {
+    ElMessage.error((error as Error).message || "读取上一版本失败");
+    diffRows.value = [];
+  } finally {
+    diffLoading.value = false;
+  }
+};
+
 const departments = computed(() => {
   const values = new Map<string, string>(departmentDirectory.map(entry => [entry.key, entry.name]));
   rules.value.forEach(rule => values.set(rule.departmentKey, rule.departmentName));
@@ -471,6 +595,12 @@ onMounted(load);
   display: grid;
   gap: 12px;
   min-width: 0;
+}
+
+.diff-line {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
 }
 
 .console-status {
