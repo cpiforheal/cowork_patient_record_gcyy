@@ -76,6 +76,7 @@ const load = async () => {
 watch(() => props.today, value => { if (!date.value) date.value = value; });
 watch(date, load);
 onMounted(load);
+defineExpose({ reload: load });
 </script>
 
 <style scoped lang="scss">

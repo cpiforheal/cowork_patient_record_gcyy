@@ -11,7 +11,7 @@
       </el-radio-group>
     </header>
 
-    <QuotaConsolePanel v-if="workspace === 'quota'" />
+    <QuotaConsolePanel v-if="workspace === 'quota'" @saved="$emit('saved')" />
 
     <template v-else>
       <el-alert
@@ -100,6 +100,7 @@ import {
 } from "@/api/modules/inventory";
 
 const workspace = ref<"quota" | "packages">("quota");
+defineEmits<{ saved: [] }>();
 
 const departmentCatalog = [
   "理疗室",

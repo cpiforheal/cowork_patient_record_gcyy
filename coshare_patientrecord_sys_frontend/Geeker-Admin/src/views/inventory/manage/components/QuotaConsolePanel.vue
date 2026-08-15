@@ -227,6 +227,8 @@ import {
   type InventoryQuotaVersion
 } from "@/api/modules/inventory";
 
+const emit = defineEmits<{ saved: [] }>();
+
 const departmentDirectory: Array<{ key: string; name: string }> = [
   { key: "physiotherapy", name: "理疗室" },
   { key: "laboratory", name: "检验科" },
@@ -573,6 +575,7 @@ const save = async () => {
     governance.value = result;
     selectedVersionId.value = result.savedVersionId || selectedVersionId.value;
     resetPending();
+    emit("saved");
     if (result.applyTodayRequested && result.applyTodayResult) {
       ElMessage.success(
         `定额已保存（${result.savedVersionCode}，${result.savedEffectiveDate} 生效），并为 ${result.applyTodayResult.seededCount} 个未填报科室预播种当日草稿`

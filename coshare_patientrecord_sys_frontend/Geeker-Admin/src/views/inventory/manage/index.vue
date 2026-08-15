@@ -40,7 +40,7 @@
       <transition v-else name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
-            <DepartmentConsumptionSummary :today="today()" @open-department="openDepartmentDraft" />
+            <DepartmentConsumptionSummary ref="consumptionSummaryRef" :today="today()" @open-department="openDepartmentDraft" />
           </template>
 
           <template v-else-if="activeTab === 'executive'">
@@ -186,7 +186,7 @@
               />
               <PatientConsumptionDraftWorkspace v-else :department-key="focusedDepartmentKey" :today="today()" />
             </template>
-            <DepartmentMaterialsPanel v-else-if="!isStandaloneConsumableEntry" />
+            <DepartmentMaterialsPanel v-else-if="!isStandaloneConsumableEntry" @saved="onQuotaConsoleSaved" />
             <PackagePanel
               v-else
               :packages="visiblePackages"
@@ -607,6 +607,11 @@ const { operatorName, currentDepartment, today, currentWeekNo, newRequestLine, c
 
 const db = ref<InventoryDb>(createEmptyInventoryDb());
 const loading = ref(false);
+const consumptionSummaryRef = ref<InstanceType<typeof DepartmentConsumptionSummary> | null>(null);
+const onQuotaConsoleSaved = () => {
+  consumptionSummaryRef.value?.reload();
+  void refreshOperationalData();
+};
 const departmentDraftMode = ref<"daily" | "patient">("daily");
 const initialInventoryLoading = computed(
   () =>
