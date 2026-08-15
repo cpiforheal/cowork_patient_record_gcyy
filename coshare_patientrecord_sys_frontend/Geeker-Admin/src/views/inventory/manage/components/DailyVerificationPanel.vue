@@ -58,7 +58,7 @@
     <section class="panel-section">
       <div class="section-heading"><h3>理论与实际汇总</h3></div>
       <div class="inventory-table-shell">
-        <el-table :data="report?.summary || []" border max-height="360" empty-text="所选范围内暂无可核查耗材明细">
+        <el-table :data="report?.summary || []" max-height="360" empty-text="所选范围内暂无可核查耗材明细">
           <el-table-column prop="materialName" label="耗材" min-width="210" show-overflow-tooltip /><el-table-column
             prop="unit"
             label="单位"
@@ -113,7 +113,7 @@
     <section class="panel-section">
       <div class="section-heading"><h3>逐日科室核查明细</h3></div>
       <div class="inventory-table-shell">
-        <el-table :data="filteredDetails" border max-height="560" :row-key="detailKey" empty-text="没有符合筛选条件的核查明细">
+        <el-table :data="filteredDetails" max-height="560" :row-key="detailKey" empty-text="没有符合筛选条件的核查明细">
           <el-table-column prop="businessDate" label="业务日期" width="110" /><el-table-column
             prop="departmentName"
             label="科室"
@@ -380,7 +380,9 @@ const shortcuts = [
 .daily-header h2,
 .section-heading h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--inventory-text, var(--el-text-color-primary));
 }
 .daily-toolbar {
   justify-content: flex-start;
@@ -418,17 +420,48 @@ const shortcuts = [
   border-right: 0;
 }
 .daily-stats strong {
-  color: var(--el-text-color-primary);
+  color: var(--inventory-text, var(--el-text-color-primary));
   font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .panel-section {
   display: grid;
   gap: 6px;
 }
+.panel-section + .panel-section {
+  animation: section-in 420ms ease-out 60ms backwards;
+}
 .inventory-table-shell {
   overflow: hidden;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--el-border-radius-base);
+  border: 1px solid var(--inventory-line-soft, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: #fff;
+}
+.inventory-table-shell :deep(.el-table) {
+  --el-table-border-color: var(--inventory-line-soft, #edf1f5);
+  --el-table-header-bg-color: transparent;
+}
+.inventory-table-shell :deep(th.el-table__cell) {
+  background: transparent;
+  color: var(--inventory-muted, var(--el-text-color-secondary));
+  font-weight: 600;
+}
+.inventory-table-shell :deep(td.el-table__cell) {
+  border-bottom: 1px solid var(--inventory-line-soft, #edf1f5);
+}
+.inventory-table-shell :deep(.el-table .cell) {
+  transition: color 160ms ease-out;
+}
+@keyframes section-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .department-list {
   line-height: 1.8;
@@ -445,12 +478,8 @@ const shortcuts = [
   border-radius: var(--el-border-radius-base);
 }
 .review-target span {
-  color: var(--el-text-color-secondary);
+  color: var(--inventory-muted, var(--el-text-color-secondary));
   font-size: 13px;
-}
-.daily-panel :deep(th.el-table__cell) {
-  background: var(--el-fill-color-light);
-  font-weight: 700;
 }
 @media (max-width: 960px) {
   .daily-header {

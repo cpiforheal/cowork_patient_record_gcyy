@@ -1,5 +1,5 @@
 <template>
-  <section class="dashboard" aria-label="管理员耗材数据驾驶舱">
+  <section ref="dashboardRootRef" class="dashboard" aria-label="管理员耗材数据驾驶舱">
     <div class="dashboard-head">
       <div>
         <div class="eyebrow">管理总览 · {{ periodLabel }}</div>
@@ -15,14 +15,21 @@
     <div v-if="!report" class="dashboard-empty"><el-empty description="查询后显示驾驶舱" /></div>
     <template v-else>
       <div class="metric-grid">
-        <article v-for="metric in metrics" :key="metric.label" class="metric-card" :class="metric.tone">
+        <article
+          v-for="(metric, index) in metrics"
+          :key="metric.label"
+          class="metric-card"
+          :class="metric.tone"
+          data-reveal
+          :style="{ '--i': index }"
+        >
           <div class="metric-label">{{ metric.label }}</div>
           <div class="metric-value">{{ metric.value }}</div>
           <div class="metric-note">{{ metric.note }}</div>
         </article>
       </div>
       <div class="chart-grid">
-        <article class="chart-card risk-card">
+        <article class="chart-card risk-card" data-reveal>
           <header>
             <div><strong>12 科室填报完成度</strong><span>每瓣对应一个科室，点击定位核查</span></div>
           </header>
@@ -51,7 +58,7 @@
             </div>
           </div>
         </article>
-        <article class="chart-card trend-card">
+        <article class="chart-card trend-card" data-reveal>
           <header>
             <div><strong>理论与实际金额趋势</strong><span>缺失实际量不按零</span></div>
           </header>
@@ -66,7 +73,7 @@
             <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
           </div>
         </article>
-        <article class="chart-card material-card">
+        <article class="chart-card material-card" data-reveal>
           <header>
             <div>
               <strong>耗材实际使用量</strong><span>{{ materialScopeNote }}</span>
@@ -115,7 +122,7 @@
             </div>
           </div>
         </article>
-        <article class="chart-card trend-card">
+        <article class="chart-card trend-card" data-reveal>
           <header>
             <div><strong>每日风险趋势</strong><span>异常峰值标记</span></div>
           </header>
@@ -219,6 +226,33 @@ const materialChartRoot = ref<HTMLElement | null>(null);
 const riskTrendChartRoot = ref<HTMLElement | null>(null);
 let chartObserver: IntersectionObserver | null = null;
 let chartLoadFallbackTimer: number | null = null;
+let revealObserver: IntersectionObserver | null = null;
+const dashboardRootRef = ref<HTMLElement | null>(null);
+const revealVisibleCards = () => {
+  dashboardRootRef.value?.querySelectorAll<HTMLElement>("[data-reveal]:not(.revealed)").forEach(node => {
+    node.classList.add("revealed");
+  });
+};
+const observeRevealCards = () => {
+  const cards = dashboardRootRef.value?.querySelectorAll<HTMLElement>("[data-reveal]:not(.revealed)");
+  if (!cards?.length) return;
+  if (prefersReducedMotion.value || typeof IntersectionObserver === "undefined") {
+    revealVisibleCards();
+    return;
+  }
+  revealObserver?.disconnect();
+  revealObserver = new IntersectionObserver(
+    entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        (entry.target as HTMLElement).classList.add("revealed");
+        revealObserver?.unobserve(entry.target);
+      });
+    },
+    { rootMargin: "0px 0px -6% 0px", threshold: 0.08 }
+  );
+  cards.forEach(node => revealObserver?.observe(node));
+};
 let dashboardMounted = false;
 let motionMediaQuery: MediaQueryList | null = null;
 const prefersReducedMotion = ref(false);
@@ -233,7 +267,10 @@ watch(
   () => props.report,
   () => {
     selectedDepartmentKey.value = null;
-    if (dashboardMounted) void nextTick(observeChartRoots);
+    if (dashboardMounted) void nextTick(() => {
+      observeChartRoots();
+      observeRevealCards();
+    });
   }
 );
 
@@ -767,12 +804,17 @@ onMounted(() => {
   motionMediaQuery.addEventListener("change", handleMotionChange);
   window.addEventListener("resize", handleChartViewportChange);
   window.addEventListener("scroll", handleChartViewportChange, true);
-  void nextTick(observeChartRoots);
+  void nextTick(() => {
+    observeChartRoots();
+    observeRevealCards();
+  });
 });
 
 onBeforeUnmount(() => {
   chartObserver?.disconnect();
   chartObserver = null;
+  revealObserver?.disconnect();
+  revealObserver = null;
   motionMediaQuery?.removeEventListener("change", handleMotionChange);
   window.removeEventListener("resize", handleChartViewportChange);
   window.removeEventListener("scroll", handleChartViewportChange, true);
@@ -820,10 +862,10 @@ const handleChartClick = (params: any) => {
   display: grid;
   gap: 14px;
   padding: 16px;
-  border: 1px solid var(--inventory-line);
-  border-radius: 14px;
-  background: linear-gradient(135deg, #fff 0%, #f7fbfa 100%);
-  box-shadow: 0 10px 28px rgb(23 33 43 / 7%);
+  border: 1px solid var(--inventory-line-soft);
+  border-radius: 12px;
+  background: #fcfdfe;
+  box-shadow: 0 6px 20px rgb(23 33 43 / 3%);
 }
 .dashboard-head {
   display: flex;
@@ -833,8 +875,9 @@ const handleChartClick = (params: any) => {
 }
 .dashboard-head h3 {
   margin: 3px 0 4px;
-  font-size: 22px;
-  letter-spacing: -0.02em;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--inventory-text);
 }
 .dashboard-head p,
@@ -844,8 +887,8 @@ const handleChartClick = (params: any) => {
   font-size: 13px;
 }
 .eyebrow {
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
 }
 .dashboard-actions,
 .chart-controls {
@@ -865,30 +908,44 @@ const handleChartClick = (params: any) => {
   gap: 10px;
 }
 .metric-card {
-  min-height: 112px;
+  min-height: 108px;
   padding: 14px;
   border: 1px solid var(--inventory-line-soft);
-  border-radius: 12px;
-  background: rgb(255 255 255 / 86%);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(23 33 43 / 2%);
   transition:
-    transform 180ms ease-out,
-    box-shadow 180ms ease-out;
+    transform 220ms ease-out,
+    box-shadow 220ms ease-out,
+    border-color 220ms ease-out;
 }
 .metric-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 18px rgb(23 33 43 / 8%);
+  transform: translateY(-1px);
+  border-color: var(--inventory-line);
+  box-shadow: 0 6px 16px rgb(23 33 43 / 5%);
 }
 .metric-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--inventory-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
+}
+.metric-label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--inventory-line);
 }
 .metric-value {
   margin-top: 10px;
   color: var(--inventory-text);
-  font-size: clamp(20px, 2vw, 30px);
-  font-weight: 800;
-  line-height: 1.1;
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 600;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
 .metric-note {
@@ -897,23 +954,23 @@ const handleChartClick = (params: any) => {
   font-size: 11px;
   line-height: 1.4;
 }
-.tone-danger {
-  border-top: 3px solid var(--inventory-danger);
+.tone-danger .metric-label::before {
+  background: var(--inventory-danger);
 }
-.tone-warning {
-  border-top: 3px solid var(--inventory-warning);
+.tone-warning .metric-label::before {
+  background: var(--inventory-warning);
 }
-.tone-info {
-  border-top: 3px solid #4f7cac;
+.tone-info .metric-label::before {
+  background: #4f7cac;
 }
-.tone-success {
-  border-top: 3px solid var(--inventory-success);
+.tone-success .metric-label::before {
+  background: var(--inventory-success);
 }
-.tone-purple {
-  border-top: 3px solid #7655b7;
+.tone-purple .metric-label::before {
+  background: #7655b7;
 }
-.tone-primary {
-  border-top: 3px solid var(--inventory-primary);
+.tone-primary .metric-label::before {
+  background: var(--inventory-primary);
 }
 .chart-grid {
   display: grid;
@@ -923,10 +980,17 @@ const handleChartClick = (params: any) => {
 .chart-card {
   min-width: 0;
   border: 1px solid var(--inventory-line-soft);
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
   overflow: hidden;
-  box-shadow: 0 4px 14px rgb(23 33 43 / 4%);
+  box-shadow: 0 1px 3px rgb(23 33 43 / 2.5%);
+  transition:
+    border-color 220ms ease-out,
+    box-shadow 220ms ease-out;
+}
+.chart-card:hover {
+  border-color: var(--inventory-line);
+  box-shadow: 0 5px 14px rgb(23 33 43 / 5%);
 }
 .chart-card header {
   display: flex;
@@ -935,6 +999,9 @@ const handleChartClick = (params: any) => {
   align-items: flex-start;
   padding: 12px 14px 0;
   color: var(--inventory-text);
+}
+.chart-card header strong {
+  font-weight: 600;
 }
 .chart-card header > div:first-child {
   display: grid;
@@ -1008,11 +1075,14 @@ const handleChartClick = (params: any) => {
 }
 .drill-list-item:hover,
 .drill-list-item.active {
-  border-color: rgb(8 118 111 / 20%);
+  border-color: rgb(8 118 111 / 14%);
+  background: rgb(8 118 111 / 5%);
+}
+.drill-list-item.active {
   background: rgb(8 118 111 / 8%);
 }
 .drill-list-item:hover {
-  transform: translateX(2px);
+  transform: translateX(1px);
 }
 .item-name {
   min-width: 0;
@@ -1030,7 +1100,7 @@ const handleChartClick = (params: any) => {
   flex: 0 0 auto;
   color: var(--inventory-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 550;
   font-variant-numeric: tabular-nums;
 }
 .risk-total {
@@ -1096,6 +1166,32 @@ const handleChartClick = (params: any) => {
   .metric-card:hover,
   .drill-list-item:hover {
     transform: none;
+  }
+}
+[data-reveal] {
+  opacity: 0;
+}
+[data-reveal].revealed {
+  animation: reveal-rise 480ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+  opacity: 1;
+}
+@keyframes reveal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    opacity: 1;
+  }
+  [data-reveal].revealed {
+    animation: none;
   }
 }
 </style>
