@@ -249,6 +249,10 @@
               @change-role="changeInventoryAccountRole"
             />
           </template>
+
+          <template v-else-if="activeTab === 'quota'">
+            <InventoryQuotaGovernancePanel />
+          </template>
         </div>
       </transition>
     </div>
@@ -512,6 +516,7 @@ import {
   downloadInventoryWeeklySnapshotApi,
   generateInventoryWeeklySnapshotApi,
   getInventoryConsumptionsApi,
+  getInventoryDepartmentDailyRollupApi,
   getInventoryDepartmentUsageReportApi,
   getInventoryDbApi,
   getInventoryExceptionsApi,
@@ -550,6 +555,8 @@ import {
   type InventoryBatch,
   type InventoryConsumptionEvent,
   type InventoryConsumptionRecord,
+  type InventoryAdminDepartmentDailyRollup,
+  type InventoryDailyRollupQuery,
   type InventoryDb,
   type InventoryDepartmentUsageReport,
   type InventoryException,
@@ -589,6 +596,7 @@ import WeeklyPanel from "./components/WeeklyPanel.vue";
 import PackagePanel from "./components/PackagePanel.vue";
 import DailyVerificationPanel from "./components/DailyVerificationPanel.vue";
 import InventoryRolePanel from "./components/InventoryRolePanel.vue";
+import InventoryQuotaGovernancePanel from "./components/InventoryQuotaGovernancePanel.vue";
 import { createEmptyInventoryDb, useInventoryManage } from "./composables/useInventoryManage";
 import { exportCsv } from "./utils";
 
@@ -634,7 +642,7 @@ const mappingLoading = ref(false);
 const itemAliases = ref<InventoryItemAlias[]>([]);
 const unitConversions = ref<InventoryUnitConversion[]>([]);
 const mappingGovernanceLoading = ref(false);
-const dailyVerificationReport = ref<InventoryDepartmentUsageReport>();
+const dailyVerificationReport = ref<InventoryAdminDepartmentDailyRollup>();
 const dailyVerificationLoading = ref(false);
 const inventoryRoles = ref<InventoryRoleDescriptor[]>([]);
 const inventoryAccounts = ref<InventoryAccountAssignment[]>([]);
@@ -741,7 +749,8 @@ const tabRoutePathMap: Record<string, string> = {
   packages: "/inventory/packages",
   trace: "/inventory/trace",
   daily: "/inventory/daily",
-  roles: "/inventory/roles"
+  roles: "/inventory/roles",
+  quota: "/inventory/quota-governance"
 };
 const inventorySystemTabRoutePathMap: Record<string, string> = {
   overview: "/inventory-system/dashboard",
@@ -754,7 +763,8 @@ const inventorySystemTabRoutePathMap: Record<string, string> = {
   packages: "/inventory-system/packages",
   trace: "/inventory-system/trace",
   daily: "/inventory-system/daily-verification",
-  roles: "/inventory-system/role-management"
+  roles: "/inventory-system/role-management",
+  quota: "/inventory-system/quota-governance"
 };
 const inventoryDepartmentRouteMap: Record<string, string> = {
   "/inventory-system/departments/physiotherapy": "理疗室",
@@ -795,7 +805,8 @@ const tabRouteNameMap: Record<string, string> = {
   packages: "inventoryPackages",
   trace: "inventoryTrace",
   daily: "inventoryDaily",
-  roles: "inventoryRoles"
+  roles: "inventoryRoles",
+  quota: "inventoryQuota"
 };
 const routeTabMap: Record<string, string> = {
   "/inventory": "overview",
@@ -822,7 +833,8 @@ const routeTabMap: Record<string, string> = {
   "/inventory-system/packages": "packages",
   "/inventory-system/trace": "trace",
   "/inventory-system/daily-verification": "daily",
-  "/inventory-system/role-management": "roles"
+  "/inventory-system/role-management": "roles",
+  "/inventory-system/quota-governance": "quota"
 };
 const isStandaloneConsumableEntry = computed(
   () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
@@ -846,7 +858,8 @@ const tabNavItems = [
   { tab: "trace", title: "出入库追溯" },
   { tab: "items", title: "物资目录" },
   { tab: "daily", title: "每日核对与导出" },
-  { tab: "roles", title: "岗位与权限" }
+  { tab: "roles", title: "岗位与权限" },
+  { tab: "quota", title: "每人次定额管理" }
 ] as const;
 const workflowSteps = [
   { title: "建物资档案", desc: "统一名称、规格、单位和预警线", action: "item", auth: ["inventory:item:manage"] },
@@ -1012,6 +1025,14 @@ const tabProfiles = {
     taskLabel: "维护提示",
     taskTitle: "变更岗位后重新登录生效",
     taskDesc: "角色权限与门诊管理平台共享同一套账号体系。"
+  },
+  quota: {
+    kicker: "管理设置 / 每人次定额",
+    title: "每人次定额管理",
+    desc: "通过未来生效的版本维护耗材定额，保障已保存日报的历史口径不被改写。",
+    taskLabel: "维护提示",
+    taskTitle: "先复制版本，再调整定额",
+    taskDesc: "定额变更在生效日后自动参与“定额 × 流转人次”计算。"
   }
 } as const;
 
@@ -1047,7 +1068,8 @@ const tabAuthMap: Record<string, readonly string[]> = {
   packages: ["inventory:read", "inventory:approve", "inventory:rule"],
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
-  roles: ["inventory:role:manage"]
+  roles: ["inventory:role:manage"],
+  quota: ["inventory:role:manage"]
 };
 const canViewAllDepartments = computed(() =>
   hasAnyInventoryAuth(["inventory:approve", "inventory:issue", "inventory:count", "inventory:export", "inventory:report"])
@@ -1665,7 +1687,8 @@ const goTab = (tab: string) => {
 const inventorySettingsRouteFallbacks: Record<string, string> = {
   "/inventory-system/packages": "/inventory-system/consumable-entry",
   "/inventory-system/executive": "/inventory-system/dashboard",
-  "/inventory-system/role-management": "/inventory-system/dashboard"
+  "/inventory-system/role-management": "/inventory-system/dashboard",
+  "/inventory-system/quota-governance": "/inventory-system/dashboard"
 };
 
 watch(
@@ -1687,7 +1710,7 @@ watch(activeTab, tab => {
   if (inventoryDepartmentRouteMap[route.path] && tab === "packages") return;
   const nextPath = (route.path.startsWith("/inventory-system/") ? inventorySystemTabRoutePathMap : tabRoutePathMap)[tab];
   if (nextPath && route.path !== nextPath) router.replace(nextPath);
-  if (tab === "daily" && !dailyVerificationReport.value) loadDailyVerification({ date: today(), departmentId: "" });
+  if (tab === "daily" && !dailyVerificationReport.value) loadDailyVerification({ from: today(), to: today() });
   if (tab === "roles" && !inventoryRoles.value.length) loadInventoryRoleManagement();
   void nextTick(() => loadTabBackgroundData());
 });
@@ -1948,15 +1971,10 @@ const saveItem = async () => {
   }
 };
 
-const loadDailyVerification = async ({ date, departmentId }: { date: string; departmentId: string }) => {
+const loadDailyVerification = async (query: InventoryDailyRollupQuery) => {
   dailyVerificationLoading.value = true;
   try {
-    const { data } = await getInventoryDepartmentUsageReportApi({
-      from: date,
-      to: date,
-      departmentIds: departmentId ? [departmentId] : undefined,
-      patientOnly: true
-    });
+    const { data } = await getInventoryDepartmentDailyRollupApi(query);
     dailyVerificationReport.value = data;
   } catch (error) {
     ElMessage.error((error as Error).message);
@@ -2665,7 +2683,7 @@ const exportWeeklyReport = () => {
 onMounted(() => {
   loadInventory();
   if (activeTab.value === "daily") {
-    loadDailyVerification({ date: today(), departmentId: "" });
+    loadDailyVerification({ from: today(), to: today() });
   }
   if (activeTab.value === "roles") {
     loadInventoryRoleManagement();

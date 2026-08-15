@@ -15,7 +15,8 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   packages: "inventoryPackages",
   trace: "inventoryTrace",
   daily: "inventoryDaily",
-  roles: "inventoryRoles"
+  roles: "inventoryRoles",
+  quota: "inventoryQuota"
 };
 
 export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
@@ -37,7 +38,8 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   packages: ["inventory:read", "inventory:approve", "inventory:rule"],
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
-  roles: ["inventory:role:manage"]
+  roles: ["inventory:role:manage"],
+  quota: ["inventory:role:manage"]
 };
 
 type InventoryMenuItem = Omit<Menu.MenuOptions, "children"> & {
@@ -161,6 +163,13 @@ const inventoryMenu: InventoryMenuItem[] = [
         meta: meta("物资设置", "Document")
       },
       {
+        path: `${INVENTORY_SYSTEM_PREFIX}/quota-governance`,
+        name: "inventorySystemQuotaGovernance",
+        tab: "quota",
+        menuCapabilities: ["inventory:role:manage"],
+        meta: meta("每人次定额管理", "SetUp")
+      },
+      {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
         name: "inventorySystemRoleManagement",
         tab: "roles",
@@ -235,7 +244,8 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/consumable-entry": "packages",
     "/inventory-system/trace": "trace",
     "/inventory-system/daily-verification": "daily",
-    "/inventory-system/role-management": "roles"
+    "/inventory-system/role-management": "roles",
+    "/inventory-system/quota-governance": "quota"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
 };
@@ -364,6 +374,12 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     name: "inventorySystemDailyVerification",
     component: inventoryView,
     meta: meta("每日耗材核对", "Tickets")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/quota-governance`,
+    name: "inventorySystemQuotaGovernance",
+    component: inventoryView,
+    meta: meta("每人次定额管理", "SetUp")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,

@@ -84,7 +84,6 @@ router.beforeEach(async to => {
 
   if (ROUTER_WHITE_LIST.includes(to.path)) return true;
   if (!userStore.token) return { path: LOGIN_URL, query: { redirect: to.fullPath }, replace: true };
-  if (to.path === "/inventory-system/quota-governance") return { path: "/inventory-system/department-materials", replace: true };
   if (isLegacyInventoryPath(to.path)) return { path: inventorySystemPathForLegacy(to.path), replace: true };
 
   try {
@@ -113,6 +112,7 @@ router.beforeEach(async to => {
           ? isMessageBoard ||
             (isPackageRoute && hasPackageAccess) ||
             to.path === "/inventory-system/daily-verification" ||
+            to.path === "/inventory-system/quota-governance" ||
             to.path === "/inventory-system/role-management" ||
             to.path.startsWith("/inventory-system/departments/")
           : isMessageBoard || to.path === departmentPath || (isPackageRoute && hasPackageAccess);

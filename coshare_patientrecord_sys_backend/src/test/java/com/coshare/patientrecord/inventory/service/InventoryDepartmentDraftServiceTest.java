@@ -161,16 +161,19 @@ class InventoryDepartmentDraftServiceTest {
 
         byte[] xlsx = service.exportAdminDailyRollupXlsx(date, administrator);
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
-            assertThat(workbook.getNumberOfSheets()).isEqualTo(5);
+            assertThat(workbook.getNumberOfSheets()).isEqualTo(7);
             assertThat(workbook.getSheetName(0)).isEqualTo("领导总览");
-            assertThat(workbook.getSheetName(1)).isEqualTo("填报进度");
-            assertThat(workbook.getSheetName(2)).isEqualTo("耗材汇总");
-            assertThat(workbook.getSheetName(3)).isEqualTo("异常核查");
-            assertThat(workbook.getSheetName(4)).isEqualTo("审计明细");
+            assertThat(workbook.getSheetName(1)).isEqualTo("日期科室明细");
+            assertThat(workbook.getSheetName(2)).isEqualTo("科室汇总");
+            assertThat(workbook.getSheetName(3)).isEqualTo("耗材汇总");
+            assertThat(workbook.getSheetName(4)).isEqualTo("异常核查");
+            assertThat(workbook.getSheetName(5)).isEqualTo("审计明细");
+            assertThat(workbook.getSheetName(6)).isEqualTo("口径说明");
             assertThat(workbookText(workbook)).contains("已填报耗材", "未填报耗材", "待核验");
             assertThat(workbook.getSheetAt(1).getPaneInformation().isFreezePane()).isTrue();
             assertThat(workbook.getSheetAt(1).getCTWorksheet().isSetAutoFilter()).isTrue();
-            var audit = workbook.getSheetAt(4);
+            assertThat(workbook.getSheetAt(2).getCTWorksheet().isSetAutoFilter()).isTrue();
+            var audit = workbook.getSheetAt(5);
             assertThat(rowForMaterial(audit, "explicit-zero").getCell(6).getNumericCellValue()).isZero();
             assertThat(rowForMaterial(audit, "explicit-zero").getCell(9).getStringCellValue()).isEmpty();
         }

@@ -853,7 +853,7 @@ public class InventoryApiController {
     private static ResponseEntity<byte[]> attachment(byte[] body, String filename, String mediaType) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType(mediaType));
-        headers.setContentDisposition(ContentDisposition.attachment().filename(filename).build());
+        headers.setContentDisposition(ContentDisposition.attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
         headers.setContentLength(body.length);
         return ResponseEntity.ok().headers(headers).body(body);
     }

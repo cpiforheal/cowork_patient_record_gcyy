@@ -24,20 +24,20 @@
       <div class="chart-grid">
         <article class="chart-card risk-card">
           <header>
-            <div><strong>风险分布</strong><span>按风险类型汇总，点击定位</span></div>
+            <div><strong>12 科室填报完成度</strong><span>每瓣对应一个科室，点击定位核查</span></div>
           </header>
           <div class="pie-layout">
             <div ref="riskChartRoot" class="chart-box pie-box">
               <VChart v-if="chartLoaded.risk && hasDepartmentRisk" :option="riskOption" autoresize @click="handleChartClick" />
-              <el-empty v-else-if="chartLoaded.risk" description="暂无风险数据" />
+              <el-empty v-else-if="chartLoaded.risk" description="暂无科室填报数据" />
               <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
             </div>
-            <div class="risk-list" aria-label="科室风险明细">
+            <div class="risk-list" aria-label="12科室填报明细">
               <div class="list-heading">
-                <strong>科室风险明细</strong><span>{{ riskRows.length }} 个科室</span>
+                <strong>科室填报明细</strong><span>{{ departmentCompletionRows.length }} 个科室</span>
               </div>
               <button
-                v-for="row in riskRows"
+                v-for="row in departmentCompletionRows"
                 :key="row.departmentKey"
                 type="button"
                 class="drill-list-item"
@@ -45,9 +45,9 @@
                 @click="handleDepartmentRowClick(row.departmentKey)"
               >
                 <span class="item-name" :title="row.departmentName">{{ row.departmentName }}</span>
-                <span class="item-value risk-total">{{ number(row.riskTotal) }}</span>
+                <span class="item-value risk-total">{{ row.submittedDayCount }} / {{ row.expectedDayCount }} 日</span>
               </button>
-              <el-empty v-if="!riskRows.length" :image-size="48" description="暂无科室风险" />
+              <el-empty v-if="!departmentCompletionRows.length" :image-size="48" description="暂无科室填报数据" />
             </div>
           </div>
         </article>
@@ -238,10 +238,19 @@ watch(
 );
 
 const hasDailyTrend = computed(() => Boolean(dashboard.value?.dailyTrend?.length));
-const riskRows = computed(() =>
-  (dashboard.value?.departmentRisk || []).filter(row => row.riskTotal > 0).sort((a, b) => b.riskTotal - a.riskTotal)
-);
-const hasDepartmentRisk = computed(() => riskRows.value.length > 0);
+const departmentCompletionRows = computed(() => {
+  const expectedDayCount = report.value?.departmentCount
+    ? Math.max(1, Math.round((dashboard.value?.expectedDepartmentDays || 0) / report.value.departmentCount))
+    : Math.max(1, dashboard.value?.dailyTrend?.length || 1);
+  return (report.value?.departments || []).map(row => {
+    const submittedDayCount = Math.min(
+      expectedDayCount,
+      Math.max(0, row.submittedDayCount ?? (row.status === "SUBMITTED" ? 1 : 0))
+    );
+    return { ...row, expectedDayCount, submittedDayCount, completionRate: submittedDayCount / expectedDayCount };
+  });
+});
+const hasDepartmentRisk = computed(() => departmentCompletionRows.value.length > 0);
 const materialKey = (row: InventoryAdminMaterialSummary) => row.materialName + "\u0000" + row.unit;
 const materialSourceRows = computed<InventoryAdminMaterialSummary[]>(() =>
   materialMode.value === "deviation" ? dashboard.value?.materialDeviationTop || [] : dashboard.value?.materialAmountTop || []
@@ -356,37 +365,40 @@ const trendDataZoom = [
   }
 ];
 
-const riskDefinitions = [
-  { key: "UNVERIFIED", label: "未核验", color: "#8aa8c3", field: "unverifiedCount" },
-  { key: "ATTENTION", label: "关注", color: palette.warning, field: "attentionCount" },
-  { key: "ABNORMAL", label: "异常", color: palette.danger, field: "abnormalCount" },
-  { key: "SPECIAL_PENDING_NOTE", label: "特殊待说明", color: palette.purple, field: "specialPendingNoteCount" }
-] as const;
-const riskDistribution = computed(() =>
-  riskDefinitions
-    .map(definition => ({
-      ...definition,
-      value: (dashboard.value?.departmentRisk || []).reduce((total, row) => total + Number(row[definition.field] || 0), 0)
-    }))
-    .filter(item => item.value > 0)
+const departmentCompletionTotal = computed(() =>
+  departmentCompletionRows.value.reduce((total, row) => total + row.submittedDayCount, 0)
 );
-const riskTotal = computed(() => riskDistribution.value.reduce((total, item) => total + item.value, 0));
 
 const riskOption = computed<EChartsOption>(() => ({
   ...chartMotion.value,
   tooltip: {
     ...tooltipSurface,
     trigger: "item",
-    formatter: (params: any) =>
-      params.name + "<br/>风险数量：<b>" + number(params.value) + "</b> 条<br/>占比：" + params.percent + "%"
+    formatter: (params: any) => {
+      const row = departmentCompletionRows.value[params.dataIndex];
+      if (!row) return "";
+      return (
+        row.departmentName +
+        "<br/>已填报：<b>" +
+        row.submittedDayCount +
+        " / " +
+        row.expectedDayCount +
+        "</b> 个科室日<br/>完成率：<b>" +
+        percent(row.completionRate) +
+        "</b>"
+      );
+    }
   },
   graphic: [
     {
       type: "text",
-      left: "38%",
+      left: "50%",
       top: "37%",
       style: {
-        text: number(riskTotal.value) + "\n风险总数\n点击扇区定位",
+        text: number(departmentCompletionTotal.value) +
+          " / " +
+          number(dashboard.value?.expectedDepartmentDays) +
+          "\n已填报科室日\n点击扇区定位",
         textAlign: "center",
         fill: palette.text,
         fontSize: 14,
@@ -397,12 +409,12 @@ const riskOption = computed<EChartsOption>(() => ({
   ],
   series: [
     {
-      name: "风险分布",
+      name: "12科室填报完成度",
       type: "pie",
       roseType: "area",
       radius: ["28%", "72%"],
-      center: ["38%", "52%"],
-      minAngle: 8,
+      center: ["50%", "52%"],
+      minAngle: 5,
       padAngle: 2,
       animationType: "expansion",
       animationDelay: (index: number) => index * 55,
@@ -417,7 +429,12 @@ const riskOption = computed<EChartsOption>(() => ({
       blur: { itemStyle: { opacity: 0.38 } },
       label: { show: false },
       labelLine: { show: false },
-      data: riskDistribution.value.map(item => ({ name: item.label, value: item.value, itemStyle: { color: item.color } }))
+      data: departmentCompletionRows.value.map((row, index) => ({
+        name: row.departmentName,
+        // Keep missing departments visible as a thin sector while preserving the real value in tooltip.
+        value: row.submittedDayCount || 0.25,
+        itemStyle: { color: materialColors[index % materialColors.length] }
+      }))
     }
   ]
 }));
@@ -765,9 +782,12 @@ onBeforeUnmount(() => {
 const handleChartClick = (params: any) => {
   const trend = dashboard.value?.dailyTrend || [];
   if (params.componentType === "series" && params.seriesType === "pie") {
-    if (params.seriesName === "风险分布") {
-      const item = riskDistribution.value[params.dataIndex];
-      if (item) emit("drill", { riskLevel: item.key });
+    if (params.seriesName === "12科室填报完成度") {
+      const item = departmentCompletionRows.value[params.dataIndex];
+      if (item) {
+        selectedDepartmentKey.value = item.departmentKey;
+        emit("drill", { departmentKey: item.departmentKey });
+      }
       return;
     }
     const item = materialChartRows.value[params.dataIndex];
@@ -932,7 +952,7 @@ const handleChartClick = (params: any) => {
 .pie-layout,
 .material-view {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(190px, 0.8fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(190px, 0.7fr);
   gap: 10px;
   align-items: stretch;
   padding: 6px 10px 12px;

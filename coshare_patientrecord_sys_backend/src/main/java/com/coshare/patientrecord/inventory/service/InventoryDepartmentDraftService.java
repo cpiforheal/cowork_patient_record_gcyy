@@ -286,26 +286,28 @@ public class InventoryDepartmentDraftService {
             row = writeXlsxRow(overview, row, titleStyle, "管理员耗材数据驾驶舱");
             row = writeXlsxRow(overview, row, null, "查询起止日期", report.path("periodStart").asText() + " 至 " + report.path("periodEnd").asText());
             row++;
-            row = writeXlsxRow(overview, row, headerStyle, "日报完成率", "未填报科室日", "零业务量科室日", "待核验耗材行", "关注", "异常", "特殊待说明", "已核价实际金额", "核价覆盖率");
+            row = writeXlsxRow(overview, row, headerStyle, "日报完成率", "已填报科室日", "应填报科室日", "未填报科室日", "待处理风险行", "未核验耗材行", "关注风险行", "异常风险行", "特殊待说明行", "已核价实际金额", "核价覆盖率");
+            int pendingRiskRows = dashboard.path("unverifiedCount").asInt() + dashboard.path("attentionCount").asInt()
+                + dashboard.path("abnormalCount").asInt() + dashboard.path("specialPendingNoteCount").asInt();
             row = writeXlsxRow(overview, row, null,
-                percentageValue(dashboard.path("completionRate").asDouble()), dashboard.path("missingDepartmentDays").asInt(),
-                dashboard.path("zeroVolumeDepartmentDays").asInt(), dashboard.path("unverifiedCount").asInt(), dashboard.path("attentionCount").asInt(),
-                dashboard.path("abnormalCount").asInt(), dashboard.path("specialPendingNoteCount").asInt(), nullableNumber(dashboard, "actualAmount"),
-                nullablePercentage(dashboard, "pricingCoverageRate"));
+                percentageValue(dashboard.path("completionRate").asDouble()), dashboard.path("submittedDepartmentDays").asInt(),
+                dashboard.path("expectedDepartmentDays").asInt(), dashboard.path("missingDepartmentDays").asInt(), pendingRiskRows,
+                dashboard.path("unverifiedCount").asInt(), dashboard.path("attentionCount").asInt(), dashboard.path("abnormalCount").asInt(),
+                dashboard.path("specialPendingNoteCount").asInt(), nullableNumber(dashboard, "actualAmount"), nullablePercentage(dashboard, "pricingCoverageRate"));
             row += 2;
-            row = writeXlsxRow(overview, row, headerStyle, "日期", "提交科室", "应提交科室", "完成率", "理论金额", "实际金额", "待核验", "关注", "异常", "特殊待说明", "未核价行");
+            row = writeXlsxRow(overview, row, headerStyle, "日期", "已提交科室", "应提交科室", "完成率", "理论金额", "实际金额", "风险总行数", "未核验行", "关注行", "异常行", "特殊待说明行");
             for (JsonNode day : dashboard.path("dailyTrend")) row = writeXlsxRow(overview, row, null,
                 text(day, "businessDate"), day.path("submittedDepartmentDays").asInt(), day.path("expectedDepartmentDays").asInt(),
                 percentageValue(day.path("completionRate").asDouble()), nullableNumber(day, "theoreticalAmount"), nullableNumber(day, "actualAmount"),
-                day.path("unverifiedCount").asInt(), day.path("attentionCount").asInt(), day.path("abnormalCount").asInt(),
-                day.path("specialPendingNoteCount").asInt(), day.path("unpricedLineCount").asInt());
-            setColumnWidths(overview, 14, 13, 13, 13, 16, 16, 12, 12, 12, 15, 12);
+                day.path("unverifiedCount").asInt() + day.path("attentionCount").asInt() + day.path("abnormalCount").asInt() + day.path("specialPendingNoteCount").asInt(),
+                day.path("unverifiedCount").asInt(), day.path("attentionCount").asInt(), day.path("abnormalCount").asInt(), day.path("specialPendingNoteCount").asInt());
+            setColumnWidths(overview, 14, 13, 13, 13, 16, 16, 14, 12, 12, 12, 15);
             overview.createFreezePane(0, 4);
             overview.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(3, 3, 0, 8));
 
-            Sheet progress = workbook.createSheet("填报进度");
+            Sheet progress = workbook.createSheet("日期科室明细");
             row = 0;
-            row = writeXlsxRow(progress, row, titleStyle, "日期 × 12 科室填报进度");
+            row = writeXlsxRow(progress, row, titleStyle, "日期 × 12 科室填报明细");
             row = writeXlsxRow(progress, row, null, "查询起止日期", report.path("periodStart").asText() + " 至 " + report.path("periodEnd").asText());
             row++;
             row = writeXlsxRow(progress, row, headerStyle, "业务日期", "科室", "填报状态", "业务量/患者数", "风险条目", "待核验", "关注", "异常", "特殊待说明", "填报人", "更新时间");
@@ -317,6 +319,41 @@ public class InventoryDepartmentDraftService {
             setColumnWidths(progress, 14, 16, 14, 16, 12, 12, 12, 12, 15, 16, 24);
             progress.createFreezePane(0, 4);
             progress.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(3, Math.max(3, row - 1), 0, 10));
+
+            Sheet departmentSheet = workbook.createSheet("科室汇总");
+            row = 0;
+            row = writeXlsxRow(departmentSheet, row, titleStyle, "12 科室填报与风险汇总");
+            row = writeXlsxRow(departmentSheet, row, null, "查询起止日期", report.path("periodStart").asText() + " 至 " + report.path("periodEnd").asText());
+            row++;
+            row = writeXlsxRow(departmentSheet, row, headerStyle, "科室", "状态", "已填报天数", "应填报天数", "完成率", "业务量合计", "风险条目", "未核验", "关注", "异常", "特殊待说明", "最后填报人", "最后更新时间");
+            for (JsonNode department : report.path("departments")) {
+                int expectedDays = Math.max(1, dashboard.path("dailyTrend").size());
+                int submittedDays = 0;
+                double businessVolume = 0;
+                int riskCount = 0;
+                int unverifiedCount = 0;
+                int attentionCount = 0;
+                int abnormalCount = 0;
+                int specialPendingNoteCount = 0;
+                for (JsonNode day : report.path("departmentDays")) {
+                    if (!text(department, "departmentKey").equals(text(day, "departmentKey"))) continue;
+                    String status = text(day, "status");
+                    if (!"MISSING".equals(status)) submittedDays++;
+                    if (!day.path("businessVolume").isNull()) businessVolume += day.path("businessVolume").asDouble();
+                    riskCount += day.path("riskCount").asInt();
+                    unverifiedCount += day.path("unverifiedCount").asInt();
+                    attentionCount += day.path("attentionCount").asInt();
+                    abnormalCount += day.path("abnormalCount").asInt();
+                    specialPendingNoteCount += day.path("specialPendingNoteCount").asInt();
+                }
+                row = writeXlsxRow(departmentSheet, row, null, text(department, "departmentName"),
+                    submittedDays == expectedDays ? "已完成" : submittedDays == 0 ? "未填报" : "部分完成", submittedDays, expectedDays,
+                    percentageValue(expectedDays == 0 ? 0 : (double) submittedDays / expectedDays), businessVolume, riskCount, unverifiedCount,
+                    attentionCount, abnormalCount, specialPendingNoteCount, text(department, "operator"), text(department, "updatedAt"));
+            }
+            setColumnWidths(departmentSheet, 20, 14, 14, 14, 12, 14, 12, 12, 12, 12, 15, 18, 24);
+            departmentSheet.createFreezePane(0, 4);
+            departmentSheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(3, Math.max(3, row - 1), 0, 12));
 
             Sheet summarySheet = workbook.createSheet("耗材汇总");
             row = 0;
@@ -342,17 +379,20 @@ public class InventoryDepartmentDraftService {
             row = writeXlsxRow(exceptionSheet, row, titleStyle, "异常、未核验与待说明明细");
             row = writeXlsxRow(exceptionSheet, row, null, "查询起止日期", report.path("periodStart").asText() + " 至 " + report.path("periodEnd").asText());
             row++;
-            row = writeXlsxRow(exceptionSheet, row, headerStyle, "业务日期", "科室", "耗材", "单位", "理论使用量", "实际使用量", "差额", "偏差率", "风险等级", "特殊说明", "复核状态", "复核备注");
+            row = writeXlsxRow(exceptionSheet, row, headerStyle, "优先级", "业务日期", "科室", "耗材", "单位", "实际状态", "理论使用量", "实际使用量", "差额", "偏差率", "风险等级", "特殊说明", "复核状态", "复核备注", "建议动作");
             for (JsonNode line : report.path("details")) {
                 String risk = text(line, "riskLevel");
-                if (!"NORMAL".equals(risk) && !"SPECIAL".equals(risk)) row = writeXlsxRow(exceptionSheet, row, null,
-                    text(line, "businessDate"), text(line, "departmentName"), text(line, "materialName"), text(line, "unit"),
-                    nullableNumber(line, "theoreticalQuantity"), nullableNumber(line, "actualQuantity"), nullableNumber(line, "difference"),
-                    nullablePercentage(line, "deviationRate"), riskLabel(risk), text(line, "specialDailyNote"), reviewLabel(text(line, "reviewStatus")), text(line, "reviewNote"));
+                if (!"NORMAL".equals(risk) && !"SPECIAL".equals(risk)) {
+                    String action = "UNVERIFIED".equals(risk) ? "补填实际量" : "SPECIAL_PENDING_NOTE".equals(risk) ? "补充特殊说明" : "ABNORMAL".equals(risk) ? "确认异常偏差" : "完成复核";
+                    int priority = "ABNORMAL".equals(risk) ? 1 : "UNVERIFIED".equals(risk) ? 2 : "SPECIAL_PENDING_NOTE".equals(risk) ? 3 : 4;
+                    row = writeXlsxRow(exceptionSheet, row, null, priority, text(line, "businessDate"), text(line, "departmentName"), text(line, "materialName"), text(line, "unit"),
+                        actualStatusLabel(text(line, "actualStatus")), nullableNumber(line, "theoreticalQuantity"), nullableNumber(line, "actualQuantity"), nullableNumber(line, "difference"),
+                        nullablePercentage(line, "deviationRate"), riskLabel(risk), text(line, "specialDailyNote"), reviewLabel(text(line, "reviewStatus")), text(line, "reviewNote"), action);
+                }
             }
-            setColumnWidths(exceptionSheet, 14, 16, 22, 10, 15, 15, 12, 12, 18, 30, 14, 30);
+            setColumnWidths(exceptionSheet, 10, 14, 16, 22, 10, 14, 15, 15, 12, 12, 18, 30, 14, 30, 18);
             exceptionSheet.createFreezePane(0, 4);
-            exceptionSheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(3, Math.max(3, row - 1), 0, 11));
+            exceptionSheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(3, Math.max(3, row - 1), 0, 14));
 
             Sheet detailsSheet = workbook.createSheet("审计明细");
             row = 0;
@@ -371,6 +411,20 @@ public class InventoryDepartmentDraftService {
             detailsSheet.createFreezePane(0, 4);
             detailsSheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(3, Math.max(3, row - 1), 0, 23));
             hideEmptyColumns(detailsSheet, 4, row, 14, 16, 20, 21);
+
+            Sheet glossary = workbook.createSheet("口径说明");
+            row = 0;
+            row = writeXlsxRow(glossary, row, titleStyle, "管理员 12 科室日报导出说明");
+            row = writeXlsxRow(glossary, row, headerStyle, "术语", "说明");
+            row = writeXlsxRow(glossary, row, null, "科室日", "一个科室在一个业务日期的填报单元；完成率 = 已提交科室日 / 应提交科室日");
+            row = writeXlsxRow(glossary, row, null, "风险条目", "按耗材明细行统计，不等同于科室数、患者数或风险事件数");
+            row = writeXlsxRow(glossary, row, null, "未填报", "应填报但没有保存日报；不等同于明确填报为 0");
+            row = writeXlsxRow(glossary, row, null, "未核验", "实际使用量为空，不能按 0 参与金额或偏差计算");
+            row = writeXlsxRow(glossary, row, null, "未核价", "存在数量但缺少单价，相关金额保留为空");
+            row = writeXlsxRow(glossary, row, null, "0", "明确填报的零值，与空值、未填报、未核价不同");
+            row = writeXlsxRow(glossary, row, null, "金额口径", "实际金额仅统计已填报且已核价的明细行");
+            setColumnWidths(glossary, 18, 90);
+            glossary.createFreezePane(0, 2);
 
             workbook.write(output);
             return output.toByteArray();

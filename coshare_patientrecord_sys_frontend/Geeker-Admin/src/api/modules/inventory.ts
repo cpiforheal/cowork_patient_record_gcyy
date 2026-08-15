@@ -86,6 +86,40 @@ export interface InventoryDepartmentDailyDraftSummary {
   list: InventoryDepartmentDailyDraft[];
 }
 
+export interface InventoryQuotaVersion {
+  id: string;
+  versionCode: string;
+  effectiveDate: string;
+  status: string;
+  createdBy?: string;
+  confirmedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface InventoryQuotaRule {
+  id: string;
+  versionId: string;
+  departmentKey: string;
+  departmentName: string;
+  sourceRow: number;
+  serviceGroup: string;
+  careType: string;
+  materialName: string;
+  unit: string;
+  standardQuantity: number | null;
+  fixedAdjustment: number;
+  measurementScope: "OUTPATIENT" | "INPATIENT" | "COMBINED" | "OTHER";
+  enabled: boolean;
+}
+
+export interface InventoryQuotaGovernance {
+  queryDate: string;
+  activeVersion: InventoryQuotaVersion | null;
+  versions: InventoryQuotaVersion[];
+  rules: InventoryQuotaRule[];
+}
+
 export interface InventoryDailyRollupQuery {
   [key: string]: string | undefined;
   date?: string;
@@ -1473,6 +1507,20 @@ export const getInventoryDepartmentDailyDraftSummaryApi = async (date: string) =
 
 export const getInventoryDepartmentDailyRollupApi = async (query: InventoryDailyRollupQuery) =>
   getInventoryData<InventoryAdminDepartmentDailyRollup>("/department-daily-drafts/admin-rollup", query);
+
+export const getInventoryQuotaGovernanceApi = async (date?: string) =>
+  getInventoryData<InventoryQuotaGovernance>("/quota-governance", date ? { date } : undefined);
+
+export const createInventoryQuotaVersionApi = async (payload: {
+  versionCode: string;
+  effectiveDate: string;
+  baseVersionId?: string;
+}) => postInventoryData<InventoryQuotaGovernance, typeof payload>("/quota-governance/versions", payload);
+
+export const updateInventoryQuotaRuleApi = async (
+  ruleId: string,
+  payload: Pick<InventoryQuotaRule, "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">
+) => putInventoryData<InventoryQuotaGovernance, typeof payload>(`/quota-governance/rules/${encodeURIComponent(ruleId)}`, payload);
 
 export const saveInventoryQuotaReviewApi = async (payload: {
   businessDate: string;

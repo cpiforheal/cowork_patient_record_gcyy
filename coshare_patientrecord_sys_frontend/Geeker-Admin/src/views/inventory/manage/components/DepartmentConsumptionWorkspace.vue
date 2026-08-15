@@ -31,7 +31,11 @@
     >
       <section class="input-pane">
         <div class="pane-heading">
-          <h3>耗材明细</h3>
+          <div>
+            <h3>耗材明细</h3>
+            <p class="patient-flow-hint">先填写当前科室流转患者人次；系统按“每人次定额 × 人次”计算参考使用量。</p>
+          </div>
+          <div class="patient-flow-total"><small>当前填报总人次</small><strong>{{ currentPatientFlow }}</strong></div>
         </div>
 
         <div class="input-pane-secondary-actions">
@@ -49,9 +53,9 @@
         </div>
 
 
-        <div class="volume-grid">
+        <div class="volume-grid" aria-label="当前科室流转患者人次">
           <label v-for="group in serviceGroups" :key="group" class="volume-field">
-            <span>{{ group }}</span>
+            <span><b>当前流转人次</b>{{ group }}</span>
             <el-input-number
               v-model="draft.groupVolumes[group]"
               :min="0"
@@ -108,15 +112,15 @@
             <template #default="{ row }"><el-input-number v-if="canEditQuota" v-model="row.manualAdjustment" :precision="6" controls-position="right" />
               <span v-else class="readonly-quantity">{{ formatQuantity(row.manualAdjustment) }}</span></template>
           </el-table-column>
-          <el-table-column label="实际耗材（科室填写）" width="140" header-class-name="actual-consumable-header">
-            <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="留空表示未填报" /></template>
+          <el-table-column label="实际耗材（选填）" width="140" header-class-name="actual-consumable-header">
+            <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="选填，留空即可" /></template>
           </el-table-column>
           <el-table-column label="特殊情况说明" min-width="190">
             <template #default="{ row }">
               <el-input v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="可选填写当日特殊情况" />
             </template>
           </el-table-column>
-          <el-table-column label="行内人次" width="122">
+          <el-table-column label="适用流转人次" width="122">
             <template #default="{ row }"
               ><el-input-number
                 v-model="row.volumeOverride"
@@ -160,13 +164,12 @@
           <span
             ><small>耗材行</small><strong>{{ visiblePreviewRows.length }}</strong></span
           >
+          <span><small>当前流转总人次</small><strong>{{ currentPatientFlow }}</strong></span>
           <span
-            ><small>实际使用量（按单位）</small
-            ><strong class="unit-summary">{{ dailyQuantitySummary || "暂无可汇总数量" }}</strong></span
+            ><small>参考使用量（定额 × 人次）</small
+            ><strong class="unit-summary">{{ referenceQuantitySummary || "暂无可汇总数量" }}</strong></span
           >
-          <span
-            ><small>未填实际量</small><strong>{{ excludedQuantityLineCount }} 行</strong></span
-          >
+          <span><small>实际使用量（选填）</small><strong>{{ excludedQuantityLineCount }} 行未填</strong></span>
           <span
             ><small>按实际外推月金额</small
             ><strong>{{ pricedMonthlyAmount === null ? "未核价" : formatMoney(pricedMonthlyAmount) }}</strong></span
@@ -184,8 +187,8 @@
                     <el-table-column prop="manualAdjustment" label="手工调整" width="104">
             <template #default="{ row }">{{ formatQuantity(row.manualAdjustment) }}</template>
           </el-table-column>
-          <el-table-column prop="volume" label="业务量" width="88" />
-          <el-table-column prop="referenceQuantity" label="参考试算（不统计）" width="142">
+          <el-table-column prop="volume" label="流转人次" width="88" />
+          <el-table-column prop="referenceQuantity" label="参考使用量（定额×人次）" width="162">
             <template #default="{ row }">{{ formatQuantity(row.referenceQuantity) }}</template>
           </el-table-column>
           <el-table-column prop="actualQuantity" label="实际使用量" width="112">
@@ -241,9 +244,9 @@
           <el-button type="primary" plain :icon="Plus" @click="addLine">新增耗材</el-button>
         </div>
 
-        <div class="volume-grid editor-volume-grid">
+        <div class="volume-grid editor-volume-grid" aria-label="当前科室流转患者人次">
           <label v-for="group in serviceGroups" :key="`editor-${group}`" class="volume-field">
-            <span>{{ group }}</span>
+            <span><b>当前流转人次</b>{{ group }}</span>
             <el-input-number
               v-model="draft.groupVolumes[group]"
               :min="0"
@@ -307,15 +310,15 @@
             <template #default="{ row }"><el-input-number v-if="canEditQuota" v-model="row.manualAdjustment" :precision="6" controls-position="right" />
               <span v-else class="readonly-quantity">{{ formatQuantity(row.manualAdjustment) }}</span></template>
           </el-table-column>
-          <el-table-column label="实际耗材（科室填写）" width="140" header-class-name="actual-consumable-header">
-            <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="留空表示未填报" /></template>
+          <el-table-column label="实际耗材（选填）" width="140" header-class-name="actual-consumable-header">
+            <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="选填，留空即可" /></template>
           </el-table-column>
           <el-table-column label="特殊情况说明" min-width="210">
             <template #default="{ row }">
               <el-input v-model="row.specialDailyNote" maxlength="500" show-word-limit placeholder="可选填写当日特殊情况" />
             </template>
           </el-table-column>
-            <el-table-column label="行内人次" width="138">
+            <el-table-column label="适用流转人次" width="138">
               <template #default="{ row }">
                 <el-input-number
                   v-model="row.volumeOverride"
@@ -543,6 +546,9 @@ const nonNegativeInteger = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
 };
+const currentPatientFlow = computed(() =>
+  serviceGroups.value.reduce((sum, group) => sum + nonNegativeInteger(draft.value.groupVolumes[group]), 0)
+);
 const combinedBusinessVolume = computed(() => {
   const groups = new Set(
     draft.value.lines
@@ -600,6 +606,15 @@ const quantitySummary = (field: "dailyQuantity" | "monthlyQuantity") => {
   return [...totals.entries()].map(([unit, quantity]) => `${formatQuantity(quantity)} ${unit}`).join(" · ");
 };
 const dailyQuantitySummary = computed(() => quantitySummary("dailyQuantity"));
+const referenceQuantitySummary = computed(() => {
+  const totals = new Map<string, number>();
+  visiblePreviewRows.value.forEach(row => {
+    const unit = row.unit.trim();
+    if (!unit) return;
+    totals.set(unit, Number(((totals.get(unit) || 0) + row.referenceQuantity).toFixed(6)));
+  });
+  return [...totals.entries()].map(([unit, quantity]) => `${formatQuantity(quantity)} ${unit}`).join(" · ");
+});
 const excludedQuantityLineCount = computed(
   () => visiblePreviewRows.value.filter(row => !row.actualFilled || !row.unit.trim()).length
 );
@@ -947,6 +962,23 @@ watch(
   justify-content: space-between;
   flex-wrap: wrap;
 }
+.patient-flow-hint {
+  margin: 4px 0 0;
+  color: var(--inventory-muted);
+  font-size: 12px;
+}
+.patient-flow-total {
+  display: grid;
+  min-width: 112px;
+  padding: 7px 10px;
+  color: #075985;
+  text-align: right;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+}
+.patient-flow-total small { font-size: 12px; }
+.patient-flow-total strong { font-size: 22px; font-variant-numeric: tabular-nums; }
 .department-toolbar h2,
 .pane-heading h3 {
   margin: 0;
@@ -1078,6 +1110,8 @@ watch(
   color: var(--inventory-text);
   font-size: 13px;
 }
+.volume-field span { display: grid; gap: 2px; }
+.volume-field b { color: #075985; font-size: 11px; font-weight: 600; }
 .volume-field :deep(.el-input-number) {
   width: 100%;
 }
