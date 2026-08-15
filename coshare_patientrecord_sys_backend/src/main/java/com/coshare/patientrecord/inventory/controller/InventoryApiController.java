@@ -164,28 +164,39 @@ public class InventoryApiController {
         @org.springframework.web.bind.annotation.PathVariable String ruleId,
         @RequestBody Map<String, Object> payload
     ) {
-        requireCapability("inventory:role:manage");
-        return ApiResult.of(200, "定额规则已更新", objectMapper.convertValue(quotaGovernanceService.updateRule(ruleId, toJson(payload)), Map.class));
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已更新", objectMapper.convertValue(quotaGovernanceService.updateRule(ruleId, toJson(payload), user), Map.class));
     }
 
     @PostMapping("/inventory-api/quota-governance/rules")
     public ApiResult<Map<String, Object>> createInventoryQuotaRule(@RequestBody Map<String, Object> payload) {
-        requireCapability("inventory:role:manage");
-        return ApiResult.of(200, "定额规则已新增", objectMapper.convertValue(quotaGovernanceService.createRule(toJson(payload)), Map.class));
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已新增", objectMapper.convertValue(quotaGovernanceService.createRule(toJson(payload), user), Map.class));
     }
 
     @org.springframework.web.bind.annotation.DeleteMapping("/inventory-api/quota-governance/rules/{ruleId}")
     public ApiResult<Map<String, Object>> deleteInventoryQuotaRule(
         @org.springframework.web.bind.annotation.PathVariable String ruleId
     ) {
-        requireCapability("inventory:role:manage");
-        return ApiResult.of(200, "定额规则已删除", objectMapper.convertValue(quotaGovernanceService.deleteRule(ruleId), Map.class));
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已删除", objectMapper.convertValue(quotaGovernanceService.deleteRule(ruleId, user), Map.class));
     }
 
     @PutMapping("/inventory-api/quota-governance/rules/batch")
     public ApiResult<Map<String, Object>> updateInventoryQuotaRulesBatch(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已批量保存", objectMapper.convertValue(quotaGovernanceService.updateRulesBatch(toJson(payload), user), Map.class));
+    }
+
+    @GetMapping("/inventory-api/quota-governance/audit-log")
+    public ApiResult<Map<String, Object>> inventoryQuotaAuditLog(
+        @RequestParam(required = false) String versionId,
+        @RequestParam(required = false, defaultValue = "200") Integer limit
+    ) {
         requireCapability("inventory:role:manage");
-        return ApiResult.of(200, "定额规则已批量保存", objectMapper.convertValue(quotaGovernanceService.updateRulesBatch(toJson(payload)), Map.class));
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("list", quotaGovernanceService.auditLog(versionId, limit == null ? 200 : limit));
+        return ApiResult.success(objectMapper.convertValue(result, Map.class));
     }
 
     @PostMapping("/inventory-api/quota-governance/console-save")

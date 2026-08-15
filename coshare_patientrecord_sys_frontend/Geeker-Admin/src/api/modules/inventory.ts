@@ -1583,6 +1583,32 @@ export const consoleSaveInventoryQuotaApi = async (payload: {
 export const applyInventoryQuotaTodayApi = async (versionId: string) =>
   postInventoryData<InventoryQuotaApplyTodayResult, { versionId: string }>("/quota-governance/apply-today", { versionId });
 
+export interface InventoryQuotaAuditEntry {
+  id: string;
+  versionId: string;
+  versionCode: string;
+  departmentKey: string;
+  departmentName: string;
+  materialName: string;
+  unit: string;
+  serviceGroup: string;
+  action: "CREATE" | "UPDATE" | "DELETE" | string;
+  beforeStandardQuantity: number | null;
+  afterStandardQuantity: number | null;
+  beforeFixedAdjustment: number | null;
+  afterFixedAdjustment: number | null;
+  beforeEnabled: boolean | null;
+  afterEnabled: boolean | null;
+  beforeMeasurementScope: string | null;
+  afterMeasurementScope: string | null;
+  operatorUsername: string;
+  operatorName: string;
+  createdAt: string;
+}
+
+export const getInventoryQuotaAuditLogApi = async (params: { versionId?: string; limit?: number } = {}) =>
+  getInventoryData<{ list: InventoryQuotaAuditEntry[] }>("/quota-governance/audit-log", params);
+
 export const saveInventoryQuotaReviewApi = async (payload: {
   businessDate: string;
   departmentKey: string;

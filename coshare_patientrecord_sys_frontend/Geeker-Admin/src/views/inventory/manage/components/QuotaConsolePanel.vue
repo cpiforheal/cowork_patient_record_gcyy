@@ -17,6 +17,7 @@
           <el-option v-for="version in versions" :key="version.id" :value="version.id" :label="`${version.versionCode}（${version.effectiveDate} 生效）`" />
         </el-select>
         <el-button link type="primary" size="small" :disabled="!previousVersion" @click="openDiff">对比上一版本</el-button>
+        <el-button link type="primary" size="small" @click="openAudit">变更记录</el-button>
       </div>
       <div class="console-actions">
         <el-tooltip content="保存后立即为当日尚未填报的科室按新定额预播种草稿；已填报科室不受影响" placement="top">
@@ -210,6 +211,42 @@
         </el-table>
       </div>
     </el-drawer>
+
+    <el-drawer v-model="auditOpen" :title="auditTitle" size="min(680px, 100%)" destroy-on-close>
+      <div v-loading="auditLoading">
+        <el-alert
+          v-if="!auditLoading && !auditRows.length"
+          type="info"
+          :closable="false"
+          show-icon
+          title="当前查看版本还没有变更记录"
+        />
+        <el-table v-if="auditRows.length" :data="auditRows" border stripe height="calc(100vh - 220px)">
+          <el-table-column label="时间" width="150">
+            <template #default="{ row }">{{ formatAuditTime(row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column prop="departmentName" label="科室" width="96" />
+          <el-table-column prop="materialName" label="耗材" min-width="140" show-overflow-tooltip />
+          <el-table-column label="操作" width="72" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.action === 'CREATE' ? 'success' : row.action === 'DELETE' ? 'danger' : 'warning'" effect="plain">
+                {{ row.action === "CREATE" ? "新增" : row.action === "DELETE" ? "删除" : "修改" }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="变更明细" min-width="200">
+            <template #default="{ row }">
+              <div v-for="(change, index) in auditChangesOf(row)" :key="index" class="diff-line">
+                {{ change.label }}：{{ change.from }} → {{ change.to }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作人" width="140">
+            <template #default="{ row }">{{ row.operatorName }}（{{ row.operatorUsername }}）</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-drawer>
   </section>
 </template>
 
@@ -220,7 +257,9 @@ import { Download, Plus, Refresh } from "@element-plus/icons-vue";
 import {
   consoleSaveInventoryQuotaApi,
   downloadInventoryQuotaGovernanceXlsxApi,
+  getInventoryQuotaAuditLogApi,
   getInventoryQuotaGovernanceApi,
+  type InventoryQuotaAuditEntry,
   type InventoryQuotaConsoleSaveResult,
   type InventoryQuotaRule,
   type InventoryQuotaRuleCreatePayload,
@@ -360,6 +399,50 @@ const openDiff = async () => {
     diffRows.value = [];
   } finally {
     diffLoading.value = false;
+  }
+};
+
+const auditOpen = ref(false);
+const auditLoading = ref(false);
+const auditRows = ref<InventoryQuotaAuditEntry[]>([]);
+const auditTitle = computed(() =>
+  viewVersion.value ? `定额变更记录（${viewVersion.value.versionCode}）` : "定额变更记录"
+);
+const formatAuditTime = (value: string) => value.replace("T", " ").slice(0, 19);
+const auditNum = (value: number | null) => (value === null || value === undefined ? "未设" : String(value));
+const auditChangesOf = (row: InventoryQuotaAuditEntry): DiffChange[] => {
+  if (row.action === "CREATE" || row.action === "DELETE")
+    return [{ label: "每人次定额", from: auditNum(row.beforeStandardQuantity), to: auditNum(row.afterStandardQuantity) }];
+  const changes: DiffChange[] = [];
+  if ((row.beforeStandardQuantity ?? null) !== (row.afterStandardQuantity ?? null))
+    changes.push({ label: "每人次定额", from: auditNum(row.beforeStandardQuantity), to: auditNum(row.afterStandardQuantity) });
+  if ((row.beforeFixedAdjustment ?? null) !== (row.afterFixedAdjustment ?? null))
+    changes.push({ label: "固定调整", from: auditNum(row.beforeFixedAdjustment), to: auditNum(row.afterFixedAdjustment) });
+  if ((row.beforeMeasurementScope ?? null) !== (row.afterMeasurementScope ?? null))
+    changes.push({
+      label: "计量范围",
+      from: row.beforeMeasurementScope ? scopeLabel(row.beforeMeasurementScope) : "-",
+      to: row.afterMeasurementScope ? scopeLabel(row.afterMeasurementScope) : "-"
+    });
+  if ((row.beforeEnabled ?? null) !== (row.afterEnabled ?? null))
+    changes.push({
+      label: "状态",
+      from: row.beforeEnabled === null ? "-" : row.beforeEnabled ? "启用" : "停用",
+      to: row.afterEnabled === null ? "-" : row.afterEnabled ? "启用" : "停用"
+    });
+  return changes;
+};
+const openAudit = async () => {
+  auditOpen.value = true;
+  auditLoading.value = true;
+  try {
+    const versionId = viewVersion.value?.id;
+    auditRows.value = (await getInventoryQuotaAuditLogApi(versionId ? { versionId } : {})).data.list || [];
+  } catch (error) {
+    ElMessage.error((error as Error).message || "读取变更记录失败");
+    auditRows.value = [];
+  } finally {
+    auditLoading.value = false;
   }
 };
 

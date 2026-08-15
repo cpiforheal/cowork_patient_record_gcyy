@@ -172,15 +172,94 @@ public class InventoryQuotaGovernanceService {
         jdbcTemplate.update("UPDATE inventory_quota_rules SET standard_quantity = ?, fixed_adjustment = ?, measurement_scope = ?, enabled = ? WHERE id = ?", standard, adjustment, scope, enabled, ruleId);
     }
 
+    private QuotaRule ruleById(String ruleId) {
+        List<QuotaRule> rows = jdbcTemplate.query(
+            "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE id = ?",
+            (rs, rowNum) -> new QuotaRule(rs.getString("id"), rs.getString("version_id"), rs.getString("department_key"), rs.getString("department_name"), rs.getInt("source_row"), rs.getString("service_group"), rs.getString("care_type"), rs.getString("material_name"), rs.getString("unit"), rs.getObject("standard_quantity") == null ? null : rs.getDouble("standard_quantity"), rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getBoolean("enabled")),
+            ruleId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private void writeAudit(String action, QuotaRule before, QuotaRule after, SessionUser user) {
+        QuotaRule reference = after != null ? after : before;
+        if (reference == null) return;
+        QuotaVersion version = versionById(reference.versionId());
+        jdbcTemplate.update(
+            "INSERT INTO inventory_quota_audit_log (id, version_id, version_code, department_key, department_name, material_name, unit, service_group, action, before_standard_quantity, after_standard_quantity, before_fixed_adjustment, after_fixed_adjustment, before_enabled, after_enabled, before_measurement_scope, after_measurement_scope, operator_username, operator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "qa-" + UUID.randomUUID(),
+            reference.versionId(),
+            version == null ? "-" : version.versionCode(),
+            reference.departmentKey(),
+            reference.departmentName(),
+            reference.materialName(),
+            reference.unit(),
+            reference.serviceGroup(),
+            action,
+            before == null ? null : before.standardQuantity(),
+            after == null ? null : after.standardQuantity(),
+            before == null ? null : before.fixedAdjustment(),
+            after == null ? null : after.fixedAdjustment(),
+            before == null ? null : before.enabled(),
+            after == null ? null : after.enabled(),
+            before == null ? null : before.measurementScope(),
+            after == null ? null : after.measurementScope(),
+            user == null ? "-" : user.username(),
+            user == null ? "-" : user.name()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public ArrayNode auditLog(String versionId, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit <= 0 ? 200 : limit, 1000));
+        ArrayNode result = JsonNodeFactory.instance.arrayNode();
+        String sql = "SELECT id, version_id, version_code, department_key, department_name, material_name, unit, service_group, action, before_standard_quantity, after_standard_quantity, before_fixed_adjustment, after_fixed_adjustment, before_enabled, after_enabled, before_measurement_scope, after_measurement_scope, operator_username, operator_name, created_at FROM inventory_quota_audit_log"
+            + (versionId == null || versionId.isBlank() ? "" : " WHERE version_id = ?")
+            + " ORDER BY created_at DESC, id LIMIT " + safeLimit;
+        jdbcTemplate.query(sql, rs -> {
+            ObjectNode row = result.addObject();
+            row.put("id", rs.getString("id"));
+            row.put("versionId", rs.getString("version_id"));
+            row.put("versionCode", rs.getString("version_code"));
+            row.put("departmentKey", rs.getString("department_key"));
+            row.put("departmentName", rs.getString("department_name"));
+            row.put("materialName", rs.getString("material_name"));
+            row.put("unit", rs.getString("unit"));
+            row.put("serviceGroup", rs.getString("service_group"));
+            row.put("action", rs.getString("action"));
+            putNullable(row, "beforeStandardQuantity", rs.getObject("before_standard_quantity"));
+            putNullable(row, "afterStandardQuantity", rs.getObject("after_standard_quantity"));
+            putNullable(row, "beforeFixedAdjustment", rs.getObject("before_fixed_adjustment"));
+            putNullable(row, "afterFixedAdjustment", rs.getObject("after_fixed_adjustment"));
+            putNullable(row, "beforeEnabled", rs.getObject("before_enabled"));
+            putNullable(row, "afterEnabled", rs.getObject("after_enabled"));
+            putNullable(row, "beforeMeasurementScope", rs.getString("before_measurement_scope"));
+            putNullable(row, "afterMeasurementScope", rs.getString("after_measurement_scope"));
+            row.put("operatorUsername", rs.getString("operator_username"));
+            row.put("operatorName", rs.getString("operator_name"));
+            row.put("createdAt", rs.getTimestamp("created_at").toLocalDateTime().toString());
+        }, versionId == null || versionId.isBlank() ? new Object[0] : new Object[] { versionId });
+        return result;
+    }
+
+    private static void putNullable(ObjectNode row, String field, Object value) {
+        if (value == null) row.putNull(field);
+        else if (value instanceof java.math.BigDecimal decimal) row.put(field, decimal);
+        else if (value instanceof Number number) row.put(field, number.doubleValue());
+        else if (value instanceof Boolean flag) row.put(field, flag);
+        else row.put(field, String.valueOf(value));
+    }
+
     @Transactional
-    public ObjectNode updateRule(String ruleId, JsonNode payload) {
+    public ObjectNode updateRule(String ruleId, JsonNode payload, SessionUser user) {
         QuotaVersion version = requireEditableVersion(versionOfRule(ruleId));
+        QuotaRule before = ruleById(ruleId);
         applyRuleUpdate(ruleId, payload);
+        writeAudit("UPDATE", before, ruleById(ruleId), user);
         return governance(version.effectiveDate(), version.id());
     }
 
     @Transactional
-    public ObjectNode updateRulesBatch(JsonNode payload) {
+    public ObjectNode updateRulesBatch(JsonNode payload, SessionUser user) {
         JsonNode rules = payload == null ? null : payload.path("rules");
         if (rules == null || !rules.isArray() || rules.isEmpty()) throw badRequest("没有需要保存的定额规则");
         LocalDate latestEffective = null; String latestVersionId = null;
@@ -188,7 +267,9 @@ public class InventoryQuotaGovernanceService {
             String ruleId = text(rule, "id");
             if (ruleId.isBlank()) throw badRequest("定额规则 id 缺失");
             QuotaVersion version = requireEditableVersion(versionOfRule(ruleId));
+            QuotaRule before = ruleById(ruleId);
             applyRuleUpdate(ruleId, rule);
+            writeAudit("UPDATE", before, ruleById(ruleId), user);
             if (latestEffective == null || version.effectiveDate().isAfter(latestEffective)) { latestEffective = version.effectiveDate(); latestVersionId = version.id(); }
         }
         return governance(latestEffective, latestVersionId);
@@ -225,17 +306,20 @@ public class InventoryQuotaGovernanceService {
     }
 
     @Transactional
-    public ObjectNode createRule(JsonNode payload) {
+    public ObjectNode createRule(JsonNode payload, SessionUser user) {
         QuotaVersion version = resolveConsoleVersion(text(payload, "versionId"));
-        insertRule(version, payload);
+        QuotaRule created = insertRule(version, payload);
+        writeAudit("CREATE", null, created, user);
         return governance(version.effectiveDate(), version.id());
     }
 
     @Transactional
-    public ObjectNode deleteRule(String ruleId) {
+    public ObjectNode deleteRule(String ruleId, SessionUser user) {
         QuotaVersion version = requireEditableVersion(versionOfRule(ruleId));
+        QuotaRule before = ruleById(ruleId);
         jdbcTemplate.update("DELETE FROM inventory_quota_rules WHERE id = ?", ruleId);
         cascadeRemoveRuleFromTodaysDrafts(ruleId);
+        writeAudit("DELETE", before, null, user);
         return governance(version.effectiveDate(), version.id());
     }
 
@@ -313,10 +397,15 @@ public class InventoryQuotaGovernanceService {
                 String resolvedId = ruleIdRemap.getOrDefault(ruleId, ruleId);
                 QuotaVersion ruleVersion = requireEditableVersion(versionOfRule(resolvedId));
                 if (!ruleVersion.id().equals(finalTarget.id())) throw badRequest("存在不属于目标版本的定额规则，请刷新后重试");
+                QuotaRule before = ruleById(resolvedId);
                 applyRuleUpdate(resolvedId, rule);
+                writeAudit("UPDATE", before, ruleById(resolvedId), user);
             }
         }
-        if (creates.isArray()) for (JsonNode create : creates) insertRule(finalTarget, create);
+        if (creates.isArray()) for (JsonNode create : creates) {
+            QuotaRule created = insertRule(finalTarget, create);
+            writeAudit("CREATE", null, created, user);
+        }
         if (deletes.isArray()) {
             for (JsonNode delete : deletes) {
                 String ruleId = delete.asText("");
@@ -324,8 +413,10 @@ public class InventoryQuotaGovernanceService {
                 String resolvedId = ruleIdRemap.getOrDefault(ruleId, ruleId);
                 QuotaVersion ruleVersion = requireEditableVersion(versionOfRule(resolvedId));
                 if (!ruleVersion.id().equals(finalTarget.id())) throw badRequest("存在不属于目标版本的定额规则，请刷新后重试");
+                QuotaRule before = ruleById(resolvedId);
                 jdbcTemplate.update("DELETE FROM inventory_quota_rules WHERE id = ?", resolvedId);
                 cascadeRemoveRuleFromTodaysDrafts(resolvedId);
+                writeAudit("DELETE", before, null, user);
             }
         }
         ObjectNode result = governance(finalTarget.effectiveDate(), finalTarget.id());
