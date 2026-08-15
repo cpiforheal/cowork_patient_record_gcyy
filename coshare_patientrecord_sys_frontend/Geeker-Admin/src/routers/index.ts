@@ -112,7 +112,6 @@ router.beforeEach(async to => {
           ? isMessageBoard ||
             (isPackageRoute && hasPackageAccess) ||
             to.path === "/inventory-system/daily-verification" ||
-            to.path === "/inventory-system/quota-governance" ||
             to.path === "/inventory-system/role-management" ||
             to.path.startsWith("/inventory-system/departments/")
           : isMessageBoard || to.path === departmentPath || (isPackageRoute && hasPackageAccess);

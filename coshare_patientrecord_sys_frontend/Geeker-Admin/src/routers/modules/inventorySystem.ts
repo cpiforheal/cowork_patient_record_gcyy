@@ -15,8 +15,7 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   packages: "inventoryPackages",
   trace: "inventoryTrace",
   daily: "inventoryDaily",
-  roles: "inventoryRoles",
-  quota: "inventoryQuota"
+  roles: "inventoryRoles"
 };
 
 export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
@@ -39,13 +38,7 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
   roles: ["inventory:role:manage"],
-  quota: ["inventory:role:manage"]
-};
-
-type InventoryMenuItem = Omit<Menu.MenuOptions, "children"> & {
-  tab?: string;
-  menuCapabilities?: string[];
-  children?: InventoryMenuItem[];
+  messageBoard: ["inventory:read"]
 };
 
 const departmentEntries = [
@@ -73,112 +66,6 @@ const meta = (title: string, icon: string, isHide = false) => ({
   isKeepAlive: true
 });
 
-const inventoryMenu: InventoryMenuItem[] = [
-  {
-    path: INVENTORY_SYSTEM_DASHBOARD,
-    name: "inventorySystemDashboard",
-    tab: "overview",
-    meta: meta("今日耗用", "DataBoard")
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/departments`,
-    name: "inventorySystemDepartmentAccounting",
-    menuCapabilities: ["inventory:read"],
-    meta: meta("科室耗用核算", "OfficeBuilding"),
-    children: departmentEntries.map(entry => ({
-      path: `${INVENTORY_SYSTEM_PREFIX}/departments/${entry.key}`,
-      name: `inventorySystemDepartmentMenu${entry.key.replace(/(^|-)([a-z])/g, (_, _dash, letter) => letter.toUpperCase())}`,
-      menuCapabilities: ["inventory:read"],
-      meta: meta(entry.title, entry.icon)
-    }))
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/requests`,
-    name: "inventorySystemRequests",
-    tab: "requests",
-    meta: meta("本科室申领", "List")
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
-    name: "inventorySystemDailyVerification",
-    tab: "daily",
-    meta: meta("每日核对与导出", "Checked")
-  },
-  {
-    path: `${INVENTORY_SYSTEM_PREFIX}/admin-tools`,
-    name: "inventorySystemAdminTools",
-    menuCapabilities: [
-      "inventory:read",
-      "inventory:item:manage",
-      "inventory:count",
-      "inventory:rule",
-      "inventory:report",
-      "inventory:issue",
-      "inventory:export",
-      "inventory:receive",
-      "inventory:approve",
-      "inventory:role:manage"
-    ],
-    meta: meta("库存与管理", "SetUp"),
-    children: [
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/stock`,
-        name: "inventorySystemStock",
-        tab: "stock",
-        menuCapabilities: ["inventory:issue", "inventory:count", "inventory:export"],
-        meta: meta("库存与批次", "Goods")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/controls`,
-        name: "inventorySystemControls",
-        tab: "controls",
-        menuCapabilities: ["inventory:count", "inventory:receive"],
-        meta: meta("盘点与报损", "Checked")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
-        name: "inventorySystemTrace",
-        tab: "trace",
-        menuCapabilities: ["inventory:export", "inventory:issue", "inventory:count"],
-        meta: meta("流水追溯", "TrendCharts")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/department-materials`,
-        name: "inventorySystemDepartmentMaterials",
-        menuCapabilities: ["inventory:rule"],
-        meta: meta("科室套餐", "Collection")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/executive`,
-        name: "inventorySystemExecutive",
-        tab: "executive",
-        menuCapabilities: ["inventory:report", "inventory:approve"],
-        meta: meta("管理总览", "DataAnalysis")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/items`,
-        name: "inventorySystemItems",
-        tab: "items",
-        menuCapabilities: ["inventory:item:manage", "inventory:rule"],
-        meta: meta("物资设置", "Document")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/quota-governance`,
-        name: "inventorySystemQuotaGovernance",
-        tab: "quota",
-        menuCapabilities: ["inventory:role:manage"],
-        meta: meta("每人次定额管理", "SetUp")
-      },
-      {
-        path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
-        name: "inventorySystemRoleManagement",
-        tab: "roles",
-        meta: meta("岗位与权限", "UserFilled")
-      }
-    ]
-  }
-];
-
 export const canAccessInventoryTab = (tab: string, buttonPermissions: Record<string, string[]>, capabilities: string[]) => {
   const required = INVENTORY_TAB_CAPABILITIES[tab] || [];
   const routePermissions = buttonPermissions[INVENTORY_TAB_ROUTE_NAMES[tab]] || [];
@@ -186,28 +73,51 @@ export const canAccessInventoryTab = (tab: string, buttonPermissions: Record<str
   return required.some(code => granted.has(code));
 };
 
-const filterInventoryMenu = (items: InventoryMenuItem[], buttonPermissions: Record<string, string[]>, capabilities: string[]) => {
-  const result: Menu.MenuOptions[] = [];
+export const getInventorySystemMenu = (
+  buttonPermissions: Record<string, string[]>,
+  capabilities: string[],
+  departmentKey?: string
+): Menu.MenuOptions[] => {
   const granted = new Set([...capabilities, ...Object.values(buttonPermissions).flat()]);
-  items.forEach(item => {
-    if (item.menuCapabilities?.length && !item.menuCapabilities.some(code => granted.has(code))) return;
-    if (item.children?.length) {
-      const children = filterInventoryMenu(item.children as InventoryMenuItem[], buttonPermissions, capabilities);
-      if (children.length) {
-        const { tab: _tab, menuCapabilities: _menuCapabilities, children: _children, ...menuItem } = item;
-        result.push({ ...menuItem, children });
+  if (granted.has("inventory:role:manage")) {
+    return [
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/daily-verification`,
+        name: "inventorySystemDailyVerification",
+        meta: meta("12科室日报汇总", "Tickets")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/department-materials`,
+        name: "inventorySystemDepartmentMaterials",
+        meta: meta("科室套餐", "Collection")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
+        name: "inventorySystemRoleManagement",
+        meta: meta("账号管理", "UserFilled")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/message-board`,
+        name: "inventorySystemMessageBoard",
+        meta: meta("需求留言板", "ChatDotRound")
       }
-      return;
+    ];
+  }
+  if (!departmentKey) return [];
+  const department = departmentEntries.find(entry => entry.key === departmentKey);
+  return [
+    {
+      path: `${INVENTORY_SYSTEM_PREFIX}/departments/${departmentKey}`,
+      name: "inventorySystemPortalDepartment",
+      meta: meta(department ? `我的科室日报（${department.title}）` : "我的科室日报", "EditPen")
+    },
+    {
+      path: `${INVENTORY_SYSTEM_PREFIX}/message-board`,
+      name: "inventorySystemMessageBoard",
+      meta: meta("需求留言板", "ChatDotRound")
     }
-    if (item.tab && !canAccessInventoryTab(item.tab, buttonPermissions, capabilities)) return;
-    const { tab: _tab, menuCapabilities: _menuCapabilities, children: _children, ...menuItem } = item;
-    result.push(menuItem);
-  });
-  return result;
+  ];
 };
-
-export const getInventorySystemMenu = (buttonPermissions: Record<string, string[]>, capabilities: string[]) =>
-  getShowMenuList(filterInventoryMenu(inventoryMenu, buttonPermissions, capabilities));
 
 const filterMedicalMenu = (items: Menu.MenuOptions[]): Menu.MenuOptions[] =>
   items.flatMap(item => {
@@ -244,8 +154,7 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/consumable-entry": "packages",
     "/inventory-system/trace": "trace",
     "/inventory-system/daily-verification": "daily",
-    "/inventory-system/role-management": "roles",
-    "/inventory-system/quota-governance": "quota"
+    "/inventory-system/role-management": "roles"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
 };
@@ -376,15 +285,15 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     meta: meta("每日耗材核对", "Tickets")
   },
   {
-    path: `${INVENTORY_SYSTEM_PREFIX}/quota-governance`,
-    name: "inventorySystemQuotaGovernance",
-    component: inventoryView,
-    meta: meta("每人次定额管理", "SetUp")
-  },
-  {
     path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
     name: "inventorySystemRoleManagement",
     component: inventoryView,
     meta: meta("岗位与权限", "UserFilled")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/message-board`,
+    name: "inventorySystemMessageBoard",
+    component: inventoryView,
+    meta: meta("需求留言板", "ChatDotRound")
   }
 ];

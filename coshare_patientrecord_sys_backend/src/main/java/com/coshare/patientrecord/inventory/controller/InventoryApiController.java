@@ -7,11 +7,13 @@ import com.coshare.patientrecord.auth.service.InventoryPortalAccountAdminService
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.config.PortalMode;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
+import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
 import com.coshare.patientrecord.inventory.service.InventoryQuotaGovernanceService;
 import com.coshare.patientrecord.security.InventoryPermission;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.Map;
 import java.util.List;
 import java.time.LocalDate;
@@ -40,6 +42,7 @@ public class InventoryApiController {
     private final InventoryPortalAccountAdminService portalAccountAdminService;
     private final InventoryMessageBoardService messageBoardService;
     private final InventoryQuotaGovernanceService quotaGovernanceService;
+    private final InventoryDepartmentDraftService departmentDraftService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -50,6 +53,7 @@ public class InventoryApiController {
         InventoryPortalAccountAdminService portalAccountAdminService,
         InventoryMessageBoardService messageBoardService,
         InventoryQuotaGovernanceService quotaGovernanceService,
+        InventoryDepartmentDraftService departmentDraftService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -59,6 +63,7 @@ public class InventoryApiController {
         this.portalAccountAdminService = portalAccountAdminService;
         this.messageBoardService = messageBoardService;
         this.quotaGovernanceService = quotaGovernanceService;
+        this.departmentDraftService = departmentDraftService;
         this.portalMode = portalMode;
     }
 
@@ -140,9 +145,12 @@ public class InventoryApiController {
     }
 
     @GetMapping("/inventory-api/quota-governance")
-    public ApiResult<Map<String, Object>> inventoryQuotaGovernance(@RequestParam(required = false) LocalDate date) {
+    public ApiResult<Map<String, Object>> inventoryQuotaGovernance(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String versionId
+    ) {
         requireCapability("inventory:role:manage");
-        return ApiResult.success(objectMapper.convertValue(quotaGovernanceService.governance(date), Map.class));
+        return ApiResult.success(objectMapper.convertValue(quotaGovernanceService.governance(date, versionId), Map.class));
     }
 
     @PostMapping("/inventory-api/quota-governance/versions")
@@ -158,6 +166,43 @@ public class InventoryApiController {
     ) {
         requireCapability("inventory:role:manage");
         return ApiResult.of(200, "定额规则已更新", objectMapper.convertValue(quotaGovernanceService.updateRule(ruleId, toJson(payload)), Map.class));
+    }
+
+    @PostMapping("/inventory-api/quota-governance/rules")
+    public ApiResult<Map<String, Object>> createInventoryQuotaRule(@RequestBody Map<String, Object> payload) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已新增", objectMapper.convertValue(quotaGovernanceService.createRule(toJson(payload)), Map.class));
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/inventory-api/quota-governance/rules/{ruleId}")
+    public ApiResult<Map<String, Object>> deleteInventoryQuotaRule(
+        @org.springframework.web.bind.annotation.PathVariable String ruleId
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已删除", objectMapper.convertValue(quotaGovernanceService.deleteRule(ruleId), Map.class));
+    }
+
+    @PutMapping("/inventory-api/quota-governance/rules/batch")
+    public ApiResult<Map<String, Object>> updateInventoryQuotaRulesBatch(@RequestBody Map<String, Object> payload) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额规则已批量保存", objectMapper.convertValue(quotaGovernanceService.updateRulesBatch(toJson(payload)), Map.class));
+    }
+
+    @PostMapping("/inventory-api/quota-governance/console-save")
+    public ApiResult<Map<String, Object>> consoleSaveInventoryQuota(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        JsonNode request = toJson(payload);
+        ObjectNode result = quotaGovernanceService.consoleSave(request, user);
+        if (request.path("applyToday").asBoolean(false) && result.hasNonNull("savedVersionId")) {
+            result.set("applyTodayResult", departmentDraftService.applyVersionToday(result.get("savedVersionId").asText(), user));
+        }
+        return ApiResult.of(200, "定额控制台已保存", objectMapper.convertValue(result, Map.class));
+    }
+
+    @PostMapping("/inventory-api/quota-governance/apply-today")
+    public ApiResult<Map<String, Object>> applyInventoryQuotaToday(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额已应用到当日未填报科室", objectMapper.convertValue(departmentDraftService.applyVersionToday(toJson(payload).path("versionId").asText(""), user), Map.class));
     }
 
     @PutMapping("/inventory-api/quota-governance/special-rules")

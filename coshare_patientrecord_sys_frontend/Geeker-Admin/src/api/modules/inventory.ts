@@ -120,6 +120,35 @@ export interface InventoryQuotaGovernance {
   rules: InventoryQuotaRule[];
 }
 
+export interface InventoryQuotaRuleCreatePayload {
+  departmentKey: string;
+  materialName: string;
+  unit: string;
+  serviceGroup: string;
+  careType: string;
+  standardQuantity: number | null;
+  fixedAdjustment: number;
+  measurementScope: InventoryQuotaRule["measurementScope"];
+  enabled?: boolean;
+}
+
+export interface InventoryQuotaApplyTodayResult {
+  versionId: string;
+  versionCode: string;
+  effectiveDate: string;
+  seededDepartments: string[];
+  seededCount: number;
+  skippedCount: number;
+}
+
+export interface InventoryQuotaConsoleSaveResult extends InventoryQuotaGovernance {
+  savedVersionId?: string;
+  savedVersionCode?: string;
+  savedEffectiveDate?: string;
+  applyTodayRequested?: boolean;
+  applyTodayResult?: InventoryQuotaApplyTodayResult;
+}
+
 export interface InventoryDailyRollupQuery {
   [key: string]: string | undefined;
   date?: string;
@@ -1487,6 +1516,11 @@ const putInventoryData = async <T, P extends object>(path: string, payload: P) =
   return response(await parseInventoryDataResponse<T>(result));
 };
 
+const deleteInventoryData = async <T>(path: string) => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}`, { method: "DELETE", headers: authHeaders() });
+  return response(await parseInventoryDataResponse<T>(result));
+};
+
 const response = <T>(data: T, msg = "成功") =>
   Promise.resolve({
     code: 200 as unknown as string,
@@ -1508,8 +1542,11 @@ export const getInventoryDepartmentDailyDraftSummaryApi = async (date: string) =
 export const getInventoryDepartmentDailyRollupApi = async (query: InventoryDailyRollupQuery) =>
   getInventoryData<InventoryAdminDepartmentDailyRollup>("/department-daily-drafts/admin-rollup", query);
 
-export const getInventoryQuotaGovernanceApi = async (date?: string) =>
-  getInventoryData<InventoryQuotaGovernance>("/quota-governance", date ? { date } : undefined);
+export const getInventoryQuotaGovernanceApi = async (date?: string, versionId?: string) =>
+  getInventoryData<InventoryQuotaGovernance>(
+    "/quota-governance",
+    { ...(date ? { date } : {}), ...(versionId ? { versionId } : {}) }
+  );
 
 export const createInventoryQuotaVersionApi = async (payload: {
   versionCode: string;
@@ -1521,6 +1558,30 @@ export const updateInventoryQuotaRuleApi = async (
   ruleId: string,
   payload: Pick<InventoryQuotaRule, "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">
 ) => putInventoryData<InventoryQuotaGovernance, typeof payload>(`/quota-governance/rules/${encodeURIComponent(ruleId)}`, payload);
+
+export const createInventoryQuotaRuleApi = async (payload: InventoryQuotaRuleCreatePayload & { versionId?: string }) =>
+  postInventoryData<InventoryQuotaGovernance, typeof payload>("/quota-governance/rules", payload);
+
+export const deleteInventoryQuotaRuleApi = async (ruleId: string) =>
+  deleteInventoryData<InventoryQuotaGovernance>(`/quota-governance/rules/${encodeURIComponent(ruleId)}`);
+
+export const updateInventoryQuotaRulesBatchApi = async (payload: {
+  rules: Array<Pick<InventoryQuotaRule, "id" | "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">>;
+}) => putInventoryData<InventoryQuotaGovernance, typeof payload>("/quota-governance/rules/batch", payload);
+
+export const consoleSaveInventoryQuotaApi = async (payload: {
+  versionId?: string;
+  effectiveDate?: string;
+  versionCode?: string;
+  baseVersionId?: string;
+  updates?: Array<Pick<InventoryQuotaRule, "id" | "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">>;
+  creates?: InventoryQuotaRuleCreatePayload[];
+  deletes?: string[];
+  applyToday?: boolean;
+}) => postInventoryData<InventoryQuotaConsoleSaveResult, typeof payload>("/quota-governance/console-save", payload);
+
+export const applyInventoryQuotaTodayApi = async (versionId: string) =>
+  postInventoryData<InventoryQuotaApplyTodayResult, { versionId: string }>("/quota-governance/apply-today", { versionId });
 
 export const saveInventoryQuotaReviewApi = async (payload: {
   businessDate: string;

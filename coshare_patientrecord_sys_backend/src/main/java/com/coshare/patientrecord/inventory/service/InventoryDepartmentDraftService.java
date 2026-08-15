@@ -950,7 +950,20 @@ public class InventoryDepartmentDraftService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "耗材明细格式不正确");
         }
         int expectedRevision = Math.max(payload.path("revision").asInt(0), 0);
+        DraftVersion current = jdbcTemplate.query(
+            "SELECT id, revision, raw_json FROM inventory_department_daily_drafts WHERE department_key = ? AND business_date = ? FOR UPDATE",
+            resultSet -> resultSet.next()
+                ? new DraftVersion(resultSet.getString("id"), resultSet.getInt("revision"), text(readJson(resultSet.getString("raw_json")), "quotaVersionId"))
+                : null,
+            departmentKey,
+            businessDate
+        );
         InventoryQuotaGovernanceService.QuotaVersion quotaVersion = quotaGovernanceService.activeVersion(businessDate);
+        if (current != null && !current.quotaVersionId().isBlank()
+            && (quotaVersion == null || !current.quotaVersionId().equals(quotaVersion.id()))) {
+            InventoryQuotaGovernanceService.QuotaVersion pinned = quotaGovernanceService.versionById(current.quotaVersionId());
+            if (pinned != null) quotaVersion = pinned;
+        }
         String templateVersion = quotaVersion == null ? "department-template-v1" : quotaVersion.versionCode();
         ObjectNode stored = JsonNodeFactory.instance.objectNode();
         stored.put("monthDays", Math.max(1, Math.min(payload.path("monthDays").asInt(30), 31)));
@@ -966,12 +979,6 @@ public class InventoryDepartmentDraftService {
         }
         stored.set("lines", canonicalLines(lines, groupVolumes, departmentKey, quotaVersion));
 
-        DraftVersion current = jdbcTemplate.query(
-            "SELECT id, revision FROM inventory_department_daily_drafts WHERE department_key = ? AND business_date = ? FOR UPDATE",
-            resultSet -> resultSet.next() ? new DraftVersion(resultSet.getString("id"), resultSet.getInt("revision")) : null,
-            departmentKey,
-            businessDate
-        );
         if (current == null) {
             if (expectedRevision != 0) throw staleDraft();
             jdbcTemplate.update(
@@ -1238,6 +1245,8 @@ public class InventoryDepartmentDraftService {
         return departmentName;
     }
 
+    public static Map<String, String> departmentDirectory() { return DEPARTMENTS; }
+
     private LocalDate parseDate(String value) {
         try {
             return LocalDate.parse(value);
@@ -1293,9 +1302,8 @@ public class InventoryDepartmentDraftService {
             int sourceRow = nonNegativeInteger(line.get("sourceRow"));
             boolean supplemental = line.path("isSupplemental").asBoolean(false);
             InventoryQuotaGovernanceService.QuotaRule rule = rules.get(sourceRow);
-            if (quotaVersion != null && !supplemental && rule == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "存在不属于当前冻结定额版本的耗材行");
-            }
+            // 规则已被删除或停用时，既有行降级为补充行快照保留，不再阻断保存
+            supplemental = supplemental || (quotaVersion != null && rule == null);
             ObjectNode canonical = result.addObject();
             String materialName = rule == null ? textValue(line, "materialName") : rule.materialName();
             String unit = rule == null ? textValue(line, "unit") : rule.unit();
@@ -1343,7 +1351,10 @@ public class InventoryDepartmentDraftService {
     }
 
     private void applyQuotaTemplate(ObjectNode result, String departmentKey, LocalDate businessDate) {
-        InventoryQuotaGovernanceService.QuotaVersion version = quotaGovernanceService.activeVersion(businessDate);
+        applyQuotaTemplate(result, departmentKey, quotaGovernanceService.activeVersion(businessDate));
+    }
+
+    private void applyQuotaTemplate(ObjectNode result, String departmentKey, InventoryQuotaGovernanceService.QuotaVersion version) {
         if (version == null) {
             result.put("frozenQuota", false);
             return;
@@ -1364,6 +1375,58 @@ public class InventoryDepartmentDraftService {
             groupVolumes.put(rule.serviceGroup(), 0);
         }
         result.put("quotaVersionId", version.id()); result.put("quotaVersionCode", version.versionCode()); result.put("quotaEffectiveDate", version.effectiveDate().toString()); result.put("frozenQuota", true); result.put("templateVersion", version.versionCode());
+    }
+
+    /** 方案B「当日即时应用」：仅对当日尚未填报的科室，用指定定额版本预播种草稿，不触碰任何既有草稿。 */
+    @Transactional
+    public ObjectNode applyVersionToday(String versionId, SessionUser user) {
+        requireAdministrator(user);
+        InventoryQuotaGovernanceService.QuotaVersion version = quotaGovernanceService.versionById(versionId);
+        if (version == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "定额版本不存在");
+        LocalDate today = LocalDate.now();
+        ObjectNode result = JsonNodeFactory.instance.objectNode();
+        result.put("versionId", version.id());
+        result.put("versionCode", version.versionCode());
+        result.put("effectiveDate", version.effectiveDate().toString());
+        ArrayNode seeded = result.putArray("seededDepartments");
+        int skipped = 0;
+        for (Map.Entry<String, String> department : DEPARTMENTS.entrySet()) {
+            Boolean exists = jdbcTemplate.query(
+                "SELECT 1 FROM inventory_department_daily_drafts WHERE department_key = ? AND business_date = ? LIMIT 1",
+                ResultSet::next,
+                department.getKey(),
+                today
+            );
+            if (Boolean.TRUE.equals(exists)) { skipped++; continue; }
+            ObjectNode stored = JsonNodeFactory.instance.objectNode();
+            stored.put("monthDays", 30);
+            applyQuotaTemplate(stored, department.getKey(), version);
+            if (!stored.path("lines").isArray() || stored.path("lines").isEmpty()) { skipped++; continue; }
+            try {
+                jdbcTemplate.update(
+                    "INSERT INTO inventory_department_daily_drafts "
+                        + "(id, department_key, department_name, business_date, template_version, revision, operator_name, operator_username, raw_json) "
+                        + "VALUES (?, ?, ?, ?, ?, 1, ?, ?, CAST(? AS JSON))",
+                    "inv-department-draft-" + UUID.randomUUID(),
+                    department.getKey(),
+                    department.getValue(),
+                    today,
+                    version.versionCode(),
+                    user.name(),
+                    user.username(),
+                    json(stored)
+                );
+                seeded.add(department.getValue());
+            } catch (RuntimeException ignored) {
+                skipped++;
+            }
+        }
+        result.put("seededCount", seeded.size());
+        result.put("skippedCount", skipped);
+        if (!seeded.isEmpty()) {
+            repository.log(user.name(), "定额控制台当日即时应用", "department_daily_draft", version.versionCode() + " " + today, "为 " + seeded.size() + " 个未填报科室预播种当日草稿");
+        }
+        return result;
     }
 
     private static int combinedVolume(Map<String, Integer> volumes, java.util.Collection<InventoryQuotaGovernanceService.QuotaRule> rules) {
@@ -1527,5 +1590,5 @@ public class InventoryDepartmentDraftService {
         return Map.copyOf(result);
     }
 
-    private record DraftVersion(String id, int revision) {}
+    private record DraftVersion(String id, int revision, String quotaVersionId) {}
 }

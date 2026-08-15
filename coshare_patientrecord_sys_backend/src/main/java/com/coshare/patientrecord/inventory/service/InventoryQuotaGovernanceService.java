@@ -2,6 +2,7 @@ package com.coshare.patientrecord.inventory.service;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,8 +24,12 @@ public class InventoryQuotaGovernanceService {
     private static final List<String> SCOPES = List.of("OUTPATIENT", "INPATIENT", "COMBINED", "OTHER");
     private static final List<String> REVIEW_STATUSES = List.of("PENDING", "EXPLAINED", "REVIEWED", "CLOSED");
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
-    public InventoryQuotaGovernanceService(JdbcTemplate jdbcTemplate) { this.jdbcTemplate = jdbcTemplate; }
+    public InventoryQuotaGovernanceService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
+    }
 
     @Transactional(readOnly = true)
     public QuotaVersion activeVersion(LocalDate date) {
@@ -53,14 +58,37 @@ public class InventoryQuotaGovernanceService {
     }
 
     @Transactional(readOnly = true)
-    public ObjectNode governance(LocalDate date) {
+    public QuotaVersion versionById(String versionId) {
+        if (versionId == null || versionId.isBlank()) return null;
+        List<QuotaVersion> rows = jdbcTemplate.query(
+            "SELECT id, version_code, effective_date, status FROM inventory_quota_versions WHERE id = ?",
+            (rs, rowNum) -> new QuotaVersion(rs.getString("id"), rs.getString("version_code"), rs.getDate("effective_date").toLocalDate(), rs.getString("status")), versionId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    @Transactional(readOnly = true)
+    public QuotaVersion editableVersion() {
+        List<QuotaVersion> rows = jdbcTemplate.query(
+            "SELECT id, version_code, effective_date, status FROM inventory_quota_versions ORDER BY effective_date DESC, created_at DESC LIMIT 1",
+            (rs, rowNum) -> new QuotaVersion(rs.getString("id"), rs.getString("version_code"), rs.getDate("effective_date").toLocalDate(), rs.getString("status")));
+        if (rows.isEmpty()) return null;
+        QuotaVersion latest = rows.get(0);
+        return latest.effectiveDate().isAfter(LocalDate.now()) ? latest : null;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode governance(LocalDate date) { return governance(date, null); }
+
+    @Transactional(readOnly = true)
+    public ObjectNode governance(LocalDate date, String versionId) {
         LocalDate queryDate = date == null ? LocalDate.now() : date;
         ArrayNode versions = JsonNodeFactory.instance.arrayNode();
         jdbcTemplate.query("SELECT id, version_code, effective_date, status, created_by, confirmed_by, created_at, updated_at FROM inventory_quota_versions ORDER BY effective_date DESC", rs -> {
             ObjectNode row = versions.addObject();
             row.put("id", rs.getString("id")); row.put("versionCode", rs.getString("version_code")); row.put("effectiveDate", rs.getDate("effective_date").toLocalDate().toString()); row.put("status", rs.getString("status")); row.put("createdBy", rs.getString("created_by")); row.put("confirmedBy", rs.getString("confirmed_by")); row.put("createdAt", rs.getTimestamp("created_at").toLocalDateTime().toString()); row.put("updatedAt", rs.getTimestamp("updated_at").toLocalDateTime().toString());
         });
-        QuotaVersion active = activeVersion(queryDate);
+        QuotaVersion active = versionId == null || versionId.isBlank() ? activeVersion(queryDate) : versionById(versionId);
+        if (versionId != null && !versionId.isBlank() && active == null) throw badRequest("定额版本不存在");
         ArrayNode rules = JsonNodeFactory.instance.arrayNode();
         if (active != null) {
             jdbcTemplate.query(
@@ -85,30 +113,240 @@ public class InventoryQuotaGovernanceService {
 
     @Transactional
     public ObjectNode createVersion(JsonNode payload, SessionUser user) {
-        String code = required(payload, "versionCode", 64); LocalDate effectiveDate;
+        LocalDate effectiveDate;
         try { effectiveDate = LocalDate.parse(text(payload, "effectiveDate")); } catch (RuntimeException error) { throw badRequest("生效日期无效"); }
         if (!effectiveDate.isAfter(LocalDate.now())) throw badRequest("新定额版本必须设置为未来生效");
+        String code = text(payload, "versionCode");
+        boolean autoCode = code.isBlank();
+        if (autoCode) code = autoVersionCode(effectiveDate);
         String baseVersionId = text(payload, "baseVersionId");
         if (baseVersionId.isBlank()) { QuotaVersion active = activeVersion(LocalDate.now()); if (active == null) throw badRequest("当前没有可复制的定额版本"); baseVersionId = active.id(); }
         Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM inventory_quota_versions WHERE id = ?", Integer.class, baseVersionId);
         if (count == null || count == 0) throw badRequest("复制来源版本不存在");
         String id = "quota-" + UUID.randomUUID();
-        try {
-            jdbcTemplate.update("INSERT INTO inventory_quota_versions (id, version_code, effective_date, status, created_by, confirmed_by) VALUES (?, ?, ?, 'ACTIVE', ?, ?)", id, code, effectiveDate, user.username(), user.username());
-            jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled) SELECT CONCAT('qr-', UUID()), ?, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE version_id = ?", id, baseVersionId);
-        } catch (RuntimeException error) { throw new ResponseStatusException(HttpStatus.CONFLICT, "版本号或生效日期已存在", error); }
+        int attempts = 0;
+        while (true) {
+            try {
+                jdbcTemplate.update("INSERT INTO inventory_quota_versions (id, version_code, effective_date, status, created_by, confirmed_by) VALUES (?, ?, ?, 'ACTIVE', ?, ?)", id, code, effectiveDate, user.username(), user.username());
+                break;
+            } catch (RuntimeException error) {
+                if (!autoCode || ++attempts > 3) throw new ResponseStatusException(HttpStatus.CONFLICT, "版本号或生效日期已存在", error);
+                code = autoVersionCode(effectiveDate) + "-" + (attempts + 1);
+            }
+        }
+        jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled) SELECT CONCAT('qr-', UUID()), ?, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE version_id = ?", id, baseVersionId);
         return governance(effectiveDate);
+    }
+
+    private static String autoVersionCode(LocalDate effectiveDate) { return "Q-" + effectiveDate.toString().replace("-", ""); }
+
+    @Transactional(readOnly = true)
+    public QuotaVersion versionOfRule(String ruleId) {
+        List<QuotaVersion> rows = jdbcTemplate.query(
+            "SELECT v.id, v.version_code, v.effective_date, v.status FROM inventory_quota_rules r JOIN inventory_quota_versions v ON v.id = r.version_id WHERE r.id = ?",
+            (rs, rowNum) -> new QuotaVersion(rs.getString("id"), rs.getString("version_code"), rs.getDate("effective_date").toLocalDate(), rs.getString("status")), ruleId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private QuotaVersion requireEditableVersion(QuotaVersion version) {
+        if (version == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "定额规则不存在");
+        if (!version.effectiveDate().isAfter(LocalDate.now())) throw badRequest("已生效版本已冻结，请复制为未来版本后修改");
+        return version;
+    }
+
+    private void applyRuleUpdate(String ruleId, JsonNode payload) {
+        String scope = required(payload, "measurementScope", 24).toUpperCase(); if (!SCOPES.contains(scope)) throw badRequest("计量范围无效");
+        Double standard = nullableNonNegative(payload.get("standardQuantity")); double adjustment = finite(payload.get("fixedAdjustment"), 0); boolean enabled = payload.path("enabled").asBoolean(true);
+        jdbcTemplate.update("UPDATE inventory_quota_rules SET standard_quantity = ?, fixed_adjustment = ?, measurement_scope = ?, enabled = ? WHERE id = ?", standard, adjustment, scope, enabled, ruleId);
     }
 
     @Transactional
     public ObjectNode updateRule(String ruleId, JsonNode payload) {
-        LocalDate effectiveDate = jdbcTemplate.query("SELECT v.effective_date FROM inventory_quota_rules r JOIN inventory_quota_versions v ON v.id = r.version_id WHERE r.id = ?", rs -> rs.next() ? rs.getDate(1).toLocalDate() : null, ruleId);
-        if (effectiveDate == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "定额规则不存在");
-        if (!effectiveDate.isAfter(LocalDate.now())) throw badRequest("已生效版本已冻结，请复制为未来版本后修改");
+        QuotaVersion version = requireEditableVersion(versionOfRule(ruleId));
+        applyRuleUpdate(ruleId, payload);
+        return governance(version.effectiveDate(), version.id());
+    }
+
+    @Transactional
+    public ObjectNode updateRulesBatch(JsonNode payload) {
+        JsonNode rules = payload == null ? null : payload.path("rules");
+        if (rules == null || !rules.isArray() || rules.isEmpty()) throw badRequest("没有需要保存的定额规则");
+        LocalDate latestEffective = null; String latestVersionId = null;
+        for (JsonNode rule : rules) {
+            String ruleId = text(rule, "id");
+            if (ruleId.isBlank()) throw badRequest("定额规则 id 缺失");
+            QuotaVersion version = requireEditableVersion(versionOfRule(ruleId));
+            applyRuleUpdate(ruleId, rule);
+            if (latestEffective == null || version.effectiveDate().isAfter(latestEffective)) { latestEffective = version.effectiveDate(); latestVersionId = version.id(); }
+        }
+        return governance(latestEffective, latestVersionId);
+    }
+
+    private QuotaVersion resolveConsoleVersion(String versionId) {
+        if (versionId != null && !versionId.isBlank()) return requireEditableVersion(versionById(versionId));
+        QuotaVersion editable = editableVersion();
+        if (editable == null) throw badRequest("请先创建未来生效的定额版本");
+        return requireEditableVersion(editable);
+    }
+
+    private QuotaRule insertRule(QuotaVersion version, JsonNode payload) {
+        String departmentKey = required(payload, "departmentKey", 64);
+        String departmentName = InventoryDepartmentDraftService.departmentDirectory().get(departmentKey);
+        if (departmentName == null) throw badRequest("未知科室：" + departmentKey);
+        String materialName = required(payload, "materialName", 255);
+        String unit = text(payload, "unit");
+        if (unit.length() > 64) throw badRequest("耗材单位过长");
+        String serviceGroup = text(payload, "serviceGroup");
+        if (serviceGroup.length() > 128) throw badRequest("服务项目过长");
+        String careType = text(payload, "careType");
+        if (careType.length() > 32) throw badRequest("照护类型过长");
         String scope = required(payload, "measurementScope", 24).toUpperCase(); if (!SCOPES.contains(scope)) throw badRequest("计量范围无效");
         Double standard = nullableNonNegative(payload.get("standardQuantity")); double adjustment = finite(payload.get("fixedAdjustment"), 0); boolean enabled = payload.path("enabled").asBoolean(true);
-        jdbcTemplate.update("UPDATE inventory_quota_rules SET standard_quantity = ?, fixed_adjustment = ?, measurement_scope = ?, enabled = ? WHERE id = ?", standard, adjustment, scope, enabled, ruleId);
-        return governance(effectiveDate);
+        Integer duplicate = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM inventory_quota_rules WHERE version_id = ? AND department_key = ? AND material_name = ? AND unit = ?", Integer.class, version.id(), departmentKey, materialName, unit);
+        if (duplicate != null && duplicate > 0) throw new ResponseStatusException(HttpStatus.CONFLICT, departmentName + " 已存在同名耗材的定额规则");
+        Integer maxRow = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(source_row), 0) FROM inventory_quota_rules WHERE version_id = ? AND department_key = ?", Integer.class, version.id(), departmentKey);
+        int sourceRow = (maxRow == null ? 0 : maxRow) + 1;
+        String id = "qr-" + UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, version.id(), departmentKey, departmentName, sourceRow, serviceGroup, careType, materialName, unit, standard, adjustment, scope, enabled);
+        return new QuotaRule(id, version.id(), departmentKey, departmentName, sourceRow, serviceGroup, careType, materialName, unit, standard, adjustment, scope, enabled);
+    }
+
+    @Transactional
+    public ObjectNode createRule(JsonNode payload) {
+        QuotaVersion version = resolveConsoleVersion(text(payload, "versionId"));
+        insertRule(version, payload);
+        return governance(version.effectiveDate(), version.id());
+    }
+
+    @Transactional
+    public ObjectNode deleteRule(String ruleId) {
+        QuotaVersion version = requireEditableVersion(versionOfRule(ruleId));
+        jdbcTemplate.update("DELETE FROM inventory_quota_rules WHERE id = ?", ruleId);
+        cascadeRemoveRuleFromTodaysDrafts(ruleId);
+        return governance(version.effectiveDate(), version.id());
+    }
+
+    /** 删除规则后，当日（含未来）草稿中尚未填报实际使用量的对应行直接移除；已填报行保留，由下次保存时降级为补充行快照。 */
+    private void cascadeRemoveRuleFromTodaysDrafts(String ruleId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT id, raw_json FROM inventory_department_daily_drafts WHERE business_date >= ?",
+            LocalDate.now()
+        );
+        for (Map<String, Object> row : rows) {
+            JsonNode parsed;
+            try { parsed = objectMapper.readTree(String.valueOf(row.get("raw_json"))); } catch (Exception ignored) { continue; }
+            if (!parsed.isObject()) continue;
+            JsonNode lines = parsed.path("lines");
+            if (!lines.isArray() || lines.isEmpty()) continue;
+            boolean changed = false;
+            ArrayNode filtered = JsonNodeFactory.instance.arrayNode();
+            for (JsonNode line : lines) {
+                boolean matches = ruleId.equals(text(line, "lineKey")) || ruleId.equals(text(line, "id"));
+                boolean filled = line.path("actualQuantity").isNumber();
+                if (matches && !filled) { changed = true; continue; }
+                filtered.add(line);
+            }
+            if (!changed) continue;
+            try {
+                jdbcTemplate.update(
+                    "UPDATE inventory_department_daily_drafts SET raw_json = CAST(? AS JSON) WHERE id = ?",
+                    objectMapper.writeValueAsString(((ObjectNode) parsed).set("lines", filtered)),
+                    String.valueOf(row.get("id"))
+                );
+            } catch (Exception ignored) {
+                // 级联清理尽力而为；失败时该行仍会在下次保存时降级为补充行
+            }
+        }
+    }
+
+    @Transactional
+    public ObjectNode consoleSave(JsonNode payload, SessionUser user) {
+        JsonNode updates = payload.path("updates");
+        JsonNode creates = payload.path("creates");
+        JsonNode deletes = payload.path("deletes");
+        boolean hasChanges = (updates.isArray() && !updates.isEmpty()) || (creates.isArray() && !creates.isEmpty()) || (deletes.isArray() && !deletes.isEmpty());
+        if (!hasChanges) throw badRequest("没有需要保存的变更");
+        String requestedVersionId = text(payload, "versionId");
+        QuotaVersion target;
+        Map<String, String> ruleIdRemap = Map.of();
+        if (!requestedVersionId.isBlank()) {
+            target = requireEditableVersion(versionById(requestedVersionId));
+        } else {
+            target = editableVersion();
+            if (target == null) {
+                LocalDate effectiveDate;
+                String requested = text(payload, "effectiveDate");
+                if (requested.isBlank()) effectiveDate = LocalDate.now().plusDays(1);
+                else { try { effectiveDate = LocalDate.parse(requested); } catch (RuntimeException error) { throw badRequest("生效日期无效"); } }
+                if (!effectiveDate.isAfter(LocalDate.now())) throw badRequest("新定额版本必须设置为未来生效");
+                String baseVersionId = text(payload, "baseVersionId");
+                QuotaVersion base = baseVersionId.isBlank() ? activeVersion(LocalDate.now()) : versionById(baseVersionId);
+                if (base == null) throw badRequest("当前没有可复制的定额版本");
+                ObjectNode created = JsonNodeFactory.instance.objectNode();
+                created.put("effectiveDate", effectiveDate.toString());
+                String requestedCode = text(payload, "versionCode");
+                if (!requestedCode.isBlank()) created.put("versionCode", requestedCode);
+                createVersion(created, user);
+                target = requireEditableVersion(editableVersion());
+                if (target == null) throw badRequest("创建未来定额版本失败");
+                ruleIdRemap = ruleIdRemap(base.id(), target.id());
+            }
+        }
+        QuotaVersion finalTarget = target;
+        if (updates.isArray()) {
+            for (JsonNode rule : updates) {
+                String ruleId = text(rule, "id");
+                if (ruleId.isBlank()) throw badRequest("定额规则 id 缺失");
+                String resolvedId = ruleIdRemap.getOrDefault(ruleId, ruleId);
+                QuotaVersion ruleVersion = requireEditableVersion(versionOfRule(resolvedId));
+                if (!ruleVersion.id().equals(finalTarget.id())) throw badRequest("存在不属于目标版本的定额规则，请刷新后重试");
+                applyRuleUpdate(resolvedId, rule);
+            }
+        }
+        if (creates.isArray()) for (JsonNode create : creates) insertRule(finalTarget, create);
+        if (deletes.isArray()) {
+            for (JsonNode delete : deletes) {
+                String ruleId = delete.asText("");
+                if (ruleId.isBlank()) continue;
+                String resolvedId = ruleIdRemap.getOrDefault(ruleId, ruleId);
+                QuotaVersion ruleVersion = requireEditableVersion(versionOfRule(resolvedId));
+                if (!ruleVersion.id().equals(finalTarget.id())) throw badRequest("存在不属于目标版本的定额规则，请刷新后重试");
+                jdbcTemplate.update("DELETE FROM inventory_quota_rules WHERE id = ?", resolvedId);
+                cascadeRemoveRuleFromTodaysDrafts(resolvedId);
+            }
+        }
+        ObjectNode result = governance(finalTarget.effectiveDate(), finalTarget.id());
+        result.put("savedVersionId", finalTarget.id());
+        result.put("savedVersionCode", finalTarget.versionCode());
+        result.put("savedEffectiveDate", finalTarget.effectiveDate().toString());
+        if (payload.path("applyToday").asBoolean(false)) result.put("applyTodayRequested", true);
+        return result;
+    }
+
+    /** 自动建版后，把前端基于旧版本提交的规则 id 映射到新版本规则 id（按科室 + 行号对齐）。 */
+    private Map<String, String> ruleIdRemap(String fromVersionId, String toVersionId) {
+        Map<String, String> fromKeys = ruleKeysByVersion(fromVersionId);
+        Map<String, String> toKeys = ruleKeysByVersion(toVersionId);
+        Map<String, String> result = new java.util.HashMap<>();
+        for (Map.Entry<String, String> entry : fromKeys.entrySet()) {
+            String toId = toKeys.get(entry.getKey());
+            if (toId != null) result.put(entry.getValue(), toId);
+        }
+        return result;
+    }
+
+    private Map<String, String> ruleKeysByVersion(String versionId) {
+        Map<String, String> result = new java.util.HashMap<>();
+        jdbcTemplate.query(
+            "SELECT id, department_key, source_row FROM inventory_quota_rules WHERE version_id = ?",
+            (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                while (rs.next()) result.put(rs.getString("department_key") + "\u0000" + rs.getInt("source_row"), rs.getString("id"));
+                return null;
+            },
+            versionId
+        );
+        return result;
     }
 
     @Transactional

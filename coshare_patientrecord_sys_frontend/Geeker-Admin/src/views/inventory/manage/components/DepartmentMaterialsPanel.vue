@@ -3,78 +3,93 @@
     <header class="page-toolbar">
       <div class="page-title">
         <h1>科室套餐</h1>
-        <span>{{ selectedDepartment || "全部科室" }} · {{ visibleRows.length }} 项耗材</span>
+        <span>{{ workspace === "quota" ? "全院耗材每人次定额总控制台" : `${selectedDepartment || "全部科室"} · ${visibleRows.length} 项耗材` }}</span>
       </div>
-      <el-button :icon="Refresh" :loading="loading" @click="loadData">刷新</el-button>
+      <el-radio-group v-model="workspace">
+        <el-radio-button value="quota">每人次定额</el-radio-button>
+        <el-radio-button value="packages">自动扣减套餐</el-radio-button>
+      </el-radio-group>
     </header>
 
-    <div class="filters">
-      <el-select v-model="selectedDepartment" filterable clearable placeholder="选择科室" class="department-select">
-        <el-option v-for="department in departments" :key="department" :label="department" :value="department" />
-      </el-select>
-      <el-input v-model="keyword" clearable placeholder="搜索套餐或耗材" class="keyword-input" />
-      <span class="filter-summary">{{ dirtyPackageIds.size ? `${dirtyPackageIds.size} 个套餐待保存` : "已同步" }}</span>
-    </div>
+    <QuotaConsolePanel v-if="workspace === 'quota'" />
 
-    <el-table
-      v-loading="loading"
-      :data="visibleRows"
-      row-key="rowKey"
-      border
-      stripe
-      class="package-table"
-      height="calc(100vh - 190px)"
-    >
-      <el-table-column prop="department" label="科室" width="130" show-overflow-tooltip />
-      <el-table-column prop="packageName" label="预置套餐" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="unit" label="单位" width="80" />
-      <el-table-column prop="careTypeLabel" label="类型" width="78" />
-      <el-table-column label="状态" width="82">
-        <template #default="{ row }">
-          <el-tag :type="statusTag(row.package.status)" effect="plain" size="small">
-            {{ statusLabel(row.package.status) }}
-          </el-tag>
+    <template v-else>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="此处数量用于患者完成阶段时自动扣减库存，与「每人次定额」相互独立，不会影响科室耗材表的理论量。"
+      />
+      <div class="filters">
+        <el-select v-model="selectedDepartment" filterable clearable placeholder="选择科室" class="department-select">
+          <el-option v-for="department in departments" :key="department" :label="department" :value="department" />
+        </el-select>
+        <el-input v-model="keyword" clearable placeholder="搜索套餐或耗材" class="keyword-input" />
+        <span class="filter-summary">{{ dirtyPackageIds.size ? `${dirtyPackageIds.size} 个套餐待保存` : "已同步" }}</span>
+        <el-button :icon="Refresh" :loading="loading" @click="loadData">刷新</el-button>
+      </div>
+
+      <el-table
+        v-loading="loading"
+        :data="visibleRows"
+        row-key="rowKey"
+        border
+        stripe
+        class="package-table"
+        height="calc(100vh - 250px)"
+      >
+        <el-table-column prop="department" label="科室" width="130" show-overflow-tooltip />
+        <el-table-column prop="packageName" label="预置套餐" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="unit" label="单位" width="80" />
+        <el-table-column prop="careTypeLabel" label="类型" width="78" />
+        <el-table-column label="状态" width="82">
+          <template #default="{ row }">
+            <el-tag :type="statusTag(row.package.status)" effect="plain" size="small">
+              {{ statusLabel(row.package.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="使用量" width="150" align="right">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.package.lines[row.lineIndex].quantity"
+              :min="0"
+              :precision="2"
+              :step="1"
+              controls-position="right"
+              size="small"
+              @change="markChanged(row.package.id)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="88" fixed="right" align="right">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              :disabled="!isDirty(row.package.id)"
+              :loading="savingId === row.package.id"
+              @click="savePackage(row.package)"
+            >
+              保存
+            </el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无预置耗材清单" />
         </template>
-      </el-table-column>
-      <el-table-column label="使用量" width="150" align="right">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="row.package.lines[row.lineIndex].quantity"
-            :min="0"
-            :precision="2"
-            :step="1"
-            controls-position="right"
-            size="small"
-            @change="markChanged(row.package.id)"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="88" fixed="right" align="right">
-        <template #default="{ row }">
-          <el-button
-            link
-            type="primary"
-            :disabled="!isDirty(row.package.id)"
-            :loading="savingId === row.package.id"
-            @click="savePackage(row.package)"
-          >
-            保存
-          </el-button>
-        </template>
-      </el-table-column>
-      <template #empty>
-        <el-empty description="暂无预置耗材清单" />
-      </template>
-    </el-table>
+      </el-table>
+    </template>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/modules/user";
+import QuotaConsolePanel from "./QuotaConsolePanel.vue";
 import {
   getInventoryDbApi,
   saveInventoryPackageApi,
@@ -83,6 +98,8 @@ import {
   type InventoryPackage,
   type InventoryPackageStatus
 } from "@/api/modules/inventory";
+
+const workspace = ref<"quota" | "packages">("quota");
 
 const departmentCatalog = [
   "理疗室",
@@ -209,7 +226,13 @@ const statusLabel = (status: InventoryPackageStatus) => ({ draft: "草稿", enab
 const statusTag = (status: InventoryPackageStatus) =>
   ({ draft: "warning", enabled: "success", disabled: "info" })[status] as "warning" | "success" | "info";
 
-onMounted(loadData);
+onMounted(() => {
+  if (workspace.value === "packages") loadData();
+});
+
+watch(workspace, next => {
+  if (next === "packages" && !db.value && !loading.value) loadData();
+});
 </script>
 
 <style scoped lang="scss">
