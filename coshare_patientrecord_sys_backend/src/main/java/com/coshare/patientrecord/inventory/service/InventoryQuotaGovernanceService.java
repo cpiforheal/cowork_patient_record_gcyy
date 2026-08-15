@@ -6,11 +6,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.ByteArrayOutputStream;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -376,6 +388,141 @@ public class InventoryQuotaGovernanceService {
 
     public static String materialKey(String materialName, String unit) { return materialName.trim() + "\u0000" + unit.trim(); }
     public static String reviewKey(LocalDate date, String departmentKey, String lineKey) { return date + "\u0000" + departmentKey + "\u0000" + lineKey; }
+
+    @Transactional(readOnly = true)
+    public byte[] exportGovernanceXlsx(LocalDate date, String versionId, SessionUser user) {
+        ObjectNode report = governance(date, versionId);
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            CellStyle titleStyle = workbook.createCellStyle();
+            Font titleFont = workbook.createFont();
+            titleFont.setBold(true);
+            titleFont.setFontHeightInPoints((short) 14);
+            titleStyle.setFont(titleFont);
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            applyThinBorders(headerStyle);
+            CellStyle dataStyle = workbook.createCellStyle();
+            applyThinBorders(dataStyle);
+            CellStyle numberStyle = workbook.createCellStyle();
+            applyThinBorders(numberStyle);
+            numberStyle.setDataFormat(workbook.createDataFormat().getFormat("0.##"));
+
+            JsonNode active = report.path("activeVersion");
+            String versionCode = active.isObject() ? active.path("versionCode").asText("-") : "-";
+            String effectiveDate = active.isObject() ? active.path("effectiveDate").asText("-") : "-";
+            String versionStatus = active.isObject() ? active.path("status").asText("-") : "-";
+
+            Sheet rulesSheet = workbook.createSheet("定额规则总表");
+            int row = writeXlsxRow(rulesSheet, 0, titleStyle, "全院耗材每人次定额总表");
+            row = writeXlsxRow(rulesSheet, row, null, "定额版本", versionCode, "生效日期", effectiveDate, "版本状态", versionStatus);
+            row = writeXlsxRow(rulesSheet, row, null, "查询日期", report.path("queryDate").asText("-"), "导出时间", LocalDateTime.now().withNano(0).toString().replace("T", " "), "导出人", user.name() + "（" + user.username() + "）");
+            row++;
+            row = writeXlsxRow(rulesSheet, row, headerStyle, "科室", "服务项目", "照护类型", "耗材名称", "单位", "每人次定额", "固定调整", "计量范围", "排序行", "状态");
+            int headerRowIndex = row - 1;
+            for (JsonNode rule : report.path("rules")) {
+                Row dataRow = rulesSheet.createRow(row++);
+                writeTextCell(dataRow, 0, dataStyle, rule.path("departmentName").asText(""));
+                writeTextCell(dataRow, 1, dataStyle, rule.path("serviceGroup").asText(""));
+                writeTextCell(dataRow, 2, dataStyle, rule.path("careType").asText(""));
+                writeTextCell(dataRow, 3, dataStyle, rule.path("materialName").asText(""));
+                writeTextCell(dataRow, 4, dataStyle, rule.path("unit").asText(""));
+                JsonNode standard = rule.path("standardQuantity");
+                Cell standardCell = dataRow.createCell(5);
+                standardCell.setCellStyle(numberStyle);
+                if (standard.isNumber()) standardCell.setCellValue(standard.asDouble()); else standardCell.setBlank();
+                Cell adjustmentCell = dataRow.createCell(6);
+                adjustmentCell.setCellStyle(numberStyle);
+                adjustmentCell.setCellValue(rule.path("fixedAdjustment").asDouble(0));
+                writeTextCell(dataRow, 7, dataStyle, measurementScopeLabel(rule.path("measurementScope").asText("")));
+                Cell sourceRowCell = dataRow.createCell(8);
+                sourceRowCell.setCellStyle(numberStyle);
+                sourceRowCell.setCellValue(rule.path("sourceRow").asInt(0));
+                writeTextCell(dataRow, 9, dataStyle, rule.path("enabled").asBoolean(true) ? "启用" : "停用");
+            }
+            rulesSheet.createFreezePane(0, headerRowIndex + 1);
+            int[] rulesWidths = { 14, 22, 12, 26, 8, 12, 10, 16, 8, 8 };
+            for (int i = 0; i < rulesWidths.length; i++) rulesSheet.setColumnWidth(i, rulesWidths[i] * 256);
+
+            Sheet versionsSheet = workbook.createSheet("版本清单");
+            row = writeXlsxRow(versionsSheet, 0, titleStyle, "定额版本清单（按生效日期倒序）");
+            row = writeXlsxRow(versionsSheet, row, headerStyle, "版本号", "生效日期", "状态", "创建人", "确认人", "创建时间", "更新时间");
+            for (JsonNode version : report.path("versions")) {
+                row = writeXlsxRow(versionsSheet, row, dataStyle,
+                    version.path("versionCode").asText(""),
+                    version.path("effectiveDate").asText(""),
+                    version.path("status").asText(""),
+                    version.path("createdBy").asText(""),
+                    version.path("confirmedBy").asText(""),
+                    version.path("createdAt").asText("").replace("T", " "),
+                    version.path("updatedAt").asText("").replace("T", " "));
+            }
+            int[] versionsWidths = { 18, 14, 10, 14, 14, 22, 22 };
+            for (int i = 0; i < versionsWidths.length; i++) versionsSheet.setColumnWidth(i, versionsWidths[i] * 256);
+
+            Sheet glossarySheet = workbook.createSheet("口径说明");
+            row = writeXlsxRow(glossarySheet, 0, titleStyle, "口径说明");
+            row = writeXlsxRow(glossarySheet, row, headerStyle, "字段", "口径");
+            String[][] glossary = {
+                { "每人次定额", "单个患者人次（按计量范围口径）应消耗的耗材数量；为空表示该耗材不参与自动测算。" },
+                { "固定调整", "在“定额 × 人次”基础上额外增减的数量，可为负数。" },
+                { "理论使用量", "每人次定额 × 计量人次 + 固定调整；补充行按实际填报值计。" },
+                { "计量范围-OUTPATIENT", "按该服务项目的门诊人次计算。" },
+                { "计量范围-INPATIENT", "按该服务项目的住院床日计算。" },
+                { "计量范围-COMBINED", "按门诊人次与住院床日合并计算。" },
+                { "计量范围-OTHER", "人次在科室日报中手工填报。" },
+                { "导出口径", "导出内容为“查询日期/指定版本”下生效的全部定额规则；已生效历史版本只读，调整需在总控制台保存为未来版本。" }
+            };
+            for (String[] entry : glossary) row = writeXlsxRow(glossarySheet, row, dataStyle, entry[0], entry[1]);
+            glossarySheet.setColumnWidth(0, 26 * 256);
+            glossarySheet.setColumnWidth(1, 110 * 256);
+
+            workbook.write(output);
+            return output.toByteArray();
+        } catch (Exception error) {
+            throw new IllegalStateException("定额总表导出失败", error);
+        }
+    }
+
+    private static String measurementScopeLabel(String scope) {
+        return switch (scope == null ? "" : scope) {
+            case "OUTPATIENT" -> "门诊人次";
+            case "INPATIENT" -> "住院床日";
+            case "COMBINED" -> "门诊+住院";
+            case "OTHER" -> "手工人次";
+            default -> scope == null ? "" : scope;
+        };
+    }
+
+    private static void applyThinBorders(CellStyle style) {
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+    }
+
+    private static int writeXlsxRow(Sheet sheet, int rowIndex, CellStyle style, Object... values) {
+        Row row = sheet.createRow(rowIndex);
+        for (int i = 0; i < values.length; i++) {
+            Cell cell = row.createCell(i);
+            Object value = values[i];
+            if (value instanceof Number number) cell.setCellValue(number.doubleValue());
+            else cell.setCellValue(value == null ? "" : String.valueOf(value));
+            if (style != null) cell.setCellStyle(style);
+        }
+        return rowIndex + 1;
+    }
+
+    private static void writeTextCell(Row row, int column, CellStyle style, String value) {
+        Cell cell = row.createCell(column);
+        cell.setCellValue(value == null ? "" : value);
+        cell.setCellStyle(style);
+    }
+
     private static ObjectNode versionNode(QuotaVersion version) { ObjectNode row = JsonNodeFactory.instance.objectNode(); row.put("id", version.id()); row.put("versionCode", version.versionCode()); row.put("effectiveDate", version.effectiveDate().toString()); row.put("status", version.status()); return row; }
     private static ObjectNode ruleNode(QuotaRule rule) { ObjectNode row = JsonNodeFactory.instance.objectNode(); row.put("id", rule.id()); row.put("versionId", rule.versionId()); row.put("departmentKey", rule.departmentKey()); row.put("departmentName", rule.departmentName()); row.put("sourceRow", rule.sourceRow()); row.put("serviceGroup", rule.serviceGroup()); row.put("careType", rule.careType()); row.put("materialName", rule.materialName()); row.put("unit", rule.unit()); if (rule.standardQuantity() == null) row.putNull("standardQuantity"); else row.put("standardQuantity", rule.standardQuantity()); row.put("fixedAdjustment", rule.fixedAdjustment()); row.put("measurementScope", rule.measurementScope()); row.put("enabled", rule.enabled()); return row; }
     private static String required(JsonNode node, String field, int max) { String value = text(node, field); if (value.isBlank() || value.length() > max) throw badRequest(field + " 无效"); return value; }

@@ -1876,6 +1876,12 @@ export const downloadInventoryDepartmentDailyRollupXlsxApi = async (query: Inven
     `管理员12科室耗材日报-${inventoryDailyRollupFilename(query)}.xlsx`
   );
 
+export const downloadInventoryQuotaGovernanceXlsxApi = async (params: { date?: string; versionId?: string }) =>
+  downloadInventoryFile(
+    `/quota-governance/export.xlsx${buildInventoryQuery(params)}`,
+    `全院耗材每人次定额总表-${params.date || "当前版本"}.xlsx`
+  );
+
 export const downloadInventoryDepartmentPeriodReportApi = async (params: {
   departmentKey: string;
   periodType: "week" | "month";

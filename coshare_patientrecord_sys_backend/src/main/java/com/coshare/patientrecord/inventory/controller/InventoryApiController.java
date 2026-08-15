@@ -217,6 +217,19 @@ public class InventoryApiController {
         return ApiResult.of(200, "复核记录已保存", objectMapper.convertValue(quotaGovernanceService.saveReview(toJson(payload), user), Map.class));
     }
 
+    @GetMapping("/inventory-api/quota-governance/export.xlsx")
+    public ResponseEntity<byte[]> exportInventoryQuotaGovernanceXlsx(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String versionId
+    ) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return attachment(
+            quotaGovernanceService.exportGovernanceXlsx(date, versionId, user),
+            "全院耗材每人次定额总表-" + java.time.LocalDate.now() + ".xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+    }
+
     @GetMapping("/inventory-api/portal-accounts")
     public ApiResult<Map<String, Object>> inventoryPortalAccounts() {
         requireCapability("inventory:role:manage");

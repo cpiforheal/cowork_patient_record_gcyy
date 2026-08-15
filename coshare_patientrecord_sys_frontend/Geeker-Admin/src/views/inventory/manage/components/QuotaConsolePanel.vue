@@ -22,6 +22,9 @@
           <el-checkbox v-model="applyToday">当日即时应用</el-checkbox>
         </el-tooltip>
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
+        <el-tooltip content="导出当前查看版本的已保存定额规则（含版本清单与口径说明）" placement="top">
+          <el-button :icon="Download" :loading="exporting" @click="exportXlsx">导出XLSX</el-button>
+        </el-tooltip>
         <el-button :icon="Plus" type="primary" plain @click="openAdd">新增耗材</el-button>
         <el-button type="primary" :loading="saving" :disabled="!hasChanges" @click="save">
           {{ isEditable ? "保存修改" : "保存并创建明日版本" }}
@@ -174,9 +177,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Refresh } from "@element-plus/icons-vue";
+import { Download, Plus, Refresh } from "@element-plus/icons-vue";
 import {
   consoleSaveInventoryQuotaApi,
+  downloadInventoryQuotaGovernanceXlsxApi,
   getInventoryQuotaGovernanceApi,
   type InventoryQuotaConsoleSaveResult,
   type InventoryQuotaRule,
@@ -203,6 +207,7 @@ type ConsoleRow = InventoryQuotaRule & { pending?: boolean; rowKey: string };
 
 const loading = ref(false);
 const saving = ref(false);
+const exporting = ref(false);
 const loadError = ref("");
 const governance = ref<InventoryQuotaConsoleSaveResult>();
 const selectedVersionId = ref("");
@@ -307,6 +312,26 @@ const reload = () => {
     ElMessage.info("已撤销未保存的修改");
   }
   load();
+};
+
+const exportXlsx = async () => {
+  exporting.value = true;
+  try {
+    const { blob, filename } = await downloadInventoryQuotaGovernanceXlsxApi({
+      date: today,
+      versionId: selectedVersionId.value || undefined
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    ElMessage.error((error as Error).message || "定额总表导出失败");
+  } finally {
+    exporting.value = false;
+  }
 };
 
 watch(selectedVersionId, async next => {
