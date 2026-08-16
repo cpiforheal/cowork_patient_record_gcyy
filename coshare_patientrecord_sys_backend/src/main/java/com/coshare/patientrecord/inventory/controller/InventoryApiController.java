@@ -133,6 +133,16 @@ public class InventoryApiController {
         return ApiResult.success(databaseService.asMap(databaseService.departmentDailyDraftSummary(date, user)));
     }
 
+    @GetMapping("/inventory-api/department-daily-drafts/history")
+    public ApiResult<Map<String, Object>> departmentDailyDraftHistory(
+        @RequestParam String departmentKey,
+        @RequestParam LocalDate from,
+        @RequestParam LocalDate to
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(databaseService.asMap(databaseService.departmentDailyDraftHistory(departmentKey, from, to, user)));
+    }
+
     @GetMapping("/inventory-api/department-daily-drafts/admin-rollup")
     public ApiResult<Map<String, Object>> adminDepartmentDailyRollup(
         @RequestParam(required = false) LocalDate date,

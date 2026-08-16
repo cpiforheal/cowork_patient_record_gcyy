@@ -23,6 +23,17 @@
       </div>
     </div>
 
+    <div v-if="todayPending" class="fill-reminder" role="status">
+      <span class="reminder-dot" aria-hidden="true" />
+      <div class="reminder-text">
+        <strong>今日（{{ today }}）耗材日报尚未填报</strong>
+        <span>保存后才会计入全院汇总与定额核对{{ lastFilledDate ? `；最近一次填报：${lastFilledDate}` : "" }}</span>
+      </div>
+      <el-button v-if="lastFilledDate" size="small" type="primary" plain :loading="bringingLast" @click="applyLastFilledDraft">
+        带入 {{ lastFilledDate }} 填报值
+      </el-button>
+    </div>
+
     <div
       ref="workspaceGridRef"
       class="department-workspace-grid"
@@ -48,7 +59,10 @@
           </div>
           <div class="input-pane-tools">
             <el-button :icon="Plus" @click="addLine">新增耗材</el-button>
-            <el-button plain :icon="EditPen" @click="openExpandedEditor">展开编辑</el-button>
+            <el-tooltip v-if="!draft.revision && lastFilledDate" :content="`复制 ${lastFilledDate} 已保存的人次与用量，核对后再保存`" placement="top">
+              <el-button :icon="CopyDocument" :loading="bringingLast" @click="applyLastFilledDraft">带入上次填报</el-button>
+            </el-tooltip>
+            <el-button type="primary" plain class="expand-editor-btn" :icon="EditPen" @click="openExpandedEditor">展开编辑</el-button>
           </div>
         </div>
 
@@ -221,6 +235,47 @@
         </el-table>
       </section>
     </div>
+
+    <section class="draft-history-card" aria-label="填报历史日历">
+      <div class="history-toolbar">
+        <div>
+          <div class="history-eyebrow">填报历史 · {{ template.department }}</div>
+          <h3 class="history-title">{{ historyMonthLabel }} 填报日历</h3>
+          <p class="history-sub">
+            本月已填报 <b>{{ historyMonthStats.filled }}</b> 天<template v-if="historyMonthStats.missing">，缺报
+              <b class="history-missing-num">{{ historyMonthStats.missing }}</b> 天</template
+            >；点击日期可直接切换到该日填报。
+          </p>
+        </div>
+        <div class="history-actions">
+          <el-button :icon="ArrowLeft" circle aria-label="上个月" @click="shiftHistoryMonth(-1)" />
+          <el-button size="small" @click="resetHistoryMonth">本月</el-button>
+          <el-button :icon="ArrowRight" circle aria-label="下个月" @click="shiftHistoryMonth(1)" />
+        </div>
+      </div>
+      <div class="history-weekdays"><span v-for="label in historyWeekdayLabels" :key="label">{{ label }}</span></div>
+      <div v-loading="historyLoading" class="history-grid">
+        <button
+          v-for="cell in historyCells"
+          :key="cell.key"
+          type="button"
+          class="history-day"
+          :class="cell.classes"
+          :disabled="cell.disabled"
+          :aria-label="cell.ariaLabel"
+          @click="selectHistoryDate(cell)"
+        >
+          <span class="history-day-num">{{ cell.day || "" }}</span>
+          <span class="history-day-state">{{ cell.state }}</span>
+        </button>
+      </div>
+      <div class="history-legend">
+        <span><i class="legend-chip is-filled" />已填报</span>
+        <span><i class="legend-chip is-missing" />缺报</span>
+        <span><i class="legend-chip is-pending" />今日待填</span>
+        <span class="history-legend-note">浅灰为未到填报日，选中日会以描边标记</span>
+      </div>
+    </section>
 
     <el-dialog
       v-model="editorOpen"
@@ -414,12 +469,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
-import { Delete, DocumentChecked, EditPen, Plus, Refresh, RefreshLeft } from "@element-plus/icons-vue";
+import { ArrowLeft, ArrowRight, CopyDocument, Delete, DocumentChecked, EditPen, Plus, Refresh, RefreshLeft } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import {
   downloadInventoryDepartmentPeriodReportApi,
   getInventoryDepartmentAllocationPlanApi,
   getInventoryDepartmentDailyDraftApi,
+  getInventoryDepartmentDailyDraftHistoryApi,
   saveInventoryDepartmentAllocationPlanApi,
   saveInventoryDepartmentDailyDraftApi,
   type InventoryBatch,
@@ -427,6 +483,7 @@ import {
   type InventoryDepartmentAllocationPlanLine,
   type InventoryDepartmentDailyDraft,
   type InventoryDepartmentDraftCareType,
+  type InventoryDepartmentDraftHistoryDay,
   type InventoryDepartmentDraftLine,
   type InventoryItem
 } from "@/api/modules/inventory";
@@ -638,6 +695,162 @@ const allocationTagType = (status?: InventoryDepartmentAllocationPlanLine["statu
 const allocationStatusText = (status?: InventoryDepartmentAllocationPlanLine["status"]) =>
   status === "WARNING" ? "预警" : status === "PENDING" || !status ? "待设定" : "正常";
 
+type HistoryCell = {
+  key: string;
+  date: string;
+  day: number;
+  state: string;
+  disabled: boolean;
+  ariaLabel: string;
+  classes: Record<string, boolean>;
+};
+
+const draftHistory = ref(new Map<string, InventoryDepartmentDraftHistoryDay>());
+const historyMonth = ref("");
+const historyLoading = ref(false);
+const bringingLast = ref(false);
+const historyWeekdayLabels = ["一", "二", "三", "四", "五", "六", "日"];
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const monthOf = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+
+const loadHistory = async (month: string) => {
+  if (!template.value || !/^\d{4}-\d{2}$/.test(month)) return;
+  const [year, monthIndex] = month.split("-").map(Number);
+  const from = `${month}-01`;
+  const to = `${month}-${pad2(new Date(year, monthIndex, 0).getDate())}`;
+  historyLoading.value = true;
+  try {
+    const response = await getInventoryDepartmentDailyDraftHistoryApi({ departmentKey: template.value.key, from, to });
+    const merged = new Map(draftHistory.value);
+    response.data.days.forEach(day => merged.set(day.businessDate, day));
+    draftHistory.value = merged;
+  } catch {
+    // 历史加载失败不影响当日填报，仅日历缺少标记，切换月份时会重试。
+  } finally {
+    historyLoading.value = false;
+  }
+};
+
+const loadHistoryAround = (today: string) => {
+  if (!today) return;
+  historyMonth.value = today.slice(0, 7);
+  void loadHistory(historyMonth.value);
+  const [year, month] = historyMonth.value.split("-").map(Number);
+  void loadHistory(monthOf(new Date(year, month - 2, 1)));
+};
+
+const shiftHistoryMonth = (offset: number) => {
+  if (!historyMonth.value) return;
+  const [year, month] = historyMonth.value.split("-").map(Number);
+  historyMonth.value = monthOf(new Date(year, month - 1 + offset, 1));
+  void loadHistory(historyMonth.value);
+};
+
+const resetHistoryMonth = () => {
+  loadHistoryAround(props.today);
+};
+
+const historyCells = computed<HistoryCell[]>(() => {
+  if (!historyMonth.value) return [];
+  const [year, month] = historyMonth.value.split("-").map(Number);
+  const leadBlanks = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const cells: HistoryCell[] = [];
+  for (let index = 0; index < leadBlanks; index++) {
+    cells.push({ key: `blank-${index}`, date: "", day: 0, state: "", disabled: true, ariaLabel: "", classes: { "is-blank": true } });
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${historyMonth.value}-${pad2(day)}`;
+    const record = draftHistory.value.get(date);
+    const saved = Boolean(record);
+    const isToday = date === props.today;
+    const isFuture = date > props.today;
+    cells.push({
+      key: date,
+      date,
+      day,
+      state: saved ? "已填" : isToday ? "待填" : isFuture ? "" : "缺报",
+      disabled: isFuture,
+      ariaLabel: saved
+        ? `${date} 已填报 v${record?.revision ?? 0}，共 ${record?.lineCount ?? 0} 行`
+        : `${date}${isToday ? " 今日待填" : isFuture ? " 未到填报日" : " 缺报"}`,
+      classes: {
+        "is-filled": saved,
+        "is-missing": !saved && !isToday && !isFuture,
+        "is-pending": !saved && isToday,
+        "is-future": isFuture,
+        "is-today": isToday,
+        "is-selected": date === businessDate.value
+      }
+    });
+  }
+  return cells;
+});
+
+const historyMonthLabel = computed(() => {
+  if (!historyMonth.value) return "";
+  const [year, month] = historyMonth.value.split("-").map(Number);
+  return `${year} 年 ${month} 月`;
+});
+
+const historyMonthStats = computed(() => {
+  let filled = 0;
+  let missing = 0;
+  if (historyMonth.value) {
+    const [year, month] = historyMonth.value.split("-").map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = `${historyMonth.value}-${pad2(day)}`;
+      if (date > props.today) continue;
+      if (draftHistory.value.has(date)) filled++;
+      else if (date < props.today) missing++;
+    }
+  }
+  return { filled, missing };
+});
+
+const lastFilledDate = computed(() => {
+  let latest = "";
+  draftHistory.value.forEach((_record, date) => {
+    if (date < businessDate.value && date > latest) latest = date;
+  });
+  return latest || null;
+});
+
+const todayPending = computed(() => businessDate.value === props.today && !draft.value.revision);
+
+const selectHistoryDate = (cell: HistoryCell) => {
+  if (cell.disabled || !cell.date || cell.date === businessDate.value) return;
+  businessDate.value = cell.date;
+};
+
+const applyLastFilledDraft = async () => {
+  if (!template.value || !lastFilledDate.value || bringingLast.value) return;
+  bringingLast.value = true;
+  try {
+    const response = await getInventoryDepartmentDailyDraftApi({ departmentKey: template.value.key, date: lastFilledDate.value });
+    const source = response.data;
+    if (!source.exists) {
+      ElMessage.warning("上次填报记录不存在，请刷新后重试");
+      return;
+    }
+    const blank = blankState(template.value);
+    draft.value = {
+      monthDays: source.monthDays || template.value.monthDays,
+      revision: 0,
+      groupVolumes: { ...blank.groupVolumes, ...(source.groupVolumes || {}) },
+      lines: (source.lines || []).map(line => ({ ...normalizeSavedDraftLine(line), specialDailyNote: "" })),
+      templateVersion: blank.templateVersion,
+      frozenQuota: blank.frozenQuota
+    };
+    ElMessage.success(`已带入 ${lastFilledDate.value} 的填报值（${(source.lines || []).length} 行），核对后请保存`);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "带入上次填报失败");
+  } finally {
+    bringingLast.value = false;
+  }
+};
+
 const restoreTemplate = () => {
   if (!template.value) return;
   draft.value = blankState(template.value);
@@ -780,6 +993,14 @@ const saveDraft = async () => {
       frozenQuota: saved.frozenQuota
     };
     ElMessage.success("科室耗材日草稿已保存，未扣减库存");
+    const mergedHistory = new Map(draftHistory.value);
+    mergedHistory.set(businessDate.value, {
+      businessDate: businessDate.value,
+      revision: saved.revision || 0,
+      lineCount: (saved.lines || []).length,
+      filledCount: (saved.lines || []).filter(line => Number(line.actualQuantity || 0) > 0).length
+    });
+    draftHistory.value = mergedHistory;
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "保存科室日草稿失败");
   } finally {
@@ -939,6 +1160,15 @@ watch(
   [() => props.departmentKey, businessDate],
   ([key]) => {
     if (key) void loadDraft();
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.departmentKey,
+  key => {
+    draftHistory.value = new Map();
+    if (key) loadHistoryAround(props.today);
   },
   { immediate: true }
 );
@@ -1249,6 +1479,270 @@ watch(
   }
   .preview-summary span:last-child {
     border-bottom: 0;
+  }
+}
+
+/* 展开编辑：强调色 + hover 轻反馈 */
+.expand-editor-btn {
+  transition:
+    transform 220ms ease-out,
+    box-shadow 220ms ease-out,
+    background-color 220ms ease-out,
+    border-color 220ms ease-out,
+    color 220ms ease-out;
+
+  &:not(.is-disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 14px rgb(15 118 110 / 14%);
+  }
+}
+
+/* 今日未填报提醒横幅 */
+.fill-reminder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgb(255 251 235 / 72%);
+  border: 1px solid rgb(217 169 82 / 32%);
+  border-radius: 10px;
+  animation: reminder-in 420ms ease-out backwards;
+}
+.reminder-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  background: #f59e0b;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgb(245 158 11 / 14%);
+}
+.reminder-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+
+  strong {
+    color: #92600a;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  span {
+    color: var(--inventory-muted);
+    font-size: 12px;
+  }
+}
+@keyframes reminder-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 填报历史日历 */
+.draft-history-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgb(236 253 245 / 40%), rgb(255 255 255 / 90%)), #fff;
+  border: 1px solid rgb(20 184 166 / 16%);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgb(23 33 43 / 2%);
+  animation: reminder-in 420ms ease-out 60ms backwards;
+}
+.history-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.history-eyebrow {
+  color: #0f8f82;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.history-title {
+  margin: 3px 0 0;
+  color: var(--inventory-text);
+  font-size: 17px;
+  font-weight: 500;
+}
+.history-sub {
+  margin: 4px 0 0;
+  color: var(--inventory-muted);
+  font-size: 12px;
+
+  b {
+    color: #0b7a63;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .history-missing-num {
+    color: #b4552d;
+  }
+}
+.history-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.history-weekdays,
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.history-weekdays span {
+  color: var(--inventory-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.history-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-height: 52px;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--inventory-text);
+  text-align: left;
+  background: #fbfcfd;
+  border: 1px solid #eef2f5;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    transform 220ms ease-out,
+    box-shadow 220ms ease-out,
+    border-color 220ms ease-out,
+    background-color 220ms ease-out;
+
+  &:not(:disabled):hover {
+    background: #f2fbf7;
+    border-color: #46b89d;
+    box-shadow: 0 6px 16px rgb(15 118 110 / 12%);
+    transform: translateY(-1px);
+  }
+
+  &.is-blank {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  &.is-filled {
+    background: #edf9f3;
+    border-color: #c9ecdd;
+
+    .history-day-state {
+      color: #0b7a63;
+    }
+  }
+
+  &.is-missing {
+    background: #fdf4f0;
+    border-color: #f2d8cb;
+
+    .history-day-state {
+      color: #b4552d;
+    }
+  }
+
+  &.is-pending {
+    background: #fff8ec;
+    border-color: #efdda9;
+
+    .history-day-state {
+      color: #b45309;
+    }
+  }
+
+  &.is-future {
+    color: var(--inventory-muted);
+    cursor: default;
+
+    &:hover {
+      background: #fbfcfd;
+      border-color: #eef2f5;
+      box-shadow: none;
+      transform: none;
+    }
+  }
+
+  &.is-today {
+    box-shadow: 0 0 0 2px rgb(245 158 11 / 34%);
+  }
+
+  &.is-selected {
+    border-color: #0f9f8f;
+    box-shadow: 0 0 0 2px rgb(15 118 110 / 22%);
+  }
+}
+.history-day-num {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.history-day-state {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--inventory-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--inventory-muted);
+  font-size: 12px;
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+}
+.legend-chip {
+  width: 16px;
+  height: 10px;
+  border: 1px solid #e3e9ee;
+  border-radius: 3px;
+
+  &.is-filled {
+    background: #edf9f3;
+    border-color: #c9ecdd;
+  }
+
+  &.is-missing {
+    background: #fdf4f0;
+    border-color: #f2d8cb;
+  }
+
+  &.is-pending {
+    background: #fff8ec;
+    border-color: #efdda9;
+  }
+}
+.history-legend-note {
+  margin-left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill-reminder,
+  .draft-history-card,
+  .history-day,
+  .expand-editor-btn {
+    animation: none;
+    transition: none;
   }
 }
 </style>

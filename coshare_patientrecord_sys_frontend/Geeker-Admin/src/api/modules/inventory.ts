@@ -86,6 +86,23 @@ export interface InventoryDepartmentDailyDraftSummary {
   list: InventoryDepartmentDailyDraft[];
 }
 
+export interface InventoryDepartmentDraftHistoryDay {
+  businessDate: string;
+  revision: number;
+  operator?: string;
+  updatedAt?: string;
+  lineCount?: number;
+  filledCount?: number;
+}
+
+export interface InventoryDepartmentDailyDraftHistory {
+  departmentKey: string;
+  departmentName: string;
+  from: string;
+  to: string;
+  days: InventoryDepartmentDraftHistoryDay[];
+}
+
 export interface InventoryQuotaVersion {
   id: string;
   versionCode: string;
@@ -1538,6 +1555,9 @@ export const getInventoryDepartmentDailyDraftApi = async (params: { departmentKe
 
 export const getInventoryDepartmentDailyDraftSummaryApi = async (date: string) =>
   getInventoryData<InventoryDepartmentDailyDraftSummary>("/department-daily-drafts/summary", { date });
+
+export const getInventoryDepartmentDailyDraftHistoryApi = async (params: { departmentKey: string; from: string; to: string }) =>
+  getInventoryData<InventoryDepartmentDailyDraftHistory>("/department-daily-drafts/history", params);
 
 export const getInventoryDepartmentDailyRollupApi = async (query: InventoryDailyRollupQuery) =>
   getInventoryData<InventoryAdminDepartmentDailyRollup>("/department-daily-drafts/admin-rollup", query);

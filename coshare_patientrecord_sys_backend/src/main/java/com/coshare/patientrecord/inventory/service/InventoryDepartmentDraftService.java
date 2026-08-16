@@ -114,6 +114,48 @@ public class InventoryDepartmentDraftService {
     }
 
     @Transactional(readOnly = true)
+    public ObjectNode history(String departmentKey, LocalDate from, LocalDate to, SessionUser user) {
+        String departmentName = requireDepartment(departmentKey, user);
+        validateDateRange(from, to);
+        if (to.isAfter(from.plusDays(400))) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "查询日期范围不能超过 400 天");
+        ArrayNode days = jdbcTemplate.query(
+            "SELECT business_date, revision, operator_name, updated_at, raw_json "
+                + "FROM inventory_department_daily_drafts WHERE department_key = ? AND business_date BETWEEN ? AND ? ORDER BY business_date",
+            resultSet -> {
+                ArrayNode list = JsonNodeFactory.instance.arrayNode();
+                while (resultSet.next()) {
+                    JsonNode lines = readJson(resultSet.getString("raw_json")).path("lines");
+                    int lineCount = 0;
+                    int filledCount = 0;
+                    for (JsonNode line : lines) {
+                        lineCount++;
+                        if (line.path("actualQuantity").isNumber() && line.path("actualQuantity").asDouble() > 0) filledCount++;
+                    }
+                    ObjectNode day = JsonNodeFactory.instance.objectNode();
+                    day.put("businessDate", resultSet.getDate("business_date").toLocalDate().toString());
+                    day.put("revision", resultSet.getInt("revision"));
+                    day.put("operator", resultSet.getString("operator_name"));
+                    day.put("updatedAt", resultSet.getTimestamp("updated_at").toLocalDateTime().toString());
+                    day.put("lineCount", lineCount);
+                    day.put("filledCount", filledCount);
+                    list.add(day);
+                }
+                return list;
+            },
+            departmentKey,
+            from,
+            to
+        );
+        ObjectNode result = JsonNodeFactory.instance.objectNode();
+        result.put("departmentKey", departmentKey);
+        result.put("departmentName", departmentName);
+        result.put("from", from.toString());
+        result.put("to", to.toString());
+        result.set("days", days);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
     public ObjectNode adminDailyRollup(LocalDate businessDate, SessionUser user) {
         return adminDailyRollup(businessDate, businessDate, user);
     }

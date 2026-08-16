@@ -233,6 +233,10 @@ public class InventoryDatabaseService {
         return departmentDraftService.summary(businessDate, user);
     }
 
+    public ObjectNode departmentDailyDraftHistory(String departmentKey, LocalDate from, LocalDate to, SessionUser user) {
+        return departmentDraftService.history(departmentKey, from, to, user);
+    }
+
     public ObjectNode adminDepartmentDailyRollup(LocalDate businessDate, SessionUser user) {
         return departmentDraftService.adminDailyRollup(businessDate, user);
     }
