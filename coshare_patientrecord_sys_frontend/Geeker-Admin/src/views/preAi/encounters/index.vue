@@ -740,6 +740,7 @@
           :model-value="createTemplateIds"
           :slot-values="createForm.clinicalTemplateSlots || {}"
           :disabled="actionLoading"
+          :auto-match-label="autoMatchedCreateLabel"
           @update:model-value="setCreateTemplateIds"
           @update:slot-values="value => patchCreateForm('clinicalTemplateSlots', value)"
           @apply="applyCreateClinicalTemplate"
@@ -1146,7 +1147,7 @@
 </template>
 
 <script setup lang="ts" name="preAiEncounters">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -1521,6 +1522,7 @@ const clinicalTemplateIds = (code: PreAiStageCode) => {
 
 const manualTemplateTouched = reactive(new Set<PreAiStageCode>());
 const autoMatchedTemplateLabel = ref("");
+let hydrationQuiet = false;
 
 const setClinicalTemplateIds = (code: PreAiStageCode, ids: string[]) => {
   manualTemplateTouched.add(code);
@@ -1534,7 +1536,7 @@ const setClinicalTemplateIds = (code: PreAiStageCode, ids: string[]) => {
 watch(
   () => stageForms.RECEPTION.chiefComplaint,
   symptoms => {
-    if (manualTemplateTouched.has("RECEPTION")) return;
+    if (hydrationQuiet || manualTemplateTouched.has("RECEPTION")) return;
     if ((stageForms.RECEPTION.clinicalTemplateIds || []).length) return;
     const ids = inferTemplateIdsBySymptoms(symptoms);
     if (!ids.length) return;
@@ -1553,11 +1555,31 @@ const updateStageTemplateSlots = (code: PreAiStageCode, value: Record<string, an
   markStageDirty(code);
 };
 
+const manualCreateTemplateTouched = ref(false);
+const autoMatchedCreateLabel = ref("");
+
 const setCreateTemplateIds = (ids: string[]) => {
+  manualCreateTemplateTouched.value = true;
+  autoMatchedCreateLabel.value = "";
   createTemplateIds.value = ids;
   const merged = mergeClinicalTemplateSlots(createForm, ids);
   if (merged) createForm.clinicalTemplateSlots = merged;
 };
+
+watch(
+  () => createForm.registrationSymptoms,
+  symptoms => {
+    if (manualCreateTemplateTouched.value) return;
+    if (createTemplateIds.value.length) return;
+    const ids = inferTemplateIdsBySymptoms(symptoms);
+    if (!ids.length) return;
+    Object.assign(createForm, applyClinicalTemplate("REGISTRATION", createForm, ids, "fill"));
+    createTemplateIds.value = ids;
+    autoMatchedCreateLabel.value = clinicalTemplateById(ids[0])?.label || "";
+    ElMessage.success(`已按症状自动匹配「${autoMatchedCreateLabel.value}」模板，主诉与现病史已生成，可继续修改`);
+  },
+  { deep: true }
+);
 
 const confirmClinicalTemplateApply = async (mode: ClinicalTemplateMode) => {
   if (mode === "fill" || mode === "render") return true;
@@ -2171,6 +2193,7 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   syncWorkspaceImageContext(value);
   syncTimelineContext(value);
   workspace.value = value;
+  hydrationQuiet = true;
   manualTemplateTouched.clear();
   autoMatchedTemplateLabel.value = "";
   value.stages.forEach(stage => {
@@ -2216,6 +2239,9 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   if (!stageDirty.RECEPTION) {
     const registration = stageForms.REGISTRATION;
     const reception = stageForms.RECEPTION;
+    if (Array.isArray(registration.registrationSymptoms) && registration.registrationSymptoms.length && !reception.chiefComplaint?.length) {
+      reception.chiefComplaint = [...registration.registrationSymptoms];
+    }
     const registrationComplaint = String(registration.registrationChiefComplaint || "").trim();
     const registrationIllness = String(registration.registrationCurrentIllness || "").trim();
     if (!String(reception.chiefComplaintSupplement || "").trim() && registrationComplaint) {
@@ -2238,6 +2264,9 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
     activeLabReportId.value = value.labReports[0]?.id || "";
   }
   if (keepInspectionImagesVisible) void loadWorkspaceInspectionImages(value);
+  void nextTick(() => {
+    hydrationQuiet = false;
+  });
 };
 
 const resetHistoricalComparison = () => {
@@ -2806,6 +2835,8 @@ const createEncounter = async () =>
     createForm.visitDate = currentLocalDateTime();
     createForm.inventoryCareType = "outpatient";
     createTemplateIds.value = [];
+    manualCreateTemplateTouched.value = false;
+    autoMatchedCreateLabel.value = "";
     createRequestId.value = "";
     await loadEncounterList();
     selectedPatientCaseId.value = encounterWorkspace.encounter.patientCaseId;

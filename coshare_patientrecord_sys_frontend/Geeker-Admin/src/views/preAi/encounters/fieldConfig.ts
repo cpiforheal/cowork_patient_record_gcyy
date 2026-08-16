@@ -252,13 +252,34 @@ export const preAiStages: PreAiStageConfig[] = [
         creatable: true
       },
       {
+        key: "registrationSymptoms",
+        label: "主要症状（点选）",
+        kind: "multi",
+        required: true,
+        span: 2,
+        options: options([
+          "肛周肿块",
+          "肛周疼痛",
+          "肛周结节",
+          "溢脓",
+          "便血",
+          "肿物脱出",
+          "肛周潮湿",
+          "肛门坠胀",
+          "肛周瘙痒",
+          "排便异常",
+          "便不尽感"
+        ]),
+        creatable: true
+      },
+      {
         key: "registrationChiefComplaint",
         label: "主诉 / 来院问题",
         kind: "textarea",
         rows: 2,
         span: 2,
         required: true,
-        placeholder: "患者有什么不适、此次想解决什么问题"
+        placeholder: "按症状点选自动生成规范主诉；患者原话可照记在此（如“屁股上有个肉球”），无需翻译成术语，接诊室会整合"
       },
       {
         key: "registrationPastHistory",

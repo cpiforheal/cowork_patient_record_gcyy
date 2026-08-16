@@ -256,6 +256,7 @@ export const applyClinicalTemplate = (
     snapshot[key] = text;
   };
   if (stage === "REGISTRATION") {
+    if (mode !== "render") patch.registrationSymptoms = mergeList(form.registrationSymptoms, selected.flatMap(item => item.symptoms), mode);
     setTemplateText("registrationChiefComplaint", renderTemplate(primary.chiefComplaint, values));
     setTemplateText("registrationCurrentIllness", renderTemplate(primary.presentIllness, values));
   } else if (stage === "RECEPTION") {
