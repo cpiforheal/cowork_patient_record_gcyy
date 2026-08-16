@@ -430,20 +430,20 @@ export const preAiStages: PreAiStageConfig[] = [
         placeholder: "选择常用病程，或直接输入如“3月余”"
       },
       {
+        key: "chiefComplaintSupplement",
+        label: "患者原话速记",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        placeholder: "患者怎么描述就怎么记（如“屁股上有个肉球，上厕所就滴血”），无需翻译成医学术语；模板未覆盖的细节也记录在此，由医生端整合"
+      },
+      {
         key: "chiefComplaintText",
         label: "主诉（最终文本）",
         kind: "template-text",
         required: true,
         span: 2,
         templateGenerator: "chiefComplaint"
-      },
-      {
-        key: "chiefComplaintSupplement",
-        label: "主诉补充说明",
-        kind: "textarea",
-        rows: 3,
-        span: 2,
-        placeholder: "用于填写选择项不能完整表达的自然语言主诉"
       },
       {
         key: "onsetTrigger",

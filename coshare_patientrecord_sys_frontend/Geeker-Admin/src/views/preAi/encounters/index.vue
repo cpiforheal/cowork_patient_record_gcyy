@@ -386,6 +386,7 @@
                     :model-value="clinicalTemplateIds(selectedStageCode)"
                     :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
                     :disabled="!canModifySelectedStage"
+                    :auto-match-label="selectedStageCode === 'RECEPTION' ? autoMatchedTemplateLabel : ''"
                     @update:model-value="value => setClinicalTemplateIds(selectedStageCode, value)"
                     @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
                     @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
@@ -1145,7 +1146,7 @@
 </template>
 
 <script setup lang="ts" name="preAiEncounters">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from "vue";
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -1259,7 +1260,9 @@ import {
 } from "./utils/templateTextGenerator";
 import {
   applyClinicalTemplate,
+  clinicalTemplateById,
   clinicalTemplateIdsForDiseases,
+  inferTemplateIdsBySymptoms,
   mergeClinicalTemplateSlots,
   type ClinicalTemplateMode
 } from "./utils/clinicalTemplateCatalog";
@@ -1516,12 +1519,34 @@ const clinicalTemplateIds = (code: PreAiStageCode) => {
   return [];
 };
 
+const manualTemplateTouched = reactive(new Set<PreAiStageCode>());
+const autoMatchedTemplateLabel = ref("");
+
 const setClinicalTemplateIds = (code: PreAiStageCode, ids: string[]) => {
+  manualTemplateTouched.add(code);
+  if (code === "RECEPTION") autoMatchedTemplateLabel.value = "";
   stageForms[code].clinicalTemplateIds = ids;
   const merged = mergeClinicalTemplateSlots(stageForms[code], ids);
   if (merged) stageForms[code].clinicalTemplateSlots = merged;
   markStageDirty(code);
 };
+
+watch(
+  () => stageForms.RECEPTION.chiefComplaint,
+  symptoms => {
+    if (manualTemplateTouched.has("RECEPTION")) return;
+    if ((stageForms.RECEPTION.clinicalTemplateIds || []).length) return;
+    const ids = inferTemplateIdsBySymptoms(symptoms);
+    if (!ids.length) return;
+    Object.assign(stageForms.RECEPTION, applyClinicalTemplate("RECEPTION", stageForms.RECEPTION, ids, "fill"));
+    const merged = mergeClinicalTemplateSlots(stageForms.RECEPTION, ids);
+    if (merged) stageForms.RECEPTION.clinicalTemplateSlots = merged;
+    autoMatchedTemplateLabel.value = clinicalTemplateById(ids[0])?.label || "";
+    markStageDirty("RECEPTION");
+    ElMessage.success(`已按症状自动匹配「${autoMatchedTemplateLabel.value}」模板，空字段已填充，可继续修改`);
+  },
+  { deep: true }
+);
 
 const updateStageTemplateSlots = (code: PreAiStageCode, value: Record<string, any>) => {
   stageForms[code].clinicalTemplateSlots = value;
@@ -2146,6 +2171,8 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   syncWorkspaceImageContext(value);
   syncTimelineContext(value);
   workspace.value = value;
+  manualTemplateTouched.clear();
+  autoMatchedTemplateLabel.value = "";
   value.stages.forEach(stage => {
     const normalized = deepCopy(stage.data);
     if (stage.stageCode === "DOCTOR") {

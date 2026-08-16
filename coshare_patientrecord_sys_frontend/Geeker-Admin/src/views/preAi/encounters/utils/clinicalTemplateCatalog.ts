@@ -148,6 +148,22 @@ export const clinicalTemplates: ClinicalTemplate[] = [
 
 export const clinicalTemplateOptions = clinicalTemplates.map(item => ({ label: item.label, value: item.id }));
 export const clinicalTemplateById = (id: string) => clinicalTemplates.find(item => item.id === id);
+
+export const inferTemplateIdsBySymptoms = (symptoms: unknown): string[] => {
+  const picked = (Array.isArray(symptoms) ? symptoms : symptoms ? [symptoms] : [])
+    .map(item => String(item || "").trim())
+    .filter(Boolean);
+  if (picked.length < 2) return [];
+  let best: { id: string; score: number; size: number } | null = null;
+  for (const item of clinicalTemplates) {
+    const score = picked.filter(value => item.symptoms.includes(value)).length;
+    if (score < 2) continue;
+    if (!best || score > best.score || (score === best.score && item.symptoms.length < best.size)) {
+      best = { id: item.id, score, size: item.symptoms.length };
+    }
+  }
+  return best ? [best.id] : [];
+};
 export const clinicalTemplateIdsForDiseases = (diseases: unknown) => {
   const values = Array.isArray(diseases) ? diseases : diseases ? [diseases] : [];
   return values.map(value => clinicalTemplates.find(item => item.disease === String(value))?.id).filter(Boolean) as string[];

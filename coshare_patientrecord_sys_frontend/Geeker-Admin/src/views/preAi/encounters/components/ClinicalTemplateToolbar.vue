@@ -2,10 +2,13 @@
   <section class="clinical-template-toolbar">
     <div class="toolbar-heading">
       <div>
-        <strong>病种模板辅助（固定文本）</strong>
-        <small>选定病种后自动生成主诉、现病史与专科检查固定文本；仅调整点位、病程等少量变量即可，生成内容可继续手工修改</small>
+        <strong>病种模板（自动匹配，可微调）</strong>
+        <small>接诊室按症状点选会自动匹配病种并生成规范文本；此处仅微调病种、点位、病程等变量，患者原话请记录在“患者原话速记”中</small>
       </div>
-      <el-tag size="small" effect="plain">{{ templateVersion }}</el-tag>
+      <div class="heading-tags">
+        <el-tag v-if="autoMatchLabel" size="small" type="success" effect="plain">已自动匹配：{{ autoMatchLabel }}</el-tag>
+        <el-tag size="small" effect="plain">{{ templateVersion }}</el-tag>
+      </div>
     </div>
     <el-select
       v-model="selected"
@@ -73,7 +76,7 @@ import {
 } from "../utils/clinicalTemplateCatalog";
 import type { ClinicalTemplateMode } from "../utils/clinicalTemplateCatalog";
 
-const props = defineProps<{ modelValue?: string[]; slotValues?: Record<string, any>; disabled?: boolean }>();
+const props = defineProps<{ modelValue?: string[]; slotValues?: Record<string, any>; disabled?: boolean; autoMatchLabel?: string }>();
 const emit = defineEmits<{
   (event: "update:modelValue", value: string[]): void;
   (event: "update:slotValues", value: Record<string, any>): void;
@@ -117,6 +120,12 @@ const emitApply = (mode: ClinicalTemplateMode) => emit("apply", mode, selected.v
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.heading-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .toolbar-heading div {
   display: grid;

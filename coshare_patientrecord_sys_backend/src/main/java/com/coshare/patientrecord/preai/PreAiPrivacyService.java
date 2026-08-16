@@ -693,7 +693,7 @@ public class PreAiPrivacyService {
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
             {"presentIllness", "现病史最终文本"}, {"physicalExam", "体格检查"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
             {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
-            {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"chiefComplaintSupplement", "主诉补充说明"}, {"receptionSpecialDescription", "接诊特殊补充说明"}, {"specialCircumstances", "特殊情况"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
+            {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"chiefComplaintSupplement", "患者原话速记"}, {"receptionSpecialDescription", "接诊特殊补充说明"}, {"specialCircumstances", "特殊情况"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},
             {"dispositionSuggestion", "建议就诊分支"}, {"dispositionSupplement", "就诊情况补充说明"}, {"careSituationDescription", "登记就诊情况补充说明"}, {"recommendedAuxiliaryExams", "建议辅助检查"},
             {"tcmDisease", "中医病名"}, {"primarySyndrome", "主证"}, {"concurrentSyndrome", "兼证"}, {"comorbidTcmItems", "合并病中医辨证"}, {"inspection", "望诊"}, {"auscultationOlfaction", "闻诊"}, {"inquiry", "问诊"}, {"palpation", "切诊"},
             {"tongue", "舌象"}, {"pulse", "脉象"}, {"syndromeBasis", "辨证依据"}, {"treatmentPrinciple", "治法治则"},
