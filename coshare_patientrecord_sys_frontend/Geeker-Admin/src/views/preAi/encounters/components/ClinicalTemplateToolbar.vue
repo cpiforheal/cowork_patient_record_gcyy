@@ -54,13 +54,29 @@
     </div>
 
     <div class="template-actions">
-      <el-button size="small" type="primary" plain :disabled="disabled || !selected.length" @click="emitApply('fill')"
-        >填充空字段</el-button
-      >
-      <el-button size="small" plain :disabled="disabled || !selected.length" @click="emitApply('append')">追加模板</el-button>
-      <el-button size="small" type="warning" plain :disabled="disabled || !selected.length" @click="emitApply('overwrite')"
-        >覆盖模板字段</el-button
-      >
+      <template v-if="simple">
+        <el-button size="small" type="primary" plain :disabled="disabled || !selected.length" @click="emitApply('fill')"
+          >应用模板</el-button
+        >
+        <el-dropdown :disabled="disabled || !selected.length" @command="emitApply">
+          <el-button size="small" plain class="more-button">更多</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="append">追加到已有内容</el-dropdown-item>
+              <el-dropdown-item command="overwrite">覆盖模板字段（慎用）</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </template>
+      <template v-else>
+        <el-button size="small" type="primary" plain :disabled="disabled || !selected.length" @click="emitApply('fill')"
+          >填充空字段</el-button
+        >
+        <el-button size="small" plain :disabled="disabled || !selected.length" @click="emitApply('append')">追加模板</el-button>
+        <el-button size="small" type="warning" plain :disabled="disabled || !selected.length" @click="emitApply('overwrite')"
+          >覆盖模板字段</el-button
+        >
+      </template>
     </div>
     <p class="template-hint">变量调整后自动重新生成未被手工修改的模板文本；覆盖已有人工内容前请确认，覆盖后需重新确认自动结论。</p>
   </section>
@@ -76,7 +92,13 @@ import {
 } from "../utils/clinicalTemplateCatalog";
 import type { ClinicalTemplateMode } from "../utils/clinicalTemplateCatalog";
 
-const props = defineProps<{ modelValue?: string[]; slotValues?: Record<string, any>; disabled?: boolean; autoMatchLabel?: string }>();
+const props = defineProps<{
+  modelValue?: string[];
+  slotValues?: Record<string, any>;
+  disabled?: boolean;
+  autoMatchLabel?: string;
+  simple?: boolean;
+}>();
 const emit = defineEmits<{
   (event: "update:modelValue", value: string[]): void;
   (event: "update:slotValues", value: Record<string, any>): void;
@@ -155,10 +177,14 @@ const emitApply = (mode: ClinicalTemplateMode) => emit("apply", mode, selected.v
 .template-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 .template-actions :deep(.el-button) {
   margin: 0;
+}
+.more-button {
+  margin-left: 0 !important;
 }
 .template-hint {
   margin: 0;

@@ -215,7 +215,6 @@
                       <h3>{{ selectedStage.title }}</h3>
                     </div>
                     <div class="heading-tags">
-                      <el-tag effect="plain">责任岗位：{{ selectedStage.owner }}</el-tag>
                       <el-tag :type="stageStatusType(selectedStageSubmission.status)">
                         {{ stageStatusLabel[selectedStageSubmission.status] }}
                       </el-tag>
@@ -387,6 +386,7 @@
                     :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
                     :disabled="!canModifySelectedStage"
                     :auto-match-label="selectedStageCode === 'RECEPTION' ? autoMatchedTemplateLabel : ''"
+                    :simple="selectedStageCode !== 'INSPECTION'"
                     @update:model-value="value => setClinicalTemplateIds(selectedStageCode, value)"
                     @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
                     @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
@@ -741,6 +741,7 @@
           :slot-values="createForm.clinicalTemplateSlots || {}"
           :disabled="actionLoading"
           :auto-match-label="autoMatchedCreateLabel"
+          simple
           @update:model-value="setCreateTemplateIds"
           @update:slot-values="value => patchCreateForm('clinicalTemplateSlots', value)"
           @apply="applyCreateClinicalTemplate"

@@ -13,18 +13,13 @@
     </section>
 
     <div class="workflow-summary">
-      <div>
-        <strong>{{ completedCount }}</strong
-        ><span>已完成</span>
-      </div>
-      <div :class="{ warning: returnedCount }">
-        <strong>{{ returnedCount }}</strong
-        ><span>退回项</span>
-      </div>
-      <div>
-        <strong>{{ cards.length - completedCount }}</strong
-        ><span>待流转</span>
-      </div>
+      <span class="summary-line">
+        已完成 <b>{{ completedCount }}</b><i>/</i>共 {{ cards.length }} 步<i>/</i>待流转
+        <b>{{ cards.length - completedCount }}</b>
+      </span>
+      <span v-if="returnedCount" class="summary-returned">
+        退回 {{ returnedCount }} 项待处理
+      </span>
     </div>
 
     <div class="workflow-title">
@@ -48,8 +43,8 @@
             <span class="workflow-order">{{ card.order }}</span>
             <div class="workflow-card-main">
               <strong>{{ card.title }}</strong>
-              <small>{{ card.owner }}</small>
-              <em v-if="card.editable">当前岗位可办理</em>
+              <small v-if="isActive(card) || isCurrent(card)">{{ card.owner }}</small>
+              <em v-if="card.editable && isActive(card)">当前岗位可办理</em>
             </div>
             <el-tag size="small" :type="statusType(statusOf(card))">
               {{ statusLabel(card) }}
@@ -137,29 +132,35 @@ defineEmits<{
   font-size: 12px;
 }
 .workflow-summary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-bottom: 14px;
-}
-.workflow-summary > div {
-  display: grid;
-  gap: 2px;
-  padding: 8px 4px;
-  text-align: center;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
   background: var(--el-fill-color-light);
 }
-.workflow-summary strong {
-  color: var(--el-color-primary);
-  font-size: 17px;
-}
-.workflow-summary span {
+.workflow-summary .summary-line {
   color: var(--el-text-color-secondary);
-  font-size: 11px;
+  font-size: 12px;
+  white-space: nowrap;
 }
-.workflow-summary .warning strong {
+.workflow-summary .summary-line b {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.workflow-summary .summary-line i {
+  margin: 0 4px;
+  font-style: normal;
+  color: var(--el-border-color);
+}
+.workflow-summary .summary-returned {
   color: var(--el-color-warning);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .workflow-title {
   padding: 0 2px 10px;
