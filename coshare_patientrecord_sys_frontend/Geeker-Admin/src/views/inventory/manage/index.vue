@@ -231,12 +231,14 @@
             <DailyVerificationPanel
               :report="dailyVerificationReport"
               :loading="dailyVerificationLoading"
-              :exporting="reportLoading"
+              :exporting-csv="reportLoading === 'csv'"
+              :exporting-xlsx="reportLoading === 'xlsx'"
               :today="today()"
               :can-export="canExportDepartmentUsage"
               :department-options="reportDepartmentOptions"
               @load="loadDailyVerification"
-              @export="exportDailyVerification"
+              @export-csv="exportDailyRollup('csv', $event)"
+              @export-xlsx="exportDailyRollup('xlsx', $event)"
             />
           </template>
 
@@ -510,6 +512,8 @@ import {
   createInventoryRequestApi,
   deleteInventoryWeeklyStandardApi,
   downloadDepartmentUsageReportApi,
+  downloadInventoryDepartmentDailyRollupApi,
+  downloadInventoryDepartmentDailyRollupXlsxApi,
   downloadInventoryWeeklySnapshotApi,
   generateInventoryWeeklySnapshotApi,
   getInventoryConsumptionsApi,
@@ -633,7 +637,7 @@ const inventoryLedgerMovements = ref<InventoryMovement[]>([]);
 const inventoryLedgerMovementsLoaded = ref(false);
 const extendedDataReady = ref(false);
 const extendedDataErrors = ref<string[]>([]);
-const reportLoading = ref<"" | "pdf" | "xlsx">("");
+const reportLoading = ref<"" | "pdf" | "xlsx" | "csv">("");
 const weeklyStandards = ref<InventoryWeeklyStandard[]>([]);
 const weeklySnapshots = ref<InventoryWeeklySnapshot[]>([]);
 const weeklyLoading = ref(false);
@@ -1754,7 +1758,15 @@ const validateIssueLines = () => {
   return false;
 };
 
+const isInventoryPortalMode = import.meta.env.VITE_PORTAL_MODE === "inventory";
+
 const loadExtendedInventory = async () => {
+  // 进销存门户账号的科室标识不在门诊科室表内，工作台/余额/流水等接口会整体 400，门户模式下跳过这些背景加载
+  if (isInventoryPortalMode) {
+    extendedDataReady.value = true;
+    extendedDataErrors.value = [];
+    return;
+  }
   const endpointLabels = ["工作台", "科室余额", "异常任务", "执行耗用", "库存流水"];
   const [workbenchResult, balancesResult, exceptionsResult, consumptionsResult, ledgerResult] = await Promise.allSettled([
     getInventoryWorkbenchApi(),
@@ -1971,22 +1983,29 @@ const loadDailyVerification = async (query: InventoryDailyRollupQuery) => {
   }
 };
 
-const exportDailyVerification = async ({
-  date,
-  departmentId,
-  format
-}: {
-  date: string;
-  departmentId: string;
-  format: "pdf" | "xlsx";
-}) => {
-  await downloadDepartmentUsageReport({
-    from: date,
-    to: date,
-    departmentIds: departmentId ? [departmentId] : undefined,
-    patientOnly: true,
-    format
-  });
+const exportDailyRollup = async (format: "csv" | "xlsx", query: InventoryDailyRollupQuery) => {
+  if (!canExportDepartmentUsage.value) {
+    ElMessage.warning("当前岗位暂无科室耗材报表导出权限");
+    return;
+  }
+  reportLoading.value = format;
+  try {
+    const { blob, filename } =
+      format === "csv"
+        ? await downloadInventoryDepartmentDailyRollupApi(query)
+        : await downloadInventoryDepartmentDailyRollupXlsxApi(query);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ElMessage.success("12科室耗材日报已生成");
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    reportLoading.value = "";
+  }
 };
 
 const loadInventoryRoleManagement = async () => {
