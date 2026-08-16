@@ -95,8 +95,8 @@ public class PreAiEncounterService {
             "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots"
         ),
         "INSPECTION", Set.of(
-            "examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition",
-            "lesionSize", "lesionExtent", "lesionDepth", "visualFindings", "digitalExamFindings", "anoscopyFindings",
+            "examinationDirection", "diseaseDirections", "examinationTypes",
+            "visualFindings", "digitalExamFindings", "anoscopyFindings",
             "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
             "inspectionSpecialDescription", "inspectionNarrative", "nextReviewAt", "nextReviewNote",
             "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots"

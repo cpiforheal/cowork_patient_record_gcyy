@@ -33,7 +33,7 @@ public class PreAiPrivacyService {
         "identityNumber", "idNumber", "idCard", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
-        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionSize", "lesionExtent", "lesionDepth", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
+        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
         "RECEPTION", List.of(
             "chiefComplaint", "chiefComplaintText", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
@@ -296,7 +296,7 @@ public class PreAiPrivacyService {
         addNodeRows(physicalExam, reception, List.of("physicalExam"), Set.of("physicalExam"));
 
         ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
-        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionSize", "lesionExtent", "lesionDepth", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
+        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
 
         ObjectNode auxiliary = addSection(sections, "08", "八、辅助检查");
         addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
@@ -685,7 +685,7 @@ public class PreAiPrivacyService {
             {"nativePlace", "籍贯"}, {"birthplace", "出生地"}, {"phone", "联系电话"}, {"address", "地址"},
             {"contactName", "联系人"}, {"contactRelation", "联系人关系"}, {"contactPhone", "联系人电话"}, {"patientSource", "患者来源"}, {"registrationNote", "登记备注"},
             {"admissionMethod", "入院方式"}, {"admissionSeverity", "入院病情"}, {"insuranceType", "医保类型"}, {"paymentMethod", "付费方式"},
-            {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"}, {"lesionSize", "病灶大小"}, {"lesionExtent", "病灶范围"}, {"lesionDepth", "病灶深度"},
+            {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"},
             {"lesionCount", "病灶数量"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
             {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"preliminaryDiagnosis", "检查室初步诊断"}, {"preliminaryDiagnosisNote", "检查室诊断补充"}, {"inspectionSpecialDescription", "检查补充说明"}, {"factualConclusion", "检查事实结论"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
             {"chiefComplaint", "主诉症状"}, {"chiefComplaintText", "主诉"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},

@@ -304,41 +304,6 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       { key: "examinationTypes", label: "已完成检查", kind: "multi", required: true, options: examinationOptions, span: 2 },
       {
-        key: "lesionLocation",
-        label: "病变位置",
-        kind: "select",
-        options: options(["肛缘", "肛管", "齿状线", "直肠下段", "会阴部", "骶尾部", "其他"]),
-        creatable: true
-      },
-      {
-        key: "clockPosition",
-        label: "方向/钟点位",
-        kind: "multi",
-        options: options(["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"]),
-        creatable: true
-      },
-      {
-        key: "lesionSize",
-        label: "病灶大小",
-        kind: "measurement",
-        unitOptions: ["mm", "cm"],
-        abnormalOptions: options(["红肿", "水肿", "触痛", "硬结", "波动感", "糜烂", "脓性附着"])
-      },
-      {
-        key: "lesionExtent",
-        label: "病灶范围",
-        kind: "measurement",
-        unitOptions: ["mm", "cm"],
-        abnormalOptions: options(["红肿", "水肿", "触痛", "硬结", "波动感", "糜烂", "脓性附着"])
-      },
-      {
-        key: "lesionDepth",
-        label: "病灶深度",
-        kind: "measurement",
-        unitOptions: ["mm", "cm"],
-        abnormalOptions: options(["红肿", "水肿", "触痛", "硬结", "波动感", "糜烂", "脓性附着"])
-      },
-      {
         key: "visualFindings",
         label: "外观所见",
         kind: "multi",

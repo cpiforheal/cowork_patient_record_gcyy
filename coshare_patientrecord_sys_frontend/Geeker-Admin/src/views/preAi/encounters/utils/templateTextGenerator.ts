@@ -65,11 +65,6 @@ const measurementText = (value: any) => {
     .join("");
 };
 
-const measurementLine = (label: string, value: any) => {
-  const text = measurementText(value);
-  return text ? `${label}${text}` : "";
-};
-
 export const buildInspectionConclusion = (form: Record<string, any>) => {
   const narrative = String(form.inspectionNarrative || "").trim();
   const notInNarrative = (value: unknown) => {
@@ -82,11 +77,6 @@ export const buildInspectionConclusion = (form: Record<string, any>) => {
   const anoscopy = filteredFindings(form.anoscopyFindings);
   const parts = [
     narrative,
-    !narrative && form.lesionLocation && `病变位于${form.lesionLocation}`,
-    !narrative && form.clockPosition && `钟点位${form.clockPosition}`,
-    measurementLine("病灶大小", form.lesionSize),
-    measurementLine("病灶范围", form.lesionExtent),
-    measurementLine("病灶深度", form.lesionDepth),
     visual.length && `视诊见${visual.join("、")}`,
     digital.length && `指诊见${digital.join("、")}`,
     anoscopy.length && `肛门镜见${anoscopy.join("、")}`,

@@ -146,8 +146,6 @@ export const clinicalTemplates: ClinicalTemplate[] = [
   }
 ];
 
-const POSITION_SLOT_KEYS = new Set(["skinTags", "internal", "fissure", "fistula", "lump", "fluctuation"]);
-
 export const clinicalTemplateOptions = clinicalTemplates.map(item => ({ label: item.label, value: item.id }));
 export const clinicalTemplateById = (id: string) => clinicalTemplates.find(item => item.id === id);
 export const clinicalTemplateIdsForDiseases = (diseases: unknown) => {
@@ -266,10 +264,6 @@ export const applyClinicalTemplate = (
     }
     if (mode === "overwrite" || !String(form.examinationDirection || "").trim()) patch.examinationDirection = "肛肠";
     setTemplateText("inspectionNarrative", renderTemplate(primary.inspectionConclusion, values));
-    const positions = Object.entries(slots)
-      .filter(([key, value]) => POSITION_SLOT_KEYS.has(key) && Array.isArray(value))
-      .flatMap(([, value]) => (value as string[]).map(String));
-    if (positions.length) patch.clockPosition = mergeList(form.clockPosition, positions, mode);
     if (mode === "overwrite") {
       patch.factualConclusionOverride = undefined;
       patch.factualConclusionSourceHash = undefined;
