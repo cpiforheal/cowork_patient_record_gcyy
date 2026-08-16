@@ -384,8 +384,10 @@
                   <ClinicalTemplateToolbar
                     v-if="['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
                     :model-value="clinicalTemplateIds(selectedStageCode)"
+                    :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
                     :disabled="!canModifySelectedStage"
                     @update:model-value="value => setClinicalTemplateIds(selectedStageCode, value)"
+                    @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
                     @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
                   />
 
@@ -734,8 +736,11 @@
     <el-dialog v-model="createDialogVisible" title="就诊登记并发号" width="760px" destroy-on-close>
       <el-form label-position="top">
         <ClinicalTemplateToolbar
-          v-model="createTemplateIds"
+          :model-value="createTemplateIds"
+          :slot-values="createForm.clinicalTemplateSlots || {}"
           :disabled="actionLoading"
+          @update:model-value="setCreateTemplateIds"
+          @update:slot-values="value => patchCreateForm('clinicalTemplateSlots', value)"
           @apply="applyCreateClinicalTemplate"
         />
         <RegistrationFormFields :fields="registrationFields" :form="createForm" @patch="patchCreateForm" />
@@ -1255,6 +1260,7 @@ import {
 import {
   applyClinicalTemplate,
   clinicalTemplateIdsForDiseases,
+  mergeClinicalTemplateSlots,
   type ClinicalTemplateMode
 } from "./utils/clinicalTemplateCatalog";
 
@@ -1512,11 +1518,24 @@ const clinicalTemplateIds = (code: PreAiStageCode) => {
 
 const setClinicalTemplateIds = (code: PreAiStageCode, ids: string[]) => {
   stageForms[code].clinicalTemplateIds = ids;
+  const merged = mergeClinicalTemplateSlots(stageForms[code], ids);
+  if (merged) stageForms[code].clinicalTemplateSlots = merged;
   markStageDirty(code);
 };
 
+const updateStageTemplateSlots = (code: PreAiStageCode, value: Record<string, any>) => {
+  stageForms[code].clinicalTemplateSlots = value;
+  markStageDirty(code);
+};
+
+const setCreateTemplateIds = (ids: string[]) => {
+  createTemplateIds.value = ids;
+  const merged = mergeClinicalTemplateSlots(createForm, ids);
+  if (merged) createForm.clinicalTemplateSlots = merged;
+};
+
 const confirmClinicalTemplateApply = async (mode: ClinicalTemplateMode) => {
-  if (mode === "fill") return true;
+  if (mode === "fill" || mode === "render") return true;
   try {
     await ElMessageBox.confirm(
       mode === "overwrite"
@@ -1541,14 +1560,26 @@ const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTe
     stageForms.INSPECTION.factualConclusionConfirmed = false;
   }
   markStageDirty(code);
-  ElMessage.success(mode === "fill" ? "已填充空白字段，可继续修改" : "模板内容已更新，请核对后保存");
+  ElMessage.success(
+    mode === "render"
+      ? "已按当前模板变量重新生成，手工修改过的内容保持不变"
+      : mode === "fill"
+        ? "已填充空白字段，可继续修改"
+        : "模板内容已更新，请核对后保存"
+  );
 };
 
 const applyCreateClinicalTemplate = async (mode: ClinicalTemplateMode, ids: string[]) => {
   if (!ids.length || !(await confirmClinicalTemplateApply(mode))) return;
   Object.assign(createForm, applyClinicalTemplate("REGISTRATION", createForm, ids, mode));
   createTemplateIds.value = ids;
-  ElMessage.success(mode === "fill" ? "已填充空白字段，可继续修改" : "模板内容已更新，请核对后登记");
+  ElMessage.success(
+    mode === "render"
+      ? "已按当前模板变量重新生成，手工修改过的内容保持不变"
+      : mode === "fill"
+        ? "已填充空白字段，可继续修改"
+        : "模板内容已更新，请核对后登记"
+  );
 };
 
 const openResponsibilityTimeline = async () => {

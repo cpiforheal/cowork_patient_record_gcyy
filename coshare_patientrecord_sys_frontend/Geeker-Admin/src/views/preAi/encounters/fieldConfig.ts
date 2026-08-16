@@ -185,7 +185,7 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "前台登记",
     shortTitle: "登记",
     owner: "前台",
-    description: "内部保存真实身份信息；导出的 DOCX 会自动脱敏。",
+    description: "选择病种模板后自动生成主诉与现病史固定文本，仅需调整病程、加重等变量；导出的 DOCX 会自动脱敏。",
     fields: [
       { key: "patientName", label: "姓名", kind: "input", required: true },
       {
@@ -284,7 +284,7 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "检查室",
     shortTitle: "检查",
     owner: "检查室",
-    description: "只记录客观所见，不填写最终诊断。可按病种套用观察项，再按实际修改位置、钟点位和所见。",
+    description: "套用病种模板后自动生成专科检查固定文本，按实际调整点位与测量值即可；只记录客观所见，不填写最终诊断。",
     fields: [
       {
         key: "examinationDirection",
@@ -316,6 +316,27 @@ export const preAiStages: PreAiStageConfig[] = [
         kind: "multi",
         options: options(["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"]),
         creatable: true
+      },
+      {
+        key: "lesionSize",
+        label: "病灶大小",
+        kind: "measurement",
+        unitOptions: ["mm", "cm"],
+        abnormalOptions: options(["红肿", "水肿", "触痛", "硬结", "波动感", "糜烂", "脓性附着"])
+      },
+      {
+        key: "lesionExtent",
+        label: "病灶范围",
+        kind: "measurement",
+        unitOptions: ["mm", "cm"],
+        abnormalOptions: options(["红肿", "水肿", "触痛", "硬结", "波动感", "糜烂", "脓性附着"])
+      },
+      {
+        key: "lesionDepth",
+        label: "病灶深度",
+        kind: "measurement",
+        unitOptions: ["mm", "cm"],
+        abnormalOptions: options(["红肿", "水肿", "触痛", "硬结", "波动感", "糜烂", "脓性附着"])
       },
       {
         key: "visualFindings",
@@ -445,7 +466,7 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       {
         key: "chiefComplaintText",
-        label: "主诉预览",
+        label: "主诉（最终文本）",
         kind: "template-text",
         required: true,
         span: 2,

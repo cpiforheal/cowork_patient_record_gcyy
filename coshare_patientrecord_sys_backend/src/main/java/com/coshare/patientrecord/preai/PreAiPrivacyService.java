@@ -23,7 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class PreAiPrivacyService {
 
-    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v4-20260810";
+    public static final String TEMPLATE_VERSION = "pre-ai-final-template-v5-20260816";
 
     private static final Pattern MOBILE_PATTERN = Pattern.compile("(?<!\\d)(1[3-9]\\d{9})(?!\\d)");
     private static final Pattern ID_CARD_PATTERN = Pattern.compile("(?<!\\d)\\d{6}(?:19|20)\\d{2}\\d{7}[0-9Xx](?![0-9Xx])");
@@ -33,9 +33,9 @@ public class PreAiPrivacyService {
         "identityNumber", "idNumber", "idCard", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
-        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
+        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionSize", "lesionExtent", "lesionDepth", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
         "RECEPTION", List.of(
-            "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
+            "chiefComplaint", "chiefComplaintText", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
             "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
             "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness", "physicalExam",
             "pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory",
@@ -281,7 +281,7 @@ public class PreAiPrivacyService {
         addNodeRows(basic, patient, List.of("patientName", "gender", "age", "nationality", "maritalStatus", "nativePlace", "birthplace", "address", "phone", "contactName", "contactRelation", "contactPhone", "patientSource", "admissionMethod", "admissionSeverity", "insuranceType", "paymentMethod", "careSituationDescription", "registrationNote"), Set.of());
 
         ObjectNode complaint = addSection(sections, "02", "二、主诉");
-        addNodeRows(complaint, reception, List.of("chiefComplaint", "chiefComplaintSupplement", "symptomDuration"), Set.of("chiefComplaint"));
+        addNodeRows(complaint, reception, List.of("chiefComplaintText", "chiefComplaint", "chiefComplaintSupplement", "symptomDuration"), Set.of("chiefComplaintText"));
 
         ObjectNode present = addSection(sections, "03", "三、现病史");
         addNodeRows(present, reception, List.of("presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"), Set.of("presentIllness"));
@@ -296,7 +296,7 @@ public class PreAiPrivacyService {
         addNodeRows(physicalExam, reception, List.of("physicalExam"), Set.of("physicalExam"));
 
         ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
-        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
+        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionLocation", "clockPosition", "lesionSize", "lesionExtent", "lesionDepth", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
 
         ObjectNode auxiliary = addSection(sections, "08", "八、辅助检查");
         addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
@@ -516,6 +516,14 @@ public class PreAiPrivacyService {
                 .reduce((left, right) -> left + (left.contains("：") || right.contains("：") ? "；" : "、") + right)
                 .orElse("");
         }
+        if (value.isObject() && value.hasNonNull("value") && value.has("unit")) {
+            String number = value.path("value").asText("").trim();
+            String unit = value.path("unit").asText("").trim();
+            String status = value.path("status").asText("").trim();
+            String display = number + unit;
+            if (!status.isBlank() && !"NORMAL".equals(status)) display += "（" + status + "）";
+            return display.isBlank() ? "" : display;
+        }
         if (value.isObject()) {
             List<String> parts = new java.util.ArrayList<>();
             value.fields().forEachRemaining(entry -> {
@@ -677,10 +685,10 @@ public class PreAiPrivacyService {
             {"nativePlace", "籍贯"}, {"birthplace", "出生地"}, {"phone", "联系电话"}, {"address", "地址"},
             {"contactName", "联系人"}, {"contactRelation", "联系人关系"}, {"contactPhone", "联系人电话"}, {"patientSource", "患者来源"}, {"registrationNote", "登记备注"},
             {"admissionMethod", "入院方式"}, {"admissionSeverity", "入院病情"}, {"insuranceType", "医保类型"}, {"paymentMethod", "付费方式"},
-            {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"},
+            {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"}, {"lesionLocation", "病变位置"}, {"clockPosition", "钟点位"}, {"lesionSize", "病灶大小"}, {"lesionExtent", "病灶范围"}, {"lesionDepth", "病灶深度"},
             {"lesionCount", "病灶数量"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
             {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"preliminaryDiagnosis", "检查室初步诊断"}, {"preliminaryDiagnosisNote", "检查室诊断补充"}, {"inspectionSpecialDescription", "检查补充说明"}, {"factualConclusion", "检查事实结论"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
-            {"chiefComplaint", "主诉症状"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
+            {"chiefComplaint", "主诉症状"}, {"chiefComplaintText", "主诉"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
             {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
             {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
             {"presentIllness", "现病史最终文本"}, {"physicalExam", "体格检查"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},

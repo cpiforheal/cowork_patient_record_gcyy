@@ -65,13 +65,31 @@ const measurementText = (value: any) => {
     .join("");
 };
 
+const measurementLine = (label: string, value: any) => {
+  const text = measurementText(value);
+  return text ? `${label}${text}` : "";
+};
+
 export const buildInspectionConclusion = (form: Record<string, any>) => {
+  const narrative = String(form.inspectionNarrative || "").trim();
+  const notInNarrative = (value: unknown) => {
+    const text = String(value || "").trim();
+    return Boolean(text) && (!narrative || !narrative.includes(text));
+  };
+  const filteredFindings = (value: unknown) => list(value).filter(notInNarrative);
+  const visual = filteredFindings(form.visualFindings);
+  const digital = filteredFindings(form.digitalExamFindings);
+  const anoscopy = filteredFindings(form.anoscopyFindings);
   const parts = [
-    form.lesionLocation && `病变位于${form.lesionLocation}`,
-    form.clockPosition && `钟点位${form.clockPosition}`,
-    join(form.visualFindings) && `视诊见${join(form.visualFindings)}`,
-    join(form.digitalExamFindings) && `指诊见${join(form.digitalExamFindings)}`,
-    join(form.anoscopyFindings) && `肛门镜见${join(form.anoscopyFindings)}`,
+    narrative,
+    !narrative && form.lesionLocation && `病变位于${form.lesionLocation}`,
+    !narrative && form.clockPosition && `钟点位${form.clockPosition}`,
+    measurementLine("病灶大小", form.lesionSize),
+    measurementLine("病灶范围", form.lesionExtent),
+    measurementLine("病灶深度", form.lesionDepth),
+    visual.length && `视诊见${visual.join("、")}`,
+    digital.length && `指诊见${digital.join("、")}`,
+    anoscopy.length && `肛门镜见${anoscopy.join("、")}`,
     form.otherFindings
   ];
   return parts.filter(Boolean).map(sentence).join("");
