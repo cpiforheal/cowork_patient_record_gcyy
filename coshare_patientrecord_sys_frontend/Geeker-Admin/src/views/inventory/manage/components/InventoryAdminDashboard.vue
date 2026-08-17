@@ -24,50 +24,86 @@
           :style="{ '--i': index }"
         >
           <div class="metric-label">{{ metric.label }}</div>
-          <div class="metric-value">{{ metric.value }}</div>
+          <div class="metric-value-row">
+            <div class="metric-value">{{ metric.value }}</div>
+            <span v-if="metric.delta != null" class="metric-delta" :class="metric.delta >= 0 ? 'delta-up' : 'delta-down'">
+              {{ metric.delta >= 0 ? "↑" : "↓" }}{{ Math.abs(metric.delta * 100).toFixed(1) }}%
+            </span>
+          </div>
           <div class="metric-note">{{ metric.note }}</div>
+          <svg
+            v-if="metric.spark && metric.spark.length >= 2"
+            class="metric-spark"
+            viewBox="0 0 100 28"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <polyline
+              :points="sparkPoints(metric.spark)"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+          </svg>
         </article>
+      </div>
+      <div v-if="timelineDays.length >= 2" class="timeline-bar" data-reveal>
+        <button type="button" class="tl-play-btn" :class="{ playing: isPlaying }" @click="togglePlay">
+          <span v-if="isPlaying">❚❚</span>
+          <span v-else>▶</span>
+        </button>
+        <span class="tl-current">{{ timelineLabel }}</span>
+        <div class="tl-track" @click="handleTrackClick">
+          <div
+            class="tl-progress"
+            :style="{ width: timelineIndex >= 0 ? ((timelineIndex + 1) / timelineDays.length) * 100 + '%' : '100%' }"
+          />
+          <div class="tl-stops">
+            <button
+              v-for="(day, index) in timelineDays"
+              :key="day"
+              type="button"
+              class="tl-stop"
+              :class="{ active: timelineIndex === index, passed: timelineIndex >= index }"
+              @click.stop="seekTimeline(index)"
+            >
+              <span class="tl-stop-dot" />
+              <span class="tl-stop-label">{{ day }}</span>
+            </button>
+          </div>
+        </div>
+        <button type="button" class="tl-reset" :class="{ active: timelineIndex < 0 }" @click="resetTimeline">全期间</button>
       </div>
       <div class="chart-grid">
         <article class="chart-card risk-card" data-reveal>
           <header>
-            <div><strong>12 科室填报完成度</strong><span>每瓣对应一个科室，点击定位核查</span></div>
+            <div><strong>12 科室填报状态</strong><span>点击科室卡片可定位核查明细</span></div>
             <el-button link size="small" class="chart-expand-btn" @click="enlargeChart('risk')">放大</el-button>
           </header>
-          <div class="pie-layout">
-            <div ref="riskChartRoot" class="chart-box pie-box">
-              <VChart
-                v-if="chartLoaded.risk && hasDepartmentRisk"
-                :option="riskOption"
-                :update-options="{ replaceMerge: ['series'] }"
-                autoresize
-                @click="handleChartClick"
-              />
-              <el-empty v-else-if="chartLoaded.risk" description="暂无科室填报数据" />
-              <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
-            </div>
-            <div class="risk-list" aria-label="12科室填报明细">
-              <div class="list-heading">
-                <strong>科室填报明细</strong><span>{{ departmentCompletionRows.length }} 个科室</span>
+          <div ref="riskChartRoot" class="dept-grid">
+            <button
+              v-for="tile in departmentTiles"
+              :key="tile.departmentKey"
+              type="button"
+              class="dept-tile"
+              :class="['status-' + tile.status, { active: selectedDepartmentKey === tile.departmentKey }]"
+              @click="handleDepartmentRowClick(tile.departmentKey)"
+            >
+              <div class="dept-tile-head">
+                <span class="dept-tile-name">{{ tile.departmentName }}</span>
+                <span class="dept-tile-badge">{{ tile.submittedDays }}/{{ tile.expectedDays }}</span>
               </div>
-              <button
-                v-for="row in departmentCompletionRows"
-                :key="row.departmentKey"
-                type="button"
-                class="drill-list-item"
-                :class="{ active: selectedDepartmentKey === row.departmentKey }"
-                @click="handleDepartmentRowClick(row.departmentKey)"
-              >
-                <span class="item-name" :title="row.departmentName + ' · 期间业务人次 ' + number(row.volumeTotal)">{{
-                  row.departmentName
-                }}</span>
-                <span class="item-value">
-                  <small class="item-volume">{{ number(row.volumeTotal) }}人次</small>
-                  <span class="risk-total">{{ row.submittedDayCount }} / {{ row.expectedDayCount }} 日</span>
-                </span>
-              </button>
-              <el-empty v-if="!departmentCompletionRows.length" :image-size="48" description="暂无科室填报数据" />
-            </div>
+              <div class="dept-tile-body">
+                <span class="dept-tile-volume">{{ number(tile.volume) }}<small>人次</small></span>
+                <span v-if="tile.riskCount > 0" class="dept-tile-risk">{{ tile.riskCount }} 风险</span>
+              </div>
+              <div class="dept-tile-bar">
+                <div class="dept-tile-fill" :style="{ width: Math.round(tile.completionRate * 100) + '%' }" />
+              </div>
+            </button>
+            <el-empty v-if="!departmentTiles.length" :image-size="48" description="暂无科室数据" />
           </div>
         </article>
         <article class="chart-card trend-card" data-reveal>
@@ -228,37 +264,189 @@ const tooltipSurface = {
 };
 
 const detailLineTotal = computed(() => (props.report?.details || []).length);
-const actualCoverageOverall = computed(() => {
-  const reported = dashboard.value?.reportedLineCount;
-  if (!reported || detailLineTotal.value <= 0) return null;
-  return reported / detailLineTotal.value;
+
+// ---- Timeline player ----
+const timelineIndex = ref(-1);
+const isPlaying = ref(false);
+let playTimer: number | null = null;
+const dailyTrendRows = computed(() => dashboard.value?.dailyTrend || []);
+const timelineDays = computed(() => dailyTrendRows.value.map(r => r.businessDate.slice(5)));
+const timelineSlice = computed(() => {
+  const rows = dailyTrendRows.value;
+  if (timelineIndex.value < 0 || !rows.length) return rows;
+  return rows.slice(0, timelineIndex.value + 1);
 });
+const timelineLabel = computed(() => {
+  if (timelineIndex.value < 0) return "全期间";
+  const rows = dailyTrendRows.value;
+  if (timelineIndex.value >= rows.length) return "全期间";
+  return rows[timelineIndex.value].businessDate;
+});
+const cumulativeDashboard = computed(() => {
+  const d = dashboard.value;
+  if (!d) return undefined;
+  const slice = timelineSlice.value;
+  if (timelineIndex.value < 0 || !slice.length) return d;
+  const expected = slice.reduce((s, r) => s + (r.expectedDepartmentDays ?? 0), 0);
+  const submitted = slice.reduce((s, r) => s + (r.submittedDepartmentDays ?? 0), 0);
+  const missing = slice.reduce((s, r) => s + (r.missingDepartmentDays ?? 0), 0);
+  const reported = slice.reduce((s, r) => s + (r.reportedLineCount ?? 0), 0);
+  const unverified = slice.reduce((s, r) => s + (r.unverifiedCount ?? 0), 0);
+  const attention = slice.reduce((s, r) => s + (r.attentionCount ?? 0), 0);
+  const abnormal = slice.reduce((s, r) => s + (r.abnormalCount ?? 0), 0);
+  const special = slice.reduce((s, r) => s + (r.specialPendingNoteCount ?? 0), 0);
+  return {
+    ...d,
+    expectedDepartmentDays: expected,
+    submittedDepartmentDays: submitted,
+    missingDepartmentDays: missing,
+    reportedLineCount: reported,
+    unverifiedCount: unverified,
+    attentionCount: attention,
+    abnormalCount: abnormal,
+    specialPendingNoteCount: special,
+    completionRate: expected ? submitted / expected : 0
+  };
+});
+const cumulativeDetailLineTotal = computed(() => {
+  if (timelineIndex.value < 0) return detailLineTotal.value;
+  return timelineSlice.value.reduce((s, r) => s + (r.lineCount ?? 0), 0);
+});
+const timelineMarkLine = computed(() => {
+  if (timelineIndex.value < 0) return undefined;
+  const rows = dailyTrendRows.value;
+  if (timelineIndex.value >= rows.length) return undefined;
+  return {
+    symbol: "none" as const,
+    silent: true,
+    label: { show: false },
+    data: [{ xAxis: rows[timelineIndex.value].businessDate.slice(5) }],
+    lineStyle: { color: "rgb(8 118 111 / 55%)", width: 2, type: "solid" as const }
+  };
+});
+const playTimeline = () => {
+  if (!dailyTrendRows.value.length) return;
+  if (timelineIndex.value < 0 || timelineIndex.value >= dailyTrendRows.value.length - 1) {
+    timelineIndex.value = 0;
+  }
+  isPlaying.value = true;
+  playTimer = window.setInterval(() => {
+    if (timelineIndex.value < dailyTrendRows.value.length - 1) {
+      timelineIndex.value++;
+    } else {
+      pauseTimeline();
+    }
+  }, 1200);
+};
+const pauseTimeline = () => {
+  isPlaying.value = false;
+  if (playTimer != null) {
+    window.clearInterval(playTimer);
+    playTimer = null;
+  }
+};
+const togglePlay = () => {
+  if (isPlaying.value) pauseTimeline();
+  else playTimeline();
+};
+const seekTimeline = (index: number) => {
+  pauseTimeline();
+  timelineIndex.value = index;
+};
+const resetTimeline = () => {
+  pauseTimeline();
+  timelineIndex.value = -1;
+};
+const handleTrackClick = (event: MouseEvent) => {
+  const target = event.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  const ratio = (event.clientX - rect.left) / rect.width;
+  const index = Math.round(ratio * (timelineDays.value.length - 1));
+  seekTimeline(Math.max(0, Math.min(timelineDays.value.length - 1, index)));
+};
+const sparkPoints = (data: number[]) => {
+  if (data.length < 2) return "";
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const w = 100;
+  const h = 28;
+  return data
+    .map((v, i) => {
+      const x = (i / (data.length - 1)) * w;
+      const y = h - 2 - ((v - min) / range) * (h - 4);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+};
+const calcDelta = (current: number | null | undefined, prev: number | null | undefined) => {
+  if (current == null || prev == null || prev === 0) return null;
+  return (current - prev) / Math.abs(prev);
+};
 
 const metrics = computed(() => {
-  const d = dashboard.value;
+  const d = cumulativeDashboard.value;
   if (!d) return [];
+  const trend = timelineSlice.value;
+  const lastDay = trend.length >= 1 ? trend[trend.length - 1] : null;
+  const prevDay = trend.length >= 2 ? trend[trend.length - 2] : null;
+  const spark = (key: string) => trend.map(r => Number((r as any)[key] ?? 0)).slice(-8);
+  const covOverall =
+    d.reportedLineCount && cumulativeDetailLineTotal.value > 0 ? d.reportedLineCount / cumulativeDetailLineTotal.value : null;
+  const covLast = lastDay && lastDay.lineCount ? lastDay.reportedLineCount / lastDay.lineCount : null;
+  const covPrev = prevDay && prevDay.lineCount ? prevDay.reportedLineCount / prevDay.lineCount : null;
   return [
     {
       label: "日报完成率",
       value: percent(d.completionRate),
       note: d.submittedDepartmentDays + " / " + d.expectedDepartmentDays + " 个科室日已提交",
-      tone: "tone-primary"
+      tone: "tone-primary",
+      spark: spark("completionRate"),
+      delta: calcDelta(d.completionRate, prevDay?.completionRate)
     },
-    { label: "未填报科室日", value: number(d.missingDepartmentDays), note: "风险分布中查看科室明细", tone: "tone-danger" },
+    {
+      label: "未填报科室日",
+      value: number(d.missingDepartmentDays),
+      note: "风险分布中查看科室明细",
+      tone: "tone-danger",
+      spark: spark("missingDepartmentDays"),
+      delta: calcDelta(d.missingDepartmentDays, prevDay?.missingDepartmentDays)
+    },
     {
       label: "实际量填报覆盖率",
-      value: percent(actualCoverageOverall.value),
-      note: number(d.reportedLineCount) + " / " + number(detailLineTotal.value) + " 行已填实际量",
-      tone: "tone-success"
+      value: percent(covOverall),
+      note: number(d.reportedLineCount) + " / " + number(cumulativeDetailLineTotal.value) + " 行已填实际量",
+      tone: "tone-success",
+      spark: trend.map(r => (r.lineCount ? r.reportedLineCount / r.lineCount : 0)).slice(-8),
+      delta: calcDelta(covLast, covPrev)
     },
     {
       label: "关注 / 异常",
       value: number(d.attentionCount) + " / " + number(d.abnormalCount),
       note: "异常优先处理",
-      tone: "tone-warning"
+      tone: "tone-warning",
+      spark: trend.map(r => r.attentionCount + r.abnormalCount).slice(-8),
+      delta: calcDelta(
+        d.attentionCount + d.abnormalCount,
+        prevDay ? (prevDay.attentionCount ?? 0) + (prevDay.abnormalCount ?? 0) : null
+      )
     },
-    { label: "待核验耗材行", value: number(d.unverifiedCount), note: "实际量为空，不计入偏差", tone: "tone-info" },
-    { label: "特殊待说明", value: number(d.specialPendingNoteCount), note: "特殊耗材说明未完成", tone: "tone-purple" }
+    {
+      label: "待核验耗材行",
+      value: number(d.unverifiedCount),
+      note: "实际量为空，不计入偏差",
+      tone: "tone-info",
+      spark: spark("unverifiedCount"),
+      delta: calcDelta(d.unverifiedCount, prevDay?.unverifiedCount)
+    },
+    {
+      label: "特殊待说明",
+      value: number(d.specialPendingNoteCount),
+      note: "特殊耗材说明未完成",
+      tone: "tone-purple",
+      spark: spark("specialPendingNoteCount"),
+      delta: calcDelta(d.specialPendingNoteCount, prevDay?.specialPendingNoteCount)
+    }
   ];
 });
 
@@ -315,6 +503,8 @@ watch(
   () => props.report,
   () => {
     selectedDepartmentKey.value = null;
+    pauseTimeline();
+    timelineIndex.value = -1;
     if (dashboardMounted)
       void nextTick(() => {
         observeChartRoots();
@@ -347,7 +537,31 @@ const departmentCompletionRows = computed(() => {
     };
   });
 });
-const hasDepartmentRisk = computed(() => departmentCompletionRows.value.length > 0);
+const departmentTiles = computed(() => {
+  const allDays = report.value?.departmentDays || [];
+  const selectedDate = timelineIndex.value >= 0 ? dailyTrendRows.value[timelineIndex.value]?.businessDate : null;
+  const expected =
+    timelineIndex.value < 0
+      ? report.value?.departmentCount
+        ? Math.max(1, Math.round((dashboard.value?.expectedDepartmentDays || 0) / report.value.departmentCount))
+        : Math.max(1, dailyTrendRows.value.length)
+      : timelineSlice.value.length || 1;
+  return (report.value?.departments || []).map(dept => {
+    const days = allDays.filter(d => d.departmentKey === dept.departmentKey && (!selectedDate || d.businessDate <= selectedDate));
+    const submitted = days.filter(d => d.status === "SUBMITTED").length;
+    const volume = days.reduce((s, d) => s + (d.businessVolume ?? 0), 0);
+    const riskCount = days.reduce((s, d) => s + (d.attentionCount ?? 0) + (d.abnormalCount ?? 0), 0);
+    return {
+      ...dept,
+      submittedDays: submitted,
+      expectedDays: expected,
+      volume,
+      riskCount,
+      completionRate: submitted / expected,
+      status: submitted === 0 ? "pending" : submitted >= expected ? "done" : "partial"
+    };
+  });
+});
 const materialKey = (row: InventoryAdminMaterialSummary) => row.materialName + "\u0000" + row.unit;
 // Full-period summary (not the pricing-filtered Top list) so unpriced materials still render in quantity mode.
 // Keep all summary rows for list stability; null values for the current mode are dropped only in materialChartRows.
@@ -884,6 +1098,7 @@ const coverageTrendOption = computed<EChartsOption>(() => {
         silent: true,
         emphasis: { disabled: true },
         data: rows.map(row => row.lineCount),
+        markLine: timelineMarkLine.value,
         animationDelay: 0
       },
       {
@@ -960,6 +1175,7 @@ const riskTrendOption = computed<EChartsOption>(() => {
         areaStyle: { opacity: 0.1 },
         data: rows.map(row => row.unverifiedCount),
         itemStyle: { color: "#8aa8c3" },
+        markLine: timelineMarkLine.value,
         animationDelay: 0
       },
       {
@@ -1090,6 +1306,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", handleChartViewportChange);
   window.removeEventListener("scroll", handleChartViewportChange, true);
   if (chartLoadFallbackTimer != null) window.clearTimeout(chartLoadFallbackTimer);
+  if (playTimer != null) window.clearInterval(playTimer);
 });
 
 const handleChartClick = (params: any) => {
@@ -1256,6 +1473,299 @@ const handleChartClick = (params: any) => {
 }
 .tone-primary .metric-label::before {
   background: var(--inventory-primary);
+}
+.metric-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+}
+.metric-delta {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.metric-delta.delta-up {
+  color: var(--inventory-success);
+}
+.metric-delta.delta-down {
+  color: var(--inventory-danger);
+}
+.metric-spark {
+  width: 100%;
+  height: 28px;
+  margin-top: 6px;
+  color: var(--inventory-line);
+  opacity: 0.7;
+}
+.tone-primary .metric-spark {
+  color: var(--inventory-primary);
+}
+.tone-danger .metric-spark {
+  color: var(--inventory-danger);
+}
+.tone-success .metric-spark {
+  color: var(--inventory-success);
+}
+.tone-warning .metric-spark {
+  color: var(--inventory-warning);
+}
+.tone-info .metric-spark {
+  color: #4f7cac;
+}
+.tone-purple .metric-spark {
+  color: #7655b7;
+}
+
+/* Timeline player */
+.timeline-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--inventory-line-soft);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(23 33 43 / 2%);
+}
+.tl-play-btn {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: var(--inventory-primary);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background 200ms ease-out,
+    transform 200ms ease-out;
+}
+.tl-play-btn:hover {
+  transform: scale(1.06);
+}
+.tl-play-btn.playing {
+  background: var(--inventory-warning);
+}
+.tl-current {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--inventory-text);
+  font-variant-numeric: tabular-nums;
+  min-width: 72px;
+}
+.tl-track {
+  flex: 1 1 auto;
+  position: relative;
+  height: 28px;
+  cursor: pointer;
+}
+.tl-progress {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--inventory-primary);
+  opacity: 0.5;
+  transition: width 400ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.tl-stops {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tl-stop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+.tl-stop-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--inventory-line);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--inventory-line-soft);
+  transition: all 200ms ease-out;
+}
+.tl-stop.passed .tl-stop-dot {
+  background: var(--inventory-primary);
+  box-shadow: 0 0 0 1px var(--inventory-primary);
+}
+.tl-stop.active .tl-stop-dot {
+  background: var(--inventory-primary);
+  box-shadow:
+    0 0 0 2px var(--inventory-primary),
+    0 0 8px rgb(8 118 111 / 30%);
+  transform: scale(1.2);
+}
+.tl-stop-label {
+  position: absolute;
+  top: 14px;
+  font-size: 9px;
+  color: var(--inventory-muted);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+.tl-stop:hover .tl-stop-label,
+.tl-stop.active .tl-stop-label {
+  opacity: 1;
+}
+.tl-stop.active .tl-stop-label {
+  color: var(--inventory-primary);
+  font-weight: 500;
+}
+.tl-reset {
+  flex: 0 0 auto;
+  border: 1px solid var(--inventory-line-soft);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--inventory-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 200ms ease-out;
+}
+.tl-reset:hover {
+  border-color: var(--inventory-primary);
+  color: var(--inventory-primary);
+}
+.tl-reset.active {
+  background: var(--inventory-primary);
+  border-color: var(--inventory-primary);
+  color: #fff;
+}
+
+/* Department status grid */
+.dept-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 4px 0;
+}
+.dept-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--inventory-line-soft);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 220ms ease-out,
+    box-shadow 220ms ease-out,
+    border-color 220ms ease-out;
+}
+.dept-tile:hover {
+  transform: translateY(-1px);
+  border-color: var(--inventory-line);
+  box-shadow: 0 4px 12px rgb(23 33 43 / 6%);
+}
+.dept-tile.active {
+  border-color: var(--inventory-primary);
+  box-shadow: 0 0 0 2px rgb(8 118 111 / 12%);
+}
+.dept-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.dept-tile-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--inventory-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dept-tile-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--inventory-muted);
+}
+.dept-tile-body {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.dept-tile-volume {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--inventory-text);
+  font-variant-numeric: tabular-nums;
+}
+.dept-tile-volume small {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--inventory-muted);
+  margin-left: 2px;
+}
+.dept-tile-risk {
+  font-size: 10px;
+  color: var(--inventory-danger);
+  font-weight: 500;
+}
+.dept-tile-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--inventory-line-soft);
+  overflow: hidden;
+}
+.dept-tile-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 500ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.dept-tile.status-done .dept-tile-badge {
+  color: var(--inventory-success);
+}
+.dept-tile.status-done .dept-tile-fill {
+  background: var(--inventory-success);
+}
+.dept-tile.status-partial .dept-tile-badge {
+  color: var(--inventory-warning);
+}
+.dept-tile.status-partial .dept-tile-fill {
+  background: var(--inventory-warning);
+}
+.dept-tile.status-partial {
+  animation: tile-breathe 2.4s ease-in-out infinite;
+}
+.dept-tile.status-pending .dept-tile-badge {
+  color: var(--inventory-muted);
+}
+.dept-tile.status-pending .dept-tile-fill {
+  background: var(--inventory-line);
+}
+@keyframes tile-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(245 158 11 / 0%);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(245 158 11 / 8%);
+  }
 }
 .chart-grid {
   display: grid;
@@ -1466,6 +1976,9 @@ const handleChartClick = (params: any) => {
   .chart-grid {
     grid-template-columns: 1fr;
   }
+  .dept-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .chart-card header {
     flex-direction: column;
   }
@@ -1479,16 +1992,31 @@ const handleChartClick = (params: any) => {
   .pie-box {
     height: 300px;
   }
+  .tl-stop-label {
+    display: none;
+  }
+  .tl-current {
+    min-width: 60px;
+    font-size: 11px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .metric-card,
   .drill-list-item,
+  .dept-tile,
   .chart-placeholder :deep(.el-skeleton__item) {
     transition: none;
   }
   .metric-card:hover,
-  .drill-list-item:hover {
+  .drill-list-item:hover,
+  .dept-tile:hover {
     transform: none;
+  }
+  .dept-tile.status-partial {
+    animation: none;
+  }
+  .tl-progress {
+    transition: none;
   }
 }
 [data-reveal] {
