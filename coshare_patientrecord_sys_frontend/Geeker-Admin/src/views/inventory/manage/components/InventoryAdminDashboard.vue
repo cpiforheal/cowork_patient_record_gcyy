@@ -4,7 +4,7 @@
       <div>
         <div class="eyebrow">管理总览 · {{ periodLabel }}</div>
         <h3>耗材日报驾驶舱</h3>
-        <p>优先查看实际使用量与风险分布；点击图表或明细可直接定位核查。</p>
+        <p>优先查看实际使用量、填报覆盖与风险分布；点击图表或明细可直接定位核查。</p>
       </div>
       <div class="dashboard-actions">
         <el-button size="small" @click="emit('reset')">重置下钻</el-button>
@@ -51,8 +51,13 @@
                 :class="{ active: selectedDepartmentKey === row.departmentKey }"
                 @click="handleDepartmentRowClick(row.departmentKey)"
               >
-                <span class="item-name" :title="row.departmentName">{{ row.departmentName }}</span>
-                <span class="item-value risk-total">{{ row.submittedDayCount }} / {{ row.expectedDayCount }} 日</span>
+                <span class="item-name" :title="row.departmentName + ' · 期间业务人次 ' + number(row.volumeTotal)">{{
+                  row.departmentName
+                }}</span>
+                <span class="item-value">
+                  <small class="item-volume">{{ number(row.volumeTotal) }}人次</small>
+                  <span class="risk-total">{{ row.submittedDayCount }} / {{ row.expectedDayCount }} 日</span>
+                </span>
               </button>
               <el-empty v-if="!departmentCompletionRows.length" :image-size="48" description="暂无科室填报数据" />
             </div>
@@ -60,16 +65,16 @@
         </article>
         <article class="chart-card trend-card" data-reveal>
           <header>
-            <div><strong>理论与实际金额趋势</strong><span>缺失实际量不按零</span></div>
+            <div><strong>每日实际量填报覆盖</strong><span>浅柱=应填报行 · 深柱=已填实际量 · 虚线=行覆盖率</span></div>
           </header>
-          <div ref="amountTrendChartRoot" class="chart-box">
+          <div ref="coverageTrendChartRoot" class="chart-box">
             <VChart
-              v-if="chartLoaded.amountTrend && hasDailyTrend"
-              :option="amountTrendOption"
+              v-if="chartLoaded.coverageTrend && hasDailyTrend"
+              :option="coverageTrendOption"
               autoresize
               @click="handleChartClick"
             />
-            <el-empty v-else-if="chartLoaded.amountTrend" description="暂无金额趋势" />
+            <el-empty v-else-if="chartLoaded.coverageTrend" description="暂无填报趋势" />
             <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
           </div>
         </article>
@@ -81,8 +86,8 @@
             <div class="chart-controls">
               <el-select v-model="materialMode" size="small" class="chart-select" aria-label="耗材指标">
                 <el-option label="实际使用量" value="quantity" />
-                <el-option label="实际金额" value="amount" />
-                <el-option label="理论与实际偏差" value="deviation" />
+                <el-option label="理论-实际量偏差" value="deviation" />
+                <el-option label="填报覆盖率" value="coverage" />
               </el-select>
               <el-select v-model="materialScope" size="small" class="chart-select" aria-label="耗材范围">
                 <el-option label="Top 10" value="top" />
@@ -164,7 +169,7 @@ use([
 ]);
 
 type Drill = { businessDate?: string; departmentKey?: string; materialName?: string; riskLevel?: string };
-type MaterialMode = "quantity" | "amount" | "deviation";
+type MaterialMode = "quantity" | "deviation" | "coverage";
 type MaterialScope = "top" | "all";
 
 const props = defineProps<{ report?: InventoryAdminDepartmentDailyRollup }>();
@@ -176,7 +181,6 @@ const number = (value: number | null | undefined) =>
   value == null ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const percent = (value: number | null | undefined) =>
   value == null ? "—" : (Number(value) * 100).toLocaleString("zh-CN", { maximumFractionDigits: 1 }) + "%";
-const amount = (value: number | null | undefined) => (value == null ? "未核价" : "¥" + number(value));
 const tooltipSurface = {
   backgroundColor: "#fff",
   borderColor: "rgb(23 33 43 / 12%)",
@@ -186,6 +190,13 @@ const tooltipSurface = {
   textStyle: { color: "#17212b", fontSize: 12, lineHeight: 19 },
   extraCssText: "box-shadow:0 10px 28px rgb(23 33 43 / 14%);"
 };
+
+const detailLineTotal = computed(() => (props.report?.details || []).length);
+const actualCoverageOverall = computed(() => {
+  const reported = dashboard.value?.reportedLineCount;
+  if (!reported || detailLineTotal.value <= 0) return null;
+  return reported / detailLineTotal.value;
+});
 
 const metrics = computed(() => {
   const d = dashboard.value;
@@ -198,19 +209,19 @@ const metrics = computed(() => {
       tone: "tone-primary"
     },
     { label: "未填报科室日", value: number(d.missingDepartmentDays), note: "风险分布中查看科室明细", tone: "tone-danger" },
-    { label: "待核验耗材行", value: number(d.unverifiedCount), note: "实际量为空，不参与金额", tone: "tone-info" },
+    {
+      label: "实际量填报覆盖率",
+      value: percent(actualCoverageOverall.value),
+      note: number(d.reportedLineCount) + " / " + number(detailLineTotal.value) + " 行已填实际量",
+      tone: "tone-success"
+    },
     {
       label: "关注 / 异常",
       value: number(d.attentionCount) + " / " + number(d.abnormalCount),
       note: "异常优先处理",
       tone: "tone-warning"
     },
-    {
-      label: "已核价实际金额",
-      value: amount(d.actualAmount),
-      note: "核价覆盖率 " + percent(d.pricingCoverageRate),
-      tone: "tone-success"
-    },
+    { label: "待核验耗材行", value: number(d.unverifiedCount), note: "实际量为空，不计入偏差", tone: "tone-info" },
     { label: "特殊待说明", value: number(d.specialPendingNoteCount), note: "特殊耗材说明未完成", tone: "tone-purple" }
   ];
 });
@@ -219,10 +230,10 @@ const materialMode = ref<MaterialMode>("quantity");
 const materialScope = ref<MaterialScope>("top");
 const selectedMaterialIndex = ref<number | null>(null);
 const selectedDepartmentKey = ref<string | null>(null);
-type ChartId = "risk" | "amountTrend" | "material" | "riskTrend";
-const chartLoaded = reactive<Record<ChartId, boolean>>({ risk: false, amountTrend: false, material: false, riskTrend: false });
+type ChartId = "risk" | "coverageTrend" | "material" | "riskTrend";
+const chartLoaded = reactive<Record<ChartId, boolean>>({ risk: false, coverageTrend: false, material: false, riskTrend: false });
 const riskChartRoot = ref<HTMLElement | null>(null);
-const amountTrendChartRoot = ref<HTMLElement | null>(null);
+const coverageTrendChartRoot = ref<HTMLElement | null>(null);
 const materialChartRoot = ref<HTMLElement | null>(null);
 const riskTrendChartRoot = ref<HTMLElement | null>(null);
 let chartObserver: IntersectionObserver | null = null;
@@ -280,12 +291,23 @@ const departmentCompletionRows = computed(() => {
   const expectedDayCount = report.value?.departmentCount
     ? Math.max(1, Math.round((dashboard.value?.expectedDepartmentDays || 0) / report.value.departmentCount))
     : Math.max(1, dashboard.value?.dailyTrend?.length || 1);
+  const volumeTotals = new Map<string, number>();
+  (report.value?.departmentDays || []).forEach(day => {
+    if (day.businessVolume == null) return;
+    volumeTotals.set(day.departmentKey, (volumeTotals.get(day.departmentKey) || 0) + day.businessVolume);
+  });
   return (report.value?.departments || []).map(row => {
     const submittedDayCount = Math.min(
       expectedDayCount,
       Math.max(0, row.submittedDayCount ?? (row.status === "SUBMITTED" ? 1 : 0))
     );
-    return { ...row, expectedDayCount, submittedDayCount, completionRate: submittedDayCount / expectedDayCount };
+    return {
+      ...row,
+      expectedDayCount,
+      submittedDayCount,
+      completionRate: submittedDayCount / expectedDayCount,
+      volumeTotal: volumeTotals.get(row.departmentKey) ?? 0
+    };
   });
 });
 const hasDepartmentRisk = computed(() => departmentCompletionRows.value.length > 0);
@@ -295,25 +317,28 @@ const materialSourceRows = computed<InventoryAdminMaterialSummary[]>(() =>
   (report.value?.summary || []).filter(row => materialRawValue(row) != null)
 );
 const materialRows = computed<InventoryAdminMaterialSummary[]>(() => {
-  const rows = [...materialSourceRows.value].sort((left, right) => materialMetricValue(right) - materialMetricValue(left));
+  const direction = materialMode.value === "coverage" ? -1 : 1;
+  const rows = [...materialSourceRows.value].sort(
+    (left, right) => direction * (materialMetricValue(left) - materialMetricValue(right))
+  );
   return materialScope.value === "top" ? rows.slice(0, 10) : rows;
 });
 const materialModeLabel = computed(
-  () => ({ quantity: "实际使用量", amount: "实际金额", deviation: "理论与实际偏差" })[materialMode.value]
+  () => ({ quantity: "实际使用量", deviation: "理论-实际量偏差", coverage: "填报覆盖率" })[materialMode.value]
 );
 const materialScopeNote = computed(() => {
-  if (materialScope.value === "top") return "按当前口径排序取前 10 · 点击图表或明细下钻";
+  if (materialScope.value === "top")
+    return "按当前口径排序取前 10 · 覆盖率模式按最低在前 · 点击下钻";
   return "全院口径全部耗材（" + materialRows.value.length + " 项）· 滚轮可滚动查看";
 });
+const materialQuantityDifference = (row: InventoryAdminMaterialSummary) =>
+  row.actualQuantity == null ? null : row.actualQuantity - row.theoreticalQuantity;
 const materialRawValue = (row: InventoryAdminMaterialSummary) => {
   if (materialMode.value === "quantity") return row.actualQuantity;
-  if (materialMode.value === "amount") return row.actualAmount;
-  return row.amountDifference;
+  if (materialMode.value === "deviation") return materialQuantityDifference(row);
+  return row.actualCoverageRate;
 };
-const materialReferenceValue = (row: InventoryAdminMaterialSummary) => {
-  if (materialMode.value === "amount") return row.theoreticalAmount;
-  return row.theoreticalQuantity;
-};
+const materialReferenceValue = (row: InventoryAdminMaterialSummary) => row.theoreticalQuantity;
 const materialMetricValue = (row: InventoryAdminMaterialSummary) => {
   const value = Number(materialRawValue(row) ?? 0);
   return materialMode.value === "deviation" ? Math.abs(value) : Math.max(0, value);
@@ -322,23 +347,27 @@ const materialDisplayValue = (row: InventoryAdminMaterialSummary) => {
   const value = materialRawValue(row);
   if (value == null) return "未填报";
   if (materialMode.value === "quantity") return number(value) + " " + row.unit;
-  return "¥" + number(value);
+  if (materialMode.value === "coverage") return percent(value);
+  const text = number(Math.abs(value));
+  return value > 0 ? "+" + text : value < 0 ? "-" + text : "0";
 };
 // Bars keep the signed deviation value so negative differences render leftwards.
 const materialChartValue = (row: InventoryAdminMaterialSummary) => {
   const value = Number(materialRawValue(row) ?? 0);
   return materialMode.value === "deviation" ? value : Math.max(0, value);
 };
-const materialChartRows = computed(() =>
-  materialRows.value.map((row, index) => ({ row, index, value: materialChartValue(row) })).filter(item => item.value !== 0)
-);
+const materialChartRows = computed(() => {
+  const rows = materialRows.value.map((row, index) => ({ row, index, value: materialChartValue(row) }));
+  // Coverage 0 is itself a signal (never reported); other modes drop zero bars.
+  return materialMode.value === "coverage" ? rows : rows.filter(item => item.value !== 0);
+});
 const hasMaterialChart = computed(() => materialChartRows.value.length > 0);
 const materialEmptyText = computed(() => {
   if (!(report.value?.summary || []).length) return "该时间段暂无科室填报";
   if (materialSourceRows.value.length) return "当前口径数值均为 0";
   if (materialMode.value === "quantity") return "该时间段暂无耗材实际量填报";
-  if (materialMode.value === "amount") return "该时间段暂无可核价的实际金额";
-  return "该时间段暂无可计算的金额偏差";
+  if (materialMode.value === "coverage") return "该时间段暂无可计算的覆盖率";
+  return "该时间段暂无可计算的理论-实际量偏差";
 });
 
 const palette = {
@@ -493,13 +522,21 @@ const materialAxisName = (row: InventoryAdminMaterialSummary) => {
   return name + " " + row.unit;
 };
 const materialBarLabelFormatter = (value: number) => {
+  if (materialMode.value === "coverage") return (Math.round(value * 1000) / 10) + "%";
   const text = number(Math.abs(value));
-  return value < 0 ? "-" + (materialMode.value === "quantity" ? text : "¥" + text) : materialMode.value === "quantity" ? text : "¥" + text;
+  if (materialMode.value === "deviation") return value > 0 ? "+" + text : value < 0 ? "-" + text : "0";
+  return text;
+};
+const materialDeviationRate = (row: InventoryAdminMaterialSummary) => {
+  const difference = materialQuantityDifference(row);
+  if (difference == null || row.theoreticalQuantity <= 0) return null;
+  return difference / row.theoreticalQuantity;
 };
 const materialOption = computed<EChartsOption>(() => {
   const rows = materialChartRows.value;
   const isDeviation = materialMode.value === "deviation";
-  const hasReference = !isDeviation;
+  const isCoverage = materialMode.value === "coverage";
+  const hasReference = materialMode.value === "quantity";
   const axisLabels = rows.map(item => materialAxisName(item.row));
   return {
     ...chartMotion.value,
@@ -545,35 +582,48 @@ const materialOption = computed<EChartsOption>(() => {
             "</b><br/>理论参考：" +
             number(row.theoreticalQuantity) +
             " " +
-            row.unit
+            row.unit +
+            "<br/>覆盖科室：" +
+            number(row.departmentCount) +
+            " 个"
           );
         }
-        if (materialMode.value === "amount") {
+        if (isDeviation) {
           return (
             header +
-            "<br/>实际金额：<b>¥" +
-            number(row.actualAmount) +
-            "</b><br/>理论金额：¥" +
-            number(row.theoreticalAmount) +
-            "<br/>核价覆盖：" +
-            percent(row.pricingCoverageRate)
+            "<br/>量偏差：<b>" +
+            materialDisplayValue(row) +
+            " " +
+            row.unit +
+            "</b><br/>实际：" +
+            number(row.actualQuantity) +
+            " · 理论：" +
+            number(row.theoreticalQuantity) +
+            "<br/>偏差率：" +
+            (materialDeviationRate(row) == null ? "—" : percent(materialDeviationRate(row)))
           );
         }
         return (
           header +
-          "<br/>偏差金额：<b>" +
-          materialBarLabelFormatter(row.amountDifference ?? 0) +
-          "</b><br/>实际：¥" +
-          number(row.actualAmount) +
-          " · 理论：¥" +
-          number(row.theoreticalAmount) +
-          "<br/>偏差率：" +
-          (row.amountDeviationRate == null ? "—" : percent(row.amountDeviationRate))
+          "<br/>填报覆盖率：<b>" +
+          percent(row.actualCoverageRate) +
+          "</b><br/>风险行：" +
+          number(row.unverifiedCount + row.attentionCount + row.abnormalCount + row.specialPendingNoteCount) +
+          "（未核验 " +
+          number(row.unverifiedCount) +
+          " · 关注 " +
+          number(row.attentionCount) +
+          " · 异常 " +
+          number(row.abnormalCount) +
+          "）<br/>覆盖科室：" +
+          number(row.departmentCount) +
+          " 个"
         );
       }
     },
     xAxis: {
       type: "value",
+      ...(isCoverage ? { max: 1 } : {}),
       axisLabel: {
         color: palette.muted,
         fontSize: 11,
@@ -617,6 +667,7 @@ const materialOption = computed<EChartsOption>(() => {
           borderRadius: 3,
           color: (params: any) => {
             if (isDeviation) return params.value >= 0 ? palette.warning : palette.info;
+            if (isCoverage) return params.value >= 0.8 ? palette.primary : params.value >= 0.5 ? palette.warning : palette.danger;
             return palette.primary;
           }
         },
@@ -641,7 +692,7 @@ const materialOption = computed<EChartsOption>(() => {
   };
 });
 
-const amountTrendOption = computed<EChartsOption>(() => {
+const coverageTrendOption = computed<EChartsOption>(() => {
   const rows = dashboard.value?.dailyTrend || [];
   return {
     ...chartMotion.value,
@@ -649,31 +700,35 @@ const amountTrendOption = computed<EChartsOption>(() => {
     tooltip: {
       ...tooltipSurface,
       trigger: "axis",
-      axisPointer: { type: "cross", label: { backgroundColor: palette.primary } },
+      axisPointer: { type: "shadow", shadowStyle: { color: "rgb(8 118 111 / 7%)" } },
       formatter: (raw: any) => {
         const p = Array.isArray(raw) ? raw : [raw];
         const row = rows[p[0]?.dataIndex];
-        return row
-          ? row.businessDate +
-              "<br/>理论金额：<b>" +
-              amount(row.theoreticalAmount) +
-              "</b><br/>实际金额：<b>" +
-              amount(row.actualAmount) +
-              "</b><br/>日报完成率：<b>" +
-              percent(row.completionRate) +
-              "</b><br/>未核价行：" +
-              number(row.unpricedLineCount) +
-              "<br/>未核验行：" +
-              number(row.unverifiedCount)
-          : "";
+        if (!row) return "";
+        const coverage = row.lineCount ? row.reportedLineCount / row.lineCount : null;
+        return (
+          row.businessDate +
+          "<br/>已填实际量行：<b>" +
+          number(row.reportedLineCount) +
+          " / " +
+          number(row.lineCount) +
+          " 行</b><br/>行覆盖率：<b>" +
+          percent(coverage) +
+          "</b><br/>提交科室日：" +
+          number(row.submittedDepartmentDays) +
+          " / " +
+          number(row.expectedDepartmentDays) +
+          "<br/>未核验行：" +
+          number(row.unverifiedCount)
+        );
       }
     },
-    legend: trendLegend(["理论金额", "实际金额", "日报完成率"]),
-    xAxis: trendXAxis(rows.map(row => row.businessDate.slice(5))),
+    legend: trendLegend(["应填报行", "已填实际量行", "行覆盖率"]),
+    xAxis: { ...trendXAxis(rows.map(row => row.businessDate.slice(5))), boundaryGap: true },
     dataZoom: trendDataZoom,
     yAxis: [
-      trendYAxis("金额"),
-      trendYAxis("完成率", {
+      trendYAxis("行数", { minInterval: 1 }),
+      trendYAxis("覆盖率", {
         max: 1,
         splitLine: { show: false },
         axisLabel: { color: palette.muted, fontSize: 11, formatter: (value: number) => value * 100 + "%" }
@@ -681,41 +736,36 @@ const amountTrendOption = computed<EChartsOption>(() => {
     ],
     series: [
       {
-        name: "理论金额",
-        type: "line",
-        smooth: true,
-        connectNulls: false,
-        data: rows.map(row => row.theoreticalAmount),
-        symbol: "circle",
-        showSymbol: false,
-        lineStyle: { width: 2.5 },
-        itemStyle: { color: palette.primary },
-        emphasis: { focus: "series", lineStyle: { width: 3.5 }, itemStyle: { borderWidth: 3 } },
+        name: "应填报行",
+        type: "bar",
+        barWidth: 14,
+        z: 1,
+        itemStyle: { color: "rgb(23 33 43 / 8%)", borderRadius: 3 },
+        silent: true,
+        emphasis: { disabled: true },
+        data: rows.map(row => row.lineCount),
         animationDelay: 0
       },
       {
-        name: "实际金额",
-        type: "line",
-        smooth: true,
-        connectNulls: false,
-        data: rows.map(row => row.actualAmount),
-        symbol: "circle",
-        showSymbol: false,
-        lineStyle: { width: 2.5 },
-        itemStyle: { color: palette.warning },
-        emphasis: { focus: "series", lineStyle: { width: 3.5 }, itemStyle: { borderWidth: 3 } },
+        name: "已填实际量行",
+        type: "bar",
+        barWidth: 14,
+        z: 3,
+        itemStyle: { color: palette.primary, borderRadius: 3 },
+        emphasis: { itemStyle: { shadowBlur: 12, shadowOffsetY: 3, shadowColor: "rgb(23 33 43 / 20%)" } },
+        data: rows.map(row => row.reportedLineCount),
         animationDelay: 60
       },
       {
-        name: "日报完成率",
+        name: "行覆盖率",
         type: "line",
         yAxisIndex: 1,
         smooth: true,
-        data: rows.map(row => row.completionRate),
+        data: rows.map(row => (row.lineCount ? row.reportedLineCount / row.lineCount : null)),
         symbol: "circle",
         showSymbol: false,
         lineStyle: { width: 2.25, type: "dashed" },
-        itemStyle: { color: palette.info },
+        itemStyle: { color: palette.warning },
         emphasis: { focus: "series", lineStyle: { width: 3.25 }, itemStyle: { borderWidth: 3 } },
         animationDelay: 120
       }
@@ -833,7 +883,7 @@ function observeChartRoots() {
   if (!dashboardMounted) return;
   const roots: Array<[ChartId, HTMLElement | null]> = [
     ["risk", riskChartRoot.value],
-    ["amountTrend", amountTrendChartRoot.value],
+    ["coverageTrend", coverageTrendChartRoot.value],
     ["material", materialChartRoot.value],
     ["riskTrend", riskTrendChartRoot.value]
   ];
@@ -932,7 +982,7 @@ const handleChartClick = (params: any) => {
     params.dataIndex != null &&
     trend[params.dataIndex] &&
     params.seriesName &&
-    ["未核验", "关注", "异常", "特殊待说明", "理论金额", "实际金额", "日报完成率"].includes(params.seriesName)
+    ["未核验", "关注", "异常", "特殊待说明", "应填报行", "已填实际量行", "行覆盖率"].includes(params.seriesName)
   ) {
     const riskMap: Record<string, string> = {
       未核验: "UNVERIFIED",
@@ -1187,10 +1237,18 @@ const handleChartClick = (params: any) => {
 }
 .item-value {
   flex: 0 0 auto;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
   color: var(--inventory-text);
   font-size: 12px;
   font-weight: 550;
   font-variant-numeric: tabular-nums;
+}
+.item-volume {
+  color: var(--inventory-muted);
+  font-size: 10px;
+  font-weight: 450;
 }
 .risk-total {
   color: var(--inventory-danger);
