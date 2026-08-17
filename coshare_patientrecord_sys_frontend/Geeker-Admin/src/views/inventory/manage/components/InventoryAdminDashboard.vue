@@ -170,7 +170,7 @@
       append-to-body
       class="enlarge-dialog"
     >
-      <div class="enlarged-chart-box">
+      <div class="enlarged-chart-box" :style="enlargedChartStyle">
         <VChart
           v-if="enlargedChart"
           :option="enlargedOption"
@@ -353,7 +353,7 @@ const materialKey = (row: InventoryAdminMaterialSummary) => row.materialName + "
 // Keep all summary rows for list stability; null values for the current mode are dropped only in materialChartRows.
 const materialSourceRows = computed<InventoryAdminMaterialSummary[]>(() => report.value?.summary || []);
 const materialRows = computed<InventoryAdminMaterialSummary[]>(() => {
-  const direction = materialMode.value === "coverage" ? -1 : 1;
+  const direction = materialMode.value === "coverage" ? 1 : -1;
   const rows = [...materialSourceRows.value].sort(
     (left, right) => direction * (materialMetricValue(left) - materialMetricValue(right))
   );
@@ -437,41 +437,59 @@ const enlargedTitle = computed(() => {
 const enlargeChart = (id: ChartId) => {
   enlargedChart.value = id;
 };
+const enlargedChartStyle = computed(() => {
+  if (enlargedChart.value === "material") {
+    const count = materialChartRows.value.length;
+    return { height: Math.max(480, count * 26) + "px", padding: "4px 8px" };
+  }
+  return { height: "min(74vh, 680px)", padding: "4px 8px" };
+});
 const enlargedOption = computed<EChartsOption | null>(() => {
   const id = enlargedChart.value;
   if (!id) return null;
   if (id === "material") {
     const opt = materialOption.value;
-    const rows = materialChartRows.value;
-    const enlargedEnd = Math.min(rows.length - 1, 24);
     return {
       ...opt,
-      dataZoom:
-        rows.length > 25
-          ? [
-              { type: "inside", yAxisIndex: 0, startValue: 0, endValue: enlargedEnd, zoomOnMouseWheel: true },
-              {
-                type: "slider",
-                yAxisIndex: 0,
-                width: 12,
-                startValue: 0,
-                endValue: enlargedEnd,
-                labelFormatter: (value: number) => {
-                  const r = rows[value]?.row;
-                  return r ? materialAxisName(r) : "";
-                }
-              }
-            ]
-          : undefined
+      dataZoom: undefined,
+      grid: { left: 10, right: 90, top: (opt.grid as any)?.top ?? 14, bottom: 10, containLabel: true },
+      yAxis: {
+        ...(opt.yAxis as any),
+        axisLabel: { color: palette.text, fontSize: 12, width: 220, overflow: "truncate" }
+      },
+      series: (opt.series as any[])?.map(s => ({
+        ...s,
+        barWidth: 18,
+        label: s.name === "实际" ? { ...s.label, fontSize: 12 } : s.label
+      }))
     } as EChartsOption;
   }
-  return (
+  if (id === "risk") {
+    const opt = riskOption.value;
+    return {
+      ...opt,
+      series: opt.series?.map(s => ({
+        ...s,
+        radius: ["26%", "74%"],
+        label: { show: true, formatter: "{b}\n{d}%", fontSize: 12, color: palette.text },
+        labelLine: { show: true, length: 8, length2: 12 }
+      }))
+    } as EChartsOption;
+  }
+  const trendOpt = (
     {
-      risk: riskOption.value,
       coverageTrend: coverageTrendOption.value,
       riskTrend: riskTrendOption.value
     } as Record<ChartId, EChartsOption>
   )[id];
+  return {
+    ...trendOpt,
+    grid: { left: 20, right: 30, top: 30, bottom: 50, containLabel: true },
+    xAxis: {
+      ...(trendOpt.xAxis as any),
+      axisLabel: { ...(trendOpt.xAxis as any)?.axisLabel, interval: 0, fontSize: 11 }
+    }
+  } as EChartsOption;
 });
 
 const palette = {
@@ -1320,10 +1338,13 @@ const handleChartClick = (params: any) => {
 }
 .enlarge-dialog .el-dialog__body {
   padding: 8px 16px 16px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(23 33 43 / 18%) transparent;
 }
 .enlarged-chart-box {
-  height: min(72vh, 640px);
-  padding: 4px;
+  width: 100%;
 }
 .risk-list,
 .material-list {
