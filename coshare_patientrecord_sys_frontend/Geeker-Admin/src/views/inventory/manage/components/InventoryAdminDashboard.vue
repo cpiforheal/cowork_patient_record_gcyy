@@ -413,7 +413,6 @@ const materialEmptyText = computed(() => {
 });
 
 // ---- Chart enlarge dialog ----
-type ChartId = "risk" | "coverageTrend" | "material" | "riskTrend";
 const enlargedChart = ref<ChartId | null>(null);
 const enlargedDialogVisible = computed({
   get: () => enlargedChart.value !== null,
