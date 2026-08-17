@@ -98,7 +98,7 @@
                 autoresize
                 @click="handleChartClick"
               />
-              <el-empty v-else-if="chartLoaded.material" description="当前口径暂无可绘制数据" />
+              <el-empty v-else-if="chartLoaded.material" :description="materialEmptyText" />
               <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
             </div>
             <div class="material-list" aria-label="耗材使用量明细">
@@ -143,7 +143,7 @@
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { LineChart, PieChart } from "echarts/charts";
+import { LineChart, PieChart, BarChart } from "echarts/charts";
 import { DataZoomComponent, GridComponent, LegendComponent, MarkPointComponent, TooltipComponent } from "echarts/components";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
@@ -155,6 +155,7 @@ use([
   CanvasRenderer,
   LineChart,
   PieChart,
+  BarChart,
   GridComponent,
   DataZoomComponent,
   LegendComponent,
@@ -289,8 +290,9 @@ const departmentCompletionRows = computed(() => {
 });
 const hasDepartmentRisk = computed(() => departmentCompletionRows.value.length > 0);
 const materialKey = (row: InventoryAdminMaterialSummary) => row.materialName + "\u0000" + row.unit;
+// Full-period summary (not the pricing-filtered Top list) so unpriced materials still render in quantity mode.
 const materialSourceRows = computed<InventoryAdminMaterialSummary[]>(() =>
-  materialMode.value === "deviation" ? dashboard.value?.materialDeviationTop || [] : dashboard.value?.materialAmountTop || []
+  (report.value?.summary || []).filter(row => materialRawValue(row) != null)
 );
 const materialRows = computed<InventoryAdminMaterialSummary[]>(() => {
   const rows = [...materialSourceRows.value].sort((left, right) => materialMetricValue(right) - materialMetricValue(left));
@@ -300,13 +302,17 @@ const materialModeLabel = computed(
   () => ({ quantity: "实际使用量", amount: "实际金额", deviation: "理论与实际偏差" })[materialMode.value]
 );
 const materialScopeNote = computed(() => {
-  if (materialScope.value === "top") return "按当前口径重点展示 · 点击查看明细";
-  return materialRows.value.length > 10 ? "当前接口返回的全部耗材数据" : "当前接口仅返回 Top 10，已安全降级";
+  if (materialScope.value === "top") return "按当前口径排序取前 10 · 点击图表或明细下钻";
+  return "全院口径全部耗材（" + materialRows.value.length + " 项）· 滚轮可滚动查看";
 });
 const materialRawValue = (row: InventoryAdminMaterialSummary) => {
   if (materialMode.value === "quantity") return row.actualQuantity;
   if (materialMode.value === "amount") return row.actualAmount;
   return row.amountDifference;
+};
+const materialReferenceValue = (row: InventoryAdminMaterialSummary) => {
+  if (materialMode.value === "amount") return row.theoreticalAmount;
+  return row.theoreticalQuantity;
 };
 const materialMetricValue = (row: InventoryAdminMaterialSummary) => {
   const value = Number(materialRawValue(row) ?? 0);
@@ -315,19 +321,25 @@ const materialMetricValue = (row: InventoryAdminMaterialSummary) => {
 const materialDisplayValue = (row: InventoryAdminMaterialSummary) => {
   const value = materialRawValue(row);
   if (value == null) return "未填报";
-  return materialMode.value === "quantity" ? number(value) + " " + row.unit : "¥" + number(value);
+  if (materialMode.value === "quantity") return number(value) + " " + row.unit;
+  return "¥" + number(value);
 };
-const materialTotal = computed(() => materialRows.value.reduce((total, row) => total + materialMetricValue(row), 0));
-const materialCenterText = computed(() => {
-  const total = number(materialTotal.value);
-  if (materialMode.value === "quantity") return total + "\n实际使用量\n单位见右侧明细";
-  if (materialMode.value === "amount") return "¥" + total + "\n实际金额";
-  return "¥" + total + "\n偏差绝对值";
-});
+// Bars keep the signed deviation value so negative differences render leftwards.
+const materialChartValue = (row: InventoryAdminMaterialSummary) => {
+  const value = Number(materialRawValue(row) ?? 0);
+  return materialMode.value === "deviation" ? value : Math.max(0, value);
+};
 const materialChartRows = computed(() =>
-  materialRows.value.map((row, index) => ({ row, index, value: materialMetricValue(row) })).filter(item => item.value > 0)
+  materialRows.value.map((row, index) => ({ row, index, value: materialChartValue(row) })).filter(item => item.value !== 0)
 );
-const hasMaterialChart = computed(() => materialChartRows.value.length > 0 && materialTotal.value > 0);
+const hasMaterialChart = computed(() => materialChartRows.value.length > 0);
+const materialEmptyText = computed(() => {
+  if (!(report.value?.summary || []).length) return "该时间段暂无科室填报";
+  if (materialSourceRows.value.length) return "当前口径数值均为 0";
+  if (materialMode.value === "quantity") return "该时间段暂无耗材实际量填报";
+  if (materialMode.value === "amount") return "该时间段暂无可核价的实际金额";
+  return "该时间段暂无可计算的金额偏差";
+});
 
 const palette = {
   primary: "#08766f",
@@ -476,89 +488,158 @@ const riskOption = computed<EChartsOption>(() => ({
   ]
 }));
 
-const materialOption = computed<EChartsOption>(() => ({
-  ...chartMotion.value,
-  tooltip: {
-    ...tooltipSurface,
-    trigger: "item",
-    formatter: (params: any) => {
-      const item = materialChartRows.value[params.dataIndex];
-      if (!item) return "";
-      const ratio = materialTotal.value ? ((item.value / materialTotal.value) * 100).toFixed(1) : "0.0";
-      const row = item.row;
-      const coverage =
-        materialMode.value === "quantity"
-          ? "<br/>已填报：" +
-            number(row.filledActualLineCount) +
-            " / " +
-            number(row.lineCount) +
-            " 行<br/>实际量覆盖率：" +
-            percent(row.actualCoverageRate)
-          : "";
-      const deviationNote = materialMode.value === "deviation" ? "<br/>图形按偏差绝对值绘制" : "";
-      return (
-        row.materialName +
-        "<br/>单位：" +
-        row.unit +
-        "<br/>" +
-        materialModeLabel.value +
-        "：<b>" +
-        materialDisplayValue(row) +
-        "</b><br/>占比：" +
-        ratio +
-        "%" +
-        coverage +
-        deviationNote
-      );
-    }
-  },
-  graphic: [
-    {
-      type: "text",
-      left: "38%",
-      top: "38%",
-      style: {
-        text: materialCenterText.value,
-        textAlign: "center",
-        fill: palette.text,
-        fontSize: 14,
-        fontWeight: 700,
-        lineHeight: 22
+const materialAxisName = (row: InventoryAdminMaterialSummary) => {
+  const name = row.materialName.length > 11 ? row.materialName.slice(0, 10) + "…" : row.materialName;
+  return name + " " + row.unit;
+};
+const materialBarLabelFormatter = (value: number) => {
+  const text = number(Math.abs(value));
+  return value < 0 ? "-" + (materialMode.value === "quantity" ? text : "¥" + text) : materialMode.value === "quantity" ? text : "¥" + text;
+};
+const materialOption = computed<EChartsOption>(() => {
+  const rows = materialChartRows.value;
+  const isDeviation = materialMode.value === "deviation";
+  const hasReference = !isDeviation;
+  const axisLabels = rows.map(item => materialAxisName(item.row));
+  return {
+    ...chartMotion.value,
+    grid: { left: 10, right: 74, top: hasReference ? 34 : 14, bottom: 10, containLabel: true },
+    legend: hasReference
+      ? {
+          top: 6,
+          left: 6,
+          data: ["实际", "理论参考"],
+          icon: "roundRect",
+          itemWidth: 10,
+          itemHeight: 6,
+          itemGap: 14,
+          textStyle: { color: palette.muted, fontSize: 11 }
+        }
+      : undefined,
+    tooltip: {
+      ...tooltipSurface,
+      trigger: "axis",
+      axisPointer: { type: "shadow", shadowStyle: { color: "rgb(8 118 111 / 6%)" } },
+      formatter: (raw: any) => {
+        const params = Array.isArray(raw) ? raw : [raw];
+        const item = rows[params[0]?.dataIndex];
+        if (!item) return "";
+        const row = item.row;
+        const header =
+          row.materialName +
+          "（" +
+          row.unit +
+          "）<br/>已填报：<b>" +
+          number(row.filledActualLineCount) +
+          " / " +
+          number(row.lineCount) +
+          " 行</b> · 覆盖率 " +
+          percent(row.actualCoverageRate);
+        if (materialMode.value === "quantity") {
+          return (
+            header +
+            "<br/>实际使用量：<b>" +
+            number(row.actualQuantity) +
+            " " +
+            row.unit +
+            "</b><br/>理论参考：" +
+            number(row.theoreticalQuantity) +
+            " " +
+            row.unit
+          );
+        }
+        if (materialMode.value === "amount") {
+          return (
+            header +
+            "<br/>实际金额：<b>¥" +
+            number(row.actualAmount) +
+            "</b><br/>理论金额：¥" +
+            number(row.theoreticalAmount) +
+            "<br/>核价覆盖：" +
+            percent(row.pricingCoverageRate)
+          );
+        }
+        return (
+          header +
+          "<br/>偏差金额：<b>" +
+          materialBarLabelFormatter(row.amountDifference ?? 0) +
+          "</b><br/>实际：¥" +
+          number(row.actualAmount) +
+          " · 理论：¥" +
+          number(row.theoreticalAmount) +
+          "<br/>偏差率：" +
+          (row.amountDeviationRate == null ? "—" : percent(row.amountDeviationRate))
+        );
       }
-    }
-  ],
-  series: [
-    {
-      name: materialModeLabel.value,
-      type: "pie",
-      radius: ["48%", "73%"],
-      center: ["38%", "52%"],
-      minAngle: 2,
-      padAngle: 1.5,
-      selectedMode: "single",
-      selectedOffset: 8,
-      animationType: "expansion",
-      animationDelay: (index: number) => index * 28,
-      animationDelayUpdate: (index: number) => index * 16,
-      itemStyle: { borderRadius: 7, borderColor: "#fff", borderWidth: 2 },
-      emphasis: {
-        focus: "self",
-        scale: true,
-        scaleSize: 7,
-        itemStyle: { shadowBlur: 16, shadowOffsetY: 4, shadowColor: "rgb(23 33 43 / 20%)" }
+    },
+    xAxis: {
+      type: "value",
+      axisLabel: {
+        color: palette.muted,
+        fontSize: 11,
+        formatter: (value: number) => materialBarLabelFormatter(value)
       },
-      blur: { itemStyle: { opacity: 0.38 } },
-      label: { show: false },
-      labelLine: { show: false },
-      data: materialChartRows.value.map(item => ({
-        name: item.row.materialName + " · " + item.row.unit,
-        value: item.value,
-        selected: selectedMaterialIndex.value === item.index,
-        itemStyle: { color: materialColors[item.index % materialColors.length] }
-      }))
-    }
-  ]
-}));
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: "rgb(23 33 43 / 7%)", type: "dashed" } }
+    },
+    yAxis: {
+      type: "category",
+      inverse: true,
+      data: axisLabels,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: "#d9e2e7" } },
+      axisLabel: { color: palette.text, fontSize: 11, width: 118, overflow: "truncate" }
+    },
+    dataZoom: rows.length > 12 ? [{ type: "inside", yAxisIndex: 0, startValue: 0, endValue: 11, zoomOnMouseWheel: true }] : undefined,
+    series: [
+      ...(hasReference
+        ? [
+            {
+              name: "理论参考",
+              type: "bar" as const,
+              barWidth: 12,
+              barGap: "-100%",
+              z: 1,
+              itemStyle: { color: "rgb(8 118 111 / 10%)", borderColor: "rgb(8 118 111 / 28%)", borderWidth: 1, borderRadius: 3 },
+              emphasis: { disabled: true },
+              silent: true,
+              data: rows.map(item => materialReferenceValue(item.row) ?? 0)
+            }
+          ]
+        : []),
+      {
+        name: "实际",
+        type: "bar" as const,
+        barWidth: 12,
+        z: 3,
+        itemStyle: {
+          borderRadius: 3,
+          color: (params: any) => {
+            if (isDeviation) return params.value >= 0 ? palette.warning : palette.info;
+            return palette.primary;
+          }
+        },
+        emphasis: { itemStyle: { shadowBlur: 12, shadowOffsetY: 3, shadowColor: "rgb(23 33 43 / 22%)" } },
+        label: {
+          show: true,
+          color: palette.muted,
+          fontSize: 11,
+          formatter: (params: any) => materialBarLabelFormatter(params.value)
+        },
+        selectedMode: false,
+        data: rows.map(item => ({
+          value: item.value,
+          label: { position: item.value < 0 ? ("left" as const) : ("right" as const) },
+          itemStyle:
+            selectedMaterialIndex.value === item.index
+              ? { borderColor: isDeviation ? palette.text : palette.primary, borderWidth: 1.5 }
+              : undefined
+        }))
+      }
+    ]
+  };
+});
 
 const amountTrendOption = computed<EChartsOption>(() => {
   const rows = dashboard.value?.dailyTrend || [];
@@ -832,6 +913,14 @@ const handleChartClick = (params: any) => {
       }
       return;
     }
+    const item = materialChartRows.value[params.dataIndex];
+    if (item) {
+      selectedMaterialIndex.value = item.index;
+      emit("drill", { materialName: item.row.materialName });
+    }
+    return;
+  }
+  if (params.componentType === "series" && params.seriesType === "bar" && params.seriesName === "实际") {
     const item = materialChartRows.value[params.dataIndex];
     if (item) {
       selectedMaterialIndex.value = item.index;
