@@ -32,6 +32,7 @@
         <article class="chart-card risk-card" data-reveal>
           <header>
             <div><strong>12 科室填报完成度</strong><span>每瓣对应一个科室，点击定位核查</span></div>
+            <el-button link size="small" class="chart-expand-btn" @click="enlargeChart('risk')">放大</el-button>
           </header>
           <div class="pie-layout">
             <div ref="riskChartRoot" class="chart-box pie-box">
@@ -72,6 +73,7 @@
         <article class="chart-card trend-card" data-reveal>
           <header>
             <div><strong>每日实际量填报覆盖</strong><span>浅柱=应填报行 · 深柱=已填实际量 · 虚线=行覆盖率</span></div>
+            <el-button link size="small" class="chart-expand-btn" @click="enlargeChart('coverageTrend')">放大</el-button>
           </header>
           <div ref="coverageTrendChartRoot" class="chart-box">
             <VChart
@@ -91,6 +93,7 @@
               <strong>耗材实际使用量</strong><span>{{ materialScopeNote }}</span>
             </div>
             <div class="chart-controls">
+              <el-button link size="small" class="chart-expand-btn" @click="enlargeChart('material')">放大</el-button>
               <el-select v-model="materialMode" size="small" class="chart-select" aria-label="耗材指标">
                 <el-option label="实际使用量" value="quantity" />
                 <el-option label="理论-实际量偏差" value="deviation" />
@@ -104,13 +107,17 @@
           </header>
           <div class="material-view">
             <div ref="materialChartRoot" class="chart-box pie-box material-pie-box">
-              <VChart
-                v-if="chartLoaded.material && hasMaterialChart"
-                :option="materialOption"
-                :update-options="{ replaceMerge: ['series'] }"
-                autoresize
-                @click="handleChartClick"
-              />
+              <template v-if="chartLoaded.material && hasMaterialChart">
+                <VChart
+                  :option="materialOption"
+                  :update-options="{ replaceMerge: ['series'] }"
+                  autoresize
+                  @click="handleChartClick"
+                />
+                <div v-if="!hasMaterialBars" class="chart-empty-overlay">
+                  <el-empty :description="materialEmptyText" :image-size="56" />
+                </div>
+              </template>
               <el-empty v-else-if="chartLoaded.material" :description="materialEmptyText" />
               <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
             </div>
@@ -138,6 +145,7 @@
         <article class="chart-card trend-card" data-reveal>
           <header>
             <div><strong>每日风险趋势</strong><span>异常峰值标记</span></div>
+            <el-button link size="small" class="chart-expand-btn" @click="enlargeChart('riskTrend')">放大</el-button>
           </header>
           <div ref="riskTrendChartRoot" class="chart-box">
             <VChart
@@ -153,6 +161,25 @@
         </article>
       </div>
     </template>
+    <el-dialog
+      v-model="enlargedDialogVisible"
+      :title="enlargedTitle"
+      width="min(1100px, 94vw)"
+      top="4vh"
+      destroy-on-close
+      append-to-body
+      class="enlarge-dialog"
+    >
+      <div class="enlarged-chart-box">
+        <VChart
+          v-if="enlargedChart"
+          :option="enlargedOption"
+          :update-options="{ replaceMerge: ['series'] }"
+          autoresize
+          @click="handleChartClick"
+        />
+      </div>
+    </el-dialog>
   </section>
 </template>
 <script setup lang="ts">
@@ -372,6 +399,7 @@ const materialChartRows = computed(() => {
 });
 // Base on summary existence so VChart stays mounted across mode switches, preventing destroy/recreate flicker.
 const hasMaterialChart = computed(() => (report.value?.summary || []).length > 0);
+const hasMaterialBars = computed(() => materialChartRows.value.length > 0);
 const materialEmptyText = computed(() => {
   const summary = report.value?.summary || [];
   if (!summary.length) return "该时间段暂无科室填报";
@@ -382,6 +410,69 @@ const materialEmptyText = computed(() => {
     return "该时间段暂无可计算的理论-实际量偏差";
   }
   return "当前口径数值均为 0";
+});
+
+// ---- Chart enlarge dialog ----
+type ChartId = "risk" | "coverageTrend" | "material" | "riskTrend";
+const enlargedChart = ref<ChartId | null>(null);
+const enlargedDialogVisible = computed({
+  get: () => enlargedChart.value !== null,
+  set: (val: boolean) => {
+    if (!val) enlargedChart.value = null;
+  }
+});
+const enlargedTitle = computed(() => {
+  switch (enlargedChart.value) {
+    case "risk":
+      return "12 科室填报完成度";
+    case "coverageTrend":
+      return "每日实际量填报覆盖";
+    case "material":
+      return "耗材实际使用量 · " + materialModeLabel.value;
+    case "riskTrend":
+      return "每日风险趋势";
+    default:
+      return "图表放大";
+  }
+});
+const enlargeChart = (id: ChartId) => {
+  enlargedChart.value = id;
+};
+const enlargedOption = computed<EChartsOption | null>(() => {
+  const id = enlargedChart.value;
+  if (!id) return null;
+  if (id === "material") {
+    const opt = materialOption.value;
+    const rows = materialChartRows.value;
+    const enlargedEnd = Math.min(rows.length - 1, 24);
+    return {
+      ...opt,
+      dataZoom:
+        rows.length > 25
+          ? [
+              { type: "inside", yAxisIndex: 0, startValue: 0, endValue: enlargedEnd, zoomOnMouseWheel: true },
+              {
+                type: "slider",
+                yAxisIndex: 0,
+                width: 12,
+                startValue: 0,
+                endValue: enlargedEnd,
+                labelFormatter: (value: number) => {
+                  const r = rows[value]?.row;
+                  return r ? materialAxisName(r) : "";
+                }
+              }
+            ]
+          : undefined
+    } as EChartsOption;
+  }
+  return (
+    {
+      risk: riskOption.value,
+      coverageTrend: coverageTrendOption.value,
+      riskTrend: riskTrendOption.value
+    } as Record<ChartId, EChartsOption>
+  )[id];
 });
 
 const palette = {
@@ -553,35 +644,22 @@ const materialOption = computed<EChartsOption>(() => {
   const isDeviation = materialMode.value === "deviation";
   const isCoverage = materialMode.value === "coverage";
   const hasReference = materialMode.value === "quantity";
-  const hasBars = rows.length > 0;
   const axisLabels = rows.map(item => materialAxisName(item.row));
   return {
     ...chartMotion.value,
-    ...(hasBars
-      ? {}
-      : {
-          graphic: {
-            type: "text",
-            left: "center",
-            top: "middle",
-            z: 10,
-            style: { text: materialEmptyText.value, fill: palette.muted, fontSize: 13, textAlign: "center" as const }
-          }
-        }),
     grid: { left: 10, right: 74, top: hasReference ? 34 : 14, bottom: 10, containLabel: true },
-    legend:
-      hasReference && hasBars
-        ? {
-            top: 6,
-            left: 6,
-            data: ["实际", "理论参考"],
-            icon: "roundRect",
-            itemWidth: 10,
-            itemHeight: 6,
-            itemGap: 14,
-            textStyle: { color: palette.muted, fontSize: 11 }
-          }
-        : undefined,
+    legend: hasReference
+      ? {
+          top: 6,
+          left: 6,
+          data: ["实际", "理论参考"],
+          icon: "roundRect",
+          itemWidth: 10,
+          itemHeight: 6,
+          itemGap: 14,
+          textStyle: { color: palette.muted, fontSize: 11 }
+        }
+      : undefined,
     tooltip: {
       ...tooltipSurface,
       trigger: "axis",
@@ -671,14 +749,29 @@ const materialOption = computed<EChartsOption>(() => {
       axisLabel: { color: palette.text, fontSize: 11, width: 118, overflow: "truncate" }
     },
     dataZoom:
-      rows.length > 12 ? [{ type: "inside", yAxisIndex: 0, startValue: 0, endValue: 11, zoomOnMouseWheel: true }] : undefined,
+      rows.length > 12
+        ? [
+            { type: "inside", yAxisIndex: 0, startValue: 0, endValue: 11, zoomOnMouseWheel: true },
+            {
+              type: "slider",
+              yAxisIndex: 0,
+              width: 10,
+              startValue: 0,
+              endValue: 11,
+              labelFormatter: (value: number) => {
+                const r = rows[value]?.row;
+                return r ? materialAxisName(r) : "";
+              }
+            }
+          ]
+        : undefined,
     series: [
       ...(hasReference
         ? [
             {
               name: "理论参考",
               type: "bar" as const,
-              barWidth: 12,
+              barWidth: 14,
               barGap: "-100%",
               z: 1,
               itemStyle: { color: "rgb(8 118 111 / 10%)", borderColor: "rgb(8 118 111 / 28%)", borderWidth: 1, borderRadius: 3 },
@@ -691,7 +784,7 @@ const materialOption = computed<EChartsOption>(() => {
       {
         name: "实际",
         type: "bar" as const,
-        barWidth: 12,
+        barWidth: 14,
         z: 3,
         itemStyle: {
           borderRadius: 3,
@@ -1205,6 +1298,33 @@ const handleChartClick = (params: any) => {
 }
 .material-pie-box {
   min-width: 0;
+  position: relative;
+}
+.chart-empty-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  border-radius: inherit;
+}
+.chart-expand-btn {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--inventory-muted);
+  transition: color 200ms ease-out;
+}
+.chart-expand-btn:hover {
+  color: var(--inventory-primary);
+}
+.enlarge-dialog .el-dialog__body {
+  padding: 8px 16px 16px;
+}
+.enlarged-chart-box {
+  height: min(72vh, 640px);
+  padding: 4px;
 }
 .risk-list,
 .material-list {
