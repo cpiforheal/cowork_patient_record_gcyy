@@ -1,5 +1,5 @@
 <template>
-  <section ref="dashboardRootRef" class="dashboard" aria-label="管理员耗材数据驾驶舱">
+  <section ref="dashboardRootRef" class="dashboard" :class="{ 'is-loading': loading }" aria-label="管理员耗材数据驾驶舱">
     <div class="dashboard-head">
       <div>
         <div class="eyebrow">管理总览 · {{ periodLabel }}</div>
@@ -35,7 +35,13 @@
           </header>
           <div class="pie-layout">
             <div ref="riskChartRoot" class="chart-box pie-box">
-              <VChart v-if="chartLoaded.risk && hasDepartmentRisk" :option="riskOption" autoresize @click="handleChartClick" />
+              <VChart
+                v-if="chartLoaded.risk && hasDepartmentRisk"
+                :option="riskOption"
+                :update-options="{ replaceMerge: ['series'] }"
+                autoresize
+                @click="handleChartClick"
+              />
               <el-empty v-else-if="chartLoaded.risk" description="暂无科室填报数据" />
               <div v-else class="chart-placeholder" aria-hidden="true"><el-skeleton :rows="4" animated /></div>
             </div>
@@ -71,6 +77,7 @@
             <VChart
               v-if="chartLoaded.coverageTrend && hasDailyTrend"
               :option="coverageTrendOption"
+              :update-options="{ replaceMerge: ['series'] }"
               autoresize
               @click="handleChartClick"
             />
@@ -100,6 +107,7 @@
               <VChart
                 v-if="chartLoaded.material && hasMaterialChart"
                 :option="materialOption"
+                :update-options="{ replaceMerge: ['series'] }"
                 autoresize
                 @click="handleChartClick"
               />
@@ -135,6 +143,7 @@
             <VChart
               v-if="chartLoaded.riskTrend && hasDailyTrend"
               :option="riskTrendOption"
+              :update-options="{ replaceMerge: ['series'] }"
               autoresize
               @click="handleChartClick"
             />
@@ -172,7 +181,7 @@ type Drill = { businessDate?: string; departmentKey?: string; materialName?: str
 type MaterialMode = "quantity" | "deviation" | "coverage";
 type MaterialScope = "top" | "all";
 
-const props = defineProps<{ report?: InventoryAdminDepartmentDailyRollup }>();
+const props = defineProps<{ report?: InventoryAdminDepartmentDailyRollup; loading?: boolean }>();
 const emit = defineEmits<{ drill: [payload: Drill]; reset: [] }>();
 const report = computed(() => props.report);
 const dashboard = computed(() => props.report?.dashboard);
@@ -279,10 +288,11 @@ watch(
   () => props.report,
   () => {
     selectedDepartmentKey.value = null;
-    if (dashboardMounted) void nextTick(() => {
-      observeChartRoots();
-      observeRevealCards();
-    });
+    if (dashboardMounted)
+      void nextTick(() => {
+        observeChartRoots();
+        observeRevealCards();
+      });
   }
 );
 
@@ -313,9 +323,8 @@ const departmentCompletionRows = computed(() => {
 const hasDepartmentRisk = computed(() => departmentCompletionRows.value.length > 0);
 const materialKey = (row: InventoryAdminMaterialSummary) => row.materialName + "\u0000" + row.unit;
 // Full-period summary (not the pricing-filtered Top list) so unpriced materials still render in quantity mode.
-const materialSourceRows = computed<InventoryAdminMaterialSummary[]>(() =>
-  (report.value?.summary || []).filter(row => materialRawValue(row) != null)
-);
+// Keep all summary rows for list stability; null values for the current mode are dropped only in materialChartRows.
+const materialSourceRows = computed<InventoryAdminMaterialSummary[]>(() => report.value?.summary || []);
 const materialRows = computed<InventoryAdminMaterialSummary[]>(() => {
   const direction = materialMode.value === "coverage" ? -1 : 1;
   const rows = [...materialSourceRows.value].sort(
@@ -327,8 +336,7 @@ const materialModeLabel = computed(
   () => ({ quantity: "实际使用量", deviation: "理论-实际量偏差", coverage: "填报覆盖率" })[materialMode.value]
 );
 const materialScopeNote = computed(() => {
-  if (materialScope.value === "top")
-    return "按当前口径排序取前 10 · 覆盖率模式按最低在前 · 点击下钻";
+  if (materialScope.value === "top") return "按当前口径排序取前 10 · 覆盖率模式按最低在前 · 点击下钻";
   return "全院口径全部耗材（" + materialRows.value.length + " 项）· 滚轮可滚动查看";
 });
 const materialQuantityDifference = (row: InventoryAdminMaterialSummary) =>
@@ -358,16 +366,22 @@ const materialChartValue = (row: InventoryAdminMaterialSummary) => {
 };
 const materialChartRows = computed(() => {
   const rows = materialRows.value.map((row, index) => ({ row, index, value: materialChartValue(row) }));
-  // Coverage 0 is itself a signal (never reported); other modes drop zero bars.
-  return materialMode.value === "coverage" ? rows : rows.filter(item => item.value !== 0);
+  if (materialMode.value === "coverage") return rows;
+  // Keep bars with a reported value for the current mode; drop null and zero so unreported materials don't clutter.
+  return rows.filter(item => materialRawValue(item.row) != null && item.value !== 0);
 });
-const hasMaterialChart = computed(() => materialChartRows.value.length > 0);
+// Base on summary existence so VChart stays mounted across mode switches, preventing destroy/recreate flicker.
+const hasMaterialChart = computed(() => (report.value?.summary || []).length > 0);
 const materialEmptyText = computed(() => {
-  if (!(report.value?.summary || []).length) return "该时间段暂无科室填报";
-  if (materialSourceRows.value.length) return "当前口径数值均为 0";
-  if (materialMode.value === "quantity") return "该时间段暂无耗材实际量填报";
-  if (materialMode.value === "coverage") return "该时间段暂无可计算的覆盖率";
-  return "该时间段暂无可计算的理论-实际量偏差";
+  const summary = report.value?.summary || [];
+  if (!summary.length) return "该时间段暂无科室填报";
+  const hasReported = summary.some(row => materialRawValue(row) != null);
+  if (!hasReported) {
+    if (materialMode.value === "quantity") return "该时间段暂无耗材实际量填报";
+    if (materialMode.value === "coverage") return "该时间段暂无可计算的覆盖率";
+    return "该时间段暂无可计算的理论-实际量偏差";
+  }
+  return "当前口径数值均为 0";
 });
 
 const palette = {
@@ -394,10 +408,11 @@ const materialColors = [
 const grid = { left: 52, right: 24, top: 54, bottom: 44, containLabel: true };
 const chartMotion = computed(() => ({
   animation: !prefersReducedMotion.value,
-  animationDuration: prefersReducedMotion.value ? 0 : 460,
-  animationDurationUpdate: prefersReducedMotion.value ? 0 : 280,
+  animationDuration: prefersReducedMotion.value ? 0 : 520,
+  animationDurationUpdate: prefersReducedMotion.value ? 0 : 360,
   animationEasing: "cubicOut" as const,
-  animationEasingUpdate: "cubicOut" as const
+  animationEasingUpdate: "cubicOut" as const,
+  animationThreshold: 2200
 }));
 const trendLegend = (items: string[]) => ({
   top: 10,
@@ -473,7 +488,8 @@ const riskOption = computed<EChartsOption>(() => ({
       left: "50%",
       top: "37%",
       style: {
-        text: number(departmentCompletionTotal.value) +
+        text:
+          number(departmentCompletionTotal.value) +
           " / " +
           number(dashboard.value?.expectedDepartmentDays) +
           "\n已填报科室日\n点击扇区定位",
@@ -522,7 +538,7 @@ const materialAxisName = (row: InventoryAdminMaterialSummary) => {
   return name + " " + row.unit;
 };
 const materialBarLabelFormatter = (value: number) => {
-  if (materialMode.value === "coverage") return (Math.round(value * 1000) / 10) + "%";
+  if (materialMode.value === "coverage") return Math.round(value * 1000) / 10 + "%";
   const text = number(Math.abs(value));
   if (materialMode.value === "deviation") return value > 0 ? "+" + text : value < 0 ? "-" + text : "0";
   return text;
@@ -537,22 +553,35 @@ const materialOption = computed<EChartsOption>(() => {
   const isDeviation = materialMode.value === "deviation";
   const isCoverage = materialMode.value === "coverage";
   const hasReference = materialMode.value === "quantity";
+  const hasBars = rows.length > 0;
   const axisLabels = rows.map(item => materialAxisName(item.row));
   return {
     ...chartMotion.value,
+    ...(hasBars
+      ? {}
+      : {
+          graphic: {
+            type: "text",
+            left: "center",
+            top: "middle",
+            z: 10,
+            style: { text: materialEmptyText.value, fill: palette.muted, fontSize: 13, textAlign: "center" as const }
+          }
+        }),
     grid: { left: 10, right: 74, top: hasReference ? 34 : 14, bottom: 10, containLabel: true },
-    legend: hasReference
-      ? {
-          top: 6,
-          left: 6,
-          data: ["实际", "理论参考"],
-          icon: "roundRect",
-          itemWidth: 10,
-          itemHeight: 6,
-          itemGap: 14,
-          textStyle: { color: palette.muted, fontSize: 11 }
-        }
-      : undefined,
+    legend:
+      hasReference && hasBars
+        ? {
+            top: 6,
+            left: 6,
+            data: ["实际", "理论参考"],
+            icon: "roundRect",
+            itemWidth: 10,
+            itemHeight: 6,
+            itemGap: 14,
+            textStyle: { color: palette.muted, fontSize: 11 }
+          }
+        : undefined,
     tooltip: {
       ...tooltipSurface,
       trigger: "axis",
@@ -641,7 +670,8 @@ const materialOption = computed<EChartsOption>(() => {
       axisLine: { lineStyle: { color: "#d9e2e7" } },
       axisLabel: { color: palette.text, fontSize: 11, width: 118, overflow: "truncate" }
     },
-    dataZoom: rows.length > 12 ? [{ type: "inside", yAxisIndex: 0, startValue: 0, endValue: 11, zoomOnMouseWheel: true }] : undefined,
+    dataZoom:
+      rows.length > 12 ? [{ type: "inside", yAxisIndex: 0, startValue: 0, endValue: 11, zoomOnMouseWheel: true }] : undefined,
     series: [
       ...(hasReference
         ? [
@@ -1006,6 +1036,12 @@ const handleChartClick = (params: any) => {
   background: #fcfdfe;
   box-shadow: 0 6px 20px rgb(23 33 43 / 3%);
 }
+.dashboard.is-loading .metric-grid,
+.dashboard.is-loading .chart-grid {
+  opacity: 0.55;
+  transition: opacity 220ms ease-out;
+  pointer-events: none;
+}
 .dashboard-head {
   display: flex;
   justify-content: space-between;
@@ -1319,14 +1355,14 @@ const handleChartClick = (params: any) => {
   opacity: 0;
 }
 [data-reveal].revealed {
-  animation: reveal-rise 480ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  animation: reveal-rise 540ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
   animation-delay: calc(var(--i, 0) * 45ms);
   opacity: 1;
 }
 @keyframes reveal-rise {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;

@@ -47,13 +47,23 @@
       :closable="false"
       show-icon
     />
-    <InventoryAdminDashboard :report="report" @drill="applyDrill" @reset="resetDrill" />
+    <InventoryAdminDashboard :report="report" :loading="loading" @drill="applyDrill" @reset="resetDrill" />
     <div class="daily-stats">
-      <span>应填报 <strong>{{ report?.dashboard?.expectedDepartmentDays ?? 0 }}</strong> 科室日</span>
-      <span>已提交 <strong>{{ report?.dashboard?.submittedDepartmentDays ?? 0 }}</strong> 科室日</span>
-      <span>未填报 <strong>{{ report?.dashboard?.missingDepartmentDays ?? 0 }}</strong> 科室日</span>
-      <span>待核验 <strong>{{ unverifiedCount }}</strong></span>
-      <span>关注 / 异常 <strong>{{ attentionCount }} / {{ abnormalCount }}</strong></span>
+      <span
+        >应填报 <strong>{{ report?.dashboard?.expectedDepartmentDays ?? 0 }}</strong> 科室日</span
+      >
+      <span
+        >已提交 <strong>{{ report?.dashboard?.submittedDepartmentDays ?? 0 }}</strong> 科室日</span
+      >
+      <span
+        >未填报 <strong>{{ report?.dashboard?.missingDepartmentDays ?? 0 }}</strong> 科室日</span
+      >
+      <span
+        >待核验 <strong>{{ unverifiedCount }}</strong></span
+      >
+      <span
+        >关注 / 异常 <strong>{{ attentionCount }} / {{ abnormalCount }}</strong></span
+      >
     </div>
     <section class="panel-section">
       <div class="section-heading"><h3>理论与实际汇总</h3></div>
@@ -234,8 +244,7 @@ const query = computed<InventoryDailyRollupQuery>(() => ({
   to: selectedRange.value[1] || selectedRange.value[0] || props.today
 }));
 const periodLabel = computed(() => query.value.from + " 至 " + query.value.to);
-const number = (value: unknown) =>
-  value == null ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
+const number = (value: unknown) => (value == null ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 }));
 const amount = (value?: number | null) => (value == null ? "未核价" : "¥" + number(value));
 const deviation = (value?: number | null) =>
   value == null ? "—" : (Number(value) * 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 }) + "%";
@@ -289,8 +298,15 @@ const filteredDetails = computed(() =>
     );
   })
 );
-const unverifiedCount = computed(() => props.report?.dashboard?.unverifiedCount ?? (props.report?.details || []).filter(row => row.actualStatus === "UNVERIFIED").length);
-const attentionCount = computed(() => props.report?.dashboard?.attentionCount ?? (props.report?.details || []).filter(row => row.riskLevel === "ATTENTION").length);
+const unverifiedCount = computed(
+  () =>
+    props.report?.dashboard?.unverifiedCount ??
+    (props.report?.details || []).filter(row => row.actualStatus === "UNVERIFIED").length
+);
+const attentionCount = computed(
+  () =>
+    props.report?.dashboard?.attentionCount ?? (props.report?.details || []).filter(row => row.riskLevel === "ATTENTION").length
+);
 const abnormalCount = computed(
   () =>
     props.report?.dashboard?.abnormalCount ??
@@ -430,7 +446,7 @@ const shortcuts = [
   gap: 6px;
 }
 .panel-section + .panel-section {
-  animation: section-in 420ms ease-out 60ms backwards;
+  animation: section-in 480ms cubic-bezier(0.22, 0.61, 0.36, 1) 60ms backwards;
 }
 .inventory-table-shell {
   overflow: hidden;
