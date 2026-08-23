@@ -810,6 +810,7 @@
       v-model="recordChatVisible"
       :encounter-id="selectedEncounterId"
       :patient-case-id="workspace?.encounter?.patientCaseId"
+      :exports="workspace?.exports ?? []"
       @record-generated="loadTargetMedicalRecordVersions"
     />
 

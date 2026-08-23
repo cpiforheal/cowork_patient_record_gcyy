@@ -371,6 +371,78 @@ class MedicalRecordWorkflowServiceTest {
         verify(sourceBuilder, org.mockito.Mockito.times(2)).assertCanReadScope("patient-1", doctor);
     }
 
+    @Test
+    void submitRejectsStalePreAiExportAttachment() throws Exception {
+        MedicalRecordWorkflowService service = service();
+        when(repository.loadAsset("asset-ref")).thenReturn(preAiScopedAsset("asset-ref", validDocx(), "encounter-1"));
+        when(repository.findPreAiExport("export-1")).thenReturn(java.util.Optional.of(
+            new MedicalRecordWorkflowRepository.PreAiExportRef("export-1", "encounter-1", "INVALIDATED", Map.of())
+        ));
+
+        MedicalRecordWorkflowSubmitRequest request = new MedicalRecordWorkflowSubmitRequest(
+            "", "asset-ref", "record-1", "生成", "LEGACY_ORDINAL", java.util.List.of(), "export-1"
+        );
+        assertThatThrownBy(() -> service.submit(request, user("doctor")))
+            .isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                assertThat(error.getReason()).contains("脱敏资料已因事实变更失效");
+            });
+        verify(repository, never()).insertTask(any(), any());
+    }
+
+    @Test
+    void submitRejectsPreAiExportFromAnotherEncounter() throws Exception {
+        MedicalRecordWorkflowService service = service();
+        when(repository.loadAsset("asset-ref")).thenReturn(preAiScopedAsset("asset-ref", validDocx(), "encounter-2"));
+        when(repository.findPreAiExport("export-1")).thenReturn(java.util.Optional.of(
+            new MedicalRecordWorkflowRepository.PreAiExportRef("export-1", "encounter-1", "GENERATED", Map.of())
+        ));
+
+        assertThatThrownBy(() -> service.submit(new MedicalRecordWorkflowSubmitRequest(
+            "", "asset-ref", "record-1", "生成", "LEGACY_ORDINAL", java.util.List.of(), "export-1"
+        ), user("doctor"))).isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+            assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(error.getReason()).contains("脱敏资料与当前病例不匹配");
+        });
+        verify(repository, never()).insertTask(any(), any());
+    }
+
+    @Test
+    void submitAttachesValidPreAiExportToTaskRequest() throws Exception {
+        MedicalRecordWorkflowService service = service();
+        SessionUser doctor = user("doctor");
+        when(repository.loadAsset("asset-ref")).thenReturn(preAiScopedAsset("asset-ref", validDocx(), "encounter-1"));
+        when(repository.findPreAiExport("export-1")).thenReturn(java.util.Optional.of(
+            new MedicalRecordWorkflowRepository.PreAiExportRef(
+                "export-1", "encounter-1", "GENERATED", Map.of("metadata", Map.of("caseToken", "CASE-1"))
+            )
+        ));
+        when(repository.loadOwnedTask(any(), any())).thenReturn(taskRow("PENDING"));
+
+        service.submit(new MedicalRecordWorkflowSubmitRequest(
+            "", "asset-ref", "record-1", "生成", "LEGACY_ORDINAL", java.util.List.of(), "export-1"
+        ), doctor);
+
+        ArgumentCaptor<MedicalRecordWorkflowRepository.Task> taskCaptor =
+            ArgumentCaptor.forClass(MedicalRecordWorkflowRepository.Task.class);
+        verify(repository).insertTask(taskCaptor.capture(), any());
+        assertThat(taskCaptor.getValue().request())
+            .containsEntry("preAiExportId", "export-1")
+            .containsKey("preAiExport");
+    }
+
+    private MedicalRecordWorkflowRepository.Asset preAiScopedAsset(String id, byte[] bytes, String encounterId) throws Exception {
+        Path path = temporaryDirectory.resolve(id + ".docx");
+        Files.write(path, bytes);
+        String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        return new MedicalRecordWorkflowRepository.Asset(
+            id, "preai:" + encounterId, "patient-1", encounterId, "OUTPUT", "record.docx",
+            path.toString(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            bytes.length, sha256, "", true, true, Map.of()
+        );
+    }
+
     private byte[] builtinTemplateBytesForTest() throws Exception {
         try (java.io.InputStream input = getClass().getClassLoader().getResourceAsStream(
             "medical-record-templates/inpatient-record-reference-v1.docx"

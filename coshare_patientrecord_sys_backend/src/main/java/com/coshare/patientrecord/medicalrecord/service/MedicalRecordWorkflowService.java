@@ -287,6 +287,22 @@ public class MedicalRecordWorkflowService {
             taskReportId = "";
         }
         String taskId = "mrtask-" + UUID.randomUUID();
+        String preAiExportId = safe(request.preAiExportId());
+        Object preAiExportSnapshot = null;
+        if (!preAiExportId.isBlank()) {
+            if (encounterId.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "脱敏资料附件仅支持前置病例范围");
+            }
+            MedicalRecordWorkflowRepository.PreAiExportRef export = repository.findPreAiExport(preAiExportId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "脱敏资料版本不存在"));
+            if (!encounterId.equals(export.encounterId())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "脱敏资料与当前病例不匹配");
+            }
+            if (!"GENERATED".equals(export.status())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "脱敏资料已因事实变更失效，请重新生成后再附加");
+            }
+            preAiExportSnapshot = export.maskedSnapshot();
+        }
         List<String> targetNodeKeys = validateTargetNodeKeys(
             request.targetNodeKeys(),
             mode,
@@ -299,7 +315,9 @@ public class MedicalRecordWorkflowService {
             safe(request.prompt()),
             mode,
             targetNodeKeys,
-            referenceAssetId
+            referenceAssetId,
+            preAiExportId,
+            preAiExportSnapshot
         );
         repository.insertTask(new Task(
             taskId,
@@ -425,7 +443,8 @@ public class MedicalRecordWorkflowService {
                 task.patientId(),
                 task.encounterId(),
                 task.sourceRecordId(),
-                task.prompt()
+                task.prompt(),
+                task.request().get("preAiExport")
             );
             Map<String, Object> generated = medicalRecordService.generateInpatientAi(
                 request,
@@ -740,7 +759,9 @@ public class MedicalRecordWorkflowService {
         String prompt,
         String mappingMode,
         List<String> targetNodeKeys,
-        String referenceAssetId
+        String referenceAssetId,
+        String preAiExportId,
+        Object preAiExportSnapshot
     ) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("patientId", patientId);
@@ -750,6 +771,8 @@ public class MedicalRecordWorkflowService {
         result.put("mappingMode", mappingMode);
         result.put("targetNodeKeys", List.copyOf(targetNodeKeys));
         result.put("referenceAssetId", safe(referenceAssetId));
+        result.put("preAiExportId", safe(preAiExportId));
+        if (preAiExportSnapshot != null) result.put("preAiExport", preAiExportSnapshot);
         return result;
     }
 

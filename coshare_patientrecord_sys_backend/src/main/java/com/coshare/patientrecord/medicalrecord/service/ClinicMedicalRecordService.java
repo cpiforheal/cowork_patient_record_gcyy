@@ -382,6 +382,9 @@ public class ClinicMedicalRecordService {
             sourceSnapshot.path("reviewedPreAiFacts").isObject()
                 ? (ObjectNode) sourceSnapshot.path("reviewedPreAiFacts")
                 : objectMapper.createObjectNode(),
+            request == null || request.preAiExport() == null
+                ? null
+                : objectMapper.valueToTree(request.preAiExport()),
             currentValues,
             reference.paragraphs().size(),
             controlledNodeKeys

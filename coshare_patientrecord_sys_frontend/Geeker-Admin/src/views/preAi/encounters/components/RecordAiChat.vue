@@ -55,6 +55,26 @@
     </div>
 
     <div class="chat-footer">
+      <div class="attachment-bar">
+        <template v-if="pinnedExport">
+          <el-tag
+            v-if="attachExport"
+            type="success"
+            effect="light"
+            closable
+            :title="pinnedExport.fileName"
+            @close="attachExport = false"
+          >
+            <el-icon><Document /></el-icon>
+            已附加：脱敏前置资料 V{{ pinnedExport.version }}
+          </el-tag>
+          <el-button v-else link type="primary" size="small" @click="attachExport = true">
+            + 附加脱敏前置资料 V{{ pinnedExport.version }}
+          </el-button>
+          <small class="attachment-note">AI 将以该资料作为已复核事实口径</small>
+        </template>
+        <small v-else class="attachment-note muted">当前病例暂无有效脱敏资料，可先在复核面板生成</small>
+      </div>
       <el-input
         v-model="prompt"
         type="textarea"
@@ -72,9 +92,9 @@
 </template>
 
 <script setup lang="ts" name="RecordAiChat">
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { Loading, Refresh } from "@element-plus/icons-vue";
+import { Document, Loading, Refresh } from "@element-plus/icons-vue";
 import {
   downloadMedicalRecordAssetV2Api,
   generateMedicalRecordApi,
@@ -84,6 +104,7 @@ import {
   submitMedicalRecordWorkflowTaskApi
 } from "@/api/modules/clinic/medicalRecord";
 import type { MedicalRecordWorkflowTask } from "@/api/modules/clinic/types";
+import type { PreAiExportVersion } from "@/api/modules/clinic/preAi";
 
 const DEFAULT_PROMPT =
   "请按照周xx病历的格式、结构、段落、排版、查房时序，完整生成【姓名】【西医主诊断+次诊断 】的住院病历，要求自动生成中药方剂参考主病、主证及兼证、四诊内容，理法一致，不改动任何格式与写法，排版相同。";
@@ -111,6 +132,7 @@ const props = defineProps<{
   modelValue: boolean;
   encounterId: string;
   patientCaseId?: string;
+  exports: PreAiExportVersion[];
 }>();
 
 const emit = defineEmits<{
@@ -127,6 +149,13 @@ const lastOutputAssetId = ref("");
 const roundCount = ref(0);
 const controller = ref<AbortController>();
 const messageListRef = ref<HTMLElement>();
+const attachExport = ref(true);
+
+const pinnedExport = computed(() =>
+  [...props.exports]
+    .filter(item => item.status && item.status !== "INVALIDATED")
+    .sort((a, b) => b.version - a.version)[0]
+);
 
 const scrollToEnd = async () => {
   await nextTick();
@@ -145,6 +174,7 @@ const resetSession = () => {
   builtinReportId.value = "";
   lastOutputAssetId.value = "";
   roundCount.value = 0;
+  attachExport.value = true;
 };
 
 watch(
@@ -209,13 +239,16 @@ const send = async () => {
   await scrollToEnd();
   try {
     await ensureBaseRecord(requestController.signal);
+    const attachExportId =
+      attachExport.value && pinnedExport.value ? pinnedExport.value.id : undefined;
     let submitParams: Parameters<typeof submitMedicalRecordWorkflowTaskApi>[0];
     if (lastOutputAssetId.value) {
       submitParams = {
         referenceAssetId: lastOutputAssetId.value,
         sourceRecordId: baseRecordId.value,
         prompt: text,
-        mappingMode: "LEGACY_ORDINAL"
+        mappingMode: "LEGACY_ORDINAL",
+        preAiExportId: attachExportId
       };
     } else {
       if (!builtinReportId.value) {
@@ -230,7 +263,8 @@ const send = async () => {
         reportId: builtinReportId.value,
         sourceRecordId: baseRecordId.value,
         prompt: text,
-        mappingMode: "LEGACY_ORDINAL"
+        mappingMode: "LEGACY_ORDINAL",
+        preAiExportId: attachExportId
       };
     }
     const { data: submitted } = await submitMedicalRecordWorkflowTaskApi(submitParams, requestController.signal);
@@ -433,6 +467,28 @@ const bubbleClass = (card: GenerationCard) => ({
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.attachment-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 24px;
+
+  .el-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+.attachment-note {
+  color: var(--el-text-color-secondary);
+
+  &.muted {
+    font-size: 12px;
+  }
 }
 
 .footer-actions {

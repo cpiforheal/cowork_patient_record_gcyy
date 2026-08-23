@@ -8,9 +8,21 @@ public record MedicalRecordWorkflowSubmitRequest(
     String sourceRecordId,
     String prompt,
     String mappingMode,
-    List<String> targetNodeKeys
+    List<String> targetNodeKeys,
+    String preAiExportId
 ) {
     public MedicalRecordWorkflowSubmitRequest {
         targetNodeKeys = targetNodeKeys == null ? List.of() : List.copyOf(targetNodeKeys);
+    }
+
+    public MedicalRecordWorkflowSubmitRequest(
+        String reportId,
+        String referenceAssetId,
+        String sourceRecordId,
+        String prompt,
+        String mappingMode,
+        List<String> targetNodeKeys
+    ) {
+        this(reportId, referenceAssetId, sourceRecordId, prompt, mappingMode, targetNodeKeys, null);
     }
 }

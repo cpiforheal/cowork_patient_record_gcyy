@@ -58,6 +58,7 @@ public class InpatientRecordAiService {
         String referenceDocumentText,
         ObjectNode sourceSnapshot,
         ObjectNode preAiFacts,
+        JsonNode maskedPreAiExport,
         Map<String, String> currentValues,
         int referenceParagraphCount,
         List<String> controlledNodeKeys
@@ -100,6 +101,7 @@ public class InpatientRecordAiService {
                     normalizedPrompt,
                     sourceSnapshot,
                     preAiFacts,
+                    maskedPreAiExport,
                     currentValues,
                     referenceDocumentText
                 )
@@ -169,6 +171,7 @@ public class InpatientRecordAiService {
             必须严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实复制给当前患者。
             当前参考文档共有 %d 个非空正文节点。%s 禁止 Markdown、解释、代码围栏或其他键。
             只能依据当前患者资料、已复核事实和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断。缺少事实时写“待医生补充”。已复核事实优先级高于当前模板值。
+            若提供了 reviewedMaskedExport（医生复核后的脱敏前置资料），它是该患者事实的权威口径：生成内容必须与其一致，冲突时以它为准并在相应段落按医生提示词处理。
             中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致；方剂只能作为医生复核用参考，并明确标注“参考”。
             每个输出值只放对应节点正文，不要自行合并或拆分节点。系统只会按受控节点键写回上传 DOCX 的原位置，以保留原文档样式、表格、书签和排版。
             """.formatted(referenceParagraphCount, outputContract);
@@ -178,6 +181,7 @@ public class InpatientRecordAiService {
         String prompt,
         ObjectNode sourceSnapshot,
         ObjectNode preAiFacts,
+        JsonNode maskedPreAiExport,
         Map<String, String> currentValues,
         String referenceDocumentText
     ) throws IOException {
@@ -186,6 +190,9 @@ public class InpatientRecordAiService {
         context.put("referenceDocument", referenceDocumentText);
         context.set("patientAndRecord", sourceSnapshot);
         context.set("reviewedPreAiFacts", preAiFacts == null ? objectMapper.createObjectNode() : preAiFacts);
+        if (maskedPreAiExport != null && maskedPreAiExport.isObject()) {
+            context.set("reviewedMaskedExport", maskedPreAiExport);
+        }
         context.set("currentTemplateValues", objectMapper.valueToTree(currentValues));
         return objectMapper.writeValueAsString(context);
     }

@@ -74,6 +74,23 @@ public class MedicalRecordWorkflowRepository {
         return rows.stream().findFirst();
     }
 
+    public record PreAiExportRef(String id, String encounterId, String status, Object maskedSnapshot) {}
+
+    public java.util.Optional<PreAiExportRef> findPreAiExport(String id) {
+        List<PreAiExportRef> rows = jdbcTemplate.query("""
+            SELECT id, encounter_id, status, masked_snapshot
+            FROM pre_ai_exports
+            WHERE id = ?
+            LIMIT 1
+            """, (rs, rowNum) -> new PreAiExportRef(
+                rs.getString("id"),
+                safe(rs.getString("encounter_id")),
+                rs.getString("status"),
+                readJson(rs.getString("masked_snapshot"))
+            ), id);
+        return rows.stream().findFirst();
+    }
+
     public void insertReport(
         String id,
         String sourceAssetId,
