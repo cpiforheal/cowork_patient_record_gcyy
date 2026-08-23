@@ -1,7 +1,7 @@
 <template>
   <el-drawer
     :model-value="modelValue"
-    size="min(620px, 96vw)"
+    size="min(560px, 96vw)"
     :with-header="true"
     :close-on-click-modal="false"
     @update:model-value="$emit('update:modelValue', $event)"
@@ -9,23 +9,17 @@
     <template #header>
       <div class="chat-header">
         <div>
-          <strong>AI 病历生成助手</strong>
-          <small>内置住院病历范本 · 依据已复核前置事实生成 · 逐轮精修</small>
+          <strong>AI 病历生成</strong>
+          <small>提示词已预置 · 确认后直接生成可下载的住院病历 DOCX</small>
         </div>
         <el-button size="small" :icon="Refresh" @click="resetSession">新对话</el-button>
       </div>
     </template>
 
     <div ref="messageListRef" class="chat-body">
-      <div v-if="!messages.length" class="chat-intro">
-        <h4>对话式生成整套住院病历</h4>
-        <ol>
-          <li>发送首条指令（已预填标准口令），系统自动生成基础目标病历并加载内置范本；</li>
-          <li>AI 按范本的格式、结构与查房时序生成完整病历，完成后卡片内可直接下载 DOCX；</li>
-          <li>继续输入修改意见（如"术后第 5 天方剂调整"），以上一轮结果为底稿逐轮精修；</li>
-          <li>每轮产物均进入版本链，前置事实变更后旧版本会自动标记过期。</li>
-        </ol>
-        <p class="intro-note">AI 生成内容仅供医生复核，下载后请逐字核对再使用。</p>
+      <div v-if="!messages.length" class="chat-hint">
+        下方提示词已按院内标准口径预填，可直接点「发送」，也可先修改再发送；AI
+        会结合该患者的已复核资料生成整套住院病历，之后继续输入修改意见即可逐轮调整。
       </div>
 
       <template v-for="item in messages" :key="item.id">
@@ -33,41 +27,29 @@
           <pre>{{ item.text }}</pre>
         </div>
 
-        <div v-else class="generation-card" :class="cardClass(item.card!)">
-          <header class="card-head">
-            <strong>{{ cardTitle(item.card!) }}</strong>
-            <el-tag size="small" :type="cardTagType(item.card!)" effect="plain">
-              {{ cardStatusText(item.card!) }}
-            </el-tag>
-          </header>
-
-          <el-steps
-            v-if="cardActive(item.card!)"
-            :active="stageStep(item.card!)"
-            align-center
-            finish-status="success"
-            class="card-steps"
-          >
-            <el-step title="准备" />
-            <el-step title="AI 生成" />
-            <el-step title="产物安检" />
-            <el-step title="节点回填" />
-          </el-steps>
-          <p v-if="item.card!.stageMessage" class="card-message">{{ item.card!.stageMessage }}</p>
-
-          <div v-if="item.card!.status === 'FAILED'" class="card-error">
-            <p>{{ item.card!.errorCode || "GENERATION_FAILED" }}：{{ item.card!.errorMessage || "生成失败，可重试" }}</p>
-            <el-button size="small" type="warning" plain :loading="busy" @click="retry(item.card!)">重试本轮</el-button>
-          </div>
-
-          <footer v-if="item.card!.status === 'SUCCEEDED'" class="card-success">
-            <p>
-              病历 V{{ item.card!.version || "-" }} 已生成
-              <span v-if="item.card!.round === 1">· 首轮（内置范本）</span>
-              <span v-else>· 第 {{ item.card!.round }} 轮精修</span>
+        <div v-else class="bubble assistant-bubble" :class="bubbleClass(item.card!)">
+          <template v-if="cardActive(item.card!)">
+            <p class="assistant-line">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              {{ runningText(item.card!) }}
             </p>
-            <el-button size="small" type="primary" @click="download(item.card!)">下载 DOCX</el-button>
-          </footer>
+            <p v-if="item.card!.stageMessage" class="assistant-sub">{{ item.card!.stageMessage }}</p>
+          </template>
+
+          <template v-else-if="item.card!.status === 'SUCCEEDED'">
+            <p class="assistant-line">已按您的要求生成住院病历{{ versionText(item.card!) }}，请下载后逐字复核。</p>
+            <p class="assistant-sub">如需调整（如更换方剂、修改某段病程），直接在下方输入即可继续精修。</p>
+            <div class="bubble-actions">
+              <el-button size="small" type="primary" @click="download(item.card!)">下载 DOCX</el-button>
+            </div>
+          </template>
+
+          <template v-else>
+            <p class="assistant-line error-line">生成失败：{{ item.card!.errorMessage || "请重试" }}</p>
+            <div class="bubble-actions">
+              <el-button size="small" type="warning" plain :loading="busy" @click="retry(item.card!)">重试</el-button>
+            </div>
+          </template>
         </div>
       </template>
     </div>
@@ -76,25 +58,23 @@
       <el-input
         v-model="prompt"
         type="textarea"
-        :autosize="{ minRows: 2, maxRows: 6 }"
-        placeholder="输入生成指令或修改意见，Enter 发送（Shift+Enter 换行）"
+        :autosize="{ minRows: 3, maxRows: 8 }"
+        placeholder="输入或修改提示词，Enter 发送（Shift+Enter 换行）"
         :disabled="busy"
         @keydown.enter.exact.prevent="send"
       />
       <div class="footer-actions">
-        <small v-if="roundHint">{{ roundHint }}</small>
-        <el-button type="primary" :loading="busy" :disabled="!prompt.trim()" @click="send">
-          {{ lastOutputAssetId ? "发送精修指令" : "生成病历" }}
-        </el-button>
+        <small>生成仅供医生复核使用</small>
+        <el-button type="primary" :loading="busy" :disabled="!prompt.trim()" @click="send">发送</el-button>
       </div>
     </div>
   </el-drawer>
 </template>
 
 <script setup lang="ts" name="RecordAiChat">
-import { computed, nextTick, ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { Refresh } from "@element-plus/icons-vue";
+import { Loading, Refresh } from "@element-plus/icons-vue";
 import {
   downloadMedicalRecordAssetV2Api,
   generateMedicalRecordApi,
@@ -142,18 +122,11 @@ const messages = ref<ChatItem[]>([]);
 const prompt = ref(DEFAULT_PROMPT);
 const busy = ref(false);
 const baseRecordId = ref("");
-const baseRecordVersion = ref("");
 const builtinReportId = ref("");
 const lastOutputAssetId = ref("");
 const roundCount = ref(0);
 const controller = ref<AbortController>();
 const messageListRef = ref<HTMLElement>();
-
-const roundHint = computed(() => {
-  if (!baseRecordId.value) return "";
-  const base = `基础目标病历 V${baseRecordVersion.value}`;
-  return lastOutputAssetId.value ? `${base} · 下一轮将以上一轮产物为底稿精修` : `${base} · 首轮使用内置范本`;
-});
 
 const scrollToEnd = async () => {
   await nextTick();
@@ -162,14 +135,13 @@ const scrollToEnd = async () => {
 
 const resetSession = () => {
   if (busy.value) {
-    ElMessage.warning("本轮生成仍在进行，请等待完成后再开新对话");
+    ElMessage.warning("正在生成，请等待完成后再开新对话");
     return;
   }
   controller.value?.abort();
   messages.value = [];
   prompt.value = DEFAULT_PROMPT;
   baseRecordId.value = "";
-  baseRecordVersion.value = "";
   builtinReportId.value = "";
   lastOutputAssetId.value = "";
   roundCount.value = 0;
@@ -209,7 +181,6 @@ const ensureBaseRecord = async (signal: AbortSignal) => {
     patientCaseId: props.patientCaseId
   });
   baseRecordId.value = data.record.id;
-  baseRecordVersion.value = String(data.record.version);
   emit("record-generated");
 };
 
@@ -224,7 +195,7 @@ const send = async () => {
     round,
     status: "PREPARING",
     stage: "QUEUED",
-    stageMessage: round === 1 ? "正在生成基础目标病历并加载内置范本…" : "正在准备精修底稿…",
+    stageMessage: "",
     outputAssetId: "",
     version: "",
     errorCode: "",
@@ -272,9 +243,9 @@ const send = async () => {
     if (finalTask.status === "SUCCEEDED") {
       lastOutputAssetId.value = finalTask.outputAssetId || lastOutputAssetId.value;
       emit("record-generated");
-      ElMessage.success(`第 ${round} 轮病历已生成${card.version ? `（V${card.version}）` : ""}，可在卡片中下载`);
+      ElMessage.success("住院病历已生成，可在对话中下载");
     } else {
-      ElMessage.error(`${finalTask.errorCode || "GENERATION_FAILED"}：${finalTask.errorMessage || "生成失败"}`);
+      ElMessage.error(finalTask.errorMessage || "生成失败，可在对话中重试");
     }
   } catch (error: any) {
     if (error?.name !== "AbortError") {
@@ -295,7 +266,7 @@ const retry = async (card: GenerationCard) => {
   const requestController = new AbortController();
   controller.value = requestController;
   card.status = "RUNNING";
-  card.stageMessage = "任务已重新提交…";
+  card.stageMessage = "";
   try {
     const { data: retried } = await retryMedicalRecordWorkflowTaskApi(card.taskId, requestController.signal);
     applyTaskToCard(card, retried);
@@ -338,35 +309,25 @@ const download = async (card: GenerationCard) => {
 };
 
 const cardActive = (card: GenerationCard) => card.status !== "SUCCEEDED" && card.status !== "FAILED";
-const cardTitle = (card: GenerationCard) =>
-  card.round === 1 ? "生成整套住院病历" : `第 ${card.round} 轮精修`;
-const cardClass = (card: GenerationCard) => ({
-  running: cardActive(card),
+const runningText = (card: GenerationCard) => {
+  if (card.status === "PREPARING") return "正在准备患者资料与病历范本…";
+  switch (card.stage) {
+    case "ASSET_LOADING":
+      return "正在调取病历范本…";
+    case "AI_GENERATION":
+      return "AI 正在生成整套住院病历…";
+    case "OUTPUT_ASSET":
+    case "NODE_MAPPING":
+      return "正在整理生成结果…";
+    default:
+      return "正在生成…";
+  }
+};
+const versionText = (card: GenerationCard) => (card.version ? `（V${card.version}）` : "");
+const bubbleClass = (card: GenerationCard) => ({
   failed: card.status === "FAILED",
   success: card.status === "SUCCEEDED"
 });
-const cardTagType = (card: GenerationCard) =>
-  card.status === "SUCCEEDED" ? "success" : card.status === "FAILED" ? "danger" : "primary";
-const cardStatusText = (card: GenerationCard) => {
-  if (card.status === "SUCCEEDED") return "已完成";
-  if (card.status === "FAILED") return "失败";
-  if (card.status === "PREPARING") return "准备中";
-  return "生成中";
-};
-const stageStep = (card: GenerationCard) => {
-  switch (card.stage) {
-    case "ASSET_LOADING":
-      return 1;
-    case "AI_GENERATION":
-      return 2;
-    case "OUTPUT_ASSET":
-      return 3;
-    case "NODE_MAPPING":
-      return 4;
-    default:
-      return card.status === "SUCCEEDED" ? 4 : 0;
-  }
-};
 </script>
 
 <style scoped lang="scss">
@@ -392,34 +353,19 @@ const stageStep = (card: GenerationCard) => {
   overflow-y: auto;
 }
 
-.chat-intro {
-  padding: 16px;
+.chat-hint {
+  padding: 12px 14px;
   font-size: 13px;
-  line-height: 1.8;
-  color: var(--el-text-color-regular);
+  line-height: 1.7;
+  color: var(--el-text-color-secondary);
   background: var(--el-fill-color-light);
-  border-radius: 8px;
-
-  h4 {
-    margin: 0 0 8px;
-  }
-
-  ol {
-    padding-left: 18px;
-    margin: 0;
-  }
-
-  .intro-note {
-    margin: 10px 0 0;
-    color: var(--el-color-warning);
-  }
+  border-radius: 10px;
 }
 
 .bubble {
-  max-width: 86%;
+  max-width: 88%;
   padding: 10px 14px;
   border-radius: 10px;
-  white-space: pre-wrap;
   word-break: break-word;
 
   pre {
@@ -427,73 +373,58 @@ const stageStep = (card: GenerationCard) => {
     font-family: inherit;
     white-space: pre-wrap;
   }
+
+  p {
+    margin: 0;
+  }
 }
 
 .user-bubble {
   align-self: flex-end;
   color: #fff;
   background: var(--el-color-primary);
+
+  pre {
+    color: inherit;
+  }
 }
 
-.generation-card {
-  padding: 12px 14px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 10px;
-
-  &.running {
-    border-color: var(--el-color-primary-light-5);
-  }
+.assistant-bubble {
+  align-self: flex-start;
+  background: var(--el-fill-color-light);
 
   &.failed {
-    border-color: var(--el-color-danger-light-5);
+    background: var(--el-color-danger-light-9);
   }
 
   &.success {
-    border-color: var(--el-color-success-light-5);
+    background: var(--el-color-success-light-9);
   }
 }
 
-.card-head {
+.assistant-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.6;
+
+  &.error-line {
+    color: var(--el-color-danger);
+  }
 }
 
-.card-steps {
-  margin: 10px 0 4px;
-}
-
-.card-message {
-  margin: 8px 0 0;
+.assistant-sub {
+  margin-top: 4px !important;
   font-size: 12px;
+  line-height: 1.6;
   color: var(--el-text-color-secondary);
 }
 
-.card-error {
-  margin-top: 10px;
-  font-size: 13px;
-  color: var(--el-color-danger);
-
-  p {
-    margin: 0 0 8px;
-  }
-}
-
-.card-success {
+.bubble-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-
-  p {
-    margin: 0;
-    font-size: 13px;
-  }
 }
 
 .chat-footer {
