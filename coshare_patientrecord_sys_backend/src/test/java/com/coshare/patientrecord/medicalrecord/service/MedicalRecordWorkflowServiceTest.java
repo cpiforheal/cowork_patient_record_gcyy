@@ -108,6 +108,7 @@ class MedicalRecordWorkflowServiceTest {
 
         MedicalRecordWorkflowSubmitRequest request = new MedicalRecordWorkflowSubmitRequest(
             "report-1",
+            null,
             "record-1",
             "",
             "LEGACY_ORDINAL",
@@ -165,7 +166,7 @@ class MedicalRecordWorkflowServiceTest {
         when(repository.compensateFailedRun(any(), any(), any())).thenReturn(true);
 
         service.submit(new MedicalRecordWorkflowSubmitRequest(
-            "report-1", "record-source", "", "CONTROLLED", java.util.List.of()
+            "report-1", null, "record-source", "", "CONTROLLED", java.util.List.of()
         ), doctor);
         assertThat(queuedTask[0]).isNotNull();
         queuedTask[0].run();
@@ -262,6 +263,7 @@ class MedicalRecordWorkflowServiceTest {
 
         MedicalRecordWorkflowSubmitRequest request = new MedicalRecordWorkflowSubmitRequest(
             "report-1",
+            null,
             "record-1",
             "",
             "CONTROLLED",
@@ -272,6 +274,110 @@ class MedicalRecordWorkflowServiceTest {
                 assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
             );
         verify(repository, never()).insertTask(any(), any());
+    }
+
+    @Test
+    void inspectBuiltinTemplatePersistsSourceAssetAndReport() {
+        MedicalRecordWorkflowService service = service();
+        when(repository.findActiveSourceAsset(org.mockito.ArgumentMatchers.eq("patient-1"), org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(java.util.Optional.empty());
+
+        Map<String, Object> result = service.inspectBuiltinTemplate("patient-1", "", user("doctor"));
+
+        assertThat(result.get("decision")).isEqualTo("ACCEPTED");
+        assertThat(result.get("canGenerate")).isEqualTo(true);
+        assertThat(result.get("templateId")).isEqualTo("builtin-inpatient-v1");
+        assertThat(result.get("sourceAssetId")).asString().startsWith("mrasset-");
+        assertThat((java.util.List<?>) result.get("nodes")).isNotEmpty();
+        ArgumentCaptor<MedicalRecordWorkflowRepository.Asset> assetCaptor =
+            ArgumentCaptor.forClass(MedicalRecordWorkflowRepository.Asset.class);
+        verify(repository).insertAsset(assetCaptor.capture(), any());
+        assertThat(assetCaptor.getValue().assetType()).isEqualTo("SOURCE");
+        assertThat(assetCaptor.getValue().metadata()).containsEntry("templateId", "builtin-inpatient-v1");
+        verify(repository).insertReport(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void inspectBuiltinTemplateReusesExistingSourceAsset() throws Exception {
+        MedicalRecordWorkflowService service = service();
+        byte[] bytes = builtinTemplateBytesForTest();
+        Path reusedPath = temporaryDirectory.resolve("reused.docx");
+        Files.write(reusedPath, bytes);
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        MedicalRecordWorkflowRepository.Asset reused = new MedicalRecordWorkflowRepository.Asset(
+            "asset-reused", "patient-1", "patient-1", "", "SOURCE", "inpatient-record-reference-v1.docx",
+            reusedPath.toString(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            bytes.length, digest, "", true, true, Map.of("templateId", "builtin-inpatient-v1")
+        );
+        when(repository.findActiveSourceAsset(org.mockito.ArgumentMatchers.eq("patient-1"), org.mockito.ArgumentMatchers.eq(digest)))
+            .thenReturn(java.util.Optional.of(reused));
+
+        Map<String, Object> result = service.inspectBuiltinTemplate("patient-1", "", user("doctor"));
+
+        assertThat(result.get("sourceAssetId")).isEqualTo("asset-reused");
+        verify(repository, never()).insertAsset(any(), any());
+        verify(repository).insertReport(any(), org.mockito.ArgumentMatchers.eq("asset-reused"), any(), any(), any());
+    }
+
+    @Test
+    void submitWithReferenceAssetRejectsNonOutputAsset() throws Exception {
+        MedicalRecordWorkflowService service = service();
+        Path path = temporaryDirectory.resolve("source-ref.docx");
+        byte[] bytes = validDocx();
+        Files.write(path, bytes);
+        MedicalRecordWorkflowRepository.Asset sourceAsset = asset("asset-ref", path, bytes);
+        MedicalRecordWorkflowRepository.Asset nonOutput = new MedicalRecordWorkflowRepository.Asset(
+            sourceAsset.id(), sourceAsset.scopeId(), sourceAsset.patientId(), sourceAsset.encounterId(),
+            "SOURCE", sourceAsset.originalFileName(), sourceAsset.storagePath(), sourceAsset.mimeType(),
+            sourceAsset.fileSize(), sourceAsset.sha256(), sourceAsset.parentAssetId(),
+            sourceAsset.mediaTypeVerified(), sourceAsset.packageVerified(), sourceAsset.metadata()
+        );
+        when(repository.loadAsset("asset-ref")).thenReturn(nonOutput);
+
+        MedicalRecordWorkflowSubmitRequest request = new MedicalRecordWorkflowSubmitRequest(
+            "", "asset-ref", "record-1", "调整术后医嘱", "LEGACY_ORDINAL", java.util.List.of()
+        );
+        assertThatThrownBy(() -> service.submit(request, user("doctor")))
+            .isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                assertThat(error.getReason()).contains("既往生成结果资产");
+            });
+        verify(repository, never()).insertTask(any(), any());
+    }
+
+    @Test
+    void submitWithReferenceAssetCreatesTaskInReferenceScope() throws Exception {
+        MedicalRecordWorkflowService service = service();
+        SessionUser doctor = user("doctor");
+        Path path = temporaryDirectory.resolve("output-ref.docx");
+        byte[] bytes = validDocx();
+        Files.write(path, bytes);
+        when(repository.loadAsset("asset-ref")).thenReturn(asset("asset-ref", path, bytes));
+        when(repository.loadOwnedTask(any(), any())).thenReturn(taskRow("PENDING"));
+
+        Map<String, Object> result = service.submit(new MedicalRecordWorkflowSubmitRequest(
+            "", "asset-ref", "record-1", "调整术后医嘱", "LEGACY_ORDINAL", java.util.List.of()
+        ), doctor);
+
+        ArgumentCaptor<MedicalRecordWorkflowRepository.Task> taskCaptor =
+            ArgumentCaptor.forClass(MedicalRecordWorkflowRepository.Task.class);
+        verify(repository).insertTask(taskCaptor.capture(), any());
+        assertThat(taskCaptor.getValue().id()).startsWith("mrtask-");
+        assertThat(taskCaptor.getValue().sourceAssetId()).isEqualTo("asset-ref");
+        assertThat(taskCaptor.getValue().sanitizedAssetId()).isEmpty();
+        assertThat(taskCaptor.getValue().reportId()).isEmpty();
+        assertThat(taskCaptor.getValue().scopeId()).isEqualTo("patient-1");
+        verify(sourceBuilder, org.mockito.Mockito.times(2)).assertCanReadScope("patient-1", doctor);
+    }
+
+    private byte[] builtinTemplateBytesForTest() throws Exception {
+        try (java.io.InputStream input = getClass().getClassLoader().getResourceAsStream(
+            "medical-record-templates/inpatient-record-reference-v1.docx"
+        )) {
+            assertThat(input).isNotNull();
+            return input.readAllBytes();
+        }
     }
 
     private MedicalRecordWorkflowRepository.TaskRow taskRow(String status) {

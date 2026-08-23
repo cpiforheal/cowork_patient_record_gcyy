@@ -145,6 +145,13 @@
             >
           </span>
         </el-tooltip>
+        <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核后使用对话式生成" placement="top">
+          <span>
+            <el-button type="primary" plain :disabled="!reviewConfirmed" @click="$emit('openRecordChat')">
+              AI 病历生成助手
+            </el-button>
+          </span>
+        </el-tooltip>
       </div>
     </footer>
     <section v-if="reviewConfirmed" class="version-control">
@@ -323,6 +330,7 @@ defineEmits<{
   confirm: [];
   generate: [];
   generateTarget: [];
+  openRecordChat: [];
   download: [version: PreAiExportVersion];
   downloadTarget: [version: GeneratedMedicalRecord];
   deleteTarget: [version: GeneratedMedicalRecord];

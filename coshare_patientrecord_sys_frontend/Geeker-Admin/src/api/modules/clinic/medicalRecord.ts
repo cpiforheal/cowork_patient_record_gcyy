@@ -2,6 +2,7 @@ import { authHeaders } from "../authToken";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 import type {
   GeneratedMedicalRecord,
+  MedicalRecordBuiltinTemplateInspection,
   MedicalRecordDocxDownload,
   MedicalRecordDocxInspection,
   MedicalRecordGenerateResult,
@@ -227,6 +228,22 @@ export const submitMedicalRecordWorkflowTaskApi = async (params: MedicalRecordWo
   });
   const data = await parseClinicApiResponse<MedicalRecordWorkflowTask>(result);
   return clinicResponse(data, "病历生成任务已提交");
+};
+
+export const inspectBuiltinMedicalRecordTemplateApi = async (
+  params: MedicalRecordGenerationScope,
+  signal?: AbortSignal
+) => {
+  const query = new URLSearchParams(
+    params.encounterId ? { encounterId: params.encounterId } : { patientId: params.patientId || "" }
+  );
+  const result = await clinicFetch(`/medical-record/v2/templates/builtin/inspect?${query.toString()}`, {
+    method: "POST",
+    headers: authHeaders(),
+    signal
+  });
+  const data = await parseClinicApiResponse<MedicalRecordBuiltinTemplateInspection>(result);
+  return clinicResponse(data, "内置住院病历范本已就绪");
 };
 
 export const getMedicalRecordWorkflowTaskApi = async (taskId: string, signal?: AbortSignal) => {

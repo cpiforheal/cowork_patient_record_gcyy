@@ -474,6 +474,19 @@ public class ClinicApiController {
         ));
     }
 
+    @PostMapping("/clinic-api/medical-record/v2/templates/builtin/inspect")
+    public ApiResult<Map<String, Object>> inspectBuiltinMedicalRecordTemplate(
+        @RequestParam(required = false, defaultValue = "") String patientId,
+        @RequestParam(required = false, defaultValue = "") String encounterId
+    ) {
+        requireMedicalRecordV2Enabled();
+        return ApiResult.success(medicalRecordWorkflowService.inspectBuiltinTemplate(
+            patientId,
+            encounterId,
+            AuthPermission.currentUserOrThrow()
+        ));
+    }
+
     @PostMapping("/clinic-api/medical-record/v2/tasks")
     public ApiResult<Map<String, Object>> submitMedicalRecordTask(
         @RequestBody MedicalRecordWorkflowSubmitRequest request

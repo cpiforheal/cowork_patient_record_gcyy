@@ -4,6 +4,7 @@ import java.util.List;
 
 public record MedicalRecordWorkflowSubmitRequest(
     String reportId,
+    String referenceAssetId,
     String sourceRecordId,
     String prompt,
     String mappingMode,

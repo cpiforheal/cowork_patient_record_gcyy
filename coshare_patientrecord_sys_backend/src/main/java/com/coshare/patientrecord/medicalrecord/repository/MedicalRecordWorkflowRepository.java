@@ -61,6 +61,19 @@ public class MedicalRecordWorkflowRepository {
         return rows.get(0);
     }
 
+    public java.util.Optional<Asset> findActiveSourceAsset(String scopeId, String sha256) {
+        List<Asset> rows = jdbcTemplate.query("""
+            SELECT id, scope_id, patient_id, encounter_id, asset_type, original_file_name, storage_path,
+                   mime_type, file_size, sha256, parent_asset_id, media_type_verified, package_verified,
+                   metadata_json
+            FROM clinic_medical_record_document_assets
+            WHERE scope_id = ? AND sha256 = ? AND asset_type = 'SOURCE' AND status = 'ACTIVE'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """, (rs, rowNum) -> readAsset(rs), scopeId, sha256);
+        return rows.stream().findFirst();
+    }
+
     public void insertReport(
         String id,
         String sourceAssetId,

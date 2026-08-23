@@ -497,8 +497,13 @@ export interface MedicalRecordDocxInspection {
   canGenerate: boolean;
 }
 
+export interface MedicalRecordBuiltinTemplateInspection extends MedicalRecordDocxInspection {
+  templateId: string;
+}
+
 export interface MedicalRecordWorkflowSubmitParams {
-  reportId: string;
+  reportId?: string;
+  referenceAssetId?: string;
   sourceRecordId: string;
   prompt?: string;
   mappingMode?: MedicalRecordMappingMode;

@@ -43,6 +43,9 @@ public class MedicalRecordWorkflowService {
     private static final String DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     private static final long MAX_INPUT_BYTES = 10L * 1024 * 1024;
     private static final List<String> AUTHOR_ROLES = List.of("doctor");
+    private static final String BUILTIN_TEMPLATE_RESOURCE = "medical-record-templates/inpatient-record-reference-v1.docx";
+    private static final String BUILTIN_TEMPLATE_FILE_NAME = "inpatient-record-reference-v1.docx";
+    private static final String BUILTIN_TEMPLATE_ID = "builtin-inpatient-v1";
 
     private final MedicalRecordWorkflowRepository repository;
     private final DocxPackageSanitizer sanitizer;
@@ -150,44 +153,163 @@ public class MedicalRecordWorkflowService {
         return result;
     }
 
+    @Transactional
+    public Map<String, Object> inspectBuiltinTemplate(String patientId, String encounterId, SessionUser user) {
+        requireAuthor(user);
+        String normalizedPatientId = safe(patientId);
+        String normalizedEncounterId = safe(encounterId);
+        String scopeId = scopeId(normalizedPatientId, normalizedEncounterId);
+        assertScopeReadable(scopeId, normalizedPatientId, normalizedEncounterId, user);
+        byte[] sourceBytes = builtinTemplateBytes();
+        DocxPackageSanitizer.Result inspection = sanitizer.inspectAndSanitize(sourceBytes);
+        if (inspection.decision() == DocxPackageSanitizer.Decision.REJECTED) {
+            throw new ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "内置范本未通过安全检查，请联系管理员更换范本"
+            );
+        }
+        String sourceAssetId = reusableBuiltinAssetId(scopeId, sha256(sourceBytes));
+        if (sourceAssetId.isBlank()) {
+            sourceAssetId = "mrasset-" + UUID.randomUUID();
+            Path sourcePath = writeAsset(scopeId, sourceAssetId, BUILTIN_TEMPLATE_FILE_NAME, sourceBytes);
+            repository.insertAsset(asset(
+                sourceAssetId,
+                scopeId,
+                normalizedPatientId,
+                normalizedEncounterId,
+                "SOURCE",
+                BUILTIN_TEMPLATE_FILE_NAME,
+                sourcePath,
+                sourceBytes,
+                "",
+                inspection.packageValidation().valid(),
+                Map.of("templateId", BUILTIN_TEMPLATE_ID, "inspectionDecision", inspection.decision().name())
+            ), user);
+        }
+        String sanitizedAssetId = "";
+        if (inspection.decision() == DocxPackageSanitizer.Decision.SANITIZED) {
+            byte[] sanitizedBytes = inspection.sanitizedBytes();
+            sanitizedAssetId = "mrasset-" + UUID.randomUUID();
+            Path sanitizedPath = writeAsset(
+                scopeId, sanitizedAssetId, "sanitized-" + BUILTIN_TEMPLATE_FILE_NAME, sanitizedBytes
+            );
+            repository.insertAsset(asset(
+                sanitizedAssetId,
+                scopeId,
+                normalizedPatientId,
+                normalizedEncounterId,
+                "SANITIZED",
+                "sanitized-" + BUILTIN_TEMPLATE_FILE_NAME,
+                sanitizedPath,
+                sanitizedBytes,
+                sourceAssetId,
+                true,
+                Map.of("templateId", BUILTIN_TEMPLATE_ID, "sanitizerVersion", "docx-package-sanitizer-v1")
+            ), user);
+        }
+        String reportId = "mrreport-" + UUID.randomUUID();
+        repository.insertReport(reportId, sourceAssetId, sanitizedAssetId, inspection, user);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("reportId", reportId);
+        result.put("templateId", BUILTIN_TEMPLATE_ID);
+        result.put("sourceAssetId", sourceAssetId);
+        result.put("sanitizedAssetId", sanitizedAssetId);
+        result.put("scopeId", scopeId);
+        result.put("decision", inspection.decision().name());
+        result.put("highestRiskLevel", inspection.highestRisk().name());
+        result.put("packageValidation", inspection.packageValidation());
+        result.put("findings", inspection.findings());
+        if (inspection.decision() != DocxPackageSanitizer.Decision.REJECTED) {
+            byte[] effectiveBytes = inspection.decision() == DocxPackageSanitizer.Decision.SANITIZED
+                ? inspection.sanitizedBytes()
+                : sourceBytes;
+            result.put("nodes", nodeMapper.catalog(effectiveBytes).nodes());
+        } else {
+            result.put("nodes", List.of());
+        }
+        result.put("canGenerate", inspection.decision() != DocxPackageSanitizer.Decision.REJECTED);
+        result.put("effectiveAssetId", sanitizedAssetId.isBlank() ? sourceAssetId : sanitizedAssetId);
+        return result;
+    }
+
     public Map<String, Object> submit(MedicalRecordWorkflowSubmitRequest request, SessionUser user) {
         requireAuthor(user);
-        if (request == null || safe(request.reportId()).isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少文档检查报告ID");
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少请求参数");
         }
-        Inspection inspection = repository.loadInspection(safe(request.reportId()));
-        assertScopeReadable(inspection.scopeId(), inspection.patientId(), inspection.encounterId(), user);
-        if ("REJECTED".equals(inspection.decision())) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "文档包检查未通过，不能提交生成");
+        String reportId = safe(request.reportId());
+        String referenceAssetId = safe(request.referenceAssetId());
+        if (reportId.isBlank() && referenceAssetId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少文档检查报告ID或参考资产ID");
+        }
+        if (!reportId.isBlank() && !referenceAssetId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档检查报告与参考资产只能二选一");
         }
         String sourceRecordId = safe(request.sourceRecordId());
         if (sourceRecordId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少基础目标病历版本ID");
         }
         String mode = mappingMode(request.mappingMode()).name();
+
+        String scopeId;
+        String patientId;
+        String encounterId;
+        String sourceAssetId;
+        String sanitizedAssetId;
+        String taskReportId;
+        if (!reportId.isBlank()) {
+            Inspection inspection = repository.loadInspection(reportId);
+            assertScopeReadable(inspection.scopeId(), inspection.patientId(), inspection.encounterId(), user);
+            if ("REJECTED".equals(inspection.decision())) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "文档包检查未通过，不能提交生成");
+            }
+            scopeId = inspection.scopeId();
+            patientId = inspection.patientId();
+            encounterId = inspection.encounterId();
+            sourceAssetId = inspection.sourceAssetId();
+            sanitizedAssetId = inspection.sanitizedAssetId();
+            taskReportId = inspection.reportId();
+        } else {
+            Asset reference = repository.loadAsset(referenceAssetId);
+            if (!"OUTPUT".equals(reference.assetType())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "精修参考必须是既往生成结果资产");
+            }
+            if (!reference.mediaTypeVerified() || !reference.packageVerified() || !DOCX_MIME.equals(reference.mimeType())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "参考资产未通过 DOCX 安全校验");
+            }
+            assertScopeReadable(reference.scopeId(), reference.patientId(), reference.encounterId(), user);
+            readAssetBytes(reference);
+            scopeId = reference.scopeId();
+            patientId = reference.patientId();
+            encounterId = reference.encounterId();
+            sourceAssetId = reference.id();
+            sanitizedAssetId = "";
+            taskReportId = "";
+        }
         String taskId = "mrtask-" + UUID.randomUUID();
         List<String> targetNodeKeys = validateTargetNodeKeys(
             request.targetNodeKeys(),
             mode,
-            inspection
+            sanitizedAssetId.isBlank() ? sourceAssetId : sanitizedAssetId
         );
         Map<String, Object> taskRequest = requestMap(
-            inspection.patientId(),
-            inspection.encounterId(),
+            patientId,
+            encounterId,
             sourceRecordId,
             safe(request.prompt()),
             mode,
-            targetNodeKeys
+            targetNodeKeys,
+            referenceAssetId
         );
         repository.insertTask(new Task(
             taskId,
-            inspection.scopeId(),
-            inspection.patientId(),
-            inspection.encounterId(),
+            scopeId,
+            patientId,
+            encounterId,
             sourceRecordId,
-            inspection.sourceAssetId(),
-            inspection.sanitizedAssetId(),
-            inspection.reportId(),
+            sourceAssetId,
+            sanitizedAssetId,
+            taskReportId,
             mode,
             safe(request.prompt()),
             taskRequest,
@@ -582,7 +704,7 @@ public class MedicalRecordWorkflowService {
     private List<String> validateTargetNodeKeys(
         List<String> rawKeys,
         String mappingMode,
-        Inspection inspection
+        String effectiveAssetId
     ) {
         List<String> source = rawKeys == null ? List.of() : rawKeys;
         List<String> keys = source.stream()
@@ -598,11 +720,7 @@ public class MedicalRecordWorkflowService {
         }
         if (keys.isEmpty()) return keys;
 
-        Asset inputAsset = repository.loadAsset(
-            inspection.sanitizedAssetId().isBlank()
-                ? inspection.sourceAssetId()
-                : inspection.sanitizedAssetId()
-        );
+        Asset inputAsset = repository.loadAsset(effectiveAssetId);
         List<String> available = nodeMapper.catalog(readAssetBytes(inputAsset)).nodes().stream()
             .map(DocxNodeMapper.CatalogNode::nodeKey)
             .toList();
@@ -621,7 +739,8 @@ public class MedicalRecordWorkflowService {
         String sourceRecordId,
         String prompt,
         String mappingMode,
-        List<String> targetNodeKeys
+        List<String> targetNodeKeys,
+        String referenceAssetId
     ) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("patientId", patientId);
@@ -630,7 +749,37 @@ public class MedicalRecordWorkflowService {
         result.put("prompt", prompt);
         result.put("mappingMode", mappingMode);
         result.put("targetNodeKeys", List.copyOf(targetNodeKeys));
+        result.put("referenceAssetId", safe(referenceAssetId));
         return result;
+    }
+
+    private String reusableBuiltinAssetId(String scopeId, String digest) {
+        return repository.findActiveSourceAsset(scopeId, digest)
+            .filter(asset -> {
+                try {
+                    validatedAssetPath(asset);
+                    return true;
+                } catch (RuntimeException ignored) {
+                    return false;
+                }
+            })
+            .map(Asset::id)
+            .orElse("");
+    }
+
+    private byte[] builtinTemplateBytes() {
+        try (java.io.InputStream input = getClass().getClassLoader().getResourceAsStream(BUILTIN_TEMPLATE_RESOURCE)) {
+            if (input == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "内置住院病历范本缺失");
+            }
+            byte[] bytes = input.readAllBytes();
+            if (bytes.length == 0 || bytes.length > MAX_INPUT_BYTES) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "内置住院病历范本大小异常");
+            }
+            return bytes;
+        } catch (IOException error) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "内置住院病历范本读取失败", error);
+        }
     }
 
     private List<String> stringList(Object value) {

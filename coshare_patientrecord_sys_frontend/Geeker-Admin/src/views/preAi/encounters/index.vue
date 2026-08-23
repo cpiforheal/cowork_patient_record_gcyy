@@ -661,6 +661,7 @@
                   @confirm="confirmReview"
                   @generate="generateExport"
                   @generate-target="generateTargetMedicalRecord"
+                  @open-record-chat="openRecordChat"
                   @download="downloadPreAiExportApi"
                   @download-target="downloadMedicalRecordApi"
                   @delete-target="deleteTargetMedicalRecord"
@@ -804,6 +805,13 @@
         <el-button type="primary" :loading="actionLoading" @click="createFollowUp">创建复诊并发号</el-button>
       </template>
     </el-dialog>
+
+    <RecordAiChat
+      v-model="recordChatVisible"
+      :encounter-id="selectedEncounterId"
+      :patient-case-id="workspace?.encounter?.patientCaseId"
+      @record-generated="loadTargetMedicalRecordVersions"
+    />
 
     <el-dialog
       v-model="inpatientAiDialogVisible"
@@ -1225,6 +1233,7 @@ import WorkflowSidebar, { type WorkflowCard } from "./components/WorkflowSidebar
 import MedicalRecordPreview from "./components/MedicalRecordPreview.vue";
 import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
+import RecordAiChat from "./components/RecordAiChat.vue";
 import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
 import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
 import StructuredField from "./components/StructuredField.vue";
@@ -1443,7 +1452,11 @@ const targetVersionsLoading = ref(false);
 const deletingTargetVersionId = ref("");
 const latestGeneratedTargetVersionId = ref("");
 const latestGeneratedExportVersionId = ref("");
-const medicalRecordV2Enabled = false;
+const medicalRecordV2Enabled = true;
+const recordChatVisible = ref(false);
+const openRecordChat = () => {
+  recordChatVisible.value = true;
+};
 const DEFAULT_INPATIENT_AI_PROMPT =
   "请按照周xx病历的格式、结构、段落、排版、查房时序，完整生成【姓名】【西医主诊断+次诊断 】的住院病历，要求自动生成中药方剂参考主病、主证及兼证、四诊内容，理法一致，不改动任何格式与写法，排版相同。";
 const inpatientAiDialogVisible = ref(false);
