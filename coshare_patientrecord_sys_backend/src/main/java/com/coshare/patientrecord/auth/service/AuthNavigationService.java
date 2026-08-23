@@ -375,7 +375,7 @@ public class AuthNavigationService {
         result.add(page("/welcome/index", "welcome", "/welcome/index", "主页", "HomeFilled", false, false, true));
         result.add(page("/home/index", "home", "/home/index", "我的待办", "List", false, false, false));
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/pre-ai/encounters", "患者就诊", "UserFilled",
-            page("/pre-ai/encounters", "preAiEncounters", "/pre-ai/encounters/index", "登记与事实采集", "EditPen", false, false, false),
+            page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen", false, false, false),
             page("/encounters/active", "encounterActive", "/encounters/active/index", "患者进度", "Connection", false, false, false),
             page("/patients/list", "patientList", "/patients/list/index", "患者档案查询", "Search", false, false, false),
             pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/list"),
