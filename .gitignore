@@ -30,3 +30,5 @@ Thumbs.db
 /.env
 
 coshare_patientrecord_sys_frontend/Geeker-Admin/package-lock.json
+# Self-contained deploy units (jar+dist+manifest), never commit build artifacts
+release-candidates/

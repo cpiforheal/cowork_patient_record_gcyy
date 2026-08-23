@@ -203,24 +203,24 @@ class AuthNavigationServiceTest {
         assertThat(patient.meta().icon()).isEqualTo("UserFilled");
         assertThat(patient.redirect()).isEqualTo("/pre-ai/encounters");
         assertThat(visibleChildren(patient).stream().map(NavigationMenu::path)).containsExactly(
-            "/pre-ai/encounters", "/encounters/active", "/patients/list"
+            "/pre-ai/encounters", "/encounters/active", "/patients/list", "/workbench/upload", "/workbench/lab-report"
         );
         assertThat(visibleChildren(patient).stream().map(item -> item.meta().title())).containsExactly(
-            "登记与事实采集", "患者进度", "患者档案查询"
+            "登记与事实采集", "患者进度", "患者档案查询", "患者资料上传", "检验报告填写"
         );
         assertThat(visibleChildren(patient).stream().map(item -> item.meta().icon())).containsExactly(
-            "EditPen", "Connection", "Search"
+            "EditPen", "Connection", "Search", "UploadFilled", "Memo"
         );
         NavigationMenu detail = findMenu(patient.children(), "/patients/detail/:id");
         assertThat(detail.meta().isHide()).isTrue();
         assertThat(detail.meta().activeMenu()).isEqualTo("/patients/list");
 
-        NavigationMenu materials = findMenu(menus, "/navigation/materials-documents");
-        assertThat(materials.meta().title()).isEqualTo("资料录入与文书");
-        assertThat(materials.meta().icon()).isEqualTo("FolderOpened");
-        assertThat(visibleChildren(materials).stream().map(item -> item.meta().title())).containsExactly(
-            "患者资料上传", "检验报告填写", "通用文书生成"
-        );
+        assertThat(findMenuOrNull(menus, "/navigation/materials-documents")).isNull();
+        assertThat(findMenuOrNull(menus, "/templates/ai-document")).isNull();
+        assertThat(findMenuOrNull(menus, "/system/aiAssistantAnalysis")).isNull();
+        assertThat(findMenuOrNull(menus, "/system/menuMange")).isNotNull();
+        assertThat(findMenu(menus, "/system/menuMange").redirect()).isEqualTo("/system/roleManage");
+        assertThat(findMenu(menus, "/system/menuMange").meta().isHide()).isTrue();
 
         NavigationMenu quality = findMenu(menus, "/navigation/quality-audit");
         assertThat(quality.meta().title()).isEqualTo("审核与追溯");
@@ -237,9 +237,11 @@ class AuthNavigationServiceTest {
 
         NavigationResult doctor = service.navigationFor(user("doctor"));
         assertThat(findMenu(doctor.menus(), "/navigation/patient-collaboration").redirect()).isEqualTo("/pre-ai/encounters");
-        NavigationMenu doctorMaterials = findMenu(doctor.menus(), "/navigation/materials-documents");
-        assertThat(doctorMaterials.redirect()).isEqualTo("/workbench/lab-report");
+        assertThat(findMenuOrNull(doctor.menus(), "/navigation/materials-documents")).isNull();
         assertThat(findMenu(doctor.menus(), "/workbench").redirect()).isEqualTo("/workbench/lab-report");
+
+        NavigationResult frontdesk = service.navigationFor(user("frontdesk"));
+        assertThat(findMenu(frontdesk.menus(), "/workbench").redirect()).isEqualTo("/workbench/upload");
 
         NavigationResult quality = service.navigationFor(user("quality"));
         NavigationMenu qualityPatient = findMenu(quality.menus(), "/navigation/patient-collaboration");
@@ -261,6 +263,8 @@ class AuthNavigationServiceTest {
         assertThat(service.navigationFor(user("doctor")).shortcuts().get(0).path()).isEqualTo("/pre-ai/encounters");
         assertThat(service.navigationFor(user("quality")).shortcuts().get(0).path()).isEqualTo("/audit/review");
         assertThat(service.navigationFor(user("manager")).shortcuts().get(0).path()).isEqualTo("/inventory/overview");
+        assertThat(service.navigationFor(user("manager")).shortcuts())
+            .noneMatch(item -> "/templates/ai-document".equals(item.path()));
         assertThat(service.navigationFor(user("quality")).shortcuts())
             .noneMatch(item -> "/pre-ai/encounters".equals(item.path()));
     }

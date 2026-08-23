@@ -27,7 +27,6 @@ const PROTECTED_BUSINESS_PATHS = [
   /^\/patients(?:\/list|\/detail\/[^/]+)?\/?$/,
   /^\/encounters(?:\/active)?\/?$/,
   /^\/workbench(?:\/upload|\/lab-report|\/legacy)?\/?$/,
-  /^\/templates\/ai-document\/?$/,
   /^\/audit(?:\/review|\/log)?\/?$/,
   /^\/documents(?:\/recycle)?\/?$/
 ];

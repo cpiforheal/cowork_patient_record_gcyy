@@ -1,37 +1,16 @@
 import { authHeaders } from "../authToken";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 import type {
-  AiAssistantAnalytics,
-  AiAssistantLogListParams,
-  AiAssistantLogListResult,
-  AiAssistantRequest,
-  AiAssistantResponse,
-  AiDocumentTask,
-  AiDocumentPreview,
-  AiDocumentRequestPayload,
-  AiDocumentTemplateResult,
   AiModelDetectionPayload,
   AiModelDetectionResult,
-  AiPromptTemplateCandidate,
-  AiPromptTemplateListResult,
-  AiPromptTemplatePayload,
   AiRecordSummary,
   AiRecordSummaryParams,
   AiRuntimeConfig,
   AiRuntimeConfigPayload,
   DoubaoTtsConfigTestPayload,
   DoubaoTtsSpeakParams,
-  DoubaoTtsSpeakResult,
-  GeneratedAiDocument
+  DoubaoTtsSpeakResult
 } from "./types";
-
-const buildQuerySuffix = (params: object = {}) => {
-  const query = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
-  });
-  return query.toString() ? `?${query.toString()}` : "";
-};
 
 export const generateRecordAiSummaryApi = async (params: AiRecordSummaryParams) => {
   const result = await clinicFetch("/ai/record-summary", {
@@ -41,69 +20,6 @@ export const generateRecordAiSummaryApi = async (params: AiRecordSummaryParams) 
   });
   const data = await parseClinicApiResponse<AiRecordSummary>(result);
   return clinicResponse(data, "AI总结已生成");
-};
-
-export const getAiDocumentTemplatesApi = async () => {
-  const result = await clinicFetch("/ai-document/templates", { headers: authHeaders() });
-  const data = await parseClinicApiResponse<AiDocumentTemplateResult>(result);
-  return clinicResponse(data);
-};
-
-export const previewAiDocumentApi = async (payload: AiDocumentRequestPayload) => {
-  const result = await clinicFetch("/ai-document/preview", {
-    method: "POST",
-    headers: clinicJsonHeaders(),
-    body: JSON.stringify(payload)
-  });
-  const data = await parseClinicApiResponse<AiDocumentPreview>(result);
-  return clinicResponse(data, "文稿预览已生成");
-};
-
-export const generateAiDocumentApi = async (payload: AiDocumentRequestPayload) => {
-  const result = await clinicFetch("/ai-document/generate", {
-    method: "POST",
-    headers: clinicJsonHeaders(),
-    body: JSON.stringify(payload)
-  });
-  const data = await parseClinicApiResponse<AiDocumentTask>(result);
-  return clinicResponse(data, "AI 文稿任务已提交");
-};
-
-export const getAiDocumentTaskApi = async (taskId: string) => {
-  const result = await clinicFetch(`/ai-document/tasks/${encodeURIComponent(taskId)}`, {
-    headers: authHeaders()
-  });
-  const data = await parseClinicApiResponse<AiDocumentTask>(result);
-  return clinicResponse(data);
-};
-
-export const retryAiDocumentTaskApi = async (taskId: string) => {
-  const result = await clinicFetch(`/ai-document/tasks/${encodeURIComponent(taskId)}/retry`, {
-    method: "POST",
-    headers: clinicJsonHeaders()
-  });
-  const data = await parseClinicApiResponse<AiDocumentTask>(result);
-  return clinicResponse(data, "AI 文稿任务已重新提交");
-};
-
-export const downloadAiDocumentApi = async (generatedDocument: GeneratedAiDocument) => {
-  const result = await clinicFetch(`/ai-document/download?id=${encodeURIComponent(generatedDocument.id)}`, {
-    headers: authHeaders()
-  });
-  if (!result.ok) {
-    await parseClinicApiResponse(result);
-    return clinicResponse(null);
-  }
-  const blob = await result.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = generatedDocument.fileName || `${generatedDocument.title || "AI文稿"}.docx`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 500);
-  return clinicResponse(null, "DOCX 文稿已下载");
 };
 
 export const getAiRuntimeConfigApi = async () => {
@@ -182,42 +98,4 @@ export const detectDoubaoAiModelsApi = async (payload: AiModelDetectionPayload) 
   });
   const data = await parseClinicApiResponse<AiModelDetectionResult>(result);
   return clinicResponse(data, "豆包模型检测完成");
-};
-
-export const askAiAssistantApi = async (payload: AiAssistantRequest) => {
-  const result = await clinicFetch("/ai/assistant", {
-    method: "POST",
-    headers: clinicJsonHeaders(),
-    body: JSON.stringify(payload)
-  });
-  const data = await parseClinicApiResponse<AiAssistantResponse>(result);
-  return clinicResponse(data, "豆包助手已生成回答");
-};
-
-export const getAiAssistantLogsApi = async (params: AiAssistantLogListParams = {}) => {
-  const result = await clinicFetch(`/ai/assistant/logs${buildQuerySuffix(params)}`, { headers: authHeaders() });
-  const data = await parseClinicApiResponse<AiAssistantLogListResult>(result);
-  return clinicResponse(data);
-};
-
-export const getAiAssistantAnalyticsApi = async (params: AiAssistantLogListParams = {}) => {
-  const result = await clinicFetch(`/ai/assistant/analytics${buildQuerySuffix(params)}`, { headers: authHeaders() });
-  const data = await parseClinicApiResponse<AiAssistantAnalytics>(result);
-  return clinicResponse(data);
-};
-
-export const getAiAssistantTemplatesApi = async () => {
-  const result = await clinicFetch("/ai/assistant/templates", { headers: authHeaders() });
-  const data = await parseClinicApiResponse<AiPromptTemplateListResult>(result);
-  return clinicResponse(data);
-};
-
-export const markAiAssistantTemplateCandidateApi = async (id: string, payload: AiPromptTemplatePayload) => {
-  const result = await clinicFetch(`/ai/assistant/logs/${id}/template-candidate`, {
-    method: "POST",
-    headers: clinicJsonHeaders(),
-    body: JSON.stringify(payload)
-  });
-  const data = await parseClinicApiResponse<AiPromptTemplateCandidate>(result);
-  return clinicResponse(data, "模板候选已保存");
 };
