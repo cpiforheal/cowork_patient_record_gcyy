@@ -378,6 +378,9 @@ public class ClinicMedicalRecordService {
         InpatientRecordAiService.AiGeneration generated = inpatientRecordAiService.generate(
             prompt,
             reference.text(),
+            safe(reference.fileName()).contains("inpatient-record-reference")
+                ? "内置住院病历范本 builtin-inpatient-template-v1（周xx病历·脱敏版）：仅提供章节结构、标题、段落顺序、查房时序与书写风格；其中的姓名、日期、住院号、数值、诊断与处方均为范本示例，严禁复制到当前患者病历"
+                : "医生上传的参考 DOCX（" + safe(reference.fileName()) + "）：仅提供结构与写法，其中患者信息严禁复制",
             sourceSnapshot,
             sourceSnapshot.path("reviewedPreAiFacts").isObject()
                 ? (ObjectNode) sourceSnapshot.path("reviewedPreAiFacts")

@@ -56,6 +56,7 @@ public class InpatientRecordAiService {
     public AiGeneration generate(
         String prompt,
         String referenceDocumentText,
+        String referenceSourceLabel,
         ObjectNode sourceSnapshot,
         ObjectNode preAiFacts,
         JsonNode maskedPreAiExport,
@@ -103,7 +104,8 @@ public class InpatientRecordAiService {
                     preAiFacts,
                     maskedPreAiExport,
                     currentValues,
-                    referenceDocumentText
+                    referenceDocumentText,
+                    referenceSourceLabel
                 )
             );
 
@@ -169,6 +171,8 @@ public class InpatientRecordAiService {
         return """
             你是院内住院病历文档生成引擎。任务方式与网页端“提示词 + 参考文档”一致：根据医生提示词、当前患者资料和已复核事实，重写上传参考 DOCX 的正文，生成一份新住院病历。
             必须严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实复制给当前患者。
+            参考文档中出现的姓名、日期、时间、住院号、床号、检查数值、诊断与方剂全部是范本示例：必须逐项替换为当前患者的真实信息；当前患者缺少的日期（查房、手术、出院等）按其入院日期与诊疗经过推算，严禁沿用范本日期。
+            若提供了 reviewedMaskedExport（医生复核后的脱敏前置资料），生成前逐节比对它与参考文档结构：参考文档的每个章节都必须用当前患者的对应事实填充，两处不一致时一律以 reviewedMaskedExport 为准。
             当前参考文档共有 %d 个非空正文节点。%s 禁止 Markdown、解释、代码围栏或其他键。
             只能依据当前患者资料、已复核事实和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断。缺少事实时写“待医生补充”。已复核事实优先级高于当前模板值。
             若提供了 reviewedMaskedExport（医生复核后的脱敏前置资料），它是该患者事实的权威口径：生成内容必须与其一致，冲突时以它为准并在相应段落按医生提示词处理。
@@ -183,11 +187,15 @@ public class InpatientRecordAiService {
         ObjectNode preAiFacts,
         JsonNode maskedPreAiExport,
         Map<String, String> currentValues,
-        String referenceDocumentText
+        String referenceDocumentText,
+        String referenceSourceLabel
     ) throws IOException {
         ObjectNode context = objectMapper.createObjectNode();
         context.put("doctorSupplement", prompt);
         context.put("referenceDocument", referenceDocumentText);
+        if (safe(referenceSourceLabel).length() > 0) {
+            context.put("referenceDocumentSource", referenceSourceLabel);
+        }
         context.set("patientAndRecord", sourceSnapshot);
         context.set("reviewedPreAiFacts", preAiFacts == null ? objectMapper.createObjectNode() : preAiFacts);
         if (maskedPreAiExport != null && maskedPreAiExport.isObject()) {

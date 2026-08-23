@@ -810,6 +810,8 @@
       v-model="recordChatVisible"
       :encounter-id="selectedEncounterId"
       :patient-case-id="workspace?.encounter?.patientCaseId"
+      :patient-name="recordChatPatientName"
+      :main-diagnosis-text="recordChatDiagnosisText"
       :exports="workspace?.exports ?? []"
       @record-generated="loadTargetMedicalRecordVersions"
     />
@@ -1458,6 +1460,20 @@ const recordChatVisible = ref(false);
 const openRecordChat = () => {
   recordChatVisible.value = true;
 };
+const recordChatPatientName = computed(() => workspace.value?.encounter?.patient?.patientName || "");
+const recordChatDiagnosisText = computed(() => {
+  const rows = workspace.value?.diagnoses ?? [];
+  return rows
+    .filter(
+      item =>
+        item.diagnosisType === "WESTERN_PRIMARY" ||
+        item.diagnosisType === "WESTERN_SECONDARY" ||
+        item.diagnosisType === "WESTERN_COMORBIDITY"
+    )
+    .map(item => String(item.diagnosisText || "").trim())
+    .filter(Boolean)
+    .join("、");
+});
 const DEFAULT_INPATIENT_AI_PROMPT =
   "请按照周xx病历的格式、结构、段落、排版、查房时序，完整生成【姓名】【西医主诊断+次诊断 】的住院病历，要求自动生成中药方剂参考主病、主证及兼证、四诊内容，理法一致，不改动任何格式与写法，排版相同。";
 const inpatientAiDialogVisible = ref(false);

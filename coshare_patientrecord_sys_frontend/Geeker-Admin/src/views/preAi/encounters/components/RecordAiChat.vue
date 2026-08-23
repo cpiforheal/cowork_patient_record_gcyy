@@ -56,6 +56,15 @@
 
     <div class="chat-footer">
       <div class="attachment-bar">
+        <el-tooltip
+          content="AI 首轮按此范本的章节结构与查房时序生成；范本中的患者信息均已脱敏，不会带入当前病历"
+          placement="top"
+        >
+          <el-tag type="primary" effect="plain">
+            <el-icon><DocumentCopy /></el-icon>
+            已固定：住院病历范本（周xx·脱敏版）
+          </el-tag>
+        </el-tooltip>
         <template v-if="pinnedExport">
           <el-tag
             v-if="attachExport"
@@ -71,7 +80,7 @@
           <el-button v-else link type="primary" size="small" @click="attachExport = true">
             + 附加脱敏前置资料 V{{ pinnedExport.version }}
           </el-button>
-          <small class="attachment-note">AI 将以该资料作为已复核事实口径</small>
+          <small class="attachment-note">AI 将以范本定结构、以该资料定事实</small>
         </template>
         <small v-else class="attachment-note muted">当前病例暂无有效脱敏资料，可先在复核面板生成</small>
       </div>
@@ -94,7 +103,7 @@
 <script setup lang="ts" name="RecordAiChat">
 import { computed, nextTick, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { Document, Loading, Refresh } from "@element-plus/icons-vue";
+import { Document, DocumentCopy, Loading, Refresh } from "@element-plus/icons-vue";
 import {
   downloadMedicalRecordAssetV2Api,
   generateMedicalRecordApi,
@@ -132,6 +141,8 @@ const props = defineProps<{
   modelValue: boolean;
   encounterId: string;
   patientCaseId?: string;
+  patientName?: string;
+  mainDiagnosisText?: string;
   exports: PreAiExportVersion[];
 }>();
 
@@ -141,7 +152,6 @@ const emit = defineEmits<{
 }>();
 
 const messages = ref<ChatItem[]>([]);
-const prompt = ref(DEFAULT_PROMPT);
 const busy = ref(false);
 const baseRecordId = ref("");
 const builtinReportId = ref("");
@@ -157,6 +167,15 @@ const pinnedExport = computed(() =>
     .sort((a, b) => b.version - a.version)[0]
 );
 
+const personalizedPrompt = computed(() => {
+  let text = DEFAULT_PROMPT;
+  if (props.patientName) text = text.replace("【姓名】", `【${props.patientName}】`);
+  if (props.mainDiagnosisText) text = text.replace("【西医主诊断+次诊断 】", `【${props.mainDiagnosisText}】`);
+  return text;
+});
+
+const prompt = ref(personalizedPrompt.value);
+
 const scrollToEnd = async () => {
   await nextTick();
   messageListRef.value?.scrollTo({ top: messageListRef.value.scrollHeight, behavior: "smooth" });
@@ -169,7 +188,7 @@ const resetSession = () => {
   }
   controller.value?.abort();
   messages.value = [];
-  prompt.value = DEFAULT_PROMPT;
+  prompt.value = personalizedPrompt.value;
   baseRecordId.value = "";
   builtinReportId.value = "";
   lastOutputAssetId.value = "";
@@ -185,7 +204,7 @@ watch(
       return;
     }
     if (messages.value.length) return;
-    prompt.value = DEFAULT_PROMPT;
+    prompt.value = personalizedPrompt.value;
   }
 );
 
