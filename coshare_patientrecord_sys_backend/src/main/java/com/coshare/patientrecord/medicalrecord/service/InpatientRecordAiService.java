@@ -163,8 +163,9 @@ public class InpatientRecordAiService {
 
     private String systemPrompt(int referenceParagraphCount, List<String> controlledNodeKeys) throws IOException {
         String outputContract = controlledNodeKeys.isEmpty()
-            ? "输出必须是单个 JSON 对象，格式只能为 {\"paragraphs\":[\"第一段\", \"第二段\"]}；paragraphs 必须恰好包含 "
-                + referenceParagraphCount + " 个字符串，并与参考文档非空段落逐一对应。"
+            ? "输出必须是单个 JSON 对象，格式只能为 {\"paragraphs\":[{\"n\":1,\"text\":\"第1段改写后的完整文字\"},{\"n\":2,\"text\":\"第2段改写后的完整文字\"}]}。"
+                + "数组每项的 n 对应参考文档中的段落编号【第N段】，必须逐一覆盖 1 到 " + referenceParagraphCount
+                + " 的全部编号、每个编号恰好出现一次；text 为该段改写后的完整文字。"
             : "输出必须是单个 JSON 对象，格式只能为 {\"nodes\":[{\"key\":\"节点键\",\"text\":\"节点正文\"}]}。"
                 + "nodes 必须逐一包含以下全部受控节点键，每个键恰好出现一次，不得新增、遗漏或改写键："
                 + objectMapper.writeValueAsString(controlledNodeKeys);

@@ -79,6 +79,9 @@ public class InpatientAiResponseParser {
         if (!paragraphs.isArray()) {
             throw badGateway("模型返回格式错误：缺少 paragraphs 数组");
         }
+        if (isNumberedParagraphArray(paragraphs)) {
+            return parseNumberedParagraphs(paragraphs, expectedCount);
+        }
         if (paragraphs.size() != expectedCount) {
             throw badGateway(
                 "模型返回段落数与参考文档不一致：期望 " + expectedCount
@@ -92,6 +95,45 @@ public class InpatientAiResponseParser {
                 throw badGateway("模型返回格式错误：paragraphs 只能包含文本");
             }
             accepted.add(boundedParagraph(paragraph.asText("")));
+        }
+        return accepted;
+    }
+
+    private boolean isNumberedParagraphArray(JsonNode paragraphs) {
+        return paragraphs.size() > 0 && paragraphs.path(0).isObject() && paragraphs.path(0).has("n");
+    }
+
+    /**
+     * 编号回填契约：模型按 {"n":段落号,"text":...} 返回，允许存在缺口——
+     * 未覆盖的段落以“待医生补充”占位而不是整体失败，避免逐段错位写入。
+     */
+    private ArrayNode parseNumberedParagraphs(JsonNode paragraphs, int expectedCount) {
+        String[] slots = new String[expectedCount];
+        boolean[] filled = new boolean[expectedCount];
+        for (JsonNode item : paragraphs) {
+            int index = item.path("n").asInt(0);
+            if (index < 1 || index > expectedCount) {
+                throw badGateway("模型返回了超出范围的段落编号：" + index);
+            }
+            if (filled[index - 1]) {
+                throw badGateway("模型返回了重复的段落编号：" + index);
+            }
+            if (!item.path("text").isTextual()) {
+                throw badGateway("模型返回格式错误：编号段落的 text 必须为文本");
+            }
+            slots[index - 1] = boundedParagraph(item.path("text").asText(""));
+            filled[index - 1] = true;
+        }
+        int covered = 0;
+        for (boolean flag : filled) if (flag) covered++;
+        if (expectedCount > 0 && covered * 2 < expectedCount) {
+            throw badGateway(
+                "模型仅覆盖 " + covered + "/" + expectedCount + " 段（低于一半），内容不可用，请重试"
+            );
+        }
+        ArrayNode accepted = objectMapper.createArrayNode();
+        for (int i = 0; i < expectedCount; i++) {
+            accepted.add(filled[i] ? slots[i] : "待医生补充");
         }
         return accepted;
     }
