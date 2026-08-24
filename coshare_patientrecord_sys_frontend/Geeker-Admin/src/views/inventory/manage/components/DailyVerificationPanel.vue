@@ -59,37 +59,25 @@
       <div class="section-heading"><h3>理论与实际汇总</h3></div>
       <div class="inventory-table-shell">
         <el-table :data="report?.summary || []" max-height="360" empty-text="所选范围内暂无可核查耗材明细">
-          <el-table-column prop="materialName" label="耗材" min-width="210" show-overflow-tooltip /><el-table-column
-            prop="unit"
-            label="单位"
-            width="90"
-            align="center"
-          />
-          <el-table-column label="理论使用量" width="130" align="right"
-            ><template #default="{ row }">{{ number(row.theoreticalQuantity) }}</template></el-table-column
-          >
-          <el-table-column label="实际使用量" width="130" align="right"
-            ><template #default="{ row }">{{ number(row.actualQuantity) }}</template></el-table-column
-          >
-          <el-table-column label="管理主口径" width="130" align="right"
-            ><template #default="{ row }">{{ number(row.mainQuantity) }}</template></el-table-column
-          >
-          <el-table-column label="理论金额" width="135" align="right">
-            <template #default="{ row }">{{ amount(row.theoreticalAmount) }}</template>
+          <el-table-column label="耗材" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }"><span>{{ row.materialName }}</span><span class="unit-suffix"> / {{ row.unit }}</span></template>
           </el-table-column>
-          <el-table-column label="已核价实际金额" width="145" align="right">
-            <template #default="{ row }">{{ amount(row.actualAmount) }}</template>
+          <el-table-column label="理论 / 实际" width="150" align="right">
+            <template #default="{ row }">
+              <div class="dual-value"><span class="dual-theory">{{ number(row.theoreticalQuantity) }}</span><span class="dual-actual">{{ row.actualQuantity == null ? "—" : number(row.actualQuantity) }}</span></div>
+            </template>
           </el-table-column>
-          <el-table-column label="管理主口径金额" width="145" align="right">
-            <template #default="{ row }">{{ amount(row.mainAmount) }}</template>
+          <el-table-column label="金额（理论 / 实际）" width="170" align="right">
+            <template #default="{ row }">
+              <div class="dual-value"><span class="dual-theory">{{ amount(row.theoreticalAmount) }}</span><span class="dual-actual">{{ amount(row.actualAmount) }}</span></div>
+            </template>
           </el-table-column>
-          <el-table-column label="实际填报覆盖率" width="135" align="right">
-            <template #default="{ row }">{{ deviation(row.actualCoverageRate) }}</template>
+          <el-table-column label="覆盖率（填报 / 核价）" width="160" align="right">
+            <template #default="{ row }">
+              <div class="dual-value"><span class="dual-theory">{{ deviation(row.actualCoverageRate) }}</span><span class="dual-actual">{{ deviation(row.pricingCoverageRate) }}</span></div>
+            </template>
           </el-table-column>
-          <el-table-column label="核价覆盖率" width="120" align="right">
-            <template #default="{ row }">{{ deviation(row.pricingCoverageRate) }}</template>
-          </el-table-column>
-          <el-table-column label="覆盖科室" width="120" align="center"
+          <el-table-column label="覆盖科室" width="100" align="center"
             ><template #default="{ row }"
               ><el-popover placement="left" :width="260" trigger="click"
                 ><template #reference
@@ -99,7 +87,7 @@
               ></template
             ></el-table-column
           >
-          <el-table-column label="核查状态" min-width="210"
+          <el-table-column label="核查状态" min-width="180"
             ><template #default="{ row }"
               ><el-tag v-if="row.unverifiedCount" type="info" size="small">未核验 {{ row.unverifiedCount }}</el-tag
               ><el-tag v-if="row.attentionCount" type="warning" size="small">关注 {{ row.attentionCount }}</el-tag
@@ -112,48 +100,48 @@
     </section>
     <section class="panel-section">
       <div class="section-heading"><h3>逐日科室核查明细</h3></div>
+      <div class="binding-legend">
+        <span class="legend-item"><i class="legend-dot" style="background:#ff9800"></i>固定日耗</span>
+        <span class="legend-item"><i class="legend-dot" style="background:#2196f3"></i>按需领取</span>
+        <span class="legend-item"><i class="legend-dot" style="background:#4caf50"></i>仪器触发</span>
+        <span class="legend-hint">非"每人次定额"耗材以颜色标记区分</span>
+      </div>
       <div class="inventory-table-shell">
-        <el-table :data="filteredDetails" max-height="560" :row-key="detailKey" empty-text="没有符合筛选条件的核查明细">
-          <el-table-column prop="businessDate" label="业务日期" width="110" /><el-table-column
-            prop="departmentName"
-            label="科室"
-            width="120"
-            show-overflow-tooltip
-          /><el-table-column prop="materialName" label="耗材" min-width="170" show-overflow-tooltip /><el-table-column
-            prop="unit"
-            label="单位"
-            width="78"
-            align="center"
-          /><el-table-column prop="serviceGroup" label="业务组" width="115" show-overflow-tooltip />
-          <el-table-column label="业务量" width="88" align="right"
-            ><template #default="{ row }">{{ number(row.volume) }}</template></el-table-column
-          ><el-table-column label="理论量" width="105" align="right"
-            ><template #default="{ row }">{{ number(row.theoreticalQuantity) }}</template></el-table-column
-          ><el-table-column label="实际量" width="112" align="right"
+        <el-table :data="filteredDetails" max-height="560" :row-key="detailKey" :row-class-name="bindingRowClass" empty-text="没有符合筛选条件的核查明细">
+          <el-table-column label="日期 / 科室" width="150" show-overflow-tooltip>
+            <template #default="{ row }"><div class="dual-value"><span class="dual-theory">{{ row.businessDate }}</span><span class="dual-actual">{{ row.departmentName }}</span></div></template>
+          </el-table-column>
+          <el-table-column prop="materialName" label="耗材" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span>{{ row.materialName }}</span><span class="unit-suffix"> / {{ row.unit }}</span>
+              <el-tag v-if="bindingLabels[row.bindingType || '']" :type="bindingTagTypes[row.bindingType]" size="small" effect="plain" class="detail-binding-tag">
+                {{ bindingLabels[row.bindingType] }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="理论 / 实际" width="130" align="right"
             ><template #default="{ row }"
-              ><span :class="{ 'not-reported': row.actualStatus === 'UNVERIFIED' }">{{
-                row.actualStatus === "UNVERIFIED" ? "待核验" : number(row.actualQuantity)
-              }}</span></template
+              ><div class="dual-value"><span class="dual-theory">{{ number(row.theoreticalQuantity) }}</span><span class="dual-actual" :class="{ 'not-reported': row.actualStatus === 'UNVERIFIED' }">{{ row.actualStatus === "UNVERIFIED" ? "待核验" : number(row.actualQuantity) }}</span></div></template
+            ></el-table-column>
+          <el-table-column label="差异 / 偏差" width="120" align="right"
+            ><template #default="{ row }"
+              ><div class="dual-value"><span class="dual-theory">{{ row.difference == null ? "—" : number(row.difference) }}</span><span class="dual-actual">{{ deviation(row.deviationRate) }}</span></div></template
             ></el-table-column
-          ><el-table-column label="差额" width="96" align="right"
-            ><template #default="{ row }">{{ row.difference == null ? "—" : number(row.difference) }}</template></el-table-column
-          ><el-table-column label="偏差率" width="102" align="right"
-            ><template #default="{ row }">{{ deviation(row.deviationRate) }}</template></el-table-column
           >
-          <el-table-column label="核查结果" width="122"
+          <el-table-column label="核查结果" width="110"
             ><template #default="{ row }"
               ><el-tag :type="riskTagType(row.riskLevel)" size="small">{{ riskLabel(row.riskLevel) }}</el-tag></template
             ></el-table-column
-          ><el-table-column label="特殊说明" min-width="160" show-overflow-tooltip
+          ><el-table-column label="特殊说明" min-width="140" show-overflow-tooltip
             ><template #default="{ row }"
               ><span v-if="row.isSpecial">{{ row.specialDailyNote || row.specialAdminNote || "未填写" }}</span
               ><span v-else>—</span></template
             ></el-table-column
-          ><el-table-column label="复核" width="120"
+          ><el-table-column label="复核" width="100"
             ><template #default="{ row }"
               ><el-tag :type="reviewTagType(row.reviewStatus)" size="small">{{ reviewLabel(row.reviewStatus) }}</el-tag></template
             ></el-table-column
-          ><el-table-column fixed="right" label="操作" width="82"
+          ><el-table-column fixed="right" label="操作" width="72"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="openReview(rollupDetail(row))">复核</el-button></template
             ></el-table-column
@@ -236,6 +224,8 @@ const query = computed<InventoryDailyRollupQuery>(() => ({
 const periodLabel = computed(() => query.value.from + " 至 " + query.value.to);
 const number = (value: unknown) =>
   value == null ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 6 });
+const bindingLabels: Record<string, string> = { FIXED_DAILY: "固定日耗", ON_DEMAND: "按需领取", EQUIPMENT: "仪器触发" };
+const bindingTagTypes: Record<string, "warning" | "info" | "success"> = { FIXED_DAILY: "warning", ON_DEMAND: "info", EQUIPMENT: "success" };
 const amount = (value?: number | null) => (value == null ? "未核价" : "¥" + number(value));
 const deviation = (value?: number | null) =>
   value == null ? "—" : (Number(value) * 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 }) + "%";
@@ -277,6 +267,18 @@ const reviewTagType = (value?: string) =>
   value === "CLOSED" ? "success" : value === "REVIEWED" ? "primary" : value === "EXPLAINED" ? "warning" : "info";
 const detailKey = (row: InventoryAdminDepartmentDailyRollup["details"][number]) =>
   [row.businessDate, row.departmentKey, row.lineKey].join(":");
+const bindingRowClass = ({ row }: { row: { bindingType?: string; materialName?: string; unit?: string } }) => {
+  const bt = row.bindingType;
+  if (bt && bt !== "PER_PERSON") return `binding-row binding-row-${bt.toLowerCase().replace(/_/g, "-")}`;
+  if (bt === "PER_PERSON") return "";
+  const name = (row.materialName || "").trim();
+  const unit = (row.unit || "").trim();
+  if (!name) return "";
+  if (name.includes("试剂") || name.includes("探") || name.includes("溶血") || name.includes("清洗液")) return "binding-row binding-row-equipment";
+  if (name.includes("利器盒") || name.includes("打印纸") || name.includes("处方") || name.includes("签字笔") || name.includes("卫生纸") || name.includes("橡胶检查手套") || name.includes("固体胶") || name.includes("拖把") || name.includes("过氧化氢") || name.includes("橡胶管") || name === "CRP试剂" || name.includes("C14") || name.includes("糖化")) return "binding-row binding-row-on-demand";
+  if (unit.includes("/天") || name.includes("口罩") || name.includes("帽子") || name.includes("手套") || name.includes("消毒") || name.includes("垃圾袋") || name.includes("中单") || name.includes("手术衣") || name.includes("注射器") || name.includes("洗手液") || name.includes("手消") || name.includes("A4纸") || name.includes("标签贴")) return "binding-row binding-row-fixed-daily";
+  return "";
+};
 const filteredDetails = computed(() =>
   (props.report?.details || []).filter(row => {
     const keyword = filters.keyword.trim().toLowerCase();
@@ -366,6 +368,9 @@ const shortcuts = [
   display: grid;
   gap: 12px;
 }
+.detail-binding-tag {
+  margin-left: 4px;
+}
 .daily-header,
 .daily-actions,
 .daily-toolbar {
@@ -438,6 +443,25 @@ const shortcuts = [
   border-radius: 10px;
   background: #fff;
 }
+.unit-suffix {
+  color: var(--el-text-color-placeholder);
+  font-size: 12px;
+}
+.dual-value {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.5;
+  gap: 1px;
+}
+.dual-value .dual-theory {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.dual-value .dual-actual {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
 .inventory-table-shell :deep(.el-table) {
   --el-table-border-color: var(--inventory-line-soft, #edf1f5);
   --el-table-header-bg-color: transparent;
@@ -452,6 +476,53 @@ const shortcuts = [
 }
 .inventory-table-shell :deep(.el-table .cell) {
   transition: color 160ms ease-out;
+}
+:deep(.binding-row) > td.el-table__cell {
+  position: relative;
+}
+:deep(.binding-row) > td.el-table__cell:first-child {
+  box-shadow: inset 5px 0 0 0 var(--binding-color, #ff9800);
+}
+:deep(.binding-row-fixed-daily) > td.el-table__cell {
+  background: #fff3e0 !important;
+  --binding-color: #ff9800;
+}
+:deep(.binding-row-on-demand) > td.el-table__cell {
+  background: #e3f2fd !important;
+  --binding-color: #2196f3;
+}
+:deep(.binding-row-equipment) > td.el-table__cell {
+  background: #e8f5e9 !important;
+  --binding-color: #4caf50;
+}
+:deep(.binding-row:hover) > td.el-table__cell {
+  filter: brightness(0.95);
+}
+.binding-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.legend-hint {
+  margin-left: auto;
+  color: var(--el-text-color-placeholder);
 }
 @keyframes section-in {
   from {

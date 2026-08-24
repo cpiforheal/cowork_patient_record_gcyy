@@ -231,12 +231,14 @@
             <DailyVerificationPanel
               :report="dailyVerificationReport"
               :loading="dailyVerificationLoading"
-              :exporting="reportLoading"
+              :exporting-csv="exportingDailyCsv"
+              :exporting-xlsx="exportingDailyXlsx"
               :today="today()"
               :can-export="canExportDepartmentUsage"
               :department-options="reportDepartmentOptions"
               @load="loadDailyVerification"
-              @export="exportDailyVerification"
+              @export-csv="exportDailyRollupCsv"
+              @export-xlsx="exportDailyRollupXlsx"
             />
           </template>
 
@@ -510,6 +512,8 @@ import {
   createInventoryRequestApi,
   deleteInventoryWeeklyStandardApi,
   downloadDepartmentUsageReportApi,
+  downloadInventoryDepartmentDailyRollupApi,
+  downloadInventoryDepartmentDailyRollupXlsxApi,
   downloadInventoryWeeklySnapshotApi,
   generateInventoryWeeklySnapshotApi,
   getInventoryConsumptionsApi,
@@ -646,6 +650,8 @@ const unitConversions = ref<InventoryUnitConversion[]>([]);
 const mappingGovernanceLoading = ref(false);
 const dailyVerificationReport = ref<InventoryAdminDepartmentDailyRollup>();
 const dailyVerificationLoading = ref(false);
+const exportingDailyCsv = ref(false);
+const exportingDailyXlsx = ref(false);
 const inventoryRoles = ref<InventoryRoleDescriptor[]>([]);
 const inventoryAccounts = ref<InventoryAccountAssignment[]>([]);
 const inventoryRolesLoading = ref(false);
@@ -1987,6 +1993,42 @@ const exportDailyVerification = async ({
     patientOnly: true,
     format
   });
+};
+
+const exportDailyRollupCsv = async (query: InventoryDailyRollupQuery) => {
+  if (!canExportDepartmentUsage.value) return;
+  exportingDailyCsv.value = true;
+  try {
+    const { blob, filename } = await downloadInventoryDepartmentDailyRollupApi(query);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    ElMessage.error((error as Error).message || "CSV 导出失败");
+  } finally {
+    exportingDailyCsv.value = false;
+  }
+};
+
+const exportDailyRollupXlsx = async (query: InventoryDailyRollupQuery) => {
+  if (!canExportDepartmentUsage.value) return;
+  exportingDailyXlsx.value = true;
+  try {
+    const { blob, filename } = await downloadInventoryDepartmentDailyRollupXlsxApi(query);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    ElMessage.error((error as Error).message || "XLSX 导出失败");
+  } finally {
+    exportingDailyXlsx.value = false;
+  }
 };
 
 const loadInventoryRoleManagement = async () => {

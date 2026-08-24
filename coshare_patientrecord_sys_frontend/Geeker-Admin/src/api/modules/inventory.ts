@@ -37,6 +37,7 @@ export interface InventoryDepartmentDraftLine {
   manualAdjustment?: number;
   fixedAdjustment?: number;
   measurementScope?: "OUTPATIENT" | "INPATIENT" | "COMBINED" | "OTHER";
+  bindingType?: InventoryQuotaBindingType;
   lineKey?: string;
   actualQuantity?: number | null;
   referenceQuantity?: number;
@@ -114,6 +115,8 @@ export interface InventoryQuotaVersion {
   updatedAt?: string;
 }
 
+export type InventoryQuotaBindingType = "PER_PERSON" | "FIXED_DAILY" | "ON_DEMAND" | "EQUIPMENT";
+
 export interface InventoryQuotaRule {
   id: string;
   versionId: string;
@@ -127,6 +130,7 @@ export interface InventoryQuotaRule {
   standardQuantity: number | null;
   fixedAdjustment: number;
   measurementScope: "OUTPATIENT" | "INPATIENT" | "COMBINED" | "OTHER";
+  bindingType: InventoryQuotaBindingType;
   enabled: boolean;
 }
 
@@ -146,6 +150,7 @@ export interface InventoryQuotaRuleCreatePayload {
   standardQuantity: number | null;
   fixedAdjustment: number;
   measurementScope: InventoryQuotaRule["measurementScope"];
+  bindingType?: InventoryQuotaBindingType;
   enabled?: boolean;
 }
 
@@ -257,6 +262,7 @@ export interface InventoryAdminDepartmentDailyRollup {
     serviceGroup?: string;
     careType?: string;
     measurementScope?: string;
+    bindingType?: InventoryQuotaBindingType;
     volume?: number;
     standardQuantity?: number | null;
     fixedAdjustment?: number;
@@ -1576,7 +1582,7 @@ export const createInventoryQuotaVersionApi = async (payload: {
 
 export const updateInventoryQuotaRuleApi = async (
   ruleId: string,
-  payload: Pick<InventoryQuotaRule, "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">
+  payload: Pick<InventoryQuotaRule, "standardQuantity" | "fixedAdjustment" | "measurementScope" | "bindingType" | "enabled">
 ) => putInventoryData<InventoryQuotaGovernance, typeof payload>(`/quota-governance/rules/${encodeURIComponent(ruleId)}`, payload);
 
 export const createInventoryQuotaRuleApi = async (payload: InventoryQuotaRuleCreatePayload & { versionId?: string }) =>
@@ -1586,7 +1592,7 @@ export const deleteInventoryQuotaRuleApi = async (ruleId: string) =>
   deleteInventoryData<InventoryQuotaGovernance>(`/quota-governance/rules/${encodeURIComponent(ruleId)}`);
 
 export const updateInventoryQuotaRulesBatchApi = async (payload: {
-  rules: Array<Pick<InventoryQuotaRule, "id" | "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">>;
+  rules: Array<Pick<InventoryQuotaRule, "id" | "standardQuantity" | "fixedAdjustment" | "measurementScope" | "bindingType" | "enabled">>;
 }) => putInventoryData<InventoryQuotaGovernance, typeof payload>("/quota-governance/rules/batch", payload);
 
 export const consoleSaveInventoryQuotaApi = async (payload: {
@@ -1594,7 +1600,7 @@ export const consoleSaveInventoryQuotaApi = async (payload: {
   effectiveDate?: string;
   versionCode?: string;
   baseVersionId?: string;
-  updates?: Array<Pick<InventoryQuotaRule, "id" | "standardQuantity" | "fixedAdjustment" | "measurementScope" | "enabled">>;
+  updates?: Array<Pick<InventoryQuotaRule, "id" | "standardQuantity" | "fixedAdjustment" | "measurementScope" | "bindingType" | "enabled">>;
   creates?: InventoryQuotaRuleCreatePayload[];
   deletes?: string[];
   applyToday?: boolean;
@@ -1621,6 +1627,8 @@ export interface InventoryQuotaAuditEntry {
   afterEnabled: boolean | null;
   beforeMeasurementScope: string | null;
   afterMeasurementScope: string | null;
+  beforeBindingType: string | null;
+  afterBindingType: string | null;
   operatorUsername: string;
   operatorName: string;
   createdAt: string;

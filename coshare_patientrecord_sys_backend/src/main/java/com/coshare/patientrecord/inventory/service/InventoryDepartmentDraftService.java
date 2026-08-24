@@ -89,7 +89,37 @@ public class InventoryDepartmentDraftService {
         );
         result.put("exists", result.has("id"));
         if (!result.path("exists").asBoolean(false)) applyQuotaTemplate(result, departmentKey, businessDate);
+        else enrichLineBindingTypes(result, departmentKey, businessDate);
         return result;
+    }
+
+    /** 旧草稿行缺少绑定方式时，按当日生效定额版本的 sourceRow 对齐回填，回退匹配 materialName+unit，保证前端标记与口径一致。 */
+    private void enrichLineBindingTypes(ObjectNode draft, String departmentKey, LocalDate businessDate) {
+        JsonNode lines = draft.path("lines");
+        if (!lines.isArray() || lines.isEmpty()) return;
+        boolean missing = false;
+        for (JsonNode line : lines) {
+            if (line.isObject() && !line.hasNonNull("bindingType")) { missing = true; break; }
+        }
+        if (!missing) return;
+        InventoryQuotaGovernanceService.QuotaVersion version = quotaGovernanceService.activeVersion(businessDate);
+        if (version == null) return;
+        List<InventoryQuotaGovernanceService.QuotaRule> ruleList = quotaGovernanceService.rules(version.id(), departmentKey);
+        Map<Integer, InventoryQuotaGovernanceService.QuotaRule> rulesBySourceRow = new java.util.HashMap<>();
+        Map<String, InventoryQuotaGovernanceService.QuotaRule> rulesByMaterial = new java.util.HashMap<>();
+        for (InventoryQuotaGovernanceService.QuotaRule rule : ruleList) {
+            rulesBySourceRow.put(rule.sourceRow(), rule);
+            rulesByMaterial.put(rule.materialName().trim() + "\u0000" + rule.unit().trim(), rule);
+        }
+        for (JsonNode line : lines) {
+            if (!line.isObject() || line.hasNonNull("bindingType")) continue;
+            InventoryQuotaGovernanceService.QuotaRule rule = rulesBySourceRow.get(line.path("sourceRow").asInt(-1));
+            if (rule == null) {
+                String materialKey = line.path("materialName").asText("").trim() + "\u0000" + line.path("unit").asText("").trim();
+                rule = rulesByMaterial.get(materialKey);
+            }
+            if (rule != null) ((ObjectNode) line).put("bindingType", rule.bindingType());
+        }
     }
 
     @Transactional(readOnly = true)
@@ -176,6 +206,7 @@ public class InventoryDepartmentDraftService {
             String departmentKey = text(draft, "departmentKey");
             String businessDate = text(draft, "businessDate");
             if (!DEPARTMENTS.containsKey(departmentKey) || businessDate.isBlank()) continue;
+            enrichLineBindingTypes(draft, departmentKey, LocalDate.parse(businessDate));
             draftsByDayDepartment.put(businessDate + "\u0000" + departmentKey, draft);
             draftsByDepartment.computeIfAbsent(departmentKey, ignored -> new ArrayList<>()).add(draft);
         }
@@ -1149,7 +1180,7 @@ public class InventoryDepartmentDraftService {
             double fixedAdjustment = finiteDouble(line.get("fixedAdjustment"), finiteDouble(line.get("manualAdjustment"), 0));
             double theoreticalQuantity = line.hasNonNull("referenceQuantity")
                 ? Math.max(0, finiteDouble(line.get("referenceQuantity"), 0))
-                : referenceQuantity(standardQuantity, volume, fixedAdjustment, line.path("isSupplemental").asBoolean(false));
+                : referenceQuantity(standardQuantity, volume, fixedAdjustment, line.path("isSupplemental").asBoolean(false), textValue(line, "bindingType"));
             Double actualQuantity = nullableNonNegativeDouble(line.get("actualQuantity"));
             boolean special = line.path("isSpecial").asBoolean(false);
             String specialDailyNote = text(line, "specialDailyNote");
@@ -1158,7 +1189,7 @@ public class InventoryDepartmentDraftService {
             if (lineKey.isBlank()) lineKey = materialName + "\u0000" + unit + "\u0000" + line.path("sourceRow").asText("0");
             Double difference = actualQuantity == null ? null : round(actualQuantity - theoreticalQuantity, 6);
             Double deviationRate = actualQuantity == null || theoreticalQuantity == 0 ? null : round(difference / theoreticalQuantity, 6);
-            String riskLevel = riskLevel(frozenQuota, special, theoreticalQuantity, actualQuantity, specialDailyNote);
+            String riskLevel = riskLevel(frozenQuota, special, theoreticalQuantity, actualQuantity, specialDailyNote, text(line, "bindingType"));
             InventoryQuotaGovernanceService.ReviewRecord review = reviews.get(InventoryQuotaGovernanceService.reviewKey(businessDate, departmentKey, lineKey));
 
             Double unitPrice = nullableNonNegativeDouble(line.get("unitPrice"));
@@ -1194,6 +1225,7 @@ public class InventoryDepartmentDraftService {
             detail.put("serviceGroup", text(line, "serviceGroup"));
             detail.put("careType", text(line, "careType"));
             detail.put("measurementScope", text(line, "measurementScope"));
+            detail.put("bindingType", text(line, "bindingType"));
             detail.put("volume", volume);
             if (standardQuantity == null) detail.putNull("standardQuantity"); else detail.put("standardQuantity", standardQuantity);
             detail.put("fixedAdjustment", fixedAdjustment);
@@ -1227,8 +1259,10 @@ public class InventoryDepartmentDraftService {
         }
     }
 
-    private static String riskLevel(boolean frozenQuota, boolean special, double theoreticalQuantity, Double actualQuantity, String specialDailyNote) {
+    private static String riskLevel(boolean frozenQuota, boolean special, double theoreticalQuantity, Double actualQuantity, String specialDailyNote, String bindingType) {
         if (!frozenQuota) return "HISTORICAL_UNFROZEN";
+        // 按需领取与仪器触发类耗材不参与理论测算，不做人次偏差评估
+        if ("ON_DEMAND".equals(bindingType) || "EQUIPMENT".equals(bindingType)) return actualQuantity == null ? "UNVERIFIED" : "NORMAL";
         if (actualQuantity == null) return "UNVERIFIED";
         if (special) return actualQuantity > 0 && specialDailyNote.isBlank() ? "SPECIAL_PENDING_NOTE" : "SPECIAL";
         double difference = Math.abs(actualQuantity - theoreticalQuantity);
@@ -1352,6 +1386,7 @@ public class InventoryDepartmentDraftService {
             String serviceGroup = rule == null ? textValue(line, "serviceGroup") : rule.serviceGroup();
             String careType = rule == null ? textValue(line, "careType") : rule.careType();
             String measurementScope = rule == null ? textValue(line, "measurementScope") : rule.measurementScope();
+            String bindingType = rule == null ? textValue(line, "bindingType") : rule.bindingType();
             Double standardQuantity = supplemental ? null : rule == null ? nullableNonNegativeDouble(line.get("standardQuantity")) : rule.standardQuantity();
             double fixedAdjustment = supplemental ? 0 : rule == null ? finiteDouble(line.get("manualAdjustment"), 0) : rule.fixedAdjustment();
             String id = rule == null ? textValue(line, "id") : rule.id();
@@ -1363,6 +1398,7 @@ public class InventoryDepartmentDraftService {
             canonical.put("serviceGroup", serviceGroup);
             canonical.put("careType", careType);
             canonical.put("measurementScope", measurementScope);
+            canonical.put("bindingType", bindingType);
             canonical.put("materialName", materialName);
             canonical.put("unit", unit);
             canonical.put("isSupplemental", supplemental);
@@ -1385,7 +1421,7 @@ public class InventoryDepartmentDraftService {
             canonical.put("isSpecial", isSpecial);
             canonical.put("specialAdminNote", special == null ? "" : special.adminNote());
             canonical.put("specialDailyNote", specialDailyNote);
-            double referenceQuantity = referenceQuantity(standardQuantity, volume, fixedAdjustment, supplemental);
+            double referenceQuantity = referenceQuantity(standardQuantity, volume, fixedAdjustment, supplemental, bindingType);
             canonical.put("referenceQuantity", referenceQuantity);
             canonical.put("calculatedQuantity", referenceQuantity);
         }
@@ -1408,6 +1444,7 @@ public class InventoryDepartmentDraftService {
             ObjectNode line = lines.addObject();
             line.put("id", rule.id()); line.put("lineKey", rule.id()); line.put("sourceRow", rule.sourceRow());
             line.put("serviceGroup", rule.serviceGroup()); line.put("careType", rule.careType()); line.put("measurementScope", rule.measurementScope());
+            line.put("bindingType", rule.bindingType());
             line.put("materialName", rule.materialName()); line.put("unit", rule.unit());
             if (rule.standardQuantity() == null) line.putNull("standardQuantity"); else line.put("standardQuantity", rule.standardQuantity());
             line.put("fixedAdjustment", rule.fixedAdjustment()); line.put("manualAdjustment", rule.fixedAdjustment()); line.put("isSupplemental", false);
@@ -1494,12 +1531,18 @@ public class InventoryDepartmentDraftService {
             nullableNonNegativeDouble(line.get("standardQuantity")),
             volume,
             finiteDouble(line.get("manualAdjustment"), 0),
-            line.path("isSupplemental").asBoolean(false)
+            line.path("isSupplemental").asBoolean(false),
+            textValue(line, "bindingType")
         );
     }
 
-    private static double referenceQuantity(Double standardQuantity, int volume, double manualAdjustment, boolean supplemental) {
-        return Math.max(0, round((supplemental || standardQuantity == null ? 0 : standardQuantity * volume) + manualAdjustment, 6));
+    /** 绑定方式决定测算口径：每人次 = 定额 × 人次；固定日耗 = 每日固定用量；按需领取与仪器触发不自动测算。 */
+    private static double referenceQuantity(Double standardQuantity, int volume, double manualAdjustment, boolean supplemental, String bindingType) {
+        double base;
+        if (supplemental || standardQuantity == null || "ON_DEMAND".equals(bindingType) || "EQUIPMENT".equals(bindingType)) base = 0;
+        else if ("FIXED_DAILY".equals(bindingType)) base = standardQuantity;
+        else base = standardQuantity * volume;
+        return Math.max(0, round(base + manualAdjustment, 6));
     }
 
     private static String textValue(JsonNode node, String field) {

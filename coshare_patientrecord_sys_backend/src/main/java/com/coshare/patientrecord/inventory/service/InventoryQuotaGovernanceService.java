@@ -35,6 +35,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class InventoryQuotaGovernanceService {
     private static final List<String> SCOPES = List.of("OUTPATIENT", "INPATIENT", "COMBINED", "OTHER");
     private static final List<String> REVIEW_STATUSES = List.of("PENDING", "EXPLAINED", "REVIEWED", "CLOSED");
+    public static final List<String> BINDING_TYPES = List.of("PER_PERSON", "FIXED_DAILY", "ON_DEMAND", "EQUIPMENT");
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
 
@@ -54,8 +55,8 @@ public class InventoryQuotaGovernanceService {
     @Transactional(readOnly = true)
     public List<QuotaRule> rules(String versionId, String departmentKey) {
         return jdbcTemplate.query(
-            "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE version_id = ? AND department_key = ? AND enabled = 1 ORDER BY source_row, id",
-            (rs, rowNum) -> new QuotaRule(rs.getString("id"), rs.getString("version_id"), rs.getString("department_key"), rs.getString("department_name"), rs.getInt("source_row"), rs.getString("service_group"), rs.getString("care_type"), rs.getString("material_name"), rs.getString("unit"), rs.getObject("standard_quantity") == null ? null : rs.getDouble("standard_quantity"), rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getBoolean("enabled")),
+            "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, binding_type, enabled FROM inventory_quota_rules WHERE version_id = ? AND department_key = ? AND enabled = 1 ORDER BY source_row, id",
+            (rs, rowNum) -> new QuotaRule(rs.getString("id"), rs.getString("version_id"), rs.getString("department_key"), rs.getString("department_name"), rs.getInt("source_row"), rs.getString("service_group"), rs.getString("care_type"), rs.getString("material_name"), rs.getString("unit"), rs.getObject("standard_quantity") == null ? null : rs.getDouble("standard_quantity"), rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("binding_type"), rs.getBoolean("enabled")),
             versionId, departmentKey);
     }
 
@@ -104,13 +105,13 @@ public class InventoryQuotaGovernanceService {
         ArrayNode rules = JsonNodeFactory.instance.arrayNode();
         if (active != null) {
             jdbcTemplate.query(
-                "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE version_id = ? ORDER BY department_name, source_row, id",
+                "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, binding_type, enabled FROM inventory_quota_rules WHERE version_id = ? ORDER BY department_name, source_row, id",
                 rs -> {
                     rules.add(ruleNode(new QuotaRule(
                         rs.getString("id"), rs.getString("version_id"), rs.getString("department_key"), rs.getString("department_name"),
                         rs.getInt("source_row"), rs.getString("service_group"), rs.getString("care_type"), rs.getString("material_name"),
                         rs.getString("unit"), rs.getObject("standard_quantity") == null ? null : rs.getDouble("standard_quantity"),
-                        rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getBoolean("enabled")
+                        rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("binding_type"), rs.getBoolean("enabled")
                     )));
                 },
                 active.id()
@@ -146,7 +147,7 @@ public class InventoryQuotaGovernanceService {
                 code = autoVersionCode(effectiveDate) + "-" + (attempts + 1);
             }
         }
-        jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled) SELECT CONCAT('qr-', UUID()), ?, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE version_id = ?", id, baseVersionId);
+        jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, binding_type, enabled) SELECT CONCAT('qr-', UUID()), ?, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, binding_type, enabled FROM inventory_quota_rules WHERE version_id = ?", id, baseVersionId);
         return governance(effectiveDate);
     }
 
@@ -168,14 +169,17 @@ public class InventoryQuotaGovernanceService {
 
     private void applyRuleUpdate(String ruleId, JsonNode payload) {
         String scope = required(payload, "measurementScope", 24).toUpperCase(); if (!SCOPES.contains(scope)) throw badRequest("计量范围无效");
+        String bindingType = text(payload, "bindingType").toUpperCase();
+        if (bindingType.isBlank()) bindingType = "PER_PERSON";
+        if (!BINDING_TYPES.contains(bindingType)) throw badRequest("耗材绑定方式无效");
         Double standard = nullableNonNegative(payload.get("standardQuantity")); double adjustment = finite(payload.get("fixedAdjustment"), 0); boolean enabled = payload.path("enabled").asBoolean(true);
-        jdbcTemplate.update("UPDATE inventory_quota_rules SET standard_quantity = ?, fixed_adjustment = ?, measurement_scope = ?, enabled = ? WHERE id = ?", standard, adjustment, scope, enabled, ruleId);
+        jdbcTemplate.update("UPDATE inventory_quota_rules SET standard_quantity = ?, fixed_adjustment = ?, measurement_scope = ?, binding_type = ?, enabled = ? WHERE id = ?", standard, adjustment, scope, bindingType, enabled, ruleId);
     }
 
     private QuotaRule ruleById(String ruleId) {
         List<QuotaRule> rows = jdbcTemplate.query(
-            "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled FROM inventory_quota_rules WHERE id = ?",
-            (rs, rowNum) -> new QuotaRule(rs.getString("id"), rs.getString("version_id"), rs.getString("department_key"), rs.getString("department_name"), rs.getInt("source_row"), rs.getString("service_group"), rs.getString("care_type"), rs.getString("material_name"), rs.getString("unit"), rs.getObject("standard_quantity") == null ? null : rs.getDouble("standard_quantity"), rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getBoolean("enabled")),
+            "SELECT id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, binding_type, enabled FROM inventory_quota_rules WHERE id = ?",
+            (rs, rowNum) -> new QuotaRule(rs.getString("id"), rs.getString("version_id"), rs.getString("department_key"), rs.getString("department_name"), rs.getInt("source_row"), rs.getString("service_group"), rs.getString("care_type"), rs.getString("material_name"), rs.getString("unit"), rs.getObject("standard_quantity") == null ? null : rs.getDouble("standard_quantity"), rs.getDouble("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("binding_type"), rs.getBoolean("enabled")),
             ruleId);
         return rows.isEmpty() ? null : rows.get(0);
     }
@@ -185,7 +189,7 @@ public class InventoryQuotaGovernanceService {
         if (reference == null) return;
         QuotaVersion version = versionById(reference.versionId());
         jdbcTemplate.update(
-            "INSERT INTO inventory_quota_audit_log (id, version_id, version_code, department_key, department_name, material_name, unit, service_group, action, before_standard_quantity, after_standard_quantity, before_fixed_adjustment, after_fixed_adjustment, before_enabled, after_enabled, before_measurement_scope, after_measurement_scope, operator_username, operator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO inventory_quota_audit_log (id, version_id, version_code, department_key, department_name, material_name, unit, service_group, action, before_standard_quantity, after_standard_quantity, before_fixed_adjustment, after_fixed_adjustment, before_enabled, after_enabled, before_measurement_scope, after_measurement_scope, before_binding_type, after_binding_type, operator_username, operator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             "qa-" + UUID.randomUUID(),
             reference.versionId(),
             version == null ? "-" : version.versionCode(),
@@ -203,6 +207,8 @@ public class InventoryQuotaGovernanceService {
             after == null ? null : after.enabled(),
             before == null ? null : before.measurementScope(),
             after == null ? null : after.measurementScope(),
+            before == null ? null : before.bindingType(),
+            after == null ? null : after.bindingType(),
             user == null ? "-" : user.username(),
             user == null ? "-" : user.name()
         );
@@ -212,7 +218,7 @@ public class InventoryQuotaGovernanceService {
     public ArrayNode auditLog(String versionId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit <= 0 ? 200 : limit, 1000));
         ArrayNode result = JsonNodeFactory.instance.arrayNode();
-        String sql = "SELECT id, version_id, version_code, department_key, department_name, material_name, unit, service_group, action, before_standard_quantity, after_standard_quantity, before_fixed_adjustment, after_fixed_adjustment, before_enabled, after_enabled, before_measurement_scope, after_measurement_scope, operator_username, operator_name, created_at FROM inventory_quota_audit_log"
+        String sql = "SELECT id, version_id, version_code, department_key, department_name, material_name, unit, service_group, action, before_standard_quantity, after_standard_quantity, before_fixed_adjustment, after_fixed_adjustment, before_enabled, after_enabled, before_measurement_scope, after_measurement_scope, before_binding_type, after_binding_type, operator_username, operator_name, created_at FROM inventory_quota_audit_log"
             + (versionId == null || versionId.isBlank() ? "" : " WHERE version_id = ?")
             + " ORDER BY created_at DESC, id LIMIT " + safeLimit;
         jdbcTemplate.query(sql, rs -> {
@@ -234,6 +240,8 @@ public class InventoryQuotaGovernanceService {
             putNullable(row, "afterEnabled", rs.getObject("after_enabled"));
             putNullable(row, "beforeMeasurementScope", rs.getString("before_measurement_scope"));
             putNullable(row, "afterMeasurementScope", rs.getString("after_measurement_scope"));
+            putNullable(row, "beforeBindingType", rs.getString("before_binding_type"));
+            putNullable(row, "afterBindingType", rs.getString("after_binding_type"));
             row.put("operatorUsername", rs.getString("operator_username"));
             row.put("operatorName", rs.getString("operator_name"));
             row.put("createdAt", rs.getTimestamp("created_at").toLocalDateTime().toString());
@@ -294,15 +302,18 @@ public class InventoryQuotaGovernanceService {
         String careType = text(payload, "careType");
         if (careType.length() > 32) throw badRequest("照护类型过长");
         String scope = required(payload, "measurementScope", 24).toUpperCase(); if (!SCOPES.contains(scope)) throw badRequest("计量范围无效");
+        String bindingType = text(payload, "bindingType").toUpperCase();
+        if (bindingType.isBlank()) bindingType = "PER_PERSON";
+        if (!BINDING_TYPES.contains(bindingType)) throw badRequest("耗材绑定方式无效");
         Double standard = nullableNonNegative(payload.get("standardQuantity")); double adjustment = finite(payload.get("fixedAdjustment"), 0); boolean enabled = payload.path("enabled").asBoolean(true);
         Integer duplicate = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM inventory_quota_rules WHERE version_id = ? AND department_key = ? AND material_name = ? AND unit = ?", Integer.class, version.id(), departmentKey, materialName, unit);
         if (duplicate != null && duplicate > 0) throw new ResponseStatusException(HttpStatus.CONFLICT, departmentName + " 已存在同名耗材的定额规则");
         Integer maxRow = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(source_row), 0) FROM inventory_quota_rules WHERE version_id = ? AND department_key = ?", Integer.class, version.id(), departmentKey);
         int sourceRow = (maxRow == null ? 0 : maxRow) + 1;
         String id = "qr-" + UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            id, version.id(), departmentKey, departmentName, sourceRow, serviceGroup, careType, materialName, unit, standard, adjustment, scope, enabled);
-        return new QuotaRule(id, version.id(), departmentKey, departmentName, sourceRow, serviceGroup, careType, materialName, unit, standard, adjustment, scope, enabled);
+        jdbcTemplate.update("INSERT INTO inventory_quota_rules (id, version_id, department_key, department_name, source_row, service_group, care_type, material_name, unit, standard_quantity, fixed_adjustment, measurement_scope, binding_type, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            id, version.id(), departmentKey, departmentName, sourceRow, serviceGroup, careType, materialName, unit, standard, adjustment, scope, bindingType, enabled);
+        return new QuotaRule(id, version.id(), departmentKey, departmentName, sourceRow, serviceGroup, careType, materialName, unit, standard, adjustment, scope, bindingType, enabled);
     }
 
     @Transactional
@@ -513,7 +524,7 @@ public class InventoryQuotaGovernanceService {
             row = writeXlsxRow(rulesSheet, row, null, "定额版本", versionCode, "生效日期", effectiveDate, "版本状态", versionStatus);
             row = writeXlsxRow(rulesSheet, row, null, "查询日期", report.path("queryDate").asText("-"), "导出时间", LocalDateTime.now().withNano(0).toString().replace("T", " "), "导出人", user.name() + "（" + user.username() + "）");
             row++;
-            row = writeXlsxRow(rulesSheet, row, headerStyle, "科室", "服务项目", "照护类型", "耗材名称", "单位", "每人次定额", "固定调整", "计量范围", "排序行", "状态");
+            row = writeXlsxRow(rulesSheet, row, headerStyle, "科室", "服务项目", "照护类型", "耗材名称", "单位", "绑定方式", "每人次定额", "固定调整", "计量范围", "排序行", "状态");
             int headerRowIndex = row - 1;
             for (JsonNode rule : report.path("rules")) {
                 Row dataRow = rulesSheet.createRow(row++);
@@ -522,21 +533,22 @@ public class InventoryQuotaGovernanceService {
                 writeTextCell(dataRow, 2, dataStyle, rule.path("careType").asText(""));
                 writeTextCell(dataRow, 3, dataStyle, rule.path("materialName").asText(""));
                 writeTextCell(dataRow, 4, dataStyle, rule.path("unit").asText(""));
+                writeTextCell(dataRow, 5, dataStyle, bindingTypeLabel(rule.path("bindingType").asText("PER_PERSON")));
                 JsonNode standard = rule.path("standardQuantity");
-                Cell standardCell = dataRow.createCell(5);
+                Cell standardCell = dataRow.createCell(6);
                 standardCell.setCellStyle(numberStyle);
                 if (standard.isNumber()) standardCell.setCellValue(standard.asDouble()); else standardCell.setBlank();
-                Cell adjustmentCell = dataRow.createCell(6);
+                Cell adjustmentCell = dataRow.createCell(7);
                 adjustmentCell.setCellStyle(numberStyle);
                 adjustmentCell.setCellValue(rule.path("fixedAdjustment").asDouble(0));
-                writeTextCell(dataRow, 7, dataStyle, measurementScopeLabel(rule.path("measurementScope").asText("")));
-                Cell sourceRowCell = dataRow.createCell(8);
+                writeTextCell(dataRow, 8, dataStyle, measurementScopeLabel(rule.path("measurementScope").asText("")));
+                Cell sourceRowCell = dataRow.createCell(9);
                 sourceRowCell.setCellStyle(numberStyle);
                 sourceRowCell.setCellValue(rule.path("sourceRow").asInt(0));
-                writeTextCell(dataRow, 9, dataStyle, rule.path("enabled").asBoolean(true) ? "启用" : "停用");
+                writeTextCell(dataRow, 10, dataStyle, rule.path("enabled").asBoolean(true) ? "启用" : "停用");
             }
             rulesSheet.createFreezePane(0, headerRowIndex + 1);
-            int[] rulesWidths = { 14, 22, 12, 26, 8, 12, 10, 16, 8, 8 };
+            int[] rulesWidths = { 14, 22, 12, 26, 8, 12, 12, 10, 16, 8, 8 };
             for (int i = 0; i < rulesWidths.length; i++) rulesSheet.setColumnWidth(i, rulesWidths[i] * 256);
 
             Sheet versionsSheet = workbook.createSheet("版本清单");
@@ -561,7 +573,11 @@ public class InventoryQuotaGovernanceService {
             String[][] glossary = {
                 { "每人次定额", "单个患者人次（按计量范围口径）应消耗的耗材数量；为空表示该耗材不参与自动测算。" },
                 { "固定调整", "在“定额 × 人次”基础上额外增减的数量，可为负数。" },
-                { "理论使用量", "每人次定额 × 计量人次 + 固定调整；补充行按实际填报值计。" },
+                { "理论使用量", "按绑定方式计算：每人次定额 × 计量人次 + 固定调整；固定日耗为每日固定用量 + 固定调整；按需领取与仪器触发不参与自动测算；补充行按实际填报值计。" },
+                { "绑定方式-PER_PERSON", "每人次定额：用量与患者人次线性相关，按“定额 × 人次”测算。" },
+                { "绑定方式-FIXED_DAILY", "固定日耗：按天固定消耗（如垃圾袋、口罩、酶液），不随人次变化，按“每日固定用量”测算。" },
+                { "绑定方式-ON_DEMAND", "按需领取：无固定规律（如签字笔芯、打印纸），不参与自动测算，按实际领取填写。" },
+                { "绑定方式-EQUIPMENT", "仪器触发：由设备开关机与报警损耗驱动（如血常规稀释液、溶血剂），不参与自动测算，按实际填写。" },
                 { "计量范围-OUTPATIENT", "按该服务项目的门诊人次计算。" },
                 { "计量范围-INPATIENT", "按该服务项目的住院床日计算。" },
                 { "计量范围-COMBINED", "按门诊人次与住院床日合并计算。" },
@@ -586,6 +602,15 @@ public class InventoryQuotaGovernanceService {
             case "COMBINED" -> "门诊+住院";
             case "OTHER" -> "手工人次";
             default -> scope == null ? "" : scope;
+        };
+    }
+
+    private static String bindingTypeLabel(String bindingType) {
+        return switch (bindingType == null ? "" : bindingType) {
+            case "FIXED_DAILY" -> "固定日耗";
+            case "ON_DEMAND" -> "按需领取";
+            case "EQUIPMENT" -> "仪器触发";
+            default -> "每人次定额";
         };
     }
 
@@ -615,7 +640,7 @@ public class InventoryQuotaGovernanceService {
     }
 
     private static ObjectNode versionNode(QuotaVersion version) { ObjectNode row = JsonNodeFactory.instance.objectNode(); row.put("id", version.id()); row.put("versionCode", version.versionCode()); row.put("effectiveDate", version.effectiveDate().toString()); row.put("status", version.status()); return row; }
-    private static ObjectNode ruleNode(QuotaRule rule) { ObjectNode row = JsonNodeFactory.instance.objectNode(); row.put("id", rule.id()); row.put("versionId", rule.versionId()); row.put("departmentKey", rule.departmentKey()); row.put("departmentName", rule.departmentName()); row.put("sourceRow", rule.sourceRow()); row.put("serviceGroup", rule.serviceGroup()); row.put("careType", rule.careType()); row.put("materialName", rule.materialName()); row.put("unit", rule.unit()); if (rule.standardQuantity() == null) row.putNull("standardQuantity"); else row.put("standardQuantity", rule.standardQuantity()); row.put("fixedAdjustment", rule.fixedAdjustment()); row.put("measurementScope", rule.measurementScope()); row.put("enabled", rule.enabled()); return row; }
+    private static ObjectNode ruleNode(QuotaRule rule) { ObjectNode row = JsonNodeFactory.instance.objectNode(); row.put("id", rule.id()); row.put("versionId", rule.versionId()); row.put("departmentKey", rule.departmentKey()); row.put("departmentName", rule.departmentName()); row.put("sourceRow", rule.sourceRow()); row.put("serviceGroup", rule.serviceGroup()); row.put("careType", rule.careType()); row.put("materialName", rule.materialName()); row.put("unit", rule.unit()); if (rule.standardQuantity() == null) row.putNull("standardQuantity"); else row.put("standardQuantity", rule.standardQuantity()); row.put("fixedAdjustment", rule.fixedAdjustment()); row.put("measurementScope", rule.measurementScope()); row.put("bindingType", rule.bindingType()); row.put("enabled", rule.enabled()); return row; }
     private static String required(JsonNode node, String field, int max) { String value = text(node, field); if (value.isBlank() || value.length() > max) throw badRequest(field + " 无效"); return value; }
     private static String text(JsonNode node, String field) { return node == null ? "" : node.path(field).asText("").trim(); }
     private static Double nullableNonNegative(JsonNode value) { if (value == null || value.isNull()) return null; if (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble() < 0) throw badRequest("定额必须为非负数"); return value.asDouble(); }
@@ -623,7 +648,7 @@ public class InventoryQuotaGovernanceService {
     private static ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
 
     public record QuotaVersion(String id, String versionCode, LocalDate effectiveDate, String status) {}
-    public record QuotaRule(String id, String versionId, String departmentKey, String departmentName, int sourceRow, String serviceGroup, String careType, String materialName, String unit, Double standardQuantity, double fixedAdjustment, String measurementScope, boolean enabled) {}
+    public record QuotaRule(String id, String versionId, String departmentKey, String departmentName, int sourceRow, String serviceGroup, String careType, String materialName, String unit, Double standardQuantity, double fixedAdjustment, String measurementScope, String bindingType, boolean enabled) {}
     public record SpecialRule(String id, String departmentKey, String materialName, String unit, boolean enabled, String adminNote, String updatedBy, String updatedAt) {}
     public record ReviewRecord(String reviewStatus, String reviewNote, String reviewerUsername, String reviewerName, String reviewedAt) {}
 }

@@ -46,7 +46,7 @@
       type="info"
       :closable="false"
       show-icon
-      title="计算口径：参考使用量 = 每人次定额 × 科室流转患者人次 + 固定调整。保存到未来版本后，次日零点起各科室耗材表按新定额重建；勾选「当日即时应用」可让当日未填报科室立即使用新定额。"
+      title="计算口径：每人次 = 定额 × 科室流转人次 + 固定调整；固定日耗 = 每日固定用量 + 固定调整；按需领取与仪器触发不参与自动测算，按实际领取填写。保存到未来版本后，次日零点起各科室耗材表按新定额重建；勾选「当日即时应用」可让当日未填报科室立即使用新定额。"
     />
 
     <div v-if="hasChanges" class="pending-bar">
@@ -61,50 +61,76 @@
       <el-select v-model="departmentKey" filterable clearable placeholder="筛选科室" class="department-select">
         <el-option v-for="department in departments" :key="department.key" :label="department.name" :value="department.key" />
       </el-select>
+      <el-select v-model="bindingFilter" clearable placeholder="筛选绑定方式" class="binding-select">
+        <el-option v-for="(meta, key) in bindingMeta" :key="key" :label="meta.label" :value="key" />
+      </el-select>
       <el-input v-model="keyword" clearable placeholder="搜索耗材或服务项目" class="keyword-input" />
       <span class="rule-count">{{ visibleRows.length }} 项定额规则</span>
+    </div>
+
+    <div class="binding-legend">
+      <span class="legend-item"><i class="legend-dot" style="background:#ff9800"></i>固定日耗</span>
+      <span class="legend-item"><i class="legend-dot" style="background:#2196f3"></i>按需领取</span>
+      <span class="legend-item"><i class="legend-dot" style="background:#4caf50"></i>仪器触发</span>
+      <span class="legend-hint">非"每人次定额"耗材以颜色标记区分</span>
     </div>
 
     <el-table
       v-loading="loading"
       :data="visibleRows"
       row-key="rowKey"
-      border
-      stripe
       table-layout="fixed"
       height="calc(100vh - 330px)"
       empty-text="当前版本没有定额规则"
+      class="clean-table"
+      :row-class-name="bindingRowClass"
     >
-      <el-table-column prop="departmentName" label="科室" width="110" />
-      <el-table-column prop="serviceGroup" label="服务项目" min-width="130" show-overflow-tooltip />
-      <el-table-column label="耗材" min-width="180" show-overflow-tooltip>
+      <el-table-column prop="departmentName" label="科室" width="100" />
+      <el-table-column prop="serviceGroup" label="服务项目" min-width="120" show-overflow-tooltip />
+      <el-table-column label="耗材" min-width="170" show-overflow-tooltip>
         <template #default="{ row }">
-          <span>{{ row.materialName }}</span>
+          <span>{{ row.materialName }}</span><span class="unit-suffix"> / {{ row.unit }}</span>
+          <el-tag
+            v-if="row.bindingType && row.bindingType !== 'PER_PERSON'"
+            size="small"
+            effect="plain"
+            :type="bindingMeta[row.bindingType]?.tag"
+            class="row-tag"
+          >
+            {{ bindingMeta[row.bindingType]?.short || row.bindingType }}
+          </el-tag>
           <el-tag v-if="row.pending" size="small" type="success" effect="plain" class="row-tag">新增</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="unit" label="单位" width="76" />
-      <el-table-column label="每人次定额" width="150">
+      <el-table-column label="绑定方式" width="118">
         <template #default="{ row }">
-          <el-input-number
-            v-model="row.standardQuantity"
-            :min="0"
-            :precision="6"
-            controls-position="right"
-            size="small"
-            @change="markDirty(row as ConsoleRow)"
-          />
+          <el-select v-model="row.bindingType" size="small" @change="onBindingChange(row as ConsoleRow)">
+            <el-option v-for="(meta, key) in bindingMeta" :key="key" :label="meta.label" :value="key" />
+          </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="固定调整" width="140">
+      <el-table-column label="定额 / 调整" width="170">
         <template #default="{ row }">
-          <el-input-number
-            v-model="row.fixedAdjustment"
-            :precision="6"
-            controls-position="right"
-            size="small"
-            @change="markDirty(row as ConsoleRow)"
-          />
+          <div class="dual-input-cell">
+            <el-input-number
+              v-model="row.standardQuantity"
+              :min="0"
+              :precision="6"
+              controls-position="right"
+              size="small"
+              :disabled="row.bindingType === 'ON_DEMAND' || row.bindingType === 'EQUIPMENT'"
+              @change="markDirty(row as ConsoleRow)"
+              placeholder="定额"
+            />
+            <el-input-number
+              v-model="row.fixedAdjustment"
+              :precision="6"
+              controls-position="right"
+              size="small"
+              @change="markDirty(row as ConsoleRow)"
+              placeholder="调整"
+            />
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="计量人次范围" width="140">
@@ -153,8 +179,20 @@
             <el-option label="通用" value="other" />
           </el-select>
         </el-form-item>
-        <el-form-item label="每人次定额">
-          <el-input-number v-model="createForm.standardQuantity" :min="0" :precision="6" controls-position="right" />
+        <el-form-item label="绑定方式" required>
+          <el-select v-model="createForm.bindingType">
+            <el-option v-for="(meta, key) in bindingMeta" :key="key" :label="meta.label" :value="key" />
+          </el-select>
+          <div class="form-hint">{{ bindingMeta[createForm.bindingType]?.hint }}</div>
+        </el-form-item>
+        <el-form-item label="定额值">
+          <el-input-number
+            v-model="createForm.standardQuantity"
+            :min="0"
+            :precision="6"
+            controls-position="right"
+            :disabled="createForm.bindingType === 'ON_DEMAND' || createForm.bindingType === 'EQUIPMENT'"
+          />
         </el-form-item>
         <el-form-item label="固定调整">
           <el-input-number v-model="createForm.fixedAdjustment" :precision="6" controls-position="right" />
@@ -190,7 +228,7 @@
           show-icon
           title="两个版本的定额规则完全一致"
         />
-        <el-table v-if="diffRows.length" :data="diffRows" border stripe height="calc(100vh - 220px)">
+        <el-table v-if="diffRows.length" :data="diffRows" height="calc(100vh - 220px)" class="clean-table">
           <el-table-column prop="departmentName" label="科室" width="96" />
           <el-table-column prop="materialName" label="耗材" min-width="150" show-overflow-tooltip />
           <el-table-column prop="unit" label="单位" width="64" />
@@ -221,7 +259,7 @@
           show-icon
           title="当前查看版本还没有变更记录"
         />
-        <el-table v-if="auditRows.length" :data="auditRows" border stripe height="calc(100vh - 220px)">
+        <el-table v-if="auditRows.length" :data="auditRows" height="calc(100vh - 220px)" class="clean-table">
           <el-table-column label="时间" width="150">
             <template #default="{ row }">{{ formatAuditTime(row.createdAt) }}</template>
           </el-table-column>
@@ -260,6 +298,7 @@ import {
   getInventoryQuotaAuditLogApi,
   getInventoryQuotaGovernanceApi,
   type InventoryQuotaAuditEntry,
+  type InventoryQuotaBindingType,
   type InventoryQuotaConsoleSaveResult,
   type InventoryQuotaRule,
   type InventoryQuotaRuleCreatePayload,
@@ -285,6 +324,33 @@ const departmentDirectory: Array<{ key: string; name: string }> = [
 
 type ConsoleRow = InventoryQuotaRule & { pending?: boolean; rowKey: string };
 
+const bindingMeta: Record<InventoryQuotaBindingType, { label: string; short: string; tag: "primary" | "warning" | "info" | "success"; hint: string }> = {
+  PER_PERSON: {
+    label: "每人次定额",
+    short: "人次",
+    tag: "primary",
+    hint: "用量与患者人次线性相关，测算口径 = 定额 × 计量人次 + 固定调整。"
+  },
+  FIXED_DAILY: {
+    label: "固定日耗",
+    short: "日耗",
+    tag: "warning",
+    hint: "按天固定消耗（如垃圾袋、口罩、酶液），测算口径 = 每日固定用量 + 固定调整，不随人次变化。"
+  },
+  ON_DEMAND: {
+    label: "按需领取",
+    short: "按需",
+    tag: "info",
+    hint: "无固定规律（如签字笔芯、打印纸），不参与自动测算，岗位人员按实际领取填写。"
+  },
+  EQUIPMENT: {
+    label: "仪器触发",
+    short: "仪器",
+    tag: "success",
+    hint: "由设备开关机与报警损耗驱动（如稀释液、溶血剂），不参与自动测算，按实际使用填写。"
+  }
+};
+
 const loading = ref(false);
 const saving = ref(false);
 const exporting = ref(false);
@@ -293,6 +359,7 @@ const governance = ref<InventoryQuotaConsoleSaveResult>();
 const selectedVersionId = ref("");
 const departmentKey = ref("");
 const keyword = ref("");
+const bindingFilter = ref<InventoryQuotaBindingType | "">("");
 const applyToday = ref(false);
 const addOpen = ref(false);
 const rules = ref<InventoryQuotaRule[]>([]);
@@ -307,7 +374,8 @@ const createForm = ref({
   careType: "outpatient",
   standardQuantity: 0,
   fixedAdjustment: 0,
-  measurementScope: "OUTPATIENT" as InventoryQuotaRuleCreatePayload["measurementScope"]
+  measurementScope: "OUTPATIENT" as InventoryQuotaRuleCreatePayload["measurementScope"],
+  bindingType: "PER_PERSON" as InventoryQuotaBindingType
 });
 const today = new Date().toISOString().slice(0, 10);
 
@@ -354,6 +422,12 @@ const diffSummary = computed(() => ({
 
 const ruleKeyOf = (rule: InventoryQuotaRule) => `${rule.departmentKey}\u0000${rule.materialName.trim()}\u0000${rule.unit.trim()}`;
 const scopeLabel = (scope: string) => scopeLabels[scope] || scope || "-";
+const bindingLabel = (binding?: string | null) => (binding && bindingMeta[binding as InventoryQuotaBindingType]?.label) || binding || "-";
+const bindingRowClass = ({ row }: { row: { bindingType?: string } }) => {
+  const bt = row.bindingType;
+  if (!bt || bt === "PER_PERSON") return "";
+  return `binding-row binding-row-${bt.toLowerCase().replace(/_/g, "-")}`;
+};
 
 const buildDiffRows = (current: InventoryQuotaRule[], previous: InventoryQuotaRule[]): DiffRow[] => {
   const previousByKey = new Map(previous.map(rule => [ruleKeyOf(rule), rule]));
@@ -372,6 +446,8 @@ const buildDiffRows = (current: InventoryQuotaRule[], previous: InventoryQuotaRu
       changes.push({ label: "固定调整", from: String(before.fixedAdjustment ?? 0), to: String(rule.fixedAdjustment ?? 0) });
     if (before.measurementScope !== rule.measurementScope)
       changes.push({ label: "计量范围", from: scopeLabel(before.measurementScope), to: scopeLabel(rule.measurementScope) });
+    if ((before.bindingType || "PER_PERSON") !== (rule.bindingType || "PER_PERSON"))
+      changes.push({ label: "绑定方式", from: bindingLabel(before.bindingType), to: bindingLabel(rule.bindingType) });
     if (before.serviceGroup !== rule.serviceGroup)
       changes.push({ label: "服务项目", from: before.serviceGroup || "-", to: rule.serviceGroup || "-" });
     if (before.enabled !== rule.enabled)
@@ -424,6 +500,8 @@ const auditChangesOf = (row: InventoryQuotaAuditEntry): DiffChange[] => {
       from: row.beforeMeasurementScope ? scopeLabel(row.beforeMeasurementScope) : "-",
       to: row.afterMeasurementScope ? scopeLabel(row.afterMeasurementScope) : "-"
     });
+  if ((row.beforeBindingType ?? null) !== (row.afterBindingType ?? null))
+    changes.push({ label: "绑定方式", from: bindingLabel(row.beforeBindingType), to: bindingLabel(row.afterBindingType) });
   if ((row.beforeEnabled ?? null) !== (row.afterEnabled ?? null))
     changes.push({
       label: "状态",
@@ -469,15 +547,17 @@ const visibleRows = computed<ConsoleRow[]>(() => {
     standardQuantity: create.standardQuantity,
     fixedAdjustment: create.fixedAdjustment,
     measurementScope: create.measurementScope,
+    bindingType: create.bindingType || "PER_PERSON",
     enabled: true,
     pending: true,
     rowKey: `pending-${index}`
   }));
   const existing: ConsoleRow[] = rules.value
     .filter(rule => !pendingDeletes.value.has(rule.id))
-    .map(rule => ({ ...rule, rowKey: rule.id }));
+    .map(rule => ({ ...rule, bindingType: rule.bindingType || "PER_PERSON", rowKey: rule.id }));
   return [...created, ...existing].filter(row => {
     if (departmentKey.value && row.departmentKey !== departmentKey.value) return false;
+    if (bindingFilter.value && row.bindingType !== bindingFilter.value) return false;
     return !search || `${row.materialName} ${row.serviceGroup}`.toLowerCase().includes(search);
   });
 });
@@ -566,6 +646,13 @@ const markDirty = (row: ConsoleRow) => {
   dirtyIds.value = next;
 };
 
+const onBindingChange = (row: ConsoleRow) => {
+  if ((row.bindingType === "ON_DEMAND" || row.bindingType === "EQUIPMENT") && row.standardQuantity !== null) {
+    row.standardQuantity = null;
+  }
+  markDirty(row);
+};
+
 const openAdd = () => {
   createForm.value = {
     departmentKey: departmentKey.value || departmentDirectory[0].key,
@@ -575,7 +662,8 @@ const openAdd = () => {
     careType: "outpatient",
     standardQuantity: 0,
     fixedAdjustment: 0,
-    measurementScope: "OUTPATIENT"
+    measurementScope: "OUTPATIENT",
+    bindingType: "PER_PERSON"
   };
   addOpen.value = true;
 };
@@ -603,9 +691,10 @@ const appendCreate = () => {
       unit: form.unit.trim(),
       serviceGroup: form.serviceGroup.trim(),
       careType: form.careType,
-      standardQuantity: form.standardQuantity,
+      standardQuantity: form.bindingType === "ON_DEMAND" || form.bindingType === "EQUIPMENT" ? null : form.standardQuantity,
       fixedAdjustment: Number(form.fixedAdjustment || 0),
       measurementScope: form.measurementScope,
+      bindingType: form.bindingType,
       enabled: true
     }
   ];
@@ -643,6 +732,7 @@ const save = async () => {
         standardQuantity: rule.standardQuantity,
         fixedAdjustment: Number(rule.fixedAdjustment || 0),
         measurementScope: rule.measurementScope,
+        bindingType: rule.bindingType || "PER_PERSON",
         enabled: rule.enabled
       }));
     const result = (
@@ -683,10 +773,90 @@ onMounted(load);
   min-width: 0;
 }
 
+.clean-table {
+  --el-table-border-color: #edf1f5;
+  --el-table-header-bg-color: transparent;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.clean-table :deep(th.el-table__cell) {
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-weight: 500;
+  border-bottom: 1px solid #edf1f5;
+}
+.clean-table :deep(td.el-table__cell) {
+  border-bottom: 1px solid #edf1f5;
+  border-right: none;
+}
+.clean-table :deep(th.el-table__cell) {
+  border-right: none;
+}
+.clean-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background: #f8fafc;
+}
+:deep(.binding-row) > td.el-table__cell {
+  position: relative;
+}
+:deep(.binding-row) > td.el-table__cell:first-child {
+  box-shadow: inset 5px 0 0 0 var(--binding-color, #ff9800);
+}
+:deep(.binding-row-fixed-daily) > td.el-table__cell {
+  background: #fff3e0 !important;
+  --binding-color: #ff9800;
+}
+:deep(.binding-row-on-demand) > td.el-table__cell {
+  background: #e3f2fd !important;
+  --binding-color: #2196f3;
+}
+:deep(.binding-row-equipment) > td.el-table__cell {
+  background: #e8f5e9 !important;
+  --binding-color: #4caf50;
+}
+:deep(.binding-row:hover) > td.el-table__cell {
+  filter: brightness(0.95);
+}
+
+.binding-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.legend-hint {
+  margin-left: auto;
+  color: var(--el-text-color-placeholder);
+}
+
 .diff-line {
   font-size: 12px;
   line-height: 1.6;
   color: var(--el-text-color-regular);
+}
+.unit-suffix {
+  color: var(--el-text-color-placeholder);
+  font-size: 12px;
+}
+.dual-input-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .console-status {
@@ -750,6 +920,18 @@ onMounted(load);
 
 .department-select {
   width: 180px;
+}
+
+.binding-select {
+  width: 150px;
+}
+
+.form-hint {
+  width: 100%;
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .keyword-input {

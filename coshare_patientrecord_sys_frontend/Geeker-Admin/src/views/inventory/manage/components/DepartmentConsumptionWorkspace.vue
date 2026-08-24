@@ -44,7 +44,7 @@
         <div class="pane-heading">
           <div>
             <h3>耗材明细</h3>
-            <p class="patient-flow-hint">先填写当前科室流转患者人次；系统按“每人次定额 × 人次”计算参考使用量。</p>
+            <p class="patient-flow-hint">先填写当前科室流转患者人次；系统按“每人次定额 × 人次”计算参考使用量，固定日耗 / 按需领取 / 仪器触发类耗材有专属标记，不按人次测算。</p>
           </div>
           <div class="patient-flow-total"><small>当前填报总人次</small><strong>{{ currentPatientFlow }}</strong></div>
         </div>
@@ -91,7 +91,14 @@
           </label>
         </div>
 
-        <el-table :data="visibleDraftLines" class="input-table" height="calc(100vh - 330px)" min-height="380" table-layout="fixed">
+        <div class="binding-legend">
+          <span class="legend-item"><i class="legend-dot" style="background:#ff9800"></i>固定日耗</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#2196f3"></i>按需领取</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#4caf50"></i>仪器触发</span>
+          <span class="legend-hint">非"每人次定额"耗材以颜色标记区分</span>
+        </div>
+
+        <el-table :data="visibleDraftLines" class="input-table clean-table" height="calc(100vh - 330px)" min-height="380" table-layout="fixed" :row-class-name="bindingRowClass">
           <el-table-column label="服务项目 / 类型" min-width="180">
             <template #default="{ row }">
               <el-select v-model="row.serviceGroup" filterable allow-create default-first-option :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
@@ -102,29 +109,37 @@
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="耗材" min-width="190">
+          <el-table-column label="耗材 / 单位" min-width="190">
             <template #default="{ row }">
-              <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental">
-                <el-option v-for="name in materialOptions" :key="name" :label="name" :value="name" />
-              </el-select>
+              <div class="material-unit-cell">
+                <el-select v-model="row.materialName" filterable allow-create default-first-option placeholder="选择或输入耗材" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" class="material-select">
+                  <el-option v-for="name in materialOptions" :key="name" :label="name" :value="name" />
+                </el-select>
+                <el-input v-model="row.unit" placeholder="单位" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" class="unit-input" />
+              </div>
               <div v-if="row.isSpecial" class="special-material-marker">
                 <el-tag type="warning" size="small" effect="plain">特殊耗材</el-tag>
                 <span>{{ row.specialAdminNote || "按实际量管理" }}</span>
               </div>
+              <div v-else-if="bindingMeta[row.bindingType || 'PER_PERSON']" class="special-material-marker" :class="`binding-marker binding-${(row.bindingType || 'PER_PERSON').toLowerCase()}`">
+                <el-tag :type="bindingMeta[row.bindingType || 'PER_PERSON'].tag" size="small" effect="plain">
+                  {{ bindingMeta[row.bindingType || 'PER_PERSON'].label }}
+                </el-tag>
+                <span>{{ bindingMeta[row.bindingType || 'PER_PERSON'].hint }}</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="单位" width="96">
-            <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" /></template>
-          </el-table-column>
-          <el-table-column label="每人次定额" width="122">
-            <template #default="{ row }"
-              ><el-input-number v-if="canEditQuota" v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
-              <span v-else class="readonly-quantity">{{ row.standardQuantity == null ? "待核定" : formatQuantity(row.standardQuantity) }}</span>
+          <el-table-column label="定额 / 调整" width="150">
+            <template #default="{ row }">
+              <div class="dual-input-cell">
+                <el-input-number v-if="canEditQuota && !isUnmeasuredBinding(row)" v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" size="small" placeholder="定额" />
+                <span v-else class="readonly-quantity">{{
+                  isUnmeasuredBinding(row) ? "不测算" : row.standardQuantity == null ? "待核定" : formatQuantity(row.standardQuantity)
+                }}</span>
+                <el-input-number v-if="canEditQuota" v-model="row.manualAdjustment" :precision="6" controls-position="right" size="small" placeholder="调整" class="adjust-input" />
+                <span v-else class="readonly-quantity">{{ formatQuantity(row.manualAdjustment) }}</span>
+              </div>
             </template>
-          </el-table-column>
-          <el-table-column label="手工调整" width="122">
-            <template #default="{ row }"><el-input-number v-if="canEditQuota" v-model="row.manualAdjustment" :precision="6" controls-position="right" />
-              <span v-else class="readonly-quantity">{{ formatQuantity(row.manualAdjustment) }}</span></template>
           </el-table-column>
           <el-table-column label="实际耗材（选填）" width="140" header-class-name="actual-consumable-header">
             <template #default="{ row }"><el-input-number v-model="row.actualQuantity" :min="0" :precision="6" controls-position="right" placeholder="选填，留空即可" /></template>
@@ -137,13 +152,16 @@
           <el-table-column label="适用流转人次" width="122">
             <template #default="{ row }"
               ><el-input-number
+                v-if="usesPatientVolume(row)"
                 v-model="row.volumeOverride"
                 :min="0"
                 :precision="0"
                 controls-position="right"
                 placeholder="跟随分组"
                 @change="normalizeLineVolume(row)"
-            /></template>
+              />
+              <span v-else class="readonly-quantity">不适用</span></template
+            >
           </el-table-column>
           <el-table-column label="单价" width="116">
             <template #default="{ row }"
@@ -180,7 +198,7 @@
           >
           <span><small>当前流转总人次</small><strong>{{ currentPatientFlow }}</strong></span>
           <span
-            ><small>参考使用量（定额 × 人次）</small
+            ><small>参考使用量（按绑定方式测算）</small
             ><strong class="unit-summary">{{ referenceQuantitySummary || "暂无可汇总数量" }}</strong></span
           >
           <span><small>实际使用量（选填）</small><strong>{{ excludedQuantityLineCount }} 行未填</strong></span>
@@ -190,29 +208,49 @@
           >
         </div>
 
-        <el-table :data="visiblePreviewRows" class="preview-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed">
+        <el-table :data="visiblePreviewRows" class="preview-table clean-table" height="calc(100vh - 390px)" min-height="380" table-layout="fixed" :row-class-name="bindingRowClass">
           <el-table-column prop="serviceGroup" label="服务项目" min-width="140" show-overflow-tooltip />
-          <el-table-column prop="materialName" label="耗材" min-width="178" show-overflow-tooltip />
-          <el-table-column prop="standardQuantity" label="标准用量" width="104">
-            <template #default="{ row }">{{
-              row.standardQuantity === null ? "待核定" : formatQuantity(row.standardQuantity)
-            }}</template>
+          <el-table-column label="耗材" min-width="178" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="preview-material-name">{{ row.materialName }}</span>
+              <el-tag
+                v-if="bindingMeta[row.bindingType || 'PER_PERSON']"
+                :type="bindingMeta[row.bindingType || 'PER_PERSON'].tag"
+                size="small"
+                effect="plain"
+                class="preview-binding-tag"
+              >
+                {{ bindingMeta[row.bindingType || 'PER_PERSON'].label }}
+              </el-tag>
+            </template>
           </el-table-column>
-                    <el-table-column prop="manualAdjustment" label="手工调整" width="104">
-            <template #default="{ row }">{{ formatQuantity(row.manualAdjustment) }}</template>
+          <el-table-column label="标准 / 调整" width="130">
+            <template #default="{ row }">
+              <div class="dual-value">
+                <span>{{ isUnmeasuredBinding(row) ? "不测算" : row.standardQuantity === null ? "待核定" : formatQuantity(row.standardQuantity) }}</span>
+                <span class="dual-actual">{{ formatQuantity(row.manualAdjustment) }}</span>
+              </div>
+            </template>
           </el-table-column>
-          <el-table-column prop="volume" label="流转人次" width="88" />
-          <el-table-column prop="referenceQuantity" label="参考使用量（定额×人次）" width="162">
-            <template #default="{ row }">{{ formatQuantity(row.referenceQuantity) }}</template>
+          <el-table-column label="流转人次" width="80">
+            <template #default="{ row }">{{ usesPatientVolume(row) ? row.volume : "—" }}</template>
           </el-table-column>
-          <el-table-column prop="actualQuantity" label="实际使用量" width="112">
+          <el-table-column label="参考使用量" width="120">
+            <template #default="{ row }">
+              <span v-if="isUnmeasuredBinding(row)" class="readonly-quantity">按实际填写</span>
+              <span v-else>{{ formatQuantity(row.referenceQuantity) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="actualQuantity" label="实际使用量" width="100">
             <template #default="{ row }">{{ row.actualFilled ? formatQuantity(row.dailyQuantity) : "未填报" }}</template>
           </el-table-column>
-          <el-table-column prop="monthlyQuantity" label="按实际外推月量" width="132">
-            <template #default="{ row }">{{ row.actualFilled ? formatQuantity(row.monthlyQuantity) : "—" }}</template>
-          </el-table-column>
-          <el-table-column prop="monthlyAmount" label="月金额" width="104">
-            <template #default="{ row }">{{ row.monthlyAmount === null ? "未核价" : formatMoney(row.monthlyAmount) }}</template>
+          <el-table-column label="月量 / 金额" width="140">
+            <template #default="{ row }">
+              <div class="dual-value">
+                <span>{{ row.actualFilled ? formatQuantity(row.monthlyQuantity) : "—" }}</span>
+                <span class="dual-actual">{{ row.monthlyAmount === null ? "未核价" : formatMoney(row.monthlyAmount) }}</span>
+              </div>
+            </template>
           </el-table-column>
           <el-table-column v-if="!isInventoryPortal" label="下拨结余 / 预警" width="154">
             <template #default="{ row }">
@@ -326,7 +364,8 @@
         <div class="editor-table-wrap">
           <el-table
             :data="visibleDraftLines"
-            class="input-table expanded-input-table"
+            class="input-table expanded-input-table clean-table"
+            :row-class-name="bindingRowClass"
             height="calc(84vh - 300px)"
             min-height="360"
             table-layout="fixed"
@@ -350,15 +389,23 @@
                   <el-tag type="warning" size="small" effect="plain">特殊耗材</el-tag>
                   <span>{{ row.specialAdminNote || "按实际量管理" }}</span>
                 </div>
+                <div v-else-if="bindingMeta[row.bindingType || 'PER_PERSON']" class="special-material-marker" :class="`binding-marker binding-${(row.bindingType || 'PER_PERSON').toLowerCase()}`">
+                  <el-tag :type="bindingMeta[row.bindingType || 'PER_PERSON'].tag" size="small" effect="plain">
+                    {{ bindingMeta[row.bindingType || 'PER_PERSON'].label }}
+                  </el-tag>
+                  <span>{{ bindingMeta[row.bindingType || 'PER_PERSON'].hint }}</span>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="单位" width="110">
               <template #default="{ row }"><el-input v-model="row.unit" placeholder="单位" :disabled="isInventoryPortal && !canEditQuota && !row.isSupplemental" /></template>
             </el-table-column>
-            <el-table-column label="每人次定额" width="138">
+            <el-table-column label="定额值" width="138">
               <template #default="{ row }">
-                <el-input-number v-if="canEditQuota" v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
-                <span v-else class="readonly-quantity">{{ row.standardQuantity == null ? "待核定" : formatQuantity(row.standardQuantity) }}</span>
+                <el-input-number v-if="canEditQuota && !isUnmeasuredBinding(row)" v-model="row.standardQuantity" :min="0" :precision="6" controls-position="right" />
+                <span v-else class="readonly-quantity">{{
+                  isUnmeasuredBinding(row) ? "不测算" : row.standardQuantity == null ? "待核定" : formatQuantity(row.standardQuantity)
+                }}</span>
               </template>
             </el-table-column>
           <el-table-column label="手工调整" width="122">
@@ -376,6 +423,7 @@
             <el-table-column label="适用流转人次" width="138">
               <template #default="{ row }">
                 <el-input-number
+                  v-if="usesPatientVolume(row)"
                   v-model="row.volumeOverride"
                   :min="0"
                   :precision="0"
@@ -383,6 +431,7 @@
                   placeholder="跟随分组"
                   @change="normalizeLineVolume(row)"
                 />
+                <span v-else class="readonly-quantity">不适用</span>
               </template>
             </el-table-column>
             <el-table-column label="单价" width="126">
@@ -422,7 +471,7 @@
       <div class="allocation-plan-note">
         这是核对与预警计划，不扣库存、不生成库存流水。默认预警值为当前月已保存日草稿的平均日使用量 × 3；没有下拨量时显示“待设定”。
       </div>
-      <el-table v-loading="allocationLoading" :data="allocationLines" max-height="480" table-layout="fixed">
+      <el-table v-loading="allocationLoading" :data="allocationLines" max-height="480" table-layout="fixed" class="clean-table">
         <el-table-column prop="materialName" label="耗材" min-width="180" />
         <el-table-column prop="unit" label="单位" width="92" />
         <el-table-column label="下拨量" width="132">
@@ -615,12 +664,40 @@ const combinedBusinessVolume = computed(() => {
   );
   return [...groups].reduce((sum, group) => sum + nonNegativeInteger(draft.value.groupVolumes[group]), 0);
 });
+const bindingMeta: Partial<Record<NonNullable<InventoryDepartmentDraftLine["bindingType"]>, { label: string; tag: "warning" | "info" | "success"; hint: string }>> = {
+  FIXED_DAILY: { label: "固定日耗", tag: "warning", hint: "按每日固定用量测算，不随人次变化" },
+  ON_DEMAND: { label: "按需领取", tag: "info", hint: "不参与定额测算，按实际领取填写" },
+  EQUIPMENT: { label: "仪器触发", tag: "success", hint: "按仪器实际损耗填写，不与人次挂钩" }
+};
+const usesPatientVolume = (line: { bindingType?: InventoryDepartmentDraftLine["bindingType"] }) =>
+  (line.bindingType || "PER_PERSON") === "PER_PERSON";
+const isUnmeasuredBinding = (line: { bindingType?: InventoryDepartmentDraftLine["bindingType"] }) =>
+  line.bindingType === "ON_DEMAND" || line.bindingType === "EQUIPMENT";
+const bindingRowClass = ({ row }: { row: { bindingType?: string; materialName?: string; unit?: string } }) => {
+  const bt = row.bindingType;
+  if (bt && bt !== "PER_PERSON") return `binding-row binding-row-${bt.toLowerCase().replace(/_/g, "-")}`;
+  if (bt === "PER_PERSON") return "";
+  const name = (row.materialName || "").trim();
+  const unit = (row.unit || "").trim();
+  if (!name) return "";
+  if (name.includes("试剂") || name.includes("探") || name.includes("溶血") || name.includes("清洗液")) return "binding-row binding-row-equipment";
+  if (name.includes("利器盒") || name.includes("打印纸") || name.includes("处方") || name.includes("签字笔") || name.includes("卫生纸") || name.includes("橡胶检查手套") || name.includes("固体胶") || name.includes("拖把") || name.includes("过氧化氢") || name.includes("橡胶管") || name === "CRP试剂" || name.includes("C14") || name.includes("糖化")) return "binding-row binding-row-on-demand";
+  if (unit.includes("/天") || unit.includes("个/天") || unit.includes("盒/天") || unit.includes("瓶/天") || unit.includes("张/天") || unit.includes("双/天") || name.includes("口罩") || name.includes("帽子") || name.includes("手套") || name.includes("消毒") || name.includes("垃圾袋") || name.includes("中单") || name.includes("手术衣") || name.includes("注射器") || name.includes("洗手液") || name.includes("手消") || name.includes("A4纸") || name.includes("标签贴")) return "binding-row binding-row-fixed-daily";
+  return "";
+};
 const volumeFor = (line: InventoryDepartmentDraftLine) =>
   nonNegativeInteger(
     line.volumeOverride ?? (line.measurementScope === "COMBINED" ? combinedBusinessVolume.value : draft.value.groupVolumes[line.serviceGroup]) ?? 0
   );
-const calculateReferenceQuantity = (line: InventoryDepartmentDraftLine, volume: number) =>
-  Math.max(0, Number(((Number(line.standardQuantity || 0) * volume + Number(line.manualAdjustment || 0)).toFixed(6))));
+const calculateReferenceQuantity = (line: InventoryDepartmentDraftLine, volume: number) => {
+  const binding = line.bindingType || "PER_PERSON";
+  const standard = Number(line.standardQuantity || 0);
+  let base: number;
+  if (line.isSupplemental || line.standardQuantity == null || binding === "ON_DEMAND" || binding === "EQUIPMENT") base = 0;
+  else if (binding === "FIXED_DAILY") base = standard;
+  else base = standard * volume;
+  return Math.max(0, Number((base + Number(line.manualAdjustment || 0)).toFixed(6)));
+};
 const actualQuantityFor = (line: InventoryDepartmentDraftLine) =>
   line.actualQuantity === null || line.actualQuantity === undefined ? null : Math.max(0, Number(line.actualQuantity || 0));
 const previewRows = computed<PreviewRow[]>(() =>
@@ -1290,12 +1367,115 @@ watch(
 .care-type-filter {
   width: 116px;
 }
+.clean-table {
+  --el-table-border-color: var(--inventory-line-soft, #edf1f5);
+  --el-table-header-bg-color: transparent;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.clean-table :deep(th.el-table__cell) {
+  background: transparent;
+  color: var(--inventory-muted, var(--el-text-color-secondary));
+  font-weight: 500;
+  border-right: none;
+  border-bottom: 1px solid var(--inventory-line-soft, #edf1f5);
+}
+.clean-table :deep(td.el-table__cell) {
+  border-bottom: 1px solid var(--inventory-line-soft, #edf1f5);
+  border-right: none;
+}
+.clean-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background: #f8fafc;
+}
+:deep(.binding-row) > td.el-table__cell {
+  position: relative;
+}
+:deep(.binding-row) > td.el-table__cell:first-child {
+  box-shadow: inset 5px 0 0 0 var(--binding-color, #ff9800);
+}
+:deep(.binding-row-fixed-daily) > td.el-table__cell {
+  background: #fff3e0 !important;
+  --binding-color: #ff9800;
+}
+:deep(.binding-row-on-demand) > td.el-table__cell {
+  background: #e3f2fd !important;
+  --binding-color: #2196f3;
+}
+:deep(.binding-row-equipment) > td.el-table__cell {
+  background: #e8f5e9 !important;
+  --binding-color: #4caf50;
+}
+:deep(.binding-row:hover) > td.el-table__cell {
+  filter: brightness(0.95);
+}
+.binding-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.legend-hint {
+  margin-left: auto;
+  color: var(--el-text-color-placeholder);
+}
 .readonly-quantity {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
   color: var(--inventory-text);
   font-variant-numeric: tabular-nums;
+}
+.material-unit-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.material-unit-cell .material-select {
+  flex: 1;
+  min-width: 0;
+}
+.material-unit-cell .unit-input {
+  width: 72px;
+  flex-shrink: 0;
+}
+.dual-input-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dual-input-cell .adjust-input :deep(.el-input__inner) {
+  font-size: 12px;
+}
+.dual-value {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.5;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.dual-value .dual-actual {
+  color: var(--el-text-color-secondary);
+}
+.unit-suffix {
+  color: var(--el-text-color-placeholder);
+  font-size: 12px;
 }
 .special-material-marker {
   display: flex;
@@ -1311,6 +1491,27 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.binding-marker.binding-fixed_daily span {
+  color: #b45309;
+}
+.binding-marker.binding-on_demand span {
+  color: #64748b;
+}
+.binding-marker.binding-equipment span {
+  color: #047857;
+}
+.preview-material-name {
+  display: inline-block;
+  max-width: calc(100% - 56px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.preview-binding-tag {
+  margin-left: 4px;
+  vertical-align: middle;
 }
 .special-note-placeholder {
   color: var(--inventory-muted);
@@ -1745,4 +1946,13 @@ watch(
     transition: none;
   }
 }
+</style>
+
+<style>
+.binding-row > td.el-table__cell { position: relative; }
+.binding-row > td.el-table__cell:first-child { box-shadow: inset 5px 0 0 0 var(--binding-color, #ff9800); }
+.binding-row-fixed-daily > td.el-table__cell { background: #fff3e0 !important; --binding-color: #ff9800; }
+.binding-row-on-demand > td.el-table__cell { background: #e3f2fd !important; --binding-color: #2196f3; }
+.binding-row-equipment > td.el-table__cell { background: #e8f5e9 !important; --binding-color: #4caf50; }
+.binding-row:hover > td.el-table__cell { filter: brightness(0.95); }
 </style>

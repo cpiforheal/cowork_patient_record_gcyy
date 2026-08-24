@@ -3,10 +3,10 @@
     <header class="page-toolbar">
       <div class="page-title">
         <h1>科室套餐</h1>
-        <span>{{ workspace === "quota" ? "全院耗材每人次定额总控制台" : `${selectedDepartment || "全部科室"} · ${visibleRows.length} 项耗材` }}</span>
+        <span>{{ workspace === "quota" ? "全院耗材定额总控制台（每人次 / 固定日耗 / 按需领取 / 仪器触发）" : `${selectedDepartment || "全部科室"} · ${visibleRows.length} 项耗材` }}</span>
       </div>
       <el-radio-group v-model="workspace">
-        <el-radio-button value="quota">每人次定额</el-radio-button>
+        <el-radio-button value="quota">耗材定额</el-radio-button>
         <el-radio-button value="packages">自动扣减套餐</el-radio-button>
       </el-radio-group>
     </header>
