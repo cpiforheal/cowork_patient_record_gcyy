@@ -136,6 +136,72 @@ class InpatientAiResponseParserTest {
         });
     }
 
+    @Test
+    void stripsParenthesizedMetaCommentary() throws Exception {
+        InpatientAiResponseParser.ParsedGeneration result = parser.parse(
+            "{\"paragraphs\":[{\"n\":1,\"text\":\"入院日期:待医生补充（当前复核事实为2026-08-04门诊就诊）\"}]}",
+            1,
+            List.of()
+        );
+
+        assertThat(result.paragraphs().get(0).asText()).isEqualTo("入院日期:待医生补充");
+    }
+
+    @Test
+    void stripsStandaloneMetaClausesButKeepsClinicalSentence() throws Exception {
+        InpatientAiResponseParser.ParsedGeneration result = parser.parse(
+            "{\"paragraphs\":[{\"n\":1,\"text\":\"2、结合病情完善必要检查；当前复核事实为门诊保守治疗，未提供住院及手术计划。\"}]}",
+            1,
+            List.of()
+        );
+
+        assertThat(result.paragraphs().get(0).asText()).isEqualTo("2、结合病情完善必要检查；");
+    }
+
+    @Test
+    void collapsesParagraphScopedPlaceholderAndMergedSignatureLine() throws Exception {
+        InpatientAiResponseParser.ParsedGeneration result = parser.parse(
+            "{\"paragraphs\":[{\"n\":1,\"text\":\"当前复核事实为门诊保守治疗，未提供术后第一天查房事实。本段待医生补充。 医师签字：\"}]}",
+            1,
+            List.of()
+        );
+
+        assertThat(result.paragraphs().get(0).asText()).isEqualTo("待医生补充");
+    }
+
+    @Test
+    void stripsTrailingSignatureFragmentFromBodyText() throws Exception {
+        InpatientAiResponseParser.ParsedGeneration result = parser.parse(
+            "{\"paragraphs\":[{\"n\":1,\"text\":\"今日查房，患者一般情况可，医嘱同前。 医师签字：\"}]}",
+            1,
+            List.of()
+        );
+
+        assertThat(result.paragraphs().get(0).asText()).isEqualTo("今日查房，患者一般情况可，医嘱同前。");
+    }
+
+    @Test
+    void preservesClinicalNarrativeThatMerelyContains未提供() throws Exception {
+        InpatientAiResponseParser.ParsedGeneration result = parser.parse(
+            "{\"paragraphs\":[{\"n\":1,\"text\":\"患者未提供详细过敏史，否认药物过敏。\"}]}",
+            1,
+            List.of()
+        );
+
+        assertThat(result.paragraphs().get(0).asText()).isEqualTo("患者未提供详细过敏史，否认药物过敏。");
+    }
+
+    @Test
+    void cleansMetaAcrossPlainStringContractToo() throws Exception {
+        InpatientAiResponseParser.ParsedGeneration result = parser.parse(
+            "{\"paragraphs\":[\"出院诊断：当前未提供住院出院事实，待医生补充。\"]}",
+            1,
+            List.of()
+        );
+
+        assertThat(result.paragraphs().get(0).asText()).isEqualTo("出院诊断：待医生补充。");
+    }
+
     private void assertBadGateway(String content, List<String> keys, String message) {
         assertThatThrownBy(() -> parser.parse(content, keys.size(), keys))
             .isInstanceOfSatisfying(ResponseStatusException.class, error -> {

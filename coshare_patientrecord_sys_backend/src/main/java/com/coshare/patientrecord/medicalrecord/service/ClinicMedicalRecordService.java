@@ -396,6 +396,12 @@ public class ClinicMedicalRecordService {
         int version = versionRepository.nextVersion(scopeId);
         String id = "medrec-" + UUID.randomUUID();
         List<String> generatedParagraphs = textValues(generated.paragraphs());
+        if (effectiveMappingMode == DocxNodeMapper.MappingMode.LEGACY_ORDINAL) {
+            generatedParagraphs = InpatientSlotClassifier.pinStructuralSlots(
+                reference.paragraphs(),
+                generatedParagraphs
+            );
+        }
         byte[] generatedBytes = rewriteReferenceDocument(
             reference.bytes(),
             generatedParagraphs,

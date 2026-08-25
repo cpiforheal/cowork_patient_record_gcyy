@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -18,6 +19,23 @@ import org.springframework.web.server.ResponseStatusException;
 public class InpatientAiResponseParser {
 
     private static final int MAX_PARAGRAPH_LENGTH = 12000;
+
+    /**
+     * 模型常把“面向系统的说明”写进病历正文（如“当前复核事实为门诊就诊”“未提供住院及手术计划”
+     * “本段待医生补充”、把签名行并入正文末尾）。这些不是病历语言，入盘前统一剔除。
+     */
+    private static final Pattern[] META_COMMENTARY_PATTERNS = {
+        // 括号内的生成说明：（当前复核事实为…）（未提供…）
+        Pattern.compile("（[^（）]{0,60}(?:当前复核事实|复核事实|未提供|无相关)[^（）]{0,60}）"),
+        // “复核事实”只会出现在面向系统的说明里，整句剔除到下一个标点
+        Pattern.compile("(?:当前|目前)?复核事实[^。，；,;）)]{0,40}[。，；,;）)]?"),
+        // “未提供/无相关 + 事实/依据/计划/记录/处方”说明从句；不含这些落点的临床叙述（如“未提供过敏史”）不受影响
+        Pattern.compile("(?:当前|目前)?(?:未提供|无相关)[^。，；,;）)]{0,16}(?:事实|依据|计划|记录|处方)[。，；,;）)]?"),
+        // “本段待医生补充”收敛为占位符本身
+        Pattern.compile("(?:本段|该段)[。；，,;]?\\s*待医生补充[。；，,;]?"),
+        // 并入正文末尾的签名行（仅吞并其前的空白，不动句子自身的结尾标点）
+        Pattern.compile("\\s*(?:副?主?任?医师|手术医师|上级医师)?签(?:名|字)[:：]\\s*$")
+    };
 
     private final ObjectMapper objectMapper;
 
@@ -154,7 +172,16 @@ public class InpatientAiResponseParser {
         if (value.length() > MAX_PARAGRAPH_LENGTH) {
             value = value.substring(0, MAX_PARAGRAPH_LENGTH);
         }
+        value = stripMetaCommentary(value);
         return value.isBlank() ? "待医生补充" : value;
+    }
+
+    private String stripMetaCommentary(String value) {
+        String result = value;
+        for (Pattern pattern : META_COMMENTARY_PATTERNS) {
+            result = pattern.matcher(result).replaceAll("");
+        }
+        return result.strip();
     }
 
     private ResponseStatusException badGateway(String message) {
