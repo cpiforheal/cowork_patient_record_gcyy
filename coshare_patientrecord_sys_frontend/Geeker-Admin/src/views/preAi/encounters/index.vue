@@ -7,7 +7,7 @@
         <h2>登记与事实采集</h2>
       </div>
       <div class="hero-actions">
-        <el-button class="patient-archive-trigger" type="primary" plain :icon="User" @click="patientDrawerOpen = true">
+        <el-button class="patient-archive-trigger" type="primary" :icon="User" @click="patientDrawerOpen = true">
           患者主档案
           <span class="patient-archive-trigger__count">{{ filteredPatientCases.length }}</span>
         </el-button>
@@ -1820,7 +1820,9 @@ const patientCaseRecordTimestamp = (item: PreAiPatientCase) => {
   const parsed = Date.parse(raw.replace(" ", "T"));
   return Number.isFinite(parsed) ? parsed : 0;
 };
-const patientCaseRecordDate = (item: PreAiPatientCase) => patientCaseRecordTime(item).split(/[ T]/)[0] || "";
+const patientCaseDatePart = (value?: string) => value?.split(/[ T]/)[0] || "";
+const patientCaseDateCandidates = (item: PreAiPatientCase) =>
+  [item.createdAt, item.latestEncounter?.visitDate, item.updatedAt].map(patientCaseDatePart).filter(Boolean);
 const formatPatientCaseRecordTime = (item: PreAiPatientCase) => patientCaseRecordTime(item) || "待补录入时间";
 
 const filteredPatientCases = computed(() => {
@@ -1834,7 +1836,7 @@ const filteredPatientCases = computed(() => {
         (careSituationFilter.value === "OUTPATIENT" && tags.includes("门诊")) ||
         (careSituationFilter.value === "INPATIENT" && tags.includes("住院")) ||
         (careSituationFilter.value === "LOW_INCOME" && tags.includes("低保"));
-      const matchesDate = !recordDate || patientCaseRecordDate(item) === recordDate;
+      const matchesDate = !recordDate || patientCaseDateCandidates(item).includes(recordDate);
       const searchable = `${item.patientName} ${item.latestEncounter?.caseToken || ""}`.toLowerCase();
       return matchesSituation && matchesDate && (!value || searchable.includes(value));
     })
@@ -3956,18 +3958,31 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
 }
 .patient-archive-trigger {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 8px 18px rgb(0 150 136 / 13%);
+  min-height: 42px;
+  padding: 10px 18px;
+  color: #ffffff;
+  font-weight: 800;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 76%, #0f766e));
+  box-shadow: 0 12px 24px rgb(0 150 136 / 24%);
+}
+.patient-archive-trigger:hover,
+.patient-archive-trigger:focus-visible {
+  color: #ffffff;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary) 88%, #0f766e), #0f766e);
+  box-shadow: 0 14px 28px rgb(0 150 136 / 30%);
 }
 .patient-archive-trigger__count {
-  min-width: 24px;
+  min-width: 28px;
   display: inline-flex;
   justify-content: center;
-  padding: 1px 7px;
-  margin-left: 2px;
-  color: #ffffff;
+  padding: 1px 8px;
+  margin-left: 4px;
+  color: var(--el-color-primary);
   border-radius: 999px;
-  background: var(--el-color-primary);
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 70%);
 }
 .workspace-shell {
   position: relative;
