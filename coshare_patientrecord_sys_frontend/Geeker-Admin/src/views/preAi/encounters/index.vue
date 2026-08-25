@@ -28,90 +28,86 @@
       @close="handoffNotice = ''"
     />
 
+    <el-dialog v-model="patientDrawerOpen" class="patient-archive-dialog" width="min(1180px, 92vw)" top="7vh" destroy-on-close>
+      <template #header>
+        <div class="sidebar-title__head patient-archive-dialog__head">
+          <div>
+            <strong>患者主档案</strong>
+            <small>{{ patientCases.length }} 位患者 · 按录入时间从新到旧排列</small>
+          </div>
+        </div>
+      </template>
+      <section class="patient-archive-dialog__body">
+        <div class="patient-archive-filters">
+          <el-input v-model="keyword" clearable placeholder="姓名/病例标识" :prefix-icon="Search" />
+          <el-select v-model="careSituationFilter" class="care-situation-filter" aria-label="就诊情况筛选">
+            <el-option label="全部就诊情况" value="ALL" />
+            <el-option label="门诊" value="OUTPATIENT" />
+            <el-option label="住院" value="INPATIENT" />
+            <el-option label="低保" value="LOW_INCOME" />
+          </el-select>
+          <el-date-picker
+            v-model="patientArchiveDate"
+            class="patient-archive-date-filter"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择录入日期"
+            clearable
+            aria-label="录入日期筛选"
+          />
+        </div>
+        <el-scrollbar height="min(62vh, 620px)">
+          <div class="patient-archive-card-grid">
+            <article
+              v-for="item in filteredPatientCases"
+              :key="item.id"
+              class="encounter-row"
+              :class="{ active: item.id === selectedPatientCaseId }"
+            >
+              <button type="button" class="encounter-row-main" @click="selectPatientCase(item)">
+                <div class="encounter-row__head">
+                  <strong>{{ item.patientName || "待补姓名" }}</strong>
+                  <el-tag v-if="item.latestEncounter" size="small" :type="encounterStatusType(item.latestEncounter.status)">
+                    {{ item.visitCount }} 次来访
+                  </el-tag>
+                </div>
+                <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
+                <small>录入 {{ formatPatientCaseRecordTime(item) }} · {{ routeLabel(item.latestEncounter?.route) }}</small>
+                <div v-if="item.latestEncounter?.careSituationTags" class="encounter-card__care-tags">
+                  <el-tag v-for="tag in item.latestEncounter.careSituationTags.split(',')" :key="tag" size="small" effect="plain">{{
+                    tag
+                  }}</el-tag>
+                </div>
+                <div v-if="item.latestEncounter" class="mini-steps">
+                  <i
+                    v-for="stage in preAiStages"
+                    :key="stage.code"
+                    :title="`${stage.title}：${stageStatusLabel[item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT']}`"
+                    :class="stageStatusClass(item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT')"
+                  ></i>
+                </div>
+              </button>
+              <button
+                v-if="canCreateEncounter"
+                type="button"
+                class="encounter-row-followup"
+                @click.stop="openFollowUpDialog(item)"
+              >
+                新增复诊
+              </button>
+            </article>
+          </div>
+          <el-empty v-if="!filteredPatientCases.length" :image-size="92" description="暂无患者主档案" />
+        </el-scrollbar>
+      </section>
+    </el-dialog>
+
     <section
       ref="workspaceShellRef"
       class="workspace-shell"
       :class="{ 'with-history': historyPanelOpen && workspace }"
       :style="historyPaneStyle"
     >
-      <button
-        v-if="patientDrawerOpen"
-        type="button"
-        class="patient-drawer-mask"
-        aria-label="关闭患者主档案"
-        @click="patientDrawerOpen = false"
-      ></button>
-      <aside v-if="patientDrawerOpen" class="encounter-sidebar" aria-label="患者主档案悬浮面板">
-        <div class="sidebar-title">
-          <div class="sidebar-title__head">
-            <div>
-              <strong>患者主档案</strong>
-              <small>{{ patientCases.length }} 位患者 · 按录入时间从新到旧排列</small>
-            </div>
-            <el-button link type="primary" @click="patientDrawerOpen = false">收起</el-button>
-          </div>
-          <div class="patient-archive-filters">
-            <el-input v-model="keyword" clearable placeholder="姓名/病例标识" :prefix-icon="Search" />
-            <el-select v-model="careSituationFilter" class="care-situation-filter" aria-label="就诊情况筛选">
-              <el-option label="全部就诊情况" value="ALL" />
-              <el-option label="门诊" value="OUTPATIENT" />
-              <el-option label="住院" value="INPATIENT" />
-              <el-option label="低保" value="LOW_INCOME" />
-            </el-select>
-            <el-date-picker
-              v-model="patientArchiveDate"
-              class="patient-archive-date-filter"
-              type="date"
-              value-format="YYYY-MM-DD"
-              placeholder="选择录入日期"
-              clearable
-              aria-label="录入日期筛选"
-            />
-          </div>
-        </div>
-        <el-scrollbar height="calc(100vh - 320px)">
-          <article
-            v-for="item in filteredPatientCases"
-            :key="item.id"
-            class="encounter-row"
-            :class="{ active: item.id === selectedPatientCaseId }"
-          >
-            <button type="button" class="encounter-row-main" @click="selectPatientCase(item)">
-              <div class="encounter-row__head">
-                <strong>{{ item.patientName || "待补姓名" }}</strong>
-                <el-tag v-if="item.latestEncounter" size="small" :type="encounterStatusType(item.latestEncounter.status)">
-                  {{ item.visitCount }} 次来访
-                </el-tag>
-              </div>
-              <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
-              <small>录入 {{ formatPatientCaseRecordTime(item) }} · {{ routeLabel(item.latestEncounter?.route) }}</small>
-              <div v-if="item.latestEncounter?.careSituationTags" class="encounter-card__care-tags">
-                <el-tag v-for="tag in item.latestEncounter.careSituationTags.split(',')" :key="tag" size="small" effect="plain">{{
-                  tag
-                }}</el-tag>
-              </div>
-              <div v-if="item.latestEncounter" class="mini-steps">
-                <i
-                  v-for="stage in preAiStages"
-                  :key="stage.code"
-                  :title="`${stage.title}：${stageStatusLabel[item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT']}`"
-                  :class="stageStatusClass(item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT')"
-                ></i>
-              </div>
-            </button>
-            <button
-              v-if="canCreateEncounter"
-              type="button"
-              class="encounter-row-followup"
-              @click.stop="openFollowUpDialog(item)"
-            >
-              新增复诊
-            </button>
-          </article>
-          <el-empty v-if="!filteredPatientCases.length" :image-size="72" description="暂无患者主档案" />
-        </el-scrollbar>
-      </aside>
-
       <main v-loading="workspaceLoading" class="encounter-workspace">
         <el-empty v-if="!workspace" description="请点击顶部患者主档案选择患者，或新建前置病历" />
         <template v-else>
@@ -3872,7 +3868,6 @@ onBeforeUnmount(() => {
 .page-hero,
 .patient-banner,
 .stage-panel,
-.encounter-sidebar,
 .workflow-empty-panel,
 .template-preview-panel {
   border: 1px solid var(--el-border-color-light);
@@ -4046,29 +4041,30 @@ onBeforeUnmount(() => {
 .history-entry-bar small {
   color: var(--el-text-color-secondary);
 }
-.encounter-sidebar {
-  position: absolute;
-  z-index: 40;
-  top: 0;
-  left: 0;
-  width: min(430px, calc(100vw - 28px));
-  max-height: min(720px, calc(100vh - 150px));
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
-  padding: 18px;
-  overflow: hidden;
-  box-shadow: 16px 18px 44px rgb(31 78 120 / 20%);
+:global(.patient-archive-dialog) {
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 28%);
 }
-.patient-drawer-mask {
-  position: fixed;
-  z-index: 39;
-  inset: 0;
-  display: block;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: default;
+:global(.patient-archive-dialog .el-dialog__header) {
+  padding: 24px 28px 14px;
+  margin-right: 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+:global(.patient-archive-dialog .el-dialog__body) {
+  padding: 18px 28px 24px;
+}
+.patient-archive-dialog__body {
+  display: grid;
+  gap: 16px;
+}
+.patient-archive-dialog__head strong {
+  font-size: 18px;
+}
+.patient-archive-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-right: 8px;
 }
 .sidebar-title {
   display: grid;
@@ -4077,7 +4073,7 @@ onBeforeUnmount(() => {
 }
 .patient-archive-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 1.2fr) minmax(180px, 0.8fr) minmax(190px, 0.8fr);
   gap: 10px;
 }
 .care-situation-filter,
@@ -5052,19 +5048,18 @@ onBeforeUnmount(() => {
   .encounter-workspace {
     grid-column: auto;
   }
-  .encounter-sidebar {
-    position: fixed;
-    z-index: 42;
-    top: 86px;
-    bottom: 18px;
-    left: 10px;
-    width: calc(100vw - 20px);
-    max-height: none;
-    min-height: 0;
+  .patient-archive-filters,
+  .patient-archive-card-grid {
+    grid-template-columns: 1fr;
   }
-  .patient-drawer-mask {
-    z-index: 41;
-    background: rgb(31 78 120 / 8%);
+  :global(.patient-archive-dialog) {
+    width: calc(100vw - 20px) !important;
+    margin-top: 5vh;
+  }
+  :global(.patient-archive-dialog .el-dialog__header),
+  :global(.patient-archive-dialog .el-dialog__body) {
+    padding-right: 16px;
+    padding-left: 16px;
   }
   .workspace-modebar {
     align-items: flex-start;
