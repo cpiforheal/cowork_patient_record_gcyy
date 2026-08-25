@@ -257,14 +257,17 @@ defineEmits<{
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
-    background-color 0.18s ease,
-    transform 0.18s ease;
+    background-color 0.18s ease;
 }
 .workflow-card:hover,
 .workflow-card.active {
   border-color: var(--el-color-primary-light-3);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, var(--el-bg-color));
   box-shadow: 0 8px 20px rgb(64 158 255 / 14%);
-  transform: translateY(-2px);
+}
+.workflow-card:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
 .workflow-card.active {
   outline: 2px solid color-mix(in srgb, var(--el-color-primary) 20%, transparent);
@@ -272,8 +275,8 @@ defineEmits<{
 }
 .workflow-card.current {
   border-color: var(--el-color-primary);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary) 13%, var(--el-bg-color)), var(--el-bg-color));
-  box-shadow: 0 12px 28px rgb(0 150 136 / 18%);
+  background: color-mix(in srgb, var(--el-color-primary) 24%, var(--el-bg-color));
+  box-shadow: 0 12px 28px rgb(0 150 136 / 16%);
 }
 .workflow-card.current::after {
   position: absolute;
@@ -326,6 +329,11 @@ defineEmits<{
   grid-column: 2;
   justify-self: start;
   max-width: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .workflow-card {
+    transition: none;
+  }
 }
 @media (max-width: 920px) {
   .workflow-header {

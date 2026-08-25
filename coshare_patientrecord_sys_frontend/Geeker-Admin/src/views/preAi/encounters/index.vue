@@ -173,11 +173,13 @@
               <span>{{ activeWorkflowTitle }}</span>
               <small>{{ activeWorkflowOwner }}</small>
             </div>
-            <div class="mode-tags" aria-label="填写态和预览态切换">
+            <div class="mode-tags" :class="{ preview: editorMode === 'PREVIEW' }" role="group" aria-label="填写态和预览态切换">
+              <span class="mode-slider" aria-hidden="true"></span>
               <button
                 type="button"
                 class="mode-pill edit"
                 :class="{ active: editorMode === 'EDIT' }"
+                :aria-pressed="editorMode === 'EDIT'"
                 @click="editorMode = 'EDIT'"
               >
                 填写态
@@ -186,6 +188,7 @@
                 type="button"
                 class="mode-pill preview"
                 :class="{ active: editorMode === 'PREVIEW' }"
+                :aria-pressed="editorMode === 'PREVIEW'"
                 @click="openPreviewMode"
               >
                 模板预览态
@@ -2627,6 +2630,7 @@ const activateWorkflowCard = (card: WorkflowCard) => {
 };
 
 const openPreviewMode = () => {
+  if (editorMode.value === "PREVIEW") return;
   editorMode.value = "PREVIEW";
   if (workspace.value) void loadWorkspaceInspectionImages(workspace.value);
 };
@@ -4292,31 +4296,57 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 .mode-tags {
-  display: flex;
-  gap: 5px;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(104px, 1fr));
+  gap: 0;
   padding: 4px;
   border-radius: 999px;
   background: var(--el-fill-color-light);
 }
+.mode-slider {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 2);
+  border-radius: 999px;
+  background-color: var(--el-color-primary);
+  transition:
+    transform 0.16s ease,
+    background-color 0.16s ease;
+}
+.mode-tags.preview .mode-slider {
+  background-color: var(--el-color-success);
+  transform: translateX(100%);
+}
 .mode-pill {
+  position: relative;
+  z-index: 1;
   min-width: 104px;
   padding: 8px 16px;
+  color: var(--el-text-color-regular);
   font-weight: 700;
   border: 0;
   border-radius: 999px;
+  background: transparent;
   cursor: pointer;
   user-select: none;
-  transition:
-    color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
+  transition: color 0.16s ease;
 }
-.mode-pill:hover {
-  transform: translateY(-1px);
+.mode-pill:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
-.mode-pill.active {
-  transform: translateY(-1px);
+.mode-pill.edit.active,
+.mode-pill.preview.active {
+  color: #ffffff;
+}
+.mode-pill.edit:not(.active) {
+  color: var(--el-color-primary);
+}
+.mode-pill.preview:not(.active) {
+  color: var(--el-color-success);
 }
 .editor-mode-content {
   min-width: 0;
@@ -4339,23 +4369,18 @@ onBeforeUnmount(() => {
   opacity: 0;
   transform: translateY(-6px);
 }
-.mode-pill.edit {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
-.mode-pill.edit.active {
-  color: white;
-  background: var(--el-color-primary);
-  box-shadow: 0 6px 16px rgb(64 158 255 / 24%);
-}
-.mode-pill.preview {
-  color: var(--el-color-success);
-  background: var(--el-color-success-light-9);
-}
-.mode-pill.preview.active {
-  color: white;
-  background: var(--el-color-success);
-  box-shadow: 0 6px 16px rgb(103 194 58 / 24%);
+@media (prefers-reduced-motion: reduce) {
+  .mode-slider,
+  .mode-pill,
+  .workspace-mode-enter-active,
+  .workspace-mode-leave-active,
+  .upstream-image-card {
+    transition: none;
+  }
+  .workspace-mode-enter-from,
+  .workspace-mode-leave-to {
+    transform: none;
+  }
 }
 .inspection-view-tabs {
   display: inline-flex;
@@ -4763,11 +4788,11 @@ onBeforeUnmount(() => {
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
-    transform 0.2s ease;
+    background-color 0.2s ease;
 }
 .upstream-image-card:hover {
   border-color: var(--el-color-primary-light-5);
-  transform: translateY(-2px);
+  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
   box-shadow: 0 8px 20px rgb(64 158 255 / 12%);
 }
 .upstream-image-card.featured {
@@ -4956,6 +4981,11 @@ onBeforeUnmount(() => {
   }
   .page-hero {
     align-items: flex-start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .upstream-image-card {
+    transition: none;
   }
 }
 @media (max-width: 680px) {

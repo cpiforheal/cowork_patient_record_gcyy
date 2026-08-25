@@ -213,11 +213,18 @@
                 </small>
               </div>
               <div class="version-actions">
-                <el-button type="primary" plain :disabled="version.status === 'voided'" @click="$emit('downloadTarget', version)">
+                <el-button
+                  class="version-direct-action"
+                  type="primary"
+                  plain
+                  :disabled="version.status === 'voided'"
+                  @click="$emit('downloadTarget', version)"
+                >
                   下载
                 </el-button>
                 <el-button
                   v-if="version.status !== 'finalized'"
+                  class="version-direct-action"
                   type="danger"
                   plain
                   :loading="deletingTargetVersionId === version.id"
@@ -225,6 +232,27 @@
                 >
                   删除
                 </el-button>
+                <el-dropdown
+                  class="version-touch-menu"
+                  trigger="click"
+                  placement="bottom-end"
+                  @command="handleTargetVersionCommand($event, version)"
+                >
+                  <el-button :icon="MoreFilled" plain aria-label="更多版本操作">更多</el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="download" :disabled="version.status === 'voided'">下载</el-dropdown-item>
+                      <el-dropdown-item
+                        v-if="version.status !== 'finalized'"
+                        command="delete"
+                        divided
+                        :disabled="deletingTargetVersionId === version.id"
+                      >
+                        删除
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </div>
           </template>
@@ -271,7 +299,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { Refresh } from "@element-plus/icons-vue";
+import { MoreFilled, Refresh } from "@element-plus/icons-vue";
 import type {
   GeneratedMedicalRecord,
   PreAiDocumentSection,
@@ -325,7 +353,7 @@ const exportStatusLabel = (status: string) => {
 const exportStatusType = (status: string) =>
   ["INVALIDATED", "VOIDED"].includes(status.toUpperCase()) ? ("danger" as const) : ("success" as const);
 
-defineEmits<{
+const emit = defineEmits<{
   refresh: [];
   confirm: [];
   generate: [];
@@ -337,6 +365,14 @@ defineEmits<{
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
 }>();
+
+const handleTargetVersionCommand = (command: string | number | object, version: GeneratedMedicalRecord) => {
+  if (command === "download") {
+    emit("downloadTarget", version);
+    return;
+  }
+  if (command === "delete") emit("deleteTarget", version);
+};
 </script>
 
 <style scoped lang="scss">
@@ -376,6 +412,13 @@ defineEmits<{
   display: flex;
   flex-shrink: 0;
   gap: 8px;
+}
+.version-touch-menu {
+  display: none;
+}
+.version-actions :deep(.el-button:focus-visible) {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
 .generate-actions {
   display: flex;
@@ -728,6 +771,16 @@ defineEmits<{
   gap: 10px;
   padding: 11px 12px;
   border-bottom: 1px solid var(--el-border-color-lighter);
+  transition:
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.version-row:not(.latest):hover,
+.version-row:not(.latest):focus-within {
+  background: color-mix(in srgb, var(--el-color-primary) 6%, var(--el-bg-color));
+}
+.version-row:focus-within {
+  box-shadow: inset 3px 0 0 var(--el-color-primary-light-3);
 }
 .version-row:last-child {
   border-bottom: 0;
@@ -762,6 +815,11 @@ defineEmits<{
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .version-row {
+    transition: none;
+  }
 }
 @media (max-width: 680px) {
   .panel-heading {
@@ -826,6 +884,17 @@ defineEmits<{
   .version-row :deep(.el-button) {
     width: 100%;
     grid-column: 1 / -1;
+  }
+  .version-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+  .version-direct-action {
+    display: none;
+  }
+  .version-touch-menu {
+    display: inline-flex;
+    width: 100%;
   }
 }
 </style>
