@@ -126,8 +126,10 @@
             <article
               v-for="item in filteredPatientCases"
               :key="item.id"
+              :ref="element => setPatientArchiveMasonryCardRef(element, item)"
               class="patient-archive-masonry-card"
               :class="{ active: item.id === selectedPatientCaseId }"
+              :data-patient-case-id="item.id"
             >
               <button type="button" class="patient-archive-masonry-main" @click="selectPatientCase(item)">
                 <header class="patient-archive-masonry-head">
@@ -161,7 +163,7 @@
                   </template>
                 </div>
                 <div v-else class="patient-archive-thumbnail-empty">
-                  {{ patientArchiveCardLoading(item) ? "正在读取图片" : "暂无患者图片" }}
+                  {{ patientArchiveCardEmptyText(item) }}
                 </div>
                 <footer class="patient-archive-masonry-foot">
                   <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
@@ -1923,6 +1925,7 @@ const filteredPatientCases = computed(() => {
 interface PatientArchiveCardDetail {
   loading: boolean;
   loaded: boolean;
+  imageLoading: boolean;
   chiefComplaint: string;
   images: PreAiAttachment[];
   error?: string;
@@ -1939,8 +1942,15 @@ const patientArchiveImageErrors = reactive<Record<string, string>>({});
 const patientArchiveMasonryLoading = ref(false);
 const patientArchiveImageStageCodes: PreAiStageCode[] = ["RECEPTION", "INSPECTION"];
 const patientArchiveTagTones = ["teal", "blue", "violet", "amber", "rose", "green"];
+const patientArchiveCardElements = new Map<string, Element>();
+const patientArchiveLoadQueue: PreAiPatientCase[] = [];
+const patientArchiveQueuedCaseIds = new Set<string>();
+const PATIENT_ARCHIVE_CARD_LOAD_LIMIT = 2;
+const PATIENT_ARCHIVE_THUMBNAIL_LIMIT = 3;
+let patientArchiveActiveLoads = 0;
 let patientArchiveRequestSequence = 0;
 let patientArchiveAbortController: AbortController | undefined;
+let patientArchiveObserver: IntersectionObserver | undefined;
 
 const patientArchiveHash = (value: string) =>
   Array.from(value).reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
@@ -2002,7 +2012,8 @@ const patientArchiveCardTags = (item: PreAiPatientCase): PatientArchiveInfoTag[]
   if (item.latestEncounter) tags.push({ key: "status", label: encounterStatusLabel[item.latestEncounter.status] });
   return tags.slice(0, 6);
 };
-const patientArchiveCardImages = (item: PreAiPatientCase) => (patientArchiveDetailOf(item)?.images || []).slice(0, 4);
+const patientArchiveCardImages = (item: PreAiPatientCase) =>
+  (patientArchiveDetailOf(item)?.images || []).slice(0, PATIENT_ARCHIVE_THUMBNAIL_LIMIT);
 const patientArchiveCardPreviewUrls = (item: PreAiPatientCase) =>
   patientArchiveCardImages(item)
     .map(attachment => patientArchiveImageUrls[attachment.id])
@@ -2011,32 +2022,34 @@ const patientArchiveCardPreviewIndex = (item: PreAiPatientCase, attachment: PreA
   const imageIds = patientArchiveCardImages(item).filter(image => patientArchiveImageUrls[image.id]).map(image => image.id);
   return Math.max(0, imageIds.indexOf(attachment.id));
 };
-const patientArchiveCardLoading = (item: PreAiPatientCase) => {
+const patientArchiveCardEmptyText = (item: PreAiPatientCase) => {
   const detail = patientArchiveDetailOf(item);
-  return Boolean(item.latestEncounter && (!detail || detail.loading));
+  if (!item.latestEncounter) return "尚无患者图片";
+  if (!detail) return "进入视图后加载图片";
+  if (detail.loading) return "正在读取病历";
+  if (detail.imageLoading) return "正在加载缩略图";
+  if (detail.error) return detail.error;
+  return "暂无患者图片";
 };
 const revokePatientArchiveImageUrl = (attachmentId: string) => {
   const url = patientArchiveImageUrls[attachmentId];
   if (url) URL.revokeObjectURL(url);
   delete patientArchiveImageUrls[attachmentId];
 };
-const abortPatientArchiveMasonryRequests = () => {
-  patientArchiveAbortController?.abort();
-  patientArchiveAbortController = undefined;
-  patientArchiveRequestSequence += 1;
-  patientArchiveMasonryLoading.value = false;
+const updatePatientArchiveMasonryLoading = () => {
+  patientArchiveMasonryLoading.value = patientArchiveActiveLoads > 0 || patientArchiveLoadQueue.length > 0;
 };
-const clearPatientArchiveMasonryResources = () => {
-  abortPatientArchiveMasonryRequests();
-  Object.keys(patientArchiveCardDetails).forEach(key => delete patientArchiveCardDetails[key]);
-  Object.keys(patientArchiveImageUrls).forEach(revokePatientArchiveImageUrl);
-  Object.keys(patientArchiveImageErrors).forEach(key => delete patientArchiveImageErrors[key]);
-};
+const attachmentWithDownloadUrl = (attachment: PreAiAttachment): PreAiAttachment => ({
+  ...attachment,
+  downloadUrl:
+    attachment.downloadUrl ||
+    `/clinic-api/pre-ai/encounters/${encodeURIComponent(attachment.encounterId)}/attachments/${encodeURIComponent(attachment.id)}/download`
+});
 const loadPatientArchiveImage = async (attachment: PreAiAttachment, signal: AbortSignal, requestSequence: number) => {
   if (patientArchiveImageUrls[attachment.id]) return;
   delete patientArchiveImageErrors[attachment.id];
   try {
-    const url = await getPreAiAttachmentObjectUrlApi(attachment, signal);
+    const url = await getPreAiAttachmentObjectUrlApi(attachmentWithDownloadUrl(attachment), signal);
     if (signal.aborted || requestSequence !== patientArchiveRequestSequence) {
       URL.revokeObjectURL(url);
       return;
@@ -2044,71 +2057,154 @@ const loadPatientArchiveImage = async (attachment: PreAiAttachment, signal: Abor
     patientArchiveImageUrls[attachment.id] = url;
   } catch (error: any) {
     if (error?.name !== "AbortError" && requestSequence === patientArchiveRequestSequence) {
-      patientArchiveImageErrors[attachment.id] = "缩略图加载失败";
+      patientArchiveImageErrors[attachment.id] = error?.message || "缩略图加载失败";
     }
   }
 };
-const loadPatientArchiveMasonryDetails = async () => {
-  if (!patientDrawerOpen.value || patientArchiveView.value !== "MASONRY") return;
-  abortPatientArchiveMasonryRequests();
-  const items = filteredPatientCases.value.filter(item => item.latestEncounter);
-  if (!items.length) return;
-
-  const requestSequence = ++patientArchiveRequestSequence;
-  const requestController = new AbortController();
-  patientArchiveAbortController = requestController;
-  patientArchiveMasonryLoading.value = true;
-  const queue = items.filter(item => !patientArchiveCardDetails[item.id]?.loaded);
-
-  const worker = async () => {
-    while (queue.length && requestSequence === patientArchiveRequestSequence && !requestController.signal.aborted) {
-      const item = queue.shift();
-      if (!item?.latestEncounter) continue;
-      patientArchiveCardDetails[item.id] = {
-        loading: true,
-        loaded: false,
-        chiefComplaint: patientArchiveChiefComplaint(item),
-        images: []
-      };
-      try {
-        const { data } = await getPreAiReadOnlyWorkspaceApi(item.latestEncounter.id, item.id, requestController.signal);
-        if (requestController.signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
-        const images = patientArchiveImagesFromWorkspace(data);
-        patientArchiveCardDetails[item.id] = {
-          loading: false,
-          loaded: true,
-          chiefComplaint: patientArchiveChiefComplaintFromWorkspace(data),
-          images
-        };
-        await Promise.all(images.slice(0, 4).map(attachment => loadPatientArchiveImage(attachment, requestController.signal, requestSequence)));
-      } catch (error: any) {
-        if (error?.name !== "AbortError" && requestSequence === patientArchiveRequestSequence) {
-          patientArchiveCardDetails[item.id] = {
-            loading: false,
-            loaded: true,
-            chiefComplaint: patientArchiveChiefComplaint(item),
-            images: [],
-            error: error?.message || "病历详情加载失败"
-          };
-        }
-      }
-    }
+const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: number, signal: AbortSignal) => {
+  if (!item.latestEncounter || signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
+  patientArchiveCardDetails[item.id] = {
+    loading: true,
+    loaded: false,
+    imageLoading: false,
+    chiefComplaint: patientArchiveChiefComplaint(item),
+    images: []
   };
 
   try {
-    await Promise.all(Array.from({ length: Math.min(3, Math.max(queue.length, 1)) }, worker));
-  } finally {
-    if (requestSequence === patientArchiveRequestSequence) {
-      patientArchiveAbortController = undefined;
-      patientArchiveMasonryLoading.value = false;
+    const { data } = await getPreAiReadOnlyWorkspaceApi(item.latestEncounter.id, item.id, signal);
+    if (signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
+    const images = patientArchiveImagesFromWorkspace(data);
+    patientArchiveCardDetails[item.id] = {
+      loading: false,
+      loaded: true,
+      imageLoading: Boolean(images.length),
+      chiefComplaint: patientArchiveChiefComplaintFromWorkspace(data),
+      images
+    };
+    for (const attachment of images.slice(0, PATIENT_ARCHIVE_THUMBNAIL_LIMIT)) {
+      if (signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
+      await loadPatientArchiveImage(attachment, signal, requestSequence);
+    }
+    if (requestSequence === patientArchiveRequestSequence && patientArchiveCardDetails[item.id]) {
+      patientArchiveCardDetails[item.id].imageLoading = false;
+    }
+  } catch (error: any) {
+    if (error?.name !== "AbortError" && requestSequence === patientArchiveRequestSequence) {
+      patientArchiveCardDetails[item.id] = {
+        loading: false,
+        loaded: true,
+        imageLoading: false,
+        chiefComplaint: patientArchiveChiefComplaint(item),
+        images: [],
+        error: error?.message || "病历详情加载失败"
+      };
     }
   }
 };
+const processPatientArchiveLoadQueue = () => {
+  if (!patientDrawerOpen.value || patientArchiveView.value !== "MASONRY") return;
+  if (!patientArchiveAbortController || patientArchiveAbortController.signal.aborted) patientArchiveAbortController = new AbortController();
+  const signal = patientArchiveAbortController.signal;
+  const requestSequence = patientArchiveRequestSequence;
+
+  while (patientArchiveActiveLoads < PATIENT_ARCHIVE_CARD_LOAD_LIMIT && patientArchiveLoadQueue.length) {
+    const item = patientArchiveLoadQueue.shift();
+    if (!item || patientArchiveCardDetails[item.id]?.loaded || patientArchiveCardDetails[item.id]?.loading) continue;
+    patientArchiveQueuedCaseIds.delete(item.id);
+    patientArchiveActiveLoads += 1;
+    updatePatientArchiveMasonryLoading();
+    void loadPatientArchiveCard(item, requestSequence, signal).finally(() => {
+      if (requestSequence === patientArchiveRequestSequence) {
+        patientArchiveActiveLoads = Math.max(0, patientArchiveActiveLoads - 1);
+        updatePatientArchiveMasonryLoading();
+        processPatientArchiveLoadQueue();
+      }
+    });
+  }
+  updatePatientArchiveMasonryLoading();
+};
+const queuePatientArchiveCardLoad = (item: PreAiPatientCase) => {
+  if (!item.latestEncounter || patientArchiveCardDetails[item.id]?.loaded || patientArchiveCardDetails[item.id]?.loading) return;
+  if (patientArchiveQueuedCaseIds.has(item.id)) return;
+  patientArchiveQueuedCaseIds.add(item.id);
+  patientArchiveLoadQueue.push(item);
+  processPatientArchiveLoadQueue();
+};
+const ensurePatientArchiveObserver = () => {
+  if (patientArchiveObserver || typeof IntersectionObserver === "undefined") return patientArchiveObserver;
+  patientArchiveObserver = new IntersectionObserver(
+    entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        patientArchiveObserver?.unobserve(entry.target);
+        const id = (entry.target as HTMLElement).dataset.patientCaseId || "";
+        const item = filteredPatientCases.value.find(candidate => candidate.id === id);
+        if (item) queuePatientArchiveCardLoad(item);
+      });
+    },
+    { root: null, rootMargin: "180px 0px", threshold: 0.01 }
+  );
+  return patientArchiveObserver;
+};
+const observePatientArchiveCard = (element: Element, item: PreAiPatientCase) => {
+  if (!patientDrawerOpen.value || patientArchiveView.value !== "MASONRY") return;
+  if (patientArchiveCardDetails[item.id]?.loaded || patientArchiveCardDetails[item.id]?.loading) return;
+  const observer = ensurePatientArchiveObserver();
+  if (observer) observer.observe(element);
+  else queuePatientArchiveCardLoad(item);
+};
+const setPatientArchiveMasonryCardRef = (element: Element | null, item: PreAiPatientCase) => {
+  const existing = patientArchiveCardElements.get(item.id);
+  if (existing) patientArchiveObserver?.unobserve(existing);
+  if (!element) {
+    patientArchiveCardElements.delete(item.id);
+    return;
+  }
+  patientArchiveCardElements.set(item.id, element);
+  observePatientArchiveCard(element, item);
+};
+const abortPatientArchiveMasonryRequests = () => {
+  patientArchiveAbortController?.abort();
+  patientArchiveAbortController = undefined;
+  patientArchiveRequestSequence += 1;
+  patientArchiveLoadQueue.length = 0;
+  patientArchiveQueuedCaseIds.clear();
+  patientArchiveActiveLoads = 0;
+  Object.keys(patientArchiveCardDetails).forEach(key => {
+    const detail = patientArchiveCardDetails[key];
+    if (detail.loading || detail.imageLoading) delete patientArchiveCardDetails[key];
+  });
+  updatePatientArchiveMasonryLoading();
+};
+const clearPatientArchiveMasonryResources = () => {
+  abortPatientArchiveMasonryRequests();
+  patientArchiveObserver?.disconnect();
+  patientArchiveObserver = undefined;
+  patientArchiveCardElements.clear();
+  Object.keys(patientArchiveCardDetails).forEach(key => delete patientArchiveCardDetails[key]);
+  Object.keys(patientArchiveImageUrls).forEach(revokePatientArchiveImageUrl);
+  Object.keys(patientArchiveImageErrors).forEach(key => delete patientArchiveImageErrors[key]);
+};
 watch(
   () => [patientDrawerOpen.value, patientArchiveView.value, filteredPatientCases.value.map(item => item.id).join("|")],
-  () => {
-    if (patientDrawerOpen.value && patientArchiveView.value === "MASONRY") void loadPatientArchiveMasonryDetails();
-    if (!patientDrawerOpen.value) abortPatientArchiveMasonryRequests();
+  async () => {
+    if (!patientDrawerOpen.value || patientArchiveView.value !== "MASONRY") {
+      abortPatientArchiveMasonryRequests();
+      patientArchiveObserver?.disconnect();
+      patientArchiveObserver = undefined;
+      return;
+    }
+    if (!patientArchiveAbortController || patientArchiveAbortController.signal.aborted) {
+      patientArchiveRequestSequence += 1;
+      patientArchiveAbortController = new AbortController();
+    }
+    await nextTick();
+    patientArchiveCardElements.forEach((element, id) => {
+      const item = filteredPatientCases.value.find(candidate => candidate.id === id);
+      if (item) observePatientArchiveCard(element, item);
+    });
+    updatePatientArchiveMasonryLoading();
   },
   { flush: "post" }
 );
