@@ -382,7 +382,10 @@
                   </section>
 
                   <ClinicalTemplateToolbar
-                    v-if="['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
+                    v-if="
+                      ['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) &&
+                      (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')
+                    "
                     :model-value="clinicalTemplateIds(selectedStageCode)"
                     :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
                     :disabled="!canModifySelectedStage"
@@ -391,6 +394,19 @@
                     @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
                     @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
                   />
+
+                  <section
+                    v-if="secondaryStageFieldsCount && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
+                    class="field-noise-toolbar"
+                  >
+                    <div>
+                      <strong>精简填写视图</strong>
+                      <small>默认收起低频补充项，仅降低录入噪音；原字段、自动生成和提交载荷保持不变。</small>
+                    </div>
+                    <el-button size="small" plain @click="compactStageFieldsExpanded = !compactStageFieldsExpanded">
+                      {{ compactStageFieldsExpanded ? "收起低频字段" : `展开 ${secondaryStageFieldsCount} 个可选字段` }}
+                    </el-button>
+                  </section>
 
                   <el-form
                     v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
@@ -403,7 +419,12 @@
                         :key="field.key"
                         :label="field.label"
                         :required="field.required"
-                        :class="{ 'span-2': field.span === 2, 'priority-field': field.emphasis === 'priority' }"
+                        v-show="!isSecondaryStageField(field) || compactStageFieldsExpanded"
+                        :class="{
+                          'span-2': field.span === 2,
+                          'priority-field': field.emphasis === 'priority',
+                          'secondary-field': isSecondaryStageField(field)
+                        }"
                       >
                         <StructuredField
                           v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
@@ -746,7 +767,16 @@
           @update:slot-values="value => patchCreateForm('clinicalTemplateSlots', value)"
           @apply="applyCreateClinicalTemplate"
         />
-        <RegistrationFormFields :fields="registrationFields" :form="createForm" @patch="patchCreateForm" />
+        <section v-if="createSecondaryRegistrationFieldsCount" class="field-noise-toolbar dialog-field-noise-toolbar">
+          <div>
+            <strong>精简登记视图</strong>
+            <small>先登记发号必须信息，证件、地址、病史补充等低频项仍可展开填写。</small>
+          </div>
+          <el-button size="small" plain @click="createOptionalFieldsExpanded = !createOptionalFieldsExpanded">
+            {{ createOptionalFieldsExpanded ? "收起低频字段" : `展开 ${createSecondaryRegistrationFieldsCount} 个可选字段` }}
+          </el-button>
+        </section>
+        <RegistrationFormFields :fields="registrationDialogFields" :form="createForm" @patch="patchCreateForm" />
         <el-alert
           title="常规诊疗进入检查候诊；选择胃肠镜检查/咨询后会直接进入接诊室，号码全程不变。"
           type="info"
@@ -1358,6 +1388,71 @@ const attachmentUpload = reactive({
 });
 const selectedPanel = ref<"STAGE" | "AUX">("STAGE");
 const selectedStageCode = ref<PreAiStageCode>("REGISTRATION");
+const compactStageFieldsExpanded = ref(false);
+const createOptionalFieldsExpanded = ref(false);
+const compactStageFieldKeys: Partial<Record<PreAiStageCode, Set<string>>> = {
+  REGISTRATION: new Set([
+    "identityType",
+    "identityNumber",
+    "address",
+    "patientSource",
+    "careSituationDescription",
+    "registrationPastHistory",
+    "registrationCurrentIllness",
+    "registrationNote"
+  ]),
+  INSPECTION: new Set(["inspectionSpecialDescription", "nextReviewAt", "nextReviewNote"]),
+  RECEPTION: new Set([
+    "chiefComplaintSupplement",
+    "previousTreatment",
+    "generalCondition",
+    "stoolFrequency",
+    "stoolCharacteristics",
+    "chronicDiseaseItems",
+    "surgicalHistoryItems",
+    "traumaHistory",
+    "transfusionHistory",
+    "vaccinationHistory",
+    "medicationHistory",
+    "allergyHistory",
+    "personalHistory",
+    "maritalHistory",
+    "familyHistory",
+    "historySupplement",
+    "specialCircumstances",
+    "receptionSpecialDescription",
+    "reviewOpinion",
+    "dispositionSupplement",
+    "recommendedAuxiliaryExams"
+  ]),
+  TCM: new Set(["auscultationOlfaction", "palpation", "comorbidTcmItems"]),
+  DOCTOR: new Set([
+    "diagnosisEvidence",
+    "differentialDiagnoses",
+    "medicationDirections",
+    "examPlans",
+    "observationFocus",
+    "admissionSeverity",
+    "treatmentCategory",
+    "plannedSecondaryOperations",
+    "operationIndications",
+    "plannedOperationSite",
+    "recommendedAnesthesia",
+    "operationGrade",
+    "specialOperationPlan"
+  ]),
+  SURGERY: new Set([
+    "actualSecondaryOperations",
+    "operationEndTime",
+    "intraoperativeFindingOptions",
+    "procedureStepOptions",
+    "specimenPathology",
+    "drainageOptions",
+    "dressingOptions",
+    "postoperativeHandoffOptions"
+  ])
+};
+const createRegistrationOptionalFieldKeys = compactStageFieldKeys.REGISTRATION || new Set<string>();
 const workflowSelected = ref(false);
 const editorMode = ref<"EDIT" | "PREVIEW">("EDIT");
 const inspectionView = ref<"CURRENT" | "HISTORY">("CURRENT");
@@ -1819,7 +1914,21 @@ const selectedStageSubmission = computed(() => stageSubmission(selectedStageCode
 const visibleStageFields = computed(() =>
   selectedStage.value.fields.filter(field => !field.visible || field.visible(stageForms[selectedStageCode.value]))
 );
+const isSecondaryStageField = (field: PreAiFieldConfig) =>
+  Boolean(compactStageFieldKeys[selectedStageCode.value]?.has(field.key));
+const secondaryStageFieldsCount = computed(() => visibleStageFields.value.filter(field => isSecondaryStageField(field)).length);
 const registrationFields = computed(() => stageByCode("REGISTRATION").fields.filter(field => field.key !== "visitNo"));
+const registrationDialogFields = computed(() =>
+  createOptionalFieldsExpanded.value
+    ? registrationFields.value
+    : registrationFields.value.filter(field => !createRegistrationOptionalFieldKeys.has(field.key))
+);
+const createSecondaryRegistrationFieldsCount = computed(
+  () => registrationFields.value.filter(field => createRegistrationOptionalFieldKeys.has(field.key)).length
+);
+watch(selectedStageCode, () => {
+  compactStageFieldsExpanded.value = false;
+});
 const labTask = computed(() => workspace.value?.auxiliaryTasks.find(task => task.taskType === "LAB"));
 const legacyAuxiliaryTasks = computed(() => workspace.value?.auxiliaryTasks.filter(task => task.taskType !== "LAB") || []);
 const activeWorkflowTitle = computed(() =>
@@ -3789,6 +3898,36 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 8px;
 }
+.field-noise-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--el-color-primary-light-5);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 76%, var(--el-bg-color));
+}
+.field-noise-toolbar > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.field-noise-toolbar small {
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+.dialog-field-noise-toolbar {
+  margin-top: 14px;
+}
+.secondary-field {
+  padding-top: 6px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+.secondary-field :deep(.el-form-item__label) {
+  color: var(--el-text-color-regular);
+}
 .panel-actions {
   display: flex;
   align-items: center;
@@ -4824,6 +4963,7 @@ onBeforeUnmount(() => {
   .page-hero,
   .patient-banner,
   .panel-heading,
+  .field-noise-toolbar,
   .history-template-toolbar,
   .history-entry-bar {
     flex-direction: column;
