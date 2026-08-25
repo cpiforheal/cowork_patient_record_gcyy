@@ -292,7 +292,8 @@
             />
 
             <div v-else key="edit" class="editor-mode-content">
-              <section v-if="selectedPanel === 'STAGE'" class="stage-panel">
+              <Transition name="stage-switch" mode="out-in">
+                <section v-if="selectedPanel === 'STAGE'" :key="`stage-${selectedStageCode}`" class="stage-panel">
                 <template v-if="selectedStageCode !== 'REVIEW'">
                   <div class="panel-heading">
                     <div>
@@ -446,6 +447,10 @@
                             {{ stageStatusLabel[item.status] }}
                           </el-tag>
                         </header>
+                        <div class="upstream-summary-label">
+                          <span>重点事实</span>
+                          <small>优先核对影响本岗位判断的已完成信息</small>
+                        </div>
                         <div class="upstream-summary-grid">
                           <div v-for="entry in upstreamSummaryEntries(item)" :key="entry[0]">
                             <span>{{ fieldLabel(item.stageCode, entry[0]) }}</span>
@@ -774,7 +779,7 @@
                 />
               </section>
 
-              <section v-else class="auxiliary-stack">
+              <section v-else :key="'auxiliary'" class="auxiliary-stack">
                 <AuxiliaryTaskPanel
                   :workspace="workspace"
                   :capabilities="authStore.capabilities"
@@ -805,6 +810,7 @@
                   @complete="completeLab"
                 />
               </section>
+              </Transition>
             </div>
           </Transition>
           </template>
@@ -1928,6 +1934,7 @@ interface PatientArchiveCardDetail {
   loaded: boolean;
   imageLoading: boolean;
   chiefComplaint: string;
+  diseaseDirection?: string;
   images: PreAiAttachment[];
   error?: string;
 }
@@ -1991,7 +1998,7 @@ const patientArchiveCardElements = new Map<string, Element>();
 const patientArchiveLoadQueue: PreAiPatientCase[] = [];
 const patientArchiveQueuedCaseIds = new Set<string>();
 const PATIENT_ARCHIVE_CARD_LOAD_LIMIT = 2;
-const PATIENT_ARCHIVE_THUMBNAIL_LIMIT = 3;
+const PATIENT_ARCHIVE_THUMBNAIL_LIMIT = 4;
 let patientArchiveActiveLoads = 0;
 let patientArchiveRequestSequence = 0;
 let patientArchiveAbortController: AbortController | undefined;
@@ -2009,6 +2016,14 @@ const truncatePatientArchiveText = (value: string, maxLength = 36) => {
 };
 const patientArchiveHumanText = (value: any, maxLength = 36) => truncatePatientArchiveText(humanValue(value), maxLength);
 const firstPatientArchiveText = (...values: any[]) => values.map(value => patientArchiveHumanText(value)).find(Boolean) || "";
+const patientArchiveDiseaseDirectionText = (value: any) => {
+  const directions = Array.isArray(value) ? value : value ? [value] : [];
+  return directions
+    .map(item => patientArchiveHumanText(item, 18))
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" / ");
+};
 const patientArchiveStageData = (value: PreAiWorkspace, code: PreAiStageCode) =>
   value.stages.find(stage => stage.stageCode === code)?.data || {};
 const patientArchiveImagesFromWorkspace = (value: PreAiWorkspace) =>
@@ -2032,8 +2047,13 @@ const patientArchiveChiefComplaintFromWorkspace = (value: PreAiWorkspace) => {
     value.encounter.visitMeta?.description
   );
 };
+const patientArchiveDiseaseDirectionFromWorkspace = (value: PreAiWorkspace) =>
+  patientArchiveDiseaseDirectionText(patientArchiveStageData(value, "INSPECTION").diseaseDirections);
 const patientArchiveDetailOf = (item: PreAiPatientCase) => patientArchiveCardDetails[item.id];
 const isTemplateValidationPatient = (item: PreAiPatientCase) => String(item.patientName || "").includes("模板验证患者");
+const patientArchiveDiseaseDirection = (item: PreAiPatientCase) =>
+  patientArchiveDetailOf(item)?.diseaseDirection ||
+  patientArchiveDiseaseDirectionText(item.patient?.diseaseDirections || item.patient?.diseaseDirection || item.patient?.inspectionDiseaseDirections);
 const patientArchiveChiefComplaint = (item: PreAiPatientCase) =>
   patientArchiveDetailOf(item)?.chiefComplaint ||
   firstPatientArchiveText(
@@ -2048,6 +2068,7 @@ const hydratePatientArchiveSampleCard = (item: PreAiPatientCase) => {
     loaded: true,
     imageLoading: false,
     chiefComplaint: patientArchiveChiefComplaint(item) || "示例主诉：肛周不适，便后偶有出血",
+    diseaseDirection: patientArchiveDiseaseDirection(item) || "混合痔方向",
     images: patientArchiveSampleAttachments
   };
   Object.assign(patientArchiveImageUrls, patientArchiveSampleImageUrls);
@@ -2058,6 +2079,8 @@ const patientArchiveCardTags = (item: PreAiPatientCase): PatientArchiveInfoTag[]
   if (genderAge) tags.push({ key: "gender-age", label: genderAge });
   if (item.latestEncounter?.route) tags.push({ key: "route", label: routeLabel(item.latestEncounter.route) });
   const chiefComplaint = patientArchiveChiefComplaint(item);
+  const diseaseDirection = patientArchiveDiseaseDirection(item);
+  if (diseaseDirection) tags.push({ key: "disease-direction", label: `病种：${diseaseDirection}` });
   if (chiefComplaint) tags.push({ key: "chief-complaint", label: `主诉：${chiefComplaint}` });
   (item.latestEncounter?.careSituationTags || "")
     .split(",")
@@ -2128,6 +2151,7 @@ const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: n
     loaded: false,
     imageLoading: false,
     chiefComplaint: patientArchiveChiefComplaint(item),
+    diseaseDirection: patientArchiveDiseaseDirection(item),
     images: []
   };
 
@@ -2140,6 +2164,7 @@ const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: n
       loaded: true,
       imageLoading: Boolean(images.length),
       chiefComplaint: patientArchiveChiefComplaintFromWorkspace(data),
+      diseaseDirection: patientArchiveDiseaseDirectionFromWorkspace(data),
       images
     };
     for (const attachment of images.slice(0, PATIENT_ARCHIVE_THUMBNAIL_LIMIT)) {
@@ -2156,6 +2181,7 @@ const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: n
         loaded: true,
         imageLoading: false,
         chiefComplaint: patientArchiveChiefComplaint(item),
+        diseaseDirection: patientArchiveDiseaseDirection(item),
         images: [],
         error: error?.message || "病历详情加载失败"
       };
@@ -4650,8 +4676,8 @@ onBeforeUnmount(() => {
 .patient-archive-masonry-main {
   width: 100%;
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
   text-align: left;
   border: 0;
   background: transparent;
@@ -4726,32 +4752,33 @@ onBeforeUnmount(() => {
 }
 .patient-archive-image-strip {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 .patient-archive-thumbnail {
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--el-fill-color-lighter);
 }
 .patient-archive-thumbnail :deep(.el-image__inner) {
   width: 100%;
   height: auto;
-  max-height: 220px;
+  max-height: 86px;
   display: block;
   object-fit: contain;
 }
 .patient-archive-thumbnail-state,
 .patient-archive-thumbnail-empty {
-  min-height: 92px;
+  min-height: 76px;
   display: grid;
   place-items: center;
-  padding: 12px;
+  padding: 10px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
   border: 1px dashed var(--el-border-color-light);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--el-fill-color-lighter);
 }
 .patient-archive-masonry-foot {
@@ -5086,24 +5113,40 @@ onBeforeUnmount(() => {
     opacity 0.2s ease,
     transform 0.2s ease;
 }
-.workspace-mode-enter-from {
+.stage-switch-enter-active,
+.stage-switch-leave-active {
+  transition:
+    opacity 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.workspace-mode-enter-from,
+.stage-switch-enter-from {
   opacity: 0;
   transform: translateY(8px);
 }
-.workspace-mode-leave-to {
+.workspace-mode-leave-to,
+.stage-switch-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+.stage-switch-enter-from,
+.stage-switch-leave-to {
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .mode-slider,
   .mode-pill,
   .workspace-mode-enter-active,
   .workspace-mode-leave-active,
+  .stage-switch-enter-active,
+  .stage-switch-leave-active,
   .upstream-image-card {
     transition: none;
   }
   .workspace-mode-enter-from,
-  .workspace-mode-leave-to {
+  .workspace-mode-leave-to,
+  .stage-switch-enter-from,
+  .stage-switch-leave-to {
     transform: none;
   }
 }
@@ -5424,6 +5467,25 @@ onBeforeUnmount(() => {
 .upstream-stage-card > header {
   padding: 12px 14px 8px;
 }
+.upstream-summary-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px 8px;
+}
+.upstream-summary-label span {
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+.upstream-summary-label small {
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .upstream-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5452,31 +5514,37 @@ onBeforeUnmount(() => {
   -webkit-box-orient: vertical;
 }
 .upstream-detail-collapse {
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid color-mix(in srgb, var(--el-border-color-lighter) 82%, transparent);
   border-bottom: 0;
+  background: color-mix(in srgb, var(--el-bg-color) 80%, var(--el-fill-color-lighter));
 }
 .upstream-detail-collapse :deep(.el-collapse-item__header) {
-  height: 44px;
-  padding: 0 16px;
-  color: var(--el-color-primary);
-  font-size: 13px;
+  height: 40px;
+  padding: 0 14px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
 }
 .read-only-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 20px;
-  padding: 2px 16px 16px;
+  gap: 12px 18px;
+  padding: 4px 14px 14px;
   margin: 0;
 }
 .read-only-grid > div {
   min-width: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--el-border-color-lighter);
 }
 .read-only-grid dt {
   margin-bottom: 4px;
 }
 .read-only-grid dd {
   margin: 0;
-  line-height: 1.65;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 .upstream-image-section,
