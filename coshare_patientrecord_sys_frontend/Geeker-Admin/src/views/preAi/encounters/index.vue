@@ -56,8 +56,33 @@
             aria-label="录入日期筛选"
           />
         </div>
+        <div class="patient-archive-toolbar">
+          <div class="patient-archive-view-tags" role="tablist" aria-label="患者主档案视图切换">
+            <button
+              type="button"
+              :class="{ active: patientArchiveView === 'LIST' }"
+              :aria-selected="patientArchiveView === 'LIST'"
+              role="tab"
+              @click="patientArchiveView = 'LIST'"
+            >
+              横向列表
+            </button>
+            <button
+              type="button"
+              :class="{ active: patientArchiveView === 'MASONRY' }"
+              :aria-selected="patientArchiveView === 'MASONRY'"
+              role="tab"
+              @click="patientArchiveView = 'MASONRY'"
+            >
+              瀑布流
+            </button>
+          </div>
+          <small v-if="patientArchiveView === 'MASONRY'" class="patient-archive-toolbar__hint">
+            {{ patientArchiveMasonryLoading ? "正在加载图片与主诉" : "保留关键信息，图片点击可放大" }}
+          </small>
+        </div>
         <el-scrollbar height="min(62vh, 620px)">
-          <div class="patient-archive-card-grid">
+          <div v-if="patientArchiveView === 'LIST'" class="patient-archive-card-grid">
             <article
               v-for="item in filteredPatientCases"
               :key="item.id"
@@ -93,6 +118,57 @@
                 class="encounter-row-followup"
                 @click.stop="openFollowUpDialog(item)"
               >
+                新增复诊
+              </button>
+            </article>
+          </div>
+          <div v-else class="patient-archive-masonry">
+            <article
+              v-for="item in filteredPatientCases"
+              :key="item.id"
+              class="patient-archive-masonry-card"
+              :class="{ active: item.id === selectedPatientCaseId }"
+            >
+              <button type="button" class="patient-archive-masonry-main" @click="selectPatientCase(item)">
+                <header class="patient-archive-masonry-head">
+                  <strong>{{ item.patientName || "待补姓名" }}</strong>
+                  <span>{{ item.visitCount }} 次来访</span>
+                </header>
+                <div class="patient-archive-info-tags">
+                  <span
+                    v-for="tag in patientArchiveCardTags(item)"
+                    :key="tag.key"
+                    :class="patientArchiveTagClass(tag.key, item.id)"
+                  >
+                    {{ tag.label }}
+                  </span>
+                </div>
+                <div v-if="patientArchiveCardImages(item).length" class="patient-archive-image-strip" @click.stop>
+                  <template v-for="attachment in patientArchiveCardImages(item)" :key="attachment.id">
+                    <el-image
+                      v-if="patientArchiveImageUrls[attachment.id]"
+                      class="patient-archive-thumbnail"
+                      :src="patientArchiveImageUrls[attachment.id]"
+                      :preview-src-list="patientArchiveCardPreviewUrls(item)"
+                      :initial-index="patientArchiveCardPreviewIndex(item, attachment)"
+                      fit="contain"
+                      preview-teleported
+                      hide-on-click-modal
+                    />
+                    <div v-else class="patient-archive-thumbnail-state">
+                      {{ patientArchiveImageErrors[attachment.id] || "缩略图加载中" }}
+                    </div>
+                  </template>
+                </div>
+                <div v-else class="patient-archive-thumbnail-empty">
+                  {{ patientArchiveCardLoading(item) ? "正在读取图片" : "暂无患者图片" }}
+                </div>
+                <footer class="patient-archive-masonry-foot">
+                  <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
+                  <small>{{ formatPatientCaseRecordTime(item) }}</small>
+                </footer>
+              </button>
+              <button v-if="canCreateEncounter" type="button" class="encounter-row-followup" @click.stop="openFollowUpDialog(item)">
                 新增复诊
               </button>
             </article>
@@ -1348,6 +1424,7 @@ const patientCases = ref<PreAiPatientCase[]>([]);
 const keyword = ref("");
 const patientArchiveDate = ref("");
 const careSituationFilter = ref<"ALL" | "OUTPATIENT" | "INPATIENT" | "LOW_INCOME">("ALL");
+const patientArchiveView = ref<"LIST" | "MASONRY">("LIST");
 const selectedPatientCaseId = ref("");
 const patientDrawerOpen = ref(false);
 const selectedEncounterId = ref("");
@@ -1842,6 +1919,199 @@ const filteredPatientCases = computed(() => {
     })
     .sort((left, right) => patientCaseRecordTimestamp(right) - patientCaseRecordTimestamp(left));
 });
+
+interface PatientArchiveCardDetail {
+  loading: boolean;
+  loaded: boolean;
+  chiefComplaint: string;
+  images: PreAiAttachment[];
+  error?: string;
+}
+
+interface PatientArchiveInfoTag {
+  key: string;
+  label: string;
+}
+
+const patientArchiveCardDetails = reactive<Record<string, PatientArchiveCardDetail>>({});
+const patientArchiveImageUrls = reactive<Record<string, string>>({});
+const patientArchiveImageErrors = reactive<Record<string, string>>({});
+const patientArchiveMasonryLoading = ref(false);
+const patientArchiveImageStageCodes: PreAiStageCode[] = ["RECEPTION", "INSPECTION"];
+const patientArchiveTagTones = ["teal", "blue", "violet", "amber", "rose", "green"];
+let patientArchiveRequestSequence = 0;
+let patientArchiveAbortController: AbortController | undefined;
+
+const patientArchiveHash = (value: string) =>
+  Array.from(value).reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
+const patientArchiveTagClass = (key: string, seed: string) => {
+  const tone = patientArchiveTagTones[Math.abs(patientArchiveHash(`${seed}:${key}`)) % patientArchiveTagTones.length];
+  return ["patient-archive-info-tag", `tone-${tone}`];
+};
+const truncatePatientArchiveText = (value: string, maxLength = 36) => {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
+};
+const patientArchiveHumanText = (value: any, maxLength = 36) => truncatePatientArchiveText(humanValue(value), maxLength);
+const firstPatientArchiveText = (...values: any[]) => values.map(value => patientArchiveHumanText(value)).find(Boolean) || "";
+const patientArchiveStageData = (value: PreAiWorkspace, code: PreAiStageCode) =>
+  value.stages.find(stage => stage.stageCode === code)?.data || {};
+const patientArchiveImagesFromWorkspace = (value: PreAiWorkspace) =>
+  value.attachments
+    .filter(attachment => attachment.stageCode && patientArchiveImageStageCodes.includes(attachment.stageCode) && isImageAttachment(attachment))
+    .sort((left, right) => {
+      const leftStage = patientArchiveImageStageCodes.indexOf(left.stageCode as PreAiStageCode);
+      const rightStage = patientArchiveImageStageCodes.indexOf(right.stageCode as PreAiStageCode);
+      if (leftStage !== rightStage) return leftStage - rightStage;
+      return (left.sequenceNo || 0) - (right.sequenceNo || 0) || String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
+    });
+const patientArchiveChiefComplaintFromWorkspace = (value: PreAiWorkspace) => {
+  const reception = patientArchiveStageData(value, "RECEPTION");
+  const registration = patientArchiveStageData(value, "REGISTRATION");
+  return firstPatientArchiveText(
+    reception.chiefComplaint,
+    reception.chiefComplaintSupplement,
+    registration.registrationChiefComplaint,
+    registration.registrationSymptoms,
+    value.encounter.visitMeta?.visitReason,
+    value.encounter.visitMeta?.description
+  );
+};
+const patientArchiveDetailOf = (item: PreAiPatientCase) => patientArchiveCardDetails[item.id];
+const patientArchiveChiefComplaint = (item: PreAiPatientCase) =>
+  patientArchiveDetailOf(item)?.chiefComplaint ||
+  firstPatientArchiveText(
+    item.patient?.chiefComplaint,
+    item.patient?.registrationChiefComplaint,
+    item.patient?.registrationSymptoms,
+    item.patient?.visitReason
+  );
+const patientArchiveCardTags = (item: PreAiPatientCase): PatientArchiveInfoTag[] => {
+  const tags: PatientArchiveInfoTag[] = [];
+  const genderAge = [item.gender, item.age].filter(Boolean).join(" / ");
+  if (genderAge) tags.push({ key: "gender-age", label: genderAge });
+  if (item.latestEncounter?.route) tags.push({ key: "route", label: routeLabel(item.latestEncounter.route) });
+  const chiefComplaint = patientArchiveChiefComplaint(item);
+  if (chiefComplaint) tags.push({ key: "chief-complaint", label: `主诉：${chiefComplaint}` });
+  (item.latestEncounter?.careSituationTags || "")
+    .split(",")
+    .map(tag => tag.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .forEach((tag, index) => tags.push({ key: `care-${index}-${tag}`, label: tag }));
+  if (item.latestEncounter) tags.push({ key: "status", label: encounterStatusLabel[item.latestEncounter.status] });
+  return tags.slice(0, 6);
+};
+const patientArchiveCardImages = (item: PreAiPatientCase) => (patientArchiveDetailOf(item)?.images || []).slice(0, 4);
+const patientArchiveCardPreviewUrls = (item: PreAiPatientCase) =>
+  patientArchiveCardImages(item)
+    .map(attachment => patientArchiveImageUrls[attachment.id])
+    .filter(Boolean);
+const patientArchiveCardPreviewIndex = (item: PreAiPatientCase, attachment: PreAiAttachment) => {
+  const imageIds = patientArchiveCardImages(item).filter(image => patientArchiveImageUrls[image.id]).map(image => image.id);
+  return Math.max(0, imageIds.indexOf(attachment.id));
+};
+const patientArchiveCardLoading = (item: PreAiPatientCase) => {
+  const detail = patientArchiveDetailOf(item);
+  return Boolean(item.latestEncounter && (!detail || detail.loading));
+};
+const revokePatientArchiveImageUrl = (attachmentId: string) => {
+  const url = patientArchiveImageUrls[attachmentId];
+  if (url) URL.revokeObjectURL(url);
+  delete patientArchiveImageUrls[attachmentId];
+};
+const abortPatientArchiveMasonryRequests = () => {
+  patientArchiveAbortController?.abort();
+  patientArchiveAbortController = undefined;
+  patientArchiveRequestSequence += 1;
+  patientArchiveMasonryLoading.value = false;
+};
+const clearPatientArchiveMasonryResources = () => {
+  abortPatientArchiveMasonryRequests();
+  Object.keys(patientArchiveCardDetails).forEach(key => delete patientArchiveCardDetails[key]);
+  Object.keys(patientArchiveImageUrls).forEach(revokePatientArchiveImageUrl);
+  Object.keys(patientArchiveImageErrors).forEach(key => delete patientArchiveImageErrors[key]);
+};
+const loadPatientArchiveImage = async (attachment: PreAiAttachment, signal: AbortSignal, requestSequence: number) => {
+  if (patientArchiveImageUrls[attachment.id]) return;
+  delete patientArchiveImageErrors[attachment.id];
+  try {
+    const url = await getPreAiAttachmentObjectUrlApi(attachment, signal);
+    if (signal.aborted || requestSequence !== patientArchiveRequestSequence) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    patientArchiveImageUrls[attachment.id] = url;
+  } catch (error: any) {
+    if (error?.name !== "AbortError" && requestSequence === patientArchiveRequestSequence) {
+      patientArchiveImageErrors[attachment.id] = "缩略图加载失败";
+    }
+  }
+};
+const loadPatientArchiveMasonryDetails = async () => {
+  if (!patientDrawerOpen.value || patientArchiveView.value !== "MASONRY") return;
+  abortPatientArchiveMasonryRequests();
+  const items = filteredPatientCases.value.filter(item => item.latestEncounter);
+  if (!items.length) return;
+
+  const requestSequence = ++patientArchiveRequestSequence;
+  const requestController = new AbortController();
+  patientArchiveAbortController = requestController;
+  patientArchiveMasonryLoading.value = true;
+  const queue = items.filter(item => !patientArchiveCardDetails[item.id]?.loaded);
+
+  const worker = async () => {
+    while (queue.length && requestSequence === patientArchiveRequestSequence && !requestController.signal.aborted) {
+      const item = queue.shift();
+      if (!item?.latestEncounter) continue;
+      patientArchiveCardDetails[item.id] = {
+        loading: true,
+        loaded: false,
+        chiefComplaint: patientArchiveChiefComplaint(item),
+        images: []
+      };
+      try {
+        const { data } = await getPreAiReadOnlyWorkspaceApi(item.latestEncounter.id, item.id, requestController.signal);
+        if (requestController.signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
+        const images = patientArchiveImagesFromWorkspace(data);
+        patientArchiveCardDetails[item.id] = {
+          loading: false,
+          loaded: true,
+          chiefComplaint: patientArchiveChiefComplaintFromWorkspace(data),
+          images
+        };
+        await Promise.all(images.slice(0, 4).map(attachment => loadPatientArchiveImage(attachment, requestController.signal, requestSequence)));
+      } catch (error: any) {
+        if (error?.name !== "AbortError" && requestSequence === patientArchiveRequestSequence) {
+          patientArchiveCardDetails[item.id] = {
+            loading: false,
+            loaded: true,
+            chiefComplaint: patientArchiveChiefComplaint(item),
+            images: [],
+            error: error?.message || "病历详情加载失败"
+          };
+        }
+      }
+    }
+  };
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(3, Math.max(queue.length, 1)) }, worker));
+  } finally {
+    if (requestSequence === patientArchiveRequestSequence) {
+      patientArchiveAbortController = undefined;
+      patientArchiveMasonryLoading.value = false;
+    }
+  }
+};
+watch(
+  () => [patientDrawerOpen.value, patientArchiveView.value, filteredPatientCases.value.map(item => item.id).join("|")],
+  () => {
+    if (patientDrawerOpen.value && patientArchiveView.value === "MASONRY") void loadPatientArchiveMasonryDetails();
+    if (!patientDrawerOpen.value) abortPatientArchiveMasonryRequests();
+  },
+  { flush: "post" }
+);
 const canHandleStage = (stageCode: PreAiStageCode, ...duties: PreAiDutyCode[]) =>
   Boolean(authStore.stagePermissions[stageCode]?.editable) || hasAssignedDuty(...duties);
 const workflowCards = computed<WorkflowCard[]>(() => [
@@ -3614,6 +3884,7 @@ const cleanupTransientResources = () => {
   pendingWorkflowSelection.value = undefined;
   resetWorkspaceImageContext();
   resetTimelineContext();
+  clearPatientArchiveMasonryResources();
   cancelReviewRequest();
   targetVersionsRequestSequence += 1;
   targetVersionsLoading.value = false;
@@ -4074,6 +4345,193 @@ onBeforeUnmount(() => {
 }
 .patient-archive-dialog__head strong {
   font-size: 18px;
+}
+.patient-archive-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.patient-archive-view-tags {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+}
+.patient-archive-view-tags button {
+  min-width: 86px;
+  padding: 6px 14px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.patient-archive-view-tags button.active {
+  color: var(--el-color-primary);
+  font-weight: 700;
+  background: var(--el-bg-color);
+  box-shadow: 0 4px 14px rgb(15 23 42 / 8%);
+}
+.patient-archive-view-tags button:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
+}
+.patient-archive-toolbar__hint {
+  color: var(--el-text-color-secondary);
+}
+.patient-archive-masonry {
+  columns: 3 260px;
+  column-gap: 14px;
+  padding-right: 8px;
+}
+.patient-archive-masonry-card {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 4px solid transparent;
+  border-radius: 14px;
+  background: var(--el-bg-color);
+  box-shadow: 0 10px 24px rgb(15 23 42 / 6%);
+  break-inside: avoid;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background-color 0.16s ease;
+}
+.patient-archive-masonry-card:hover,
+.patient-archive-masonry-card.active {
+  border-color: var(--el-color-primary-light-3);
+  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
+  box-shadow: 0 14px 30px rgb(0 150 136 / 13%);
+}
+.patient-archive-masonry-card.active {
+  border-left-color: var(--el-color-primary);
+}
+.patient-archive-masonry-main {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.patient-archive-masonry-main:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -3px;
+}
+.patient-archive-masonry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.patient-archive-masonry-head strong {
+  overflow: hidden;
+  color: var(--el-text-color-primary);
+  font-size: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.patient-archive-masonry-head span {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+}
+.patient-archive-info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.patient-archive-info-tag {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+.patient-archive-info-tag.tone-teal {
+  color: #0f766e;
+  background: #ccfbf1;
+}
+.patient-archive-info-tag.tone-blue {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+.patient-archive-info-tag.tone-violet {
+  color: #6d28d9;
+  background: #ede9fe;
+}
+.patient-archive-info-tag.tone-amber {
+  color: #92400e;
+  background: #fef3c7;
+}
+.patient-archive-info-tag.tone-rose {
+  color: #be123c;
+  background: #ffe4e6;
+}
+.patient-archive-info-tag.tone-green {
+  color: #15803d;
+  background: #dcfce7;
+}
+.patient-archive-image-strip {
+  display: grid;
+  gap: 8px;
+}
+.patient-archive-thumbnail {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+}
+.patient-archive-thumbnail :deep(.el-image__inner) {
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  display: block;
+  object-fit: contain;
+}
+.patient-archive-thumbnail-state,
+.patient-archive-thumbnail-empty {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  border: 1px dashed var(--el-border-color-light);
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+}
+.patient-archive-masonry-foot {
+  display: grid;
+  gap: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.patient-archive-masonry-foot span {
+  color: var(--el-text-color-regular);
 }
 .patient-archive-card-grid {
   display: grid;
@@ -5018,7 +5476,9 @@ onBeforeUnmount(() => {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .upstream-image-card {
+  .upstream-image-card,
+  .patient-archive-view-tags button,
+  .patient-archive-masonry-card {
     transition: none;
   }
 }
@@ -5066,6 +5526,19 @@ onBeforeUnmount(() => {
   .patient-archive-filters,
   .patient-archive-card-grid {
     grid-template-columns: 1fr;
+  }
+  .patient-archive-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .patient-archive-view-tags {
+    width: 100%;
+  }
+  .patient-archive-view-tags button {
+    flex: 1;
+  }
+  .patient-archive-masonry {
+    columns: 1;
   }
   :global(.patient-archive-dialog) {
     width: calc(100vw - 20px) !important;
