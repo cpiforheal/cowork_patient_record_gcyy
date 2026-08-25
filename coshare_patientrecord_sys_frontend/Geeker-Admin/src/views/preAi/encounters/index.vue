@@ -105,27 +105,27 @@
         </el-scrollbar>
       </aside>
 
-      <WorkflowSidebar
-        v-if="workspace"
-        :workspace="workspace"
-        :cards="workflowCards"
-        :encounter-status-label="encounterStatusLabel"
-        :encounter-status-type="encounterStatusType"
-        :route-label="routeLabel"
-        :status-of="workflowCardStatus"
-        :status-label="workflowCardStatusLabel"
-        :status-type="stageStatusType"
-        :is-active="isWorkflowCardActive"
-        :is-current="isCurrentWorkflowCard"
-        @select="selectWorkflowCard"
-      />
-
       <main v-loading="workspaceLoading" class="encounter-workspace">
         <el-empty v-if="!workspace" description="请从左侧选择患者，或新建前置病历" />
-        <section v-else-if="!workflowSelected" class="workflow-empty-panel">
-          <el-empty :image-size="96" description="请选择左侧岗位节点" />
-        </section>
         <template v-else>
+          <WorkflowSidebar
+            :workspace="workspace"
+            :cards="workflowCards"
+            :encounter-status-label="encounterStatusLabel"
+            :encounter-status-type="encounterStatusType"
+            :route-label="routeLabel"
+            :status-of="workflowCardStatus"
+            :status-label="workflowCardStatusLabel"
+            :status-type="stageStatusType"
+            :is-active="isWorkflowCardActive"
+            :is-current="isCurrentWorkflowCard"
+            @select="selectWorkflowCard"
+          />
+
+          <section v-if="!workflowSelected" class="workflow-empty-panel">
+            <el-empty :image-size="96" description="请选择上方岗位节点" />
+          </section>
+          <template v-else>
           <section class="patient-banner">
             <div class="patient-banner__identity">
               <span class="patient-avatar">{{ (workspace.encounter.patient.patientName || "患").slice(0, 1) }}</span>
@@ -722,6 +722,7 @@
               </section>
             </div>
           </Transition>
+          </template>
         </template>
       </main>
 
@@ -3942,14 +3943,14 @@ onBeforeUnmount(() => {
 .workspace-shell {
   position: relative;
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   padding-left: 64px;
   flex: 1;
   min-height: 650px;
 }
 .workspace-shell.with-history {
-  grid-template-columns: 250px minmax(520px, 1fr) 8px minmax(360px, var(--history-pane-width, 410px));
+  grid-template-columns: minmax(520px, 1fr) 8px minmax(360px, var(--history-pane-width, 410px));
 }
 .history-resizer {
   position: sticky;
@@ -4941,11 +4942,9 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(10px);
 }
 @media (max-width: 1100px) {
-  .workspace-shell {
-    grid-template-columns: 225px minmax(0, 1fr);
-  }
+  .workspace-shell,
   .workspace-shell.with-history {
-    grid-template-columns: 225px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
   .history-resizer {
     display: none;
