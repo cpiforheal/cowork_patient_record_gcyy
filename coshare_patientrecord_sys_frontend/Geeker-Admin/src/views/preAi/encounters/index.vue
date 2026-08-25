@@ -296,6 +296,7 @@
                 <template v-if="selectedStageCode !== 'REVIEW'">
                   <div class="panel-heading">
                     <div>
+                      <span class="work-surface-kicker">当前填写</span>
                       <h3>{{ selectedStage.title }}</h3>
                     </div>
                     <div class="heading-tags">
@@ -1942,6 +1943,50 @@ const patientArchiveImageErrors = reactive<Record<string, string>>({});
 const patientArchiveMasonryLoading = ref(false);
 const patientArchiveImageStageCodes: PreAiStageCode[] = ["RECEPTION", "INSPECTION"];
 const patientArchiveTagTones = ["teal", "blue", "violet", "amber", "rose", "green"];
+const patientArchiveSampleSvgUrl = (accent: string, soft: string, label: string) =>
+  `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 240"><rect width="360" height="240" rx="22" fill="${soft}"/><circle cx="86" cy="82" r="46" fill="${accent}" opacity="0.18"/><rect x="142" y="56" width="146" height="18" rx="9" fill="${accent}" opacity="0.32"/><rect x="142" y="90" width="96" height="14" rx="7" fill="${accent}" opacity="0.22"/><path d="M56 172c42-46 72-44 104-8 26 30 52 30 86-4 20-20 38-28 58-18v46H56z" fill="${accent}" opacity="0.28"/><text x="180" y="214" text-anchor="middle" font-size="18" font-family="Arial, sans-serif" fill="${accent}" font-weight="700">${label}</text></svg>`
+  )}`;
+const patientArchiveSampleAttachments: PreAiAttachment[] = [
+  {
+    id: "patient-archive-sample-1",
+    encounterId: "patient-archive-sample",
+    stageCode: "RECEPTION",
+    fileName: "sample-reception-1.svg",
+    mimeType: "image/svg+xml",
+    fileSize: 0,
+    description: "示例缩略图 1",
+    createdAt: "",
+    downloadUrl: ""
+  },
+  {
+    id: "patient-archive-sample-2",
+    encounterId: "patient-archive-sample",
+    stageCode: "RECEPTION",
+    fileName: "sample-reception-2.svg",
+    mimeType: "image/svg+xml",
+    fileSize: 0,
+    description: "示例缩略图 2",
+    createdAt: "",
+    downloadUrl: ""
+  },
+  {
+    id: "patient-archive-sample-3",
+    encounterId: "patient-archive-sample",
+    stageCode: "INSPECTION",
+    fileName: "sample-inspection-3.svg",
+    mimeType: "image/svg+xml",
+    fileSize: 0,
+    description: "示例缩略图 3",
+    createdAt: "",
+    downloadUrl: ""
+  }
+];
+const patientArchiveSampleImageUrls: Record<string, string> = {
+  "patient-archive-sample-1": patientArchiveSampleSvgUrl("#0f766e", "#ecfdf5", "Sample A"),
+  "patient-archive-sample-2": patientArchiveSampleSvgUrl("#2563eb", "#eff6ff", "Sample B"),
+  "patient-archive-sample-3": patientArchiveSampleSvgUrl("#b45309", "#fffbeb", "Sample C")
+};
 const patientArchiveCardElements = new Map<string, Element>();
 const patientArchiveLoadQueue: PreAiPatientCase[] = [];
 const patientArchiveQueuedCaseIds = new Set<string>();
@@ -1988,6 +2033,7 @@ const patientArchiveChiefComplaintFromWorkspace = (value: PreAiWorkspace) => {
   );
 };
 const patientArchiveDetailOf = (item: PreAiPatientCase) => patientArchiveCardDetails[item.id];
+const isTemplateValidationPatient = (item: PreAiPatientCase) => String(item.patientName || "").includes("模板验证患者");
 const patientArchiveChiefComplaint = (item: PreAiPatientCase) =>
   patientArchiveDetailOf(item)?.chiefComplaint ||
   firstPatientArchiveText(
@@ -1996,6 +2042,16 @@ const patientArchiveChiefComplaint = (item: PreAiPatientCase) =>
     item.patient?.registrationSymptoms,
     item.patient?.visitReason
   );
+const hydratePatientArchiveSampleCard = (item: PreAiPatientCase) => {
+  patientArchiveCardDetails[item.id] = {
+    loading: false,
+    loaded: true,
+    imageLoading: false,
+    chiefComplaint: patientArchiveChiefComplaint(item) || "示例主诉：肛周不适，便后偶有出血",
+    images: patientArchiveSampleAttachments
+  };
+  Object.assign(patientArchiveImageUrls, patientArchiveSampleImageUrls);
+};
 const patientArchiveCardTags = (item: PreAiPatientCase): PatientArchiveInfoTag[] => {
   const tags: PatientArchiveInfoTag[] = [];
   const genderAge = [item.gender, item.age].filter(Boolean).join(" / ");
@@ -2062,6 +2118,10 @@ const loadPatientArchiveImage = async (attachment: PreAiAttachment, signal: Abor
   }
 };
 const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: number, signal: AbortSignal) => {
+  if (isTemplateValidationPatient(item)) {
+    hydratePatientArchiveSampleCard(item);
+    return;
+  }
   if (!item.latestEncounter || signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
   patientArchiveCardDetails[item.id] = {
     loading: true,
@@ -2125,7 +2185,7 @@ const processPatientArchiveLoadQueue = () => {
   updatePatientArchiveMasonryLoading();
 };
 const queuePatientArchiveCardLoad = (item: PreAiPatientCase) => {
-  if (!item.latestEncounter || patientArchiveCardDetails[item.id]?.loaded || patientArchiveCardDetails[item.id]?.loading) return;
+  if ((!item.latestEncounter && !isTemplateValidationPatient(item)) || patientArchiveCardDetails[item.id]?.loaded || patientArchiveCardDetails[item.id]?.loading) return;
   if (patientArchiveQueuedCaseIds.has(item.id)) return;
   patientArchiveQueuedCaseIds.add(item.id);
   patientArchiveLoadQueue.push(item);
@@ -4273,9 +4333,83 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--el-border-color-lighter));
+}
+.panel-heading > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.work-surface-kicker {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color));
 }
 .panel-heading h3 {
   margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.stage-panel {
+  position: relative;
+  padding: 22px 24px 88px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--el-color-primary) 28%, var(--el-border-color-light));
+  box-shadow: 0 18px 44px rgb(15 23 42 / 10%);
+}
+.stage-panel::before {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 0;
+  width: 4px;
+  content: "";
+  border-radius: 0 999px 999px 0;
+  background: var(--el-color-primary);
+}
+.stage-form {
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 16%, var(--el-border-color-lighter));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--el-bg-color) 88%, var(--el-color-primary-light-9));
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+.form-grid .span-2 {
+  grid-column: span 2;
+}
+.form-grid .priority-field {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--el-border-color-lighter));
+  border-radius: 12px;
+  background: var(--el-bg-color);
+}
+.form-grid .secondary-field {
+  opacity: 0.88;
+}
+.stage-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+.stage-form :deep(.el-form-item__label) {
+  padding-bottom: 6px;
+  color: var(--el-text-color-primary);
+  font-weight: 700;
+}
+.stage-form :deep(.el-input__wrapper),
+.stage-form :deep(.el-textarea__inner),
+.stage-form :deep(.el-select__wrapper) {
+  background: var(--el-bg-color);
 }
 .heading-tags {
   display: flex;
@@ -4780,31 +4914,32 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 16px 18px;
-  margin-bottom: 10px;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
   overflow: hidden;
-  border-color: var(--el-border-color-light);
-  background: var(--el-bg-color);
+  border-color: var(--el-border-color-lighter);
+  background: color-mix(in srgb, var(--el-bg-color) 94%, var(--el-fill-color-light));
+  box-shadow: 0 6px 18px rgb(31 78 120 / 5%);
 }
 .patient-banner__identity {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 10px;
 }
 .patient-avatar {
-  width: 46px;
-  height: 46px;
+  width: 38px;
+  height: 38px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   color: var(--el-color-primary);
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 800;
-  border: 1px solid var(--el-color-primary-light-7);
-  border-radius: 14px;
-  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-8);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 72%, var(--el-bg-color));
 }
 .patient-banner__identity small,
 .context-stat small {
@@ -4812,13 +4947,14 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 .patient-banner h3 {
-  margin: 2px 0 4px;
-  font-size: 22px;
+  margin: 1px 0 2px;
+  font-size: 18px;
   line-height: 1.2;
 }
 .patient-banner p {
   margin: 0;
   color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 .patient-banner__overview {
   display: flex;
@@ -4828,17 +4964,17 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .context-stat {
-  min-width: 76px;
+  min-width: 68px;
   display: grid;
-  gap: 2px;
-  padding: 8px 12px;
+  gap: 1px;
+  padding: 6px 10px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
-  background: var(--el-fill-color-light);
+  background: color-mix(in srgb, var(--el-bg-color) 72%, var(--el-fill-color-light));
 }
 .context-stat strong {
   color: var(--el-color-primary);
-  font-size: 18px;
+  font-size: 15px;
 }
 .context-stat.warning strong {
   color: var(--el-color-warning);
@@ -4863,12 +4999,13 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
   align-items: center;
-  gap: 14px;
-  padding: 11px 15px;
-  margin-bottom: 10px;
-  border: 1px solid var(--el-border-color-light);
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
-  background: var(--el-bg-color);
+  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-lighter));
+  box-shadow: 0 5px 14px rgb(31 78 120 / 5%);
 }
 .workspace-modebar > .el-tag:last-child {
   justify-self: end;
@@ -5251,8 +5388,9 @@ onBeforeUnmount(() => {
 }
 .upstream-section {
   display: grid;
-  gap: 12px;
-  margin-top: 18px;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 2px;
 }
 .upstream-heading,
 .upstream-image-heading,
@@ -5279,26 +5417,26 @@ onBeforeUnmount(() => {
 }
 .upstream-stage-card {
   overflow: hidden;
-  border: 1px solid var(--el-border-color-light);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
-  background: var(--el-bg-color);
+  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-lighter));
 }
 .upstream-stage-card > header {
-  padding: 14px 16px 10px;
+  padding: 12px 14px 8px;
 }
 .upstream-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  padding: 0 16px 14px;
+  gap: 8px;
+  padding: 0 14px 12px;
 }
 .upstream-summary-grid > div {
   min-width: 0;
   display: grid;
-  gap: 5px;
-  padding: 10px 12px;
+  gap: 4px;
+  padding: 8px 10px;
   border-radius: 8px;
-  background: var(--el-fill-color-light);
+  background: color-mix(in srgb, var(--el-bg-color) 70%, var(--el-fill-color-light));
 }
 .upstream-summary-grid span,
 .read-only-grid dt {
@@ -5344,17 +5482,17 @@ onBeforeUnmount(() => {
 .upstream-image-section,
 .attachment-section {
   display: grid;
-  gap: 12px;
-  margin-top: 18px;
-  padding: 16px;
-  border: 1px solid var(--el-border-color-light);
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 14px;
-  background: var(--el-fill-color-lighter);
+  background: color-mix(in srgb, var(--el-bg-color) 70%, var(--el-fill-color-lighter));
 }
 .priority-image-section {
-  margin-top: 16px;
-  border-color: var(--el-color-primary-light-7);
-  background: var(--el-color-primary-light-9);
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--el-color-primary) 20%, var(--el-border-color-light));
+  background: color-mix(in srgb, var(--el-bg-color) 78%, var(--el-color-primary-light-9));
 }
 .upstream-image-grid {
   display: grid;
