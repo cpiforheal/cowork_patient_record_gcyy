@@ -7,6 +7,10 @@
         <h2>登记与事实采集</h2>
       </div>
       <div class="hero-actions">
+        <el-button class="patient-archive-trigger" type="primary" plain :icon="User" @click="patientDrawerOpen = true">
+          患者主档案
+          <span class="patient-archive-trigger__count">{{ filteredPatientCases.length }}</span>
+        </el-button>
         <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>
         <el-button v-if="workspace" @click="openResponsibilityTimeline">责任时间轴</el-button>
         <el-button v-if="workspace?.admissionProfile" @click="openAdmissionProfile">住院补录</el-button>
@@ -34,35 +38,38 @@
         v-if="patientDrawerOpen"
         type="button"
         class="patient-drawer-mask"
-        aria-label="关闭患者列表"
+        aria-label="关闭患者主档案"
         @click="patientDrawerOpen = false"
       ></button>
-      <aside class="encounter-sidebar" :class="{ expanded: patientDrawerOpen }">
-        <button
-          type="button"
-          class="patient-drawer-rail"
-          :aria-expanded="patientDrawerOpen"
-          :aria-label="patientDrawerOpen ? '收起患者主档案' : '展开患者主档案'"
-          @click="togglePatientDrawer"
-        >
-          <el-icon><User /></el-icon>
-          <strong>{{ patientCases.length }}</strong>
-          <span>{{ selectedPatientCase?.patientName || "患者" }}</span>
-        </button>
+      <aside v-if="patientDrawerOpen" class="encounter-sidebar" aria-label="患者主档案悬浮面板">
         <div class="sidebar-title">
           <div class="sidebar-title__head">
-            <strong>患者主档案</strong>
+            <div>
+              <strong>患者主档案</strong>
+              <small>{{ patientCases.length }} 位患者 · 按录入时间从新到旧排列</small>
+            </div>
             <el-button link type="primary" @click="patientDrawerOpen = false">收起</el-button>
           </div>
-          <el-input v-model="keyword" clearable placeholder="姓名/病例标识" :prefix-icon="Search" />
-          <el-select v-model="careSituationFilter" class="care-situation-filter" aria-label="就诊情况筛选">
-            <el-option label="全部就诊情况" value="ALL" />
-            <el-option label="门诊" value="OUTPATIENT" />
-            <el-option label="住院" value="INPATIENT" />
-            <el-option label="低保" value="LOW_INCOME" />
-          </el-select>
+          <div class="patient-archive-filters">
+            <el-input v-model="keyword" clearable placeholder="姓名/病例标识" :prefix-icon="Search" />
+            <el-select v-model="careSituationFilter" class="care-situation-filter" aria-label="就诊情况筛选">
+              <el-option label="全部就诊情况" value="ALL" />
+              <el-option label="门诊" value="OUTPATIENT" />
+              <el-option label="住院" value="INPATIENT" />
+              <el-option label="低保" value="LOW_INCOME" />
+            </el-select>
+            <el-date-picker
+              v-model="patientArchiveDate"
+              class="patient-archive-date-filter"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择录入日期"
+              clearable
+              aria-label="录入日期筛选"
+            />
+          </div>
         </div>
-        <el-scrollbar height="calc(100vh - 285px)">
+        <el-scrollbar height="calc(100vh - 320px)">
           <article
             v-for="item in filteredPatientCases"
             :key="item.id"
@@ -70,27 +77,27 @@
             :class="{ active: item.id === selectedPatientCaseId }"
           >
             <button type="button" class="encounter-row-main" @click="selectPatientCase(item)">
-            <div class="encounter-row__head">
-              <strong>{{ item.patientName || "待补姓名" }}</strong>
-              <el-tag v-if="item.latestEncounter" size="small" :type="encounterStatusType(item.latestEncounter.status)">
-                {{ item.visitCount }} 次来访
-              </el-tag>
-            </div>
-            <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
-            <small>{{ item.latestEncounter?.visitDate || "待补就诊时间" }} · {{ routeLabel(item.latestEncounter?.route) }}</small>
-            <div v-if="item.latestEncounter?.careSituationTags" class="encounter-card__care-tags">
-              <el-tag v-for="tag in item.latestEncounter.careSituationTags.split(',')" :key="tag" size="small" effect="plain">{{
-                tag
-              }}</el-tag>
-            </div>
-            <div v-if="item.latestEncounter" class="mini-steps">
-              <i
-                v-for="stage in preAiStages"
-                :key="stage.code"
-                :title="`${stage.title}：${stageStatusLabel[item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT']}`"
-                :class="stageStatusClass(item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT')"
-              ></i>
-            </div>
+              <div class="encounter-row__head">
+                <strong>{{ item.patientName || "待补姓名" }}</strong>
+                <el-tag v-if="item.latestEncounter" size="small" :type="encounterStatusType(item.latestEncounter.status)">
+                  {{ item.visitCount }} 次来访
+                </el-tag>
+              </div>
+              <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
+              <small>录入 {{ formatPatientCaseRecordTime(item) }} · {{ routeLabel(item.latestEncounter?.route) }}</small>
+              <div v-if="item.latestEncounter?.careSituationTags" class="encounter-card__care-tags">
+                <el-tag v-for="tag in item.latestEncounter.careSituationTags.split(',')" :key="tag" size="small" effect="plain">{{
+                  tag
+                }}</el-tag>
+              </div>
+              <div v-if="item.latestEncounter" class="mini-steps">
+                <i
+                  v-for="stage in preAiStages"
+                  :key="stage.code"
+                  :title="`${stage.title}：${stageStatusLabel[item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT']}`"
+                  :class="stageStatusClass(item.latestEncounter.stageStatuses?.[stage.code] || 'DRAFT')"
+                ></i>
+              </div>
             </button>
             <button
               v-if="canCreateEncounter"
@@ -106,7 +113,7 @@
       </aside>
 
       <main v-loading="workspaceLoading" class="encounter-workspace">
-        <el-empty v-if="!workspace" description="请从左侧选择患者，或新建前置病历" />
+        <el-empty v-if="!workspace" description="请点击顶部患者主档案选择患者，或新建前置病历" />
         <template v-else>
           <WorkflowSidebar
             :workspace="workspace"
@@ -1343,6 +1350,7 @@ const canConfirmSurgery = computed(() => hasCapability("preai:surgery:confirm") 
 const encounters = ref<PreAiEncounterSummary[]>([]);
 const patientCases = ref<PreAiPatientCase[]>([]);
 const keyword = ref("");
+const patientArchiveDate = ref("");
 const careSituationFilter = ref<"ALL" | "OUTPATIENT" | "INPATIENT" | "LOW_INCOME">("ALL");
 const selectedPatientCaseId = ref("");
 const patientDrawerOpen = ref(false);
@@ -1809,21 +1817,33 @@ const followUpForm = reactive<Record<string, any>>({
   visitDate: currentLocalDateTime()
 });
 
+const patientCaseRecordTime = (item: PreAiPatientCase) => item.createdAt || item.latestEncounter?.visitDate || item.updatedAt || "";
+const patientCaseRecordTimestamp = (item: PreAiPatientCase) => {
+  const raw = patientCaseRecordTime(item);
+  if (!raw) return 0;
+  const parsed = Date.parse(raw.replace(" ", "T"));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+const patientCaseRecordDate = (item: PreAiPatientCase) => patientCaseRecordTime(item).split(/[ T]/)[0] || "";
+const formatPatientCaseRecordTime = (item: PreAiPatientCase) => patientCaseRecordTime(item) || "待补录入时间";
+
 const filteredPatientCases = computed(() => {
   const value = keyword.value.trim().toLowerCase();
-  return patientCases.value.filter(item => {
-    const tags = item.latestEncounter?.careSituationTags || "";
-    const matchesSituation =
-      careSituationFilter.value === "ALL" ||
-      (careSituationFilter.value === "OUTPATIENT" && tags.includes("门诊")) ||
-      (careSituationFilter.value === "INPATIENT" && tags.includes("住院")) ||
-      (careSituationFilter.value === "LOW_INCOME" && tags.includes("低保"));
-    return (
-      matchesSituation && (!value || `${item.patientName} ${item.latestEncounter?.caseToken || ""}`.toLowerCase().includes(value))
-    );
-  });
+  const recordDate = patientArchiveDate.value;
+  return patientCases.value
+    .filter(item => {
+      const tags = item.latestEncounter?.careSituationTags || "";
+      const matchesSituation =
+        careSituationFilter.value === "ALL" ||
+        (careSituationFilter.value === "OUTPATIENT" && tags.includes("门诊")) ||
+        (careSituationFilter.value === "INPATIENT" && tags.includes("住院")) ||
+        (careSituationFilter.value === "LOW_INCOME" && tags.includes("低保"));
+      const matchesDate = !recordDate || patientCaseRecordDate(item) === recordDate;
+      const searchable = `${item.patientName} ${item.latestEncounter?.caseToken || ""}`.toLowerCase();
+      return matchesSituation && matchesDate && (!value || searchable.includes(value));
+    })
+    .sort((left, right) => patientCaseRecordTimestamp(right) - patientCaseRecordTimestamp(left));
 });
-const selectedPatientCase = computed(() => patientCases.value.find(item => item.id === selectedPatientCaseId.value));
 const canHandleStage = (stageCode: PreAiStageCode, ...duties: PreAiDutyCode[]) =>
   Boolean(authStore.stagePermissions[stageCode]?.editable) || hasAssignedDuty(...duties);
 const workflowCards = computed<WorkflowCard[]>(() => [
@@ -2607,10 +2627,6 @@ const selectPatientCase = async (patientCase: PreAiPatientCase) => {
   if (selectedEncounterId.value !== patientCase.latestEncounter.id) return;
   selectedPatientCaseId.value = patientCase.id;
   patientDrawerOpen.value = false;
-};
-
-const togglePatientDrawer = () => {
-  patientDrawerOpen.value = !patientDrawerOpen.value;
 };
 
 const activateWorkflowCard = (card: WorkflowCard) => {
@@ -3944,12 +3960,25 @@ onBeforeUnmount(() => {
 .panel-actions > div {
   flex: 1 1 auto;
 }
+.patient-archive-trigger {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 8px 18px rgb(0 150 136 / 13%);
+}
+.patient-archive-trigger__count {
+  min-width: 24px;
+  display: inline-flex;
+  justify-content: center;
+  padding: 1px 7px;
+  margin-left: 2px;
+  color: #ffffff;
+  border-radius: 999px;
+  background: var(--el-color-primary);
+}
 .workspace-shell {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
-  padding-left: 64px;
   flex: 1;
   min-height: 650px;
 }
@@ -4019,72 +4048,56 @@ onBeforeUnmount(() => {
 }
 .encounter-sidebar {
   position: absolute;
-  z-index: 20;
-  inset: 0 auto 0 0;
-  width: 54px;
-  min-height: 650px;
-  padding: 14px 14px 14px 68px;
+  z-index: 40;
+  top: 0;
+  left: 0;
+  width: min(430px, calc(100vw - 28px));
+  max-height: min(720px, calc(100vh - 150px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 18px;
   overflow: hidden;
-  box-sizing: border-box;
-  transition:
-    width 0.24s ease,
-    box-shadow 0.24s ease;
-}
-.encounter-sidebar.expanded {
-  width: 310px;
-  box-shadow: 12px 12px 34px rgb(31 78 120 / 18%);
-}
-.encounter-sidebar .sidebar-title,
-.encounter-sidebar :deep(.el-scrollbar) {
-  width: 228px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.16s ease;
-}
-.encounter-sidebar.expanded .sidebar-title,
-.encounter-sidebar.expanded :deep(.el-scrollbar) {
-  opacity: 1;
-  pointer-events: auto;
-}
-.patient-drawer-rail {
-  position: absolute;
-  inset: 12px auto 12px 7px;
-  width: 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 5px;
-  color: var(--el-color-primary);
-  border: 0;
-  border-radius: 13px;
-  background: var(--el-color-primary-light-9);
-  cursor: pointer;
-}
-.patient-drawer-rail span {
-  max-height: 130px;
-  overflow: hidden;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  writing-mode: vertical-rl;
-  text-overflow: ellipsis;
+  box-shadow: 16px 18px 44px rgb(31 78 120 / 20%);
 }
 .patient-drawer-mask {
-  display: none;
+  position: fixed;
+  z-index: 39;
+  inset: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
 }
 .sidebar-title {
   display: grid;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 0;
 }
-.care-situation-filter {
+.patient-archive-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.care-situation-filter,
+.patient-archive-date-filter {
   width: 100%;
 }
 .sidebar-title__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+.sidebar-title__head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.sidebar-title__head small {
+  color: var(--el-text-color-secondary);
+  line-height: 1.45;
 }
 .sidebar-title__head :deep(.el-button) {
   margin-left: 0;
@@ -4096,20 +4109,24 @@ onBeforeUnmount(() => {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 8px;
-  margin-bottom: 4px;
-  padding: 6px;
+  gap: 10px 12px;
+  margin-bottom: 10px;
+  padding: 12px;
   text-align: left;
-  border: 1px solid transparent;
-  border-left: 3px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  transition: background-color 0.16s ease, border-color 0.16s ease;
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 4px solid transparent;
+  border-radius: 12px;
+  background: var(--el-bg-color);
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .encounter-row:hover,
 .encounter-row.active {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
+  box-shadow: 0 10px 22px rgb(0 150 136 / 12%);
 }
 .encounter-row.active {
   border-left-color: var(--el-color-primary);
@@ -4117,7 +4134,7 @@ onBeforeUnmount(() => {
 .encounter-row-main {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 6px;
   padding: 0;
   text-align: left;
   border: 0;
@@ -4133,7 +4150,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+}
+.encounter-row__head strong {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .encounter-row span {
   color: var(--el-text-color-regular);
@@ -4143,7 +4166,7 @@ onBeforeUnmount(() => {
 }
 .encounter-row-followup {
   align-self: end;
-  padding: 3px 5px;
+  padding: 4px 0;
   color: var(--el-color-primary);
   font-size: 12px;
   white-space: nowrap;
@@ -5025,34 +5048,23 @@ onBeforeUnmount(() => {
   }
   .workspace-shell {
     grid-template-columns: 1fr;
-    padding-left: 0;
   }
   .encounter-workspace {
     grid-column: auto;
   }
   .encounter-sidebar {
-    max-height: none;
-  }
-  .encounter-sidebar {
     position: fixed;
     z-index: 42;
-    top: 80px;
+    top: 86px;
     bottom: 18px;
     left: 10px;
+    width: calc(100vw - 20px);
+    max-height: none;
     min-height: 0;
   }
-  .encounter-sidebar:not(.expanded) .sidebar-title,
-  .encounter-sidebar:not(.expanded) :deep(.el-scrollbar) {
-    opacity: 0;
-    pointer-events: none;
-  }
   .patient-drawer-mask {
-    position: fixed;
     z-index: 41;
-    inset: 0;
-    display: block;
-    border: 0;
-    background: rgb(0 0 0 / 30%);
+    background: rgb(31 78 120 / 8%);
   }
   .workspace-modebar {
     align-items: flex-start;
