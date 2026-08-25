@@ -1,6 +1,6 @@
 <template>
-  <section class="workflow-sidebar" aria-label="院内流转时间轴">
-    <div class="workflow-header">
+  <section class="workflow-sidebar" :class="{ compact }" aria-label="院内流转时间轴" @pointermove="$emit('interact')">
+    <div v-if="!compact" class="workflow-header">
       <section class="workflow-patient-card">
         <span>当前患者</span>
         <strong>{{ workspace.encounter.patient.patientName || "待补姓名" }}</strong>
@@ -32,9 +32,10 @@
     <div class="workflow-title">
       <div>
         <strong>院内流转</strong>
-        <small>按岗位节点切换填写区</small>
+        <small v-if="!compact">按岗位节点切换填写区</small>
       </div>
-      <span>当前岗位已加重标识</span>
+      <button v-if="compact" type="button" class="workflow-restore" @click="$emit('restore')">展开流转信息</button>
+      <span v-else>当前岗位已加重标识</span>
     </div>
 
     <el-scrollbar class="workflow-scrollbar">
@@ -84,6 +85,7 @@ export interface WorkflowCard {
 const props = defineProps<{
   workspace: PreAiWorkspace;
   cards: WorkflowCard[];
+  compact?: boolean;
   encounterStatusLabel: Record<string, string>;
   encounterStatusType: (status: PreAiEncounterStatus) => "success" | "warning" | "info";
   routeLabel: (route?: string) => string;
@@ -99,11 +101,14 @@ const returnedCount = computed(() => props.cards.filter(card => props.statusOf(c
 
 defineEmits<{
   select: [card: WorkflowCard];
+  restore: [];
+  interact: [];
 }>();
 </script>
 
 <style scoped lang="scss">
 .workflow-sidebar {
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -112,6 +117,16 @@ defineEmits<{
   border-radius: 16px;
   background: var(--el-bg-color);
   box-shadow: 0 10px 30px rgb(31 78 120 / 8%);
+  transition:
+    padding 0.24s var(--ease-standard),
+    gap 0.24s var(--ease-standard),
+    box-shadow 0.24s var(--ease-standard),
+    background-color 0.24s var(--ease-standard);
+}
+.workflow-sidebar.compact {
+  gap: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 6px 18px rgb(31 78 120 / 5%);
 }
 .workflow-header {
   display: grid;
@@ -191,6 +206,7 @@ defineEmits<{
   justify-content: space-between;
   gap: 12px;
   padding: 0 2px;
+  transition: margin 0.24s var(--ease-standard);
 }
 .workflow-title > div {
   min-width: 0;
@@ -205,6 +221,15 @@ defineEmits<{
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }
+.workflow-restore {
+  padding: 4px 10px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 70%, var(--el-bg-color));
+  cursor: pointer;
+}
 .workflow-scrollbar {
   width: 100%;
 }
@@ -213,10 +238,21 @@ defineEmits<{
   display: flex;
   gap: 18px;
   padding: 4px 4px 10px;
+  transition:
+    gap 0.24s var(--ease-standard),
+    padding 0.24s var(--ease-standard);
+}
+.workflow-sidebar.compact .workflow-flow {
+  gap: 12px;
+  padding-bottom: 6px;
 }
 .workflow-card-wrap {
   position: relative;
   flex: 0 0 186px;
+  transition: flex-basis 0.24s var(--ease-standard);
+}
+.workflow-sidebar.compact .workflow-card-wrap {
+  flex-basis: 154px;
 }
 .workflow-card-wrap:not(:last-child)::after {
   position: absolute;
@@ -255,9 +291,17 @@ defineEmits<{
   background: var(--el-bg-color);
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background-color 0.18s ease;
+    min-height 0.24s var(--ease-standard),
+    padding 0.24s var(--ease-standard),
+    border-color 0.2s var(--ease-standard),
+    box-shadow 0.2s var(--ease-standard),
+    background-color 0.2s var(--ease-standard);
+}
+.workflow-sidebar.compact .workflow-card {
+  min-height: 72px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 6px 8px;
+  padding: 9px 10px;
 }
 .workflow-card:hover,
 .workflow-card.active {
@@ -304,6 +348,14 @@ defineEmits<{
   font-weight: 700;
   border-radius: 50%;
   background: var(--el-color-primary-light-9);
+  transition:
+    width 0.24s var(--ease-standard),
+    height 0.24s var(--ease-standard),
+    box-shadow 0.24s var(--ease-standard);
+}
+.workflow-sidebar.compact .workflow-order {
+  width: 28px;
+  height: 28px;
 }
 .workflow-card-main {
   min-width: 0;
@@ -320,6 +372,10 @@ defineEmits<{
 .workflow-card-main small {
   color: var(--el-text-color-secondary);
 }
+.workflow-sidebar.compact .workflow-card-main small,
+.workflow-sidebar.compact .workflow-card-main em {
+  display: none;
+}
 .workflow-card-main em {
   color: var(--el-color-primary);
   font-style: normal;
@@ -330,8 +386,16 @@ defineEmits<{
   justify-self: start;
   max-width: 100%;
 }
+.workflow-sidebar.compact .workflow-card :deep(.el-tag) {
+  max-width: 76px;
+}
 @media (prefers-reduced-motion: reduce) {
-  .workflow-card {
+  .workflow-sidebar,
+  .workflow-title,
+  .workflow-flow,
+  .workflow-card-wrap,
+  .workflow-card,
+  .workflow-order {
     transition: none;
   }
 }

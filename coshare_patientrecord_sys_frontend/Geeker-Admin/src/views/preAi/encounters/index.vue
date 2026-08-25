@@ -1,11 +1,12 @@
 <template>
   <!-- eslint-disable vue/html-closing-bracket-newline -->
   <div class="pre-ai-page">
-    <header class="page-hero">
-      <div>
+    <header class="page-hero" :class="{ 'is-context-compact': topContextCompacted }" @pointermove="scheduleTopContextCompaction">
+      <div v-if="!topContextCompacted" class="page-hero__copy">
         <el-tag type="primary" effect="plain">患者就诊</el-tag>
         <h2>登记与事实采集</h2>
       </div>
+      <button v-else type="button" class="context-restore" @click="restoreTopContext">展开说明</button>
       <div class="hero-actions">
         <el-button class="patient-archive-trigger" type="primary" :icon="User" @click="patientDrawerOpen = true">
           患者主档案
@@ -192,6 +193,7 @@
           <WorkflowSidebar
             :workspace="workspace"
             :cards="workflowCards"
+            :compact="workflowContextCompacted"
             :encounter-status-label="encounterStatusLabel"
             :encounter-status-type="encounterStatusType"
             :route-label="routeLabel"
@@ -201,24 +203,29 @@
             :is-active="isWorkflowCardActive"
             :is-current="isCurrentWorkflowCard"
             @select="selectWorkflowCard"
+            @restore="restoreWorkflowContext"
+            @interact="scheduleWorkflowContextCompaction"
           />
 
           <section v-if="!workflowSelected" class="workflow-empty-panel">
             <el-empty :image-size="96" description="请选择上方岗位节点" />
           </section>
           <template v-else>
-          <section class="patient-banner">
+          <section class="patient-banner" :class="{ 'is-context-compact': topContextCompacted }" @pointermove="scheduleTopContextCompaction">
             <div class="patient-banner__identity">
               <span class="patient-avatar">{{ (workspace.encounter.patient.patientName || "患").slice(0, 1) }}</span>
               <div>
-                <small>当前就诊患者</small>
+                <small v-if="!topContextCompacted">当前就诊患者</small>
                 <h3>
                   {{ workspace.encounter.patient.patientName || "待补姓名" }}
                 </h3>
-                <p>
+                <p v-if="!topContextCompacted">
                   {{ workspace.encounter.caseToken }} · {{ workspace.encounter.patient.gender || "待补性别" }} ·
                   {{ workspace.encounter.patient.age || "待补年龄" }} ·
                   {{ workspace.encounter.patient.visitDate || "待补就诊时间" }}
+                </p>
+                <p v-else class="patient-banner__compact-meta">
+                  {{ workspace.encounter.caseToken }} · {{ routeLabel(workspace.encounter.route) }}
                 </p>
               </div>
             </div>
@@ -1482,6 +1489,37 @@ const attachmentUpload = reactive({
 });
 const selectedPanel = ref<"STAGE" | "AUX">("STAGE");
 const selectedStageCode = ref<PreAiStageCode>("REGISTRATION");
+const topContextCompacted = ref(false);
+const workflowContextCompacted = ref(false);
+const TOP_CONTEXT_IDLE_MS = 7000;
+const WORKFLOW_CONTEXT_IDLE_MS = 9000;
+type IdleCompactionTarget = { value: boolean };
+const createIdleCompactionController = (target: IdleCompactionTarget, delayMs: number) => {
+  let timer: number | undefined;
+  const clear = () => {
+    if (timer !== undefined) window.clearTimeout(timer);
+    timer = undefined;
+  };
+  const schedule = () => {
+    if (typeof window === "undefined") return;
+    clear();
+    timer = window.setTimeout(() => {
+      target.value = true;
+      timer = undefined;
+    }, delayMs);
+  };
+  const restore = () => {
+    target.value = false;
+    schedule();
+  };
+  return { clear, restore, schedule };
+};
+const topContextIdle = createIdleCompactionController(topContextCompacted, TOP_CONTEXT_IDLE_MS);
+const workflowContextIdle = createIdleCompactionController(workflowContextCompacted, WORKFLOW_CONTEXT_IDLE_MS);
+const scheduleTopContextCompaction = () => topContextIdle.schedule();
+const restoreTopContext = () => topContextIdle.restore();
+const scheduleWorkflowContextCompaction = () => workflowContextIdle.schedule();
+const restoreWorkflowContext = () => workflowContextIdle.restore();
 const compactStageFieldsExpanded = ref(false);
 const createOptionalFieldsExpanded = ref(false);
 const compactStageFieldKeys: Partial<Record<PreAiStageCode, Set<string>>> = {
@@ -2402,6 +2440,19 @@ const createSecondaryRegistrationFieldsCount = computed(
 );
 watch(selectedStageCode, () => {
   compactStageFieldsExpanded.value = false;
+  restoreWorkflowContext();
+});
+watch(selectedPanel, restoreWorkflowContext);
+watch(workspace, value => {
+  if (!value) {
+    topContextCompacted.value = false;
+    workflowContextCompacted.value = false;
+    topContextIdle.clear();
+    workflowContextIdle.clear();
+    return;
+  }
+  restoreTopContext();
+  restoreWorkflowContext();
 });
 const labTask = computed(() => workspace.value?.auxiliaryTasks.find(task => task.taskType === "LAB"));
 const legacyAuxiliaryTasks = computed(() => workspace.value?.auxiliaryTasks.filter(task => task.taskType !== "LAB") || []);
@@ -4109,6 +4160,8 @@ onMounted(() => {
     historyResizeObserver.observe(workspaceShellRef.value);
   }
   void loadEncounterList();
+  scheduleTopContextCompaction();
+  scheduleWorkflowContextCompaction();
   window.addEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);
   window.addEventListener("beforeunload", beforeUnloadWithUnsavedDrafts);
 });
@@ -4148,6 +4201,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);
   window.removeEventListener("beforeunload", beforeUnloadWithUnsavedDrafts);
   if (queueUpdateRefreshTimer) clearTimeout(queueUpdateRefreshTimer);
+  topContextIdle.clear();
+  workflowContextIdle.clear();
   stopHistoryPointerResize?.();
   historyResizeObserver?.disconnect();
   historyResizeObserver = undefined;
@@ -4312,6 +4367,7 @@ onBeforeUnmount(() => {
 }
 
 .pre-ai-page {
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -4335,8 +4391,36 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   gap: 20px;
+  min-height: 86px;
   padding: 20px 24px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color)), var(--el-bg-color));
+  transition:
+    min-height 0.28s var(--ease-standard),
+    padding 0.28s var(--ease-standard),
+    box-shadow 0.28s var(--ease-standard),
+    background-color 0.28s var(--ease-standard);
+}
+.page-hero.is-context-compact {
+  min-height: 58px;
+  padding: 12px 24px;
+  box-shadow: 0 6px 18px rgb(31 78 120 / 5%);
+}
+.page-hero__copy {
+  min-width: 0;
+}
+.context-restore {
+  padding: 6px 12px;
+  color: var(--el-color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 70%, var(--el-bg-color));
+  cursor: pointer;
+}
+.context-restore:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
 .page-hero h2 {
   margin: 8px 0 0;
@@ -4948,6 +5032,14 @@ onBeforeUnmount(() => {
   border-color: var(--el-border-color-lighter);
   background: color-mix(in srgb, var(--el-bg-color) 94%, var(--el-fill-color-light));
   box-shadow: 0 6px 18px rgb(31 78 120 / 5%);
+  transition:
+    padding 0.28s var(--ease-standard),
+    box-shadow 0.28s var(--ease-standard),
+    background-color 0.28s var(--ease-standard);
+}
+.patient-banner.is-context-compact {
+  padding: 9px 12px;
+  box-shadow: 0 4px 12px rgb(31 78 120 / 4%);
 }
 .patient-banner__identity {
   min-width: 0;
@@ -4967,6 +5059,15 @@ onBeforeUnmount(() => {
   border: 1px solid var(--el-color-primary-light-8);
   border-radius: 12px;
   background: color-mix(in srgb, var(--el-color-primary-light-9) 72%, var(--el-bg-color));
+  transition:
+    width 0.28s var(--ease-standard),
+    height 0.28s var(--ease-standard),
+    font-size 0.28s var(--ease-standard);
+}
+.patient-banner.is-context-compact .patient-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
 }
 .patient-banner__identity small,
 .context-stat small {
@@ -4982,6 +5083,12 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+.patient-banner__compact-meta {
+  overflow: hidden;
+  max-width: min(64vw, 640px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .patient-banner__overview {
   display: flex;
@@ -5110,14 +5217,14 @@ onBeforeUnmount(() => {
 .workspace-mode-enter-active,
 .workspace-mode-leave-active {
   transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
+    opacity 0.22s var(--ease-standard),
+    transform 0.22s var(--ease-standard);
 }
 .stage-switch-enter-active,
 .stage-switch-leave-active {
   transition:
-    opacity 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+    opacity 0.26s var(--ease-standard),
+    transform 0.26s var(--ease-standard);
 }
 .workspace-mode-enter-from,
 .stage-switch-enter-from {
@@ -5134,6 +5241,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
+  .page-hero,
+  .patient-banner,
+  .patient-avatar,
   .mode-slider,
   .mode-pill,
   .workspace-mode-enter-active,
