@@ -29,6 +29,14 @@
           <el-button :icon="Refresh" :loading="medicalLoading" @click="loadMedicalConfig">刷新</el-button>
         </div>
         <el-alert
+          v-if="medicalConfig.runtimeConfigLocked"
+          title="病历 AI 已由服务端固定配置"
+          description="医生端可直接使用当前配置生成病历；如需修改 Base URL、Model 或 API Key，请更新 8848 运行配置并重启服务。"
+          type="info"
+          show-icon
+          :closable="false"
+        />
+        <el-alert
           v-if="medicalConfig.apiKeyRequiresReset"
           title="现有病历 AI API Key 已无法解密，必须重新填写并保存"
           description="请取消“保留现有 API Key”，输入有效 Key 后保存。旧密文无法自动恢复；完成重置前住院病历 AI 生成不可用。"
@@ -36,7 +44,7 @@
           show-icon
           :closable="false"
         />
-        <el-form :model="medicalForm" label-width="112px" class="ai-config-form">
+        <el-form :model="medicalForm" label-width="112px" class="ai-config-form" :disabled="medicalConfig.runtimeConfigLocked">
           <el-form-item label="启用 AI">
             <el-switch v-model="medicalForm.enabled" active-text="启用" inactive-text="停用" />
           </el-form-item>
@@ -66,7 +74,14 @@
         </el-form>
         <div class="form-actions">
           <el-button :icon="Refresh" @click="resetMedicalForm">还原</el-button>
-          <el-button type="primary" :icon="Check" :loading="medicalSaving" @click="saveMedicalConfig">保存病历 AI</el-button>
+          <el-button
+            type="primary"
+            :icon="Check"
+            :loading="medicalSaving"
+            :disabled="medicalConfig.runtimeConfigLocked"
+            @click="saveMedicalConfig"
+            >保存病历 AI</el-button
+          >
         </div>
       </article>
 
@@ -277,6 +292,7 @@ const ttsHasExistingKey = computed(() => ttsConfig.value.apiKeyConfigured);
 
 const statusOf = (config: AiRuntimeConfig) => {
   if (config.apiKeyRequiresReset) return { tagType: "danger" as TagProps["type"], tagText: "Key 待重置" };
+  if (config.runtimeConfigLocked) return { tagType: "success" as TagProps["type"], tagText: "服务端固定" };
   if (!config.enabled) return { tagType: "info" as TagProps["type"], tagText: "已停用" };
   return config.baseUrl && config.apiKeyConfigured
     ? { tagType: "success" as TagProps["type"], tagText: "可用" }
@@ -289,7 +305,11 @@ const statusCards = computed(() => [
     title: "病历 AI",
     model: medicalConfig.value.model,
     apiKeyText: medicalConfig.value.apiKeyConfigured ? medicalConfig.value.apiKeyMasked || "已配置" : "未配置",
-    sourceText: medicalConfig.value.usingRuntimeConfig ? "后台运行时配置" : "环境变量默认值",
+    sourceText: medicalConfig.value.runtimeConfigLocked
+      ? "服务端固定配置"
+      : medicalConfig.value.usingRuntimeConfig
+        ? "后台运行时配置"
+        : "环境变量默认值",
     updatedAt: medicalConfig.value.updatedAt,
     ...statusOf(medicalConfig.value)
   },

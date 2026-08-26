@@ -122,7 +122,7 @@
             @select="selectPatientFieldSearchItem"
           />
 
-            <el-button v-if="!readOnly" type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
+          <el-button v-if="!readOnly" type="primary" plain :loading="saving" @click="saveActiveMode">保存</el-button>
 
           <el-button v-if="archiveSubmitted && !readOnly" @click="revokeArchive">撤回草稿</el-button>
 
@@ -1994,7 +1994,7 @@ const roleVisibleFieldKeys: Partial<Record<UserRole, Set<string>>> = {
 
   lab: new Set(["patientName", "visitNo", "hpTestStatus", "uncheckedItemsNote", "documentScope"]),
 
-  ecg: new Set(["patientName", "visitNo", "ecgResult", "ecgStatus", "uncheckedItemsNote", "documentScope"]),
+  ecg: new Set(["patientName", "visitNo", "ecgImages", "ecgResult", "ecgStatus", "uncheckedItemsNote", "documentScope"]),
 
   ultrasound: new Set([
     "patientName",
@@ -3134,7 +3134,10 @@ const previewTimelineEvents = computed(() => {
 const shortTitle = (title: string) => title.replace(/^.*?、/, "");
 
 const isEditable = (field: RecordField) =>
-  !readOnly.value && field.enabled !== false && currentRole.value !== "admin" && ensureArray(field.editors).includes(currentRole.value);
+  !readOnly.value &&
+  field.enabled !== false &&
+  currentRole.value !== "admin" &&
+  ensureArray(field.editors).includes(currentRole.value);
 
 const canEditRecordSection = (section: RecordSection) => section.fields.some(isEditable);
 
@@ -3389,9 +3392,11 @@ const fileToDataUrl = (file: File) =>
   });
 
 const uploadFieldAttachments = async (field: RecordField, files: File[], remark = "") => {
-  const validFiles = files.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/"));
+  const validFiles = files.filter(
+    file => file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+  );
   if (!validFiles.length) {
-    ElMessage.warning("请选择图片或视频文件");
+    ElMessage.warning("请选择图片或 PDF 文件");
     return;
   }
 

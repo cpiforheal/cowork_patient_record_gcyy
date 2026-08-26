@@ -58,6 +58,7 @@ public class ClinicAiConfigService {
     private final String doubaoTtsDefaultVoiceType;
     private final double doubaoTtsDefaultSpeedRatio;
     private final byte[] encryptionKey;
+    private final boolean runtimeConfigLocked;
 
     public ClinicAiConfigService(
         ClinicAiConfigRepository configRepository,
@@ -75,7 +76,8 @@ public class ClinicAiConfigService {
         @Value("${clinic.ai.doubao.tts.voice-type:}") String doubaoTtsDefaultVoiceType,
         @Value("${clinic.ai.doubao.tts.speed-ratio:1.0}") double doubaoTtsDefaultSpeedRatio,
         @Value("${clinic.ai.config-secret:}") String configSecret,
-        @Value("${spring.profiles.active:}") String activeProfiles
+        @Value("${spring.profiles.active:}") String activeProfiles,
+        @Value("${clinic.ai.runtime-config-locked:false}") boolean runtimeConfigLocked
     ) {
         this.configRepository = configRepository;
         this.objectMapper = objectMapper;
@@ -92,6 +94,7 @@ public class ClinicAiConfigService {
         this.doubaoTtsDefaultVoiceType = safe(firstNonBlank(doubaoTtsDefaultVoiceType, System.getenv("CLINIC_AI_DOUBAO_TTS_VOICE_TYPE")));
         this.doubaoTtsDefaultSpeedRatio = normalizeSpeedRatio(doubaoTtsDefaultSpeedRatio);
         this.encryptionKey = deriveEncryptionKey(configSecret, activeProfiles);
+        this.runtimeConfigLocked = runtimeConfigLocked;
     }
 
     public ObjectNode status() {
@@ -108,7 +111,8 @@ public class ClinicAiConfigService {
 
     public ObjectNode statusFor(String configId) {
         AiDefaults defaults = defaultsFor(configId);
-        StoredAiConfig stored = readStoredConfig(configId, defaults.model());
+        boolean locked = isRuntimeConfigLocked(configId);
+        StoredAiConfig stored = locked ? null : readStoredConfig(configId, defaults.model());
         String effectiveApiKey = defaults.apiKey();
         boolean apiKeyDecryptable = true;
         if (stored != null && !safe(stored.apiKeyCipher()).isBlank()) {
@@ -130,7 +134,8 @@ public class ClinicAiConfigService {
         status.put("apiKeyMasked", maskKey(effectiveApiKey));
         status.put("apiKeyDecryptable", apiKeyDecryptable);
         status.put("apiKeyRequiresReset", stored != null && !apiKeyDecryptable);
-        status.put("usingRuntimeConfig", stored != null);
+        status.put("usingRuntimeConfig", locked || stored != null);
+        status.put("runtimeConfigLocked", locked);
         status.put("updatedAt", stored == null ? "" : stored.updatedAt());
         status.put("updatedBy", stored == null ? "" : stored.updatedBy());
         return status;
@@ -227,6 +232,9 @@ public class ClinicAiConfigService {
     }
 
     public ObjectNode updateConfigFor(String configId, Map<String, Object> payload, SessionUser user) {
+        if (isRuntimeConfigLocked(configId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "病历 AI 已由服务端运行配置固定，请联系系统运维修改运行配置后重启服务");
+        }
         AiDefaults defaults = defaultsFor(configId);
         StoredAiConfig current = readStoredConfig(configId, defaults.model());
         String baseUrl = normalizeBaseUrl(payload.get("baseUrl"));
@@ -317,6 +325,9 @@ public class ClinicAiConfigService {
 
     public EffectiveAiConfig resolveEffectiveConfig(String configId) {
         AiDefaults defaults = defaultsFor(configId);
+        if (isRuntimeConfigLocked(configId)) {
+            return new EffectiveAiConfig(defaults.baseUrl(), defaults.apiKey(), defaults.model(), true, true);
+        }
         StoredAiConfig stored = readStoredConfig(configId, defaults.model());
         if (stored == null) {
             return new EffectiveAiConfig(defaults.baseUrl(), defaults.apiKey(), defaults.model(), false, true);
@@ -329,6 +340,10 @@ public class ClinicAiConfigService {
 
     private StoredAiConfig readStoredConfig(String configId, String fallbackModel) {
         return configRepository.readStoredConfig(configId, fallbackModel);
+    }
+
+    private boolean isRuntimeConfigLocked(String configId) {
+        return runtimeConfigLocked && CONFIG_ID.equals(configId);
     }
 
     private AiDefaults defaultsFor(String configId) {

@@ -1293,6 +1293,7 @@ const documentTypeMeta = (type: string, typeLabel: string, role: string, fileNam
       department: roleToDepartment.lab
     },
     ecg: { fieldKey: "ecgResult", fieldLabel: typeLabel, department: roleToDepartment.ecg },
+    ecgImages: { fieldKey: "ecgImages", fieldLabel: typeLabel || "心电图图片/报告", department: roleToDepartment.ecg },
     ultrasound: { fieldKey: "colonoscopy", fieldLabel: typeLabel, department: roleToDepartment.ultrasound },
     followup: { fieldKey: "followupRecordsJson", fieldLabel: typeLabel, department: roleToDepartment.frontdesk },
     inspectionImage: {

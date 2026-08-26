@@ -1032,6 +1032,15 @@ export const recordSections: RecordSection[] = [
     description: "化验室检验结果由检验报告模板维护；本节仅保留心电图、肠镜、生命体征等非化验室冗余字段。",
     fields: [
       {
+        key: "ecgImages",
+        label: "心电图图片/报告",
+        value: "",
+        kind: "attachment",
+        editors: ecg,
+        evidence: "心电图图片/报告",
+        placeholder: "心电室可上传心电图纸、图片或 PDF 报告，上传后由医生复核。"
+      },
+      {
         key: "ecgResult",
         label: "心电图",
         value: "窦性心律，ST-T 改变按实际填写。",

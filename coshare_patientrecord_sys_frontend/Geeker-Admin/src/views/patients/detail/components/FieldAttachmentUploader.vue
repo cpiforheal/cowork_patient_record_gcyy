@@ -2,8 +2,8 @@
   <div class="field-attachment-uploader">
     <div class="field-attachment-actions">
       <label class="field-attachment-button" :class="{ disabled }">
-        <span>{{ attachments.length ? "继续上传图片/视频" : "上传图片/视频" }}</span>
-        <input ref="inputRef" type="file" accept="image/*,video/*" multiple :disabled="disabled" @change="handleFiles" />
+        <span>{{ attachments.length ? "继续上传图片/PDF" : "上传图片/PDF" }}</span>
+        <input ref="inputRef" type="file" accept="image/*,.pdf" multiple :disabled="disabled" @change="handleFiles" />
       </label>
 
       <el-input
@@ -25,7 +25,7 @@
     />
 
     <small class="field-attachment-hint">
-      {{ field.placeholder || "该字段以图片/视频证据为主，无需填写大段文字。" }}
+      {{ field.placeholder || "该字段以图片/PDF 证据为主，无需填写大段文字。" }}
     </small>
   </div>
 </template>

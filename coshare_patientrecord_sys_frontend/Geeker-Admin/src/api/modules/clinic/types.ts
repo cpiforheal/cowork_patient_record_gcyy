@@ -111,6 +111,7 @@ export interface AiRuntimeConfig {
   apiKeyDecryptable?: boolean;
   apiKeyRequiresReset?: boolean;
   usingRuntimeConfig: boolean;
+  runtimeConfigLocked?: boolean;
   updatedAt: string;
   updatedBy: string;
 }
