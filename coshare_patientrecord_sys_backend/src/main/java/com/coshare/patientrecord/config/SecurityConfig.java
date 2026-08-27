@@ -2,6 +2,7 @@ package com.coshare.patientrecord.config;
 
 import com.coshare.patientrecord.security.AuthTokenFilter;
 import com.coshare.patientrecord.security.InventoryPortalBoundaryFilter;
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
@@ -19,6 +20,10 @@ public class SecurityConfig {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
+                // DeferredResult 长轮询完成时会触发 ASYNC/ERROR dispatch 重新进入过滤链，
+                // 此时 AuthTokenFilter(OncePerRequestFilter) 不再执行、SecurityContext 为空，
+                // 必须放行 dispatch 否则 AuthorizationFilter 会以匿名身份拒绝并返回空 body 403
+                .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers(
                     "/",
                     "/index.html",

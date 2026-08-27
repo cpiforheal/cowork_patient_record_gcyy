@@ -47,11 +47,17 @@ let queueUpdateAbort: AbortController | undefined;
 let queueUpdateTimer: number | undefined;
 let queueUpdateVersion = 1;
 let queueUpdateActive = false;
+let queueUpdateFailCount = 0;
 const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
 
 const scheduleQueueUpdateWait = (delay = 200) => {
   if (!queueUpdateActive) return;
   queueUpdateTimer = window.setTimeout(() => void waitForQueueUpdate(), delay);
+};
+
+const scheduleQueueUpdateBackoff = () => {
+  queueUpdateFailCount = Math.min(queueUpdateFailCount + 1, 10);
+  scheduleQueueUpdateWait(Math.min(3000 * queueUpdateFailCount, 30000));
 };
 
 const waitForQueueUpdate = async () => {
@@ -67,6 +73,16 @@ const waitForQueueUpdate = async () => {
       signal: queueUpdateAbort.signal
     });
     if (response.status === 401) handleUnauthorizedResponse();
+    if (response.status === 403) {
+      // 会话受限（如首登强制改密）或网关拦截长轮询：停止轮询，避免固定 200ms 重试刷屏
+      queueUpdateActive = false;
+      return;
+    }
+    if (!response.ok) {
+      scheduleQueueUpdateBackoff();
+      return;
+    }
+    queueUpdateFailCount = 0;
     const nextVersion = Number(response.headers.get("X-Clinic-Queue-Version"));
     const changed = response.headers.get("X-Clinic-Queue-Changed") === "true";
     if (Number.isFinite(nextVersion) && nextVersion > queueUpdateVersion) queueUpdateVersion = nextVersion;
@@ -75,7 +91,8 @@ const waitForQueueUpdate = async () => {
       ElNotification({ title: "业务待办已更新", message: "前台或岗位已更新患者流程，已同步最新待办。", type: "info", duration: 3200 });
     }
   } catch (error: any) {
-    if (error?.name !== "AbortError" && queueUpdateActive) scheduleQueueUpdateWait(3000);
+    if (error?.name === "AuthExpiredError") return;
+    if (error?.name !== "AbortError" && queueUpdateActive) scheduleQueueUpdateBackoff();
     return;
   } finally {
     queueUpdateAbort = undefined;
@@ -119,6 +136,7 @@ window.addEventListener("resize", listeningWindow, false);
 onMounted(() => {
   if (isInventoryPortal) return;
   queueUpdateActive = true;
+  queueUpdateFailCount = 0;
   scheduleQueueUpdateWait(0);
   document.addEventListener("visibilitychange", resumeQueueUpdateWait);
 });
