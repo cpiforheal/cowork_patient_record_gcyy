@@ -164,6 +164,9 @@
           </div>
 
           <div class="actions">
+            <el-button class="preview-toggle" :icon="View" @click="mobilePreviewVisible = !mobilePreviewVisible">
+              {{ mobilePreviewVisible ? "收起报告预览" : "查看报告预览" }}
+            </el-button>
             <el-button :icon="Refresh" :disabled="!canSaveActiveTemplate" @click="resetTemplateValues">重置当前模板</el-button>
             <el-button :icon="Printer" :disabled="activeTemplate.id === 'ecgImage'" @click="printPreview">
               打印/导出预览
@@ -180,12 +183,13 @@
           </div>
         </section>
 
-        <section class="preview-panel">
+        <section class="preview-panel" :class="{ 'mobile-hidden': !mobilePreviewVisible }">
           <div class="panel-title">
             <div>
               <strong>报告预览</strong>
               <span>预览只展示模板化报告，不替代原始 LIS 报告。</span>
             </div>
+            <el-button class="preview-close" size="small" plain @click="mobilePreviewVisible = false">收起</el-button>
           </div>
 
           <div v-if="activeTemplate.id === 'ecgImage'" class="image-preview-grid">
@@ -240,7 +244,7 @@
 <script setup lang="ts" name="labReportWorkbench">
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, type UploadUserFile } from "element-plus";
-import { FolderChecked, Printer, Refresh, Search, UploadFilled } from "@element-plus/icons-vue";
+import { FolderChecked, Printer, Refresh, Search, UploadFilled, View } from "@element-plus/icons-vue";
 import { useRoute } from "vue-router";
 import {
   getPatientDetailApi,
@@ -290,6 +294,7 @@ const formValues = reactive<Record<string, string>>({});
 const numericValues = reactive<Record<string, number | undefined>>({});
 const ecgFiles = ref<UploadUserFile[]>([]);
 const previewRef = ref<HTMLElement>();
+const mobilePreviewVisible = ref(false);
 
 const patientPickerKey = (patient: LabPatientCandidate) =>
   patient.preAiEncounterId ? `encounter:${patient.preAiEncounterId}` : `patient:${patient.legacyPatientId || patient.id}`;
@@ -1098,16 +1103,210 @@ const printPreview = async () => {
   }
 }
 
-@media (max-width: 760px) {
-  .page-head,
-  .panel-title {
-    flex-direction: column;
+/* ===== 移动端（≤768px）：填写流程优先，尺寸按约 50% 收敛 ===== */
+@media (max-width: 768px) {
+  .lab-report-page {
+    gap: 6px;
   }
 
-  .search-row,
-  .metric-row,
-  .report-paper .patient-line {
+  .page-head,
+  .patient-strip,
+  .editor-panel,
+  .preview-panel {
+    padding: 8px;
+    border-radius: 6px;
+  }
+
+  .page-head {
+    flex-direction: column;
+    gap: 6px;
+
+    p {
+      margin-top: 4px;
+      font-size: 12px;
+    }
+
+    h2 {
+      font-size: 16px;
+    }
+  }
+
+  .search-row {
     grid-template-columns: 1fr;
+    gap: 6px;
+
+    :deep(.el-button) {
+      width: 100%;
+    }
+  }
+
+  /* 模板清单退化为横向滚动胶囊，节省纵向空间 */
+  .workspace-layout {
+    gap: 6px;
+  }
+
+  .template-sidebar {
+    display: flex;
+    gap: 6px;
+    padding: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .template-status-filter {
+      flex: 0 0 auto;
+      width: 108px;
+    }
+
+    button {
+      flex: 0 0 auto;
+      min-width: 122px;
+      padding: 6px 8px;
+
+      span {
+        font-size: 11px;
+      }
+
+      em {
+        font-size: 10px;
+      }
+    }
+  }
+
+  .editor-preview-grid {
+    gap: 6px;
+  }
+
+  .editor-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .editor-scroll {
+    overflow: visible;
+  }
+
+  .panel-title {
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+
+    span {
+      font-size: 12px;
+    }
+
+    strong {
+      font-size: 14px;
+    }
+  }
+
+  /* 预览默认隐藏，通过"查看报告预览"按钮展开，避免挤占填写区 */
+  .preview-panel.mobile-hidden {
+    display: none;
+  }
+
+  .preview-close {
+    display: none;
+  }
+
+  /* 指标行退化为堆叠卡：名称行 + 全宽输入 + 参考值小字，触控目标更大 */
+  .report-form :deep(.el-row) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .metric-list {
+    gap: 5px;
+  }
+
+  .metric-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+    padding: 7px;
+    border-radius: 5px;
+
+    .metric-label span {
+      font-size: 11px;
+    }
+
+    :deep(.el-input__inner),
+    :deep(.el-select__wrapper) {
+      min-height: 34px;
+    }
+
+    small {
+      font-size: 11px;
+    }
+  }
+
+  .actions {
+    position: sticky;
+    bottom: 0;
+    display: grid;
+    gap: 5px;
+    margin: 8px -8px -8px;
+    padding: 8px;
+
+    :deep(.el-button) {
+      width: 100%;
+      margin-left: 0;
+    }
+  }
+
+  /* 桌面端隐藏预览切换按钮，移动端由 actions 内展示 */
+  .preview-toggle {
+    display: inline-flex;
+  }
+
+  .ecg-uploader {
+    margin-top: 6px;
+
+    :deep(.el-upload-dragger) {
+      padding: 14px 8px;
+    }
+  }
+
+  .report-paper {
+    padding: 10px;
+    border-radius: 4px;
+
+    header h3 {
+      font-size: 16px;
+    }
+
+    header p {
+      font-size: 12px;
+    }
+
+    .patient-line {
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      margin: 8px 0 6px;
+      font-size: 11px;
+    }
+
+    th,
+    td {
+      padding: 4px 3px;
+      font-size: 11px;
+    }
+
+    footer {
+      margin-top: 8px;
+      font-size: 11px;
+    }
+  }
+}
+
+/* 桌面端不需要移动预览切换按钮 */
+@media (min-width: 769px) {
+  .preview-toggle {
+    display: none;
   }
 }
 </style>

@@ -309,5 +309,103 @@
   .el-drawer:not(.is-fullscreen) {
     max-width: 100vw;
   }
+
+  /* ===== 尺寸收敛原则：间距/装饰性尺寸向 50% 收缩，字号保持 12px 以上确保清晰 ===== */
+
+  /* 控件高度整体降档（32→28 / 24→20），容纳更多表单行 */
+  :root {
+    --el-component-size: 28px;
+    --el-component-size-small: 20px;
+    --el-border-radius-base: 4px;
+    --el-border-radius-small: 3px;
+  }
+
+  /* 表单行距与标签字号收敛，单屏可见更多填写项 */
+  .el-form-item {
+    margin-bottom: 9px;
+  }
+  .el-form-item__label {
+    padding-bottom: 3px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .el-form-item__error {
+    padding-top: 1px;
+    font-size: 11px;
+  }
+
+  /* 输入/选择内部字号同步收敛 */
+  .el-input__inner,
+  .el-select__placeholder,
+  .el-select__wrapper,
+  .el-textarea__inner,
+  .el-input-number,
+  .el-input__wrapper {
+    font-size: 13px;
+  }
+
+  /* 按钮收敛：内边距减半、字号降档 */
+  .el-button:not(.is-link):not(.is-text) {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .el-button--small {
+    padding: 4px 8px;
+  }
+
+  /* 弹层内边距收敛 */
+  .el-dialog__header {
+    padding: 11px 13px 7px;
+  }
+  .el-dialog__body {
+    padding: 11px 13px;
+  }
+  .el-dialog__footer {
+    padding: 8px 13px 12px;
+  }
+  .el-message-box {
+    padding: 13px 13px 10px;
+  }
+
+  /* 标签/徽标收敛 */
+  .el-tag {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+  .el-alert {
+    padding: 6px 9px;
+  }
+  .el-alert__title {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  /* 卡片与描述列表间距收敛 */
+  .el-card__body {
+    padding: 9px;
+  }
+  .el-descriptions__cell {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  /* 标签页头收敛，横向占位更小 */
+  .el-tabs__nav-wrap::after {
+    height: 1px;
+  }
+  .el-tabs__item {
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  /* 折叠面板标题收敛 */
+  .el-collapse-item__header {
+    padding: 0 9px;
+    font-size: 13px;
+  }
+  .el-collapse-item__content {
+    padding-bottom: 8px;
+    font-size: 12px;
+  }
 }
 

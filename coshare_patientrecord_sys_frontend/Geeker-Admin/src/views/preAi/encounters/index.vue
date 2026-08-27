@@ -248,6 +248,17 @@
             </div>
           </section>
 
+          <section v-if="registrationImageAttachments.length" class="patient-dr-strip">
+            <div class="patient-dr-strip__head">
+              <div>
+                <span class="section-caption">患者信息 · 优先视觉核对</span>
+                <strong>DR 影像（前台岗采集）</strong>
+              </div>
+              <el-tag type="primary" effect="plain">{{ registrationImageAttachments.length }} 张</el-tag>
+            </div>
+            <AttachmentPreviewGallery :attachments="registrationImageAttachments" compact @download="downloadPreAiAttachmentApi" />
+          </section>
+
           <section v-if="encounterHistory.length > 1" class="history-entry-bar">
             <div>
               <strong>本次为第 {{ workspace.encounter.visitNo }} 次就诊</strong>
@@ -655,6 +666,72 @@
                     :saving="actionLoading"
                     @save="saveDutyAssignments"
                   />
+
+                  <section v-if="selectedStageCode === 'REGISTRATION'" class="dr-image-section">
+                    <header class="dr-image-heading">
+                      <div>
+                        <span class="section-caption">前台岗影像采集</span>
+                        <strong>DR 影像资料</strong>
+                        <small>作为独立附件存储，不参与前置病历元数据生成；上传后各岗位在患者信息区优先可见。</small>
+                      </div>
+                      <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                        {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                      </el-tag>
+                    </header>
+                    <AttachmentPreviewGallery
+                      v-if="registrationImageAttachments.length"
+                      :attachments="registrationImageAttachments"
+                      @download="downloadPreAiAttachmentApi"
+                    />
+                    <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
+                    <div v-if="canModifySelectedStage" class="upload-actions">
+                      <label class="upload-button">
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '前台DR影像')"
+                        />
+                        <el-icon><Upload /></el-icon> 选择 DR 图片
+                      </label>
+                      <label class="upload-button camera-button">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '前台DR影像')"
+                        />
+                        <el-icon><Camera /></el-icon> 拍照上传
+                      </label>
+                    </div>
+                    <el-progress
+                      v-if="attachmentUpload.total"
+                      :percentage="attachmentUpload.percent"
+                      :status="
+                        attachmentUpload.failed
+                          ? 'warning'
+                          : attachmentUpload.success === attachmentUpload.total
+                            ? 'success'
+                            : undefined
+                      "
+                    />
+                    <small v-if="attachmentUpload.total" class="upload-summary">
+                      共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                      {{ attachmentUpload.failed }} 个
+                    </small>
+                    <div v-if="registrationImageAttachments.length" class="dr-void-actions">
+                      <el-button
+                        v-for="attachment in registrationImageAttachments"
+                        :key="attachment.id"
+                        link
+                        type="danger"
+                        size="small"
+                        @click="voidAttachment(attachment.id)"
+                      >
+                        作废 {{ attachment.fileName }}
+                      </el-button>
+                    </div>
+                  </section>
 
                   <section
                     v-if="
@@ -1289,7 +1366,7 @@
 <script setup lang="ts" name="preAiEncounters">
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
+import { Camera, FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
@@ -2550,6 +2627,9 @@ const upstreamStageTime = (item: PreAiWorkspace["stages"][number]) => {
 const selectedStageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === selectedStageCode.value && !item.taskId) || []
 );
+const registrationImageAttachments = computed(
+  () => workspace.value?.attachments.filter(item => item.stageCode === "REGISTRATION" && !item.taskId && isImageAttachment(item)) || []
+);
 const inspectionImageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item)) || []
 );
@@ -3595,7 +3675,13 @@ const returnAuxTask = async (taskId: string) => {
   }
 };
 
-const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskId?: string, folderMode = false) => {
+const uploadAttachments = async (
+  event: Event,
+  stageCode?: PreAiStageCode,
+  taskId?: string,
+  folderMode = false,
+  customBatchName = ""
+) => {
   const input = event.target as HTMLInputElement;
   const files = Array.from(input.files || []);
   if (!files.length) return;
@@ -3603,11 +3689,13 @@ const uploadAttachments = async (event: Event, stageCode?: PreAiStageCode, taskI
   const timestamp = Date.now();
   const folderName = files[0]?.webkitRelativePath?.split("/")[0] || "";
   const batchId = `pre-att-${timestamp}`;
-  const batchName = folderMode
-    ? folderName || `检查室文件夹-${timestamp}`
-    : files.length > 1
-      ? `批量附件-${timestamp}`
-      : files[0].name;
+  const batchName =
+    customBatchName ||
+    (folderMode
+      ? folderName || `检查室文件夹-${timestamp}`
+      : files.length > 1
+        ? `批量附件-${timestamp}`
+        : files[0].name);
   Object.assign(attachmentUpload, {
     total: files.length,
     success: 0,
@@ -5657,6 +5745,65 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   white-space: pre-wrap;
 }
+/* ===== 前台 DR 影像：独立附件，不参与病历元数据 ===== */
+.patient-dr-strip {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, var(--el-border-color-light));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 82%, var(--el-color-primary-light-9));
+}
+.patient-dr-strip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.patient-dr-strip__head strong {
+  display: block;
+  font-size: 14px;
+}
+.dr-image-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 20%, var(--el-border-color-light));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--el-bg-color) 76%, var(--el-color-primary-light-9));
+}
+.dr-image-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dr-image-heading > div {
+  display: grid;
+  gap: 4px;
+}
+.dr-image-heading strong {
+  font-size: 14px;
+}
+.dr-image-heading small {
+  color: var(--el-text-color-secondary);
+}
+.dr-void-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.camera-button {
+  border-color: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+}
+.camera-button:hover {
+  border-color: var(--el-color-success);
+  background: var(--el-color-success-light-8);
+}
 .upstream-image-section,
 .attachment-section {
   display: grid;
@@ -6014,6 +6161,46 @@ onBeforeUnmount(() => {
   }
   .timeline-facts {
     grid-template-columns: 1fr;
+  }
+
+  /* ===== 前台 DR 影像移动端：拍照为主路径，尺寸收敛 ===== */
+  .patient-dr-strip {
+    gap: 6px;
+    padding: 7px 9px;
+    border-radius: 9px;
+  }
+  .patient-dr-strip__head strong {
+    font-size: 12px;
+  }
+  .dr-image-section {
+    gap: 7px;
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 9px;
+  }
+  .dr-image-heading {
+    flex-direction: column;
+    gap: 5px;
+  }
+  .dr-image-heading strong {
+    font-size: 13px;
+  }
+  .dr-image-heading small {
+    font-size: 11px;
+  }
+  .dr-image-section .upload-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .dr-image-section .upload-button {
+    min-height: 44px;
+    padding: 0 6px;
+    font-size: 13px;
+    border-radius: 7px;
+  }
+  .dr-void-actions :deep(.el-button) {
+    margin-left: 0;
   }
 }
 </style>

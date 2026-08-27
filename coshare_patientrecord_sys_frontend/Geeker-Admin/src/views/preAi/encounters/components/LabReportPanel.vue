@@ -293,8 +293,22 @@ defineEmits<{
     grid-template-columns: 1fr 1fr;
   }
   .lab-report-paper {
-    padding: 14px;
+    min-width: 0;
+    padding: 8px;
+    font-size: 12px;
     overflow-x: auto;
+  }
+  .lab-report-paper h3 {
+    font-size: 15px;
+  }
+  .lab-report-paper th,
+  .lab-report-paper td {
+    padding: 4px 3px;
+    font-size: 11px;
+  }
+  .lab-report-paper footer {
+    flex-direction: column;
+    gap: 3px;
   }
 }
 </style>
