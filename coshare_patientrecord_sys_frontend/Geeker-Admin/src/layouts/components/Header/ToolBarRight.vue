@@ -73,4 +73,29 @@ const username = computed(() => {
     }
   }
 }
+
+/* 移动端收敛顶栏：隐藏全屏按钮、收紧用户名，保证头像与系统徽标可见 */
+@media (max-width: 768px) {
+  .tool-bar-ri {
+    padding-right: 10px;
+
+    .header-icon > * {
+      margin-left: 10px;
+    }
+
+    .header-icon :deep(#fullscreen) {
+      display: none;
+    }
+
+    .username {
+      max-width: 96px;
+      margin: 0 10px;
+      font-size: 13px;
+    }
+
+    .system-badge {
+      margin-left: 10px;
+    }
+  }
+}
 </style>

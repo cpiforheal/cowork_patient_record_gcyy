@@ -5931,6 +5931,11 @@ onBeforeUnmount(() => {
   }
   .workspace-shell {
     grid-template-columns: 1fr;
+    min-height: 420px;
+  }
+  .workflow-empty-panel {
+    min-height: 320px;
+    padding: 18px;
   }
   .encounter-workspace {
     grid-column: auto;

@@ -163,4 +163,15 @@ const emitApply = (mode: ClinicalTemplateMode) => emit("apply", mode, selected.v
 .template-hint {
   margin: 0;
 }
+
+@media (max-width: 680px) {
+  .toolbar-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .heading-tags {
+    flex-wrap: wrap;
+  }
+}
 </style>

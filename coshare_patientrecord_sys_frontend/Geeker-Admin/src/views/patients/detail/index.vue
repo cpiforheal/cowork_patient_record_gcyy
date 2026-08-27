@@ -10618,6 +10618,11 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
   }
 
+  .workbench-field-row,
+  .field-attachment-actions {
+    grid-template-columns: 1fr;
+  }
+
   .field-layer-switch {
     align-items: flex-start;
 

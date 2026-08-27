@@ -20,4 +20,12 @@ const globalStore = useGlobalStore();
   overflow: hidden;
   white-space: nowrap;
 }
+
+/* 移动端侧边栏已隐藏，折叠按钮与面包屑不再需要，避免顶栏横向溢出 */
+@media (max-width: 768px) {
+  .tool-bar-lf :deep(#collapseIcon),
+  .tool-bar-lf :deep(#breadcrumb) {
+    display: none;
+  }
+}
 </style>
