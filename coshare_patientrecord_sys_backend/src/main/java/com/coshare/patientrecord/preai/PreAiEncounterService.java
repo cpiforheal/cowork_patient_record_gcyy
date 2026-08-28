@@ -1920,7 +1920,7 @@ public class PreAiEncounterService {
         if ("INPATIENT".equals(route) && "outpatient".equals(text(encounter, "inventoryCareType"))) {
             transitionToInpatientCare(encounterId, encounter, user);
         } else if ("OUTPATIENT".equals(route) && "inpatient".equals(text(encounter, "inventoryCareType"))) {
-            throw conflict("该就诊已进入住院耗材口径，不能直接改回门诊；请先完成住院阶段冲销并由管理员处理");
+            transitionToOutpatientCare(encounterId, encounter, user);
         }
         jdbcTemplate.update("UPDATE pre_ai_encounters SET route = ?, treatment_path = ?, updated_at = ? WHERE id = ?", route, path, now(), encounterId);
         if (!existing.isBlank() && !existing.equals(route)) {
@@ -2702,14 +2702,6 @@ public class PreAiEncounterService {
             jdbcTemplate.update("UPDATE pre_ai_encounters SET care_situation_tags = NULLIF(?, ''), updated_at = ? WHERE id = ?", tags, now(), encounterId);
             return;
         }
-        Integer eventCount = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM inventory_consumption_events WHERE encounter_id = ? AND status = 'succeeded'",
-            Integer.class,
-            encounterId
-        );
-        if (eventCount != null && eventCount > 0) {
-            throw conflict("该就诊已经产生实际耗用，登记口径不能直接修改；请通过退回冲销或门诊转住院处理");
-        }
         jdbcTemplate.update(
             "UPDATE pre_ai_encounters SET inventory_care_type = ?, care_situation_tags = NULLIF(?, ''), care_type_locked_at = ?, updated_at = ? WHERE id = ?",
             requested, tags, now(), now(), encounterId
@@ -2754,6 +2746,35 @@ public class PreAiEncounterService {
         );
         audit(encounterId, "encounter.care-type.transition", "DOCTOR", user,
             "门诊耗材就诊已结束并创建关联住院耗材就诊；既往门诊耗用保持不变");
+    }
+
+    private void transitionToOutpatientCare(String encounterId, ObjectNode encounter, SessionUser user) {
+        String inpatientCareId = jdbcTemplate.query(
+            "SELECT id FROM pre_ai_care_encounters WHERE clinical_encounter_id = ? AND care_type = 'inpatient' ORDER BY started_at DESC LIMIT 1",
+            (rs, rowNum) -> rs.getString("id"),
+            encounterId
+        ).stream().findFirst().orElse(null);
+        jdbcTemplate.update(
+            "UPDATE pre_ai_care_encounters SET status = 'COMPLETED', ended_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'ACTIVE'",
+            inpatientCareId
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO pre_ai_care_encounters (
+              id, clinical_encounter_id, source_care_encounter_id, care_type, owning_department_id,
+              case_token, visit_date, status, started_at, created_by
+            ) VALUES (?, ?, ?, 'outpatient', ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP(3), ?)
+            ON DUPLICATE KEY UPDATE status = 'ACTIVE', ended_at = NULL
+            """,
+            "care-" + UUID.randomUUID(), encounterId, inpatientCareId, text(encounter, "owningDepartmentId"),
+            text(encounter, "caseToken"), parseVisitDate(text(encounter.path("patient"), "visitDate")), text(encounter, "createdBy")
+        );
+        jdbcTemplate.update(
+            "UPDATE pre_ai_encounters SET inventory_care_type = 'outpatient', care_type_locked_at = ?, updated_at = ? WHERE id = ?",
+            now(), now(), encounterId
+        );
+        audit(encounterId, "encounter.care-type.transition", "DOCTOR", user,
+            "住院耗材就诊已结束并恢复门诊耗材就诊；既往耗用记录保持不变，口径由病历分支直接决定");
     }
 
     private void requireEncounterAccess(String encounterId, SessionUser user) {

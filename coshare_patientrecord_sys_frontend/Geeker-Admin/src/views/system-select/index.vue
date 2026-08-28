@@ -24,22 +24,44 @@
         </span>
         <span class="card-action">进入系统 <el-icon><ArrowRight /></el-icon></span>
       </button>
+
+      <button
+        v-if="isReceptionRole && hasPatientArchiveAccess"
+        class="system-card archive"
+        type="button"
+        @click="enterPatientArchive"
+      >
+        <span class="card-icon"><el-icon><Search /></el-icon></span>
+        <span class="card-copy">
+          <strong>患者主档案查询</strong>
+          <small>接诊流转专用入口：按姓名、门诊号直达患者档案与病历</small>
+        </span>
+        <span class="card-action">直接查询 <el-icon><ArrowRight /></el-icon></span>
+      </button>
     </section>
   </main>
 </template>
 
 <script setup lang="ts" name="systemSelect">
-import { ArrowRight, Box, Document } from "@element-plus/icons-vue";
+import { ArrowRight, Box, Document, Search } from "@element-plus/icons-vue";
+import { computed } from "vue";
 import { HOME_URL } from "@/config";
 import { INVENTORY_SYSTEM_DASHBOARD } from "@/routers/modules/inventorySystem";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/modules/auth";
+import { useUserStore } from "@/stores/modules/user";
 
 const router = useRouter();
 const authStore = useAuthStore();
+const userStore = useUserStore();
 const enterMedical = () => router.push(HOME_URL);
 const enterInventory = () => router.push(INVENTORY_SYSTEM_DASHBOARD);
 
+const isReceptionRole = computed(() => userStore.userInfo.role === "reception");
+const hasPatientArchiveAccess = computed(() =>
+  authStore.flatMenuListGet.some(item => item.path === "/patients/list")
+);
+const enterPatientArchive = () => router.push("/patients/list");
 </script>
 
 <style scoped lang="scss">
@@ -115,6 +137,10 @@ const enterInventory = () => router.push(INVENTORY_SYSTEM_DASHBOARD);
   &.inventory:hover {
     border-color: var(--el-color-success-light-5);
   }
+
+  &.archive:hover {
+    border-color: var(--el-color-warning-light-5);
+  }
 }
 
 .card-icon {
@@ -131,6 +157,11 @@ const enterInventory = () => router.push(INVENTORY_SYSTEM_DASHBOARD);
 .inventory .card-icon {
   color: var(--el-color-success);
   background: var(--el-color-success-light-9);
+}
+
+.archive .card-icon {
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
 }
 
 .card-copy {
@@ -160,6 +191,10 @@ const enterInventory = () => router.push(INVENTORY_SYSTEM_DASHBOARD);
 
 .inventory .card-action {
   color: var(--el-color-success);
+}
+
+.archive .card-action {
+  color: var(--el-color-warning);
 }
 
 @media (max-width: 720px) {
