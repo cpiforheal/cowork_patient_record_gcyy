@@ -2780,9 +2780,6 @@ public class PreAiEncounterService {
     private void requireEncounterAccess(String encounterId, SessionUser user) {
         requireReadRole(user);
         String role = RoleCatalog.canonicalize(user.role());
-        if (isTcmRole(user) && isOutpatientEncounter(loadEncounter(encounterId))) {
-            throw forbidden("门诊患者跳过中医环节，当前岗位不可查看该病历");
-        }
         if ("quality".equals(role) || hasFullPreAiOperationAccess(user)) return;
         if (!canAccessEncounter(encounterId, user)) {
             throw forbidden("当前账号不属于病历归属科室，且未获得该病历的跨科授权");
@@ -2793,7 +2790,6 @@ public class PreAiEncounterService {
         if (user == null || safe(encounterId).isBlank()) return false;
         String role = RoleCatalog.canonicalize(user.role());
         ObjectNode encounter = loadEncounter(encounterId);
-        if (isTcmRole(user) && isOutpatientEncounter(encounter)) return false;
         if ("quality".equals(role) || hasFullPreAiOperationAccess(user)) return true;
         if (!READ_ROLES.contains(role)) return false;
 
@@ -3005,10 +3001,6 @@ public class PreAiEncounterService {
         if (Set.of("outpatient", "门诊", "门诊医保", "out").contains(route)) return "outpatient";
         // Unknown legacy values must remain visible to the TCM work queue.
         return "inpatient";
-    }
-
-    private boolean isTcmRole(SessionUser user) {
-        return user != null && "tcm".equals(RoleCatalog.canonicalize(user.role()));
     }
 
     private String normalizeTaskType(String value) {
