@@ -278,6 +278,8 @@ export const labReportRecordFields: RecordField[] = [
   { key: "lab_urineRoutine_vc", label: "VC", value: "", kind: "select", editors: labReportEditors },
   { key: "postprandialGlucose", label: "餐后血糖", value: "", kind: "input", inputType: "number", editors: labReportEditors },
   { key: "postprandialGlucoseStatus", label: "餐后血糖状态", value: "", kind: "select", editors: labReportEditors },
+  { key: "preprandialGlucose", label: "餐前血糖", value: "", kind: "input", inputType: "number", editors: labReportEditors },
+  { key: "preprandialGlucoseStatus", label: "餐前血糖状态", value: "", kind: "select", editors: labReportEditors },
   { key: "lab_hba1c_hba1c", label: "HbA1c", value: "", kind: "input", inputType: "number", editors: labReportEditors },
   { key: "auxiliaryExamSummary", label: "辅助检查自动摘要", value: "", kind: "textarea", editors: labReportSummaryEditors }
 ];

@@ -223,7 +223,15 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
     roles: ["lab"],
     sectionKeys: ["preOpScreening", "auxiliary"],
     medicalSections: ["专科及辅助检查", "术前筛查"],
-    archiveFieldKeys: ["bloodRoutine", "coagulation", "preOpEight", "urineRoutine", "biochemistry", "postprandialGlucose"],
+    archiveFieldKeys: [
+      "bloodRoutine",
+      "coagulation",
+      "preOpEight",
+      "urineRoutine",
+      "biochemistry",
+      "preprandialGlucose",
+      "postprandialGlucose"
+    ],
     medicalFieldKeys: [
       "bloodRoutine",
       "bloodWbc",
@@ -237,6 +245,7 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "preOpEight",
       "urineRoutine",
       "biochemistry",
+      "preprandialGlucose",
       "postprandialGlucose",
       "bloodRoutineStatus",
       "coagulationStatus",
@@ -244,6 +253,7 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "liverFunctionStatus",
       "renalFunctionStatus",
       "fastingGlucoseStatus",
+      "preprandialGlucoseStatus",
       "postprandialGlucoseStatus",
       "urineRoutineStatus"
     ],
@@ -266,6 +276,8 @@ const rolePreviewConfigs: RolePreviewConfig[] = [
       "biochemistry",
       "liverFunctionStatus",
       "renalFunctionStatus",
+      "preprandialGlucose",
+      "preprandialGlucoseStatus",
       "postprandialGlucose",
       "postprandialGlucoseStatus"
     ],

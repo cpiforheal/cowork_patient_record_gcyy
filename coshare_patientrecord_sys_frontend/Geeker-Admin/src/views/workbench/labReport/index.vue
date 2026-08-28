@@ -91,29 +91,6 @@
           </div>
 
           <div class="editor-scroll">
-          <template v-if="activeTemplate.id === 'ecgImage'">
-            <el-alert
-              type="info"
-              show-icon
-              :closable="false"
-              title="心电图来自专用设备，本页只做拍照或图片上传；保存后回填心电图状态为已查。"
-            />
-            <el-upload
-              v-model:file-list="ecgFiles"
-              drag
-              action="#"
-              :auto-upload="false"
-              :disabled="!canSaveActiveTemplate"
-              multiple
-              accept="image/*"
-              class="ecg-uploader"
-            >
-              <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-              <div class="el-upload__text">拖入心电图照片，或点击选择图片</div>
-            </el-upload>
-          </template>
-
-          <template v-else>
             <el-form label-position="top" class="report-form">
               <el-row :gutter="12">
                 <el-col :span="12">
@@ -160,7 +137,6 @@
                 </article>
               </div>
             </el-form>
-          </template>
           </div>
 
           <div class="actions">
@@ -168,9 +144,7 @@
               {{ mobilePreviewVisible ? "收起报告预览" : "查看报告预览" }}
             </el-button>
             <el-button :icon="Refresh" :disabled="!canSaveActiveTemplate" @click="resetTemplateValues">重置当前模板</el-button>
-            <el-button :icon="Printer" :disabled="activeTemplate.id === 'ecgImage'" @click="printPreview">
-              打印/导出预览
-            </el-button>
+            <el-button :icon="Printer" @click="printPreview">打印/导出预览</el-button>
             <el-button
               type="primary"
               :icon="FolderChecked"
@@ -192,14 +166,7 @@
             <el-button class="preview-close" size="small" plain @click="mobilePreviewVisible = false">收起</el-button>
           </div>
 
-          <div v-if="activeTemplate.id === 'ecgImage'" class="image-preview-grid">
-            <article v-for="file in ecgFiles" :key="file.uid || file.name">
-              <span>{{ file.name }}</span>
-            </article>
-            <el-empty v-if="!ecgFiles.length" description="请选择心电图图片" />
-          </div>
-
-          <article v-else ref="previewRef" class="report-paper">
+          <article ref="previewRef" class="report-paper">
             <header>
               <h3>固始中医肛肠医院检验报告单</h3>
               <p>{{ activeTemplate.name }}</p>
@@ -243,8 +210,8 @@
 
 <script setup lang="ts" name="labReportWorkbench">
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage, type UploadUserFile } from "element-plus";
-import { FolderChecked, Printer, Refresh, Search, UploadFilled, View } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
+import { FolderChecked, Printer, Refresh, Search, View } from "@element-plus/icons-vue";
 import { useRoute } from "vue-router";
 import {
   getPatientDetailApi,
@@ -287,12 +254,11 @@ const patientGender = ref("");
 const referenceGender = ref("");
 const templateStatusFilter = ref<"all" | "pending" | "completed">("pending");
 const patientFieldValues = ref<Record<string, string>>({});
-const activeTemplateId = ref<LabTemplateId>(currentRole.value === "ecg" ? "ecgImage" : "bloodRoutine");
+const activeTemplateId = ref<LabTemplateId>("bloodRoutine");
 const reportDate = ref(today());
 const reportRemark = ref("");
 const formValues = reactive<Record<string, string>>({});
 const numericValues = reactive<Record<string, number | undefined>>({});
-const ecgFiles = ref<UploadUserFile[]>([]);
 const previewRef = ref<HTMLElement>();
 const mobilePreviewVisible = ref(false);
 
@@ -337,7 +303,6 @@ const mergeCandidates = (legacyPatients: PatientRow[], encounters: PreAiEncounte
 
 const activeTemplate = computed(() => labTemplateById(activeTemplateId.value));
 const templateCompletionState = (template: (typeof labReportTemplates)[number]) => {
-  if (template.id === "ecgImage") return patientFieldValues.value.ecgStatus ? "completed" : "pending";
   const total = template.metrics.length;
   const filled = template.metrics.filter(metric =>
     String(patientFieldValues.value[metricStorageKey(template.id, metric.key)] || "").trim()
@@ -345,7 +310,6 @@ const templateCompletionState = (template: (typeof labReportTemplates)[number]) 
   return total > 0 && filled === total ? "completed" : "pending";
 };
 const templateCompletionLabel = (template: (typeof labReportTemplates)[number]) => {
-  if (template.id === "ecgImage") return templateCompletionState(template) === "completed" ? "已填写" : "待上传";
   const filled = template.metrics.filter(metric =>
     String(patientFieldValues.value[metricStorageKey(template.id, metric.key)] || "").trim()
   ).length;
@@ -370,11 +334,7 @@ const mergePreAiLabReportValues = (reports: Array<{ templateId: string; reportDa
 const hasGenderSpecificReference = computed(() =>
   activeTemplate.value.metrics.some(metric => Boolean(metric.maleReference || metric.femaleReference))
 );
-const canSaveActiveTemplate = computed(() =>
-  activeTemplate.value.id === "ecgImage"
-    ? ["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)
-    : canEditLabMetrics.value
-);
+const canSaveActiveTemplate = computed(() => canEditLabMetrics.value);
 
 const resetTemplateValues = () => {
   Object.keys(formValues).forEach(key => delete formValues[key]);
@@ -383,7 +343,6 @@ const resetTemplateValues = () => {
     formValues[metric.key] = metric.defaultValue || "";
     numericValues[metric.key] = undefined;
   });
-  if (activeTemplate.value.id === "ecgImage") ecgFiles.value = [];
 };
 
 const hydrateTemplateValues = () => {
@@ -401,14 +360,6 @@ watch(activeTemplateId, hydrateTemplateValues, { immediate: true });
 watch(patientGender, gender => {
   referenceGender.value = gender.includes("女") ? "女" : gender.includes("男") ? "男" : "";
 });
-
-watch(
-  currentRole,
-  role => {
-    if (role === "ecg") activeTemplateId.value = "ecgImage";
-  },
-  { immediate: true }
-);
 
 const loadTodayPatients = async () => {
   if (todayPatientsLoaded.value || searching.value) return;
@@ -601,25 +552,7 @@ const textToDataUrl = (text: string, mime = "text/html;charset=utf-8") => {
   return `data:${mime};base64,${btoa(binary)}`;
 };
 
-const fileToDataUrl = (file?: File) =>
-  new Promise<string>(resolve => {
-    if (!file) {
-      resolve("");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => resolve("");
-    reader.readAsDataURL(file);
-  });
-
 const buildArchiveValues = () => {
-  if (activeTemplate.value.id === "ecgImage") {
-    const values: Record<string, string> = { ecgStatus: "已查" };
-    const summary = buildLabReportSummary({ ...patientFieldValues.value, ...values });
-    if (summary) values.auxiliaryExamSummary = summary;
-    return values;
-  }
   const values: Record<string, string> = {
     [activeTemplate.value.fieldKey]: reportSummary()
   };
@@ -636,20 +569,8 @@ const buildArchiveValues = () => {
 
 const validateBeforeSave = () => {
   if (!selectedPatient.value) return "请先选择患者";
-  if (
-    activeTemplate.value.id === "ecgImage" &&
-    (!selectedPatient.value.legacyPatientId || !selectedPatient.value.legacyPatientAvailable)
-  )
-    return "心电图不属于本次前置病历化验室节点";
   if (!canSaveActiveTemplate.value) return "当前岗位只能查看该检验报告模板，不能保存检验数值";
-  if (activeTemplate.value.id === "ecgImage" && !ecgFiles.value.length) return "请先选择心电图图片";
-  if (activeTemplate.value.id === "ecgImage" && !["admin", "doctor", "nurse", "ecg"].includes(currentRole.value)) {
-    return "当前账号不能回填心电图状态，请使用心电室、医生或管理员账号保存";
-  }
-  if (
-    activeTemplate.value.id !== "ecgImage" &&
-    activeTemplate.value.metrics.every(metric => !String(formValues[metric.key] || "").trim())
-  ) {
+  if (activeTemplate.value.metrics.every(metric => !String(formValues[metric.key] || "").trim())) {
     return "请至少填写一个检验指标";
   }
   return "";
@@ -678,27 +599,6 @@ const saveToArchive = async () => {
         operator: roleName.value,
         values: archiveValues
       });
-    }
-    if (activeTemplate.value.id === "ecgImage" && legacyPatientId) {
-      const documents = await Promise.all(
-        ecgFiles.value.map(async file => ({
-          type: activeTemplate.value.documentType,
-          typeLabel: activeTemplate.value.documentTypeLabel,
-          fileName: file.name,
-          contentDataUrl: await fileToDataUrl(file.raw),
-          remark: reportRemark.value
-        }))
-      );
-      await uploadDocumentsApi({
-        patientId: legacyPatientId,
-        role: currentRole.value,
-        operator: roleName.value,
-        sourceRole: "ecg",
-        batchId,
-        batchName: `${activeTemplate.value.name}-${reportDate.value}`,
-        documents
-      });
-    } else if (activeTemplate.value.id !== "ecgImage" && legacyPatientId) {
       await uploadDocumentsApi({
         patientId: legacyPatientId,
         role: currentRole.value,
@@ -717,7 +617,7 @@ const saveToArchive = async () => {
         ]
       });
     }
-    if (selectedPatient.value.preAiEncounterId && activeTemplate.value.id !== "ecgImage") {
+    if (selectedPatient.value.preAiEncounterId) {
       const encounterId = selectedPatient.value.preAiEncounterId;
       const { data: workspace } = await getPreAiWorkspaceApi(encounterId);
       const expectedVersion = workspace.labReports
@@ -754,7 +654,6 @@ const saveToArchive = async () => {
 };
 
 const printPreview = async () => {
-  if (activeTemplate.value.id === "ecgImage") return;
   await nextTick();
   const html = htmlReport();
   const printWindow = window.open("", "_blank", "width=920,height=680");
@@ -1017,10 +916,6 @@ const printPreview = async () => {
   }
 }
 
-.ecg-uploader {
-  margin-top: 12px;
-}
-
 .report-paper {
   padding: 20px;
   color: #111827;
@@ -1081,18 +976,6 @@ const printPreview = async () => {
     gap: 12px;
     margin-top: 14px;
     font-size: 13px;
-  }
-}
-
-.image-preview-grid {
-  display: grid;
-  gap: 10px;
-
-  article {
-    padding: 10px;
-    background: #f8fafc;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 6px;
   }
 }
 
@@ -1261,14 +1144,6 @@ const printPreview = async () => {
   /* 桌面端隐藏预览切换按钮，移动端由 actions 内展示 */
   .preview-toggle {
     display: inline-flex;
-  }
-
-  .ecg-uploader {
-    margin-top: 6px;
-
-    :deep(.el-upload-dragger) {
-      padding: 14px 8px;
-    }
   }
 
   .report-paper {

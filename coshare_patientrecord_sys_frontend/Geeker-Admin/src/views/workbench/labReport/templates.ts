@@ -7,8 +7,8 @@ export type LabTemplateId =
   | "coagulation"
   | "urineRoutine"
   | "hba1c"
-  | "postprandialGlucose"
-  | "ecgImage";
+  | "preprandialGlucose"
+  | "postprandialGlucose";
 
 export type LabMetricInput = "number" | "text" | "select";
 
@@ -62,6 +62,9 @@ const legacyMetricValueKeys: Partial<Record<LabTemplateId, Record<string, string
   },
   postprandialGlucose: {
     postprandialGlucose: "postprandialGlucose"
+  },
+  preprandialGlucose: {
+    preprandialGlucose: "preprandialGlucose"
   }
 };
 
@@ -364,6 +367,26 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     ]
   },
   {
+    id: "preprandialGlucose",
+    name: "餐前血糖",
+    subtitle: "餐前血糖值",
+    fieldKey: "preprandialGlucose",
+    statusKeys: ["preprandialGlucoseStatus"],
+    documentType: "labPreprandialGlucose",
+    documentTypeLabel: "餐前血糖模板报告",
+    description: "用于记录餐前血糖值，保存后医生端化验报告视图可直接查看。",
+    metrics: [
+      {
+        key: "preprandialGlucose",
+        name: "餐前血糖",
+        shortName: "FPG",
+        unit: "mmol/L",
+        input: "number",
+        reference: "<7.8"
+      }
+    ]
+  },
+  {
     id: "postprandialGlucose",
     name: "餐后血糖",
     subtitle: "餐后2小时血糖值",
@@ -393,17 +416,6 @@ export const labReportTemplates: LabTemplateDefinition[] = [
     documentTypeLabel: "糖化血红蛋白模板报告",
     description: "按参考单记录 HbA1c。",
     metrics: [{ key: "hba1c", name: "糖化血红蛋白", shortName: "HbA1c", unit: "%", input: "number", reference: "4.0-6.0" }]
-  },
-  {
-    id: "ecgImage",
-    name: "心电图图片",
-    subtitle: "专用心电设备拍照上传",
-    fieldKey: "ecgResult",
-    statusKeys: ["ecgStatus"],
-    documentType: "ecg",
-    documentTypeLabel: "心电图图片",
-    description: "心电图来自专用设备，本模块只做图片上传和状态回填。",
-    metrics: []
   }
 ];
 

@@ -17,11 +17,6 @@ export const hasLabReportData = (values: Record<string, string> = {}) =>
 export const buildLabReportSummary = (values: Record<string, string> = {}) => {
   const summaries = labReportTemplates
     .map(template => {
-      if (template.id === "ecgImage") {
-        const ecg = clean(values.ecgResult || values.ecgStatus);
-        return ecg ? `心电图：${ecg}` : "";
-      }
-
       const metrics = template.metrics
         .map(metric => {
           const value = clean(metricStoredValue(values, template.id, metric.key));

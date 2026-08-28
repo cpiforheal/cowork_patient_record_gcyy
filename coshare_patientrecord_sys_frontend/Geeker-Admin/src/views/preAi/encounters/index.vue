@@ -252,7 +252,7 @@
             <div class="patient-dr-strip__head">
               <div>
                 <span class="section-caption">患者信息 · 优先视觉核对</span>
-                <strong>DR 影像（前台岗采集）</strong>
+                <strong>DR 影像（前台/化验岗采集）</strong>
               </div>
               <el-tag type="primary" effect="plain">{{ registrationImageAttachments.length }} 张</el-tag>
             </div>
@@ -874,6 +874,71 @@
               </section>
 
               <section v-else :key="'auxiliary'" class="auxiliary-stack">
+                <section class="dr-image-section aux-dr-section">
+                  <header class="dr-image-heading">
+                    <div>
+                      <span class="section-caption">辅助检查 · 影像采集</span>
+                      <strong>DR 影像资料</strong>
+                      <small>与前台岗共用同一影像库，作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区优先可见。</small>
+                    </div>
+                    <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                      {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                    </el-tag>
+                  </header>
+                  <AttachmentPreviewGallery
+                    v-if="registrationImageAttachments.length"
+                    :attachments="registrationImageAttachments"
+                    @download="downloadPreAiAttachmentApi"
+                  />
+                  <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
+                  <div v-if="canOpenLabWorkbench" class="upload-actions">
+                    <label class="upload-button">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+                      />
+                      <el-icon><Upload /></el-icon> 选择 DR 图片
+                    </label>
+                    <label class="upload-button camera-button">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+                      />
+                      <el-icon><Camera /></el-icon> 拍照上传
+                    </label>
+                  </div>
+                  <el-progress
+                    v-if="attachmentUpload.total"
+                    :percentage="attachmentUpload.percent"
+                    :status="
+                      attachmentUpload.failed
+                        ? 'warning'
+                        : attachmentUpload.success === attachmentUpload.total
+                          ? 'success'
+                          : undefined
+                    "
+                  />
+                  <small v-if="attachmentUpload.total" class="upload-summary">
+                    共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                    {{ attachmentUpload.failed }} 个
+                  </small>
+                  <div v-if="registrationImageAttachments.length" class="dr-void-actions">
+                    <el-button
+                      v-for="attachment in registrationImageAttachments"
+                      :key="attachment.id"
+                      link
+                      type="danger"
+                      size="small"
+                      @click="voidAttachment(attachment.id)"
+                    >
+                      作废 {{ attachment.fileName }}
+                    </el-button>
+                  </div>
+                </section>
                 <AuxiliaryTaskPanel
                   :workspace="workspace"
                   :capabilities="authStore.capabilities"
@@ -5318,6 +5383,9 @@ onBeforeUnmount(() => {
 .auxiliary-stack {
   display: grid;
   gap: 16px;
+}
+.aux-dr-section {
+  margin-top: 0;
 }
 .workspace-mode-enter-active,
 .workspace-mode-leave-active {

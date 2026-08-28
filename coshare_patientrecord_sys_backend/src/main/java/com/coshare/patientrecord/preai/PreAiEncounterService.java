@@ -1898,6 +1898,9 @@ public class PreAiEncounterService {
     }
 
     private void assertPreviousStages(String encounterId, String stage, ObjectNode encounter) {
+        // 中医科不再强制绑定前置科室：接诊/检查未交接时也可自由填写并完成交接；
+        // 接诊室与检查室之间的强先后对照（INSPECTION → RECEPTION）保持不变。
+        if ("TCM".equals(stage)) return;
         List<String> stages = effectiveStageOrder(encounter);
         int index = stages.indexOf(stage);
         if (index <= 0) return;

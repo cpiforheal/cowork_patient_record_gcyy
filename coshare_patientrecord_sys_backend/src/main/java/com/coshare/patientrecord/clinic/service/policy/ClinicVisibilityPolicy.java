@@ -88,6 +88,8 @@ public class ClinicVisibilityPolicy {
         "lab_urineRoutine_vc",
         "postprandialGlucose",
         "postprandialGlucoseStatus",
+        "preprandialGlucose",
+        "preprandialGlucoseStatus",
         "lab_hba1c_hba1c",
         "auxiliaryExamSummary"
     );
