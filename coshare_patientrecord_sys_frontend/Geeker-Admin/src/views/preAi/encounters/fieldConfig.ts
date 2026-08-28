@@ -694,7 +694,10 @@ export const preAiStages: PreAiStageConfig[] = [
         label: "过敏史",
         kind: "multi",
         options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
-        creatable: true
+        creatable: true,
+        placeholder: "请选择过敏类型（可多选，可输入补充）",
+        supplementKey: "allergyHistoryNote",
+        span: 2
       },
       {
         key: "personalHistory",

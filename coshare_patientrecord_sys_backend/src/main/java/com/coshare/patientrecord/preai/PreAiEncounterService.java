@@ -108,7 +108,7 @@ public class PreAiEncounterService {
             "presentIllnessOverride", "presentIllnessSourceHash", "presentIllnessConfirmed", "chronicDiseaseItems", "surgicalHistoryItems",
             "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots",
             "pastHistory", "surgicalHistory", "traumaHistory", "transfusionHistory", "vaccinationHistory",
-            "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
+            "medicationHistory", "allergyHistory", "allergyHistoryNote", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
             "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "dispositionSupplement", "recommendedAuxiliaryExams", "specialCircumstances",
             "chiefComplaintSupplement", "receptionSpecialDescription", "physicalExam", "physicalExamOverride",
             "physicalExamSourceHash", "physicalExamConfirmed"
@@ -1796,9 +1796,6 @@ public class PreAiEncounterService {
                 required(data, missing, "primaryWesternDiagnosis", "西医主诊断");
                 required(data, missing, "treatmentPath", "治疗方式");
                 required(data, missing, "treatmentPlan", "治疗方案");
-                if ("OUTPATIENT".equals(text(data, "finalRoute")) && "SURGICAL".equals(text(data, "treatmentPath"))) {
-                    throw badRequest("门诊分支本期不进入手术室，请选择保守治疗或改为住院");
-                }
                 if ("SURGICAL".equals(text(data, "treatmentPath"))
                     && text(data, "plannedPrimaryOperation").isBlank()
                     && text(data, "plannedOperationName").isBlank()) {

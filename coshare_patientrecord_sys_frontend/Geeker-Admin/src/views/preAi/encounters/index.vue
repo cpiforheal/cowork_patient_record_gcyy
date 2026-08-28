@@ -627,25 +627,35 @@
                             :value="option.value"
                           />
                         </el-select>
-                        <el-select
-                          v-else-if="field.kind === 'multi'"
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          multiple
-                          clearable
-                          filterable
-                          :allow-create="field.creatable || !fieldOptions(field).length"
-                          default-first-option
-                          :placeholder="field.placeholder || `请选择或输入${field.label}`"
-                          :disabled="isStageFieldDisabled(field)"
-                          @update:model-value="markStageDirty(selectedStageCode)"
-                        >
-                          <el-option
-                            v-for="option in fieldOptions(field)"
-                            :key="option.value"
-                            :label="option.label"
-                            :value="option.value"
+                        <div v-else-if="field.kind === 'multi'" class="multi-field">
+                          <el-select
+                            v-model="stageForms[selectedStageCode][field.key]"
+                            multiple
+                            clearable
+                            filterable
+                            :allow-create="field.creatable || !fieldOptions(field).length"
+                            default-first-option
+                            :placeholder="field.placeholder || `请选择或输入${field.label}`"
+                            :disabled="isStageFieldDisabled(field)"
+                            @update:model-value="markStageDirty(selectedStageCode)"
+                          >
+                            <el-option
+                              v-for="option in fieldOptions(field)"
+                              :key="option.value"
+                              :label="option.label"
+                              :value="option.value"
+                            />
+                          </el-select>
+                          <el-input
+                            v-if="field.supplementKey"
+                            v-model="stageForms[selectedStageCode][field.supplementKey]"
+                            type="textarea"
+                            :rows="2"
+                            placeholder="可补充口语化描述（如患者自述过敏反应、具体过敏原，可选）"
+                            :disabled="isStageFieldDisabled(field)"
+                            @update:model-value="markStageDirty(selectedStageCode)"
                           />
-                        </el-select>
+                        </div>
                         <el-date-picker
                           v-else
                           v-model="stageForms[selectedStageCode][field.key]"
@@ -1612,6 +1622,14 @@ const compactStageFieldKeys: Partial<Record<PreAiStageCode, Set<string>>> = {
   ]),
   INSPECTION: new Set(["inspectionSpecialDescription", "nextReviewAt", "nextReviewNote"]),
   RECEPTION: new Set([
+    "onsetTrigger",
+    "symptomPattern",
+    "aggravatingFactors",
+    "bleedingFeatures",
+    "painFeatures",
+    "prolapseReduction",
+    "associatedSymptoms",
+    "recentAggravation",
     "chiefComplaintSupplement",
     "previousTreatment",
     "generalCondition",
@@ -1623,7 +1641,6 @@ const compactStageFieldKeys: Partial<Record<PreAiStageCode, Set<string>>> = {
     "transfusionHistory",
     "vaccinationHistory",
     "medicationHistory",
-    "allergyHistory",
     "personalHistory",
     "maritalHistory",
     "familyHistory",
@@ -5984,6 +6001,15 @@ onBeforeUnmount(() => {
 }
 .diagnosis-field :deep(.el-select),
 .diagnosis-field :deep(.el-input) {
+  width: 100%;
+}
+.multi-field {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.multi-field :deep(.el-select),
+.multi-field :deep(.el-input) {
   width: 100%;
 }
 .textarea-field {
