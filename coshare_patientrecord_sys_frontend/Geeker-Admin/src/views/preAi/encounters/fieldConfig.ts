@@ -283,7 +283,7 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       {
         key: "registrationPastHistory",
-        label: "既往史 / 其他病史 / 过敏史",
+        label: "既往史 / 其他病史",
         kind: "textarea",
         rows: 2,
         span: 2,
@@ -296,6 +296,145 @@ export const preAiStages: PreAiStageConfig[] = [
         rows: 2,
         span: 2,
         placeholder: "本次症状的发生、持续或变化情况"
+      },
+      {
+        key: "allergyHistory",
+        label: "过敏史",
+        kind: "multi",
+        required: true,
+        span: 2,
+        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
+        creatable: true,
+        placeholder: "请选择过敏类型（可多选，可输入补充）",
+        supplementKey: "allergyHistoryNote"
+      },
+      {
+        key: "personalHistory",
+        label: "个人史",
+        kind: "multi",
+        required: true,
+        span: 2,
+        options: options([
+          "生长于原籍",
+          "否认长期外地居住史",
+          "无烟酒嗜好",
+          "少量吸烟",
+          "长期吸烟",
+          "少量饮酒",
+          "长期饮酒",
+          "否认特殊化学品接触史",
+          "否认放射性接触史",
+          "否认冶游史"
+        ]),
+        creatable: true
+      },
+      {
+        key: "chronicDiseaseItems",
+        label: "慢性病史明细",
+        kind: "repeatable",
+        addLabel: "添加慢性病",
+        span: 2,
+        fields: [
+          {
+            key: "disease",
+            label: "疾病",
+            kind: "select",
+            options: options(["高血压", "糖尿病", "冠心病", "脑血管病", "慢性胃炎", "慢性肾病", "其他"]),
+            creatable: true,
+            required: true
+          },
+          { key: "duration", label: "病程", kind: "select", options: durationOptions, creatable: true },
+          {
+            key: "treatment",
+            label: "治疗情况",
+            kind: "select",
+            options: options(["未治疗", "规律治疗", "间断治疗", "治疗不详", "其他"]),
+            creatable: true
+          },
+          {
+            key: "control",
+            label: "控制情况",
+            kind: "select",
+            options: options(["控制良好", "控制一般", "控制不佳", "不详"]),
+            creatable: true
+          }
+        ]
+      },
+      {
+        key: "surgicalHistoryItems",
+        label: "手术史明细",
+        kind: "repeatable",
+        addLabel: "添加既往手术",
+        span: 2,
+        fields: [
+          { key: "year", label: "年份", kind: "number" },
+          { key: "operationName", label: "手术名称", kind: "select", options: surgeryOptions, creatable: true, required: true },
+          {
+            key: "site",
+            label: "部位",
+            kind: "select",
+            options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "腹部", "其他"]),
+            creatable: true
+          },
+          {
+            key: "result",
+            label: "结果",
+            kind: "select",
+            options: options(["恢复良好", "症状缓解", "症状复发", "遗留并发症", "不详"]),
+            creatable: true
+          }
+        ]
+      },
+      {
+        key: "traumaHistory",
+        label: "外伤史",
+        kind: "select",
+        options: options(["否认外伤史", "有外伤史"]),
+        creatable: true
+      },
+      {
+        key: "transfusionHistory",
+        label: "输血史",
+        kind: "select",
+        options: options(["否认输血史", "有输血史", "不详"]),
+        creatable: true
+      },
+      {
+        key: "vaccinationHistory",
+        label: "预防接种史",
+        kind: "select",
+        options: options(["预防接种随社会进行", "按计划接种", "接种不全", "不详"]),
+        creatable: true
+      },
+      {
+        key: "medicationHistory",
+        label: "用药史",
+        kind: "multi",
+        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗", "其他"]),
+        creatable: true
+      },
+      {
+        key: "maritalHistory",
+        label: "婚育史",
+        kind: "multi",
+        options: options(["适龄结婚", "未婚", "已婚", "离异", "丧偶", "配偶体健", "子女体健", "婚育史无特殊"]),
+        creatable: true
+      },
+      {
+        key: "familyHistory",
+        label: "家族史",
+        kind: "multi",
+        options: options([
+          "家族史无特殊",
+          "否认传染病家族史",
+          "否认遗传病家族史",
+          "否认代谢性疾病家族史",
+          "否认糖尿病家族史",
+          "否认血友病家族史",
+          "否认肿瘤家族史",
+          "否认类似病史"
+        ]),
+        creatable: true
       },
       { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 }
     ]
@@ -456,7 +595,8 @@ export const preAiStages: PreAiStageConfig[] = [
         kind: "textarea",
         rows: 3,
         span: 2,
-        placeholder: "患者怎么描述就怎么记（如“屁股上有个肉球，上厕所就滴血”），无需翻译成医学术语；模板未覆盖的细节也记录在此，由医生端整合"
+        placeholder:
+          "患者怎么描述就怎么记（如“屁股上有个肉球，上厕所就滴血”），无需翻译成医学术语；模板未覆盖的细节也记录在此，由医生端整合"
       },
       {
         key: "chiefComplaintText",
@@ -688,16 +828,6 @@ export const preAiStages: PreAiStageConfig[] = [
         kind: "multi",
         options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗", "其他"]),
         creatable: true
-      },
-      {
-        key: "allergyHistory",
-        label: "过敏史",
-        kind: "multi",
-        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
-        creatable: true,
-        placeholder: "请选择过敏类型（可多选，可输入补充）",
-        supplementKey: "allergyHistoryNote",
-        span: 2
       },
       {
         key: "personalHistory",
@@ -1580,6 +1710,22 @@ export const auxiliaryTaskFields: Record<PreAiAuxiliaryTaskType, PreAiFieldConfi
 };
 
 export const stageByCode = (code: PreAiStageCode) => preAiStages.find(stage => stage.code === code)!;
+
+const historyIntakeFieldKeys = new Set([
+  "allergyHistory",
+  "allergyHistoryNote",
+  "personalHistory",
+  "chronicDiseaseItems",
+  "surgicalHistoryItems",
+  "traumaHistory",
+  "transfusionHistory",
+  "vaccinationHistory",
+  "medicationHistory",
+  "maritalHistory",
+  "familyHistory"
+]);
+
+export const isHistoryIntakeKey = (key: string) => historyIntakeFieldKeys.has(key);
 
 export const stageStatusLabel: Record<string, string> = {
   DRAFT: "待填写",

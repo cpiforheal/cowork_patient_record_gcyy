@@ -568,7 +568,9 @@ const operationPending = ref("");
 const registrationVisible = ref(false);
 const registrationRequestId = ref("");
 const registrationForm = reactive<Record<string, any>>({});
-const registrationFields = preAiStages.find(stage => stage.code === "REGISTRATION")?.fields || [];
+const registrationFields = (preAiStages.find(stage => stage.code === "REGISTRATION")?.fields || []).filter(
+  field => field.kind !== "repeatable"
+);
 const issuanceNotice = ref<{ ticketId: string; publicNo: string; message: string; printPending: boolean }>();
 const newReceptionIds = reactive(new Set<string>());
 const knownReceptionIds = new Set<string>();

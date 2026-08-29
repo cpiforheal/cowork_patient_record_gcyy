@@ -89,6 +89,8 @@ public class PreAiEncounterService {
             "patientName", "gender", "birthDate", "age", "phone", "identityType", "identityNumber", "address",
             "contactName", "contactRelation", "contactPhone", "visitDate", "visitPurpose", "patientSource", "registrationNote",
             "registrationChiefComplaint", "registrationSymptoms", "visitProblem", "visitExpectation", "registrationPastHistory", "registrationIllnessHistory", "registrationPersonalHistory", "registrationCurrentIllness",
+            "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
+            "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory",
             "visitNo", "admissionNo", "medicalRecordNo", "inpatientNo", "ward", "bedNo", "admissionCount",
             "nationality", "nativePlace", "birthplace", "maritalStatus", "admissionMethod", "insuranceType", "paymentMethod",
             "owningDepartmentId", "inventoryCareType", "careSituationDescription",
@@ -1765,6 +1767,8 @@ public class PreAiEncounterService {
                 required(data, missing, "visitDate", "就诊时间");
                 required(data, missing, "visitPurpose", "来院目的");
                 required(data, missing, "registrationChiefComplaint", "登记主诉");
+                required(data, missing, "allergyHistory", "过敏史");
+                required(data, missing, "personalHistory", "个人史");
                 required(data, missing, "inventoryCareType", "耗材统计口径（门诊/住院）");
                 if (!text(data, "inventoryCareType").isBlank()) normalizeInventoryCareType(text(data, "inventoryCareType"));
                 if (!text(data, "visitPurpose").isBlank()) normalizeEnum(text(data, "visitPurpose"), Set.of("GENERAL", "ENDOSCOPY_DIRECT"), "来院目的");

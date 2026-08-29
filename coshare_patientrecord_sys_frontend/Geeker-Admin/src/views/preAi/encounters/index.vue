@@ -531,7 +531,8 @@
                         :class="{
                           'span-2': field.span === 2,
                           'priority-field': field.emphasis === 'priority',
-                          'secondary-field': isSecondaryStageField(field)
+                          'secondary-field': isSecondaryStageField(field),
+                          'history-intake-field': isHistoryIntakeKey(field.key) && selectedStageCode === 'REGISTRATION'
                         }"
                       >
                         <StructuredField
@@ -1530,6 +1531,7 @@ import { getLocalPrintAgentStatus, printQueueTicketLocally } from "../../clinicQ
 import {
   auxiliaryTaskLabel,
   encounterStatusLabel,
+  isHistoryIntakeKey,
   preAiStages,
   stageByCode,
   stageStatusLabel,
@@ -1683,6 +1685,14 @@ const compactStageFieldKeys: Partial<Record<PreAiStageCode, Set<string>>> = {
     "careSituationDescription",
     "registrationPastHistory",
     "registrationCurrentIllness",
+    "chronicDiseaseItems",
+    "surgicalHistoryItems",
+    "traumaHistory",
+    "transfusionHistory",
+    "vaccinationHistory",
+    "medicationHistory",
+    "maritalHistory",
+    "familyHistory",
     "registrationNote"
   ]),
   INSPECTION: new Set(["inspectionSpecialDescription", "nextReviewAt", "nextReviewNote"]),
@@ -2591,11 +2601,13 @@ const secondaryStageFieldsCount = computed(() => visibleStageFields.value.filter
 const registrationFields = computed(() => stageByCode("REGISTRATION").fields.filter(field => field.key !== "visitNo"));
 const registrationDialogFields = computed(() =>
   createOptionalFieldsExpanded.value
-    ? registrationFields.value
-    : registrationFields.value.filter(field => !createRegistrationOptionalFieldKeys.has(field.key))
+    ? registrationFields.value.filter(field => field.kind !== "repeatable")
+    : registrationFields.value.filter(field => !createRegistrationOptionalFieldKeys.has(field.key) && field.kind !== "repeatable")
 );
 const createSecondaryRegistrationFieldsCount = computed(
-  () => registrationFields.value.filter(field => createRegistrationOptionalFieldKeys.has(field.key)).length
+  () =>
+    registrationFields.value.filter(field => createRegistrationOptionalFieldKeys.has(field.key) && field.kind !== "repeatable")
+      .length
 );
 watch(selectedStageCode, () => {
   compactStageFieldsExpanded.value = false;
@@ -3062,9 +3074,31 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
       Object.assign(stageForms[stage.stageCode], normalized);
     }
   });
+  if (!stageDirty.REGISTRATION) {
+    // 病史采集字段数据归属接诊室，前台仅作集中填写入口；两侧表单值保持一致。
+    const registration = stageForms.REGISTRATION;
+    const reception = stageForms.RECEPTION;
+    stageByCode("REGISTRATION").fields.forEach(field => {
+      if (!isHistoryIntakeKey(field.key)) return;
+      const source = reception[field.key];
+      if (Array.isArray(source) ? source.length : String(source ?? "").trim()) {
+        registration[field.key] = Array.isArray(source) ? [...source] : source;
+      }
+    });
+  }
   if (!stageDirty.RECEPTION) {
     const registration = stageForms.REGISTRATION;
     const reception = stageForms.RECEPTION;
+    stageByCode("REGISTRATION").fields.forEach(field => {
+      if (!isHistoryIntakeKey(field.key)) return;
+      const source = reception[field.key];
+      const fromRegistration = registration[field.key];
+      const receptionEmpty = Array.isArray(source) ? !source.length : !String(source ?? "").trim();
+      const registrationHas = Array.isArray(fromRegistration) ? fromRegistration.length > 0 : Boolean(String(fromRegistration ?? "").trim());
+      if (receptionEmpty && registrationHas) {
+        reception[field.key] = Array.isArray(fromRegistration) ? [...fromRegistration] : fromRegistration;
+      }
+    });
     if (Array.isArray(registration.registrationSymptoms) && registration.registrationSymptoms.length && !reception.chiefComplaint?.length) {
       reception.chiefComplaint = [...registration.registrationSymptoms];
     }
@@ -3492,8 +3526,49 @@ const selectWorkflowCard = async (card: WorkflowCard) => {
   if (card.kind === "STAGE" && card.stageCode === "REVIEW") await selectStage(card.stageCode);
 };
 
+const syncRegistrationHistoryToReception = () => {
+  const registration = stageForms.REGISTRATION;
+  const reception = stageForms.RECEPTION;
+  stageByCode("REGISTRATION").fields.forEach(field => {
+    if (!isHistoryIntakeKey(field.key)) return;
+    const value = registration[field.key];
+    if (Array.isArray(value) ? value.length : String(value ?? "").trim()) {
+      reception[field.key] = Array.isArray(value) ? [...value] : value;
+    }
+  });
+};
+
+const persistReceptionHistoryFromRegistration = async () => {
+  // 病史采集数据归属接诊室（病历生成从接诊室读取），前台保存时联动落一份接诊室草稿。
+  syncRegistrationHistoryToReception();
+  const receptionStatus = stageSubmission("RECEPTION")?.status;
+  if (receptionStatus === "COMPLETED") {
+    ElMessage.info("接诊室已完成交接，本次病史修改暂存于前台登记，接诊室纠错保存后才会更新到病历");
+    return;
+  }
+  const hasHistoryValue = stageByCode("REGISTRATION").fields.some(field => {
+    if (!isHistoryIntakeKey(field.key)) return false;
+    const value = stageForms.RECEPTION[field.key];
+    return Array.isArray(value) ? value.length > 0 : Boolean(String(value ?? "").trim());
+  });
+  if (!hasHistoryValue) return;
+  try {
+    const { data } = await savePreAiStageApi(
+      selectedEncounterId.value,
+      "RECEPTION",
+      cleanStageForm("RECEPTION"),
+      stageSubmission("RECEPTION")?.version ?? 0
+    );
+    hydrateWorkspace(data);
+  } catch (error: any) {
+    ElMessage.warning("病史采集数据同步至接诊室草稿失败，请稍后重试保存");
+    throw error;
+  }
+};
+
 const saveSelectedStage = async () =>
   runAction(async () => {
+    if (selectedStageCode.value === "REGISTRATION") await persistReceptionHistoryFromRegistration();
     const { data } = await savePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
@@ -3519,6 +3594,7 @@ const correctSelectedStage = async () => {
       }
     );
     await runAction(async () => {
+      if (selectedStageCode.value === "REGISTRATION") await persistReceptionHistoryFromRegistration();
       const { data } = await correctPreAiStageApi(
         selectedEncounterId.value,
         selectedStageCode.value,
@@ -3538,6 +3614,7 @@ const correctSelectedStage = async () => {
 
 const completeSelectedStage = async () =>
   runAction(async () => {
+    if (selectedStageCode.value === "REGISTRATION") await persistReceptionHistoryFromRegistration();
     const { data } = await completePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
@@ -3616,6 +3693,15 @@ const cleanStageForm = (code: PreAiStageCode) => {
       if (metadataValue !== undefined && metadataValue !== null && metadataValue !== "") result[key] = metadataValue;
     }
   });
+  if (code === "RECEPTION") {
+    // 过敏史等病史采集入口已前移至前台，字段不再出现在接诊室表单定义中；
+    // 保存时必须把内存中的既有值随载荷提交，否则整体替换会丢失数据。
+    for (const key of Object.keys(stageForms.RECEPTION)) {
+      if (!isHistoryIntakeKey(key) || key in result) continue;
+      const value = stageForms.RECEPTION[key];
+      if (hasFormValue(value)) result[key] = value;
+    }
+  }
   for (const key of ["clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt"]) {
     const metadataValue = stageForms[code][key];
     if (hasFormValue(metadataValue)) result[key] = metadataValue;
@@ -4726,6 +4812,20 @@ onBeforeUnmount(() => {
 }
 .secondary-field :deep(.el-form-item__label) {
   color: var(--el-text-color-regular);
+}
+.history-intake-field :deep(.el-form-item__label) {
+  color: var(--el-color-primary);
+  font-weight: 700;
+}
+.history-intake-field :deep(.el-form-item__label)::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  vertical-align: middle;
 }
 .panel-actions {
   display: flex;
