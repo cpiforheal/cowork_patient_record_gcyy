@@ -178,6 +178,7 @@ export interface PreAiAttachment {
   batchName?: string;
   relativePath?: string;
   sequenceNo?: number;
+  status?: string;
   createdAt: string;
   downloadUrl: string;
 }
@@ -264,6 +265,7 @@ export interface PreAiWorkspace {
   auxiliaryTasks: PreAiAuxiliaryTask[];
   labReports: LabReportSnapshot[];
   attachments: PreAiAttachment[];
+  voidedAttachments?: PreAiAttachment[];
   diagnoses: Array<Record<string, any>>;
   auditLogs: PreAiAuditLog[];
   exports: PreAiExportVersion[];
@@ -597,6 +599,12 @@ export const voidPreAiAttachmentApi = (encounterId: string, attachmentId: string
   jsonRequest<PreAiWorkspace>(
     `/pre-ai/encounters/${encodeURIComponent(encounterId)}/attachments/${encodeURIComponent(attachmentId)}`,
     "DELETE"
+  );
+
+export const restorePreAiAttachmentApi = (encounterId: string, attachmentId: string) =>
+  jsonRequest<PreAiWorkspace>(
+    `/pre-ai/encounters/${encodeURIComponent(encounterId)}/attachments/${encodeURIComponent(attachmentId)}/restore`,
+    "POST"
   );
 
 export const getPreAiReviewPreviewApi = async (encounterId: string, signal?: AbortSignal) => {

@@ -18,6 +18,16 @@
             hide-on-click-modal
           />
           <el-button class="original-button" link type="primary" @click="openOriginal(attachment)">原图</el-button>
+          <el-button
+            v-if="removable"
+            class="remove-button"
+            link
+            type="danger"
+            :title="`删除 ${attachment.fileName}`"
+            @click.stop="emit('remove', attachment)"
+          >
+            <el-icon><Delete /></el-icon>
+          </el-button>
         </template>
       </template>
 
@@ -71,18 +81,21 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { getPreAiAttachmentObjectUrlApi, type PreAiAttachment } from "@/api/modules/clinic/preAi";
+import { Delete } from "@element-plus/icons-vue";
+import { getPreAiAttachmentObjectUrlApi, type PreAiAttachment } from "@/api/modules/clinic";
 
 const props = withDefaults(
   defineProps<{
     attachments: PreAiAttachment[];
     compact?: boolean;
+    removable?: boolean;
   }>(),
-  { compact: false }
+  { compact: false, removable: false }
 );
 
-defineEmits<{
+const emit = defineEmits<{
   download: [attachment: PreAiAttachment];
+  remove: [attachment: PreAiAttachment];
 }>();
 
 const objectUrls = reactive<Record<string, string>>({});
@@ -273,6 +286,34 @@ onBeforeUnmount(() => {
   padding: 4px 8px;
   border-radius: 6px;
   background: rgb(255 255 255 / 90%);
+}
+
+.remove-button {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 88%);
+  opacity: 0;
+  transition:
+    opacity 0.22s ease,
+    background-color 0.22s ease;
+
+  :deep(.el-icon) {
+    font-size: 14px;
+  }
+}
+
+.attachment-card:hover .remove-button,
+.remove-button:focus-visible {
+  opacity: 1;
+}
+
+.remove-button:hover {
+  background: var(--el-color-danger-light-9);
 }
 
 .attachment-meta {

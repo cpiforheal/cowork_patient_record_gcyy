@@ -272,6 +272,11 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "附件引用已作废", service.voidAttachment(encounterId, attachmentId, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/{encounterId}/attachments/{attachmentId}/restore")
+    public ApiResult<Map<String, Object>> restoreAttachment(@PathVariable String encounterId, @PathVariable String attachmentId) {
+        return ApiResult.of(200, "附件引用已恢复", service.restoreAttachment(encounterId, attachmentId, AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/{encounterId}/attachments/{attachmentId}/download")
     public ResponseEntity<FileSystemResource> downloadAttachment(@PathVariable String encounterId, @PathVariable String attachmentId) {
         PreAiEncounterService.AttachmentDownload download = service.downloadAttachment(encounterId, attachmentId, AuthPermission.currentUserOrThrow());

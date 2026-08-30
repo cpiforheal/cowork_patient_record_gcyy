@@ -1327,6 +1327,20 @@ public class PreAiEncounterService {
         return toMap(workspace(encounterId, user));
     }
 
+    @Transactional
+    public Map<String, Object> restoreAttachment(String encounterId, String attachmentId, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        ObjectNode attachment = loadAttachment(encounterId, attachmentId);
+        if (!"VOIDED".equals(text(attachment, "status"))) throw conflict("仅已作废的附件可以恢复");
+        String taskId = text(attachment, "taskId");
+        if (!taskId.isBlank()) requireAuxEditor(encounter, loadAuxiliaryTask(encounterId, taskId), user);
+        else requireStageEditor(encounter, normalizeStage(text(attachment, "stageCode")), user);
+        jdbcTemplate.update("UPDATE pre_ai_attachments SET status = 'ACTIVE' WHERE id = ? AND encounter_id = ? AND status = 'VOIDED'", attachmentId, encounterId);
+        audit(encounterId, "attachment.restore", text(attachment, "stageCode"), user, "恢复附件引用");
+        return toMap(workspace(encounterId, user));
+    }
+
     public AttachmentDownload downloadAttachment(String encounterId, String attachmentId, SessionUser user) {
         requireReadRole(user);
         requireEncounterAccess(encounterId, user);
@@ -1713,6 +1727,8 @@ public class PreAiEncounterService {
         jdbcTemplate.query("SELECT * FROM pre_ai_lab_reports WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY report_date, saved_at, id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> labReports.add(readLabReport(rs)), encounterId);
         ArrayNode attachments = result.putArray("attachments");
         jdbcTemplate.query("SELECT * FROM pre_ai_attachments WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY created_at", (org.springframework.jdbc.core.RowCallbackHandler) rs -> attachments.add(readAttachment(rs)), encounterId);
+        ArrayNode voidedAttachments = result.putArray("voidedAttachments");
+        jdbcTemplate.query("SELECT * FROM pre_ai_attachments WHERE encounter_id = ? AND status = 'VOIDED' ORDER BY created_at DESC LIMIT 20", (org.springframework.jdbc.core.RowCallbackHandler) rs -> voidedAttachments.add(readAttachment(rs)), encounterId);
         ArrayNode diagnoses = result.putArray("diagnoses");
         jdbcTemplate.query("SELECT * FROM pre_ai_diagnoses WHERE encounter_id = ? ORDER BY source_stage, sort_no, id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> diagnoses.add(readDiagnosis(rs)), encounterId);
         ArrayNode audits = result.putArray("auditLogs");

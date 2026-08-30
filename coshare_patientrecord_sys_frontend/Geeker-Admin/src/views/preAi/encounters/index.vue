@@ -259,6 +259,17 @@
             <AttachmentPreviewGallery :attachments="registrationImageAttachments" compact @download="downloadPreAiAttachmentApi" />
           </section>
 
+          <section v-if="endoscopyReportAttachments.length" class="patient-dr-strip">
+            <div class="patient-dr-strip__head">
+              <div>
+                <span class="section-caption">患者信息 · 辅助检查报告</span>
+                <strong>胃肠镜检查报告单</strong>
+              </div>
+              <el-tag type="primary" effect="plain">{{ endoscopyReportAttachments.length }} 张</el-tag>
+            </div>
+            <AttachmentPreviewGallery :attachments="endoscopyReportAttachments" compact @download="downloadPreAiAttachmentApi" />
+          </section>
+
           <section v-if="encounterHistory.length > 1" class="history-entry-bar">
             <div>
               <strong>本次为第 {{ workspace.encounter.visitNo }} 次就诊</strong>
@@ -692,7 +703,9 @@
                     <AttachmentPreviewGallery
                       v-if="registrationImageAttachments.length"
                       :attachments="registrationImageAttachments"
+                      :removable="canModifySelectedStage"
                       @download="downloadPreAiAttachmentApi"
+                      @remove="removeImageAttachment"
                     />
                     <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
                     <div v-if="canModifySelectedStage" class="upload-actions">
@@ -730,16 +743,17 @@
                       共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
                       {{ attachmentUpload.failed }} 个
                     </small>
-                    <div v-if="registrationImageAttachments.length" class="dr-void-actions">
+                    <div v-if="voidedAttachments.length" class="voided-attachments-row">
+                      <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
                       <el-button
-                        v-for="attachment in registrationImageAttachments"
+                        v-for="attachment in voidedAttachments"
                         :key="attachment.id"
                         link
-                        type="danger"
+                        type="primary"
                         size="small"
-                        @click="voidAttachment(attachment.id)"
+                        @click="restoreAttachment(attachment)"
                       >
-                        作废 {{ attachment.fileName }}
+                        恢复 {{ attachment.fileName }}
                       </el-button>
                     </div>
                   </section>
@@ -889,7 +903,9 @@
                   <AttachmentPreviewGallery
                     v-if="registrationImageAttachments.length"
                     :attachments="registrationImageAttachments"
+                    :removable="canOpenLabWorkbench"
                     @download="downloadPreAiAttachmentApi"
+                    @remove="removeImageAttachment"
                   />
                   <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
                   <div v-if="canOpenLabWorkbench" class="upload-actions">
@@ -927,19 +943,75 @@
                     共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
                     {{ attachmentUpload.failed }} 个
                   </small>
-                  <div v-if="registrationImageAttachments.length" class="dr-void-actions">
-                    <el-button
-                      v-for="attachment in registrationImageAttachments"
-                      :key="attachment.id"
-                      link
-                      type="danger"
-                      size="small"
-                      @click="voidAttachment(attachment.id)"
-                    >
-                      作废 {{ attachment.fileName }}
-                    </el-button>
-                  </div>
                 </section>
+                <section class="dr-image-section aux-dr-section endoscopy-report-section">
+                  <header class="dr-image-heading">
+                    <div>
+                      <span class="section-caption">辅助检查 · 报告采集</span>
+                      <strong>胃肠镜检查报告单</strong>
+                      <small>作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区可见，支持重复上传与误删恢复。</small>
+                    </div>
+                    <el-tag :type="endoscopyReportAttachments.length ? 'primary' : 'info'" effect="plain">
+                      {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
+                    </el-tag>
+                  </header>
+                  <AttachmentPreviewGallery
+                    v-if="endoscopyReportAttachments.length"
+                    :attachments="endoscopyReportAttachments"
+                    :removable="canOpenLabWorkbench"
+                    @download="downloadPreAiAttachmentApi"
+                    @remove="removeImageAttachment"
+                  />
+                  <el-empty v-else :image-size="56" description="暂无胃肠镜报告，可在下方上传或拍照采集" />
+                  <div v-if="canOpenLabWorkbench" class="upload-actions">
+                    <label class="upload-button">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,.pdf"
+                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '胃肠镜报告', endoscopyReportDescription)"
+                      />
+                      <el-icon><Upload /></el-icon> 选择报告图片/PDF
+                    </label>
+                    <label class="upload-button camera-button">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '胃肠镜报告', endoscopyReportDescription)"
+                      />
+                      <el-icon><Camera /></el-icon> 拍照上传
+                    </label>
+                  </div>
+                  <el-progress
+                    v-if="attachmentUpload.total"
+                    :percentage="attachmentUpload.percent"
+                    :status="
+                      attachmentUpload.failed
+                        ? 'warning'
+                        : attachmentUpload.success === attachmentUpload.total
+                          ? 'success'
+                          : undefined
+                    "
+                  />
+                  <small v-if="attachmentUpload.total" class="upload-summary">
+                    共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                    {{ attachmentUpload.failed }} 个
+                  </small>
+                </section>
+                <div v-if="voidedAttachments.length" class="voided-attachments-row aux-voided-row">
+                  <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
+                  <el-button
+                    v-for="attachment in voidedAttachments"
+                    :key="attachment.id"
+                    link
+                    type="primary"
+                    size="small"
+                    @click="restoreAttachment(attachment)"
+                  >
+                    恢复 {{ attachment.fileName }}
+                  </el-button>
+                </div>
                 <AuxiliaryTaskPanel
                   :workspace="workspace"
                   :capabilities="authStore.capabilities"
@@ -1440,8 +1512,8 @@
 </template>
 
 <script setup lang="ts" name="preAiEncounters">
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
+import { ElButton, ElMessage, ElMessageBox } from "element-plus";
 import { Camera, FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
@@ -1490,6 +1562,7 @@ import {
   importLegacyPreAiEncounterApi,
   returnPreAiAuxiliaryTaskApi,
   returnPreAiStageApi,
+  restorePreAiAttachmentApi,
   savePreAiDutyAssignmentsApi,
   savePreAiAdmissionProfileApi,
   savePreAiStageApi,
@@ -2721,9 +2794,24 @@ const upstreamStageTime = (item: PreAiWorkspace["stages"][number]) => {
 const selectedStageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === selectedStageCode.value && !item.taskId) || []
 );
-const registrationImageAttachments = computed(
-  () => workspace.value?.attachments.filter(item => item.stageCode === "REGISTRATION" && !item.taskId && isImageAttachment(item)) || []
+const endoscopyReportDescription = "胃肠镜检查报告单";
+const endoscopyReportAttachments = computed(
+  () =>
+    workspace.value?.attachments.filter(
+      item => !item.taskId && (item.description || "").includes(endoscopyReportDescription)
+    ) || []
 );
+const registrationImageAttachments = computed(
+  () =>
+    workspace.value?.attachments.filter(
+      item =>
+        item.stageCode === "REGISTRATION" &&
+        !item.taskId &&
+        isImageAttachment(item) &&
+        !(item.description || "").includes(endoscopyReportDescription)
+    ) || []
+);
+const voidedAttachments = computed(() => workspace.value?.voidedAttachments || []);
 const inspectionImageAttachments = computed(
   () => workspace.value?.attachments.filter(item => item.stageCode === "INSPECTION" && isImageAttachment(item)) || []
 );
@@ -3848,7 +3936,8 @@ const uploadAttachments = async (
   stageCode?: PreAiStageCode,
   taskId?: string,
   folderMode = false,
-  customBatchName = ""
+  customBatchName = "",
+  customDescription = ""
 ) => {
   const input = event.target as HTMLInputElement;
   const files = Array.from(input.files || []);
@@ -3883,6 +3972,7 @@ const uploadAttachments = async (
         stageCode,
         taskId,
         file,
+        description: customDescription || undefined,
         capturedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
         batchId,
         batchName,
@@ -3915,6 +4005,57 @@ const voidAttachment = async (attachmentId: string) => {
     hydrateWorkspace(data);
     ElMessage.success("附件引用已作废");
   });
+};
+
+const restoreAttachment = async (attachment: PreAiAttachment) => {
+  try {
+    await runAction(async () => {
+      const { data } = await restorePreAiAttachmentApi(selectedEncounterId.value, attachment.id);
+      hydrateWorkspace(data);
+      ElMessage.success(`已恢复「${attachment.fileName}」`);
+    });
+  } catch (error: any) {
+    ElMessage.error(error?.message || "附件恢复失败");
+  }
+};
+
+const removeImageAttachment = async (attachment: PreAiAttachment) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除「${attachment.fileName}」吗？删除后可在 10 秒内撤销，或稍后在“已作废（可恢复）”中找回。`,
+      "删除影像",
+      { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    const { data } = await voidPreAiAttachmentApi(selectedEncounterId.value, attachment.id);
+    hydrateWorkspace(data);
+    const undoMessage = ElMessage({
+      type: "success",
+      duration: 10000,
+      showClose: true,
+      message: h("span", { class: "attachment-undo-message" }, [
+        `已删除「${attachment.fileName}」`,
+        h(
+          ElButton,
+          {
+            link: true,
+            type: "primary",
+            size: "small",
+            onClick: async () => {
+              undoMessage.close();
+              await restoreAttachment(attachment);
+            }
+          },
+          () => "撤销删除"
+        )
+      ])
+    });
+  } catch (error: any) {
+    ElMessage.error(error?.message || "删除失败");
+  }
 };
 
 const deleteTargetMedicalRecord = async (version: GeneratedMedicalRecord) => {
@@ -5975,10 +6116,29 @@ onBeforeUnmount(() => {
 .dr-image-heading small {
   color: var(--el-text-color-secondary);
 }
-.dr-void-actions {
+.voided-attachments-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+  padding-top: 4px;
+}
+.voided-attachments-row .voided-caption {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.voided-attachments-row :deep(.el-button) {
+  margin-left: 0;
+  font-size: 12px;
+}
+.aux-voided-row {
+  margin-top: -4px;
+  padding: 2px 4px 6px;
+}
+.attachment-undo-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 .camera-button {
   border-color: var(--el-color-success-light-5);
@@ -6393,7 +6553,7 @@ onBeforeUnmount(() => {
     font-size: 13px;
     border-radius: 7px;
   }
-  .dr-void-actions :deep(.el-button) {
+  .voided-attachments-row :deep(.el-button) {
     margin-left: 0;
   }
 }
