@@ -87,6 +87,7 @@ export * from "./clinic/ai";
 export * from "./clinic/audit";
 export * from "./clinic/backup";
 export * from "./clinic/dataPurge";
+export * from "./clinic/healthArchive";
 export * from "./clinic/medicalRecord";
 export * from "./clinic/patients";
 export * from "./clinic/preAi";

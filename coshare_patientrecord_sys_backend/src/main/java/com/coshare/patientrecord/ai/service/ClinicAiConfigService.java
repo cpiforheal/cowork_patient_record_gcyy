@@ -38,6 +38,7 @@ public class ClinicAiConfigService {
     private static final String CONFIG_ID = "default";
     private static final String DOUBAO_CONFIG_ID = "doubao_assistant";
     private static final String DOUBAO_TTS_CONFIG_ID = "doubao_tts";
+    private static final String DIFY_CONFIG_ID = "dify";
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int GCM_TAG_BITS = 128;
     private static final int GCM_IV_BYTES = 12;
@@ -57,6 +58,8 @@ public class ClinicAiConfigService {
     private final String doubaoTtsDefaultResourceId;
     private final String doubaoTtsDefaultVoiceType;
     private final double doubaoTtsDefaultSpeedRatio;
+    private final String difyDefaultBaseUrl;
+    private final String difyDefaultApiKey;
     private final byte[] encryptionKey;
     private final boolean runtimeConfigLocked;
 
@@ -75,6 +78,8 @@ public class ClinicAiConfigService {
         @Value("${clinic.ai.doubao.tts.resource-id:}") String doubaoTtsDefaultResourceId,
         @Value("${clinic.ai.doubao.tts.voice-type:}") String doubaoTtsDefaultVoiceType,
         @Value("${clinic.ai.doubao.tts.speed-ratio:1.0}") double doubaoTtsDefaultSpeedRatio,
+        @Value("${clinic.ai.dify.base-url:}") String difyDefaultBaseUrl,
+        @Value("${clinic.ai.dify.api-key:}") String difyDefaultApiKey,
         @Value("${clinic.ai.config-secret:}") String configSecret,
         @Value("${spring.profiles.active:}") String activeProfiles,
         @Value("${clinic.ai.runtime-config-locked:false}") boolean runtimeConfigLocked
@@ -93,6 +98,8 @@ public class ClinicAiConfigService {
         this.doubaoTtsDefaultResourceId = safe(firstNonBlank(doubaoTtsDefaultResourceId, System.getenv("CLINIC_AI_DOUBAO_TTS_RESOURCE_ID")));
         this.doubaoTtsDefaultVoiceType = safe(firstNonBlank(doubaoTtsDefaultVoiceType, System.getenv("CLINIC_AI_DOUBAO_TTS_VOICE_TYPE")));
         this.doubaoTtsDefaultSpeedRatio = normalizeSpeedRatio(doubaoTtsDefaultSpeedRatio);
+        this.difyDefaultBaseUrl = normalizeBaseUrl(firstNonBlank(difyDefaultBaseUrl, System.getenv("CLINIC_AI_DIFY_BASE_URL")));
+        this.difyDefaultApiKey = normalizeApiKey(firstNonBlank(difyDefaultApiKey, System.getenv("CLINIC_AI_DIFY_API_KEY")));
         this.encryptionKey = deriveEncryptionKey(configSecret, activeProfiles);
         this.runtimeConfigLocked = runtimeConfigLocked;
     }
@@ -107,6 +114,10 @@ public class ClinicAiConfigService {
 
     public ObjectNode doubaoTtsStatus() {
         return statusFor(DOUBAO_TTS_CONFIG_ID);
+    }
+
+    public ObjectNode difyStatus() {
+        return statusFor(DIFY_CONFIG_ID);
     }
 
     public ObjectNode statusFor(String configId) {
@@ -151,6 +162,10 @@ public class ClinicAiConfigService {
 
     public ObjectNode updateDoubaoTtsConfig(Map<String, Object> payload, SessionUser user) {
         return updateConfigFor(DOUBAO_TTS_CONFIG_ID, payload, user);
+    }
+
+    public ObjectNode updateDifyConfig(Map<String, Object> payload, SessionUser user) {
+        return updateConfigFor(DIFY_CONFIG_ID, payload, user);
     }
 
     public ObjectNode detectDoubaoModels(Map<String, Object> payload) {
@@ -250,7 +265,7 @@ public class ClinicAiConfigService {
         if (baseUrl.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI base_url is required");
         }
-        if (model.isBlank()) {
+        if (model.isBlank() && !DIFY_CONFIG_ID.equals(configId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI model is required");
         }
 
@@ -284,8 +299,11 @@ public class ClinicAiConfigService {
         return resolveEffectiveConfig(DOUBAO_CONFIG_ID);
     }
 
-    public EffectiveTtsConfig resolveDoubaoTtsConfig() {
-        AiDefaults defaults = defaultsFor(DOUBAO_TTS_CONFIG_ID);
+    public EffectiveAiConfig resolveDifyConfig() {
+        return resolveEffectiveConfig(DIFY_CONFIG_ID);
+    }
+
+    public EffectiveTtsConfig resolveDoubaoTtsConfig() {        AiDefaults defaults = defaultsFor(DOUBAO_TTS_CONFIG_ID);
         StoredAiConfig stored = readStoredConfig(DOUBAO_TTS_CONFIG_ID, defaults.model());
         if (stored == null) {
             return new EffectiveTtsConfig(
@@ -361,6 +379,10 @@ public class ClinicAiConfigService {
                 doubaoTtsDefaultVoiceType,
                 doubaoTtsDefaultSpeedRatio
             );
+        }
+        if (DIFY_CONFIG_ID.equals(configId)) {
+            // Dify 工作流以 API Key 鉴权，model 字段无意义，仅用于落库占位
+            return new AiDefaults(difyDefaultBaseUrl, difyDefaultApiKey, "dify-workflow", "", "", 1.0);
         }
         return new AiDefaults(defaultBaseUrl, defaultApiKey, defaultModel, "", "", 1.0);
     }

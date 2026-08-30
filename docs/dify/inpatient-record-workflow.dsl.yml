@@ -1,0 +1,689 @@
+# =====================================================================
+# AI 住院病历生成工作流（周xx范本改写 · 四路并行分片）
+# Dify DSL  |  kind: app  |  mode: workflow  |  version: 0.3.0（Dify 1.x）
+# 若你的 Dify 为 0.15.x 或更早（DSL version 0.1.x）导入报版本不兼容，
+# 请反馈实例版本号，由系统侧生成对应格式。
+# ---------------------------------------------------------------------
+# 【导入步骤】
+#   1. Dify 控制台 → 工作室 → 导入 DSL 文件 → 选择本 yml。
+#   2. 确认实例已安装「OpenAI-API-compatible」模型插件，并在其凭据中配置：
+#      Base URL = https://sub.sailapi.top/v1   （与系统病历 AI 现行中转一致）
+#      API Key  = 你的中转站 Key
+#      并注册模型名 gpt-5.5（或你的当前模型）。
+#   3. 画布中依次打开 5 个 LLM 节点（定纲 ×1 + 分片改写 ×4），把模型统一
+#      选为上述 gpt-5.5；未选模型时节点会标红提示。
+#   4. 试运行：参考文末「输入变量契约」填一组样例（referenceDocument 至少
+#      含 8 行【第N段】编号文本），确认 End 输出 paragraphs_json 覆盖 1..N。
+#   5. 发布 → API 访问 → 创建应用 API Key。此后把「实例基础地址 + 该
+#      API Key」交给系统侧做后端引擎适配（阶段 2），请勿在聊天中明文传输
+#      Key，可直接录入系统 AI 配置页。
+# ---------------------------------------------------------------------
+# 【输入变量契约】（与后端 InpatientRecordAiService.buildUserContent 一一对应）
+#   doctorSupplement      ← 医生提示词（聊天窗口固定提示词+个人修改）
+#   referenceDocument     ← 范本全文，已由后端按行编号为【第N段】xxx
+#   referenceSourceLabel  ← 范本来源与禁复制声明
+#   patientAndRecord      ← 患者与当前病历 JSON 快照（sourceSnapshot）
+#   reviewedPreAiFacts    ← 已复核前置事实 JSON（可为空对象）
+#   reviewedMaskedExport  ← 复核后脱敏前置资料 JSON（权威口径，可为空）
+#   currentTemplateValues ← 当前模板值 JSON
+#   conversationHistory   ← 既往对话要求文本（可选，后端注入"【第N轮】…"逐条拼接）
+# 【输出契约】
+#   paragraphs_json = {"paragraphs":[{"n":1,"text":"..."},...]}，n 覆盖 1..N
+#                     （LEGACY_ORDINAL 模式；纯标题段/签名行原样沿用）
+#   total_n / covered_n / missing_n / error_code 见文末说明
+# ---------------------------------------------------------------------
+# 【编排】start → prepare(切片) → outline(理法定纲)
+#        → rewrite_a/b/c/d（四路并行改写）→ merge_validate(拼装校验) → end
+#   分片由 prepare 均匀切分；每片自带衔接上下文；纲要是全局一致性锚点。
+#   调整并行度：需同步修改 prepare 切片数、rewrite 节点数与 merge 入参，
+#   系统侧可代为调整。
+# =====================================================================
+
+app:
+  description: 按院内住院病历范本结构，将患者已复核事实改写为完整住院病历正文（LEGACY_ORDINAL 段落级输出，供后端渲染 DOCX）
+  icon: "\U0001F3E5"
+  icon_background: "#FFEAD5"
+  mode: workflow
+  name: AI住院病历生成-周xx范本改写
+  use_icon_as_answer_icon: false
+
+kind: app
+version: 0.3.0
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+  graph:
+    edges:
+      - id: edge-start-prepare
+        source: start
+        sourceHandle: source
+        target: prepare
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: start
+          targetType: code
+          isInIteration: false
+      - id: edge-prepare-outline
+        source: prepare
+        sourceHandle: source
+        target: outline
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: code
+          targetType: llm
+          isInIteration: false
+      - id: edge-outline-ra
+        source: outline
+        sourceHandle: source
+        target: rewrite_a
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: llm
+          isInIteration: false
+      - id: edge-outline-rb
+        source: outline
+        sourceHandle: source
+        target: rewrite_b
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: llm
+          isInIteration: false
+      - id: edge-outline-rc
+        source: outline
+        sourceHandle: source
+        target: rewrite_c
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: llm
+          isInIteration: false
+      - id: edge-outline-rd
+        source: outline
+        sourceHandle: source
+        target: rewrite_d
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: llm
+          isInIteration: false
+      - id: edge-ra-merge
+        source: rewrite_a
+        sourceHandle: source
+        target: merge_validate
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: code
+          isInIteration: false
+      - id: edge-rb-merge
+        source: rewrite_b
+        sourceHandle: source
+        target: merge_validate
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: code
+          isInIteration: false
+      - id: edge-rc-merge
+        source: rewrite_c
+        sourceHandle: source
+        target: merge_validate
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: code
+          isInIteration: false
+      - id: edge-rd-merge
+        source: rewrite_d
+        sourceHandle: source
+        target: merge_validate
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: llm
+          targetType: code
+          isInIteration: false
+      - id: edge-merge-end
+        source: merge_validate
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        type: custom
+        zIndex: 0
+        data:
+          sourceType: code
+          targetType: end
+          isInIteration: false
+
+    nodes:
+      # ---------------- 开始：输入变量 ----------------
+      - id: start
+        type: custom
+        position: {x: 40, y: 320}
+        data:
+          type: start
+          title: 开始
+          desc: 与系统后端 buildUserContent 字段一一对应
+          variables:
+            - variable: doctorSupplement
+              label: 医生提示词
+              type: paragraph
+              required: true
+              max_length: 8000
+              options: []
+            - variable: referenceDocument
+              label: 参考范本全文（已按【第N段】编号）
+              type: paragraph
+              required: true
+              max_length: 400000
+              options: []
+            - variable: referenceSourceLabel
+              label: 范本来源与禁复制声明
+              type: paragraph
+              required: false
+              max_length: 2000
+              options: []
+            - variable: patientAndRecord
+              label: 患者与当前病历快照(JSON)
+              type: paragraph
+              required: true
+              max_length: 400000
+              options: []
+            - variable: reviewedPreAiFacts
+              label: 已复核前置事实(JSON)
+              type: paragraph
+              required: false
+              max_length: 200000
+              options: []
+            - variable: reviewedMaskedExport
+              label: 复核后脱敏前置资料(JSON·权威口径)
+              type: paragraph
+              required: false
+              max_length: 200000
+              options: []
+            - variable: currentTemplateValues
+              label: 当前模板值(JSON)
+              type: paragraph
+              required: false
+              max_length: 100000
+              options: []
+            - variable: conversationHistory
+              label: 既往对话要求(可选·会话记忆)
+              type: paragraph
+              required: false
+              max_length: 8000
+              options: []
+
+      # ---------------- 预处理：编号解析 + 四路切片 ----------------
+      - id: prepare
+        type: custom
+        position: {x: 340, y: 320}
+        data:
+          type: code
+          title: 预处理与四路切片
+          desc: 解析【第N段】编号，均匀切 4 片并抽取衔接上下文
+          code_language: python3
+          code: |
+            def main(reference_document: str,
+                     reference_source_label: str,
+                     patient_and_record: str,
+                     reviewed_pre_ai_facts: str,
+                     reviewed_masked_export: str,
+                     current_template_values: str) -> dict:
+                import json
+                import re
+
+                text = (reference_document or "").replace("\r\n", "\n").strip()
+                marker = re.compile(r"^【第(\d+)段】\s*(.*)$")
+                marked = 0
+                lines = []
+                for raw in text.split("\n"):
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    m = marker.match(line)
+                    if m:
+                        marked += 1
+                        lines.append((int(m.group(1)), m.group(2).strip()))
+                    else:
+                        lines.append((None, line))
+
+                # 标记覆盖率不足 90% 时视为未编号，按出现顺序重新编号
+                if lines and marked < len(lines) * 0.9:
+                    lines = [(i + 1, t) for i, (_, t) in enumerate(lines)]
+
+                seq = []
+                for n, t in lines:
+                    if n is None:
+                        n = (seq[-1][0] + 1) if seq else 1
+                    seq.append((n, t))
+
+                by_n = {}
+                for n, t in seq:
+                    by_n[n] = t
+                total_n = max(by_n.keys()) if by_n else 0
+                paragraphs = [{"n": n, "text": by_n.get(n, "")} for n in range(1, total_n + 1)]
+
+                # 均匀切 4 片（按段落数），并取每片的前一行原文作衔接上文
+                def split_quarters(items):
+                    size = (len(items) + 3) // 4
+                    return [items[i * size:(i + 1) * size] for i in range(4)]
+
+                quarters = split_quarters(paragraphs)
+                result = {"total_n": total_n, "reference_source_label": reference_source_label or ""}
+                names = ["a", "b", "c", "d"]
+                for idx, name in enumerate(names):
+                    chunk = quarters[idx]
+                    prev_text = ""
+                    if idx > 0 and quarters[idx - 1]:
+                        last = quarters[idx - 1][-1]
+                        prev_text = "【第%d段】%s" % (last["n"], last["text"])
+                    elif paragraphs and chunk:
+                        pass
+                    if idx == 0:
+                        prev_text = ""
+                    result["slice_%s_json" % name] = json.dumps(chunk, ensure_ascii=False)
+                    result["context_%s" % name] = (
+                        ("上一段落原文（仅用于衔接，不得作为事实来源）：\n" + prev_text) if prev_text else "（本片为全文起始）"
+                    )
+                return result
+          variables:
+            - {variable: reference_document, value_selector: ['start', 'referenceDocument']}
+            - {variable: reference_source_label, value_selector: ['start', 'referenceSourceLabel']}
+            - {variable: patient_and_record, value_selector: ['start', 'patientAndRecord']}
+            - {variable: reviewed_pre_ai_facts, value_selector: ['start', 'reviewedPreAiFacts']}
+            - {variable: reviewed_masked_export, value_selector: ['start', 'reviewedMaskedExport']}
+            - {variable: current_template_values, value_selector: ['start', 'currentTemplateValues']}
+          outputs:
+            total_n: {type: number, children: null}
+            reference_source_label: {type: string, children: null}
+            slice_a_json: {type: string, children: null}
+            slice_b_json: {type: string, children: null}
+            slice_c_json: {type: string, children: null}
+            slice_d_json: {type: string, children: null}
+            context_a: {type: string, children: null}
+            context_b: {type: string, children: null}
+            context_c: {type: string, children: null}
+            context_d: {type: string, children: null}
+
+      # ---------------- 理法定纲（全局一致性锚点） ----------------
+      - id: outline
+        type: custom
+        position: {x: 640, y: 320}
+        data:
+          type: llm
+          title: 理法定纲（主病主证治则方剂）
+          desc: 全文一致性锚点，分片改写必须与纲要保持一致
+          model:
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+            name: gpt-5.5
+            mode: chat
+            completion_params:
+              temperature: 0.2
+              max_tokens: 2000
+          memory: null
+          vision:
+            enabled: false
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是院内住院病历的理法定纲引擎。你只输出一份简要纲要，不生成病历正文。
+                依据下方患者资料、已复核事实与脱敏前置资料（如有，后者为该患者事实的权威口径），输出以下小节，每节一至三行：
+                1. 主病与主证（含西医主诊断、中医主病）
+                2. 兼证与四诊要点
+                3. 治则治法
+                4. 方剂参考（仅作医生复核参考，须标注"参考"，并说明与主病主证兼证的对应关系）
+                5. 诊疗经过推算口径（以入院日期与已有记录为基准推算查房/手术/出院日期的规则）
+                6. 全文写作注意事项（各章节衔接、时序一致性要点）
+                规则：不得虚构检查数值、日期、手术事实、身份信息或诊断；资料缺失的小节写"待定纲信息不足"；
+                纲要中的事实结论必须能在患者资料或已复核事实中找到出处。
+                若提供了"既往对话要求"（医生在本会话早前各轮提出的特殊强调），纲要必须吸纳这些要求；
+                与本轮医生提示词冲突时，以本轮为准。
+            - role: user
+              text: |
+                【医生提示词】{{#start.doctorSupplement#}}
+                【范本来源说明】{{#start.referenceSourceLabel#}}
+                【患者与当前病历】{{#start.patientAndRecord#}}
+                【已复核前置事实】{{#start.reviewedPreAiFacts#}}
+                【复核后脱敏前置资料（权威口径）】{{#start.reviewedMaskedExport#}}
+                【当前模板值】{{#start.currentTemplateValues#}}
+                【既往对话要求】{{#start.conversationHistory#}}
+
+      # ---------------- 四路并行分片改写 ----------------
+      - id: rewrite_a
+        type: custom
+        position: {x: 950, y: 80}
+        data:
+          type: llm
+          title: 分片改写 A
+          model:
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+            name: gpt-5.5
+            mode: chat
+            completion_params:
+              temperature: 0.35
+              max_tokens: 6000
+          memory: null
+          vision:
+            enabled: false
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是院内住院病历文档生成引擎。你会收到参考范本的一个分段切片（JSON 数组，每项 {"n":段落编号,"text":原文}）。
+                任务：对切片内每一段进行改写，生成当前患者的住院病历正文。规则：
+                1. 严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实写入当前患者病历。
+                2. 参考文档中的姓名、日期、时间、住院号、床号、检查数值、诊断与方剂全部是范本示例：必须逐项替换为当前患者的真实信息；当前患者缺少的日期（查房、手术、出院等）按其入院日期与诊疗经过推算，严禁沿用范本日期。
+                3. 若提供了复核后脱敏前置资料，它是该患者事实的权威口径：生成内容必须与其一致，冲突时以它为准。
+                4. 只能依据患者资料、已复核事实、全文纲要和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断；某项缺少事实时该项只写"待医生补充"四个字。
+                5. 病历正文只能使用病历书写语言：禁止出现"当前复核事实""未提供……事实""本段待医生补充"等面向系统的说明文字，不要用括号解释缺项原因。
+                6. 纯标题段（如"体格检查""辅助检查结果""出院记录"）和签名行（如"医师签名：""医师签字："）原样输出范本原文；含日期、姓名、数值的短行（查房记录标题行、生命体征行）不属于此类，必须按当前患者改写输出。原文为空的段落，输出空文本。
+                7. 中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致，且与下方"全文纲要"保持一致；方剂只能作为医生复核用参考，并明确标注"参考"。
+                8. 衔接上下文仅用于保持段落间连贯，不得把其内容当作当前患者的新事实来源。
+                9. 每段独立成段输出，严禁把相邻段落（尤其是签名行）并入上一段或在段内重复签名行。
+                10. 输出必须是单个 JSON 对象，禁止 Markdown、解释、代码围栏或其他键，格式：
+                    {"items":[{"n":编号,"text":"该段改写后的完整文字"}]}
+                    items 必须且仅覆盖切片给出的全部编号，每个编号恰好出现一次，按编号升序排列。
+                11. 若提供了"既往对话要求"：它们是医生在本会话早前各轮提出的特殊强调（如中医辨证侧重、方剂取舍、章节详略），除本轮明确推翻外必须继续遵守并体现在相应段落；本轮要求与既往要求冲突时，以本轮为准。
+            - role: user
+              text: |
+                【全文纲要】
+                {{#outline.text#}}
+                【医生提示词】{{#start.doctorSupplement#}}
+                【患者与当前病历】{{#start.patientAndRecord#}}
+                【已复核前置事实】{{#start.reviewedPreAiFacts#}}
+                【复核后脱敏前置资料】{{#start.reviewedMaskedExport#}}
+                【当前模板值】{{#start.currentTemplateValues#}}
+                【既往对话要求】{{#start.conversationHistory#}}
+                【衔接上下文】{{#prepare.context_a#}}
+                【待改写切片】{{#prepare.slice_a_json#}}
+
+      - id: rewrite_b
+        type: custom
+        position: {x: 950, y: 340}
+        data:
+          type: llm
+          title: 分片改写 B
+          model:
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+            name: gpt-5.5
+            mode: chat
+            completion_params:
+              temperature: 0.35
+              max_tokens: 6000
+          memory: null
+          vision:
+            enabled: false
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是院内住院病历文档生成引擎。你会收到参考范本的一个分段切片（JSON 数组，每项 {"n":段落编号,"text":原文}）。
+                任务：对切片内每一段进行改写，生成当前患者的住院病历正文。规则：
+                1. 严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实写入当前患者病历。
+                2. 参考文档中的姓名、日期、时间、住院号、床号、检查数值、诊断与方剂全部是范本示例：必须逐项替换为当前患者的真实信息；当前患者缺少的日期（查房、手术、出院等）按其入院日期与诊疗经过推算，严禁沿用范本日期。
+                3. 若提供了复核后脱敏前置资料，它是该患者事实的权威口径：生成内容必须与其一致，冲突时以它为准。
+                4. 只能依据患者资料、已复核事实、全文纲要和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断；某项缺少事实时该项只写"待医生补充"四个字。
+                5. 病历正文只能使用病历书写语言：禁止出现"当前复核事实""未提供……事实""本段待医生补充"等面向系统的说明文字，不要用括号解释缺项原因。
+                6. 纯标题段（如"体格检查""辅助检查结果""出院记录"）和签名行（如"医师签名：""医师签字："）原样输出范本原文；含日期、姓名、数值的短行（查房记录标题行、生命体征行）不属于此类，必须按当前患者改写输出。原文为空的段落，输出空文本。
+                7. 中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致，且与下方"全文纲要"保持一致；方剂只能作为医生复核用参考，并明确标注"参考"。
+                8. 衔接上下文仅用于保持段落间连贯，不得把其内容当作当前患者的新事实来源。
+                9. 每段独立成段输出，严禁把相邻段落（尤其是签名行）并入上一段或在段内重复签名行。
+                10. 输出必须是单个 JSON 对象，禁止 Markdown、解释、代码围栏或其他键，格式：
+                    {"items":[{"n":编号,"text":"该段改写后的完整文字"}]}
+                    items 必须且仅覆盖切片给出的全部编号，每个编号恰好出现一次，按编号升序排列。
+                11. 若提供了"既往对话要求"：它们是医生在本会话早前各轮提出的特殊强调（如中医辨证侧重、方剂取舍、章节详略），除本轮明确推翻外必须继续遵守并体现在相应段落；本轮要求与既往要求冲突时，以本轮为准。
+            - role: user
+              text: |
+                【全文纲要】
+                {{#outline.text#}}
+                【医生提示词】{{#start.doctorSupplement#}}
+                【患者与当前病历】{{#start.patientAndRecord#}}
+                【已复核前置事实】{{#start.reviewedPreAiFacts#}}
+                【复核后脱敏前置资料】{{#start.reviewedMaskedExport#}}
+                【当前模板值】{{#start.currentTemplateValues#}}
+                【既往对话要求】{{#start.conversationHistory#}}
+                【衔接上下文】{{#prepare.context_b#}}
+                【待改写切片】{{#prepare.slice_b_json#}}
+
+      - id: rewrite_c
+        type: custom
+        position: {x: 950, y: 600}
+        data:
+          type: llm
+          title: 分片改写 C
+          model:
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+            name: gpt-5.5
+            mode: chat
+            completion_params:
+              temperature: 0.35
+              max_tokens: 6000
+          memory: null
+          vision:
+            enabled: false
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是院内住院病历文档生成引擎。你会收到参考范本的一个分段切片（JSON 数组，每项 {"n":段落编号,"text":原文}）。
+                任务：对切片内每一段进行改写，生成当前患者的住院病历正文。规则：
+                1. 严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实写入当前患者病历。
+                2. 参考文档中的姓名、日期、时间、住院号、床号、检查数值、诊断与方剂全部是范本示例：必须逐项替换为当前患者的真实信息；当前患者缺少的日期（查房、手术、出院等）按其入院日期与诊疗经过推算，严禁沿用范本日期。
+                3. 若提供了复核后脱敏前置资料，它是该患者事实的权威口径：生成内容必须与其一致，冲突时以它为准。
+                4. 只能依据患者资料、已复核事实、全文纲要和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断；某项缺少事实时该项只写"待医生补充"四个字。
+                5. 病历正文只能使用病历书写语言：禁止出现"当前复核事实""未提供……事实""本段待医生补充"等面向系统的说明文字，不要用括号解释缺项原因。
+                6. 纯标题段（如"体格检查""辅助检查结果""出院记录"）和签名行（如"医师签名：""医师签字："）原样输出范本原文；含日期、姓名、数值的短行（查房记录标题行、生命体征行）不属于此类，必须按当前患者改写输出。原文为空的段落，输出空文本。
+                7. 中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致，且与下方"全文纲要"保持一致；方剂只能作为医生复核用参考，并明确标注"参考"。
+                8. 衔接上下文仅用于保持段落间连贯，不得把其内容当作当前患者的新事实来源。
+                9. 每段独立成段输出，严禁把相邻段落（尤其是签名行）并入上一段或在段内重复签名行。
+                10. 输出必须是单个 JSON 对象，禁止 Markdown、解释、代码围栏或其他键，格式：
+                    {"items":[{"n":编号,"text":"该段改写后的完整文字"}]}
+                    items 必须且仅覆盖切片给出的全部编号，每个编号恰好出现一次，按编号升序排列。
+                11. 若提供了"既往对话要求"：它们是医生在本会话早前各轮提出的特殊强调（如中医辨证侧重、方剂取舍、章节详略），除本轮明确推翻外必须继续遵守并体现在相应段落；本轮要求与既往要求冲突时，以本轮为准。
+            - role: user
+              text: |
+                【全文纲要】
+                {{#outline.text#}}
+                【医生提示词】{{#start.doctorSupplement#}}
+                【患者与当前病历】{{#start.patientAndRecord#}}
+                【已复核前置事实】{{#start.reviewedPreAiFacts#}}
+                【复核后脱敏前置资料】{{#start.reviewedMaskedExport#}}
+                【当前模板值】{{#start.currentTemplateValues#}}
+                【既往对话要求】{{#start.conversationHistory#}}
+                【衔接上下文】{{#prepare.context_c#}}
+                【待改写切片】{{#prepare.slice_c_json#}}
+
+      - id: rewrite_d
+        type: custom
+        position: {x: 950, y: 860}
+        data:
+          type: llm
+          title: 分片改写 D
+          model:
+            provider: langgenius/openai_api_compatible/openai_api_compatible
+            name: gpt-5.5
+            mode: chat
+            completion_params:
+              temperature: 0.35
+              max_tokens: 6000
+          memory: null
+          vision:
+            enabled: false
+          context:
+            enabled: false
+            variable_selector: []
+          prompt_template:
+            - role: system
+              text: |
+                你是院内住院病历文档生成引擎。你会收到参考范本的一个分段切片（JSON 数组，每项 {"n":段落编号,"text":原文}）。
+                任务：对切片内每一段进行改写，生成当前患者的住院病历正文。规则：
+                1. 严格沿用参考文档的结构、标题、段落数量、段落顺序、查房时序和医学书写风格。参考文档只提供格式、结构和写法，严禁把参考患者的姓名、诊断、日期、检查结果、处方等事实写入当前患者病历。
+                2. 参考文档中的姓名、日期、时间、住院号、床号、检查数值、诊断与方剂全部是范本示例：必须逐项替换为当前患者的真实信息；当前患者缺少的日期（查房、手术、出院等）按其入院日期与诊疗经过推算，严禁沿用范本日期。
+                3. 若提供了复核后脱敏前置资料，它是该患者事实的权威口径：生成内容必须与其一致，冲突时以它为准。
+                4. 只能依据患者资料、已复核事实、全文纲要和医生提示词撰写，不得虚构检查数值、日期、手术事实、身份信息或诊断；某项缺少事实时该项只写"待医生补充"四个字。
+                5. 病历正文只能使用病历书写语言：禁止出现"当前复核事实""未提供……事实""本段待医生补充"等面向系统的说明文字，不要用括号解释缺项原因。
+                6. 纯标题段（如"体格检查""辅助检查结果""出院记录"）和签名行（如"医师签名：""医师签字："）原样输出范本原文；含日期、姓名、数值的短行（查房记录标题行、生命体征行）不属于此类，必须按当前患者改写输出。原文为空的段落，输出空文本。
+                7. 中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致，且与下方"全文纲要"保持一致；方剂只能作为医生复核用参考，并明确标注"参考"。
+                8. 衔接上下文仅用于保持段落间连贯，不得把其内容当作当前患者的新事实来源。
+                9. 每段独立成段输出，严禁把相邻段落（尤其是签名行）并入上一段或在段内重复签名行。
+                10. 输出必须是单个 JSON 对象，禁止 Markdown、解释、代码围栏或其他键，格式：
+                    {"items":[{"n":编号,"text":"该段改写后的完整文字"}]}
+                    items 必须且仅覆盖切片给出的全部编号，每个编号恰好出现一次，按编号升序排列。
+                11. 若提供了"既往对话要求"：它们是医生在本会话早前各轮提出的特殊强调（如中医辨证侧重、方剂取舍、章节详略），除本轮明确推翻外必须继续遵守并体现在相应段落；本轮要求与既往要求冲突时，以本轮为准。
+            - role: user
+              text: |
+                【全文纲要】
+                {{#outline.text#}}
+                【医生提示词】{{#start.doctorSupplement#}}
+                【患者与当前病历】{{#start.patientAndRecord#}}
+                【已复核前置事实】{{#start.reviewedPreAiFacts#}}
+                【复核后脱敏前置资料】{{#start.reviewedMaskedExport#}}
+                【当前模板值】{{#start.currentTemplateValues#}}
+                【既往对话要求】{{#start.conversationHistory#}}
+                【衔接上下文】{{#prepare.context_d#}}
+                【待改写切片】{{#prepare.slice_d_json#}}
+
+      # ---------------- 拼装与覆盖度校验 ----------------
+      - id: merge_validate
+        type: custom
+        position: {x: 1280, y: 470}
+        data:
+          type: code
+          title: 拼装与覆盖度校验
+          desc: 合并四路输出，校验段落编号覆盖 1..N
+          code_language: python3
+          code: |
+            def main(slice_a: str, slice_b: str, slice_c: str, slice_d: str, total_n: int) -> dict:
+                import json
+                import re
+
+                def parse_slice(raw):
+                    s = (raw or "").strip()
+                    if not s:
+                        return []
+                    s = re.sub(r"^```(?:json)?\s*|```\s*$", "", s, flags=re.M).strip()
+                    start = s.find("{")
+                    end = s.rfind("}")
+                    if start == -1 or end <= start:
+                        return []
+                    try:
+                        obj = json.loads(s[start:end + 1])
+                    except Exception:
+                        return []
+                    items = obj.get("items") if isinstance(obj, dict) else None
+                    pairs = []
+                    if isinstance(items, list):
+                        for it in items:
+                            if not isinstance(it, dict):
+                                continue
+                            try:
+                                n = int(str(it.get("n", "")).strip())
+                            except Exception:
+                                continue
+                            pairs.append((n, str(it.get("text", ""))))
+                    return pairs
+
+                by_n = {}
+                for chunk in (slice_a, slice_b, slice_c, slice_d):
+                    for n, t in parse_slice(chunk):
+                        by_n[n] = t
+
+                if total_n <= 0:
+                    return {
+                        "paragraphs_json": json.dumps({"paragraphs": []}, ensure_ascii=False, separators=(",", ":")),
+                        "total_n": 0, "covered_n": 0, "missing_n": "",
+                        "error_code": "EMPTY_REFERENCE",
+                    }
+
+                missing = [n for n in range(1, total_n + 1) if n not in by_n]
+                covered = total_n - len(missing)
+                paragraphs = [{"n": n, "text": by_n.get(n, "")} for n in range(1, total_n + 1)]
+
+                if covered < max(1, int(total_n * 0.5)):
+                    error_code = "PARAGRAPH_COVERAGE_INCOMPLETE"
+                elif missing:
+                    error_code = "PARTIAL_COVERAGE"
+                else:
+                    error_code = "OK"
+
+                return {
+                    "paragraphs_json": json.dumps({"paragraphs": paragraphs}, ensure_ascii=False, separators=(",", ":")),
+                    "total_n": total_n,
+                    "covered_n": covered,
+                    "missing_n": ",".join(str(n) for n in missing)[:900],
+                    "error_code": error_code,
+                }
+          variables:
+            - {variable: slice_a, value_selector: ['rewrite_a', 'text']}
+            - {variable: slice_b, value_selector: ['rewrite_b', 'text']}
+            - {variable: slice_c, value_selector: ['rewrite_c', 'text']}
+            - {variable: slice_d, value_selector: ['rewrite_d', 'text']}
+            - {variable: total_n, value_selector: ['prepare', 'total_n']}
+          outputs:
+            paragraphs_json: {type: string, children: null}
+            total_n: {type: number, children: null}
+            covered_n: {type: number, children: null}
+            missing_n: {type: string, children: null}
+            error_code: {type: string, children: null}
+
+      # ---------------- 结束输出 ----------------
+      - id: end
+        type: custom
+        position: {x: 1560, y: 470}
+        data:
+          type: end
+          title: 结束
+          desc: paragraphs_json 为后端渲染 DOCX 的唯一内容来源
+          outputs:
+            - {variable: paragraphs_json, value_selector: ['merge_validate', 'paragraphs_json']}
+            - {variable: total_n, value_selector: ['merge_validate', 'total_n']}
+            - {variable: covered_n, value_selector: ['merge_validate', 'covered_n']}
+            - {variable: missing_n, value_selector: ['merge_validate', 'missing_n']}
+            - {variable: error_code, value_selector: ['merge_validate', 'error_code']}
+
+# =====================================================================
+# 【输出 error_code 说明】
+#   OK                            全部 1..N 段落覆盖完整，paragraphs_json 可直接使用
+#   PARTIAL_COVERAGE              少量段落缺失（≤5% 容忍线与 50% 硬线之间），
+#                                 缺失编号见 missing_n；后端可沿用范本原文占位
+#   PARAGRAPH_COVERAGE_INCOMPLETE 覆盖率低于 50%，应整任务失败并重试
+#   EMPTY_REFERENCE               参考范本为空，输入错误
+# 【后端对接占位（阶段 2）】POST {实例地址}/v1/workflows/run
+#   inputs = 上述七个输入变量；response_mode 先 stream（分片节点完成时
+#   产生 node_finished 事件，可映射为系统内逐片进度），解析 end 输出。
+# =====================================================================

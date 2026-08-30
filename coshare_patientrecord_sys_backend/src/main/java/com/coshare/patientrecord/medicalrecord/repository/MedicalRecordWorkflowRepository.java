@@ -149,7 +149,7 @@ public class MedicalRecordWorkflowRepository {
               id, scope_id, patient_id, encounter_id, source_record_id, source_asset_id, sanitized_asset_id,
               sanitization_report_id, status, current_stage, mapping_mode, prompt_text, request_json,
               attempt_count, retry_of_task_id, created_by, created_by_role
-            ) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, 'PENDING', 'QUEUED', ?, ?,
+            ) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), 'PENDING', 'QUEUED', ?, ?,
                       CAST(? AS JSON), ?, NULLIF(?, ''), ?, ?)
             """,
             task.id(), task.scopeId(), task.patientId(), task.encounterId(), task.sourceRecordId(),

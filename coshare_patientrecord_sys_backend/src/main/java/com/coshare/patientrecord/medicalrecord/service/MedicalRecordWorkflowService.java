@@ -317,7 +317,8 @@ public class MedicalRecordWorkflowService {
             targetNodeKeys,
             referenceAssetId,
             preAiExportId,
-            preAiExportSnapshot
+            preAiExportSnapshot,
+            sanitizeConversationHistory(request.conversationHistory())
         );
         repository.insertTask(new Task(
             taskId,
@@ -444,7 +445,8 @@ public class MedicalRecordWorkflowService {
                 task.encounterId(),
                 task.sourceRecordId(),
                 task.prompt(),
-                task.request().get("preAiExport")
+                task.request().get("preAiExport"),
+                stringList(task.request().get("conversationHistory"))
             );
             Map<String, Object> generated = medicalRecordService.generateInpatientAi(
                 request,
@@ -761,7 +763,8 @@ public class MedicalRecordWorkflowService {
         List<String> targetNodeKeys,
         String referenceAssetId,
         String preAiExportId,
-        Object preAiExportSnapshot
+        Object preAiExportSnapshot,
+        List<String> conversationHistory
     ) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("patientId", patientId);
@@ -773,7 +776,22 @@ public class MedicalRecordWorkflowService {
         result.put("referenceAssetId", safe(referenceAssetId));
         result.put("preAiExportId", safe(preAiExportId));
         if (preAiExportSnapshot != null) result.put("preAiExport", preAiExportSnapshot);
+        if (!conversationHistory.isEmpty()) result.put("conversationHistory", conversationHistory);
         return result;
+    }
+
+    /**
+     * 会话记忆：仅保留医生各轮的额外备注（固定口径每轮都在 prompt 里，无需重复），
+     * 最多回看 6 轮、单条截断 300 字，避免历史无限膨胀。
+     */
+    private List<String> sanitizeConversationHistory(List<String> conversationHistory) {
+        if (conversationHistory == null || conversationHistory.isEmpty()) return List.of();
+        List<String> items = conversationHistory.stream()
+            .map(item -> safe(item))
+            .filter(item -> !item.isBlank())
+            .map(item -> item.length() > 300 ? item.substring(0, 300) : item)
+            .toList();
+        return items.size() > 6 ? items.subList(items.size() - 6, items.size()) : List.copyOf(items);
     }
 
     private String reusableBuiltinAssetId(String scopeId, String digest) {

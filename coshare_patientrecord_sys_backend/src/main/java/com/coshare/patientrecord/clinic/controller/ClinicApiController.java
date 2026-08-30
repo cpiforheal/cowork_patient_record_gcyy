@@ -281,6 +281,22 @@ public class ClinicApiController {
         return ApiResult.of(200, "doubao tts generated", data);
     }
 
+    @GetMapping("/clinic-api/ai/dify/config")
+    public ApiResult<Map<String, Object>> difyConfigStatus() {
+        requireClinicAdmin();
+        Map<String, Object> data = objectMapper.convertValue(aiConfigService.difyStatus(), new TypeReference<Map<String, Object>>() {});
+        return ApiResult.success(data);
+    }
+
+    @PutMapping("/clinic-api/ai/dify/config")
+    public ApiResult<Map<String, Object>> updateDifyAiConfig(@RequestBody Map<String, Object> payload) {
+        SessionUser user = AuthPermission.currentUserOrThrow();
+        requireClinicAdmin();
+        ObjectNode result = aiConfigService.updateDifyConfig(payload, user);
+        Map<String, Object> data = objectMapper.convertValue(result, new TypeReference<Map<String, Object>>() {});
+        return ApiResult.of(200, "dify workflow config saved", data);
+    }
+
     @PostMapping("/clinic-api/ai/doubao/tts/test")
     public ApiResult<Map<String, Object>> testDoubaoTts(@RequestBody TtsConfigTestRequest request) {
         requireClinicAdmin();

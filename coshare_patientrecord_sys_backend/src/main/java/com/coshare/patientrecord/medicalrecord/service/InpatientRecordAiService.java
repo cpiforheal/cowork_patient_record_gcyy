@@ -7,7 +7,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
@@ -16,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -62,11 +66,32 @@ public class InpatientRecordAiService {
         JsonNode maskedPreAiExport,
         Map<String, String> currentValues,
         int referenceParagraphCount,
-        List<String> controlledNodeKeys
+        List<String> controlledNodeKeys,
+        List<String> conversationHistory
     ) {
         String normalizedPrompt = safe(prompt);
         if (normalizedPrompt.length() > MAX_PROMPT_LENGTH) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能超过 " + MAX_PROMPT_LENGTH + " 个字符");
+        }
+
+        EffectiveAiConfig difyConfig = aiConfigService.resolveDifyConfig();
+        boolean difyEligible = (controlledNodeKeys == null || controlledNodeKeys.isEmpty())
+            && difyConfig.enabled()
+            && !normalizeApiKey(difyConfig.apiKey()).isBlank()
+            && !safe(difyConfig.baseUrl()).isBlank();
+        if (difyEligible) {
+            return generateViaDifyWorkflow(
+                difyConfig,
+                normalizedPrompt,
+                referenceDocumentText,
+                referenceSourceLabel,
+                sourceSnapshot,
+                preAiFacts,
+                maskedPreAiExport,
+                currentValues,
+                referenceParagraphCount,
+                conversationHistory
+            );
         }
 
         EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
@@ -91,7 +116,7 @@ public class InpatientRecordAiService {
             List<String> expectedNodeKeys = controlledNodeKeys == null ? List.of() : List.copyOf(controlledNodeKeys);
             messages.addObject().put("role", "system").put(
                 "content",
-                systemPrompt(referenceParagraphCount, expectedNodeKeys)
+                systemPrompt(referenceParagraphCount, expectedNodeKeys) + conversationHistoryBlock(conversationHistory)
             );
             messages.addObject().put(
                 "role",
@@ -159,6 +184,175 @@ public class InpatientRecordAiService {
             log.warn("GPT-compatible inpatient generation request is invalid: endpoint={}", safeEndpoint(baseUrl), error);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "GPT 兼容 Base URL 或请求参数格式不正确", error);
         }
+    }
+
+    private AiGeneration generateViaDifyWorkflow(
+        EffectiveAiConfig difyConfig,
+        String prompt,
+        String referenceDocumentText,
+        String referenceSourceLabel,
+        ObjectNode sourceSnapshot,
+        ObjectNode preAiFacts,
+        JsonNode maskedPreAiExport,
+        Map<String, String> currentValues,
+        int referenceParagraphCount,
+        List<String> conversationHistory
+    ) {
+        long startedAt = System.nanoTime();
+        try {
+            String paragraphsJson = aiCallGuard.execute(() ->
+                runDifyWorkflow(difyConfig, prompt, referenceDocumentText, referenceSourceLabel, sourceSnapshot, preAiFacts, maskedPreAiExport, currentValues, conversationHistory));
+            InpatientAiResponseParser.ParsedGeneration parsed = responseParser.parse(paragraphsJson, referenceParagraphCount, List.of());
+            log.info(
+                "Dify inpatient generation succeeded: endpoint={}, elapsedMs={}, historyRounds={}",
+                safeEndpoint(difyConfig.baseUrl()),
+                (System.nanoTime() - startedAt) / 1_000_000,
+                conversationHistory == null ? 0 : conversationHistory.size()
+            );
+            return new AiGeneration(parsed.paragraphs(), parsed.nodeReplacements(), "dify-workflow");
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Dify 病历生成已中断，请稍后重试", error);
+        } catch (HttpTimeoutException error) {
+            log.warn("Dify inpatient generation timed out: endpoint={}", safeEndpoint(difyConfig.baseUrl()), error);
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "Dify 病历生成超时，请稍后重试", error);
+        } catch (ConnectException error) {
+            log.warn("Dify inpatient generation connection failed: endpoint={}", safeEndpoint(difyConfig.baseUrl()), error);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "无法连接 Dify 工作流服务，请检查 Base URL 和网络", error);
+        } catch (IOException error) {
+            log.warn("Dify inpatient generation failed: endpoint={}, detail={}", safeEndpoint(difyConfig.baseUrl()), safeErrorMessage(error));
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Dify 病历生成失败：" + safeErrorMessage(error), error);
+        }
+    }
+
+    /**
+     * 以流式模式调用 Dify 工作流并消费 SSE 事件，返回工作流 end 节点的 paragraphs_json。
+     * 上游非 2xx / workflow failed / 覆盖度硬失败统一抛 IOException，交给 AiCallGuard 计入熔断统计。
+     */
+    private String runDifyWorkflow(
+        EffectiveAiConfig difyConfig,
+        String prompt,
+        String referenceDocumentText,
+        String referenceSourceLabel,
+        ObjectNode sourceSnapshot,
+        ObjectNode preAiFacts,
+        JsonNode maskedPreAiExport,
+        Map<String, String> currentValues,
+        List<String> conversationHistory
+    ) throws IOException, InterruptedException {
+        String endpoint = normalizeDifyWorkflowUrl(difyConfig.baseUrl());
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("response_mode", "streaming");
+        payload.put("user", "clinic-inpatient-engine");
+        ObjectNode inputs = payload.putObject("inputs");
+        inputs.put("doctorSupplement", safe(prompt));
+        inputs.put("referenceDocument", numberReferenceParagraphs(referenceDocumentText));
+        inputs.put("referenceSourceLabel", safe(referenceSourceLabel));
+        inputs.put("patientAndRecord", sourceSnapshot == null ? "{}" : sourceSnapshot.toString());
+        inputs.put("reviewedPreAiFacts", preAiFacts == null ? "{}" : preAiFacts.toString());
+        inputs.put("reviewedMaskedExport", maskedPreAiExport == null ? "" : maskedPreAiExport.toString());
+        inputs.put("currentTemplateValues", objectMapper.writeValueAsString(currentValues == null ? Map.of() : currentValues));
+        inputs.put("conversationHistory", joinConversationHistory(conversationHistory));
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+            .timeout(Duration.ofSeconds(120))
+            .header("Authorization", "Bearer " + normalizeApiKey(difyConfig.apiKey()))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
+            .build();
+        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String body = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+            throw new IOException("上游状态 " + response.statusCode() + "：" + truncate(upstreamErrorMessage(body)));
+        }
+
+        Instant deadline = Instant.now().plus(Duration.ofMinutes(10));
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (Instant.now().isAfter(deadline)) {
+                    throw new IOException("Dify 工作流执行超过 10 分钟未完成");
+                }
+                String trimmed = line.trim();
+                if (!trimmed.startsWith("data:")) continue;
+                JsonNode event;
+                try {
+                    event = objectMapper.readTree(trimmed.substring(5).trim());
+                } catch (Exception malformed) {
+                    continue;
+                }
+                String type = event.path("event").asText("");
+                if ("node_finished".equals(type)) {
+                    JsonNode nodeData = event.path("data");
+                    log.debug(
+                        "Dify workflow node finished: title={}, status={}, elapsedMs={}",
+                        nodeData.path("title").asText(""),
+                        nodeData.path("status").asText(""),
+                        Math.round(nodeData.path("elapsed_time").asDouble(0) * 1000)
+                    );
+                } else if ("workflow_finished".equals(type)) {
+                    return extractDifyOutputs(event.path("data"));
+                } else if ("error".equals(type)) {
+                    throw new IOException(truncate(event.path("message").asText("Dify 工作流执行错误")));
+                }
+            }
+        }
+        throw new IOException("Dify 工作流流式响应在 workflow_finished 前结束");
+    }
+
+    private String extractDifyOutputs(JsonNode workflowData) throws IOException {
+        String status = workflowData.path("status").asText("");
+        if (!"succeeded".equalsIgnoreCase(status)) {
+            throw new IOException("Dify 工作流执行失败：" + workflowData.path("error").asText(status));
+        }
+        JsonNode outputs = workflowData.path("outputs");
+        String errorCode = outputs.path("error_code").asText("");
+        if ("EMPTY_REFERENCE".equals(errorCode)) {
+            throw new IOException("参考范本内容为空，无法生成病历");
+        }
+        if ("PARAGRAPH_COVERAGE_INCOMPLETE".equals(errorCode)) {
+            throw new IOException("模型段落覆盖率过低（" + outputs.path("covered_n").asText("?") + "/" + outputs.path("total_n").asText("?") + "），请重试");
+        }
+        if ("PARTIAL_COVERAGE".equals(errorCode)) {
+            log.warn("Dify workflow partial coverage: missing_n={}", outputs.path("missing_n").asText(""));
+        }
+        String paragraphsJson = outputs.path("paragraphs_json").asText("");
+        if (paragraphsJson.isBlank()) {
+            throw new IOException("Dify 工作流输出缺少 paragraphs_json");
+        }
+        return paragraphsJson;
+    }
+
+    private String normalizeDifyWorkflowUrl(String rawUrl) {
+        String value = safe(rawUrl).replaceAll("/+$", "");
+        if (value.isBlank() || value.endsWith("/workflows/run")) return value;
+        return value + "/workflows/run";
+    }
+
+    /**
+     * 会话记忆：把医生早前各轮的额外备注拼成"【第N轮】…"文本块。
+     * Dify 路径作为独立输入变量下发（旧工作流会忽略该变量）；legacy 路径折入系统提示词。
+     */
+    private String joinConversationHistory(List<String> conversationHistory) {
+        if (conversationHistory == null || conversationHistory.isEmpty()) return "";
+        List<String> items = conversationHistory.stream()
+            .map(InpatientRecordAiService::safe)
+            .filter(item -> !item.isBlank())
+            .map(item -> item.length() > 300 ? item.substring(0, 300) : item)
+            .toList();
+        if (items.size() > 6) items = items.subList(items.size() - 6, items.size());
+        StringBuilder block = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (block.length() > 0) block.append("\n");
+            block.append("【第").append(i + 1).append("轮】").append(items.get(i));
+        }
+        return block.toString();
+    }
+
+    private String conversationHistoryBlock(List<String> conversationHistory) {
+        String joined = joinConversationHistory(conversationHistory);
+        if (joined.isBlank()) return "";
+        return "\n\n【既往对话要求】（医生早前各轮的特殊强调，除本轮明确推翻外必须继续遵守；与本轮要求冲突时以本轮为准）\n" + joined;
     }
 
     private String systemPrompt(int referenceParagraphCount, List<String> controlledNodeKeys) throws IOException {

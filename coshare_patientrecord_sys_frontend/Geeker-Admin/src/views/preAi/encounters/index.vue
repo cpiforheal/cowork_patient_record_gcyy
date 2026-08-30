@@ -873,17 +873,21 @@
                   :version-loading="targetVersionsLoading"
                   :encounter-status="workspace.encounter.status"
                   :exports="workspace.exports"
-                  :target-versions="targetMedicalRecordVersions"
+                  :target-versions="templateTargetVersions"
+                  :ai-versions="aiGeneratedVersions"
                   :latest-target-version-id="latestGeneratedTargetVersionId"
                   :latest-export-version-id="latestGeneratedExportVersionId"
+                  :latest-ai-version-id="latestAiGeneratedVersionId"
                   :deleting-target-version-id="deletingTargetVersionId"
                   @refresh="loadReviewPreview"
                   @confirm="confirmReview"
                   @generate="generateExport"
                   @generate-target="generateTargetMedicalRecord"
                   @open-record-chat="openRecordChat"
+                  @open-health-archive="openHealthArchive"
                   @download="downloadPreAiExportApi"
                   @download-target="downloadMedicalRecordApi"
+                  @download-ai="downloadAiGeneratedRecord"
                   @delete-target="deleteTargetMedicalRecord"
                 />
               </section>
@@ -1168,6 +1172,13 @@
       :main-diagnosis-text="recordChatDiagnosisText"
       :exports="workspace?.exports ?? []"
       @record-generated="loadTargetMedicalRecordVersions"
+    />
+
+    <HealthArchiveDialog
+      v-model="healthArchiveVisible"
+      :encounter-id="selectedEncounterId"
+      :encounter-patient-name="recordChatPatientName"
+      @completed="loadTargetMedicalRecordVersions"
     />
 
     <el-dialog
@@ -1592,6 +1603,7 @@ import MedicalRecordPreview from "./components/MedicalRecordPreview.vue";
 import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import RecordAiChat from "./components/RecordAiChat.vue";
+import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
 import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
 import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
 import StructuredField from "./components/StructuredField.vue";
@@ -1920,6 +1932,25 @@ const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
 const targetMedicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
+const templateTargetVersions = computed(() =>
+  targetMedicalRecordVersions.value.filter(record => !record.model || record.model === "docx-template")
+);
+const aiGeneratedVersions = computed(() =>
+  targetMedicalRecordVersions.value.filter(record => Boolean(record.model) && record.model !== "docx-template")
+);
+const latestAiGeneratedVersionId = computed(() => {
+  const list = aiGeneratedVersions.value;
+  if (!list.length) return "";
+  return [...list].sort((left, right) => right.version - left.version)[0].id;
+});
+const downloadAiGeneratedRecord = async (version: GeneratedMedicalRecord) => {
+  try {
+    saveMedicalRecordDownload(await downloadGeneratedMedicalRecordV2Api(version.id));
+    ElMessage.success(`AI 病历 V${version.version} 已下载`);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "AI 病历下载失败");
+  }
+};
 const targetVersionsLoading = ref(false);
 const deletingTargetVersionId = ref("");
 const latestGeneratedTargetVersionId = ref("");
@@ -1928,6 +1959,10 @@ const medicalRecordV2Enabled = true;
 const recordChatVisible = ref(false);
 const openRecordChat = () => {
   recordChatVisible.value = true;
+};
+const healthArchiveVisible = ref(false);
+const openHealthArchive = () => {
+  healthArchiveVisible.value = true;
 };
 const recordChatPatientName = computed(() => workspace.value?.encounter?.patient?.patientName || "");
 const recordChatDiagnosisText = computed(() => {

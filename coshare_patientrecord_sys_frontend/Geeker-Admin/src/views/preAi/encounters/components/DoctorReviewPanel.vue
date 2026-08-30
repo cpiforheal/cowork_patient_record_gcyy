@@ -152,6 +152,13 @@
             </el-button>
           </span>
         </el-tooltip>
+        <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核" placement="top">
+          <span>
+            <el-button type="warning" plain :disabled="!reviewConfirmed" @click="$emit('openHealthArchive')">
+              健康管理档案
+            </el-button>
+          </span>
+        </el-tooltip>
       </div>
     </footer>
     <section v-if="reviewConfirmed" class="version-control">
@@ -160,7 +167,7 @@
           <strong>文档版本控制</strong>
           <small>生成只建立新版本，不自动下载、不覆盖历史文件；确认版本后再下载。</small>
         </div>
-        <el-tag type="info" effect="plain">共 {{ targetVersions.length + exports.length }} 个版本</el-tag>
+        <el-tag type="info" effect="plain">共 {{ targetVersions.length + exports.length + aiVersions.length }} 个版本</el-tag>
       </header>
 
       <div v-if="latestTargetVersion" class="generation-result">
@@ -292,6 +299,52 @@
             </div>
           </template>
         </article>
+
+        <article class="version-group">
+          <header>
+            <div>
+              <strong>AI 病历生成助手版本</strong>
+              <small>对话框产出即时捕捉固定，版本号与下载随生成更新</small>
+            </div>
+            <el-tag type="warning" effect="plain">{{ aiVersions.length }}</el-tag>
+          </header>
+          <div v-if="versionLoading" class="version-empty">正在加载版本记录…</div>
+          <div v-else-if="!orderedAiVersions.length" class="version-empty">尚未生成 AI 病历版本</div>
+          <template v-else>
+            <div
+              v-for="version in orderedAiVersions"
+              :key="version.id"
+              class="version-row"
+              :class="{ latest: version.id === latestAiVersionId }"
+            >
+              <span class="version-no ai-version">V{{ version.version }}</span>
+              <div class="version-detail">
+                <div>
+                  <strong>{{ version.fileName || `AI住院病历-V${version.version}.docx` }}</strong>
+                  <el-tag :type="targetStatusType(version.status)" size="small" effect="plain">
+                    {{ targetStatusLabel(version.status) }}
+                  </el-tag>
+                  <el-tag v-if="version.id === latestAiVersionId" type="success" size="small" effect="dark">刚刚生成</el-tag>
+                </div>
+                <small>
+                  {{ version.generatedAt }} · {{ version.operatorRole || "医生" }} ·
+                  {{ aiModelLabel(version.model) }}
+                </small>
+              </div>
+              <div class="version-actions">
+                <el-button
+                  class="version-direct-action"
+                  type="warning"
+                  plain
+                  :disabled="version.status === 'voided'"
+                  @click="$emit('downloadAi', version)"
+                >
+                  下载
+                </el-button>
+              </div>
+            </div>
+          </template>
+        </article>
       </div>
     </section>
   </section>
@@ -320,8 +373,10 @@ const props = defineProps<{
   encounterStatus: PreAiEncounterStatus;
   exports: PreAiExportVersion[];
   targetVersions: GeneratedMedicalRecord[];
+  aiVersions: GeneratedMedicalRecord[];
   latestTargetVersionId: string;
   latestExportVersionId: string;
+  latestAiVersionId: string;
   deletingTargetVersionId: string;
 }>();
 
@@ -334,6 +389,7 @@ const targetGenerationDisabledReason = computed(() => {
 });
 const orderedTargetVersions = computed(() => [...props.targetVersions].sort((left, right) => right.version - left.version));
 const orderedExports = computed(() => [...props.exports].sort((left, right) => right.version - left.version));
+const orderedAiVersions = computed(() => [...props.aiVersions].sort((left, right) => right.version - left.version));
 const latestTargetVersion = computed(() => props.targetVersions.find(version => version.id === props.latestTargetVersionId));
 const latestExportVersion = computed(() => props.exports.find(version => version.id === props.latestExportVersionId));
 
@@ -352,6 +408,12 @@ const exportStatusLabel = (status: string) => {
 };
 const exportStatusType = (status: string) =>
   ["INVALIDATED", "VOIDED"].includes(status.toUpperCase()) ? ("danger" as const) : ("success" as const);
+const aiModelLabel = (model: string) => {
+  const value = (model || "").toLowerCase();
+  if (value === "dify-workflow") return "Dify 工作流";
+  if (value === "docx-template") return "模板直出";
+  return model || "AI 生成";
+};
 
 const emit = defineEmits<{
   refresh: [];
@@ -359,8 +421,10 @@ const emit = defineEmits<{
   generate: [];
   generateTarget: [];
   openRecordChat: [];
+  openHealthArchive: [];
   download: [version: PreAiExportVersion];
   downloadTarget: [version: GeneratedMedicalRecord];
+  downloadAi: [version: GeneratedMedicalRecord];
   deleteTarget: [version: GeneratedMedicalRecord];
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
@@ -744,8 +808,13 @@ const handleTargetVersionCommand = (command: string | number | object, version: 
 }
 .version-groups {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+.ha-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .version-group {
   min-width: 0;
@@ -821,7 +890,15 @@ const handleTargetVersionCommand = (command: string | number | object, version: 
     transition: none;
   }
 }
+@media (max-width: 1100px) {
+  .version-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 @media (max-width: 680px) {
+  .version-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .panel-heading {
     flex-direction: column;
   }

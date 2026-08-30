@@ -390,7 +390,8 @@ public class ClinicMedicalRecordService {
                 : objectMapper.valueToTree(request.preAiExport()),
             currentValues,
             reference.paragraphs().size(),
-            controlledNodeKeys
+            controlledNodeKeys,
+            request == null ? List.of() : request.conversationHistory()
         );
 
         int version = versionRepository.nextVersion(scopeId);

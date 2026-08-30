@@ -18,8 +18,8 @@
 
     <div ref="messageListRef" class="chat-body">
       <div v-if="!messages.length" class="chat-hint">
-        下方提示词已按院内标准口径预填，可直接点「发送」，也可先修改再发送；AI
-        会结合该患者的已复核资料生成整套住院病历，之后继续输入修改意见即可逐轮调整。
+        标准生成口径已固定（见下方标签），可直接点「发送」；需要针对本例特殊强调时（如中医辨证侧重、方剂取舍），在输入框写备注后发送。AI
+        会结合该患者的已复核资料与历轮备注逐轮收敛生成整套住院病历。
       </div>
 
       <template v-for="item in messages" :key="item.id">
@@ -65,6 +65,12 @@
             已固定：住院病历范本（周xx·脱敏版）
           </el-tag>
         </el-tooltip>
+        <el-tooltip :content="personalizedPrompt" placement="top">
+          <el-tag type="warning" effect="plain">
+            <el-icon><DocumentCopy /></el-icon>
+            已固定：标准生成口径（已代入本例患者与主诊断）
+          </el-tag>
+        </el-tooltip>
         <template v-if="pinnedExport">
           <el-tag
             v-if="attachExport"
@@ -85,16 +91,16 @@
         <small v-else class="attachment-note muted">当前病例暂无有效脱敏资料，可先在复核面板生成</small>
       </div>
       <el-input
-        v-model="prompt"
+        v-model="notes"
         type="textarea"
         :autosize="{ minRows: 3, maxRows: 8 }"
-        placeholder="输入或修改提示词，Enter 发送（Shift+Enter 换行）"
+        :placeholder="notesPlaceholder"
         :disabled="busy"
         @keydown.enter.exact.prevent="send"
       />
       <div class="footer-actions">
-        <small>生成仅供医生复核使用</small>
-        <el-button type="primary" :loading="busy" :disabled="!prompt.trim()" @click="send">发送</el-button>
+        <small>标准口径已固定，本框仅记录医生本例特殊备注；生成仅供医生复核使用</small>
+        <el-button type="primary" :loading="busy" :disabled="busy" @click="send">发送</el-button>
       </div>
     </div>
   </el-drawer>
@@ -174,7 +180,10 @@ const personalizedPrompt = computed(() => {
   return text;
 });
 
-const prompt = ref(personalizedPrompt.value);
+const notes = ref("");
+const notesHistory = ref<string[]>([]);
+const notesPlaceholder =
+  "输入本例特殊备注（如中医辨证侧重、方剂取舍、章节详略），留空则按标准口径生成；Enter 发送，Shift+Enter 换行。每轮备注会带入后续轮次作为上下文，直至开新对话。";
 
 const scrollToEnd = async () => {
   await nextTick();
@@ -188,7 +197,8 @@ const resetSession = () => {
   }
   controller.value?.abort();
   messages.value = [];
-  prompt.value = personalizedPrompt.value;
+  notes.value = "";
+  notesHistory.value = [];
   baseRecordId.value = "";
   builtinReportId.value = "";
   lastOutputAssetId.value = "";
@@ -204,7 +214,7 @@ watch(
       return;
     }
     if (messages.value.length) return;
-    prompt.value = personalizedPrompt.value;
+    notes.value = "";
   }
 );
 
@@ -234,11 +244,18 @@ const ensureBaseRecord = async (signal: AbortSignal) => {
 };
 
 const send = async () => {
-  const text = prompt.value.trim();
-  if (!text || busy.value || !props.encounterId) return;
+  const trimmedNotes = notes.value.trim();
+  if (busy.value || !props.encounterId) return;
   roundCount.value += 1;
   const round = roundCount.value;
-  messages.value.push({ id: `u-${round}-${Date.now()}`, role: "user", text });
+  const composed = trimmedNotes
+    ? `${personalizedPrompt.value}\n【医生本例备注】${trimmedNotes}`
+    : personalizedPrompt.value;
+  messages.value.push({
+    id: `u-${round}-${Date.now()}`,
+    role: "user",
+    text: trimmedNotes ? `【本例备注】${trimmedNotes}` : "按标准口径生成本例病历"
+  });
   const card: GenerationCard = {
     taskId: "",
     round,
@@ -251,7 +268,7 @@ const send = async () => {
     errorMessage: ""
   };
   messages.value.push({ id: `c-${round}-${Date.now()}`, role: "card", card });
-  prompt.value = "";
+  notes.value = "";
   busy.value = true;
   const requestController = new AbortController();
   controller.value = requestController;
@@ -265,9 +282,10 @@ const send = async () => {
       submitParams = {
         referenceAssetId: lastOutputAssetId.value,
         sourceRecordId: baseRecordId.value,
-        prompt: text,
+        prompt: composed,
         mappingMode: "LEGACY_ORDINAL",
-        preAiExportId: attachExportId
+        preAiExportId: attachExportId,
+        conversationHistory: [...notesHistory.value]
       };
     } else {
       if (!builtinReportId.value) {
@@ -281,12 +299,14 @@ const send = async () => {
       submitParams = {
         reportId: builtinReportId.value,
         sourceRecordId: baseRecordId.value,
-        prompt: text,
+        prompt: composed,
         mappingMode: "LEGACY_ORDINAL",
-        preAiExportId: attachExportId
+        preAiExportId: attachExportId,
+        conversationHistory: [...notesHistory.value]
       };
     }
     const { data: submitted } = await submitMedicalRecordWorkflowTaskApi(submitParams, requestController.signal);
+    if (trimmedNotes) notesHistory.value.push(trimmedNotes);
     applyTaskToCard(card, submitted);
     const finalTask = await pollMedicalRecordWorkflowTask(submitted.taskId, {
       signal: requestController.signal,
