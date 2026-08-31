@@ -2,8 +2,12 @@
   <section class="clinical-template-toolbar">
     <div class="toolbar-heading">
       <div>
-        <strong>病种模板（自动匹配，可微调）</strong>
-        <small>接诊室按症状点选会自动匹配病种并生成规范文本；此处仅微调病种、点位、病程等变量，患者原话请记录在“患者原话速记”中</small>
+        <strong>{{ simplified ? "病种模板（选择后自动生成，可直接修改）" : "病种模板（自动匹配，可微调）" }}</strong>
+        <small>{{
+          simplified
+            ? "选择病种后自动按默认变量生成检查记录全文，直接在下方文本框修改后提交即可"
+            : "接诊室按症状点选会自动匹配病种并生成规范文本；此处仅微调病种、点位、病程等变量，患者原话请记录在“患者原话速记”中"
+        }}</small>
       </div>
       <div class="heading-tags">
         <el-tag v-if="autoMatchLabel" size="small" type="success" effect="plain">已自动匹配：{{ autoMatchLabel }}</el-tag>
@@ -22,7 +26,7 @@
       <el-option v-for="option in options" :key="option.value" :label="option.label" :value="option.value" />
     </el-select>
 
-    <div v-if="primaryTemplate && primaryTemplate.slots.length" class="template-slots">
+    <div v-if="!simplified && primaryTemplate && primaryTemplate.slots.length" class="template-slots">
       <label v-for="item in primaryTemplate.slots" :key="item.key" class="template-slot">
         <span class="slot-label">{{ item.label }}</span>
         <el-select
@@ -53,7 +57,7 @@
       </label>
     </div>
 
-    <div class="template-actions">
+    <div v-if="!simplified" class="template-actions">
       <el-button size="small" type="primary" plain :disabled="disabled || !selected.length" @click="emitApply('fill')"
         >填充空字段</el-button
       >
@@ -62,7 +66,7 @@
         >覆盖模板字段</el-button
       >
     </div>
-    <p class="template-hint">变量调整后自动重新生成未被手工修改的模板文本；覆盖已有人工内容前请确认，覆盖后需重新确认自动结论。</p>
+    <p v-if="!simplified" class="template-hint">变量调整后自动重新生成未被手工修改的模板文本；覆盖已有人工内容前请确认，覆盖后需重新确认自动结论。</p>
   </section>
 </template>
 
@@ -76,7 +80,13 @@ import {
 } from "../utils/clinicalTemplateCatalog";
 import type { ClinicalTemplateMode } from "../utils/clinicalTemplateCatalog";
 
-const props = defineProps<{ modelValue?: string[]; slotValues?: Record<string, any>; disabled?: boolean; autoMatchLabel?: string }>();
+const props = defineProps<{
+  modelValue?: string[];
+  slotValues?: Record<string, any>;
+  disabled?: boolean;
+  autoMatchLabel?: string;
+  simplified?: boolean;
+}>();
 const emit = defineEmits<{
   (event: "update:modelValue", value: string[]): void;
   (event: "update:slotValues", value: Record<string, any>): void;

@@ -505,17 +505,35 @@
                       ['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) &&
                       (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')
                     "
+                    :simplified="selectedStageCode === 'INSPECTION'"
                     :model-value="clinicalTemplateIds(selectedStageCode)"
                     :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
                     :disabled="!canModifySelectedStage"
                     :auto-match-label="selectedStageCode === 'RECEPTION' ? autoMatchedTemplateLabel : ''"
-                    @update:model-value="value => setClinicalTemplateIds(selectedStageCode, value)"
+                    @update:model-value="value => onClinicalTemplateSelection(selectedStageCode, value)"
                     @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
                     @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
                   />
 
                   <section
-                    v-if="secondaryStageFieldsCount && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
+                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
+                    class="inspection-narrative-edit"
+                  >
+                    <div class="narrative-heading">
+                      <strong>检查记录</strong>
+                      <small>模板已按默认变量生成全文，可直接在本框修改；切换病种将重新生成并覆盖</small>
+                    </div>
+                    <el-input
+                      v-model="stageForms.INSPECTION.inspectionNarrative"
+                      type="textarea"
+                      :rows="16"
+                      :disabled="!canModifySelectedStage"
+                      @update:model-value="markStageDirty('INSPECTION')"
+                    />
+                  </section>
+
+                  <section
+                    v-if="selectedStageCode !== 'INSPECTION' && secondaryStageFieldsCount"
                     class="field-noise-toolbar"
                   >
                     <div>
@@ -527,11 +545,7 @@
                     </el-button>
                   </section>
 
-                  <el-form
-                    v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
-                    label-position="top"
-                    class="stage-form"
-                  >
+                  <el-form v-if="selectedStageCode !== 'INSPECTION'" label-position="top" class="stage-form">
                     <div class="form-grid">
                       <el-form-item
                         v-for="field in visibleStageFields"
@@ -2132,7 +2146,7 @@ const confirmClinicalTemplateApply = async (mode: ClinicalTemplateMode) => {
 };
 
 const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTemplateMode, ids: string[]) => {
-  if (!ids.length || !(await confirmClinicalTemplateApply(mode))) return;
+  if (!ids.length || !(await confirmClinicalTemplateApply(mode))) return false;
   Object.assign(stageForms[code], applyClinicalTemplate(code, stageForms[code], ids, mode));
   if (code === "INSPECTION" && mode !== "fill") {
     const conclusion = buildInspectionConclusion(stageForms.INSPECTION);
@@ -2145,9 +2159,20 @@ const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTe
     mode === "render"
       ? "已按当前模板变量重新生成，手工修改过的内容保持不变"
       : mode === "fill"
-        ? "已填充空白字段，可继续修改"
-        : "模板内容已更新，请核对后保存"
+        ? "已生成检查记录全文，可在下方文本框直接修改"
+        : "检查记录已按模板重新生成，请核对后提交"
   );
+  return true;
+};
+
+// 检查室试点：选择病种即按默认变量生成检查记录全文（textarea 可直接修改）
+const onClinicalTemplateSelection = async (code: PreAiStageCode, ids: string[]) => {
+  const previous = [...clinicalTemplateIds(code)];
+  setClinicalTemplateIds(code, ids);
+  if (code !== "INSPECTION") return;
+  const narrative = String(stageForms.INSPECTION.inspectionNarrative || "").trim();
+  const applied = await applyStageClinicalTemplate("INSPECTION", narrative ? "overwrite" : "fill", ids);
+  if (!applied && narrative) setClinicalTemplateIds(code, previous);
 };
 
 const applyCreateClinicalTemplate = async (mode: ClinicalTemplateMode, ids: string[]) => {
@@ -4916,6 +4941,28 @@ onBeforeUnmount(() => {
   content: "";
   border-radius: 0 999px 999px 0;
   background: var(--el-color-primary);
+}
+.inspection-narrative-edit {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 10px;
+  background: var(--el-color-primary-light-9);
+}
+.narrative-heading {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+
+  strong {
+    font-size: 14px;
+    color: var(--el-text-color-primary);
+  }
+
+  small {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
 }
 .stage-form {
   padding: 16px;
