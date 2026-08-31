@@ -233,6 +233,7 @@ public class FollowUpVisitService {
 
     private Map<String, Object> visitWithImages(String visitId) {
         Map<String, Object> result = new LinkedHashMap<>(loadVisit(visitId));
+        result.put("id", visitId);
         List<Map<String, Object>> images = new ArrayList<>();
         jdbcTemplate.query(
             "SELECT id, file_name, seq FROM pre_ai_follow_up_images WHERE visit_id = ? ORDER BY seq ASC",
@@ -251,8 +252,9 @@ public class FollowUpVisitService {
 
     private Map<String, String> loadVisit(String visitId) {
         List<Map<String, String>> rows = jdbcTemplate.query(
-            "SELECT patient_case_id, encounter_id, seq, reason FROM pre_ai_follow_up_visits WHERE id = ?",
+            "SELECT id, patient_case_id, encounter_id, seq, reason FROM pre_ai_follow_up_visits WHERE id = ?",
             (resultSet, rowNum) -> Map.of(
+                "id", resultSet.getString("id"),
                 "patientCaseId", resultSet.getString("patient_case_id"),
                 "encounterId", resultSet.getString("encounter_id"),
                 "seq", String.valueOf(resultSet.getInt("seq")),

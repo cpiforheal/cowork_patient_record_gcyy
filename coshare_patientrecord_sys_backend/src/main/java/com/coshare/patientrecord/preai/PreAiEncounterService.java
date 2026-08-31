@@ -101,7 +101,9 @@ public class PreAiEncounterService {
             "visualFindings", "digitalExamFindings", "anoscopyFindings",
             "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
             "inspectionSpecialDescription", "inspectionNarrative", "nextReviewAt", "nextReviewNote",
-            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots"
+            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots",
+            "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
+            "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory"
         ),
         "RECEPTION", Set.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
@@ -723,6 +725,10 @@ public class PreAiEncounterService {
         }
         ObjectNode data = sanitizeStageData(stage, request == null ? null : request.data());
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
+        if ("INSPECTION".equals(stage) && !text(data, "inspectionNarrative").isBlank()) {
+            // 检查室收束流程：编辑并保存检查记录即视为对检查事实结论的人工确认
+            data.put("factualConclusionConfirmed", true);
+        }
         if ("REGISTRATION".equals(stage)) {
             syncRegistrationCareType(encounterId, data, encounter);
             jdbcTemplate.update("UPDATE pre_ai_encounters SET patient_json = ?, updated_at = ? WHERE id = ?", toJson(data), now(), encounterId);
@@ -1783,8 +1789,6 @@ public class PreAiEncounterService {
                 required(data, missing, "visitDate", "就诊时间");
                 required(data, missing, "visitPurpose", "来院目的");
                 required(data, missing, "registrationChiefComplaint", "登记主诉");
-                required(data, missing, "allergyHistory", "过敏史");
-                required(data, missing, "personalHistory", "个人史");
                 required(data, missing, "inventoryCareType", "耗材统计口径（门诊/住院）");
                 if (!text(data, "inventoryCareType").isBlank()) normalizeInventoryCareType(text(data, "inventoryCareType"));
                 if (!text(data, "visitPurpose").isBlank()) normalizeEnum(text(data, "visitPurpose"), Set.of("GENERAL", "ENDOSCOPY_DIRECT"), "来院目的");
@@ -1794,6 +1798,8 @@ public class PreAiEncounterService {
                 required(data, missing, "diseaseDirections", "病种方向");
                 if (data.path("examinationTypes").isMissingNode() || data.path("examinationTypes").isEmpty()) missing.add("已完成检查类型");
                 required(data, missing, "factualConclusion", "检查事实结论");
+                required(data, missing, "allergyHistory", "过敏史");
+                required(data, missing, "personalHistory", "个人史");
             }
             case "RECEPTION" -> {
                 required(data, missing, "chiefComplaint", "主诉");
