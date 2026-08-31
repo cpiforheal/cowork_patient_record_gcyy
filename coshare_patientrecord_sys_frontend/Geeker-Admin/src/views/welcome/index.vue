@@ -52,7 +52,46 @@
           <p :key="careTip" class="care-tip">{{ careTip }}</p>
         </transition>
       </div>
+
+      <div class="welcome-archive-entry">
+        <button v-if="canOpenPatientArchive" class="archive-direct-btn" type="button" @click.stop="openPatientArchive">
+          <span class="archive-direct-glyph">档</span>
+          <span class="archive-direct-copy">
+            <strong>患者主档案 · 直达</strong>
+            <small>点击选择患者，直接进入登记与事实采集</small>
+          </span>
+          <span class="archive-direct-arrow">›</span>
+        </button>
+      </div>
     </section>
+
+    <el-dialog
+      v-model="archiveDialogOpen"
+      width="min(640px, 92vw)"
+      append-to-body
+      destroy-on-close
+      class="welcome-archive-dialog"
+    >
+      <template #header>
+        <div>
+          <strong>患者主档案 · 选择患者进入</strong>
+          <small style="display: block; color: var(--el-text-color-secondary)">按姓名检索，点击进入该患者的登记与事实采集</small>
+        </div>
+      </template>
+      <div v-loading="archiveLoading" class="archive-picker">
+        <el-input v-model="archiveSearch" placeholder="输入患者姓名检索" clearable />
+        <div class="archive-picker-list">
+          <div v-for="item in archiveFiltered" :key="item.id" class="archive-picker-row" @click="enterPatient(item)">
+            <div class="archive-picker-main">
+              <strong>{{ item.patientName }}</strong>
+              <small>{{ item.gender || "—" }} · {{ item.age || "—" }} · 共 {{ item.visitCount }} 次就诊 · 更新于 {{ item.updatedAt }}</small>
+            </div>
+            <el-button size="small" type="primary" plain>进入</el-button>
+          </div>
+          <el-empty v-if="!archiveFiltered.length" description="未找到匹配患者" :image-size="56" />
+        </div>
+      </div>
+    </el-dialog>
 
     <section class="summary-strip" aria-label="今日运行概况">
       <button
@@ -80,11 +119,52 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useUserStore } from "@/stores/modules/user";
+import { useAuthStore } from "@/stores/modules/auth";
+import { Search } from "@element-plus/icons-vue";
+import { getPreAiPatientCasesApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
+import { ElMessage } from "element-plus";
 import { roleLabel } from "@/config/fieldPermissions";
 import { getHomeSummaryApi, type HomeSummary } from "@/api/modules/clinic/homeSummary";
 
 const router = useRouter();
 const userStore = useUserStore();
+const authStore = useAuthStore();
+
+const archiveDialogOpen = ref(false);
+const archiveLoading = ref(false);
+const archiveSearch = ref("");
+const archiveCases = ref<PreAiPatientCase[]>([]);
+const canOpenPatientArchive = computed(() => {
+  const menus = authStore.flatMenuListGet || [];
+  return menus.some((item: { path?: string }) => String(item?.path || "") === "/pre-ai/encounters");
+});
+const archiveFiltered = computed(() => {
+  const keyword = archiveSearch.value.trim();
+  if (!keyword) return archiveCases.value;
+  return archiveCases.value.filter(item => String(item.patientName || "").includes(keyword));
+});
+const openPatientArchive = async () => {
+  archiveDialogOpen.value = true;
+  archiveLoading.value = true;
+  try {
+    const { data } = await getPreAiPatientCasesApi();
+    archiveCases.value = data.list || [];
+  } catch {
+    archiveCases.value = [];
+    ElMessage.error("患者主档案加载失败");
+  } finally {
+    archiveLoading.value = false;
+  }
+};
+const enterPatient = (item: PreAiPatientCase) => {
+  const encounterId = item.latestEncounter?.id || "";
+  if (!encounterId) {
+    ElMessage.warning("该患者暂无进行中就诊，请先在登记与事实采集页新建就诊");
+    return;
+  }
+  archiveDialogOpen.value = false;
+  void router.push(`/pre-ai/encounters?encounterId=${encodeURIComponent(encounterId)}`);
+};
 const userName = computed(() => userStore.userInfo.name || "同事");
 const roleName = computed(() => roleLabel(userStore.userInfo.role));
 const department = computed(() => userStore.userInfo.department || "门诊");
@@ -751,6 +831,89 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-primary);
 }
 
+.welcome-archive-entry {
+  margin-top: 18px;
+  display: flex;
+  justify-content: center;
+}
+.archive-direct-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 22px;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 14%);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  transition: background 0.18s linear, transform 0.18s linear, border-color 0.18s linear;
+}
+.archive-direct-btn:hover {
+  background: rgb(255 255 255 / 24%);
+  border-color: rgb(255 255 255 / 75%);
+  transform: translateY(-1px);
+}
+.archive-direct-glyph {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 17px;
+  background: rgb(255 255 255 / 22%);
+}
+.archive-direct-copy {
+  display: grid;
+  gap: 2px;
+
+  strong {
+    font-size: 15px;
+  }
+
+  small {
+    font-size: 12px;
+    opacity: 0.78;
+  }
+}
+.archive-direct-arrow {
+  font-size: 20px;
+  opacity: 0.8;
+}
+.welcome-archive-dialog .archive-picker-list {
+  margin-top: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+}
+.welcome-archive-dialog .archive-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.18s linear, background 0.18s linear;
+}
+.welcome-archive-dialog .archive-picker-row:hover {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.welcome-archive-dialog .archive-picker-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+
+  small {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
 .welcome-footnote {
   position: relative;
   z-index: 1;

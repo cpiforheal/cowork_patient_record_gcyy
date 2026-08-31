@@ -8,20 +8,6 @@
       @open-first="openFocusTask"
     />
 
-    <button
-      v-if="canOpenPatientArchive"
-      class="patient-archive-hero"
-      type="button"
-      @click="router.push('/pre-ai/encounters')"
-    >
-      <span class="hero-glyph"><el-icon :size="26"><User /></el-icon></span>
-      <span class="hero-copy">
-        <strong>患者主档案</strong>
-        <small>筛选与查看全部在管患者 · 登记与事实采集 · 就诊全流程入口</small>
-      </span>
-      <span class="hero-cta">进入档案</span>
-    </button>
-
     <section class="stat-strip">
       <button v-for="card in statCards" :key="card.id" class="stat-card" :class="`is-${card.tone}`" @click="openStatCard(card)">
         <span>{{ card.label }}</span>
@@ -119,7 +105,6 @@ import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/t
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
-import { User } from "@element-plus/icons-vue";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 import CalendarHeatmap from "./components/CalendarHeatmap.vue";
 import HomeTaskPanel from "./components/HomeTaskPanel.vue";
@@ -174,12 +159,6 @@ type CalendarDayCell = {
 const router = useRouter();
 const userStore = useUserStore();
 const authStore = useAuthStore();
-
-// 主页患者主档案入口：仅对拥有前置病历菜单权限的岗位展示
-const canOpenPatientArchive = computed(() => {
-  const menus = authStore.flatMenuListGet || [];
-  return menus.some((item: { path?: string }) => String(item?.path || "") === "/pre-ai/encounters");
-});
 
 const patientRows = ref<PatientRow[]>([]);
 const dashboardLoading = ref(false);
@@ -904,63 +883,6 @@ onMounted(reloadAll);
   padding: 4px 2px 16px;
 }
 
-.patient-archive-hero {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  margin-bottom: 12px;
-  padding: 16px 20px;
-  border: 1px solid var(--el-color-primary-light-5);
-  border-radius: 14px;
-  background: linear-gradient(120deg, var(--el-color-primary-light-9) 0%, var(--el-bg-color) 62%);
-  cursor: pointer;
-  text-align: left;
-  transition: box-shadow 0.18s linear, transform 0.18s linear, border-color 0.18s linear;
-}
-.patient-archive-hero:hover {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 10px 22px rgb(0 150 136 / 16%);
-  transform: translateY(-1px);
-}
-.patient-archive-hero:hover .hero-cta {
-  background: var(--el-color-primary);
-  color: #ffffff;
-}
-.hero-glyph {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-8);
-}
-.hero-copy {
-  flex: 1;
-  display: grid;
-  gap: 3px;
-
-  strong {
-    font-size: 16px;
-    color: var(--el-text-color-primary);
-  }
-
-  small {
-    color: var(--el-text-color-secondary);
-  }
-}
-.hero-cta {
-  flex-shrink: 0;
-  padding: 8px 16px;
-  border-radius: 999px;
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-8);
-  font-weight: 700;
-  font-size: 13px;
-  transition: all 0.18s linear;
-}
 .stat-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

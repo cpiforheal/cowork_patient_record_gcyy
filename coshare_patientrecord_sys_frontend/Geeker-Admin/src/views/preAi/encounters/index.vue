@@ -850,6 +850,12 @@
                     </div>
                   </section>
 
+                  <FollowUpTimeline
+                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
+                    :encounter-id="selectedEncounterId"
+                    :can-manage="canManageFollowUp"
+                  />
+
                   <footer
                     v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
                     class="panel-actions sticky-actions"
@@ -1633,6 +1639,7 @@ import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import RecordAiChat from "./components/RecordAiChat.vue";
 import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
+import FollowUpTimeline from "./components/FollowUpTimeline.vue";
 import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
 import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
 import StructuredField from "./components/StructuredField.vue";
@@ -1682,6 +1689,7 @@ const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const currentRole = computed(() => userStore.userInfo.role || "");
+const canManageFollowUp = computed(() => ["inspection", "admin", "doctor"].includes(currentRole.value));
 const currentUser = computed(() => userStore.userInfo as typeof userStore.userInfo & { id?: string; username?: string });
 const currentUserId = computed(() => String(currentUser.value.id || ""));
 const currentUserName = computed(() => String(currentUser.value.name || currentUser.value.username || ""));
