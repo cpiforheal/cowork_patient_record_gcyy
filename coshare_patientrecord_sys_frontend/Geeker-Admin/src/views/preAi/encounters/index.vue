@@ -8,8 +8,12 @@
       </div>
       <button v-else type="button" class="context-restore" @click="restoreTopContext">展开说明</button>
       <div class="hero-actions">
-        <el-button class="patient-archive-trigger" type="primary" :icon="User" @click="patientDrawerOpen = true">
-          患者主档案
+        <el-button class="patient-archive-trigger" type="primary" @click="patientDrawerOpen = true">
+          <span class="patient-archive-trigger__glyph"><el-icon :size="22"><User /></el-icon></span>
+          <span class="patient-archive-trigger__copy">
+            患者主档案
+            <small>筛选与查看全部在管患者</small>
+          </span>
           <span class="patient-archive-trigger__count">{{ filteredPatientCases.length }}</span>
         </el-button>
         <el-button :icon="Refresh" @click="refreshWorkspace">刷新</el-button>
@@ -5082,14 +5086,37 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
 }
 .patient-archive-trigger {
-  min-height: 42px;
-  padding: 10px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 8px 20px;
   color: #ffffff;
   font-weight: 800;
   border: 0;
-  border-radius: 12px;
+  border-radius: 14px;
   background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 76%, #0f766e));
   box-shadow: 0 12px 24px rgb(0 150 136 / 24%);
+}
+.patient-archive-trigger__glyph {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 18%);
+}
+.patient-archive-trigger__copy {
+  display: grid;
+  gap: 1px;
+  line-height: 1.25;
+  text-align: left;
+
+  small {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgb(255 255 255 / 78%);
+  }
 }
 .patient-archive-trigger:hover,
 .patient-archive-trigger:focus-visible {
@@ -5098,14 +5125,14 @@ onBeforeUnmount(() => {
   box-shadow: 0 14px 28px rgb(0 150 136 / 30%);
 }
 .patient-archive-trigger__count {
-  min-width: 28px;
+  min-width: 30px;
   display: inline-flex;
   justify-content: center;
-  padding: 1px 8px;
-  margin-left: 4px;
+  padding: 2px 9px;
   color: var(--el-color-primary);
   border-radius: 999px;
   background: #ffffff;
+  font-size: 13px;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 70%);
 }
 .workspace-shell {
