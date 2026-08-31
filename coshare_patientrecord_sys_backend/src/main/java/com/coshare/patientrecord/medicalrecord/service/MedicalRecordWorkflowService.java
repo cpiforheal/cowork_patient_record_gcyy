@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
@@ -39,6 +41,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 @Profile("mysql")
 public class MedicalRecordWorkflowService {
+
+    private static final Logger log = LoggerFactory.getLogger(MedicalRecordWorkflowService.class);
 
     private static final String DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     private static final long MAX_INPUT_BYTES = 10L * 1024 * 1024;
@@ -422,6 +426,13 @@ public class MedicalRecordWorkflowService {
             repository.failTask(taskId, "QUEUE_REJECTED", "QUEUE_FULL", "病历生成任务队列已满，请稍后重试", user);
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "病历生成任务队列已满，请稍后重试");
         }
+    }
+
+    /** 巡检：RUNNING 超过 15 分钟的生成任务视为执行中断，转失败释放生成队列。 */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000L)
+    public void failStuckGenerationTasks() {
+        int failed = repository.failStuckGenerationTasks();
+        if (failed > 0) log.warn("Stuck generation tasks failed by sweep: count={}", failed);
     }
 
     private void run(String taskId, SessionUser user) {

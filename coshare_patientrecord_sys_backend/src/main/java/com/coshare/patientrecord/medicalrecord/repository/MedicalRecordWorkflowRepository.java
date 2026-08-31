@@ -164,6 +164,15 @@ public class MedicalRecordWorkflowRepository {
         appendEvent(taskId, "CHAPTER_PROGRESS", "AI_GENERATION", "RUNNING", "RUNNING", message, Map.of(), user);
     }
 
+    /** 巡检：RUNNING 超过 15 分钟的生成任务视为执行中断，转失败释放生成队列。返回清理数量。 */
+    public int failStuckGenerationTasks() {
+        return jdbcTemplate.update(
+            "UPDATE clinic_medical_record_generation_tasks "
+                + "SET status = 'FAILED', error_code = 'GENERATION_TIMEOUT', "
+                + "error_message = '生成超时（任务执行中断），请重试', finished_at = CURRENT_TIMESTAMP(3) "
+                + "WHERE status = 'RUNNING' AND started_at < DATE_SUB(NOW(3), INTERVAL 15 MINUTE)");
+    }
+
     public boolean claimTask(String id) {
         int updated = jdbcTemplate.update("""
             UPDATE clinic_medical_record_generation_tasks

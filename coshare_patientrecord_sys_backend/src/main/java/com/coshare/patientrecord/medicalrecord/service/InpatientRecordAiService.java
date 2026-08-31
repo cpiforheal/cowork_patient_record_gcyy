@@ -271,6 +271,19 @@ public class InpatientRecordAiService {
         }
 
         Instant deadline = Instant.now().plus(Duration.ofMinutes(10));
+        // 看门狗：SSE 读在网络停滞时会永久阻塞（行间超时检查无法触发），超时强制断流使阻塞读抛出、任务转失败
+        java.util.concurrent.atomic.AtomicBoolean watchdogFired = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.Timer watchdog = new java.util.Timer("dify-sse-watchdog", true);
+        watchdog.schedule(new java.util.TimerTask() {
+            @Override
+            public void run() {
+                watchdogFired.set(true);
+                try {
+                    response.body().close();
+                } catch (IOException ignored) {
+                }
+            }
+        }, java.time.Duration.ofMinutes(10).toMillis());
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -301,7 +314,13 @@ public class InpatientRecordAiService {
                     throw new IOException(truncate(event.path("message").asText("Dify 工作流执行错误")));
                 }
             }
+        } catch (IOException error) {
+            if (watchdogFired.get()) {
+                throw new IOException("Dify 工作流执行超过 10 分钟未完成（连接已超时中断）");
+            }
+            throw error;
         }
+        watchdog.cancel();
         throw new IOException("Dify 工作流流式响应在 workflow_finished 前结束");
     }
 
