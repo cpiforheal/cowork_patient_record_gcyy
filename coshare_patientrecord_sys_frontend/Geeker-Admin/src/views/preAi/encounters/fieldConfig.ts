@@ -297,6 +297,122 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2,
         placeholder: "本次症状的发生、持续或变化情况"
       },
+      { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 }
+    ]
+  },
+  {
+    code: "INSPECTION",
+    title: "检查室",
+    shortTitle: "检查",
+    owner: "检查室",
+    description: "套用病种模板后自动生成专科检查固定文本，按实际调整点位与测量值即可；只记录客观所见，不填写最终诊断。",
+    fields: [
+      {
+        key: "examinationDirection",
+        label: "检查方向",
+        kind: "select",
+        required: true,
+        options: ["肛肠", "胃肠", "其他"].map(value => ({ label: value, value }))
+      },
+      {
+        key: "diseaseDirections",
+        label: "病种方向",
+        kind: "multi",
+        required: true,
+        options: diseaseOptions,
+        creatable: true,
+        span: 2
+      },
+      { key: "examinationTypes", label: "已完成检查", kind: "multi", required: true, options: examinationOptions, span: 2 },
+      {
+        key: "visualFindings",
+        label: "外观所见",
+        kind: "multi",
+        optionsFor: form => selectedDiseaseOptions(form, visualByDisease, []),
+        creatable: true,
+        visible: form => hasExam(form, "VISUAL"),
+        span: 2
+      },
+      {
+        key: "digitalExamFindings",
+        label: "指检所见",
+        kind: "multi",
+        options: options(digitalCommon),
+        creatable: true,
+        visible: form => hasExam(form, "DIGITAL"),
+        span: 2
+      },
+      {
+        key: "anoscopyFindings",
+        label: "镜下/肛门镜所见",
+        kind: "multi",
+        options: options(anoscopyCommon),
+        creatable: true,
+        visible: form => hasExam(form, "ANOSCOPY"),
+        span: 2
+      },
+      {
+        key: "otherFindings",
+        label: "其他客观表现",
+        kind: "textarea",
+        rows: 3,
+        visible: form => hasExam(form, "OTHER"),
+        span: 2
+      },
+      {
+        key: "preliminaryDiagnosis",
+        label: "检查室初步诊断",
+        kind: "diagnosis",
+        span: 2,
+        supplementKey: "preliminaryDiagnosisNote",
+        options: options([
+          "未见明显异常",
+          "考虑炎症性改变",
+          "考虑痔病相关改变",
+          "考虑肛裂相关改变",
+          "考虑肛瘘或脓肿相关改变",
+          "考虑息肉或占位性病变",
+          "建议结合影像或病理进一步判断"
+        ]),
+        creatable: true,
+        placeholder: "选择常用诊断，也可直接输入其他结论"
+      },
+      {
+        key: "factualConclusion",
+        label: "检查事实结论",
+        kind: "template-text",
+        required: true,
+        rows: 4,
+        span: 2,
+        templateGenerator: "inspectionConclusion",
+        overrideKey: "factualConclusionOverride",
+        sourceHashKey: "factualConclusionSourceHash",
+        confirmedKey: "factualConclusionConfirmed"
+      },
+      {
+        key: "inspectionSpecialDescription",
+        label: "检查补充说明",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        placeholder: "补充选择项无法完整表达的客观所见、特殊情况或交接说明"
+      },
+      {
+        key: "nextReviewAt",
+        label: "下次复查时间",
+        kind: "datetime",
+        span: 1,
+        placeholder: "请选择明确的复查日期和时间"
+      },
+      {
+        key: "nextReviewNote",
+        label: "复查安排说明",
+        kind: "textarea",
+        rows: 2,
+        span: 1,
+        placeholder: "填写复查项目、注意事项或告知内容"
+      },
+      // 病史采集（自前台登记迁入：检查室随检查同步询问，数据仍归属接诊室草稿）
       {
         key: "allergyHistory",
         label: "过敏史",
@@ -436,121 +552,6 @@ export const preAiStages: PreAiStageConfig[] = [
         ]),
         creatable: true
       },
-      { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 }
-    ]
-  },
-  {
-    code: "INSPECTION",
-    title: "检查室",
-    shortTitle: "检查",
-    owner: "检查室",
-    description: "套用病种模板后自动生成专科检查固定文本，按实际调整点位与测量值即可；只记录客观所见，不填写最终诊断。",
-    fields: [
-      {
-        key: "examinationDirection",
-        label: "检查方向",
-        kind: "select",
-        required: true,
-        options: ["肛肠", "胃肠", "其他"].map(value => ({ label: value, value }))
-      },
-      {
-        key: "diseaseDirections",
-        label: "病种方向",
-        kind: "multi",
-        required: true,
-        options: diseaseOptions,
-        creatable: true,
-        span: 2
-      },
-      { key: "examinationTypes", label: "已完成检查", kind: "multi", required: true, options: examinationOptions, span: 2 },
-      {
-        key: "visualFindings",
-        label: "外观所见",
-        kind: "multi",
-        optionsFor: form => selectedDiseaseOptions(form, visualByDisease, []),
-        creatable: true,
-        visible: form => hasExam(form, "VISUAL"),
-        span: 2
-      },
-      {
-        key: "digitalExamFindings",
-        label: "指检所见",
-        kind: "multi",
-        options: options(digitalCommon),
-        creatable: true,
-        visible: form => hasExam(form, "DIGITAL"),
-        span: 2
-      },
-      {
-        key: "anoscopyFindings",
-        label: "镜下/肛门镜所见",
-        kind: "multi",
-        options: options(anoscopyCommon),
-        creatable: true,
-        visible: form => hasExam(form, "ANOSCOPY"),
-        span: 2
-      },
-      {
-        key: "otherFindings",
-        label: "其他客观表现",
-        kind: "textarea",
-        rows: 3,
-        visible: form => hasExam(form, "OTHER"),
-        span: 2
-      },
-      {
-        key: "preliminaryDiagnosis",
-        label: "检查室初步诊断",
-        kind: "diagnosis",
-        span: 2,
-        supplementKey: "preliminaryDiagnosisNote",
-        options: options([
-          "未见明显异常",
-          "考虑炎症性改变",
-          "考虑痔病相关改变",
-          "考虑肛裂相关改变",
-          "考虑肛瘘或脓肿相关改变",
-          "考虑息肉或占位性病变",
-          "建议结合影像或病理进一步判断"
-        ]),
-        creatable: true,
-        placeholder: "选择常用诊断，也可直接输入其他结论"
-      },
-      {
-        key: "factualConclusion",
-        label: "检查事实结论",
-        kind: "template-text",
-        required: true,
-        rows: 4,
-        span: 2,
-        templateGenerator: "inspectionConclusion",
-        overrideKey: "factualConclusionOverride",
-        sourceHashKey: "factualConclusionSourceHash",
-        confirmedKey: "factualConclusionConfirmed"
-      },
-      {
-        key: "inspectionSpecialDescription",
-        label: "检查补充说明",
-        kind: "textarea",
-        rows: 3,
-        span: 2,
-        placeholder: "补充选择项无法完整表达的客观所见、特殊情况或交接说明"
-      },
-      {
-        key: "nextReviewAt",
-        label: "下次复查时间",
-        kind: "datetime",
-        span: 1,
-        placeholder: "请选择明确的复查日期和时间"
-      },
-      {
-        key: "nextReviewNote",
-        label: "复查安排说明",
-        kind: "textarea",
-        rows: 2,
-        span: 1,
-        placeholder: "填写复查项目、注意事项或告知内容"
-      }
     ]
   },
   {

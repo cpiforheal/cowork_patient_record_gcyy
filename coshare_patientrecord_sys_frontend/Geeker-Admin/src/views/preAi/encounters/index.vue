@@ -545,10 +545,21 @@
                     </el-button>
                   </section>
 
-                  <el-form v-if="selectedStageCode !== 'INSPECTION'" label-position="top" class="stage-form">
+                  <div
+                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
+                    class="narrative-heading history-intake-heading"
+                  >
+                    <strong>病史采集</strong>
+                    <small>已自前台登记迁入：随检查同步询问患者，保存后自动归入接诊室病史草稿</small>
+                  </div>
+                  <el-form
+                    v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
+                    label-position="top"
+                    class="stage-form"
+                  >
                     <div class="form-grid">
                       <el-form-item
-                        v-for="field in visibleStageFields"
+                        v-for="field in stageFormFields"
                         :key="field.key"
                         :label="field.label"
                         :required="field.required"
@@ -557,7 +568,7 @@
                           'span-2': field.span === 2,
                           'priority-field': field.emphasis === 'priority',
                           'secondary-field': isSecondaryStageField(field),
-                          'history-intake-field': isHistoryIntakeKey(field.key) && selectedStageCode === 'REGISTRATION'
+                          'history-intake-field': isHistoryIntakeKey(field.key) && selectedStageCode === 'INSPECTION'
                         }"
                       >
                         <StructuredField
@@ -2728,6 +2739,12 @@ const selectedStageSubmission = computed(() => stageSubmission(selectedStageCode
 const visibleStageFields = computed(() =>
   selectedStage.value.fields.filter(field => !field.visible || field.visible(stageForms[selectedStageCode.value]))
 );
+// 检查室收束视图：字段表单仅渲染病史采集组（检查所见已由上方模板 textarea 承载）
+const stageFormFields = computed(() => {
+  const fields = visibleStageFields.value;
+  if (selectedStageCode.value !== "INSPECTION") return fields;
+  return fields.filter(field => isHistoryIntakeKey(field.key));
+});
 const isSecondaryStageField = (field: PreAiFieldConfig) =>
   Boolean(compactStageFieldKeys[selectedStageCode.value]?.has(field.key));
 const secondaryStageFieldsCount = computed(() => visibleStageFields.value.filter(field => isSecondaryStageField(field)).length);
@@ -3674,10 +3691,10 @@ const selectWorkflowCard = async (card: WorkflowCard) => {
   if (card.kind === "STAGE" && card.stageCode === "REVIEW") await selectStage(card.stageCode);
 };
 
-const syncRegistrationHistoryToReception = () => {
-  const registration = stageForms.REGISTRATION;
+const syncRegistrationHistoryToReception = (fromStage: PreAiStageCode) => {
+  const registration = stageForms[fromStage];
   const reception = stageForms.RECEPTION;
-  stageByCode("REGISTRATION").fields.forEach(field => {
+  stageByCode(fromStage).fields.forEach(field => {
     if (!isHistoryIntakeKey(field.key)) return;
     const value = registration[field.key];
     if (Array.isArray(value) ? value.length : String(value ?? "").trim()) {
@@ -3686,15 +3703,15 @@ const syncRegistrationHistoryToReception = () => {
   });
 };
 
-const persistReceptionHistoryFromRegistration = async () => {
+const persistReceptionHistoryFromStage = async (fromStage: PreAiStageCode) => {
   // 病史采集数据归属接诊室（病历生成从接诊室读取），前台保存时联动落一份接诊室草稿。
-  syncRegistrationHistoryToReception();
+  syncRegistrationHistoryToReception(fromStage);
   const receptionStatus = stageSubmission("RECEPTION")?.status;
   if (receptionStatus === "COMPLETED") {
     ElMessage.info("接诊室已完成交接，本次病史修改暂存于前台登记，接诊室纠错保存后才会更新到病历");
     return;
   }
-  const hasHistoryValue = stageByCode("REGISTRATION").fields.some(field => {
+  const hasHistoryValue = stageByCode(fromStage).fields.some(field => {
     if (!isHistoryIntakeKey(field.key)) return false;
     const value = stageForms.RECEPTION[field.key];
     return Array.isArray(value) ? value.length > 0 : Boolean(String(value ?? "").trim());
@@ -3716,7 +3733,8 @@ const persistReceptionHistoryFromRegistration = async () => {
 
 const saveSelectedStage = async () =>
   runAction(async () => {
-    if (selectedStageCode.value === "REGISTRATION") await persistReceptionHistoryFromRegistration();
+    if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
+      await persistReceptionHistoryFromStage(selectedStageCode.value);
     const { data } = await savePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
@@ -3742,7 +3760,8 @@ const correctSelectedStage = async () => {
       }
     );
     await runAction(async () => {
-      if (selectedStageCode.value === "REGISTRATION") await persistReceptionHistoryFromRegistration();
+      if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
+      await persistReceptionHistoryFromStage(selectedStageCode.value);
       const { data } = await correctPreAiStageApi(
         selectedEncounterId.value,
         selectedStageCode.value,
@@ -3762,7 +3781,8 @@ const correctSelectedStage = async () => {
 
 const completeSelectedStage = async () =>
   runAction(async () => {
-    if (selectedStageCode.value === "REGISTRATION") await persistReceptionHistoryFromRegistration();
+    if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
+      await persistReceptionHistoryFromStage(selectedStageCode.value);
     const { data } = await completePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
