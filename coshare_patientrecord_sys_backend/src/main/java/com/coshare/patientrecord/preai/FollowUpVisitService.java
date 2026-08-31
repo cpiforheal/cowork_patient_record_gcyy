@@ -237,9 +237,10 @@ public class FollowUpVisitService {
 
     private Map<String, String> loadVisit(String visitId) {
         List<Map<String, String>> rows = jdbcTemplate.query(
-            "SELECT encounter_id, reason FROM pre_ai_follow_up_visits WHERE id = ?",
+            "SELECT encounter_id, seq, reason FROM pre_ai_follow_up_visits WHERE id = ?",
             (resultSet, rowNum) -> Map.of(
                 "encounterId", resultSet.getString("encounter_id"),
+                "seq", String.valueOf(resultSet.getInt("seq")),
                 "reason", resultSet.getString("reason")
             ),
             visitId
