@@ -2882,8 +2882,9 @@ public class PreAiEncounterService {
 
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {
         requireActiveEncounter(encounter);
-        if (hasFullPreAiOperationAccess(user)) return;
-        if ("TCM".equals(stage) && isOutpatientEncounter(encounter)) {
+        // 中医岗按管理员对待：门诊跳过中医环节的门控对中医岗自身放行
+        boolean tcmOperator = "tcm".equals(RoleCatalog.canonicalize(user == null ? "" : user.role()));
+        if ("TCM".equals(stage) && isOutpatientEncounter(encounter) && !tcmOperator) {
             throw conflict("门诊患者跳过中医环节，不能维护中医阶段");
         }
         boolean policyAllowed = user != null && navigationService.canEditStage(user.role(), stage);
