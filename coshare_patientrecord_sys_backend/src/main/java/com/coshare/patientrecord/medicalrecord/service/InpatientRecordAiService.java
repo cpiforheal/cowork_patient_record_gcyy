@@ -67,7 +67,8 @@ public class InpatientRecordAiService {
         Map<String, String> currentValues,
         int referenceParagraphCount,
         List<String> controlledNodeKeys,
-        List<String> conversationHistory
+        List<String> conversationHistory,
+        java.util.function.Consumer<String> chapterProgress
     ) {
         String normalizedPrompt = safe(prompt);
         if (normalizedPrompt.length() > MAX_PROMPT_LENGTH) {
@@ -90,7 +91,8 @@ public class InpatientRecordAiService {
                 maskedPreAiExport,
                 currentValues,
                 referenceParagraphCount,
-                conversationHistory
+                conversationHistory,
+                chapterProgress
             );
         }
 
@@ -196,12 +198,13 @@ public class InpatientRecordAiService {
         JsonNode maskedPreAiExport,
         Map<String, String> currentValues,
         int referenceParagraphCount,
-        List<String> conversationHistory
+        List<String> conversationHistory,
+        java.util.function.Consumer<String> chapterProgress
     ) {
         long startedAt = System.nanoTime();
         try {
             String paragraphsJson = aiCallGuard.execute(() ->
-                runDifyWorkflow(difyConfig, prompt, referenceDocumentText, referenceSourceLabel, sourceSnapshot, preAiFacts, maskedPreAiExport, currentValues, conversationHistory));
+                runDifyWorkflow(difyConfig, prompt, referenceDocumentText, referenceSourceLabel, sourceSnapshot, preAiFacts, maskedPreAiExport, currentValues, conversationHistory, chapterProgress));
             InpatientAiResponseParser.ParsedGeneration parsed = responseParser.parse(paragraphsJson, referenceParagraphCount, List.of());
             log.info(
                 "Dify inpatient generation succeeded: endpoint={}, elapsedMs={}, historyRounds={}",
@@ -238,7 +241,8 @@ public class InpatientRecordAiService {
         ObjectNode preAiFacts,
         JsonNode maskedPreAiExport,
         Map<String, String> currentValues,
-        List<String> conversationHistory
+        List<String> conversationHistory,
+        java.util.function.Consumer<String> chapterProgress
     ) throws IOException, InterruptedException {
         String endpoint = normalizeDifyWorkflowUrl(difyConfig.baseUrl());
         ObjectNode payload = objectMapper.createObjectNode();
@@ -290,6 +294,7 @@ public class InpatientRecordAiService {
                         nodeData.path("status").asText(""),
                         Math.round(nodeData.path("elapsed_time").asDouble(0) * 1000)
                     );
+                    emitChapterProgress(nodeData, chapterProgress);
                 } else if ("workflow_finished".equals(type)) {
                     return extractDifyOutputs(event.path("data"));
                 } else if ("error".equals(type)) {
@@ -321,6 +326,42 @@ public class InpatientRecordAiService {
             throw new IOException("Dify 工作流输出缺少 paragraphs_json");
         }
         return paragraphsJson;
+    }
+
+    /** 分片改写节点完成：抽取章节文本追加进进度回调（供任务事件透出，前端按章渲染）。 */
+    private void emitChapterProgress(JsonNode nodeData, java.util.function.Consumer<String> chapterProgress) {
+        if (chapterProgress == null) return;
+        if (!"succeeded".equalsIgnoreCase(nodeData.path("status").asText(""))) return;
+        String title = nodeData.path("title").asText("章节");
+        JsonNode outputs = nodeData.path("outputs");
+        String raw = outputs.path("text").asText("");
+        if (raw.isBlank()) {
+            for (JsonNode value : outputs) {
+                if (value.isTextual() && !value.asText("").isBlank()) {
+                    raw = value.asText();
+                    break;
+                }
+            }
+        }
+        if (raw.isBlank()) return;
+        String readable = extractChapterText(raw);
+        if (readable.isBlank()) return;
+        chapterProgress.accept("【" + title + " 已完成】\n" + readable);
+    }
+
+    private String extractChapterText(String raw) {
+        try {
+            JsonNode items = objectMapper.readTree(raw).path("items");
+            if (!items.isArray()) return "";
+            StringBuilder text = new StringBuilder();
+            for (JsonNode item : items) {
+                String paragraph = item.path("text").asText("").trim();
+                if (!paragraph.isBlank()) text.append(paragraph).append("\n");
+            }
+            return text.toString().strip();
+        } catch (Exception error) {
+            return "";
+        }
     }
 
     private String normalizeDifyWorkflowUrl(String rawUrl) {

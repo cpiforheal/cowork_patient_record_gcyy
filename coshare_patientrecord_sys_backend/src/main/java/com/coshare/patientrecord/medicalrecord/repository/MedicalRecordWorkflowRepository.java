@@ -159,6 +159,11 @@ public class MedicalRecordWorkflowRepository {
         appendEvent(task.id(), "TASK_CREATED", "QUEUED", null, "PENDING", "生成任务已创建", Map.of(), user);
     }
 
+    /** 章节进度事件：检查室收束流式反馈（按章节追加，消息截断至 1000 字）。 */
+    public void appendProgressEvent(String taskId, String message, SessionUser user) {
+        appendEvent(taskId, "CHAPTER_PROGRESS", "AI_GENERATION", "RUNNING", "RUNNING", message, Map.of(), user);
+    }
+
     public boolean claimTask(String id) {
         int updated = jdbcTemplate.update("""
             UPDATE clinic_medical_record_generation_tasks

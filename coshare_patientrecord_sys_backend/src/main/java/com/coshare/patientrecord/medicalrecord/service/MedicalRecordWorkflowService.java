@@ -448,13 +448,16 @@ public class MedicalRecordWorkflowService {
                 task.request().get("preAiExport"),
                 stringList(task.request().get("conversationHistory"))
             );
+            java.util.function.Consumer<String> chapterSink = text ->
+                repository.appendProgressEvent(taskId, text, user);
             Map<String, Object> generated = medicalRecordService.generateInpatientAi(
                 request,
                 inputAsset.originalFileName(),
                 inputBytes,
                 mappingMode(task.mappingMode()),
                 stringList(task.request().get("targetNodeKeys")),
-                user
+                user,
+                chapterSink
             );
             Map<String, Object> record = mapValue(generated.get("record"));
             recordId = safe(record.get("id"));

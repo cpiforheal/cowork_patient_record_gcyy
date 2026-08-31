@@ -301,14 +301,16 @@ public class ClinicMedicalRecordService {
         byte[] referenceBytes,
         DocxNodeMapper.MappingMode mappingMode,
         List<String> targetNodeKeys,
-        SessionUser user
+        SessionUser user,
+        java.util.function.Consumer<String> chapterProgress
     ) {
         return generateInpatientAi(
             request,
             readReferenceDocument(referenceFileName, referenceBytes),
             mappingMode,
             targetNodeKeys,
-            user
+            user,
+            chapterProgress
         );
     }
 
@@ -322,7 +324,8 @@ public class ClinicMedicalRecordService {
             reference,
             DocxNodeMapper.MappingMode.LEGACY_ORDINAL,
             List.of(),
-            user
+            user,
+            chapterProgress -> {}
         );
     }
 
@@ -332,6 +335,17 @@ public class ClinicMedicalRecordService {
         DocxNodeMapper.MappingMode mappingMode,
         List<String> targetNodeKeys,
         SessionUser user
+    ) {
+        return generateInpatientAi(request, reference, mappingMode, targetNodeKeys, user, chapterProgress -> {});
+    }
+
+    private Map<String, Object> generateInpatientAi(
+        InpatientAiGenerateRequest request,
+        ReferenceDocument reference,
+        DocxNodeMapper.MappingMode mappingMode,
+        List<String> targetNodeKeys,
+        SessionUser user,
+        java.util.function.Consumer<String> chapterProgress
     ) {
         requireGenerateRole(user);
         String patientId = safe(request == null ? "" : request.patientId());
@@ -391,7 +405,8 @@ public class ClinicMedicalRecordService {
             currentValues,
             reference.paragraphs().size(),
             controlledNodeKeys,
-            request == null ? List.of() : request.conversationHistory()
+            request == null ? List.of() : request.conversationHistory(),
+            chapterProgress
         );
 
         int version = versionRepository.nextVersion(scopeId);
