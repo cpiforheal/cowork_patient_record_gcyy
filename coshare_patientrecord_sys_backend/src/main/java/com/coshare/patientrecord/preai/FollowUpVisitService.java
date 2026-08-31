@@ -26,8 +26,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * 复诊随访：由检查室岗位随检查创建，时间轴形式沉淀；数据仅供后置科室查看，
- * 独立存储、独立表，不参与前置病历导出与 AI 成档病历内容生成。
+ * 复诊随访：复诊患者不经前台登记，由检查室按患者主档案直接创建（锚点 = 患者病例 patientCaseId），
+ * 时间轴按患者累计第 N 次；后置科室可查看；独立表存储，不参与前置病历导出与 AI 成档病历内容生成。
  */
 @Service
 @Profile("mysql")
@@ -35,6 +35,8 @@ public class FollowUpVisitService {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Set<String> MANAGE_ROLES = Set.of("inspection", "admin", "doctor");
+    private static final Set<String> VIEW_ROLES =
+        Set.of("admin", "quality", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -53,63 +55,66 @@ public class FollowUpVisitService {
         this.archiveRoot = Path.of(attachmentDir).toAbsolutePath().normalize().resolve("follow-up");
     }
 
-    public Map<String, Object> create(String encounterId, JsonNode body, SessionUser user) {
-        requireEncounter(encounterId);
+    public Map<String, Object> create(String patientCaseId, JsonNode body, SessionUser user) {
+        requirePatientCase(patientCaseId);
         requireManageRole(user, "仅检查室、医生或管理员可创建复诊记录");
-        assertCanRead(encounterId, user);
+        assertCanReadPatientCase(patientCaseId, user);
         String reason = text(body, "reason");
         if (reason.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "复诊原因不能为空");
         String conditionNote = text(body, "conditionNote");
         String nextReviewDate = text(body, "nextReviewDate");
+        String encounterId = text(body, "encounterId");
 
         String visitId = "fuv-" + UUID.randomUUID();
         String now = TIME.format(LocalDateTime.now());
         int seq = jdbcTemplate.queryForObject(
-            "SELECT COALESCE(MAX(seq), 0) + 1 FROM pre_ai_follow_up_visits WHERE encounter_id = ?", Integer.class, encounterId);
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM pre_ai_follow_up_visits WHERE patient_case_id = ?",
+            Integer.class, patientCaseId);
         jdbcTemplate.update("""
             INSERT INTO pre_ai_follow_up_visits (
-              id, encounter_id, seq, reason, condition_note, next_review_date, status,
+              id, encounter_id, patient_case_id, seq, reason, condition_note, next_review_date, status,
               created_by, created_by_role, created_at, updated_by, updated_by_role, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?)
             """,
-            visitId, encounterId, seq, truncate(reason, 500), conditionNote, nextReviewDate,
+            visitId, encounterId, patientCaseId, seq, truncate(reason, 500), conditionNote, nextReviewDate,
             user.name(), user.role(), now, user.name(), user.role(), now
         );
         JsonNode images = body.path("images");
         if (images.isArray()) {
             for (JsonNode image : images) {
-                storeImage(visitId, encounterId, image.path("fileName").asText("复诊图片"), image.path("dataUrl").asText(""), user);
+                storeImage(visitId, patientCaseId, encounterId, image.path("fileName").asText("复诊图片"),
+                    image.path("dataUrl").asText(""), user);
             }
         }
-        audit(encounterId, "followup.create", user, "创建第 " + seq + " 次复诊记录：" + truncate(reason, 80));
+        audit(patientCaseId, "followup.create", user, "创建第 " + seq + " 次复诊记录：" + truncate(reason, 80));
         return visitWithImages(visitId);
     }
 
-    public Map<String, Object> list(String encounterId, SessionUser user) {
-        requireEncounter(encounterId);
-        assertCanRead(encounterId, user);
+    public Map<String, Object> list(String patientCaseId, SessionUser user) {
+        requirePatientCase(patientCaseId);
+        assertCanReadPatientCase(patientCaseId, user);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("encounterId", encounterId);
+        result.put("patientCaseId", patientCaseId);
         result.put("canManage", MANAGE_ROLES.contains(user.role()));
-        result.put("visits", visits(encounterId));
+        result.put("visits", visits(patientCaseId));
         return result;
     }
 
     public Map<String, Object> addImage(String visitId, JsonNode body, SessionUser user) {
         Map<String, String> visit = loadVisit(visitId);
         requireManageRole(user, "仅检查室、医生或管理员可上传复诊图片");
-        assertCanRead(visit.get("encounterId"), user);
+        assertCanReadPatientCase(visit.get("patientCaseId"), user);
         String fileName = text(body, "fileName");
         if (fileName.isBlank()) fileName = "复诊图片";
-        storeImage(visitId, visit.get("encounterId"), fileName, text(body, "dataUrl"), user);
-        audit(visit.get("encounterId"), "followup.image.upload", user, "复诊记录补充图片");
+        storeImage(visitId, visit.get("patientCaseId"), visit.get("encounterId"), fileName, text(body, "dataUrl"), user);
+        audit(visit.get("patientCaseId"), "followup.image.upload", user, "复诊记录补充图片");
         return visitWithImages(visitId);
     }
 
     public Map<String, Object> removeImage(String visitId, String imageId, SessionUser user) {
         Map<String, String> visit = loadVisit(visitId);
         requireManageRole(user, "仅检查室、医生或管理员可删除复诊图片");
-        assertCanRead(visit.get("encounterId"), user);
+        assertCanReadPatientCase(visit.get("patientCaseId"), user);
         Map<String, String> image = loadImage(visitId, imageId);
         jdbcTemplate.update("DELETE FROM pre_ai_follow_up_images WHERE id = ? AND visit_id = ?", imageId, visitId);
         try {
@@ -117,16 +122,16 @@ public class FollowUpVisitService {
         } catch (Exception ignored) {
             // 文件清理失败不阻断主流程
         }
-        audit(visit.get("encounterId"), "followup.image.remove", user, "删除复诊图片");
+        audit(visit.get("patientCaseId"), "followup.image.remove", user, "删除复诊图片");
         return visitWithImages(visitId);
     }
 
     public Map<String, String> imageContent(String imageId, SessionUser user) {
         List<Map<String, String>> rows = jdbcTemplate.query(
-            "SELECT visit_id, encounter_id, file_name, storage_path, mime_type FROM pre_ai_follow_up_images WHERE id = ?",
+            "SELECT v.patient_case_id, i.file_name, i.storage_path, i.mime_type "
+                + "FROM pre_ai_follow_up_images i JOIN pre_ai_follow_up_visits v ON v.id = i.visit_id WHERE i.id = ?",
             (resultSet, rowNum) -> Map.of(
-                "visitId", resultSet.getString("visit_id"),
-                "encounterId", resultSet.getString("encounter_id"),
+                "patientCaseId", resultSet.getString("patient_case_id"),
                 "fileName", resultSet.getString("file_name"),
                 "storagePath", resultSet.getString("storage_path"),
                 "mimeType", resultSet.getString("mime_type")
@@ -135,13 +140,14 @@ public class FollowUpVisitService {
         );
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "复诊图片不存在");
         Map<String, String> image = rows.get(0);
-        assertCanRead(image.get("encounterId"), user);
+        assertCanReadPatientCase(image.get("patientCaseId"), user);
         return image;
     }
 
     // ---------- internals ----------
 
-    private String storeImage(String visitId, String encounterId, String fileName, String dataUrl, SessionUser user) {
+    private String storeImage(String visitId, String patientCaseId, String encounterId, String fileName,
+                              String dataUrl, SessionUser user) {
         if (dataUrl == null || !dataUrl.startsWith("data:image/")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "复诊图片格式不正确，仅支持图片文件");
         }
@@ -164,7 +170,7 @@ public class FollowUpVisitService {
         int seq = jdbcTemplate.queryForObject(
             "SELECT COALESCE(MAX(seq), 0) + 1 FROM pre_ai_follow_up_images WHERE visit_id = ?", Integer.class, visitId);
         String imageId = "fuimg-" + UUID.randomUUID();
-        Path directory = archiveRoot.resolve(encounterId).resolve(visitId);
+        Path directory = archiveRoot.resolve(patientCaseId).resolve(visitId);
         try {
             Files.createDirectories(directory);
             Path target = directory.resolve(imageId + extension);
@@ -183,14 +189,16 @@ public class FollowUpVisitService {
         return imageId;
     }
 
-    private ArrayNode visits(String encounterId) {
+    private ArrayNode visits(String patientCaseId) {
         ArrayNode result = objectMapper.createArrayNode();
+        List<ObjectNode> visitNodes = new ArrayList<>();
+        Map<String, ObjectNode> visitById = new LinkedHashMap<>();
         jdbcTemplate.query(
             "SELECT id, seq, reason, condition_note, next_review_date, status, created_by, created_by_role, created_at "
-                + "FROM pre_ai_follow_up_visits WHERE encounter_id = ? ORDER BY seq ASC",
+                + "FROM pre_ai_follow_up_visits WHERE patient_case_id = ? ORDER BY seq ASC",
             resultSet -> {
                 String visitId = resultSet.getString("id");
-                ObjectNode visit = result.addObject();
+                ObjectNode visit = objectMapper.createObjectNode();
                 visit.put("id", visitId);
                 visit.put("seq", resultSet.getInt("seq"));
                 visit.put("reason", resultSet.getString("reason"));
@@ -200,20 +208,26 @@ public class FollowUpVisitService {
                 visit.put("createdBy", resultSet.getString("created_by"));
                 visit.put("createdByRole", resultSet.getString("created_by_role"));
                 visit.put("createdAt", resultSet.getString("created_at"));
-                ArrayNode images = visit.putArray("images");
-                jdbcTemplate.query(
-                    "SELECT id, file_name, seq FROM pre_ai_follow_up_images WHERE visit_id = ? ORDER BY seq ASC",
-                    imageResultSet -> {
-                        ObjectNode image = images.addObject();
-                        image.put("id", imageResultSet.getString("id"));
-                        image.put("fileName", imageResultSet.getString("file_name"));
-                        image.put("url", "/clinic-api/follow-up/visits/images/" + imageResultSet.getString("id") + "/file");
-                    },
-                    visitId
-                );
+                visit.set("images", objectMapper.createArrayNode());
+                visitById.put(visitId, visit);
+                visitNodes.add(visit);
             },
-            encounterId
+            patientCaseId
         );
+        jdbcTemplate.query(
+            "SELECT visit_id, id, file_name FROM pre_ai_follow_up_images WHERE encounter_id IN "
+                + "(SELECT encounter_id FROM pre_ai_follow_up_visits WHERE patient_case_id = ?) ORDER BY seq ASC",
+            resultSet -> {
+                ObjectNode visit = visitById.get(resultSet.getString("visit_id"));
+                if (visit == null) return;
+                ObjectNode image = ((ArrayNode) visit.get("images")).addObject();
+                image.put("id", resultSet.getString("id"));
+                image.put("fileName", resultSet.getString("file_name"));
+                image.put("url", "/clinic-api/follow-up/visits/images/" + resultSet.getString("id") + "/file");
+            },
+            patientCaseId
+        );
+        result.addAll(visitNodes);
         return result;
     }
 
@@ -237,8 +251,9 @@ public class FollowUpVisitService {
 
     private Map<String, String> loadVisit(String visitId) {
         List<Map<String, String>> rows = jdbcTemplate.query(
-            "SELECT encounter_id, seq, reason FROM pre_ai_follow_up_visits WHERE id = ?",
+            "SELECT patient_case_id, encounter_id, seq, reason FROM pre_ai_follow_up_visits WHERE id = ?",
             (resultSet, rowNum) -> Map.of(
+                "patientCaseId", resultSet.getString("patient_case_id"),
                 "encounterId", resultSet.getString("encounter_id"),
                 "seq", String.valueOf(resultSet.getInt("seq")),
                 "reason", resultSet.getString("reason")
@@ -262,8 +277,18 @@ public class FollowUpVisitService {
         return rows.get(0);
     }
 
-    private void assertCanRead(String encounterId, SessionUser user) {
-        sourceBuilder.assertCanReadScope("preai:" + encounterId, user);
+    /** 复诊查看权限：患者病例下任一就诊可读即放行；无就诊的病例回退到岗位白名单。 */
+    private void assertCanReadPatientCase(String patientCaseId, SessionUser user) {
+        if (user == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录已失效");
+        List<String> encounterIds = jdbcTemplate.queryForList(
+            "SELECT id FROM pre_ai_encounters WHERE patient_case_id = ? LIMIT 1", String.class, patientCaseId);
+        if (!encounterIds.isEmpty()) {
+            sourceBuilder.assertCanReadScope("preai:" + encounterIds.get(0), user);
+            return;
+        }
+        if (!VIEW_ROLES.contains(user.role())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无权查看该患者复诊记录");
+        }
     }
 
     private void requireManageRole(SessionUser user, String message) {
@@ -271,18 +296,18 @@ public class FollowUpVisitService {
         if (!MANAGE_ROLES.contains(user.role())) throw new ResponseStatusException(HttpStatus.FORBIDDEN, message);
     }
 
-    private void requireEncounter(String encounterId) {
-        if (encounterId == null || encounterId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少前置病例ID");
+    private void requirePatientCase(String patientCaseId) {
+        if (patientCaseId == null || patientCaseId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者病例ID");
         }
     }
 
-    private void audit(String encounterId, String action, SessionUser user, String detail) {
+    private void audit(String patientCaseId, String action, SessionUser user, String detail) {
         try {
             jdbcTemplate.update(
                 "INSERT INTO pre_ai_audit_logs (id, encounter_id, action, stage_code, operator, operator_role, detail, created_at) "
-                    + "VALUES (?, ?, ?, 'INSPECTION', ?, ?, ?, ?)",
-                "audit-" + UUID.randomUUID(), encounterId, action, user.name(), user.role(), truncate(detail, 500),
+                    + "VALUES (?, '', ?, 'INSPECTION', ?, ?, ?, ?)",
+                "audit-" + UUID.randomUUID(), action, user.name(), user.role(), truncate(detail, 500),
                 TIME.format(LocalDateTime.now())
             );
         } catch (Exception ignored) {

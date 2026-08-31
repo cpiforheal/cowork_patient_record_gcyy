@@ -131,7 +131,7 @@ import {
 
 const REASONS = ["术后复查", "换药", "拆线", "不适随诊", "复查结果解读", "其他"];
 
-const props = defineProps<{ encounterId: string; canManage: boolean }>();
+const props = defineProps<{ patientCaseId: string; encounterId?: string; canManage: boolean }>();
 
 const visits = ref<FollowUpVisit[]>([]);
 const loading = ref(false);
@@ -147,10 +147,10 @@ const previewList = (visit: FollowUpVisit) =>
   visit.images.map(image => imageUrls.value[image.id]).filter(Boolean) as string[];
 
 const load = async () => {
-  if (!props.encounterId) return;
+  if (!props.patientCaseId) return;
   loading.value = true;
   try {
-    const { data } = await loadFollowUpVisitsApi(props.encounterId);
+    const { data } = await loadFollowUpVisitsApi(props.patientCaseId);
     visits.value = data.visits || [];
     await hydrateImages();
   } catch (error: any) {
@@ -202,7 +202,8 @@ const submitCreate = async () => {
   creating.value = true;
   try {
     const { data } = await createFollowUpVisitApi({
-      encounterId: props.encounterId,
+      patientCaseId: props.patientCaseId,
+      encounterId: props.encounterId || undefined,
       reason: createForm.reason.trim(),
       conditionNote: createForm.conditionNote.trim(),
       nextReviewDate: createForm.nextReviewDate || "",
@@ -245,7 +246,7 @@ const removeLastImage = async (visit: FollowUpVisit) => {
 };
 
 watch(
-  () => [props.encounterId, props.canManage],
+  () => [props.patientCaseId, props.canManage],
   () => {
     imageUrls.value = {};
     void load();

@@ -22,15 +22,16 @@ export interface FollowUpVisit {
 }
 
 export interface FollowUpCreatePayload {
-  encounterId: string;
+  patientCaseId: string;
+  encounterId?: string;
   reason: string;
   conditionNote: string;
   nextReviewDate: string;
   images?: { fileName: string; dataUrl: string }[];
 }
 
-export const loadFollowUpVisitsApi = async (encounterId: string, signal?: AbortSignal) => {
-  const result = await clinicFetch(`/follow-up/visits?encounterId=${encodeURIComponent(encounterId)}`, {
+export const loadFollowUpVisitsApi = async (patientCaseId: string, signal?: AbortSignal) => {
+  const result = await clinicFetch(`/follow-up/visits?patientCaseId=${encodeURIComponent(patientCaseId)}`, {
     headers: authHeaders(),
     signal
   });

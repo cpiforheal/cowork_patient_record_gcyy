@@ -852,6 +852,7 @@
 
                   <FollowUpTimeline
                     v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
+                    :patient-case-id="workspace?.encounter?.patientCaseId"
                     :encounter-id="selectedEncounterId"
                     :can-manage="canManageFollowUp"
                   />

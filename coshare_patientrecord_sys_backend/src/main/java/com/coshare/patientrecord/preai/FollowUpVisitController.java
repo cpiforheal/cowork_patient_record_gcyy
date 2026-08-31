@@ -35,9 +35,9 @@ public class FollowUpVisitController {
     }
 
     @GetMapping("/clinic-api/follow-up/visits")
-    public ApiResult<Map<String, Object>> list(@RequestParam String encounterId) {
+    public ApiResult<Map<String, Object>> list(@RequestParam String patientCaseId) {
         return ApiResult.success(objectMapper.convertValue(
-            followUpVisitService.list(safe(encounterId), currentUser()),
+            followUpVisitService.list(safe(patientCaseId), currentUser()),
             new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}
         ));
     }
@@ -46,7 +46,7 @@ public class FollowUpVisitController {
     public ApiResult<Map<String, Object>> create(@RequestBody CreateRequest request) {
         SessionUser user = currentUser();
         return ApiResult.of(200, "复诊记录已创建", followUpVisitService.create(
-            safe(request.encounterId()), objectMapper.valueToTree(request), user));
+            safe(request.patientCaseId()), objectMapper.valueToTree(request), user));
     }
 
     @PostMapping("/clinic-api/follow-up/visits/{id}/images")
@@ -88,6 +88,7 @@ public class FollowUpVisitController {
     }
 
     public record CreateRequest(
+        String patientCaseId,
         String encounterId,
         String reason,
         String conditionNote,
