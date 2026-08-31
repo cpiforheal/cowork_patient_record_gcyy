@@ -366,7 +366,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> importLegacy(String patientId, SessionUser user) {
-        requireRole(user, "admin", "frontdesk", "doctor");
+        requireRole(user, "admin", "frontdesk", "doctor", "tcm");
         String sourcePatientId = safe(patientId);
         if (sourcePatientId.isBlank()) throw badRequest("缺少旧患者 ID");
         List<String> existing = jdbcTemplate.query(
@@ -573,7 +573,7 @@ public class PreAiEncounterService {
     }
 
     public Map<String, Object> inspectionTimeline(String patientCaseId, SessionUser user) {
-        requireRole(user, "admin", "inspection", "doctor");
+        requireRole(user, "admin", "inspection", "doctor", "tcm");
         loadPatientCase(patientCaseId);
         ArrayNode nodes = objectMapper.createArrayNode();
         List<ObjectNode> encounters = jdbcTemplate.query(
@@ -742,7 +742,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> correctOwningDepartment(String encounterId, DepartmentCorrectionRequest request, SessionUser user) {
-        requireRole(user, "admin");
+        requireRole(user, "admin", "tcm");
         requireEncounterAccess(encounterId, user);
         ObjectNode encounter = loadEncounter(encounterId);
         requireActiveEncounter(encounter);
@@ -791,7 +791,7 @@ public class PreAiEncounterService {
 
     @Transactional
     public Map<String, Object> updateEncounterGrant(String encounterId, EncounterGrantRequest request, SessionUser user) {
-        requireRole(user, "admin");
+        requireRole(user, "admin", "tcm");
         requireEncounterAccess(encounterId, user);
         requireActiveEncounter(loadEncounter(encounterId));
         String accountId = safe(request == null ? null : request.accountId());
@@ -2042,7 +2042,7 @@ public class PreAiEncounterService {
     }
 
     private void requireAdmissionEditor(SessionUser user) {
-        if (user == null || !Set.of("admin", "nurse", "nursing").contains(user.role())) {
+        if (user == null || !Set.of("admin", "tcm", "nurse", "nursing").contains(user.role())) {
             throw forbidden("仅护士或管理员可填写住院补录资料");
         }
     }
@@ -2710,7 +2710,7 @@ public class PreAiEncounterService {
     }
 
     private void requireDutyAssignmentManager(SessionUser user) {
-        if (user == null || !Set.of("admin", "doctor").contains(RoleCatalog.canonicalize(user.role()))) {
+        if (user == null || !Set.of("admin", "tcm", "doctor").contains(RoleCatalog.canonicalize(user.role()))) {
             throw forbidden("仅管理员和医师可以维护病例岗位安排");
         }
     }
@@ -2882,6 +2882,7 @@ public class PreAiEncounterService {
 
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {
         requireActiveEncounter(encounter);
+        if (hasFullPreAiOperationAccess(user)) return;
         if ("TCM".equals(stage) && isOutpatientEncounter(encounter)) {
             throw conflict("门诊患者跳过中医环节，不能维护中医阶段");
         }

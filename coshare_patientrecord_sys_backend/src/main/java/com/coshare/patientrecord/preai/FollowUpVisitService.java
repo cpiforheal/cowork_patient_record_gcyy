@@ -34,7 +34,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class FollowUpVisitService {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final Set<String> MANAGE_ROLES = Set.of("inspection", "admin", "doctor");
+    private static final Set<String> MANAGE_ROLES = Set.of("inspection", "admin", "doctor", "tcm");
     private static final Set<String> VIEW_ROLES =
         Set.of("admin", "quality", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound");
 

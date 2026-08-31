@@ -1690,7 +1690,7 @@ const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const currentRole = computed(() => userStore.userInfo.role || "");
-const canManageFollowUp = computed(() => ["inspection", "admin", "doctor"].includes(currentRole.value));
+const canManageFollowUp = computed(() => ["inspection", "admin", "doctor", "tcm"].includes(currentRole.value));
 const currentUser = computed(() => userStore.userInfo as typeof userStore.userInfo & { id?: string; username?: string });
 const currentUserId = computed(() => String(currentUser.value.id || ""));
 const currentUserName = computed(() => String(currentUser.value.name || currentUser.value.username || ""));
@@ -1756,7 +1756,7 @@ const actionLoading = ref(false);
 const admissionProfileDialogVisible = ref(false);
 const admissionProfileForm = reactive<Record<string, any>>({});
 const admissionProfile = computed<PreAiAdmissionProfile | null>(() => workspace.value?.admissionProfile || null);
-const canEditAdmissionProfile = computed(() => ["admin", "nurse", "nursing"].includes(currentRole.value));
+const canEditAdmissionProfile = computed(() => ["admin", "tcm", "nurse", "nursing"].includes(currentRole.value));
 const activeLabReportId = ref("");
 const attachmentUpload = reactive({
   total: 0,
@@ -2833,7 +2833,7 @@ const canTerminateReception = computed(
   () =>
     selectedStageCode.value === "RECEPTION" &&
     canEditSelectedStage.value &&
-    ["admin", "inspection", "reception", "doctor"].includes(currentRole.value)
+    ["admin", "inspection", "reception", "doctor", "tcm"].includes(currentRole.value)
 );
 const canReturnSelectedStage = computed(
   () =>
