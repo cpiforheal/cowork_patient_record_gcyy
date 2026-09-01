@@ -572,6 +572,91 @@
                         />
                       </section>
 
+                      <section v-if="selectedStageCode === 'NURSING'" class="nursing-vitals-section">
+                        <header class="nursing-vitals-heading">
+                          <div>
+                            <strong>四测信息采集</strong>
+                            <small>
+                              住院患者生命体征按轮次记录：填写后点击「记录本轮」，下方时间轴逐轮汇总；仅系统留存，不进入导出文档。
+                            </small>
+                          </div>
+                          <el-tag effect="dark">重点区域</el-tag>
+                        </header>
+                        <div class="nursing-vitals-input">
+                          <label v-for="field in nursingVitalFields" :key="field.key" class="vital-field">
+                            <span>{{ field.label }}</span>
+                            <StructuredField
+                              :model-value="stageForms.NURSING[field.key]"
+                              :field="field"
+                              :form="stageForms.NURSING"
+                              :disabled="isStageFieldDisabled(field)"
+                              @update:model-value="
+                                value => {
+                                  stageForms.NURSING[field.key] = value;
+                                  markStageDirty('NURSING');
+                                }
+                              "
+                            />
+                          </label>
+                          <div class="vital-record-action">
+                            <el-button type="primary" :disabled="!canModifySelectedStage" @click="recordVitalRound">
+                              记录本轮
+                            </el-button>
+                          </div>
+                        </div>
+                        <div v-if="vitalRounds.length" class="nursing-vitals-summary">
+                          <div class="vitals-summary-title">
+                            <strong>四测轮次汇总</strong>
+                            <small>共 {{ vitalRounds.length }} 轮，最新一轮在最上方</small>
+                          </div>
+                          <el-timeline class="vitals-timeline">
+                            <el-timeline-item
+                              v-for="item in vitalRoundItems"
+                              :key="`${item.idx}-${vitalRoundTime(item.round)}`"
+                              :timestamp="vitalRoundTime(item.round)"
+                              :type="
+                                vitalRoundHasCritical(item.round)
+                                  ? 'danger'
+                                  : vitalRoundHasAbnormal(item.round)
+                                    ? 'warning'
+                                    : 'primary'
+                              "
+                              placement="top"
+                            >
+                              <div class="vital-round-card">
+                                <div class="vital-round-values">
+                                  <span
+                                    v-for="entry in vitalRoundEntries(item.round)"
+                                    :key="entry.key"
+                                    class="vital-value-chip"
+                                    :class="{ abnormal: vitalEntryAbnormal(entry.status) }"
+                                  >
+                                    <em>{{ entry.label }}</em>
+                                    <strong>{{ entry.text }}</strong>
+                                    <i v-if="entry.status && vitalEntryAbnormal(entry.status)">{{ entry.status }}</i>
+                                  </span>
+                                </div>
+                                <el-button
+                                  link
+                                  type="danger"
+                                  size="small"
+                                  :disabled="!canModifySelectedStage"
+                                  @click="removeVitalRound(item.idx)"
+                                >
+                                  删除本轮
+                                </el-button>
+                              </div>
+                            </el-timeline-item>
+                          </el-timeline>
+                        </div>
+                        <p v-else class="vitals-empty-hint">暂无轮次记录：填写上方数值后点击「记录本轮」生成第一轮汇总。</p>
+                      </section>
+
+                      <div v-if="selectedStageCode === 'NURSING'" class="narrative-heading nursing-history-heading">
+                        <strong>病史采集与护理评估</strong>
+                        <small>病史采集随完成交接归档进前置资料文档；护理评估项仅系统留存</small>
+                      </div>
+
                       <section v-if="selectedStageCode !== 'INSPECTION' && secondaryStageFieldsCount" class="field-noise-toolbar">
                         <div>
                           <strong>精简填写视图</strong>
@@ -2851,7 +2936,74 @@ const visibleStageFields = computed(() =>
 // 检查室收束视图：病种模板 + 检查记录 textarea 承载全部录入，旧槽位字段不再渲染
 const stageFormFields = computed(() => {
   if (selectedStageCode.value === "INSPECTION") return [];
+  // 护理部：四测在上方强调区单独录入并按轮次生成时间轴，常规表单仅保留病史采集与护理评估
+  if (selectedStageCode.value === "NURSING")
+    return visibleStageFields.value.filter(field => !nursingVitalFieldKeys.has(field.key));
   return visibleStageFields.value;
+});
+
+// 护理部四测：强调区录入字段与轮次记录（vitalSignRounds 随阶段草稿持久化，仅系统留存）
+const nursingVitalFieldKeys = new Set(["measuredAt", "systolicBp", "diastolicBp", "temperature", "pulse", "respiration"]);
+const VITAL_NORMAL_STATUSES = new Set(["", "正常", "未判断"]);
+const nursingVitalFields = computed(() => stageByCode("NURSING").fields.filter(field => nursingVitalFieldKeys.has(field.key)));
+const vitalRounds = computed<Record<string, any>[]>(() => {
+  const rounds = stageForms.NURSING.vitalSignRounds;
+  return Array.isArray(rounds) ? rounds : [];
+});
+const vitalRoundItems = computed(() => vitalRounds.value.map((round, idx) => ({ round, idx })).reverse());
+const nowTimeString = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+const vitalRoundEntries = (round: Record<string, any>) =>
+  nursingVitalFields.value
+    .filter(field => field.key !== "measuredAt")
+    .map(field => {
+      const value = round[field.key];
+      if (value && typeof value === "object") {
+        const text = `${value.value ?? ""}${value.unit ?? ""}`.trim();
+        return { key: field.key, label: field.label, text, status: String(value.status || "").trim() };
+      }
+      const text = String(value ?? "").trim();
+      return { key: field.key, label: field.label, text, status: "" };
+    })
+    .filter(item => item.text);
+const vitalEntryAbnormal = (status: string) => !VITAL_NORMAL_STATUSES.has(String(status || "").trim());
+const vitalRoundHasCritical = (round: Record<string, any>) =>
+  vitalRoundEntries(round).some(entry => String(entry.status).trim() === "危急值");
+const vitalRoundHasAbnormal = (round: Record<string, any>) =>
+  vitalRoundEntries(round).some(entry => vitalEntryAbnormal(entry.status));
+const vitalRoundTime = (round: Record<string, any>) =>
+  String(round?.measuredAt || "")
+    .replace("T", " ")
+    .slice(0, 16) || "时间未记录";
+const recordVitalRound = () => {
+  if (!canModifySelectedStage.value) return;
+  const round: Record<string, any> = {};
+  nursingVitalFields.value.forEach(field => {
+    const value = stageForms.NURSING[field.key];
+    if (hasFormValue(value, field)) round[field.key] = value;
+  });
+  if (!["systolicBp", "diastolicBp", "temperature", "pulse", "respiration"].some(key => round[key])) {
+    ElMessage.warning("请先填写至少一项四测数值再记录本轮");
+    return;
+  }
+  if (!Array.isArray(stageForms.NURSING.vitalSignRounds)) stageForms.NURSING.vitalSignRounds = [];
+  stageForms.NURSING.vitalSignRounds.push(round);
+  nursingVitalFields.value.forEach(field => {
+    stageForms.NURSING[field.key] =
+      field.key === "measuredAt" ? nowTimeString() : { value: "", unit: field.unitOptions?.[0] || "", status: "" };
+  });
+  markStageDirty("NURSING");
+  ElMessage.success("本轮四测已记录；请点击保存或完成交接持久化");
+};
+const removeVitalRound = (index: number) => {
+  if (!canModifySelectedStage.value) return;
+  const rounds = stageForms.NURSING.vitalSignRounds;
+  if (Array.isArray(rounds)) {
+    rounds.splice(index, 1);
+    markStageDirty("NURSING");
+  }
+};
+watch(selectedStageCode, code => {
+  if (code === "NURSING" && !stageForms.NURSING.measuredAt) stageForms.NURSING.measuredAt = nowTimeString();
 });
 const isSecondaryStageField = (field: PreAiFieldConfig) =>
   Boolean(compactStageFieldKeys[selectedStageCode.value]?.has(field.key));
@@ -4046,6 +4198,11 @@ const cleanStageForm = (code: PreAiStageCode) => {
     const narrative = stageForms.INSPECTION.inspectionNarrative;
     if (hasFormValue(narrative)) result.inspectionNarrative = narrative;
   }
+  if (code === "NURSING") {
+    // 四测轮次记录为数组，由强调区时间轴维护，不经过字段定义收集
+    const rounds = stageForms.NURSING.vitalSignRounds;
+    if (Array.isArray(rounds) && rounds.length) result.vitalSignRounds = rounds;
+  }
   for (const key of ["clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt"]) {
     const metadataValue = stageForms[code][key];
     if (hasFormValue(metadataValue)) result[key] = metadataValue;
@@ -5134,6 +5291,157 @@ onBeforeUnmount(() => {
   border-radius: 0 999px 999px 0;
   background: var(--el-color-primary);
 }
+// 护理部四测强调区：与病史采集常规表单形成视觉分层
+.nursing-vitals-section {
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-left: 4px solid var(--el-color-primary);
+  border-radius: 10px;
+
+  .nursing-vitals-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+
+    strong {
+      font-size: 15px;
+      color: var(--el-text-color-primary);
+    }
+
+    small {
+      display: block;
+      margin-top: 3px;
+      color: var(--el-text-color-secondary);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+  }
+
+  .nursing-vitals-input {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 16px;
+    padding: 12px 14px;
+    background: var(--el-bg-color);
+    border: 1px dashed var(--el-color-primary-light-5);
+    border-radius: 8px;
+
+    .vital-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+
+      > span {
+        font-size: 12px;
+        color: var(--el-text-color-regular);
+      }
+    }
+
+    .vital-record-action {
+      display: flex;
+      grid-column: 1 / -1;
+      justify-content: flex-end;
+      padding-top: 2px;
+      border-top: 1px solid var(--el-border-color-lighter);
+    }
+  }
+
+  .nursing-vitals-summary {
+    margin-top: 12px;
+
+    .vitals-summary-title {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 8px;
+
+      strong {
+        font-size: 13px;
+        color: var(--el-text-color-primary);
+      }
+
+      small {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+    }
+
+    .vitals-timeline {
+      padding-left: 2px;
+
+      :deep(.el-timeline-item__timestamp) {
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+    }
+
+    .vital-round-card {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--el-bg-color);
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 8px;
+    }
+
+    .vital-round-values {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .vital-value-chip {
+      display: inline-flex;
+      gap: 4px;
+      align-items: baseline;
+      padding: 3px 8px;
+      font-size: 12px;
+      background: var(--el-fill-color-light);
+      border-radius: 6px;
+
+      em {
+        font-style: normal;
+        color: var(--el-text-color-secondary);
+      }
+
+      strong {
+        font-variant-numeric: tabular-nums;
+      }
+
+      i {
+        font-style: normal;
+        color: var(--el-color-warning);
+      }
+
+      &.abnormal {
+        background: var(--el-color-warning-light-9);
+
+        i {
+          color: var(--el-color-danger);
+          font-weight: 600;
+        }
+      }
+    }
+  }
+
+  .vitals-empty-hint {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.nursing-history-heading {
+  margin-top: 4px;
+}
+
 .inspection-narrative-edit {
   margin: 0 0 16px;
   padding: 14px 16px;

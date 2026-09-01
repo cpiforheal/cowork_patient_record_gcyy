@@ -120,7 +120,7 @@ public class PreAiEncounterService {
         "NURSING", Set.of(
             "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
             "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory",
-            "measuredAt", "systolicBp", "diastolicBp", "temperature", "pulse", "respiration",
+            "measuredAt", "systolicBp", "diastolicBp", "temperature", "pulse", "respiration", "vitalSignRounds",
             "admissionWay", "consciousness", "heightCm", "weightKg", "painScore",
             "fallRisk", "pressureUlcerRisk", "nutritionScreening", "selfCareAbility", "nursingAssessmentNote"
         ),
