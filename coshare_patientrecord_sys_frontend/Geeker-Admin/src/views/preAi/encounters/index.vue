@@ -372,7 +372,14 @@
                         :title="`医生退回：${selectedStageSubmission.returnedReason || '请核对后重新提交'}`"
                       />
                       <el-alert
-                        v-if="!canModifySelectedStage"
+                        v-if="selectedStageCode === 'NURSING' && !nursingUnlocked"
+                        type="warning"
+                        show-icon
+                        :closable="false"
+                        title="护理部暂未开放：待接诊室完成交接并确定住院后填写；判定门诊的病例自动跳过本环节"
+                      />
+                      <el-alert
+                        v-if="!canModifySelectedStage && !(selectedStageCode === 'NURSING' && !nursingUnlocked)"
                         type="info"
                         show-icon
                         :closable="false"
@@ -2766,8 +2773,18 @@ const workflowCards = computed<WorkflowCard[]>(() => {
       editable: canHandleStage("RECEPTION", "RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR")
     },
     {
-      key: "AUX",
+      // 护理部固定在接诊室之后：是否开放由接诊室最终判定住院决定（nursingUnlocked），门诊自动跳过
+      key: "NURSING",
       order: 4,
+      kind: "STAGE",
+      stageCode: "NURSING",
+      title: "护理部评估",
+      owner: "护理部",
+      editable: nursingUnlocked.value && canHandleStage("NURSING", "BASIC_NURSING")
+    },
+    {
+      key: "AUX",
+      order: 5,
       kind: "AUX",
       title: "化验等辅助检查",
       owner: "检验报告、心电、影像与其他辅助检查",
@@ -2775,7 +2792,7 @@ const workflowCards = computed<WorkflowCard[]>(() => {
     },
     {
       key: "TCM",
-      order: 5,
+      order: 6,
       kind: "STAGE",
       stageCode: "TCM",
       title: "中医辨证",
@@ -2784,7 +2801,7 @@ const workflowCards = computed<WorkflowCard[]>(() => {
     },
     {
       key: "DOCTOR",
-      order: 6,
+      order: 7,
       kind: "STAGE",
       stageCode: "DOCTOR",
       title: "医生诊疗方案",
@@ -2793,7 +2810,7 @@ const workflowCards = computed<WorkflowCard[]>(() => {
     },
     {
       key: "SURGERY",
-      order: 7,
+      order: 8,
       kind: "STAGE",
       stageCode: "SURGERY",
       title: "手术结果登记",
@@ -2802,7 +2819,7 @@ const workflowCards = computed<WorkflowCard[]>(() => {
     },
     {
       key: "REVIEW",
-      order: 8,
+      order: 9,
       kind: "STAGE",
       stageCode: "REVIEW",
       title: "医生最终复核",
@@ -2810,24 +2827,6 @@ const workflowCards = computed<WorkflowCard[]>(() => {
       editable: canReview.value
     }
   ];
-  // 护理部：仅住院患者显示（门诊由后端置 SKIPPED，不进入工作流卡片）
-  const inpatient = ["inpatient", ""].includes(
-    String(workspace.value?.encounter?.normalizedCareType || workspace.value?.encounter?.inventoryCareType || "").toLowerCase()
-  );
-  if (workspace.value && inpatient) {
-    cards.splice(3, 0, {
-      key: "NURSING",
-      order: 4,
-      kind: "STAGE",
-      stageCode: "NURSING",
-      title: "护理部评估",
-      owner: "护理部",
-      editable: canHandleStage("NURSING", "BASIC_NURSING")
-    });
-    cards.forEach((card, index) => {
-      card.order = index + 1;
-    });
-  }
   return cards;
 });
 const workflowProgress = computed(() => {
@@ -2902,9 +2901,18 @@ const stageDutyCodes: Partial<Record<PreAiStageCode, PreAiDutyCode[]>> = {
   SURGERY: ["SURGEON", "OPERATING_ROOM_NURSE"],
   REVIEW: ["FINAL_REVIEW_DOCTOR", "ATTENDING_DOCTOR"]
 };
+// 护理部开放条件：接诊室完成交接且判定住院（决定权在接诊室最后一步，前台口径不影响）
+const nursingUnlocked = computed(() => {
+  if (!workspace.value) return false;
+  const reception = stageSubmission("RECEPTION");
+  const disposition = String(reception?.data?.dispositionSuggestion || "").toUpperCase();
+  const nursingStatus = stageSubmission("NURSING")?.status;
+  return reception?.status === "COMPLETED" && disposition === "INPATIENT" && nursingStatus !== "SKIPPED";
+});
 const canEditSelectedStage = computed(() => {
   if (!workspace.value || selectedStageCode.value === "REVIEW") return false;
   if (workspace.value.encounter.status === "CANCELLED") return false;
+  if (selectedStageCode.value === "NURSING" && !nursingUnlocked.value) return false;
   const submission = selectedStageSubmission.value;
   const roleAllowed = Boolean(authStore.stagePermissions[selectedStageCode.value]?.editable);
   const dutyAllowed = hasAssignedDuty(...(stageDutyCodes[selectedStageCode.value] || []));
@@ -4031,6 +4039,12 @@ const cleanStageForm = (code: PreAiStageCode) => {
       const value = stageForms.RECEPTION[key];
       if (hasFormValue(value)) result[key] = value;
     }
+  }
+  if (code === "INSPECTION") {
+    // 检查记录全文是收束视图的唯一编辑入口，由模板区 textarea 承载、不在字段定义中；
+    // 必须随载荷提交，后端才能把正文同步为检查事实结论（否则完成交接会报"请先补齐：检查事实结论"）。
+    const narrative = stageForms.INSPECTION.inspectionNarrative;
+    if (hasFormValue(narrative)) result.inspectionNarrative = narrative;
   }
   for (const key of ["clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt"]) {
     const metadataValue = stageForms[code][key];

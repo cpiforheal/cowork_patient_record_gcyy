@@ -733,6 +733,7 @@ public class PreAiEncounterService {
         ObjectNode data = sanitizeStageData(stage, request == null ? null : request.data());
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
         syncInspectionConclusion(stage, data);
+        if ("NURSING".equals(stage)) assertNursingEditable(encounterId, current);
         if ("REGISTRATION".equals(stage)) {
             syncRegistrationCareType(encounterId, data, encounter);
             jdbcTemplate.update("UPDATE pre_ai_encounters SET patient_json = ?, updated_at = ? WHERE id = ?", toJson(data), now(), encounterId);
@@ -919,6 +920,7 @@ public class PreAiEncounterService {
             : safeObject(current.path("data"));
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
         syncInspectionConclusion(stage, data);
+        if ("NURSING".equals(stage)) assertNursingEditable(encounterId, current);
         validateStage(stage, data, encounter);
         if ("REGISTRATION".equals(stage)) {
             syncRegistrationCareType(encounterId, data, encounter);
@@ -933,6 +935,7 @@ public class PreAiEncounterService {
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
         updateStageVersioned(encounterId, stage, completedStatus, data, "", user, now(), request == null ? null : request.expectedVersion());
         if ("REGISTRATION".equals(stage)) applyRegistrationPurpose(encounterId, data, user);
+        if ("RECEPTION".equals(stage)) applyReceptionDisposition(encounterId, data, user);
         if ("DOCTOR".equals(stage)) syncAdmissionProfile(encounterId, text(data, "finalRoute"), user);
         syncDiagnoses(encounterId, stage, data);
         if (!"SURGERY".equals(stage)) {
@@ -1933,6 +1936,8 @@ public class PreAiEncounterService {
         for (JsonNode stage : workspace.path("stages")) statuses.put(text(stage, "stageCode"), text(stage, "status"));
         for (String stage : effectiveStageOrder(encounter)) {
             if ("REVIEW".equals(stage)) continue;
+            // 护理部被接诊室判定门诊自动跳过（SKIPPED）时不再阻塞复核
+            if ("NURSING".equals(stage) && "SKIPPED".equals(statuses.get(stage))) continue;
             if (!"COMPLETED".equals(statuses.get(stage))) blockers.add(stageLabel(stage) + "未完成");
         }
         for (JsonNode task : workspace.path("auxiliaryTasks")) {
@@ -2913,13 +2918,55 @@ public class PreAiEncounterService {
         if ("TCM".equals(stage) && isOutpatientEncounter(encounter) && !tcmOperator) {
             throw conflict("门诊患者跳过中医环节，不能维护中医阶段");
         }
-        if ("NURSING".equals(stage) && isOutpatientEncounter(encounter)) {
-            throw conflict("门诊患者无需护理部环节，不能维护护理部阶段");
-        }
+        // 护理部的开放/跳过由接诊室完成交接时的住院判定驱动（assertNursingEditable），不按前台口径拦截
         // 各科室自由提交：阶段提交/完成交接不再受责任人指派限制，责任人指派仅作记录与时间轴展示
         boolean policyAllowed = user != null && navigationService.canEditStage(user.role(), stage);
         if (!policyAllowed) throw forbidden("当前岗位无权维护" + stageLabel(stage));
         if (isReceptionInspectionCoverage(stage, user)) return;
+    }
+
+    /** 护理部填写门控：接诊室完成交接且判定住院后才可填写；判定门诊已自动跳过。 */
+    private void assertNursingEditable(String encounterId, ObjectNode nursingStage) {
+        if ("SKIPPED".equals(text(nursingStage, "status"))) {
+            throw conflict("接诊室判定门诊，护理部已跳过；如需填写请使用纠错恢复");
+        }
+        ObjectNode reception = loadStage(encounterId, "RECEPTION");
+        if (!"COMPLETED".equals(text(reception, "status"))) {
+            throw conflict("接诊室完成交接并确定住院后，才能填写护理部");
+        }
+        if (!"INPATIENT".equalsIgnoreCase(text(reception.path("data"), "dispositionSuggestion"))) {
+            throw conflict("接诊室判定门诊，护理部已跳过；如需填写请使用纠错恢复");
+        }
+    }
+
+    /**
+     * 接诊室完成交接时落住院/门诊判定：判定门诊自动跳过护理部；判定住院时把存量回填的
+     * "已跳过"护理部行恢复为待填写（仅限未被人工处理过的行）。
+     */
+    private void applyReceptionDisposition(String encounterId, ObjectNode data, SessionUser user) {
+        String disposition = text(data, "dispositionSuggestion").toUpperCase(Locale.ROOT);
+        if ("OUTPATIENT".equals(disposition)) {
+            ObjectNode nursing = loadStage(encounterId, "NURSING");
+            if (!"COMPLETED".equals(text(nursing, "status"))) {
+                updateStageVersioned(
+                    encounterId,
+                    "NURSING",
+                    "SKIPPED",
+                    safeObject(nursing.path("data")),
+                    "接诊室判定门诊，护理部自动跳过",
+                    user,
+                    "",
+                    nursing.path("version").asInt()
+                );
+            }
+        } else if ("INPATIENT".equals(disposition)) {
+            jdbcTemplate.update(
+                "UPDATE pre_ai_stage_submissions SET status = 'DRAFT', updated_at = ? "
+                    + "WHERE encounter_id = ? AND stage_code = 'NURSING' AND status = 'SKIPPED' AND version = 0",
+                now(),
+                encounterId
+            );
+        }
     }
 
     private boolean isReceptionInspectionCoverage(String stage, SessionUser user) {
@@ -3032,10 +3079,9 @@ public class PreAiEncounterService {
 
     private List<String> effectiveStageOrder(ObjectNode encounter) {
         List<String> stages = new ArrayList<>(STAGE_ORDER);
-        if (isOutpatientEncounter(encounter)) {
-            stages.remove("TCM");
-            stages.remove("NURSING");
-        }
+        // 护理部固定保留在流程中：是否跳过由接诊室完成交接时的住院判定驱动（applyReceptionDisposition），
+        // 不按前台的耗材口径预判——前台登记时未必知道患者最终是门诊还是住院。
+        if (isOutpatientEncounter(encounter)) stages.remove("TCM");
         if (!("inpatient".equals(normalizedCareType(encounter)) && "SURGICAL".equalsIgnoreCase(text(encounter, "treatmentPath")))) {
             stages.remove("SURGERY");
         }
