@@ -7,22 +7,34 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.ConnectException;
 import java.net.URI;
-import java.net.http.HttpTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -37,12 +49,16 @@ public class InpatientRecordAiService {
     private static final Logger log = LoggerFactory.getLogger(InpatientRecordAiService.class);
     private static final int MAX_PROMPT_LENGTH = 4000;
     private static final int MAX_UPSTREAM_ERROR_LENGTH = 500;
+    private static final int RELAY_SLICE_COUNT = 4;
+    private static final int RELAY_MAX_TOKENS = 6000;
 
     private final ClinicAiConfigService aiConfigService;
     private final AiCallGuard aiCallGuard;
     private final ObjectMapper objectMapper;
     private final InpatientAiResponseParser responseParser;
     private final HttpClient httpClient;
+    private final ExecutorService relayExecutor;
+    private final Semaphore relayGenerationLock = new Semaphore(1, true);
 
     public InpatientRecordAiService(
         ClinicAiConfigService aiConfigService,
@@ -55,6 +71,18 @@ public class InpatientRecordAiService {
         this.objectMapper = objectMapper;
         this.responseParser = responseParser;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        AtomicInteger threadIndex = new AtomicInteger(1);
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(runnable, "inpatient-record-relay-" + threadIndex.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
+        this.relayExecutor = Executors.newFixedThreadPool(RELAY_SLICE_COUNT, threadFactory);
+    }
+
+    @PreDestroy
+    void shutdownRelayExecutor() {
+        relayExecutor.shutdownNow();
     }
 
     public AiGeneration generate(
@@ -75,8 +103,31 @@ public class InpatientRecordAiService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "AI 提示词不能超过 " + MAX_PROMPT_LENGTH + " 个字符");
         }
 
+        boolean legacyOrdinalMode = controlledNodeKeys == null || controlledNodeKeys.isEmpty();
+        EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
+        boolean directEligible = legacyOrdinalMode
+            && config.enabled()
+            && !normalizeApiKey(config.apiKey()).isBlank()
+            && !safe(config.baseUrl()).isBlank()
+            && !safe(config.model()).isBlank();
+        if (directEligible) {
+            return generateViaChapteredRelay(
+                config,
+                normalizedPrompt,
+                referenceDocumentText,
+                referenceSourceLabel,
+                sourceSnapshot,
+                preAiFacts,
+                maskedPreAiExport,
+                currentValues,
+                referenceParagraphCount,
+                conversationHistory,
+                chapterProgress
+            );
+        }
+
         EffectiveAiConfig difyConfig = aiConfigService.resolveDifyConfig();
-        boolean difyEligible = (controlledNodeKeys == null || controlledNodeKeys.isEmpty())
+        boolean difyEligible = legacyOrdinalMode
             && difyConfig.enabled()
             && !normalizeApiKey(difyConfig.apiKey()).isBlank()
             && !safe(difyConfig.baseUrl()).isBlank();
@@ -95,8 +146,6 @@ public class InpatientRecordAiService {
                 chapterProgress
             );
         }
-
-        EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
         String baseUrl = normalizeChatCompletionsUrl(config.baseUrl());
         String apiKey = normalizeApiKey(config.apiKey());
         String model = safe(config.model());
@@ -186,6 +235,430 @@ public class InpatientRecordAiService {
             log.warn("GPT-compatible inpatient generation request is invalid: endpoint={}", safeEndpoint(baseUrl), error);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "GPT 兼容 Base URL 或请求参数格式不正确", error);
         }
+    }
+
+    private AiGeneration generateViaChapteredRelay(
+        EffectiveAiConfig config,
+        String prompt,
+        String referenceDocumentText,
+        String referenceSourceLabel,
+        ObjectNode sourceSnapshot,
+        ObjectNode preAiFacts,
+        JsonNode maskedPreAiExport,
+        Map<String, String> currentValues,
+        int referenceParagraphCount,
+        List<String> conversationHistory,
+        Consumer<String> chapterProgress
+    ) {
+        String endpoint = normalizeChatCompletionsUrl(config.baseUrl());
+        String apiKey = normalizeApiKey(config.apiKey());
+        String model = safe(config.model());
+        if (!config.enabled() || endpoint.isBlank() || apiKey.isBlank() || model.isBlank()) {
+            throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "病历 AI 未启用，或 GPT 兼容 Base URL、API Key、Model 尚未完整配置"
+            );
+        }
+
+        boolean lockAcquired = false;
+        long startedAt = System.nanoTime();
+        try {
+            relayGenerationLock.acquire();
+            lockAcquired = true;
+
+            List<NumberedParagraph> referenceParagraphs = parseNumberedReference(referenceDocumentText);
+            if (referenceParagraphs.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "参考范本内容为空，无法生成病历");
+            }
+            int expectedCount = referenceParagraphCount > 0 ? referenceParagraphCount : referenceParagraphs.size();
+            if (referenceParagraphs.size() > expectedCount) {
+                referenceParagraphs = referenceParagraphs.subList(0, expectedCount);
+            }
+            if (referenceParagraphs.size() != expectedCount) {
+                log.warn(
+                    "Chaptered relay reference paragraph count mismatch: parsed={}, expected={}",
+                    referenceParagraphs.size(),
+                    expectedCount
+                );
+            }
+
+            String factsContext = buildRelayFactsContext(
+                prompt,
+                sourceSnapshot,
+                preAiFacts,
+                maskedPreAiExport,
+                currentValues,
+                conversationHistory
+            );
+            String outline = generateRelayOutline(
+                endpoint,
+                apiKey,
+                model,
+                prompt,
+                factsContext,
+                referenceDocumentText,
+                referenceSourceLabel,
+                expectedCount
+            );
+            List<RelaySlice> slices = splitRelaySlices(referenceParagraphs);
+            Map<Integer, String> merged = Collections.synchronizedMap(new TreeMap<>());
+            List<String> failures = Collections.synchronizedList(new ArrayList<>());
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+            for (RelaySlice slice : slices) {
+                CompletableFuture<Void> future = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return rewriteRelaySliceWithRetry(endpoint, apiKey, model, factsContext, outline, referenceSourceLabel, expectedCount, slice);
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                        throw new CompletionException(error);
+                    } catch (IOException error) {
+                        throw new CompletionException(error);
+                    }
+                }, relayExecutor).thenAccept(result -> {
+                    synchronized (merged) {
+                        for (NumberedParagraph item : result.items()) {
+                            merged.put(item.n(), item.text());
+                        }
+                    }
+                    emitRelayProgress(result, chapterProgress);
+                }).exceptionally(error -> {
+                    failures.add(slice.label() + "：" + safeThrowableMessage(unwrapCompletion(error)));
+                    return null;
+                });
+                futures.add(future);
+            }
+
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+            int covered = merged.size();
+            if (expectedCount > 0 && covered * 2 < expectedCount) {
+                throw new IOException("模型仅覆盖 " + covered + "/" + expectedCount + " 段（低于一半），内容不可用，请重试" + summarizeFailures(failures));
+            }
+            if (!failures.isEmpty()) {
+                log.warn("Chaptered relay generation completed with partial slice failures: endpoint={}, failures={}", safeEndpoint(endpoint), failures);
+            }
+
+            ObjectNode result = objectMapper.createObjectNode();
+            ArrayNode paragraphs = result.putArray("paragraphs");
+            synchronized (merged) {
+                for (Map.Entry<Integer, String> entry : merged.entrySet()) {
+                    paragraphs.addObject().put("n", entry.getKey()).put("text", entry.getValue());
+                }
+            }
+            InpatientAiResponseParser.ParsedGeneration parsed = responseParser.parse(
+                objectMapper.writeValueAsString(result),
+                expectedCount,
+                List.of()
+            );
+            log.info(
+                "Chaptered relay inpatient generation succeeded: endpoint={}, model={}, elapsedMs={}, covered={}/{}, historyRounds={}",
+                safeEndpoint(endpoint),
+                model,
+                (System.nanoTime() - startedAt) / 1_000_000,
+                covered,
+                expectedCount,
+                conversationHistory == null ? 0 : conversationHistory.size()
+            );
+            return new AiGeneration(parsed.paragraphs(), parsed.nodeReplacements(), "chaptered-relay/" + model);
+        } catch (ResponseStatusException error) {
+            throw error;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "直连病历生成已中断，请稍后重试", error);
+        } catch (HttpTimeoutException error) {
+            log.warn("Chaptered relay inpatient generation timed out: endpoint={}", safeEndpoint(endpoint), error);
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "直连病历生成超时，请检查模型服务网络后重试", error);
+        } catch (ConnectException error) {
+            log.warn("Chaptered relay inpatient generation connection failed: endpoint={}", safeEndpoint(endpoint), error);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "无法连接直连模型服务，请检查 Base URL 和网络", error);
+        } catch (IOException error) {
+            log.warn("Chaptered relay inpatient generation failed: endpoint={}, detail={}", safeEndpoint(endpoint), safeErrorMessage(error));
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "直连病历生成失败：" + safeErrorMessage(error), error);
+        } finally {
+            if (lockAcquired) relayGenerationLock.release();
+        }
+    }
+
+    private String generateRelayOutline(
+        String endpoint,
+        String apiKey,
+        String model,
+        String prompt,
+        String factsContext,
+        String referenceDocumentText,
+        String referenceSourceLabel,
+        int expectedCount
+    ) throws IOException, InterruptedException {
+        String userContent = """
+            【固定上下文：医生提示词、患者资料、脱敏前置资料、会话记忆】
+            %s
+
+            【参考范本来源】
+            %s
+
+            【周xx住院病历范本全文（已逐段编号，仅作结构和写法参考，禁止复制示例患者事实）】
+            %s
+            """.formatted(factsContext, safe(referenceSourceLabel), numberReferenceParagraphs(referenceDocumentText));
+        String raw = chatCompletion(endpoint, apiKey, model, relayOutlineSystemPrompt(expectedCount), userContent, 1800);
+        return extractRelayOutline(raw);
+    }
+
+    private SliceResult rewriteRelaySliceWithRetry(
+        String endpoint,
+        String apiKey,
+        String model,
+        String factsContext,
+        String outline,
+        String referenceSourceLabel,
+        int expectedCount,
+        RelaySlice slice
+    ) throws IOException, InterruptedException {
+        IOException lastIo = null;
+        ResponseStatusException lastStatus = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                return rewriteRelaySlice(endpoint, apiKey, model, factsContext, outline, referenceSourceLabel, expectedCount, slice);
+            } catch (ResponseStatusException error) {
+                lastStatus = error;
+            } catch (IOException error) {
+                lastIo = error;
+            }
+            if (attempt < 2) Thread.sleep(700L * attempt);
+        }
+        if (lastStatus != null) throw lastStatus;
+        throw lastIo == null ? new IOException("分片生成失败") : lastIo;
+    }
+
+    private SliceResult rewriteRelaySlice(
+        String endpoint,
+        String apiKey,
+        String model,
+        String factsContext,
+        String outline,
+        String referenceSourceLabel,
+        int expectedCount,
+        RelaySlice slice
+    ) throws IOException, InterruptedException {
+        String userContent = """
+            【生成总纲】
+            %s
+
+            【固定上下文：医生提示词、患者资料、脱敏前置资料、会话记忆】
+            %s
+
+            【参考范本来源】
+            %s
+
+            【本次分片：%s】
+            %s
+            """.formatted(safe(outline), factsContext, safe(referenceSourceLabel), slice.label(), slice.referenceText());
+        String raw = chatCompletion(endpoint, apiKey, model, relaySliceSystemPrompt(slice, expectedCount), userContent, RELAY_MAX_TOKENS);
+        List<NumberedParagraph> items = parseRelaySliceResponse(raw, slice.startN(), slice.endN());
+        if (items.isEmpty()) {
+            throw new IOException(slice.label() + " 未返回可用段落");
+        }
+        return new SliceResult(slice, items);
+    }
+
+    private String chatCompletion(
+        String endpoint,
+        String apiKey,
+        String model,
+        String systemContent,
+        String userContent,
+        int maxTokens
+    ) throws IOException, InterruptedException {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("model", model);
+        payload.put("temperature", 0.2);
+        payload.put("max_tokens", maxTokens);
+        payload.put("stream", false);
+        payload.putObject("response_format").put("type", "json_object");
+        ArrayNode messages = payload.putArray("messages");
+        messages.addObject().put("role", "system").put("content", systemContent);
+        messages.addObject().put("role", "user").put("content", userContent);
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+            .timeout(Duration.ofSeconds(120))
+            .header("Authorization", "Bearer " + apiKey)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
+            .build();
+        HttpResponse<String> response = aiCallGuard.execute(
+            () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        );
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("上游状态 " + response.statusCode() + "：" + truncate(upstreamErrorMessage(response.body())));
+        }
+        return extractContent(response.body());
+    }
+
+    private String buildRelayFactsContext(
+        String prompt,
+        ObjectNode sourceSnapshot,
+        ObjectNode preAiFacts,
+        JsonNode maskedPreAiExport,
+        Map<String, String> currentValues,
+        List<String> conversationHistory
+    ) throws IOException {
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("doctorSupplement", safe(prompt));
+        context.set("patientAndRecord", sourceSnapshot == null ? objectMapper.createObjectNode() : sourceSnapshot);
+        context.set("reviewedPreAiFacts", preAiFacts == null ? objectMapper.createObjectNode() : preAiFacts);
+        if (maskedPreAiExport != null && !maskedPreAiExport.isMissingNode() && !maskedPreAiExport.isNull()) {
+            context.set("reviewedMaskedExport", maskedPreAiExport);
+        }
+        context.set("currentTemplateValues", objectMapper.valueToTree(currentValues == null ? Map.of() : currentValues));
+        String history = joinConversationHistory(conversationHistory);
+        if (!history.isBlank()) context.put("conversationHistory", history);
+        return objectMapper.writeValueAsString(context);
+    }
+
+    private List<NumberedParagraph> parseNumberedReference(String referenceDocumentText) {
+        List<NumberedParagraph> paragraphs = new ArrayList<>();
+        int index = 1;
+        for (String line : safe(referenceDocumentText).split("\\n", -1)) {
+            String text = safe(line);
+            if (text.isBlank()) continue;
+            paragraphs.add(new NumberedParagraph(index++, text));
+        }
+        return paragraphs;
+    }
+
+    private List<RelaySlice> splitRelaySlices(List<NumberedParagraph> paragraphs) {
+        if (paragraphs.isEmpty()) return List.of();
+        List<RelaySlice> slices = new ArrayList<>();
+        int total = paragraphs.size();
+        for (int i = 0; i < RELAY_SLICE_COUNT; i++) {
+            int from = i * total / RELAY_SLICE_COUNT;
+            int to = (i + 1) * total / RELAY_SLICE_COUNT;
+            if (from >= to) continue;
+            List<NumberedParagraph> items = paragraphs.subList(from, to);
+            NumberedParagraph first = items.get(0);
+            NumberedParagraph last = items.get(items.size() - 1);
+            slices.add(new RelaySlice(i + 1, first.n(), last.n(), numberedText(items)));
+        }
+        return slices;
+    }
+
+    private String numberedText(List<NumberedParagraph> paragraphs) {
+        StringBuilder result = new StringBuilder();
+        for (NumberedParagraph paragraph : paragraphs) {
+            if (result.length() > 0) result.append('\n');
+            result.append("【第").append(paragraph.n()).append("段】").append(paragraph.text());
+        }
+        return result.toString();
+    }
+
+    private List<NumberedParagraph> parseRelaySliceResponse(String rawContent, int startN, int endN) throws IOException {
+        JsonNode root = objectMapper.readTree(stripCodeFence(rawContent));
+        JsonNode items = root.path("items");
+        if (!items.isArray()) items = root.path("paragraphs");
+        if (!items.isArray()) {
+            throw new IOException("分片模型返回格式错误：缺少 items 数组");
+        }
+        Map<Integer, String> accepted = new LinkedHashMap<>();
+        for (JsonNode item : items) {
+            int n = item.path("n").asInt(0);
+            if (n < startN || n > endN) {
+                throw new IOException("分片模型返回了超出范围的段落编号：" + n + "，期望 " + startN + "-" + endN);
+            }
+            if (accepted.containsKey(n)) {
+                throw new IOException("分片模型返回了重复的段落编号：" + n);
+            }
+            if (!item.path("text").isTextual()) {
+                throw new IOException("分片模型返回格式错误：text 必须为文本");
+            }
+            String text = safe(item.path("text").asText(""));
+            accepted.put(n, text.isBlank() ? "待医生补充" : text);
+        }
+        List<NumberedParagraph> result = new ArrayList<>();
+        for (Map.Entry<Integer, String> entry : accepted.entrySet()) {
+            result.add(new NumberedParagraph(entry.getKey(), entry.getValue()));
+        }
+        return result;
+    }
+
+    private void emitRelayProgress(SliceResult result, Consumer<String> chapterProgress) {
+        if (chapterProgress == null) return;
+        StringBuilder body = new StringBuilder();
+        for (NumberedParagraph item : result.items()) {
+            if (body.length() > 0) body.append('\n');
+            body.append("【第").append(item.n()).append("段】").append(item.text());
+        }
+        String text = body.toString().strip();
+        if (text.isBlank()) return;
+        emitProgressChunks("【" + result.slice().label() + " 已完成】\n", text, chapterProgress);
+    }
+
+    private void emitProgressChunks(String firstHeader, String text, Consumer<String> chapterProgress) {
+        int chunkSize = 850;
+        for (int start = 0; start < text.length(); start += chunkSize) {
+            int end = Math.min(text.length(), start + chunkSize);
+            String header = start == 0 ? firstHeader : firstHeader.replace(" 已完成", " 续");
+            chapterProgress.accept(header + text.substring(start, end));
+        }
+    }
+
+    private String relayOutlineSystemPrompt(int expectedCount) {
+        return """
+            你是院内住院病历生成定纲助手。请基于医生提示词、当前患者资料、已复核脱敏前置资料和周xx参考范本，先整理后续分片改写共用的病例写作总纲。
+            参考范本只提供结构、标题、段落顺序、查房时序和书写风格；严禁复制范本中的姓名、日期、住院号、床号、检查数值、诊断和处方。
+            当前参考文档共有 %d 个非空正文段落。总纲必须说明主诊断、关键病史、查体/辅助检查事实、诊疗经过、中医辨证和方剂参考口径；缺事实时写待医生补充，不得虚构。
+            输出必须是单个 JSON 对象，格式只能为 {"outline":"供后续分片改写使用的中文总纲"}，禁止 Markdown、解释、代码围栏或其他键。
+            """.formatted(expectedCount);
+    }
+
+    private String relaySliceSystemPrompt(RelaySlice slice, int expectedCount) {
+        return """
+            你是院内住院病历章节改写引擎。任务是按周xx参考范本的结构和写法，仅改写本次给定编号范围内的段落。
+            当前参考文档共有 %d 个非空正文段落，本次只允许输出第 %d 到第 %d 段。输出编号 n 必须对应参考范本中的【第N段】，不得越界、不得重复、不得合并相邻段落。
+            参考范本只提供格式、结构、查房时序和语言风格；范本中的患者事实全部是示例，必须替换为当前患者事实。reviewedMaskedExport 是当前患者事实的权威口径，冲突时以它为准。
+            纯标题段和签名行可以不输出，系统会沿用范本；含日期、姓名、数值、诊断、病程和治疗内容的短行必须输出。缺少事实时该项只写“待医生补充”。
+            中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致；方剂只能作为医生复核用参考，并明确标注“参考”。
+            输出必须是单个 JSON 对象，格式只能为 {"items":[{"n":%d,"text":"第%d段改写后的完整正文"}]}。禁止 Markdown、解释、代码围栏或其他键。
+            """.formatted(expectedCount, slice.startN(), slice.endN(), slice.startN(), slice.startN());
+    }
+
+    private String extractRelayOutline(String rawContent) {
+        try {
+            String outline = objectMapper.readTree(stripCodeFence(rawContent)).path("outline").asText("");
+            return safe(outline).isBlank() ? safe(rawContent) : safe(outline);
+        } catch (Exception ignored) {
+            return safe(rawContent);
+        }
+    }
+
+    private String stripCodeFence(String rawContent) {
+        String content = safe(rawContent);
+        if (content.startsWith("```")) {
+            content = content
+                .replaceFirst("^```(?:json)?\\s*", "")
+                .replaceFirst("\\s*```$", "")
+                .trim();
+        }
+        return content;
+    }
+
+    private String summarizeFailures(List<String> failures) {
+        if (failures == null || failures.isEmpty()) return "";
+        int count = Math.min(3, failures.size());
+        return "；失败分片：" + truncate(String.join("；", failures.subList(0, count)));
+    }
+
+    private Throwable unwrapCompletion(Throwable error) {
+        Throwable current = error;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private String safeThrowableMessage(Throwable error) {
+        String message = error instanceof ResponseStatusException statusError
+            ? statusError.getReason()
+            : error == null ? "" : error.getMessage();
+        return safe(message).isBlank() ? "生成失败" : truncate(message);
     }
 
     private AiGeneration generateViaDifyWorkflow(
@@ -530,6 +1003,20 @@ public class InpatientRecordAiService {
 
     private static String safe(Object value) {
         return String.valueOf(value == null ? "" : value).trim();
+    }
+
+    private record NumberedParagraph(int n, String text) {}
+
+    private record RelaySlice(int index, int startN, int endN, String referenceText) {
+        String label() {
+            return "第" + index + "分片（第" + startN + "-" + endN + "段）";
+        }
+    }
+
+    private record SliceResult(RelaySlice slice, List<NumberedParagraph> items) {
+        SliceResult {
+            items = List.copyOf(items);
+        }
     }
 
     public record AiGeneration(ArrayNode paragraphs, Map<String, String> nodeReplacements, String model) {

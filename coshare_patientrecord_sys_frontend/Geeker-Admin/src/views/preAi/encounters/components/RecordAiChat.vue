@@ -50,16 +50,19 @@
               <el-button size="small" type="warning" plain :loading="busy" @click="retry(item.card!)">重试</el-button>
             </div>
           </template>
+
+          <div v-if="item.card!.progressMessages.length" class="chapter-progress">
+            <pre v-for="(message, index) in item.card!.progressMessages" :key="`${item.card!.taskId || item.id}-${index}`">{{
+              message
+            }}</pre>
+          </div>
         </div>
       </template>
     </div>
 
     <div class="chat-footer">
       <div class="attachment-bar">
-        <el-tooltip
-          content="AI 首轮按此范本的章节结构与查房时序生成；范本中的患者信息均已脱敏，不会带入当前病历"
-          placement="top"
-        >
+        <el-tooltip content="AI 首轮按此范本的章节结构与查房时序生成；范本中的患者信息均已脱敏，不会带入当前病历" placement="top">
           <el-tag type="primary" effect="plain">
             <el-icon><DocumentCopy /></el-icon>
             已固定：住院病历范本（周xx·脱敏版）
@@ -130,6 +133,7 @@ interface GenerationCard {
   status: string;
   stage: string;
   stageMessage: string;
+  progressMessages: string[];
   outputAssetId: string;
   version: string;
   errorCode: string;
@@ -167,10 +171,8 @@ const controller = ref<AbortController>();
 const messageListRef = ref<HTMLElement>();
 const attachExport = ref(true);
 
-const pinnedExport = computed(() =>
-  [...props.exports]
-    .filter(item => item.status && item.status !== "INVALIDATED")
-    .sort((a, b) => b.version - a.version)[0]
+const pinnedExport = computed(
+  () => [...props.exports].filter(item => item.status && item.status !== "INVALIDATED").sort((a, b) => b.version - a.version)[0]
 );
 
 const personalizedPrompt = computed(() => {
@@ -218,14 +220,21 @@ watch(
   }
 );
 
-watch(() => props.encounterId, () => resetSession());
+watch(
+  () => props.encounterId,
+  () => resetSession()
+);
 
 const applyTaskToCard = (card: GenerationCard, task: MedicalRecordWorkflowTask) => {
   card.taskId = task.taskId;
   card.status = task.status;
   card.stage = task.currentStage;
-  const latestEvent = task.events?.[task.events.length - 1];
-  card.stageMessage = latestEvent?.message || "";
+  const progressMessages = (task.events || [])
+    .filter(event => event.eventType === "CHAPTER_PROGRESS" && event.message)
+    .map(event => event.message);
+  card.progressMessages = progressMessages;
+  const latestStageEvent = [...(task.events || [])].reverse().find(event => event.eventType !== "CHAPTER_PROGRESS");
+  card.stageMessage = latestStageEvent?.message || "";
   card.outputAssetId = task.outputAssetId || card.outputAssetId;
   card.errorCode = task.errorCode || "";
   card.errorMessage = task.errorMessage || "";
@@ -233,7 +242,7 @@ const applyTaskToCard = (card: GenerationCard, task: MedicalRecordWorkflowTask) 
   if (recordVersion !== undefined) card.version = String(recordVersion);
 };
 
-const ensureBaseRecord = async (signal: AbortSignal) => {
+const ensureBaseRecord = async () => {
   if (baseRecordId.value) return;
   const { data } = await generateMedicalRecordApi({
     encounterId: props.encounterId,
@@ -248,9 +257,7 @@ const send = async () => {
   if (busy.value || !props.encounterId) return;
   roundCount.value += 1;
   const round = roundCount.value;
-  const composed = trimmedNotes
-    ? `${personalizedPrompt.value}\n【医生本例备注】${trimmedNotes}`
-    : personalizedPrompt.value;
+  const composed = trimmedNotes ? `${personalizedPrompt.value}\n【医生本例备注】${trimmedNotes}` : personalizedPrompt.value;
   messages.value.push({
     id: `u-${round}-${Date.now()}`,
     role: "user",
@@ -262,6 +269,7 @@ const send = async () => {
     status: "PREPARING",
     stage: "QUEUED",
     stageMessage: "",
+    progressMessages: [],
     outputAssetId: "",
     version: "",
     errorCode: "",
@@ -274,9 +282,8 @@ const send = async () => {
   controller.value = requestController;
   await scrollToEnd();
   try {
-    await ensureBaseRecord(requestController.signal);
-    const attachExportId =
-      attachExport.value && pinnedExport.value ? pinnedExport.value.id : undefined;
+    await ensureBaseRecord();
+    const attachExportId = attachExport.value && pinnedExport.value ? pinnedExport.value.id : undefined;
     let submitParams: Parameters<typeof submitMedicalRecordWorkflowTaskApi>[0];
     if (lastOutputAssetId.value) {
       submitParams = {
@@ -322,9 +329,16 @@ const send = async () => {
     }
   } catch (error: any) {
     if (error?.name !== "AbortError") {
-      card.status = "FAILED";
-      card.errorCode = card.errorCode || "REQUEST_FAILED";
-      card.errorMessage = error?.message || "生成请求失败";
+      if (String(error?.message || "").includes("轮询超时")) {
+        // 后端任务仍在执行：转后台提示，完成后可在版本列表查看
+        card.status = "RUNNING";
+        card.stageMessage = "生成转入后台执行，完成后将出现在文档版本列表";
+        ElMessage.info("生成仍在后台进行，完成后可在文档版本列表查看并下载");
+      } else {
+        card.status = "FAILED";
+        card.errorCode = card.errorCode || "REQUEST_FAILED";
+        card.errorMessage = error?.message || "生成请求失败";
+      }
     }
   } finally {
     if (controller.value === requestController) controller.value = undefined;
@@ -340,6 +354,7 @@ const retry = async (card: GenerationCard) => {
   controller.value = requestController;
   card.status = "RUNNING";
   card.stageMessage = "";
+  card.progressMessages = [];
   try {
     const { data: retried } = await retryMedicalRecordWorkflowTaskApi(card.taskId, requestController.signal);
     applyTaskToCard(card, retried);
@@ -492,6 +507,28 @@ const bubbleClass = (card: GenerationCard) => ({
   font-size: 12px;
   line-height: 1.6;
   color: var(--el-text-color-secondary);
+}
+
+.chapter-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+
+  pre {
+    margin: 0;
+    font-family: inherit;
+    white-space: pre-wrap;
+  }
 }
 
 .bubble-actions {

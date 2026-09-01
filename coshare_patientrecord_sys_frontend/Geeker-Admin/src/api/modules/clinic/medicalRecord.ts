@@ -230,10 +230,7 @@ export const submitMedicalRecordWorkflowTaskApi = async (params: MedicalRecordWo
   return clinicResponse(data, "病历生成任务已提交");
 };
 
-export const inspectBuiltinMedicalRecordTemplateApi = async (
-  params: MedicalRecordGenerationScope,
-  signal?: AbortSignal
-) => {
+export const inspectBuiltinMedicalRecordTemplateApi = async (params: MedicalRecordGenerationScope, signal?: AbortSignal) => {
   const query = new URLSearchParams(
     params.encounterId ? { encounterId: params.encounterId } : { patientId: params.patientId || "" }
   );
@@ -340,7 +337,7 @@ export const pollMedicalRecordWorkflowTask = async (
   options: MedicalRecordWorkflowPollingOptions = {}
 ): Promise<MedicalRecordWorkflowTask> => {
   const intervalMs = Math.max(250, options.intervalMs ?? 1500);
-  const timeoutMs = Math.max(intervalMs, options.timeoutMs ?? 5 * 60 * 1000);
+  const timeoutMs = Math.max(intervalMs, options.timeoutMs ?? 15 * 60 * 1000);
   const maxConsecutiveErrors = Math.max(0, options.maxConsecutiveErrors ?? 2);
   const startedAt = Date.now();
   let consecutiveErrors = 0;
