@@ -9,7 +9,9 @@
       <button v-else type="button" class="context-restore" @click="restoreTopContext">展开说明</button>
       <div class="hero-actions">
         <el-button class="patient-archive-trigger" type="primary" @click="patientDrawerOpen = true">
-          <span class="patient-archive-trigger__glyph"><el-icon :size="22"><User /></el-icon></span>
+          <span class="patient-archive-trigger__glyph"
+            ><el-icon :size="22"><User /></el-icon
+          ></span>
           <span class="patient-archive-trigger__copy">
             患者主档案
             <small>筛选与查看全部在管患者</small>
@@ -104,9 +106,13 @@
                 <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
                 <small>录入 {{ formatPatientCaseRecordTime(item) }} · {{ routeLabel(item.latestEncounter?.route) }}</small>
                 <div v-if="item.latestEncounter?.careSituationTags" class="encounter-card__care-tags">
-                  <el-tag v-for="tag in item.latestEncounter.careSituationTags.split(',')" :key="tag" size="small" effect="plain">{{
-                    tag
-                  }}</el-tag>
+                  <el-tag
+                    v-for="tag in item.latestEncounter.careSituationTags.split(',')"
+                    :key="tag"
+                    size="small"
+                    effect="plain"
+                    >{{ tag }}</el-tag
+                  >
                 </div>
                 <div v-if="item.latestEncounter" class="mini-steps">
                   <i
@@ -175,7 +181,12 @@
                   <small>{{ formatPatientCaseRecordTime(item) }}</small>
                 </footer>
               </button>
-              <button v-if="canCreateEncounter" type="button" class="encounter-row-followup" @click.stop="openFollowUpDialog(item)">
+              <button
+                v-if="canCreateEncounter"
+                type="button"
+                class="encounter-row-followup"
+                @click.stop="openFollowUpDialog(item)"
+              >
                 新增复诊
               </button>
             </article>
@@ -215,621 +226,771 @@
             <el-empty :image-size="96" description="请选择上方岗位节点" />
           </section>
           <template v-else>
-          <section class="patient-banner" :class="{ 'is-context-compact': topContextCompacted }" @pointermove="scheduleTopContextCompaction">
-            <div class="patient-banner__identity">
-              <span class="patient-avatar">{{ (workspace.encounter.patient.patientName || "患").slice(0, 1) }}</span>
+            <section
+              class="patient-banner"
+              :class="{ 'is-context-compact': topContextCompacted }"
+              @pointermove="scheduleTopContextCompaction"
+            >
+              <div class="patient-banner__identity">
+                <span class="patient-avatar">{{ (workspace.encounter.patient.patientName || "患").slice(0, 1) }}</span>
+                <div>
+                  <small v-if="!topContextCompacted">当前就诊患者</small>
+                  <h3>
+                    {{ workspace.encounter.patient.patientName || "待补姓名" }}
+                  </h3>
+                  <p v-if="!topContextCompacted">
+                    {{ workspace.encounter.caseToken }} · {{ workspace.encounter.patient.gender || "待补性别" }} ·
+                    {{ workspace.encounter.patient.age || "待补年龄" }} ·
+                    {{ workspace.encounter.patient.visitDate || "待补就诊时间" }}
+                  </p>
+                  <p v-else class="patient-banner__compact-meta">
+                    {{ workspace.encounter.caseToken }} · {{ routeLabel(workspace.encounter.route) }}
+                  </p>
+                </div>
+              </div>
+              <div class="patient-banner__overview">
+                <div class="context-stat">
+                  <small>流程进度</small>
+                  <strong>{{ workflowProgress.completed }}/{{ workflowProgress.total }}</strong>
+                </div>
+                <div class="context-stat" :class="{ warning: workflowProgress.returned }">
+                  <small>待处理异常</small>
+                  <strong>{{ workflowProgress.returned }}</strong>
+                </div>
+                <div class="patient-banner__meta">
+                  <el-tag :type="encounterStatusType(workspace.encounter.status)">
+                    {{ encounterStatusLabel[workspace.encounter.status] || workspace.encounter.status }}
+                  </el-tag>
+                  <span>{{ routeLabel(workspace.encounter.route) }}</span>
+                  <span>{{ treatmentPathLabel(workspace.encounter.treatmentPath) }}</span>
+                </div>
+              </div>
+            </section>
+
+            <section v-if="registrationImageAttachments.length" class="patient-dr-strip">
+              <div class="patient-dr-strip__head">
+                <div>
+                  <span class="section-caption">患者信息 · 优先视觉核对</span>
+                  <strong>DR 影像（前台/化验岗采集）</strong>
+                </div>
+                <el-tag type="primary" effect="plain">{{ registrationImageAttachments.length }} 张</el-tag>
+              </div>
+              <AttachmentPreviewGallery
+                :attachments="registrationImageAttachments"
+                compact
+                @download="downloadPreAiAttachmentApi"
+              />
+            </section>
+
+            <section v-if="endoscopyReportAttachments.length" class="patient-dr-strip">
+              <div class="patient-dr-strip__head">
+                <div>
+                  <span class="section-caption">患者信息 · 辅助检查报告</span>
+                  <strong>胃肠镜检查报告单</strong>
+                </div>
+                <el-tag type="primary" effect="plain">{{ endoscopyReportAttachments.length }} 张</el-tag>
+              </div>
+              <AttachmentPreviewGallery
+                :attachments="endoscopyReportAttachments"
+                compact
+                @download="downloadPreAiAttachmentApi"
+              />
+            </section>
+
+            <section v-if="encounterHistory.length > 1" class="history-entry-bar">
               <div>
-                <small v-if="!topContextCompacted">当前就诊患者</small>
-                <h3>
-                  {{ workspace.encounter.patient.patientName || "待补姓名" }}
-                </h3>
-                <p v-if="!topContextCompacted">
-                  {{ workspace.encounter.caseToken }} · {{ workspace.encounter.patient.gender || "待补性别" }} ·
-                  {{ workspace.encounter.patient.age || "待补年龄" }} ·
-                  {{ workspace.encounter.patient.visitDate || "待补就诊时间" }}
-                </p>
-                <p v-else class="patient-banner__compact-meta">
-                  {{ workspace.encounter.caseToken }} · {{ routeLabel(workspace.encounter.route) }}
-                </p>
+                <strong>本次为第 {{ workspace.encounter.visitNo }} 次就诊</strong>
+                <small>可在右侧只读回查初诊、上次或其他历次病历，当前未保存内容不会受影响。</small>
               </div>
-            </div>
-            <div class="patient-banner__overview">
-              <div class="context-stat">
-                <small>流程进度</small>
-                <strong>{{ workflowProgress.completed }}/{{ workflowProgress.total }}</strong>
-              </div>
-              <div class="context-stat" :class="{ warning: workflowProgress.returned }">
-                <small>待处理异常</small>
-                <strong>{{ workflowProgress.returned }}</strong>
-              </div>
-              <div class="patient-banner__meta">
-                <el-tag :type="encounterStatusType(workspace.encounter.status)">
-                  {{ encounterStatusLabel[workspace.encounter.status] || workspace.encounter.status }}
-                </el-tag>
-                <span>{{ routeLabel(workspace.encounter.route) }}</span>
-                <span>{{ treatmentPathLabel(workspace.encounter.treatmentPath) }}</span>
-              </div>
-            </div>
-          </section>
+              <el-button type="primary" plain @click="openHistoricalComparison">查看历次病历</el-button>
+            </section>
 
-          <section v-if="registrationImageAttachments.length" class="patient-dr-strip">
-            <div class="patient-dr-strip__head">
+            <div class="workspace-modebar">
               <div>
-                <span class="section-caption">患者信息 · 优先视觉核对</span>
-                <strong>DR 影像（前台/化验岗采集）</strong>
+                <span>{{ activeWorkflowTitle }}</span>
+                <small>{{ activeWorkflowOwner }}</small>
               </div>
-              <el-tag type="primary" effect="plain">{{ registrationImageAttachments.length }} 张</el-tag>
-            </div>
-            <AttachmentPreviewGallery :attachments="registrationImageAttachments" compact @download="downloadPreAiAttachmentApi" />
-          </section>
-
-          <section v-if="endoscopyReportAttachments.length" class="patient-dr-strip">
-            <div class="patient-dr-strip__head">
-              <div>
-                <span class="section-caption">患者信息 · 辅助检查报告</span>
-                <strong>胃肠镜检查报告单</strong>
+              <div class="mode-tags" :class="{ preview: editorMode === 'PREVIEW' }" role="group" aria-label="填写态和预览态切换">
+                <span class="mode-slider" aria-hidden="true"></span>
+                <button
+                  type="button"
+                  class="mode-pill edit"
+                  :class="{ active: editorMode === 'EDIT' }"
+                  :aria-pressed="editorMode === 'EDIT'"
+                  @click="editorMode = 'EDIT'"
+                >
+                  填写态
+                </button>
+                <button
+                  type="button"
+                  class="mode-pill preview"
+                  :class="{ active: editorMode === 'PREVIEW' }"
+                  :aria-pressed="editorMode === 'PREVIEW'"
+                  @click="openPreviewMode"
+                >
+                  模板预览态
+                </button>
               </div>
-              <el-tag type="primary" effect="plain">{{ endoscopyReportAttachments.length }} 张</el-tag>
+              <el-tag :type="stageStatusType(workflowCardStatus(activeWorkflowCard))">
+                {{ workflowCardStatusLabel(activeWorkflowCard) }}
+              </el-tag>
             </div>
-            <AttachmentPreviewGallery :attachments="endoscopyReportAttachments" compact @download="downloadPreAiAttachmentApi" />
-          </section>
 
-          <section v-if="encounterHistory.length > 1" class="history-entry-bar">
-            <div>
-              <strong>本次为第 {{ workspace.encounter.visitNo }} 次就诊</strong>
-              <small>可在右侧只读回查初诊、上次或其他历次病历，当前未保存内容不会受影响。</small>
-            </div>
-            <el-button type="primary" plain @click="openHistoricalComparison">查看历次病历</el-button>
-          </section>
+            <Transition name="workspace-mode" mode="out-in">
+              <MedicalRecordPreview
+                v-if="editorMode === 'PREVIEW'"
+                key="preview"
+                :case-token="workspace.encounter.caseToken"
+                :visit-date="workspace.encounter.patient.visitDate"
+                :route-label="routeLabel(workspace.encounter.route)"
+                :sections="documentPreviewSections"
+                :inspection-images="inspectionPreviewImages"
+              />
 
-          <div class="workspace-modebar">
-            <div>
-              <span>{{ activeWorkflowTitle }}</span>
-              <small>{{ activeWorkflowOwner }}</small>
-            </div>
-            <div class="mode-tags" :class="{ preview: editorMode === 'PREVIEW' }" role="group" aria-label="填写态和预览态切换">
-              <span class="mode-slider" aria-hidden="true"></span>
-              <button
-                type="button"
-                class="mode-pill edit"
-                :class="{ active: editorMode === 'EDIT' }"
-                :aria-pressed="editorMode === 'EDIT'"
-                @click="editorMode = 'EDIT'"
-              >
-                填写态
-              </button>
-              <button
-                type="button"
-                class="mode-pill preview"
-                :class="{ active: editorMode === 'PREVIEW' }"
-                :aria-pressed="editorMode === 'PREVIEW'"
-                @click="openPreviewMode"
-              >
-                模板预览态
-              </button>
-            </div>
-            <el-tag :type="stageStatusType(workflowCardStatus(activeWorkflowCard))">
-              {{ workflowCardStatusLabel(activeWorkflowCard) }}
-            </el-tag>
-          </div>
-
-          <Transition name="workspace-mode" mode="out-in">
-            <MedicalRecordPreview
-              v-if="editorMode === 'PREVIEW'"
-              key="preview"
-              :case-token="workspace.encounter.caseToken"
-              :visit-date="workspace.encounter.patient.visitDate"
-              :route-label="routeLabel(workspace.encounter.route)"
-              :sections="documentPreviewSections"
-              :inspection-images="inspectionPreviewImages"
-            />
-
-            <div v-else key="edit" class="editor-mode-content">
-              <Transition name="stage-switch" mode="out-in">
-                <section v-if="selectedPanel === 'STAGE'" :key="`stage-${selectedStageCode}`" class="stage-panel">
-                <template v-if="selectedStageCode !== 'REVIEW'">
-                  <div class="panel-heading">
-                    <div>
-                      <span class="work-surface-kicker">当前填写</span>
-                      <h3>{{ selectedStage.title }}</h3>
-                    </div>
-                    <div class="heading-tags">
-                      <el-tag effect="plain">责任岗位：{{ selectedStage.owner }}</el-tag>
-                      <el-tag :type="stageStatusType(selectedStageSubmission.status)">
-                        {{ stageStatusLabel[selectedStageSubmission.status] }}
-                      </el-tag>
-                    </div>
-                  </div>
-
-                  <el-alert
-                    v-if="selectedStageSubmission.status === 'RETURNED'"
-                    type="warning"
-                    show-icon
-                    :closable="false"
-                    :title="`医生退回：${selectedStageSubmission.returnedReason || '请核对后重新提交'}`"
-                  />
-                  <el-alert
-                    v-if="!canModifySelectedStage"
-                    type="info"
-                    show-icon
-                    :closable="false"
-                    :title="
-                      selectedStageSubmission.status === 'COMPLETED'
-                        ? '本阶段已完成；当前账号没有纠错权限。'
-                        : `当前账号为${currentRole ? roleLabel(currentRole) : '未授权岗位'}，本页仅可查看。`
-                    "
-                  />
-
-                  <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section priority-image-section">
-                    <header class="upstream-image-heading">
-                      <div>
-                        <strong>检查影像优先核对</strong>
-                        <small>接诊前先核对检查室上传的一手影像，点击图片可查看原图。</small>
-                      </div>
-                      <el-tag :type="inspectionImageAttachments.length ? 'primary' : 'info'" effect="plain">
-                        {{ inspectionImageAttachments.length ? `${inspectionImageAttachments.length} 张影像` : "暂无影像" }}
-                      </el-tag>
-                    </header>
-                    <AttachmentPreviewGallery
-                      v-if="inspectionImageAttachments.length"
-                      :attachments="inspectionImageAttachments"
-                      @download="downloadPreAiAttachmentApi"
-                    />
-                    <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
-                  </section>
-
-                  <div v-if="selectedStageCode === 'INSPECTION'" class="inspection-view-tabs">
-                    <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="showCurrentInspection">
-                      本次检查
-                    </button>
-                    <button type="button" :class="{ active: inspectionView === 'HISTORY' }" @click="showInspectionTimeline">
-                      检查与复查时间轴
-                    </button>
-                  </div>
-
-                  <section
-                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'HISTORY'"
-                    v-loading="timelineLoading"
-                    class="inspection-timeline"
-                  >
-                    <el-empty v-if="!inspectionTimeline.length" description="暂无历次检查记录" />
-                    <article
-                      v-for="(node, index) in inspectionTimeline"
-                      :key="node.encounterId"
-                      class="timeline-node"
-                      :class="{
-                        latest: index === inspectionTimeline.length - 1
-                      }"
-                    >
-                      <i class="timeline-dot"></i>
-                      <header>
+              <div v-else key="edit" class="editor-mode-content">
+                <Transition name="stage-switch" mode="out-in">
+                  <section v-if="selectedPanel === 'STAGE'" :key="`stage-${selectedStageCode}`" class="stage-panel">
+                    <template v-if="selectedStageCode !== 'REVIEW'">
+                      <div class="panel-heading">
                         <div>
-                          <strong>第 {{ node.visitNo }} 次来访 · {{ node.visitDate || "日期待补" }}</strong>
-                          <small>{{ node.caseToken }} · {{ routeLabel(node.route) }}</small>
+                          <span class="work-surface-kicker">当前填写</span>
+                          <h3>{{ selectedStage.title }}</h3>
                         </div>
-                        <el-tag :type="stageStatusType(node.inspectionStatus)">{{
-                          stageStatusLabel[node.inspectionStatus]
-                        }}</el-tag>
-                      </header>
-                      <div v-if="node.inspection.nextReviewAt || node.inspection.nextReviewNote" class="timeline-follow-up">
-                        <strong>复查安排</strong>
-                        <span v-if="node.inspection.nextReviewAt">下次复查：{{ humanValue(node.inspection.nextReviewAt) }}</span>
-                        <p v-if="node.inspection.nextReviewNote">{{ humanValue(node.inspection.nextReviewNote) }}</p>
-                      </div>
-                      <div class="timeline-facts">
-                        <div v-for="entry in inspectionTimelineEntries(node.inspection)" :key="entry[0]">
-                          <span>{{ fieldLabel("INSPECTION", entry[0]) }}</span>
-                          <p>{{ humanValue(entry[1]) }}</p>
+                        <div class="heading-tags">
+                          <el-tag effect="plain">责任岗位：{{ selectedStage.owner }}</el-tag>
+                          <el-tag :type="stageStatusType(selectedStageSubmission.status)">
+                            {{ stageStatusLabel[selectedStageSubmission.status] }}
+                          </el-tag>
                         </div>
                       </div>
-                      <div v-if="node.attachments.length" class="timeline-attachment-groups">
-                        <section
-                          v-for="group in timelineAttachmentGroups(node.attachments)"
-                          :key="group.id"
-                          class="timeline-attachment-group"
-                        >
-                          <strong>{{ group.name }}</strong>
-                          <AttachmentPreviewGallery :attachments="group.items" compact @download="downloadPreAiAttachmentApi" />
-                        </section>
-                      </div>
-                      <details v-if="hasVisitMeta(node.visitMeta)" class="visit-meta-summary">
-                        <summary>来访描述与交费参考</summary>
-                        <p v-if="node.visitMeta.visitReason">来访原因：{{ node.visitMeta.visitReason }}</p>
-                        <p v-if="node.visitMeta.description">描述：{{ node.visitMeta.description }}</p>
-                        <p>交费参考：{{ paymentStatusLabel(node.visitMeta.paymentStatus) }}</p>
-                      </details>
-                    </article>
-                  </section>
 
-                  <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section primary-evidence-section">
-                    <div class="primary-evidence-heading">
-                      <div>
-                        <span class="section-caption">接诊首要复核资料</span>
-                        <strong>检查室原始图片</strong>
-                        <small>先核对一手图片，再结合检查事实完成接诊评估。</small>
-                      </div>
-                      <el-tag effect="plain">{{ inspectionImageAttachments.length }} 张</el-tag>
-                    </div>
-                    <AttachmentPreviewGallery
-                      v-if="inspectionImageAttachments.length"
-                      :attachments="inspectionImageAttachments"
-                      @download="downloadPreAiAttachmentApi"
-                    />
-                    <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
-                  </section>
+                      <el-alert
+                        v-if="selectedStageSubmission.status === 'RETURNED'"
+                        type="warning"
+                        show-icon
+                        :closable="false"
+                        :title="`医生退回：${selectedStageSubmission.returnedReason || '请核对后重新提交'}`"
+                      />
+                      <el-alert
+                        v-if="!canModifySelectedStage"
+                        type="info"
+                        show-icon
+                        :closable="false"
+                        :title="
+                          selectedStageSubmission.status === 'COMPLETED'
+                            ? '本阶段已完成；当前账号没有纠错权限。'
+                            : `当前账号为${currentRole ? roleLabel(currentRole) : '未授权岗位'}，本页仅可查看。`
+                        "
+                      />
 
-                  <section
-                    v-if="upstreamStages.length && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
-                    class="upstream-section"
-                  >
-                    <header class="upstream-heading">
-                      <div>
-                        <strong>前置岗位事实</strong>
-                        <small>关键结论直接展示，完整采集项按岗位展开核对。</small>
-                      </div>
-                      <el-tag type="info" effect="plain">{{ upstreamStages.length }} 个岗位</el-tag>
-                    </header>
-                    <div class="upstream-stage-list">
-                      <article v-for="item in upstreamStages" :key="item.stageCode" class="upstream-stage-card">
-                        <header>
-                          <div class="upstream-stage-title">
-                            <strong>{{ stageByCode(item.stageCode).title }}</strong>
-                            <small>{{ upstreamStageTime(item) }}</small>
+                      <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section priority-image-section">
+                        <header class="upstream-image-heading">
+                          <div>
+                            <strong>检查影像优先核对</strong>
+                            <small>接诊前先核对检查室上传的一手影像，点击图片可查看原图。</small>
                           </div>
-                          <el-tag :type="stageStatusType(item.status)" size="small" effect="plain">
-                            {{ stageStatusLabel[item.status] }}
+                          <el-tag :type="inspectionImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                            {{ inspectionImageAttachments.length ? `${inspectionImageAttachments.length} 张影像` : "暂无影像" }}
                           </el-tag>
                         </header>
-                        <div class="upstream-summary-label">
-                          <span>重点事实</span>
-                          <small>优先核对影响本岗位判断的已完成信息</small>
-                        </div>
-                        <div class="upstream-summary-grid">
-                          <div v-for="entry in upstreamSummaryEntries(item)" :key="entry[0]">
-                            <span>{{ fieldLabel(item.stageCode, entry[0]) }}</span>
-                            <strong :title="humanValue(entry[1])">{{ humanValue(entry[1]) }}</strong>
-                          </div>
-                        </div>
-                        <el-collapse class="upstream-detail-collapse">
-                          <el-collapse-item :title="`查看全部 ${nonEmptyEntries(item.data).length} 项已采集事实`">
-                            <dl class="read-only-grid">
-                              <div v-for="entry in nonEmptyEntries(item.data)" :key="entry[0]">
-                                <dt>{{ fieldLabel(item.stageCode, entry[0]) }}</dt>
-                                <dd>{{ humanValue(entry[1]) }}</dd>
-                              </div>
-                            </dl>
-                          </el-collapse-item>
-                        </el-collapse>
-                      </article>
-                    </div>
-                  </section>
-
-                  <ClinicalTemplateToolbar
-                    v-if="
-                      ['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) &&
-                      (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')
-                    "
-                    :simplified="selectedStageCode === 'INSPECTION'"
-                    :model-value="clinicalTemplateIds(selectedStageCode)"
-                    :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
-                    :disabled="!canModifySelectedStage"
-                    :auto-match-label="selectedStageCode === 'RECEPTION' ? autoMatchedTemplateLabel : ''"
-                    @update:model-value="value => onClinicalTemplateSelection(selectedStageCode, value)"
-                    @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
-                    @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
-                  />
-
-                  <section
-                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
-                    class="inspection-narrative-edit"
-                  >
-                    <div class="narrative-heading">
-                      <strong>检查记录</strong>
-                      <small>模板已按默认变量生成全文，可直接在本框修改；切换病种将重新生成并覆盖</small>
-                    </div>
-                    <el-input
-                      v-model="stageForms.INSPECTION.inspectionNarrative"
-                      type="textarea"
-                      :rows="16"
-                      :disabled="!canModifySelectedStage"
-                      @update:model-value="markStageDirty('INSPECTION')"
-                    />
-                  </section>
-
-                  <section
-                    v-if="selectedStageCode !== 'INSPECTION' && secondaryStageFieldsCount"
-                    class="field-noise-toolbar"
-                  >
-                    <div>
-                      <strong>精简填写视图</strong>
-                      <small>默认收起低频补充项，仅降低录入噪音；原字段、自动生成和提交载荷保持不变。</small>
-                    </div>
-                    <el-button size="small" plain @click="compactStageFieldsExpanded = !compactStageFieldsExpanded">
-                      {{ compactStageFieldsExpanded ? "收起低频字段" : `展开 ${secondaryStageFieldsCount} 个可选字段` }}
-                    </el-button>
-                  </section>
-
-                  <div
-                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
-                    class="narrative-heading history-intake-heading"
-                  >
-                    <strong>病史采集</strong>
-                    <small>已自前台登记迁入：随检查同步询问患者，保存后自动归入接诊室病史草稿</small>
-                  </div>
-                  <el-form
-                    v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
-                    label-position="top"
-                    class="stage-form"
-                  >
-                    <div class="form-grid">
-                      <el-form-item
-                        v-for="field in stageFormFields"
-                        :key="field.key"
-                        :label="field.label"
-                        :required="field.required"
-                        v-show="!isSecondaryStageField(field) || compactStageFieldsExpanded"
-                        :class="{
-                          'span-2': field.span === 2,
-                          'priority-field': field.emphasis === 'priority',
-                          'secondary-field': isSecondaryStageField(field),
-                          'history-intake-field': isHistoryIntakeKey(field.key) && selectedStageCode === 'INSPECTION'
-                        }"
-                      >
-                        <StructuredField
-                          v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          :field="field"
-                          :form="stageForms[selectedStageCode]"
-                          :generated-text="generatedTemplateText(field, stageForms[selectedStageCode])"
-                          :source-hash="templateSourceHash(field)"
-                          :disabled="isStageFieldDisabled(field)"
-                          @patch="value => patchStageForm(selectedStageCode, value)"
+                        <AttachmentPreviewGallery
+                          v-if="inspectionImageAttachments.length"
+                          :attachments="inspectionImageAttachments"
+                          @download="downloadPreAiAttachmentApi"
                         />
-                        <el-input
-                          v-else-if="field.kind === 'input' || field.kind === 'number'"
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          :type="field.kind === 'number' ? 'number' : 'text'"
-                          :placeholder="field.placeholder"
-                          :disabled="isStageFieldDisabled(field)"
-                          @update:model-value="markStageDirty(selectedStageCode)"
-                        />
-                        <div v-else-if="field.kind === 'textarea'" class="textarea-field">
-                          <div v-if="field.quickTemplates?.length" class="quick-template-actions">
-                            <el-button
-                              v-for="template in field.quickTemplates"
-                              :key="template.label"
-                              size="small"
-                              plain
-                              :disabled="isStageFieldDisabled(field)"
-                              @click="applyQuickTemplate(field.key, template.value)"
-                            >
-                              {{ template.label }}
-                            </el-button>
-                          </div>
-                          <el-input
-                            v-model="stageForms[selectedStageCode][field.key]"
-                            type="textarea"
-                            :rows="field.rows || 3"
-                            :placeholder="field.placeholder"
-                            :disabled="isStageFieldDisabled(field)"
-                            @update:model-value="markStageDirty(selectedStageCode)"
-                          />
-                        </div>
-                        <div v-else-if="field.kind === 'diagnosis'" class="diagnosis-field">
-                          <el-select
-                            v-model="stageForms[selectedStageCode][field.key]"
-                            filterable
-                            allow-create
-                            default-first-option
-                            clearable
-                            :placeholder="field.placeholder || `请选择${field.label}`"
-                            :disabled="isStageFieldDisabled(field)"
-                            @update:model-value="markStageDirty(selectedStageCode)"
-                          >
-                            <el-option
-                              v-for="option in fieldOptions(field)"
-                              :key="option.value"
-                              :label="option.label"
-                              :value="option.value"
-                            />
-                          </el-select>
-                          <el-input
-                            v-if="field.supplementKey"
-                            v-model="stageForms[selectedStageCode][field.supplementKey]"
-                            type="textarea"
-                            :rows="2"
-                            placeholder="需要时补充一句自然语言所见或判断依据（可选）"
-                            :disabled="isStageFieldDisabled(field)"
-                            @update:model-value="markStageDirty(selectedStageCode)"
-                          />
-                        </div>
-                        <CreatableSelect
-                          v-else-if="field.kind === 'select' && field.creatable"
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          :options="fieldOptions(field)"
-                          :placeholder="field.placeholder || `请选择或直接输入${field.label}`"
-                          :disabled="isStageFieldDisabled(field)"
-                          @update:model-value="markStageDirty(selectedStageCode)"
-                        />
-                        <el-select
-                          v-else-if="field.kind === 'select'"
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          clearable
-                          filterable
-                          default-first-option
-                          :placeholder="field.placeholder || `请选择${field.label}`"
-                          :disabled="isStageFieldDisabled(field)"
-                          @update:model-value="markStageDirty(selectedStageCode)"
-                        >
-                          <el-option
-                            v-for="option in fieldOptions(field)"
-                            :key="option.value"
-                            :label="option.label"
-                            :value="option.value"
-                          />
-                        </el-select>
-                        <div v-else-if="field.kind === 'multi'" class="multi-field">
-                          <el-select
-                            v-model="stageForms[selectedStageCode][field.key]"
-                            multiple
-                            clearable
-                            filterable
-                            :allow-create="field.creatable || !fieldOptions(field).length"
-                            default-first-option
-                            :placeholder="field.placeholder || `请选择或输入${field.label}`"
-                            :disabled="isStageFieldDisabled(field)"
-                            @update:model-value="markStageDirty(selectedStageCode)"
-                          >
-                            <el-option
-                              v-for="option in fieldOptions(field)"
-                              :key="option.value"
-                              :label="option.label"
-                              :value="option.value"
-                            />
-                          </el-select>
-                          <el-input
-                            v-if="field.supplementKey"
-                            v-model="stageForms[selectedStageCode][field.supplementKey]"
-                            type="textarea"
-                            :rows="2"
-                            placeholder="可补充口语化描述（如患者自述过敏反应、具体过敏原，可选）"
-                            :disabled="isStageFieldDisabled(field)"
-                            @update:model-value="markStageDirty(selectedStageCode)"
-                          />
-                        </div>
-                        <el-date-picker
-                          v-else
-                          v-model="stageForms[selectedStageCode][field.key]"
-                          :type="field.kind === 'date' ? 'date' : 'datetime'"
-                          :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
-                          :placeholder="`请选择${field.label}`"
-                          :disabled="isStageFieldDisabled(field)"
-                          @update:model-value="markStageDirty(selectedStageCode)"
-                        />
-                      </el-form-item>
-                    </div>
-                  </el-form>
+                        <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
+                      </section>
 
-                  <DutyAssignmentPanel
-                    v-if="selectedStageCode === 'REGISTRATION'"
-                    :assignments="workspace.dutyAssignments || []"
-                    :disabled="!canMaintainDuties"
-                    :saving="actionLoading"
-                    @save="saveDutyAssignments"
-                  />
-
-                  <section v-if="selectedStageCode === 'REGISTRATION'" class="dr-image-section">
-                    <header class="dr-image-heading">
-                      <div>
-                        <span class="section-caption">前台岗影像采集</span>
-                        <strong>DR 影像资料</strong>
-                        <small>作为独立附件存储，不参与前置病历元数据生成；上传后各岗位在患者信息区优先可见。</small>
+                      <div v-if="selectedStageCode === 'INSPECTION'" class="inspection-view-tabs">
+                        <button type="button" :class="{ active: inspectionView === 'CURRENT' }" @click="showCurrentInspection">
+                          本次检查
+                        </button>
+                        <button type="button" :class="{ active: inspectionView === 'HISTORY' }" @click="showInspectionTimeline">
+                          检查与复查时间轴
+                        </button>
                       </div>
-                      <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
-                        {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
-                      </el-tag>
-                    </header>
-                    <AttachmentPreviewGallery
-                      v-if="registrationImageAttachments.length"
-                      :attachments="registrationImageAttachments"
-                      :removable="canModifySelectedStage"
-                      @download="downloadPreAiAttachmentApi"
-                      @remove="removeImageAttachment"
-                    />
-                    <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
-                    <div v-if="canModifySelectedStage" class="upload-actions">
-                      <label class="upload-button">
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*"
-                          @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '前台DR影像')"
-                        />
-                        <el-icon><Upload /></el-icon> 选择 DR 图片
-                      </label>
-                      <label class="upload-button camera-button">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '前台DR影像')"
-                        />
-                        <el-icon><Camera /></el-icon> 拍照上传
-                      </label>
-                    </div>
-                    <el-progress
-                      v-if="attachmentUpload.total"
-                      :percentage="attachmentUpload.percent"
-                      :status="
-                        attachmentUpload.failed
-                          ? 'warning'
-                          : attachmentUpload.success === attachmentUpload.total
-                            ? 'success'
-                            : undefined
-                      "
-                    />
-                    <small v-if="attachmentUpload.total" class="upload-summary">
-                      共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                      {{ attachmentUpload.failed }} 个
-                    </small>
-                    <div v-if="voidedAttachments.length" class="voided-attachments-row">
-                      <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
-                      <el-button
-                        v-for="attachment in voidedAttachments"
-                        :key="attachment.id"
-                        link
-                        type="primary"
-                        size="small"
-                        @click="restoreAttachment(attachment)"
-                      >
-                        恢复 {{ attachment.fileName }}
-                      </el-button>
-                    </div>
-                  </section>
 
-                  <section
-                    v-if="
-                      (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT') &&
-                      (selectedStageCode === 'INSPECTION' || selectedStageCode === 'SURGERY')
-                    "
-                    class="attachment-section"
-                  >
-                    <div class="section-caption">本阶段附件</div>
-                    <div class="attachment-list">
-                      <section v-for="group in selectedAttachmentGroups" :key="group.id" class="attachment-batch">
-                        <header>
-                          <strong>{{ group.name }}</strong>
-                          <small>{{ group.items.length }} 个文件</small>
-                        </header>
-                        <div v-for="attachment in group.items" :key="attachment.id" class="attachment-row">
-                          <div class="attachment-name">
-                            <span>{{ attachment.fileName }}</span>
-                            <small>{{ attachment.relativePath || attachment.description || "独立文件" }}</small>
+                      <section
+                        v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'HISTORY'"
+                        v-loading="timelineLoading"
+                        class="inspection-timeline"
+                      >
+                        <el-empty v-if="!inspectionTimeline.length" description="暂无历次检查记录" />
+                        <article
+                          v-for="(node, index) in inspectionTimeline"
+                          :key="node.encounterId"
+                          class="timeline-node"
+                          :class="{
+                            latest: index === inspectionTimeline.length - 1
+                          }"
+                        >
+                          <i class="timeline-dot"></i>
+                          <header>
+                            <div>
+                              <strong>第 {{ node.visitNo }} 次来访 · {{ node.visitDate || "日期待补" }}</strong>
+                              <small>{{ node.caseToken }} · {{ routeLabel(node.route) }}</small>
+                            </div>
+                            <el-tag :type="stageStatusType(node.inspectionStatus)">{{
+                              stageStatusLabel[node.inspectionStatus]
+                            }}</el-tag>
+                          </header>
+                          <div v-if="node.inspection.nextReviewAt || node.inspection.nextReviewNote" class="timeline-follow-up">
+                            <strong>复查安排</strong>
+                            <span v-if="node.inspection.nextReviewAt"
+                              >下次复查：{{ humanValue(node.inspection.nextReviewAt) }}</span
+                            >
+                            <p v-if="node.inspection.nextReviewNote">{{ humanValue(node.inspection.nextReviewNote) }}</p>
                           </div>
-                          <el-button link type="primary" @click="downloadPreAiAttachmentApi(attachment)">下载</el-button>
-                          <el-button v-if="canModifySelectedStage" link type="danger" @click="voidAttachment(attachment.id)"
-                            >作废</el-button
-                          >
+                          <div class="timeline-facts">
+                            <div v-for="entry in inspectionTimelineEntries(node.inspection)" :key="entry[0]">
+                              <span>{{ fieldLabel("INSPECTION", entry[0]) }}</span>
+                              <p>{{ humanValue(entry[1]) }}</p>
+                            </div>
+                          </div>
+                          <div v-if="node.attachments.length" class="timeline-attachment-groups">
+                            <section
+                              v-for="group in timelineAttachmentGroups(node.attachments)"
+                              :key="group.id"
+                              class="timeline-attachment-group"
+                            >
+                              <strong>{{ group.name }}</strong>
+                              <AttachmentPreviewGallery
+                                :attachments="group.items"
+                                compact
+                                @download="downloadPreAiAttachmentApi"
+                              />
+                            </section>
+                          </div>
+                          <details v-if="hasVisitMeta(node.visitMeta)" class="visit-meta-summary">
+                            <summary>来访描述与交费参考</summary>
+                            <p v-if="node.visitMeta.visitReason">来访原因：{{ node.visitMeta.visitReason }}</p>
+                            <p v-if="node.visitMeta.description">描述：{{ node.visitMeta.description }}</p>
+                            <p>交费参考：{{ paymentStatusLabel(node.visitMeta.paymentStatus) }}</p>
+                          </details>
+                        </article>
+                      </section>
+
+                      <section v-if="selectedStageCode === 'RECEPTION'" class="upstream-image-section primary-evidence-section">
+                        <div class="primary-evidence-heading">
+                          <div>
+                            <span class="section-caption">接诊首要复核资料</span>
+                            <strong>检查室原始图片</strong>
+                            <small>先核对一手图片，再结合检查事实完成接诊评估。</small>
+                          </div>
+                          <el-tag effect="plain">{{ inspectionImageAttachments.length }} 张</el-tag>
+                        </div>
+                        <AttachmentPreviewGallery
+                          v-if="inspectionImageAttachments.length"
+                          :attachments="inspectionImageAttachments"
+                          @download="downloadPreAiAttachmentApi"
+                        />
+                        <el-empty v-else :image-size="64" description="检查室尚未上传原始图片" />
+                      </section>
+
+                      <section
+                        v-if="upstreamStages.length && (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')"
+                        class="upstream-section"
+                      >
+                        <header class="upstream-heading">
+                          <div>
+                            <strong>前置岗位事实</strong>
+                            <small>关键结论直接展示，完整采集项按岗位展开核对。</small>
+                          </div>
+                          <el-tag type="info" effect="plain">{{ upstreamStages.length }} 个岗位</el-tag>
+                        </header>
+                        <div class="upstream-stage-list">
+                          <article v-for="item in upstreamStages" :key="item.stageCode" class="upstream-stage-card">
+                            <header>
+                              <div class="upstream-stage-title">
+                                <strong>{{ stageByCode(item.stageCode).title }}</strong>
+                                <small>{{ upstreamStageTime(item) }}</small>
+                              </div>
+                              <el-tag :type="stageStatusType(item.status)" size="small" effect="plain">
+                                {{ stageStatusLabel[item.status] }}
+                              </el-tag>
+                            </header>
+                            <div class="upstream-summary-label">
+                              <span>重点事实</span>
+                              <small>优先核对影响本岗位判断的已完成信息</small>
+                            </div>
+                            <div class="upstream-summary-grid">
+                              <div v-for="entry in upstreamSummaryEntries(item)" :key="entry[0]">
+                                <span>{{ fieldLabel(item.stageCode, entry[0]) }}</span>
+                                <strong :title="humanValue(entry[1])">{{ humanValue(entry[1]) }}</strong>
+                              </div>
+                            </div>
+                            <el-collapse class="upstream-detail-collapse">
+                              <el-collapse-item :title="`查看全部 ${nonEmptyEntries(item.data).length} 项已采集事实`">
+                                <dl class="read-only-grid">
+                                  <div v-for="entry in nonEmptyEntries(item.data)" :key="entry[0]">
+                                    <dt>{{ fieldLabel(item.stageCode, entry[0]) }}</dt>
+                                    <dd>{{ humanValue(entry[1]) }}</dd>
+                                  </div>
+                                </dl>
+                              </el-collapse-item>
+                            </el-collapse>
+                          </article>
                         </div>
                       </section>
-                      <div v-if="canModifySelectedStage" class="upload-actions">
+
+                      <ClinicalTemplateToolbar
+                        v-if="
+                          ['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) &&
+                          (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')
+                        "
+                        :simplified="selectedStageCode === 'INSPECTION'"
+                        :model-value="clinicalTemplateIds(selectedStageCode)"
+                        :slot-values="stageForms[selectedStageCode].clinicalTemplateSlots || {}"
+                        :disabled="!canModifySelectedStage"
+                        :auto-match-label="selectedStageCode === 'RECEPTION' ? autoMatchedTemplateLabel : ''"
+                        @update:model-value="value => onClinicalTemplateSelection(selectedStageCode, value)"
+                        @update:slot-values="value => updateStageTemplateSlots(selectedStageCode, value)"
+                        @apply="(mode, ids) => applyStageClinicalTemplate(selectedStageCode, mode, ids)"
+                      />
+
+                      <section
+                        v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
+                        class="inspection-narrative-edit"
+                      >
+                        <div class="narrative-heading">
+                          <strong>检查记录</strong>
+                          <small>模板已按默认变量生成全文，可直接在本框修改；切换病种将重新生成并覆盖</small>
+                        </div>
+                        <el-input
+                          v-model="stageForms.INSPECTION.inspectionNarrative"
+                          type="textarea"
+                          :rows="16"
+                          :disabled="!canModifySelectedStage"
+                          @update:model-value="markStageDirty('INSPECTION')"
+                        />
+                      </section>
+
+                      <section v-if="selectedStageCode !== 'INSPECTION' && secondaryStageFieldsCount" class="field-noise-toolbar">
+                        <div>
+                          <strong>精简填写视图</strong>
+                          <small>默认收起低频补充项，仅降低录入噪音；原字段、自动生成和提交载荷保持不变。</small>
+                        </div>
+                        <el-button size="small" plain @click="compactStageFieldsExpanded = !compactStageFieldsExpanded">
+                          {{ compactStageFieldsExpanded ? "收起低频字段" : `展开 ${secondaryStageFieldsCount} 个可选字段` }}
+                        </el-button>
+                      </section>
+
+                      <el-form
+                        v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
+                        label-position="top"
+                        class="stage-form"
+                      >
+                        <div class="form-grid">
+                          <el-form-item
+                            v-for="field in stageFormFields"
+                            :key="field.key"
+                            :label="field.label"
+                            :required="field.required"
+                            v-show="!isSecondaryStageField(field) || compactStageFieldsExpanded"
+                            :class="{
+                              'span-2': field.span === 2,
+                              'priority-field': field.emphasis === 'priority',
+                              'secondary-field': isSecondaryStageField(field),
+                              'history-intake-field': isHistoryIntakeKey(field.key) && selectedStageCode === 'INSPECTION'
+                            }"
+                          >
+                            <StructuredField
+                              v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
+                              v-model="stageForms[selectedStageCode][field.key]"
+                              :field="field"
+                              :form="stageForms[selectedStageCode]"
+                              :generated-text="generatedTemplateText(field, stageForms[selectedStageCode])"
+                              :source-hash="templateSourceHash(field)"
+                              :disabled="isStageFieldDisabled(field)"
+                              @patch="value => patchStageForm(selectedStageCode, value)"
+                            />
+                            <el-input
+                              v-else-if="field.kind === 'input' || field.kind === 'number'"
+                              v-model="stageForms[selectedStageCode][field.key]"
+                              :type="field.kind === 'number' ? 'number' : 'text'"
+                              :placeholder="field.placeholder"
+                              :disabled="isStageFieldDisabled(field)"
+                              @update:model-value="markStageDirty(selectedStageCode)"
+                            />
+                            <div v-else-if="field.kind === 'textarea'" class="textarea-field">
+                              <div v-if="field.quickTemplates?.length" class="quick-template-actions">
+                                <el-button
+                                  v-for="template in field.quickTemplates"
+                                  :key="template.label"
+                                  size="small"
+                                  plain
+                                  :disabled="isStageFieldDisabled(field)"
+                                  @click="applyQuickTemplate(field.key, template.value)"
+                                >
+                                  {{ template.label }}
+                                </el-button>
+                              </div>
+                              <el-input
+                                v-model="stageForms[selectedStageCode][field.key]"
+                                type="textarea"
+                                :rows="field.rows || 3"
+                                :placeholder="field.placeholder"
+                                :disabled="isStageFieldDisabled(field)"
+                                @update:model-value="markStageDirty(selectedStageCode)"
+                              />
+                            </div>
+                            <div v-else-if="field.kind === 'diagnosis'" class="diagnosis-field">
+                              <el-select
+                                v-model="stageForms[selectedStageCode][field.key]"
+                                filterable
+                                allow-create
+                                default-first-option
+                                clearable
+                                :placeholder="field.placeholder || `请选择${field.label}`"
+                                :disabled="isStageFieldDisabled(field)"
+                                @update:model-value="markStageDirty(selectedStageCode)"
+                              >
+                                <el-option
+                                  v-for="option in fieldOptions(field)"
+                                  :key="option.value"
+                                  :label="option.label"
+                                  :value="option.value"
+                                />
+                              </el-select>
+                              <el-input
+                                v-if="field.supplementKey"
+                                v-model="stageForms[selectedStageCode][field.supplementKey]"
+                                type="textarea"
+                                :rows="2"
+                                placeholder="需要时补充一句自然语言所见或判断依据（可选）"
+                                :disabled="isStageFieldDisabled(field)"
+                                @update:model-value="markStageDirty(selectedStageCode)"
+                              />
+                            </div>
+                            <CreatableSelect
+                              v-else-if="field.kind === 'select' && field.creatable"
+                              v-model="stageForms[selectedStageCode][field.key]"
+                              :options="fieldOptions(field)"
+                              :placeholder="field.placeholder || `请选择或直接输入${field.label}`"
+                              :disabled="isStageFieldDisabled(field)"
+                              @update:model-value="markStageDirty(selectedStageCode)"
+                            />
+                            <el-select
+                              v-else-if="field.kind === 'select'"
+                              v-model="stageForms[selectedStageCode][field.key]"
+                              clearable
+                              filterable
+                              default-first-option
+                              :placeholder="field.placeholder || `请选择${field.label}`"
+                              :disabled="isStageFieldDisabled(field)"
+                              @update:model-value="markStageDirty(selectedStageCode)"
+                            >
+                              <el-option
+                                v-for="option in fieldOptions(field)"
+                                :key="option.value"
+                                :label="option.label"
+                                :value="option.value"
+                              />
+                            </el-select>
+                            <div v-else-if="field.kind === 'multi'" class="multi-field">
+                              <el-select
+                                v-model="stageForms[selectedStageCode][field.key]"
+                                multiple
+                                clearable
+                                filterable
+                                :allow-create="field.creatable || !fieldOptions(field).length"
+                                default-first-option
+                                :placeholder="field.placeholder || `请选择或输入${field.label}`"
+                                :disabled="isStageFieldDisabled(field)"
+                                @update:model-value="markStageDirty(selectedStageCode)"
+                              >
+                                <el-option
+                                  v-for="option in fieldOptions(field)"
+                                  :key="option.value"
+                                  :label="option.label"
+                                  :value="option.value"
+                                />
+                              </el-select>
+                              <el-input
+                                v-if="field.supplementKey"
+                                v-model="stageForms[selectedStageCode][field.supplementKey]"
+                                type="textarea"
+                                :rows="2"
+                                placeholder="可补充口语化描述（如患者自述过敏反应、具体过敏原，可选）"
+                                :disabled="isStageFieldDisabled(field)"
+                                @update:model-value="markStageDirty(selectedStageCode)"
+                              />
+                            </div>
+                            <el-date-picker
+                              v-else
+                              v-model="stageForms[selectedStageCode][field.key]"
+                              :type="field.kind === 'date' ? 'date' : 'datetime'"
+                              :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
+                              :placeholder="`请选择${field.label}`"
+                              :disabled="isStageFieldDisabled(field)"
+                              @update:model-value="markStageDirty(selectedStageCode)"
+                            />
+                          </el-form-item>
+                        </div>
+                      </el-form>
+
+                      <DutyAssignmentPanel
+                        v-if="selectedStageCode === 'REGISTRATION'"
+                        :assignments="workspace.dutyAssignments || []"
+                        :disabled="!canMaintainDuties"
+                        :saving="actionLoading"
+                        @save="saveDutyAssignments"
+                      />
+
+                      <section v-if="selectedStageCode === 'REGISTRATION'" class="dr-image-section">
+                        <header class="dr-image-heading">
+                          <div>
+                            <span class="section-caption">前台岗影像采集</span>
+                            <strong>DR 影像资料</strong>
+                            <small>作为独立附件存储，不参与前置病历元数据生成；上传后各岗位在患者信息区优先可见。</small>
+                          </div>
+                          <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                            {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                          </el-tag>
+                        </header>
+                        <AttachmentPreviewGallery
+                          v-if="registrationImageAttachments.length"
+                          :attachments="registrationImageAttachments"
+                          :removable="canModifySelectedStage"
+                          @download="downloadPreAiAttachmentApi"
+                          @remove="removeImageAttachment"
+                        />
+                        <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
+                        <div v-if="canModifySelectedStage" class="upload-actions">
+                          <label class="upload-button">
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*"
+                              @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '前台DR影像')"
+                            />
+                            <el-icon><Upload /></el-icon> 选择 DR 图片
+                          </label>
+                          <label class="upload-button camera-button">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '前台DR影像')"
+                            />
+                            <el-icon><Camera /></el-icon> 拍照上传
+                          </label>
+                        </div>
+                        <el-progress
+                          v-if="attachmentUpload.total"
+                          :percentage="attachmentUpload.percent"
+                          :status="
+                            attachmentUpload.failed
+                              ? 'warning'
+                              : attachmentUpload.success === attachmentUpload.total
+                                ? 'success'
+                                : undefined
+                          "
+                        />
+                        <small v-if="attachmentUpload.total" class="upload-summary">
+                          共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                          {{ attachmentUpload.failed }} 个
+                        </small>
+                        <div v-if="voidedAttachments.length" class="voided-attachments-row">
+                          <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
+                          <el-button
+                            v-for="attachment in voidedAttachments"
+                            :key="attachment.id"
+                            link
+                            type="primary"
+                            size="small"
+                            @click="restoreAttachment(attachment)"
+                          >
+                            恢复 {{ attachment.fileName }}
+                          </el-button>
+                        </div>
+                      </section>
+
+                      <section
+                        v-if="
+                          (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT') &&
+                          (selectedStageCode === 'INSPECTION' || selectedStageCode === 'SURGERY')
+                        "
+                        class="attachment-section"
+                      >
+                        <div class="section-caption">本阶段附件</div>
+                        <div class="attachment-list">
+                          <section v-for="group in selectedAttachmentGroups" :key="group.id" class="attachment-batch">
+                            <header>
+                              <strong>{{ group.name }}</strong>
+                              <small>{{ group.items.length }} 个文件</small>
+                            </header>
+                            <div v-for="attachment in group.items" :key="attachment.id" class="attachment-row">
+                              <div class="attachment-name">
+                                <span>{{ attachment.fileName }}</span>
+                                <small>{{ attachment.relativePath || attachment.description || "独立文件" }}</small>
+                              </div>
+                              <el-button link type="primary" @click="downloadPreAiAttachmentApi(attachment)">下载</el-button>
+                              <el-button v-if="canModifySelectedStage" link type="danger" @click="voidAttachment(attachment.id)"
+                                >作废</el-button
+                              >
+                            </div>
+                          </section>
+                          <div v-if="canModifySelectedStage" class="upload-actions">
+                            <label class="upload-button">
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*,.pdf"
+                                @change="event => uploadAttachments(event, selectedStageCode)"
+                              />
+                              <el-icon><Upload /></el-icon> 选择多个文件
+                            </label>
+                            <label class="upload-button">
+                              <input
+                                type="file"
+                                multiple
+                                webkitdirectory
+                                @change="event => uploadAttachments(event, selectedStageCode, undefined, true)"
+                              />
+                              <el-icon><FolderOpened /></el-icon> 选择文件夹
+                            </label>
+                          </div>
+                          <el-progress
+                            v-if="attachmentUpload.total"
+                            :percentage="attachmentUpload.percent"
+                            :status="
+                              attachmentUpload.failed
+                                ? 'warning'
+                                : attachmentUpload.success === attachmentUpload.total
+                                  ? 'success'
+                                  : undefined
+                            "
+                          />
+                          <small v-if="attachmentUpload.total" class="upload-summary">
+                            共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                            {{ attachmentUpload.failed }} 个
+                          </small>
+                        </div>
+                      </section>
+
+                      <FollowUpTimeline
+                        v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
+                        :patient-case-id="workspace?.encounter?.patientCaseId"
+                        :encounter-id="selectedEncounterId"
+                        :can-manage="canManageFollowUp"
+                      />
+
+                      <footer
+                        v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
+                        class="panel-actions sticky-actions"
+                      >
+                        <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
+                          >退回修改</el-button
+                        >
+                        <div></div>
+                        <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
+                          >保存草稿</el-button
+                        >
+                        <el-button
+                          v-if="canEditSelectedStage"
+                          type="primary"
+                          :loading="actionLoading"
+                          @click="completeSelectedStage"
+                          >完成并交接</el-button
+                        >
+                        <el-button
+                          v-if="canTerminateReception"
+                          type="danger"
+                          plain
+                          :loading="actionLoading"
+                          @click="terminateReception"
+                          >患者离院（不治疗）</el-button
+                        >
+                        <el-button
+                          v-if="canPhysicianConfirmSelectedSurgery"
+                          type="primary"
+                          :loading="actionLoading"
+                          @click="confirmSelectedSurgery"
+                        >
+                          医生确认手术事实
+                        </el-button>
+                        <el-button
+                          v-if="canCorrectSelectedStage"
+                          type="primary"
+                          :loading="actionLoading"
+                          @click="correctSelectedStage"
+                          >保存纠错并重新复核</el-button
+                        >
+                      </footer>
+                    </template>
+
+                    <DoctorReviewPanel
+                      v-else
+                      v-model:statement="reviewStatement"
+                      v-model:critical-acknowledged="criticalAcknowledged"
+                      :preview="reviewPreview"
+                      :sections="maskedSections"
+                      :can-review="canReview"
+                      :can-generate-target="canReview && Boolean(workspace.encounter.id)"
+                      :loading="actionLoading"
+                      :version-loading="targetVersionsLoading"
+                      :encounter-status="workspace.encounter.status"
+                      :exports="workspace.exports"
+                      :target-versions="templateTargetVersions"
+                      :ai-versions="aiGeneratedVersions"
+                      :latest-target-version-id="latestGeneratedTargetVersionId"
+                      :latest-export-version-id="latestGeneratedExportVersionId"
+                      :latest-ai-version-id="latestAiGeneratedVersionId"
+                      :deleting-target-version-id="deletingTargetVersionId"
+                      @refresh="loadReviewPreview"
+                      @confirm="confirmReview"
+                      @generate="generateExport"
+                      @generate-target="generateTargetMedicalRecord"
+                      @open-record-chat="openRecordChat"
+                      @open-health-archive="openHealthArchive"
+                      @download="downloadPreAiExportApi"
+                      @download-target="downloadMedicalRecordApi"
+                      @download-ai="downloadAiGeneratedRecord"
+                      @delete-target="deleteTargetMedicalRecord"
+                    />
+                  </section>
+
+                  <section v-else :key="'auxiliary'" class="auxiliary-stack">
+                    <section class="dr-image-section aux-dr-section">
+                      <header class="dr-image-heading">
+                        <div>
+                          <span class="section-caption">辅助检查 · 影像采集</span>
+                          <strong>DR 影像资料</strong>
+                          <small
+                            >与前台岗共用同一影像库，作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区优先可见。</small
+                          >
+                        </div>
+                        <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                          {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                        </el-tag>
+                      </header>
+                      <AttachmentPreviewGallery
+                        v-if="registrationImageAttachments.length"
+                        :attachments="registrationImageAttachments"
+                        :removable="canOpenLabWorkbench"
+                        @download="downloadPreAiAttachmentApi"
+                        @remove="removeImageAttachment"
+                      />
+                      <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
+                      <div v-if="canOpenLabWorkbench" class="upload-actions">
                         <label class="upload-button">
                           <input
                             type="file"
                             multiple
-                            accept="image/*,.pdf"
-                            @change="event => uploadAttachments(event, selectedStageCode)"
+                            accept="image/*"
+                            @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
                           />
-                          <el-icon><Upload /></el-icon> 选择多个文件
+                          <el-icon><Upload /></el-icon> 选择 DR 图片
                         </label>
-                        <label class="upload-button">
+                        <label class="upload-button camera-button">
                           <input
                             type="file"
-                            multiple
-                            webkitdirectory
-                            @change="event => uploadAttachments(event, selectedStageCode, undefined, true)"
+                            accept="image/*"
+                            capture="environment"
+                            @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
                           />
-                          <el-icon><FolderOpened /></el-icon> 选择文件夹
+                          <el-icon><Camera /></el-icon> 拍照上传
                         </label>
                       </div>
                       <el-progress
@@ -847,244 +1008,130 @@
                         共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
                         {{ attachmentUpload.failed }} 个
                       </small>
+                    </section>
+                    <section class="dr-image-section aux-dr-section endoscopy-report-section">
+                      <header class="dr-image-heading">
+                        <div>
+                          <span class="section-caption">辅助检查 · 报告采集</span>
+                          <strong>胃肠镜检查报告单</strong>
+                          <small
+                            >作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区可见，支持重复上传与误删恢复。</small
+                          >
+                        </div>
+                        <el-tag :type="endoscopyReportAttachments.length ? 'primary' : 'info'" effect="plain">
+                          {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
+                        </el-tag>
+                      </header>
+                      <AttachmentPreviewGallery
+                        v-if="endoscopyReportAttachments.length"
+                        :attachments="endoscopyReportAttachments"
+                        :removable="canOpenLabWorkbench"
+                        @download="downloadPreAiAttachmentApi"
+                        @remove="removeImageAttachment"
+                      />
+                      <el-empty v-else :image-size="56" description="暂无胃肠镜报告，可在下方上传或拍照采集" />
+                      <div v-if="canOpenLabWorkbench" class="upload-actions">
+                        <label class="upload-button">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,.pdf"
+                            @change="
+                              event =>
+                                uploadAttachments(
+                                  event,
+                                  'REGISTRATION',
+                                  undefined,
+                                  false,
+                                  '胃肠镜报告',
+                                  endoscopyReportDescription
+                                )
+                            "
+                          />
+                          <el-icon><Upload /></el-icon> 选择报告图片/PDF
+                        </label>
+                        <label class="upload-button camera-button">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            @change="
+                              event =>
+                                uploadAttachments(
+                                  event,
+                                  'REGISTRATION',
+                                  undefined,
+                                  false,
+                                  '胃肠镜报告',
+                                  endoscopyReportDescription
+                                )
+                            "
+                          />
+                          <el-icon><Camera /></el-icon> 拍照上传
+                        </label>
+                      </div>
+                      <el-progress
+                        v-if="attachmentUpload.total"
+                        :percentage="attachmentUpload.percent"
+                        :status="
+                          attachmentUpload.failed
+                            ? 'warning'
+                            : attachmentUpload.success === attachmentUpload.total
+                              ? 'success'
+                              : undefined
+                        "
+                      />
+                      <small v-if="attachmentUpload.total" class="upload-summary">
+                        共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                        {{ attachmentUpload.failed }} 个
+                      </small>
+                    </section>
+                    <div v-if="voidedAttachments.length" class="voided-attachments-row aux-voided-row">
+                      <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
+                      <el-button
+                        v-for="attachment in voidedAttachments"
+                        :key="attachment.id"
+                        link
+                        type="primary"
+                        size="small"
+                        @click="restoreAttachment(attachment)"
+                      >
+                        恢复 {{ attachment.fileName }}
+                      </el-button>
                     </div>
+                    <AuxiliaryTaskPanel
+                      :workspace="workspace"
+                      :capabilities="authStore.capabilities"
+                      :permissions="authStore.auxiliaryPermissions"
+                      :current-user-id="currentUserId"
+                      :current-user-name="currentUserName"
+                      :loading="actionLoading"
+                      :can-return="canReview"
+                      @updated="hydrateWorkspace"
+                      @return-task="returnAuxTask"
+                      @draft-change="auxiliaryTasksDirty = $event"
+                    />
+                    <LabReportPanel
+                      v-model:active-report-id="activeLabReportId"
+                      :workspace="workspace"
+                      :lab-task="labTask"
+                      :legacy-tasks="legacyAuxiliaryTasks"
+                      :can-open-workbench="canOpenLabWorkbench"
+                      :can-review="canReview"
+                      :can-complete="canCompleteLab"
+                      :loading="actionLoading"
+                      :task-label="auxiliaryTaskLabel"
+                      :human-value="humanValue"
+                      :abnormal-label="labMetricAbnormalLabel"
+                      :is-metric-abnormal="isLabMetricAbnormal"
+                      @open-workbench="openLabWorkbench"
+                      @return-task="returnAuxTask"
+                      @complete="completeLab"
+                    />
                   </section>
-
-                  <FollowUpTimeline
-                    v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
-                    :patient-case-id="workspace?.encounter?.patientCaseId"
-                    :encounter-id="selectedEncounterId"
-                    :can-manage="canManageFollowUp"
-                  />
-
-                  <footer
-                    v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
-                    class="panel-actions sticky-actions"
-                  >
-                    <el-button v-if="canReturnSelectedStage" type="warning" plain @click="returnStage(selectedStageCode)"
-                      >退回修改</el-button
-                    >
-                    <div></div>
-                    <el-button v-if="canEditSelectedStage" :loading="actionLoading" @click="saveSelectedStage"
-                      >保存草稿</el-button
-                    >
-                    <el-button v-if="canEditSelectedStage" type="primary" :loading="actionLoading" @click="completeSelectedStage"
-                      >完成并交接</el-button
-                    >
-                    <el-button
-                      v-if="canTerminateReception"
-                      type="danger"
-                      plain
-                      :loading="actionLoading"
-                      @click="terminateReception"
-                      >患者离院（不治疗）</el-button
-                    >
-                    <el-button
-                      v-if="canPhysicianConfirmSelectedSurgery"
-                      type="primary"
-                      :loading="actionLoading"
-                      @click="confirmSelectedSurgery"
-                    >
-                      医生确认手术事实
-                    </el-button>
-                    <el-button
-                      v-if="canCorrectSelectedStage"
-                      type="primary"
-                      :loading="actionLoading"
-                      @click="correctSelectedStage"
-                      >保存纠错并重新复核</el-button
-                    >
-                  </footer>
-                </template>
-
-                <DoctorReviewPanel
-                  v-else
-                  v-model:statement="reviewStatement"
-                  v-model:critical-acknowledged="criticalAcknowledged"
-                  :preview="reviewPreview"
-                  :sections="maskedSections"
-                  :can-review="canReview"
-                  :can-generate-target="canReview && Boolean(workspace.encounter.id)"
-                  :loading="actionLoading"
-                  :version-loading="targetVersionsLoading"
-                  :encounter-status="workspace.encounter.status"
-                  :exports="workspace.exports"
-                  :target-versions="templateTargetVersions"
-                  :ai-versions="aiGeneratedVersions"
-                  :latest-target-version-id="latestGeneratedTargetVersionId"
-                  :latest-export-version-id="latestGeneratedExportVersionId"
-                  :latest-ai-version-id="latestAiGeneratedVersionId"
-                  :deleting-target-version-id="deletingTargetVersionId"
-                  @refresh="loadReviewPreview"
-                  @confirm="confirmReview"
-                  @generate="generateExport"
-                  @generate-target="generateTargetMedicalRecord"
-                  @open-record-chat="openRecordChat"
-                  @open-health-archive="openHealthArchive"
-                  @download="downloadPreAiExportApi"
-                  @download-target="downloadMedicalRecordApi"
-                  @download-ai="downloadAiGeneratedRecord"
-                  @delete-target="deleteTargetMedicalRecord"
-                />
-              </section>
-
-              <section v-else :key="'auxiliary'" class="auxiliary-stack">
-                <section class="dr-image-section aux-dr-section">
-                  <header class="dr-image-heading">
-                    <div>
-                      <span class="section-caption">辅助检查 · 影像采集</span>
-                      <strong>DR 影像资料</strong>
-                      <small>与前台岗共用同一影像库，作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区优先可见。</small>
-                    </div>
-                    <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
-                      {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
-                    </el-tag>
-                  </header>
-                  <AttachmentPreviewGallery
-                    v-if="registrationImageAttachments.length"
-                    :attachments="registrationImageAttachments"
-                    :removable="canOpenLabWorkbench"
-                    @download="downloadPreAiAttachmentApi"
-                    @remove="removeImageAttachment"
-                  />
-                  <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
-                  <div v-if="canOpenLabWorkbench" class="upload-actions">
-                    <label class="upload-button">
-                      <input
-                        type="file"
-                        multiple
-                        accept="image/*"
-                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
-                      />
-                      <el-icon><Upload /></el-icon> 选择 DR 图片
-                    </label>
-                    <label class="upload-button camera-button">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
-                      />
-                      <el-icon><Camera /></el-icon> 拍照上传
-                    </label>
-                  </div>
-                  <el-progress
-                    v-if="attachmentUpload.total"
-                    :percentage="attachmentUpload.percent"
-                    :status="
-                      attachmentUpload.failed
-                        ? 'warning'
-                        : attachmentUpload.success === attachmentUpload.total
-                          ? 'success'
-                          : undefined
-                    "
-                  />
-                  <small v-if="attachmentUpload.total" class="upload-summary">
-                    共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                    {{ attachmentUpload.failed }} 个
-                  </small>
-                </section>
-                <section class="dr-image-section aux-dr-section endoscopy-report-section">
-                  <header class="dr-image-heading">
-                    <div>
-                      <span class="section-caption">辅助检查 · 报告采集</span>
-                      <strong>胃肠镜检查报告单</strong>
-                      <small>作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区可见，支持重复上传与误删恢复。</small>
-                    </div>
-                    <el-tag :type="endoscopyReportAttachments.length ? 'primary' : 'info'" effect="plain">
-                      {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
-                    </el-tag>
-                  </header>
-                  <AttachmentPreviewGallery
-                    v-if="endoscopyReportAttachments.length"
-                    :attachments="endoscopyReportAttachments"
-                    :removable="canOpenLabWorkbench"
-                    @download="downloadPreAiAttachmentApi"
-                    @remove="removeImageAttachment"
-                  />
-                  <el-empty v-else :image-size="56" description="暂无胃肠镜报告，可在下方上传或拍照采集" />
-                  <div v-if="canOpenLabWorkbench" class="upload-actions">
-                    <label class="upload-button">
-                      <input
-                        type="file"
-                        multiple
-                        accept="image/*,.pdf"
-                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '胃肠镜报告', endoscopyReportDescription)"
-                      />
-                      <el-icon><Upload /></el-icon> 选择报告图片/PDF
-                    </label>
-                    <label class="upload-button camera-button">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '胃肠镜报告', endoscopyReportDescription)"
-                      />
-                      <el-icon><Camera /></el-icon> 拍照上传
-                    </label>
-                  </div>
-                  <el-progress
-                    v-if="attachmentUpload.total"
-                    :percentage="attachmentUpload.percent"
-                    :status="
-                      attachmentUpload.failed
-                        ? 'warning'
-                        : attachmentUpload.success === attachmentUpload.total
-                          ? 'success'
-                          : undefined
-                    "
-                  />
-                  <small v-if="attachmentUpload.total" class="upload-summary">
-                    共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                    {{ attachmentUpload.failed }} 个
-                  </small>
-                </section>
-                <div v-if="voidedAttachments.length" class="voided-attachments-row aux-voided-row">
-                  <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
-                  <el-button
-                    v-for="attachment in voidedAttachments"
-                    :key="attachment.id"
-                    link
-                    type="primary"
-                    size="small"
-                    @click="restoreAttachment(attachment)"
-                  >
-                    恢复 {{ attachment.fileName }}
-                  </el-button>
-                </div>
-                <AuxiliaryTaskPanel
-                  :workspace="workspace"
-                  :capabilities="authStore.capabilities"
-                  :permissions="authStore.auxiliaryPermissions"
-                  :current-user-id="currentUserId"
-                  :current-user-name="currentUserName"
-                :loading="actionLoading"
-                :can-return="canReview"
-                @updated="hydrateWorkspace"
-                @return-task="returnAuxTask"
-                @draft-change="auxiliaryTasksDirty = $event"
-              />
-                <LabReportPanel
-                  v-model:active-report-id="activeLabReportId"
-                  :workspace="workspace"
-                  :lab-task="labTask"
-                  :legacy-tasks="legacyAuxiliaryTasks"
-                  :can-open-workbench="canOpenLabWorkbench"
-                  :can-review="canReview"
-                  :can-complete="canCompleteLab"
-                  :loading="actionLoading"
-                  :task-label="auxiliaryTaskLabel"
-                  :human-value="humanValue"
-                  :abnormal-label="labMetricAbnormalLabel"
-                  :is-metric-abnormal="isLabMetricAbnormal"
-                  @open-workbench="openLabWorkbench"
-                  @return-task="returnAuxTask"
-                  @complete="completeLab"
-                />
-              </section>
-              </Transition>
-            </div>
-          </Transition>
+                </Transition>
+              </div>
+            </Transition>
           </template>
         </template>
       </main>
@@ -1819,6 +1866,16 @@ const compactStageFieldKeys: Partial<Record<PreAiStageCode, Set<string>>> = {
     "registrationNote"
   ]),
   INSPECTION: new Set(["inspectionSpecialDescription", "nextReviewAt", "nextReviewNote"]),
+  NURSING: new Set([
+    "heightCm",
+    "weightKg",
+    "painScore",
+    "fallRisk",
+    "pressureUlcerRisk",
+    "nutritionScreening",
+    "selfCareAbility",
+    "nursingAssessmentNote"
+  ]),
   RECEPTION: new Set([
     "onsetTrigger",
     "symptomPattern",
@@ -1951,6 +2008,7 @@ const stageForms = reactive<Record<PreAiStageCode, Record<string, any>>>({
   REGISTRATION: {},
   INSPECTION: {},
   RECEPTION: {},
+  NURSING: {},
   TCM: {},
   DOCTOR: {},
   SURGERY: {},
@@ -1960,6 +2018,7 @@ const stageDirty = reactive<Record<PreAiStageCode, boolean>>({
   REGISTRATION: false,
   INSPECTION: false,
   RECEPTION: false,
+  NURSING: false,
   TCM: false,
   DOCTOR: false,
   SURGERY: false,
@@ -2263,7 +2322,8 @@ const followUpForm = reactive<Record<string, any>>({
   visitDate: currentLocalDateTime()
 });
 
-const patientCaseRecordTime = (item: PreAiPatientCase) => item.createdAt || item.latestEncounter?.visitDate || item.updatedAt || "";
+const patientCaseRecordTime = (item: PreAiPatientCase) =>
+  item.createdAt || item.latestEncounter?.visitDate || item.updatedAt || "";
 const patientCaseRecordTimestamp = (item: PreAiPatientCase) => {
   const raw = patientCaseRecordTime(item);
   if (!raw) return 0;
@@ -2392,12 +2452,18 @@ const patientArchiveStageData = (value: PreAiWorkspace, code: PreAiStageCode) =>
   value.stages.find(stage => stage.stageCode === code)?.data || {};
 const patientArchiveImagesFromWorkspace = (value: PreAiWorkspace) =>
   value.attachments
-    .filter(attachment => attachment.stageCode && patientArchiveImageStageCodes.includes(attachment.stageCode) && isImageAttachment(attachment))
+    .filter(
+      attachment =>
+        attachment.stageCode && patientArchiveImageStageCodes.includes(attachment.stageCode) && isImageAttachment(attachment)
+    )
     .sort((left, right) => {
       const leftStage = patientArchiveImageStageCodes.indexOf(left.stageCode as PreAiStageCode);
       const rightStage = patientArchiveImageStageCodes.indexOf(right.stageCode as PreAiStageCode);
       if (leftStage !== rightStage) return leftStage - rightStage;
-      return (left.sequenceNo || 0) - (right.sequenceNo || 0) || String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
+      return (
+        (left.sequenceNo || 0) - (right.sequenceNo || 0) ||
+        String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
+      );
     });
 const patientArchiveChiefComplaintFromWorkspace = (value: PreAiWorkspace) => {
   const reception = patientArchiveStageData(value, "RECEPTION");
@@ -2417,7 +2483,9 @@ const patientArchiveDetailOf = (item: PreAiPatientCase) => patientArchiveCardDet
 const isTemplateValidationPatient = (item: PreAiPatientCase) => String(item.patientName || "").includes("模板验证患者");
 const patientArchiveDiseaseDirection = (item: PreAiPatientCase) =>
   patientArchiveDetailOf(item)?.diseaseDirection ||
-  patientArchiveDiseaseDirectionText(item.patient?.diseaseDirections || item.patient?.diseaseDirection || item.patient?.inspectionDiseaseDirections);
+  patientArchiveDiseaseDirectionText(
+    item.patient?.diseaseDirections || item.patient?.diseaseDirection || item.patient?.inspectionDiseaseDirections
+  );
 const patientArchiveChiefComplaint = (item: PreAiPatientCase) =>
   patientArchiveDetailOf(item)?.chiefComplaint ||
   firstPatientArchiveText(
@@ -2462,7 +2530,9 @@ const patientArchiveCardPreviewUrls = (item: PreAiPatientCase) =>
     .map(attachment => patientArchiveImageUrls[attachment.id])
     .filter(Boolean);
 const patientArchiveCardPreviewIndex = (item: PreAiPatientCase, attachment: PreAiAttachment) => {
-  const imageIds = patientArchiveCardImages(item).filter(image => patientArchiveImageUrls[image.id]).map(image => image.id);
+  const imageIds = patientArchiveCardImages(item)
+    .filter(image => patientArchiveImageUrls[image.id])
+    .map(image => image.id);
   return Math.max(0, imageIds.indexOf(attachment.id));
 };
 const patientArchiveCardEmptyText = (item: PreAiPatientCase) => {
@@ -2554,7 +2624,8 @@ const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: n
 };
 const processPatientArchiveLoadQueue = () => {
   if (!patientDrawerOpen.value || patientArchiveView.value !== "MASONRY") return;
-  if (!patientArchiveAbortController || patientArchiveAbortController.signal.aborted) patientArchiveAbortController = new AbortController();
+  if (!patientArchiveAbortController || patientArchiveAbortController.signal.aborted)
+    patientArchiveAbortController = new AbortController();
   const signal = patientArchiveAbortController.signal;
   const requestSequence = patientArchiveRequestSequence;
 
@@ -2575,7 +2646,12 @@ const processPatientArchiveLoadQueue = () => {
   updatePatientArchiveMasonryLoading();
 };
 const queuePatientArchiveCardLoad = (item: PreAiPatientCase) => {
-  if ((!item.latestEncounter && !isTemplateValidationPatient(item)) || patientArchiveCardDetails[item.id]?.loaded || patientArchiveCardDetails[item.id]?.loading) return;
+  if (
+    (!item.latestEncounter && !isTemplateValidationPatient(item)) ||
+    patientArchiveCardDetails[item.id]?.loaded ||
+    patientArchiveCardDetails[item.id]?.loading
+  )
+    return;
   if (patientArchiveQueuedCaseIds.has(item.id)) return;
   patientArchiveQueuedCaseIds.add(item.id);
   patientArchiveLoadQueue.push(item);
@@ -2660,79 +2736,100 @@ watch(
 );
 const canHandleStage = (stageCode: PreAiStageCode, ...duties: PreAiDutyCode[]) =>
   Boolean(authStore.stagePermissions[stageCode]?.editable) || hasAssignedDuty(...duties);
-const workflowCards = computed<WorkflowCard[]>(() => [
-  {
-    key: "REGISTRATION",
-    order: 1,
-    kind: "STAGE",
-    stageCode: "REGISTRATION",
-    title: "前台登记",
-    owner: "前台",
-    editable: canHandleStage("REGISTRATION", "FRONT_DESK")
-  },
-  {
-    key: "INSPECTION",
-    order: 2,
-    kind: "STAGE",
-    stageCode: "INSPECTION",
-    title: "检查室",
-    owner: "检查室",
-    editable: canHandleStage("INSPECTION", "INSPECTION_DOCTOR", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR")
-  },
-  {
-    key: "RECEPTION",
-    order: 3,
-    kind: "STAGE",
-    stageCode: "RECEPTION",
-    title: "接诊评估",
-    owner: "接诊室",
-    editable: canHandleStage("RECEPTION", "RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR")
-  },
-  {
-    key: "AUX",
-    order: 4,
-    kind: "AUX",
-    title: "化验等辅助检查",
-    owner: "检验报告、心电、影像与其他辅助检查",
-    editable: canOpenLabWorkbench.value
-  },
-  {
-    key: "TCM",
-    order: 5,
-    kind: "STAGE",
-    stageCode: "TCM",
-    title: "中医辨证",
-    owner: "中医岗位",
-    editable: canHandleStage("TCM", "TCM_DOCTOR")
-  },
-  {
-    key: "DOCTOR",
-    order: 6,
-    kind: "STAGE",
-    stageCode: "DOCTOR",
-    title: "医生诊疗方案",
-    owner: "医生",
-    editable: canHandleStage("DOCTOR", "ATTENDING_DOCTOR")
-  },
-  {
-    key: "SURGERY",
-    order: 7,
-    kind: "STAGE",
-    stageCode: "SURGERY",
-    title: "手术结果登记",
-    owner: "手术室护士",
-    editable: canHandleStage("SURGERY", "SURGEON", "OPERATING_ROOM_NURSE")
-  },
-  {
-    key: "REVIEW",
-    order: 8,
-    kind: "STAGE",
-    stageCode: "REVIEW",
-    title: "医生最终复核",
-    owner: "医生",
-    editable: canReview.value
+const workflowCards = computed<WorkflowCard[]>(() => {
+  const cards: WorkflowCard[] = [
+    {
+      key: "REGISTRATION",
+      order: 1,
+      kind: "STAGE",
+      stageCode: "REGISTRATION",
+      title: "前台登记",
+      owner: "前台",
+      editable: canHandleStage("REGISTRATION", "FRONT_DESK")
+    },
+    {
+      key: "INSPECTION",
+      order: 2,
+      kind: "STAGE",
+      stageCode: "INSPECTION",
+      title: "检查室",
+      owner: "检查室",
+      editable: canHandleStage("INSPECTION", "INSPECTION_DOCTOR", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR")
+    },
+    {
+      key: "RECEPTION",
+      order: 3,
+      kind: "STAGE",
+      stageCode: "RECEPTION",
+      title: "接诊评估",
+      owner: "接诊室",
+      editable: canHandleStage("RECEPTION", "RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR")
+    },
+    {
+      key: "AUX",
+      order: 4,
+      kind: "AUX",
+      title: "化验等辅助检查",
+      owner: "检验报告、心电、影像与其他辅助检查",
+      editable: canOpenLabWorkbench.value
+    },
+    {
+      key: "TCM",
+      order: 5,
+      kind: "STAGE",
+      stageCode: "TCM",
+      title: "中医辨证",
+      owner: "中医岗位",
+      editable: canHandleStage("TCM", "TCM_DOCTOR")
+    },
+    {
+      key: "DOCTOR",
+      order: 6,
+      kind: "STAGE",
+      stageCode: "DOCTOR",
+      title: "医生诊疗方案",
+      owner: "医生",
+      editable: canHandleStage("DOCTOR", "ATTENDING_DOCTOR")
+    },
+    {
+      key: "SURGERY",
+      order: 7,
+      kind: "STAGE",
+      stageCode: "SURGERY",
+      title: "手术结果登记",
+      owner: "手术室护士",
+      editable: canHandleStage("SURGERY", "SURGEON", "OPERATING_ROOM_NURSE")
+    },
+    {
+      key: "REVIEW",
+      order: 8,
+      kind: "STAGE",
+      stageCode: "REVIEW",
+      title: "医生最终复核",
+      owner: "医生",
+      editable: canReview.value
+    }
+  ];
+  // 护理部：仅住院患者显示（门诊由后端置 SKIPPED，不进入工作流卡片）
+  const inpatient = ["inpatient", ""].includes(
+    String(workspace.value?.encounter?.normalizedCareType || workspace.value?.encounter?.inventoryCareType || "").toLowerCase()
+  );
+  if (workspace.value && inpatient) {
+    cards.splice(3, 0, {
+      key: "NURSING",
+      order: 4,
+      kind: "STAGE",
+      stageCode: "NURSING",
+      title: "护理部评估",
+      owner: "护理部",
+      editable: canHandleStage("NURSING", "BASIC_NURSING")
+    });
+    cards.forEach((card, index) => {
+      card.order = index + 1;
+    });
   }
-]);
+  return cards;
+});
 const workflowProgress = computed(() => {
   const statuses = workflowCards.value.map(card => workflowCardStatus(card));
   return {
@@ -2752,11 +2849,10 @@ const selectedStageSubmission = computed(() => stageSubmission(selectedStageCode
 const visibleStageFields = computed(() =>
   selectedStage.value.fields.filter(field => !field.visible || field.visible(stageForms[selectedStageCode.value]))
 );
-// 检查室收束视图：字段表单仅渲染病史采集组（检查所见已由上方模板 textarea 承载）
+// 检查室收束视图：病种模板 + 检查记录 textarea 承载全部录入，旧槽位字段不再渲染
 const stageFormFields = computed(() => {
-  const fields = visibleStageFields.value;
-  if (selectedStageCode.value !== "INSPECTION") return fields;
-  return fields.filter(field => isHistoryIntakeKey(field.key));
+  if (selectedStageCode.value === "INSPECTION") return [];
+  return visibleStageFields.value;
 });
 const isSecondaryStageField = (field: PreAiFieldConfig) =>
   Boolean(compactStageFieldKeys[selectedStageCode.value]?.has(field.key));
@@ -2800,6 +2896,7 @@ const stageDutyCodes: Partial<Record<PreAiStageCode, PreAiDutyCode[]>> = {
   REGISTRATION: ["FRONT_DESK"],
   INSPECTION: ["INSPECTION_DOCTOR", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR"],
   RECEPTION: ["RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR"],
+  NURSING: ["BASIC_NURSING"],
   TCM: ["TCM_DOCTOR"],
   DOCTOR: ["ATTENDING_DOCTOR"],
   SURGERY: ["SURGEON", "OPERATING_ROOM_NURSE"],
@@ -2863,6 +2960,7 @@ const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
   ],
   INSPECTION: ["diseaseDirections", "examinationTypes", "preliminaryDiagnosis", "factualConclusion"],
   RECEPTION: ["chiefComplaint", "presentIllness", "physicalExam"],
+  NURSING: ["allergyHistory", "personalHistory", "chronicDiseaseItems"],
   TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],
   DOCTOR: ["primaryWesternDiagnosis", "treatmentPath", "treatmentPlan"],
   SURGERY: ["actualOperationName", "operationDate", "intraoperativeFindings"]
@@ -2887,9 +2985,8 @@ const selectedStageAttachments = computed(
 const endoscopyReportDescription = "胃肠镜检查报告单";
 const endoscopyReportAttachments = computed(
   () =>
-    workspace.value?.attachments.filter(
-      item => !item.taskId && (item.description || "").includes(endoscopyReportDescription)
-    ) || []
+    workspace.value?.attachments.filter(item => !item.taskId && (item.description || "").includes(endoscopyReportDescription)) ||
+    []
 );
 const registrationImageAttachments = computed(
   () =>
@@ -3272,12 +3369,18 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
       const source = reception[field.key];
       const fromRegistration = registration[field.key];
       const receptionEmpty = Array.isArray(source) ? !source.length : !String(source ?? "").trim();
-      const registrationHas = Array.isArray(fromRegistration) ? fromRegistration.length > 0 : Boolean(String(fromRegistration ?? "").trim());
+      const registrationHas = Array.isArray(fromRegistration)
+        ? fromRegistration.length > 0
+        : Boolean(String(fromRegistration ?? "").trim());
       if (receptionEmpty && registrationHas) {
         reception[field.key] = Array.isArray(fromRegistration) ? [...fromRegistration] : fromRegistration;
       }
     });
-    if (Array.isArray(registration.registrationSymptoms) && registration.registrationSymptoms.length && !reception.chiefComplaint?.length) {
+    if (
+      Array.isArray(registration.registrationSymptoms) &&
+      registration.registrationSymptoms.length &&
+      !reception.chiefComplaint?.length
+    ) {
       reception.chiefComplaint = [...registration.registrationSymptoms];
     }
     const registrationComplaint = String(registration.registrationChiefComplaint || "").trim();
@@ -3297,6 +3400,17 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
           : registration.clinicalTemplateDiseases
       );
     }
+  }
+  if (!stageDirty.NURSING) {
+    // 护理部：过敏史/个人史同步自前台登记（数据归属接诊室草稿），其余病史由护理部自行采集
+    const nursing = stageForms.NURSING;
+    const reception = stageForms.RECEPTION;
+    ["allergyHistory", "allergyHistoryNote", "personalHistory"].forEach(key => {
+      const source = reception[key];
+      if (Array.isArray(source) ? source.length : String(source ?? "").trim()) {
+        nursing[key] = Array.isArray(source) ? [...source] : source;
+      }
+    });
   }
   if (!value.labReports.some(report => report.id === activeLabReportId.value)) {
     activeLabReportId.value = value.labReports[0]?.id || "";
@@ -3744,10 +3858,43 @@ const persistReceptionHistoryFromStage = async (fromStage: PreAiStageCode) => {
   }
 };
 
+const persistNursingHistoryFromStage = async () => {
+  // 护理部：病史采集（含同步修订的过敏史/个人史）落接诊室草稿；过敏史/个人史回写前台登记草稿
+  const nursingKeys = ["allergyHistory", "allergyHistoryNote", "personalHistory"];
+  const nursing = stageForms.NURSING;
+  const registration = stageForms.REGISTRATION;
+  nursingKeys.forEach(key => {
+    const value = nursing[key];
+    registration[key] = Array.isArray(value) ? [...value] : value;
+  });
+  await persistReceptionHistoryFromStage("NURSING");
+  const registrationStatus = stageSubmission("REGISTRATION")?.status;
+  if (stageDirty.REGISTRATION || registrationStatus === "COMPLETED") return;
+  const registrationChanged = nursingKeys.some(key => {
+    const value = nursing[key];
+    const hasValue = Array.isArray(value) ? value.length > 0 : Boolean(String(value ?? "").trim());
+    return hasValue;
+  });
+  if (!registrationChanged) return;
+  try {
+    const { data } = await savePreAiStageApi(
+      selectedEncounterId.value,
+      "REGISTRATION",
+      cleanStageForm("REGISTRATION"),
+      stageSubmission("REGISTRATION")?.version ?? 0
+    );
+    hydrateWorkspace(data);
+  } catch (error: any) {
+    ElMessage.warning("过敏史/个人史同步回前台登记失败，请稍后重试保存");
+    throw error;
+  }
+};
+
 const saveSelectedStage = async () =>
   runAction(async () => {
     if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
       await persistReceptionHistoryFromStage(selectedStageCode.value);
+    if (selectedStageCode.value === "NURSING") await persistNursingHistoryFromStage();
     const { data } = await savePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
@@ -3774,7 +3921,8 @@ const correctSelectedStage = async () => {
     );
     await runAction(async () => {
       if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
-      await persistReceptionHistoryFromStage(selectedStageCode.value);
+        await persistReceptionHistoryFromStage(selectedStageCode.value);
+      if (selectedStageCode.value === "NURSING") await persistNursingHistoryFromStage();
       const { data } = await correctPreAiStageApi(
         selectedEncounterId.value,
         selectedStageCode.value,
@@ -3796,6 +3944,7 @@ const completeSelectedStage = async () =>
   runAction(async () => {
     if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
       await persistReceptionHistoryFromStage(selectedStageCode.value);
+    if (selectedStageCode.value === "NURSING") await persistNursingHistoryFromStage();
     const { data } = await completePreAiStageApi(
       selectedEncounterId.value,
       selectedStageCode.value,
@@ -4041,11 +4190,7 @@ const uploadAttachments = async (
   const batchId = `pre-att-${timestamp}`;
   const batchName =
     customBatchName ||
-    (folderMode
-      ? folderName || `检查室文件夹-${timestamp}`
-      : files.length > 1
-        ? `批量附件-${timestamp}`
-        : files[0].name);
+    (folderMode ? folderName || `检查室文件夹-${timestamp}` : files.length > 1 ? `批量附件-${timestamp}` : files[0].name);
   Object.assign(attachmentUpload, {
     total: files.length,
     success: 0,

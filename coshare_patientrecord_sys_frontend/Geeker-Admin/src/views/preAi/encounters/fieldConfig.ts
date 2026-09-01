@@ -297,7 +297,39 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2,
         placeholder: "本次症状的发生、持续或变化情况"
       },
-      { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 }
+      { key: "registrationNote", label: "特殊情况 / 其他信息 / 备注", kind: "textarea", rows: 2, span: 2 },
+      // 病史采集（前台完成过敏史与个人史；数据归属接诊室草稿，其余病史由护理部采集）
+      {
+        key: "allergyHistory",
+        label: "过敏史",
+        kind: "multi",
+        required: true,
+        span: 2,
+        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
+        creatable: true,
+        placeholder: "请选择过敏类型（可多选，可输入补充）",
+        supplementKey: "allergyHistoryNote"
+      },
+      {
+        key: "personalHistory",
+        label: "个人史",
+        kind: "multi",
+        required: true,
+        span: 2,
+        options: options([
+          "生长于原籍",
+          "否认长期外地居住史",
+          "无烟酒嗜好",
+          "少量吸烟",
+          "长期吸烟",
+          "少量饮酒",
+          "长期饮酒",
+          "否认特殊化学品接触史",
+          "否认放射性接触史",
+          "否认冶游史"
+        ]),
+        creatable: true
+      }
     ]
   },
   {
@@ -411,147 +443,7 @@ export const preAiStages: PreAiStageConfig[] = [
         rows: 2,
         span: 1,
         placeholder: "填写复查项目、注意事项或告知内容"
-      },
-      // 病史采集（自前台登记迁入：检查室随检查同步询问，数据仍归属接诊室草稿）
-      {
-        key: "allergyHistory",
-        label: "过敏史",
-        kind: "multi",
-        required: true,
-        span: 2,
-        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
-        creatable: true,
-        placeholder: "请选择过敏类型（可多选，可输入补充）",
-        supplementKey: "allergyHistoryNote"
-      },
-      {
-        key: "personalHistory",
-        label: "个人史",
-        kind: "multi",
-        required: true,
-        span: 2,
-        options: options([
-          "生长于原籍",
-          "否认长期外地居住史",
-          "无烟酒嗜好",
-          "少量吸烟",
-          "长期吸烟",
-          "少量饮酒",
-          "长期饮酒",
-          "否认特殊化学品接触史",
-          "否认放射性接触史",
-          "否认冶游史"
-        ]),
-        creatable: true
-      },
-      {
-        key: "chronicDiseaseItems",
-        label: "慢性病史明细",
-        kind: "repeatable",
-        addLabel: "添加慢性病",
-        span: 2,
-        fields: [
-          {
-            key: "disease",
-            label: "疾病",
-            kind: "select",
-            options: options(["高血压", "糖尿病", "冠心病", "脑血管病", "慢性胃炎", "慢性肾病", "其他"]),
-            creatable: true,
-            required: true
-          },
-          { key: "duration", label: "病程", kind: "select", options: durationOptions, creatable: true },
-          {
-            key: "treatment",
-            label: "治疗情况",
-            kind: "select",
-            options: options(["未治疗", "规律治疗", "间断治疗", "治疗不详", "其他"]),
-            creatable: true
-          },
-          {
-            key: "control",
-            label: "控制情况",
-            kind: "select",
-            options: options(["控制良好", "控制一般", "控制不佳", "不详"]),
-            creatable: true
-          }
-        ]
-      },
-      {
-        key: "surgicalHistoryItems",
-        label: "手术史明细",
-        kind: "repeatable",
-        addLabel: "添加既往手术",
-        span: 2,
-        fields: [
-          { key: "year", label: "年份", kind: "number" },
-          { key: "operationName", label: "手术名称", kind: "select", options: surgeryOptions, creatable: true, required: true },
-          {
-            key: "site",
-            label: "部位",
-            kind: "select",
-            options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "腹部", "其他"]),
-            creatable: true
-          },
-          {
-            key: "result",
-            label: "结果",
-            kind: "select",
-            options: options(["恢复良好", "症状缓解", "症状复发", "遗留并发症", "不详"]),
-            creatable: true
-          }
-        ]
-      },
-      {
-        key: "traumaHistory",
-        label: "外伤史",
-        kind: "select",
-        options: options(["否认外伤史", "有外伤史"]),
-        creatable: true
-      },
-      {
-        key: "transfusionHistory",
-        label: "输血史",
-        kind: "select",
-        options: options(["否认输血史", "有输血史", "不详"]),
-        creatable: true
-      },
-      {
-        key: "vaccinationHistory",
-        label: "预防接种史",
-        kind: "select",
-        options: options(["预防接种随社会进行", "按计划接种", "接种不全", "不详"]),
-        creatable: true
-      },
-      {
-        key: "medicationHistory",
-        label: "用药史",
-        kind: "multi",
-        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗", "其他"]),
-        creatable: true
-      },
-      {
-        key: "maritalHistory",
-        label: "婚育史",
-        kind: "multi",
-        options: options(["适龄结婚", "未婚", "已婚", "离异", "丧偶", "配偶体健", "子女体健", "婚育史无特殊"]),
-        creatable: true
-      },
-      {
-        key: "familyHistory",
-        label: "家族史",
-        kind: "multi",
-        options: options([
-          "家族史无特殊",
-          "否认传染病家族史",
-          "否认遗传病家族史",
-          "否认代谢性疾病家族史",
-          "否认糖尿病家族史",
-          "否认血友病家族史",
-          "否认肿瘤家族史",
-          "否认类似病史"
-        ]),
-        creatable: true
-      },
+      }
     ]
   },
   {
@@ -912,6 +804,212 @@ export const preAiStages: PreAiStageConfig[] = [
         kind: "multi",
         options: options(["化验", "心电", "影像", "肠镜"]),
         creatable: true
+      }
+    ]
+  },
+  {
+    code: "NURSING",
+    title: "护理部",
+    shortTitle: "护理",
+    owner: "护理部",
+    description:
+      "住院患者护理信息收束页（门诊自动跳过）：病史采集照常归档进前置资料文档；四测与护理评估仅系统留存，不进入导出文档。",
+    fields: [
+      // 病史采集（自检查室迁入：住院患者由护理部采集，数据仍归属接诊室草稿并归档进前置资料）
+      {
+        key: "chronicDiseaseItems",
+        label: "慢性病史明细",
+        kind: "repeatable",
+        addLabel: "添加慢性病",
+        span: 2,
+        fields: [
+          {
+            key: "disease",
+            label: "疾病",
+            kind: "select",
+            options: options(["高血压", "糖尿病", "冠心病", "脑血管病", "慢性胃炎", "慢性肾病", "其他"]),
+            creatable: true,
+            required: true
+          },
+          { key: "duration", label: "病程", kind: "select", options: durationOptions, creatable: true },
+          {
+            key: "treatment",
+            label: "治疗情况",
+            kind: "select",
+            options: options(["未治疗", "规律治疗", "间断治疗", "治疗不详", "其他"]),
+            creatable: true
+          },
+          {
+            key: "control",
+            label: "控制情况",
+            kind: "select",
+            options: options(["控制良好", "控制一般", "控制不佳", "不详"]),
+            creatable: true
+          }
+        ]
+      },
+      {
+        key: "surgicalHistoryItems",
+        label: "手术史明细",
+        kind: "repeatable",
+        addLabel: "添加既往手术",
+        span: 2,
+        fields: [
+          { key: "year", label: "年份", kind: "number" },
+          { key: "operationName", label: "手术名称", kind: "select", options: surgeryOptions, creatable: true, required: true },
+          {
+            key: "site",
+            label: "部位",
+            kind: "select",
+            options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "腹部", "其他"]),
+            creatable: true
+          },
+          {
+            key: "result",
+            label: "结果",
+            kind: "select",
+            options: options(["恢复良好", "症状缓解", "症状复发", "遗留并发症", "不详"]),
+            creatable: true
+          }
+        ]
+      },
+      {
+        key: "traumaHistory",
+        label: "外伤史",
+        kind: "select",
+        options: options(["否认外伤史", "有外伤史"]),
+        creatable: true
+      },
+      {
+        key: "transfusionHistory",
+        label: "输血史",
+        kind: "select",
+        options: options(["否认输血史", "有输血史", "不详"]),
+        creatable: true
+      },
+      {
+        key: "vaccinationHistory",
+        label: "预防接种史",
+        kind: "select",
+        options: options(["预防接种随社会进行", "按计划接种", "接种不全", "不详"]),
+        creatable: true
+      },
+      {
+        key: "medicationHistory",
+        label: "用药史",
+        kind: "multi",
+        options: options(["无长期用药", "降压药", "降糖药", "抗凝药", "激素类药物", "中药治疗", "其他"]),
+        creatable: true
+      },
+      {
+        key: "maritalHistory",
+        label: "婚育史",
+        kind: "multi",
+        options: options(["适龄结婚", "未婚", "已婚", "离异", "丧偶", "配偶体健", "子女体健", "婚育史无特殊"]),
+        creatable: true
+      },
+      {
+        key: "familyHistory",
+        label: "家族史",
+        kind: "multi",
+        options: options([
+          "家族史无特殊",
+          "否认传染病家族史",
+          "否认遗传病家族史",
+          "否认代谢性疾病家族史",
+          "否认糖尿病家族史",
+          "否认血友病家族史",
+          "否认肿瘤家族史",
+          "否认类似病史"
+        ]),
+        creatable: true
+      },
+      // 过敏史/个人史（同步自前台登记，可在此修订；保存后回写前台并同步接诊室草稿）
+      {
+        key: "allergyHistory",
+        label: "过敏史（同步自前台）",
+        kind: "multi",
+        span: 2,
+        options: options(["否认药物及食物过敏史", "药物过敏", "食物过敏", "其他过敏", "过敏原不详"]),
+        creatable: true,
+        placeholder: "与前台登记保持同步，可按住院评估结果修订",
+        supplementKey: "allergyHistoryNote"
+      },
+      {
+        key: "personalHistory",
+        label: "个人史（同步自前台）",
+        kind: "multi",
+        span: 2,
+        options: options([
+          "生长于原籍",
+          "否认长期外地居住史",
+          "无烟酒嗜好",
+          "少量吸烟",
+          "长期吸烟",
+          "少量饮酒",
+          "长期饮酒",
+          "否认特殊化学品接触史",
+          "否认放射性接触史",
+          "否认冶游史"
+        ]),
+        creatable: true
+      },
+      // 四测信息采集（仅系统留存，不进文档）
+      { key: "measuredAt", label: "测量时间", kind: "datetime" },
+      { key: "systolicBp", label: "收缩压", kind: "measurement", unitOptions: ["mmHg"], abnormalOptions },
+      { key: "diastolicBp", label: "舒张压", kind: "measurement", unitOptions: ["mmHg"], abnormalOptions },
+      { key: "temperature", label: "体温", kind: "measurement", unitOptions: ["℃"], abnormalOptions },
+      { key: "pulse", label: "脉搏", kind: "measurement", unitOptions: ["次/分"], abnormalOptions },
+      { key: "respiration", label: "呼吸", kind: "measurement", unitOptions: ["次/分"], abnormalOptions },
+      // 住院护理评估（仅系统留存，不进文档）
+      {
+        key: "admissionWay",
+        label: "入院方式",
+        kind: "select",
+        options: options(["步行", "扶持", "轮椅", "平车", "其他"]),
+        creatable: true
+      },
+      {
+        key: "consciousness",
+        label: "意识状态",
+        kind: "select",
+        options: options(["清醒", "嗜睡", "意识模糊", "昏睡", "昏迷", "其他"]),
+        creatable: true
+      },
+      { key: "heightCm", label: "身高（cm）", kind: "number" },
+      { key: "weightKg", label: "体重（kg）", kind: "number" },
+      { key: "painScore", label: "疼痛评分（0-10）", kind: "number" },
+      {
+        key: "fallRisk",
+        label: "跌倒风险",
+        kind: "select",
+        options: options(["无风险", "低风险", "中风险", "高风险"])
+      },
+      {
+        key: "pressureUlcerRisk",
+        label: "压疮风险",
+        kind: "select",
+        options: options(["无风险", "低风险", "中风险", "高风险"])
+      },
+      {
+        key: "nutritionScreening",
+        label: "营养筛查",
+        kind: "select",
+        options: options(["无营养风险", "有营养风险", "需进一步评估"])
+      },
+      {
+        key: "selfCareAbility",
+        label: "自理能力",
+        kind: "select",
+        options: options(["完全自理", "部分依赖", "完全依赖"])
+      },
+      {
+        key: "nursingAssessmentNote",
+        label: "护理评估备注",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        placeholder: "皮肤状况、静脉条件、心理状态、宣教需求等其他需留存的护理信息"
       }
     ]
   },

@@ -3,7 +3,7 @@ import type { DirectoryAccountOption } from "@/api/modules/login";
 import { clinicFetch, clinicJsonHeaders, clinicResponse, parseClinicApiResponse } from "./http";
 import type { QueueWorkspace } from "./clinicQueue";
 
-export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "TCM" | "DOCTOR" | "SURGERY" | "REVIEW";
+export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "NURSING" | "TCM" | "DOCTOR" | "SURGERY" | "REVIEW";
 export type PreAiStageStatus = "DRAFT" | "PENDING_CONFIRMATION" | "COMPLETED" | "RETURNED" | "SKIPPED";
 export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED";
 export type PreAiEncounterRoute = "" | "OUTPATIENT" | "INPATIENT";

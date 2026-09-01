@@ -114,7 +114,7 @@ public class MedicalRecordSourceBuilder {
             """
                 SELECT stage_code, status, version, data_json, completed_at, updated_at
                 FROM pre_ai_stage_submissions
-                WHERE encounter_id = ? AND status = 'COMPLETED'
+                WHERE encounter_id = ? AND status = 'COMPLETED' AND stage_code <> 'NURSING'
                 ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
                 """,
             resultSet -> {
@@ -196,6 +196,7 @@ public class MedicalRecordSourceBuilder {
                 FROM pre_ai_stage_submissions
                 WHERE encounter_id = ?
                   AND status = 'COMPLETED'
+                  AND stage_code <> 'NURSING'
                 ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
                 """,
             resultSet -> {

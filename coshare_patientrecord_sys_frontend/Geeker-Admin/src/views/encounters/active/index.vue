@@ -15,7 +15,14 @@
     </section>
 
     <section class="progress-summary">
-      <button v-for="item in summaryItems" :key="item.key" type="button" class="summary-item" :class="{ active: activeSummary === item.key }" @click="activeSummary = item.key">
+      <button
+        v-for="item in summaryItems"
+        :key="item.key"
+        type="button"
+        class="summary-item"
+        :class="{ active: activeSummary === item.key }"
+        @click="activeSummary = item.key"
+      >
         <span>{{ item.label }}</span>
         <strong>{{ item.count }}</strong>
       </button>
@@ -80,26 +87,39 @@
           <template #default="{ row }">{{ careTypeLabel(row.normalizedCareType) }}</template>
         </el-table-column>
         <el-table-column label="当前阶段" min-width="135">
-          <template #default="{ row }"><el-tag effect="plain">{{ stageLabel(row.currentStage) }}</el-tag></template>
+          <template #default="{ row }"
+            ><el-tag effect="plain">{{ stageLabel(row.currentStage) }}</el-tag></template
+          >
         </el-table-column>
         <el-table-column label="流程" min-width="300">
           <template #default="{ row }">
             <div class="step-indicator">
-              <el-tooltip v-for="step in row.steps" :key="step.key" :content="step.title + (step.status === 'skipped' ? '（门诊跳过）' : '')">
+              <el-tooltip
+                v-for="step in row.steps"
+                :key="step.key"
+                :content="step.title + (step.status === 'skipped' ? '（门诊跳过）' : '')"
+              >
                 <span class="step-segment" :class="step.status">{{ step.shortTitle }}</span>
               </el-tooltip>
             </div>
-            <div class="progress-meta"><span>{{ row.completed }}/{{ row.total }}</span><strong>{{ row.nextOwner || "待分派" }}</strong></div>
+            <div class="progress-meta">
+              <span>{{ row.completed }}/{{ row.total }}</span
+              ><strong>{{ row.nextOwner || "待分派" }}</strong>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
-          <template #default="{ row }"><el-tag :type="row.riskType">{{ encounterStatusLabel(row.status) }}</el-tag></template>
+          <template #default="{ row }"
+            ><el-tag :type="row.riskType">{{ encounterStatusLabel(row.status) }}</el-tag></template
+          >
         </el-table-column>
         <el-table-column label="最近更新" min-width="160">
           <template #default="{ row }">{{ row.updatedAt || "--" }}</template>
         </el-table-column>
         <el-table-column label="操作" fixed="right" width="100">
-          <template #default="{ row }"><el-button type="primary" :icon="ArrowRight" link @click.stop="openTablePatient(row)">进入</el-button></template>
+          <template #default="{ row }"
+            ><el-button type="primary" :icon="ArrowRight" link @click.stop="openTablePatient(row)">进入</el-button></template
+          >
         </el-table-column>
       </el-table>
     </section>
@@ -152,6 +172,7 @@ const workflowStages: Array<{ key: PreAiStageCode; title: string; shortTitle: st
   { key: "REGISTRATION", title: "前台建档", shortTitle: "建档", owner: "前台", roles: ["frontdesk"] },
   { key: "INSPECTION", title: "检查评估", shortTitle: "检查", owner: "检查医生", roles: ["inspection"] },
   { key: "RECEPTION", title: "接诊", shortTitle: "接诊", owner: "接诊医生", roles: ["reception"] },
+  { key: "NURSING", title: "护理部评估", shortTitle: "护理", owner: "护理部", roles: ["nurse", "nursing"] },
   { key: "TCM", title: "中医辨证", shortTitle: "中医", owner: "中医医生", roles: ["tcm"] },
   { key: "DOCTOR", title: "医生诊疗", shortTitle: "诊疗", owner: "主治医生", roles: ["doctor"] },
   { key: "SURGERY", title: "手术处置", shortTitle: "手术", owner: "手术岗位", roles: ["surgeon"] },
@@ -175,7 +196,14 @@ const stageLabel = (stage: ProgressStage) => {
 };
 const careTypeLabel = (careType?: string) => (careType === "inpatient" ? "住院" : careType === "outpatient" ? "门诊" : "待核验");
 const encounterStatusLabel = (status: string) =>
-  ({ IN_PROGRESS: "处理中", PENDING_REVIEW: "待复核", REVIEWED: "已复核", EXPORTED: "已归档", CANCELLED: "已终止", LEGACY: "待核验" }[status] || status);
+  ({
+    IN_PROGRESS: "处理中",
+    PENDING_REVIEW: "待复核",
+    REVIEWED: "已复核",
+    EXPORTED: "已归档",
+    CANCELLED: "已终止",
+    LEGACY: "待核验"
+  })[status] || status;
 
 const toProgressPatient = (patientCase: PreAiPatientCase): ProgressPatient => {
   const encounter = patientCase.latestEncounter;
@@ -207,7 +235,15 @@ const toProgressPatient = (patientCase: PreAiPatientCase): ProgressPatient => {
     const returned = stageStatus === "RETURNED";
     return {
       ...stage,
-      status: skipped ? "skipped" : returned ? "returned" : stageStatus === "COMPLETED" || (closed && stage.key === "REVIEW") ? "done" : stage.key === currentStage ? "active" : "waiting"
+      status: skipped
+        ? "skipped"
+        : returned
+          ? "returned"
+          : stageStatus === "COMPLETED" || (closed && stage.key === "REVIEW")
+            ? "done"
+            : stage.key === currentStage
+              ? "active"
+              : "waiting"
     };
   });
   const effectiveSteps = steps.filter(step => step.status !== "skipped");
@@ -244,7 +280,11 @@ const filteredPatients = computed(() =>
     if (keyword && !(patient.name + " " + patient.visitNo).toLowerCase().includes(keyword)) return false;
     if (filters.careType && patient.normalizedCareType !== filters.careType) return false;
     if (filters.stage && patient.currentStage !== filters.stage) return false;
-    if (activeSummary.value === "todo" && (patient.currentStage === "LEGACY" || ["REVIEWED", "EXPORTED", "CANCELLED"].includes(patient.status))) return false;
+    if (
+      activeSummary.value === "todo" &&
+      (patient.currentStage === "LEGACY" || ["REVIEWED", "EXPORTED", "CANCELLED"].includes(patient.status))
+    )
+      return false;
     if (activeSummary.value === "returned" && !patient.returned) return false;
     if (activeSummary.value === "completed" && !["REVIEWED", "EXPORTED"].includes(patient.status)) return false;
     return !(activeSummary.value === "legacy" && patient.currentStage !== "LEGACY");
@@ -252,13 +292,30 @@ const filteredPatients = computed(() =>
 );
 const summaryItems = computed(() => [
   { key: "all" as const, label: "全部病例", count: progressPatients.value.length },
-  { key: "todo" as const, label: "待处理", count: progressPatients.value.filter(item => item.currentStage !== "LEGACY" && !["REVIEWED", "EXPORTED", "CANCELLED"].includes(item.status)).length },
+  {
+    key: "todo" as const,
+    label: "待处理",
+    count: progressPatients.value.filter(
+      item => item.currentStage !== "LEGACY" && !["REVIEWED", "EXPORTED", "CANCELLED"].includes(item.status)
+    ).length
+  },
   { key: "returned" as const, label: "退回异常", count: progressPatients.value.filter(item => item.returned).length },
-  { key: "completed" as const, label: "已完成", count: progressPatients.value.filter(item => ["REVIEWED", "EXPORTED"].includes(item.status)).length },
-  { key: "legacy" as const, label: "待核验旧流程", count: progressPatients.value.filter(item => item.currentStage === "LEGACY").length }
+  {
+    key: "completed" as const,
+    label: "已完成",
+    count: progressPatients.value.filter(item => ["REVIEWED", "EXPORTED"].includes(item.status)).length
+  },
+  {
+    key: "legacy" as const,
+    label: "待核验旧流程",
+    count: progressPatients.value.filter(item => item.currentStage === "LEGACY").length
+  }
 ]);
 const kanbanColumns = computed(() => {
-  const columns = [...workflowStages, { key: "LEGACY" as const, title: "待核验旧流程", shortTitle: "核验", owner: "历史档案", roles: [] }].map(stage => ({ ...stage, patients: [] as ProgressPatient[] }));
+  const columns = [
+    ...workflowStages,
+    { key: "LEGACY" as const, title: "待核验旧流程", shortTitle: "核验", owner: "历史档案", roles: [] }
+  ].map(stage => ({ ...stage, patients: [] as ProgressPatient[] }));
   filteredPatients.value.forEach(patient => {
     const column = columns.find(item => item.key === patient.currentStage) || columns[columns.length - 1];
     column.patients.push(patient);
@@ -266,7 +323,11 @@ const kanbanColumns = computed(() => {
   return columns;
 });
 
-const riskClass = (patient: ProgressPatient) => ({ timeout: isTimeout(patient), current: isCurrentRoleFocus(patient), ["risk-" + patient.riskType]: true });
+const riskClass = (patient: ProgressPatient) => ({
+  timeout: isTimeout(patient),
+  current: isCurrentRoleFocus(patient),
+  ["risk-" + patient.riskType]: true
+});
 const clearFilters = () => {
   filters.keyword = "";
   filters.careType = "";
@@ -280,7 +341,8 @@ const stayDuration = (updatedAt: string) => {
   return hours >= 24 ? "停留 " + Math.round(hours / 24) + " 天" : "停留 " + hours + " 小时";
 };
 const isTimeout = (patient: ProgressPatient) => patient.riskType === "warning" || patient.riskType === "danger";
-const isCurrentRoleFocus = (patient: ProgressPatient) => workflowStages.find(stage => stage.key === patient.currentStage)?.roles.includes(currentRole.value) || false;
+const isCurrentRoleFocus = (patient: ProgressPatient) =>
+  workflowStages.find(stage => stage.key === patient.currentStage)?.roles.includes(currentRole.value) || false;
 const loadProgress = async () => {
   loading.value = true;
   try {
@@ -303,54 +365,302 @@ onMounted(loadProgress);
 </script>
 
 <style scoped lang="scss">
-.encounter-page { display: flex; flex-direction: column; min-height: 0; gap: 12px; }
-.board-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; background: var(--hos-panel); border: 1px solid var(--hos-border); border-radius: var(--hos-radius-card); box-shadow: var(--hos-shadow-soft); }
-.board-toolbar h2, .board-toolbar p { margin: 0; }
-.board-toolbar h2 { font-size: 20px; }
-.board-toolbar p { margin-top: 5px; color: var(--el-text-color-regular); }
-.toolbar-actions, .progress-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.progress-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.summary-item { display: flex; align-items: baseline; justify-content: space-between; min-width: 0; padding: 10px 12px; color: var(--hos-text-secondary); cursor: pointer; background: var(--hos-panel); border: 1px solid var(--hos-border); border-radius: var(--hos-radius-card); }
-.summary-item strong { color: var(--hos-text-primary); font-size: 20px; font-variant-numeric: tabular-nums; }
-.summary-item.active { border-color: var(--hos-border-interactive); box-shadow: 0 0 0 2px rgb(var(--hos-primary-rgb) / 10%); }
-.progress-filters { padding: 0 2px; }
-.progress-filters :deep(.el-input), .progress-filters :deep(.el-select) { width: min(100%, 210px); }
-.kanban-board { display: grid; grid-template-columns: repeat(8, minmax(220px, 1fr)); min-height: 0; gap: 12px; overflow-x: auto; }
-.kanban-column { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); padding: 12px; overflow: hidden; background: var(--hos-glass); border: 1px solid var(--hos-border); border-radius: var(--hos-radius-card); box-shadow: var(--hos-shadow-soft); }
-.kanban-column header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; margin-bottom: 10px; font-weight: 600; }
-.kanban-column header small { grid-column: 1 / -1; color: var(--hos-text-secondary); font-size: 12px; font-weight: 400; }
-.kanban-list { display: grid; min-height: 0; gap: 8px; padding-right: 4px; overflow-y: auto; overscroll-behavior: contain; }
-.kanban-list :deep(.el-empty) { min-height: 96px; padding: 12px 0; }
-.patient-card { position: relative; display: grid; min-width: 0; gap: 7px; padding: 12px; overflow: hidden; text-align: left; cursor: pointer; background: var(--hos-panel); border: 1px solid var(--hos-border-light); border-radius: var(--hos-radius-card); }
-.patient-card::before { position: absolute; top: 0; bottom: 0; left: 0; width: 4px; content: ""; background: var(--hos-status-info); }
-.patient-card:hover, .patient-card.current { border-color: var(--hos-border-interactive); box-shadow: var(--hos-shadow-card-hover); }
-.patient-card.timeout { border-color: var(--el-color-danger-light-5); }
-.patient-card.risk-success::before { background: var(--hos-status-success); }
-.patient-card.risk-warning::before { background: var(--hos-status-warning); }
-.patient-card.risk-danger::before { background: var(--hos-status-danger); }
-.patient-card strong { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--hos-text-primary); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.patient-card span, .patient-card small { overflow: hidden; color: var(--hos-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
-.patient-card-head, .stay-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.patient-status-dot { width: 10px; height: 10px; flex: 0 0 auto; background: var(--hos-primary); border-radius: 999px; }
-.encounter-count, .return-note { width: fit-content; padding: 2px 8px; color: var(--hos-primary-deep) !important; background: var(--hos-primary-soft); border-radius: 999px; font-size: 12px; }
-.return-note { color: var(--el-color-danger) !important; background: var(--el-color-danger-light-9); }
-.closed-loop-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-.closed-loop-progress > span { height: 8px; overflow: hidden; background: rgb(255 255 255 / 46%); border: 1px solid var(--hos-border-light); border-radius: 999px; }
-.closed-loop-progress em { display: block; height: 100%; background: var(--hos-status-info); border-radius: inherit; }
-.closed-loop-progress.risk-success em { background: var(--hos-status-success); }
-.closed-loop-progress.risk-warning em { background: var(--hos-status-warning); }
-.closed-loop-progress.risk-danger em { background: var(--hos-status-danger); }
-.closed-loop-progress small { font-size: 12px; font-variant-numeric: tabular-nums; }
-.stay-line { padding-top: 7px; border-top: 1px solid var(--hos-border-light); }
-.stay-line em { color: var(--hos-primary-deep); font-style: normal; font-weight: 600; }
-.stay-line.timeout span { color: var(--el-color-danger); font-weight: 600; }
-.progress-table-wrap { min-height: 0; overflow: auto; }
-.step-indicator { display: grid; grid-template-columns: repeat(7, minmax(34px, 1fr)); gap: 3px; }
-.step-segment { display: grid; min-height: 24px; place-items: center; color: var(--hos-text-secondary); background: var(--hos-glass); border: 1px solid var(--hos-border-light); border-radius: 4px; font-size: 12px; }
-.step-segment.done { color: var(--hos-status-success); background: var(--hos-status-success-soft); }
-.step-segment.active { color: var(--hos-status-warning); background: var(--hos-status-warning-soft); }
-.step-segment.returned { color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
-.step-segment.skipped { color: var(--hos-text-muted); border-style: dashed; opacity: 0.65; }
-.progress-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; color: var(--el-text-color-regular); font-size: 12px; }
-@media (max-width: 980px) { .board-toolbar { align-items: flex-start; flex-direction: column; } .progress-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kanban-column { max-height: calc(100vh - 380px); } }
+.encounter-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 12px;
+}
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+}
+.board-toolbar h2,
+.board-toolbar p {
+  margin: 0;
+}
+.board-toolbar h2 {
+  font-size: 20px;
+}
+.board-toolbar p {
+  margin-top: 5px;
+  color: var(--el-text-color-regular);
+}
+.toolbar-actions,
+.progress-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.progress-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.summary-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--hos-text-secondary);
+  cursor: pointer;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+}
+.summary-item strong {
+  color: var(--hos-text-primary);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.summary-item.active {
+  border-color: var(--hos-border-interactive);
+  box-shadow: 0 0 0 2px rgb(var(--hos-primary-rgb) / 10%);
+}
+.progress-filters {
+  padding: 0 2px;
+}
+.progress-filters :deep(.el-input),
+.progress-filters :deep(.el-select) {
+  width: min(100%, 210px);
+}
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(220px, 1fr));
+  min-height: 0;
+  gap: 12px;
+  overflow-x: auto;
+}
+.kanban-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 320px);
+  padding: 12px;
+  overflow: hidden;
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border);
+  border-radius: var(--hos-radius-card);
+  box-shadow: var(--hos-shadow-soft);
+}
+.kanban-column header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.kanban-column header small {
+  grid-column: 1 / -1;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+.kanban-list {
+  display: grid;
+  min-height: 0;
+  gap: 8px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kanban-list :deep(.el-empty) {
+  min-height: 96px;
+  padding: 12px 0;
+}
+.patient-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 12px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  background: var(--hos-panel);
+  border: 1px solid var(--hos-border-light);
+  border-radius: var(--hos-radius-card);
+}
+.patient-card::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  content: "";
+  background: var(--hos-status-info);
+}
+.patient-card:hover,
+.patient-card.current {
+  border-color: var(--hos-border-interactive);
+  box-shadow: var(--hos-shadow-card-hover);
+}
+.patient-card.timeout {
+  border-color: var(--el-color-danger-light-5);
+}
+.patient-card.risk-success::before {
+  background: var(--hos-status-success);
+}
+.patient-card.risk-warning::before {
+  background: var(--hos-status-warning);
+}
+.patient-card.risk-danger::before {
+  background: var(--hos-status-danger);
+}
+.patient-card strong {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--hos-text-primary);
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.patient-card span,
+.patient-card small {
+  overflow: hidden;
+  color: var(--hos-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.patient-card-head,
+.stay-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.patient-status-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  background: var(--hos-primary);
+  border-radius: 999px;
+}
+.encounter-count,
+.return-note {
+  width: fit-content;
+  padding: 2px 8px;
+  color: var(--hos-primary-deep) !important;
+  background: var(--hos-primary-soft);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.return-note {
+  color: var(--el-color-danger) !important;
+  background: var(--el-color-danger-light-9);
+}
+.closed-loop-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.closed-loop-progress > span {
+  height: 8px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 46%);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+}
+.closed-loop-progress em {
+  display: block;
+  height: 100%;
+  background: var(--hos-status-info);
+  border-radius: inherit;
+}
+.closed-loop-progress.risk-success em {
+  background: var(--hos-status-success);
+}
+.closed-loop-progress.risk-warning em {
+  background: var(--hos-status-warning);
+}
+.closed-loop-progress.risk-danger em {
+  background: var(--hos-status-danger);
+}
+.closed-loop-progress small {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.stay-line {
+  padding-top: 7px;
+  border-top: 1px solid var(--hos-border-light);
+}
+.stay-line em {
+  color: var(--hos-primary-deep);
+  font-style: normal;
+  font-weight: 600;
+}
+.stay-line.timeout span {
+  color: var(--el-color-danger);
+  font-weight: 600;
+}
+.progress-table-wrap {
+  min-height: 0;
+  overflow: auto;
+}
+.step-indicator {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(34px, 1fr));
+  gap: 3px;
+}
+.step-segment {
+  display: grid;
+  min-height: 24px;
+  place-items: center;
+  color: var(--hos-text-secondary);
+  background: var(--hos-glass);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.step-segment.done {
+  color: var(--hos-status-success);
+  background: var(--hos-status-success-soft);
+}
+.step-segment.active {
+  color: var(--hos-status-warning);
+  background: var(--hos-status-warning-soft);
+}
+.step-segment.returned {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+}
+.step-segment.skipped {
+  color: var(--hos-text-muted);
+  border-style: dashed;
+  opacity: 0.65;
+}
+.progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+}
+@media (max-width: 980px) {
+  .board-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .progress-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kanban-column {
+    max-height: calc(100vh - 380px);
+  }
+}
 </style>

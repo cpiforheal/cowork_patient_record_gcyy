@@ -53,9 +53,9 @@ public class PreAiEncounterService {
 
     private static final Logger log = LoggerFactory.getLogger(PreAiEncounterService.class);
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW");
+    private static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "NURSING", "TCM", "DOCTOR", "SURGERY", "REVIEW");
     private static final Set<String> INVENTORY_CONSUMPTION_STAGES = Set.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
-    private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound", "quality");
+    private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "nursing", "lab", "ecg", "ultrasound", "quality");
     private static final Set<String> FULL_OPERATION_ROLES = Set.of(
         "admin", "inspection", "reception", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
     );
@@ -67,6 +67,7 @@ public class PreAiEncounterService {
         "REGISTRATION", Set.of("FRONT_DESK"),
         "INSPECTION", Set.of("INSPECTION_DOCTOR", "RECEPTION_DOCTOR", "ATTENDING_DOCTOR"),
         "RECEPTION", Set.of("RECEPTION_DOCTOR", "INSPECTION_DOCTOR", "ATTENDING_DOCTOR"),
+        "NURSING", Set.of("BASIC_NURSING"),
         "TCM", Set.of("TCM_DOCTOR"),
         "DOCTOR", Set.of("ATTENDING_DOCTOR"),
         "SURGERY", Set.of("SURGEON", "OPERATING_ROOM_NURSE"),
@@ -78,7 +79,7 @@ public class PreAiEncounterService {
         Map.entry("TCM_DOCTOR", Set.of("tcm")),
         Map.entry("INSPECTION_DOCTOR", Set.of("inspection")),
         Map.entry("LAB_STAFF", Set.of("lab")),
-        Map.entry("BASIC_NURSING", Set.of("nurse")),
+        Map.entry("BASIC_NURSING", Set.of("nurse", "nursing")),
         Map.entry("ATTENDING_DOCTOR", Set.of("doctor")),
         Map.entry("SURGEON", Set.of("doctor")),
         Map.entry("OPERATING_ROOM_NURSE", Set.of("nurse")),
@@ -101,9 +102,7 @@ public class PreAiEncounterService {
             "visualFindings", "digitalExamFindings", "anoscopyFindings",
             "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
             "inspectionSpecialDescription", "inspectionNarrative", "nextReviewAt", "nextReviewNote",
-            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots",
-            "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
-            "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory"
+            "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots"
         ),
         "RECEPTION", Set.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
@@ -116,6 +115,14 @@ public class PreAiEncounterService {
             "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "dispositionSupplement", "recommendedAuxiliaryExams", "specialCircumstances",
             "chiefComplaintSupplement", "receptionSpecialDescription", "physicalExam", "physicalExamOverride",
             "physicalExamSourceHash", "physicalExamConfirmed"
+        ),
+        // 护理部（住院专属）：病史采集照常归档至前置资料文档；四测与护理评估仅系统留存，不进导出白名单
+        "NURSING", Set.of(
+            "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
+            "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory",
+            "measuredAt", "systolicBp", "diastolicBp", "temperature", "pulse", "respiration",
+            "admissionWay", "consciousness", "heightCm", "weightKg", "painScore",
+            "fallRisk", "pressureUlcerRisk", "nutritionScreening", "selfCareAbility", "nursingAssessmentNote"
         ),
         "TCM", Set.of(
             "tcmDisease", "primarySyndrome", "concurrentSyndrome", "inspection", "auscultationOlfaction", "inquiry",
@@ -725,10 +732,7 @@ public class PreAiEncounterService {
         }
         ObjectNode data = sanitizeStageData(stage, request == null ? null : request.data());
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
-        if ("INSPECTION".equals(stage) && !text(data, "inspectionNarrative").isBlank()) {
-            // 检查室收束流程：编辑并保存检查记录即视为对检查事实结论的人工确认
-            data.put("factualConclusionConfirmed", true);
-        }
+        syncInspectionConclusion(stage, data);
         if ("REGISTRATION".equals(stage)) {
             syncRegistrationCareType(encounterId, data, encounter);
             jdbcTemplate.update("UPDATE pre_ai_encounters SET patient_json = ?, updated_at = ? WHERE id = ?", toJson(data), now(), encounterId);
@@ -872,6 +876,7 @@ public class PreAiEncounterService {
         ObjectNode before = safeObject(current.path("data")).deepCopy();
         ObjectNode data = sanitizeStageData(stage, request == null ? null : request.data());
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
+        syncInspectionConclusion(stage, data);
         validateStage(stage, data, encounter);
         if ("REGISTRATION".equals(stage)) {
             syncRegistrationCareType(encounterId, data, encounter);
@@ -913,6 +918,7 @@ public class PreAiEncounterService {
             ? sanitizeStageData(stage, request.data())
             : safeObject(current.path("data"));
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
+        syncInspectionConclusion(stage, data);
         validateStage(stage, data, encounter);
         if ("REGISTRATION".equals(stage)) {
             syncRegistrationCareType(encounterId, data, encounter);
@@ -1726,7 +1732,7 @@ public class PreAiEncounterService {
         if (admissionProfile == null) result.putNull("admissionProfile");
         else result.set("admissionProfile", admissionProfile);
         ArrayNode stages = result.putArray("stages");
-        jdbcTemplate.query("SELECT * FROM pre_ai_stage_submissions WHERE encounter_id = ? ORDER BY FIELD(stage_code, 'REGISTRATION','INSPECTION','RECEPTION','TCM','DOCTOR','SURGERY','REVIEW')", (org.springframework.jdbc.core.RowCallbackHandler) rs -> stages.add(readStage(rs)), encounterId);
+        jdbcTemplate.query("SELECT * FROM pre_ai_stage_submissions WHERE encounter_id = ? ORDER BY FIELD(stage_code, 'REGISTRATION','INSPECTION','RECEPTION','NURSING','TCM','DOCTOR','SURGERY','REVIEW')", (org.springframework.jdbc.core.RowCallbackHandler) rs -> stages.add(readStage(rs)), encounterId);
         ArrayNode auxiliaryTasks = result.putArray("auxiliaryTasks");
         jdbcTemplate.query("SELECT * FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> auxiliaryTasks.add(readAuxiliaryTask(rs)), encounterId);
         ArrayNode labReports = result.putArray("labReports");
@@ -1789,6 +1795,8 @@ public class PreAiEncounterService {
                 required(data, missing, "visitDate", "就诊时间");
                 required(data, missing, "visitPurpose", "来院目的");
                 required(data, missing, "registrationChiefComplaint", "登记主诉");
+                required(data, missing, "allergyHistory", "过敏史");
+                required(data, missing, "personalHistory", "个人史");
                 required(data, missing, "inventoryCareType", "耗材统计口径（门诊/住院）");
                 if (!text(data, "inventoryCareType").isBlank()) normalizeInventoryCareType(text(data, "inventoryCareType"));
                 if (!text(data, "visitPurpose").isBlank()) normalizeEnum(text(data, "visitPurpose"), Set.of("GENERAL", "ENDOSCOPY_DIRECT"), "来院目的");
@@ -1798,8 +1806,6 @@ public class PreAiEncounterService {
                 required(data, missing, "diseaseDirections", "病种方向");
                 if (data.path("examinationTypes").isMissingNode() || data.path("examinationTypes").isEmpty()) missing.add("已完成检查类型");
                 required(data, missing, "factualConclusion", "检查事实结论");
-                required(data, missing, "allergyHistory", "过敏史");
-                required(data, missing, "personalHistory", "个人史");
             }
             case "RECEPTION" -> {
                 required(data, missing, "chiefComplaint", "主诉");
@@ -1860,6 +1866,20 @@ public class PreAiEncounterService {
         }
     }
 
+    /**
+     * 检查室收束流程：所见叙述文本（inspectionNarrative）就是检查事实结论的权威内容。
+     * 保存/完成/纠错任一路径写入时，将叙述同步为事实结论字段并视为已人工确认，
+     * 保证导出文档与 AI 成档读到医生实际编辑内容，且不再被"手工修订需重新确认"拦截。
+     */
+    private void syncInspectionConclusion(String stage, ObjectNode data) {
+        if (!"INSPECTION".equals(stage)) return;
+        String narrative = text(data, "inspectionNarrative");
+        if (narrative.isBlank()) return;
+        data.put("factualConclusion", narrative);
+        data.put("factualConclusionOverride", narrative);
+        data.put("factualConclusionConfirmed", true);
+    }
+
     private void validateRepeatableRequired(JsonNode items, String key, String groupLabel, String fieldLabel, List<String> missing) {
         if (!items.isArray()) return;
         int index = 1;
@@ -1881,8 +1901,8 @@ public class PreAiEncounterService {
     }
 
     private void validateTemplateConfirmations(String stage, JsonNode data, List<String> missing) {
+        // INSPECTION 不再要求独立确认：收束流程中叙述即结论，syncInspectionConclusion 已同步并确认
         Map<String, List<String>> confirmations = switch (stage) {
-            case "INSPECTION" -> Map.of("factualConclusionOverride", List.of("factualConclusionConfirmed", "检查事实结论"));
             case "RECEPTION" -> Map.of(
                 "presentIllnessOverride", List.of("presentIllnessConfirmed", "现病史"),
                 "physicalExamOverride", List.of("physicalExamConfirmed", "体格检查")
@@ -2893,14 +2913,13 @@ public class PreAiEncounterService {
         if ("TCM".equals(stage) && isOutpatientEncounter(encounter) && !tcmOperator) {
             throw conflict("门诊患者跳过中医环节，不能维护中医阶段");
         }
+        if ("NURSING".equals(stage) && isOutpatientEncounter(encounter)) {
+            throw conflict("门诊患者无需护理部环节，不能维护护理部阶段");
+        }
+        // 各科室自由提交：阶段提交/完成交接不再受责任人指派限制，责任人指派仅作记录与时间轴展示
         boolean policyAllowed = user != null && navigationService.canEditStage(user.role(), stage);
         if (!policyAllowed) throw forbidden("当前岗位无权维护" + stageLabel(stage));
         if (isReceptionInspectionCoverage(stage, user)) return;
-        if (hasFullPreAiOperationAccess(user)) return;
-        Set<String> duties = STAGE_DUTIES.getOrDefault(stage, Set.of());
-        if (hasConfiguredDuty(encounter, duties) && !hasAssignedDuty(encounter, user, duties)) {
-            throw forbidden("本病例已指定" + stageLabel(stage) + "责任人，当前账号不在责任范围内");
-        }
     }
 
     private boolean isReceptionInspectionCoverage(String stage, SessionUser user) {
@@ -3013,7 +3032,10 @@ public class PreAiEncounterService {
 
     private List<String> effectiveStageOrder(ObjectNode encounter) {
         List<String> stages = new ArrayList<>(STAGE_ORDER);
-        if (isOutpatientEncounter(encounter)) stages.remove("TCM");
+        if (isOutpatientEncounter(encounter)) {
+            stages.remove("TCM");
+            stages.remove("NURSING");
+        }
         if (!("inpatient".equals(normalizedCareType(encounter)) && "SURGICAL".equalsIgnoreCase(text(encounter, "treatmentPath")))) {
             stages.remove("SURGERY");
         }
@@ -3139,6 +3161,7 @@ public class PreAiEncounterService {
             case "REGISTRATION" -> "前台登记";
             case "INSPECTION" -> "检查室";
             case "RECEPTION" -> "接诊室";
+            case "NURSING" -> "护理部";
             case "TCM" -> "中医岗位";
             case "DOCTOR" -> "医生诊疗方案";
             case "SURGERY" -> "手术室登记";

@@ -3,8 +3,10 @@ package com.coshare.patientrecord.health.service;
 import com.coshare.patientrecord.backup.entity.BackupConfig;
 import com.coshare.patientrecord.backup.repository.ClinicBackupRepository;
 import com.coshare.patientrecord.file.service.ClinicFileService;
+import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
 import com.coshare.patientrecord.ai.service.AiCallGuard;
 import com.coshare.patientrecord.ai.service.AiDocumentTaskService;
+import com.coshare.patientrecord.ai.service.ClinicAiConfigService;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,6 +43,7 @@ public class RuntimeHealthService {
     private final String aiConfigSecret;
     private final AiCallGuard aiCallGuard;
     private final ObjectProvider<AiDocumentTaskService> aiDocumentTaskService;
+    private final ObjectProvider<ClinicAiConfigService> clinicAiConfigService;
 
     public RuntimeHealthService(
         Environment environment,
@@ -56,7 +59,8 @@ public class RuntimeHealthService {
         @Value("${clinic.ai.doubao.tts.model:}") String doubaoTtsModel,
         @Value("${clinic.ai.config-secret:}") String aiConfigSecret,
         AiCallGuard aiCallGuard,
-        ObjectProvider<AiDocumentTaskService> aiDocumentTaskService
+        ObjectProvider<AiDocumentTaskService> aiDocumentTaskService,
+        ObjectProvider<ClinicAiConfigService> clinicAiConfigService
     ) {
         this.environment = environment;
         this.releaseId = releaseId == null ? "" : releaseId;
@@ -72,6 +76,7 @@ public class RuntimeHealthService {
         this.aiConfigSecret = aiConfigSecret == null ? "" : aiConfigSecret;
         this.aiCallGuard = aiCallGuard;
         this.aiDocumentTaskService = aiDocumentTaskService;
+        this.clinicAiConfigService = clinicAiConfigService;
     }
 
     public Map<String, Object> summary() {
@@ -149,6 +154,18 @@ public class RuntimeHealthService {
 
     private Map<String, Object> ai() {
         boolean genericConfigured = !aiApiKey.isBlank() && !aiModel.isBlank();
+        if (!genericConfigured) {
+            // 环境变量未配置时回查运行时 DB 配置（clinic_ai_config），避免管理界面配置后 health 仍误报
+            ClinicAiConfigService configService = clinicAiConfigService.getIfAvailable();
+            if (configService != null) {
+                try {
+                    EffectiveAiConfig config = configService.resolveEffectiveConfig();
+                    genericConfigured = config.enabled() && !safe(config.apiKey()).isBlank() && !safe(config.model()).isBlank();
+                } catch (Exception ignored) {
+                    // 数据库可达性由 database 组件负责，这里不重复报警
+                }
+            }
+        }
         boolean doubaoConfigured = !doubaoApiKey.isBlank() && !doubaoModel.isBlank();
         boolean ttsConfigured = !doubaoTtsApiKey.isBlank() && !doubaoTtsModel.isBlank();
         List<String> providers = new ArrayList<>();
@@ -161,6 +178,10 @@ public class RuntimeHealthService {
         component.put("configSecretConfigured", !aiConfigSecret.isBlank());
         component.put("runtime", aiCallGuard.metrics());
         return component;
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private Map<String, Object> taskQueue() {

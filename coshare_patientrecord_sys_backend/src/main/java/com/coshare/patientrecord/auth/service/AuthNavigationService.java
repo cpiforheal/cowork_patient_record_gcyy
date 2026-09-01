@@ -34,12 +34,13 @@ public class AuthNavigationService {
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
-        "REGISTRATION", "INSPECTION", "RECEPTION", "TCM", "DOCTOR", "SURGERY", "REVIEW"
+        "REGISTRATION", "INSPECTION", "RECEPTION", "NURSING", "TCM", "DOCTOR", "SURGERY", "REVIEW"
     );
     private static final Map<String, Set<String>> STAGE_EDITORS = Map.of(
         "REGISTRATION", Set.of("frontdesk"),
         "INSPECTION", Set.of("inspection", "reception"),
         "RECEPTION", Set.of("reception", "inspection"),
+        "NURSING", Set.of("nurse", "nursing"),
         "TCM", Set.of("tcm"),
         "DOCTOR", Set.of("doctor"),
         "SURGERY", Set.of("nurse"),
@@ -49,7 +50,7 @@ public class AuthNavigationService {
         "LAB", Set.of("lab"),
         "ECG", Set.of("ecg"),
         "IMAGING", Set.of("ultrasound"),
-        "VITAL_SIGNS", Set.of("nurse"),
+        "VITAL_SIGNS", Set.of("nurse", "nursing"),
         "COLONOSCOPY", Set.of("inspection")
     );
     private static final Set<String> PRE_AI_FULL_OPERATOR_ROLES = Set.of(
