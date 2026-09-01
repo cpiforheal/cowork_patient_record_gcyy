@@ -50,7 +50,8 @@ public class InpatientRecordAiService {
     private static final int MAX_PROMPT_LENGTH = 4000;
     private static final int MAX_UPSTREAM_ERROR_LENGTH = 500;
     private static final int RELAY_SLICE_COUNT = 4;
-    private static final int RELAY_MAX_TOKENS = 6000;
+    private static final int RELAY_MAX_TOKENS = 10000;
+    private static final int RELAY_OUTLINE_MAX_TOKENS = 4096;
 
     private final ClinicAiConfigService aiConfigService;
     private final AiCallGuard aiCallGuard;
@@ -290,13 +291,20 @@ public class InpatientRecordAiService {
                 currentValues,
                 conversationHistory
             );
+            log.info(
+                "Chaptered relay generation started: endpoint={}, model={}, factsContextChars={}, referenceChars={}, expectedCount={}",
+                safeEndpoint(endpoint),
+                model,
+                factsContext.length(),
+                safe(referenceDocumentText).length(),
+                expectedCount
+            );
             String outline = generateRelayOutline(
                 endpoint,
                 apiKey,
                 model,
                 prompt,
                 factsContext,
-                referenceDocumentText,
                 referenceSourceLabel,
                 expectedCount
             );
@@ -385,21 +393,22 @@ public class InpatientRecordAiService {
         String model,
         String prompt,
         String factsContext,
-        String referenceDocumentText,
         String referenceSourceLabel,
         int expectedCount
     ) throws IOException, InterruptedException {
+        // 定纲只做写作口径规划，不携带范本全文：长上下文会使 deepseek-v4-flash 等推理模型退化
+        // （实测 46k+ prompt tokens 时输出近乎为空且上游照常计费）；范本结构由各分片自行携带。
         String userContent = """
-            【固定上下文：医生提示词、患者资料、脱敏前置资料、会话记忆】
+            【固定上下文：医生提示词、患者档案、已复核事实、脱敏前置资料、会话记忆】
             %s
 
             【参考范本来源】
             %s
 
-            【周xx住院病历范本全文（已逐段编号，仅作结构和写法参考，禁止复制示例患者事实）】
-            %s
-            """.formatted(factsContext, safe(referenceSourceLabel), numberReferenceParagraphs(referenceDocumentText));
-        String raw = chatCompletion(endpoint, apiKey, model, relayOutlineSystemPrompt(expectedCount), userContent, 1800);
+            【范本规模】
+            参考范本共 %d 个非空正文段落，后续将按 4 个连续分片并行改写后合并；总纲无需逐段规划，只需统一病例写作口径。
+            """.formatted(factsContext, safe(referenceSourceLabel), expectedCount);
+        String raw = chatCompletion(endpoint, apiKey, model, relayOutlineSystemPrompt(expectedCount), userContent, RELAY_OUTLINE_MAX_TOKENS);
         return extractRelayOutline(raw);
     }
 
@@ -468,29 +477,59 @@ public class InpatientRecordAiService {
         String userContent,
         int maxTokens
     ) throws IOException, InterruptedException {
-        ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("model", model);
-        payload.put("temperature", 0.2);
-        payload.put("max_tokens", maxTokens);
-        payload.put("stream", false);
-        payload.putObject("response_format").put("type", "json_object");
-        ArrayNode messages = payload.putArray("messages");
-        messages.addObject().put("role", "system").put("content", systemContent);
-        messages.addObject().put("role", "user").put("content", userContent);
+        int attemptBudget = Math.max(maxTokens, 1024);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("model", model);
+            payload.put("temperature", 0.2);
+            payload.put("max_tokens", attemptBudget);
+            payload.put("stream", false);
+            payload.putObject("response_format").put("type", "json_object");
+            ArrayNode messages = payload.putArray("messages");
+            messages.addObject().put("role", "system").put("content", systemContent);
+            messages.addObject().put("role", "user").put("content", userContent);
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-            .timeout(Duration.ofSeconds(120))
-            .header("Authorization", "Bearer " + apiKey)
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
-            .build();
-        HttpResponse<String> response = aiCallGuard.execute(
-            () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-        );
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("上游状态 " + response.statusCode() + "：" + truncate(upstreamErrorMessage(response.body())));
+            HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+                .timeout(Duration.ofSeconds(120))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
+                .build();
+            HttpResponse<String> response = aiCallGuard.execute(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+            );
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IOException("上游状态 " + response.statusCode() + "：" + truncate(upstreamErrorMessage(response.body())));
+            }
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode content = root.path("choices").path(0).path("message").path("content");
+            if (content.isTextual() && !content.asText("").isBlank()) {
+                return content.asText();
+            }
+            String finishReason = root.path("choices").path(0).path("finish_reason").asText("unknown");
+            int completionTokens = root.path("usage").path("completion_tokens").asInt(0);
+            int promptTokens = root.path("usage").path("prompt_tokens").asInt(0);
+            log.warn(
+                "Chaptered relay upstream returned empty content: endpoint={}, model={}, attempt={}/2, budgetTokens={}, "
+                    + "finishReason={}, completionTokens={}, promptTokens={}",
+                safeEndpoint(endpoint),
+                model,
+                attempt,
+                attemptBudget,
+                finishReason,
+                completionTokens,
+                promptTokens
+            );
+            if (attempt == 1) {
+                attemptBudget = Math.min(attemptBudget * 2, 32768);
+                continue;
+            }
+            throw new IOException(
+                "模型返回了空内容（finish_reason=" + finishReason + "，completionTokens=" + completionTokens
+                    + "，promptTokens=" + promptTokens + "）；已自动提高输出上限重试仍失败，请稍后重试或联系管理员"
+            );
         }
-        return extractContent(response.body());
+        throw new IOException("模型返回了空内容");
     }
 
     private String buildRelayFactsContext(
@@ -503,7 +542,13 @@ public class InpatientRecordAiService {
     ) throws IOException {
         ObjectNode context = objectMapper.createObjectNode();
         context.put("doctorSupplement", safe(prompt));
-        context.set("patientAndRecord", sourceSnapshot == null ? objectMapper.createObjectNode() : sourceSnapshot);
+        // 只携带患者身份档案（真实姓名/性别/年龄等表头信息），不携带全量合并病历：
+        // 实测直连中转在 46k+ prompt tokens 时输出严重退化甚至返回空内容，临床事实由
+        // reviewedPreAiFacts 与 reviewedMaskedExport（权威口径）承担。
+        ObjectNode patientProfile = sourceSnapshot != null && sourceSnapshot.path("patient").isObject()
+            ? (ObjectNode) sourceSnapshot.path("patient").deepCopy()
+            : objectMapper.createObjectNode();
+        context.set("patientProfile", patientProfile);
         context.set("reviewedPreAiFacts", preAiFacts == null ? objectMapper.createObjectNode() : preAiFacts);
         if (maskedPreAiExport != null && !maskedPreAiExport.isMissingNode() && !maskedPreAiExport.isNull()) {
             context.set("reviewedMaskedExport", maskedPreAiExport);
@@ -602,10 +647,10 @@ public class InpatientRecordAiService {
 
     private String relayOutlineSystemPrompt(int expectedCount) {
         return """
-            你是院内住院病历生成定纲助手。请基于医生提示词、当前患者资料、已复核脱敏前置资料和周xx参考范本，先整理后续分片改写共用的病例写作总纲。
-            参考范本只提供结构、标题、段落顺序、查房时序和书写风格；严禁复制范本中的姓名、日期、住院号、床号、检查数值、诊断和处方。
-            当前参考文档共有 %d 个非空正文段落。总纲必须说明主诊断、关键病史、查体/辅助检查事实、诊疗经过、中医辨证和方剂参考口径；缺事实时写待医生补充，不得虚构。
-            输出必须是单个 JSON 对象，格式只能为 {"outline":"供后续分片改写使用的中文总纲"}，禁止 Markdown、解释、代码围栏或其他键。
+            你是院内住院病历生成定纲助手。请基于医生提示词、当前患者档案、已复核事实与脱敏前置资料，整理后续分片改写共用的病例写作总纲。
+            范本全文不随本请求下发：总纲只负责统一写作口径（主诊断、关键病史、查体/辅助检查事实、诊疗经过、中医辨证和方剂参考），章节结构与段落编号由各分片按范本自行对齐。
+            缺事实时写待医生补充，不得虚构。
+            输出必须是单个 JSON 对象，格式只能为 {"outline":"供后续分片改写使用的中文总纲"}，总纲控制在 600 字以内，禁止 Markdown、解释、代码围栏或其他键。
             """.formatted(expectedCount);
     }
 
