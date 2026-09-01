@@ -21,6 +21,8 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -290,6 +292,53 @@ public class ClinicAiConfigService {
         configRepository.saveConfig(configId, baseUrl, cipher, model, enabled, updatedAt, updatedBy, resourceId, voiceType, speedRatio);
         return statusFor(configId);
     }
+
+    /** 对话框模型选择：读取当前直连中转的可用模型列表（10 分钟缓存），默认模型取系统配置。 */
+    public Map<String, Object> relayModels() {
+        Map<String, Object> cached = relayModelsCache;
+        if (cached != null && Duration.between(relayModelsCacheAt, java.time.Instant.now()).toMinutes() < 10) {
+            return cached;
+        }
+        EffectiveAiConfig config = resolveEffectiveConfig();
+        String baseUrl = (config.baseUrl() == null ? "" : config.baseUrl()).replaceAll("/+$", "");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("configured", config.enabled() && !baseUrl.isBlank() && !config.apiKey().isBlank());
+        result.put("defaultModel", config.model() == null ? "" : config.model());
+        List<String> models = new java.util.ArrayList<>();
+        if (config.enabled() && !baseUrl.isBlank() && !config.apiKey().isBlank()) {
+            try {
+                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(baseUrl + "/models"))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Authorization", "Bearer " + config.apiKey())
+                    .GET()
+                    .build();
+                java.net.http.HttpResponse<String> response = relayModelsHttpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    com.fasterxml.jackson.databind.JsonNode data = objectMapper.readTree(response.body()).path("data");
+                    if (data.isArray()) {
+                        data.forEach(item -> {
+                            String id = item.path("id").asText("");
+                            if (!id.isBlank()) models.add(id);
+                        });
+                        java.util.Collections.sort(models);
+                    }
+                }
+            } catch (Exception error) {
+                // 模型列表拉取失败不阻断生成：返回默认模型即可
+            }
+        }
+        result.put("models", models);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> unmodifiable = (Map<String, Object>) java.util.Collections.unmodifiableMap(result);
+        relayModelsCache = unmodifiable;
+        relayModelsCacheAt = java.time.Instant.now();
+        return unmodifiable;
+    }
+
+    private volatile Map<String, Object> relayModelsCache;
+    private volatile java.time.Instant relayModelsCacheAt = java.time.Instant.EPOCH;
+    private final java.net.http.HttpClient relayModelsHttpClient =
+        java.net.http.HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public EffectiveAiConfig resolveEffectiveConfig() {
         return resolveEffectiveConfig(CONFIG_ID);

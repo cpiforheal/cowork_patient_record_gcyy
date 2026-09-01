@@ -219,6 +219,13 @@ public class ClinicApiController {
         return ApiResult.of(200, "backup finished", data);
     }
 
+    /** 病历对话框模型选择：返回直连中转可用模型与系统默认模型（登录用户可读）。 */
+    @GetMapping("/clinic-api/ai/relay/models")
+    public ApiResult<Map<String, Object>> relayModels() {
+        AuthPermission.currentUserOrThrow();
+        return ApiResult.success(aiConfigService.relayModels());
+    }
+
     @GetMapping("/clinic-api/ai/config")
     public ApiResult<Map<String, Object>> aiConfigStatus() {
         requireClinicAdmin();

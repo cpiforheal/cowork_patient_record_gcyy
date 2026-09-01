@@ -93,6 +93,14 @@
         </template>
         <small v-else class="attachment-note muted">当前病例暂无有效脱敏资料，可先在复核面板生成</small>
       </div>
+      <div class="model-bar">
+        <span class="model-label">生成模型</span>
+        <el-select v-model="selectedModel" class="model-select" size="small" :disabled="busy" placeholder="系统默认">
+          <el-option :label="defaultModelOptionLabel" value="" />
+          <el-option v-for="model in relayModels.models" :key="model" :label="model" :value="model" />
+        </el-select>
+        <small v-if="!relayModels.configured" class="model-hint">未检测到模型服务列表，将按系统配置生成</small>
+      </div>
       <el-input
         v-model="notes"
         type="textarea"
@@ -117,10 +125,12 @@ import {
   downloadMedicalRecordAssetV2Api,
   generateMedicalRecordApi,
   inspectBuiltinMedicalRecordTemplateApi,
+  getRelayModelsApi,
   pollMedicalRecordWorkflowTask,
   retryMedicalRecordWorkflowTaskApi,
   submitMedicalRecordWorkflowTaskApi
 } from "@/api/modules/clinic/medicalRecord";
+import type { RelayModelsInfo } from "@/api/modules/clinic/medicalRecord";
 import type { MedicalRecordWorkflowTask } from "@/api/modules/clinic/types";
 import type { PreAiExportVersion } from "@/api/modules/clinic/preAi";
 
@@ -170,6 +180,12 @@ const roundCount = ref(0);
 const controller = ref<AbortController>();
 const messageListRef = ref<HTMLElement>();
 const attachExport = ref(true);
+const relayModels = ref<RelayModelsInfo>({ configured: false, defaultModel: "", models: [] });
+const selectedModel = ref("");
+
+const defaultModelOptionLabel = computed(() =>
+  relayModels.value.defaultModel ? `系统默认（${relayModels.value.defaultModel}）` : "系统默认"
+);
 
 const pinnedExport = computed(
   () => [...props.exports].filter(item => item.status && item.status !== "INVALIDATED").sort((a, b) => b.version - a.version)[0]
@@ -206,6 +222,7 @@ const resetSession = () => {
   lastOutputAssetId.value = "";
   roundCount.value = 0;
   attachExport.value = true;
+  selectedModel.value = "";
 };
 
 watch(
@@ -217,6 +234,19 @@ watch(
     }
     if (messages.value.length) return;
     notes.value = "";
+  }
+);
+
+watch(
+  () => props.modelValue,
+  async visible => {
+    if (!visible || relayModels.value.models.length) return;
+    try {
+      const { data } = await getRelayModelsApi();
+      relayModels.value = data;
+    } catch {
+      relayModels.value = { configured: false, defaultModel: "", models: [] };
+    }
   }
 );
 
@@ -292,7 +322,8 @@ const send = async () => {
         prompt: composed,
         mappingMode: "LEGACY_ORDINAL",
         preAiExportId: attachExportId,
-        conversationHistory: [...notesHistory.value]
+        conversationHistory: [...notesHistory.value],
+        model: selectedModel.value || undefined
       };
     } else {
       if (!builtinReportId.value) {
@@ -309,7 +340,8 @@ const send = async () => {
         prompt: composed,
         mappingMode: "LEGACY_ORDINAL",
         preAiExportId: attachExportId,
-        conversationHistory: [...notesHistory.value]
+        conversationHistory: [...notesHistory.value],
+        model: selectedModel.value || undefined
       };
     }
     const { data: submitted } = await submitMedicalRecordWorkflowTaskApi(submitParams, requestController.signal);
@@ -535,6 +567,26 @@ const bubbleClass = (card: GenerationCard) => ({
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+
+.model-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .model-label {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+
+  .model-select {
+    width: 260px;
+  }
+
+  .model-hint {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
 }
 
 .chat-footer {

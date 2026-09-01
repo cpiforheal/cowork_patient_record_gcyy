@@ -324,6 +324,19 @@ export const exportGeneratedMedicalRecordV2Api = (recordId: string, signal?: Abo
     signal
   );
 
+export interface RelayModelsInfo {
+  configured: boolean;
+  defaultModel: string;
+  models: string[];
+}
+
+/** 病历对话框模型选择：直连中转可用模型 + 系统默认模型。 */
+export const getRelayModelsApi = async (signal?: AbortSignal) => {
+  const result = await clinicFetch("/ai/relay/models", { headers: authHeaders(), signal });
+  const data = await parseClinicApiResponse<RelayModelsInfo>(result);
+  return clinicResponse(data);
+};
+
 export interface MedicalRecordWorkflowPollingOptions {
   signal?: AbortSignal;
   intervalMs?: number;

@@ -26,7 +26,8 @@ public final class RoleCatalog {
         role("ultrasound", "超声岗位", "填写超声影像辅助检查结果", "患者资料上传、影像任务", "影像结果录入", "授权科室或本人任务"),
         role("warehouse", "仓库岗位", "负责物资、库存和科室配送作业", "入库与库存、申领审批、盘点报损", "入库、审批、发放、调拨、盘点、报损", "中央仓及授权科室库存"),
         role("inventory_reporter", "科室耗材填报测试账号", "填写本部门耗材草稿并导出本部门周/月报表", "科室耗材核算", "填写草稿、导出报表", "仅所属科室"),
-        role("tcm_pharmacy", "中药房岗位", "完成收费后审方、调剂、代煎和领取", "中药房工作台、取药大屏", "审方、调剂、代煎、发药", "中药房处方和任务")
+        role("tcm_pharmacy", "中药房岗位", "完成收费后审方、调剂、代煎和领取", "中药房工作台、取药大屏", "审方、调剂、代煎、发药", "中药房处方和任务"),
+        role("billing", "收费室", "查询患者姓名、身份证号、家庭住址、联系电话用于收费登记", "患者收费信息", "查询、复制患者基础信息", "仅患者基础身份信息（只读）")
     );
 
     private static final Map<String, RoleDefinition> BY_ROLE;
@@ -37,6 +38,9 @@ public final class RoleCatalog {
         Map.entry("pharmacy", "tcm_pharmacy"),
         Map.entry("decoction", "tcm_pharmacy"),
         Map.entry("registration", "frontdesk"),
+        Map.entry("billing", "billing"),
+        Map.entry("收费室", "billing"),
+        Map.entry("收费员", "billing"),
         Map.entry("\u524d\u53f0", "frontdesk"),
         Map.entry("\u767b\u8bb0\u524d\u53f0", "frontdesk"),
         Map.entry("\u524d\u53f0\u767b\u8bb0", "frontdesk"),

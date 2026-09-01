@@ -511,6 +511,7 @@ export interface MedicalRecordWorkflowSubmitParams {
   targetNodeKeys?: string[];
   preAiExportId?: string;
   conversationHistory?: string[];
+  model?: string;
 }
 
 export interface MedicalRecordWorkflowTaskEvent {

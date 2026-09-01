@@ -8,7 +8,8 @@ public record InpatientAiGenerateRequest(
     String sourceRecordId,
     String prompt,
     Object preAiExport,
-    List<String> conversationHistory
+    List<String> conversationHistory,
+    String model
 ) {
     public InpatientAiGenerateRequest {
         conversationHistory = conversationHistory == null ? List.of() : List.copyOf(conversationHistory);
@@ -21,7 +22,7 @@ public record InpatientAiGenerateRequest(
         String prompt,
         Object preAiExport
     ) {
-        this(patientId, encounterId, sourceRecordId, prompt, preAiExport, List.of());
+        this(patientId, encounterId, sourceRecordId, prompt, preAiExport, List.of(), null);
     }
 
     public InpatientAiGenerateRequest(
@@ -30,6 +31,6 @@ public record InpatientAiGenerateRequest(
         String sourceRecordId,
         String prompt
     ) {
-        this(patientId, encounterId, sourceRecordId, prompt, null, List.of());
+        this(patientId, encounterId, sourceRecordId, prompt, null, List.of(), null);
     }
 }

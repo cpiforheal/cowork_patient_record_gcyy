@@ -97,6 +97,7 @@ public class InpatientRecordAiService {
         int referenceParagraphCount,
         List<String> controlledNodeKeys,
         List<String> conversationHistory,
+        String modelOverride,
         java.util.function.Consumer<String> chapterProgress
     ) {
         String normalizedPrompt = safe(prompt);
@@ -111,9 +112,14 @@ public class InpatientRecordAiService {
             && !normalizeApiKey(config.apiKey()).isBlank()
             && !safe(config.baseUrl()).isBlank()
             && !safe(config.model()).isBlank();
+        String effectiveModel = safe(modelOverride);
+        if (effectiveModel.length() > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "模型名称不能超过 100 个字符");
+        }
         if (directEligible) {
             return generateViaChapteredRelay(
                 config,
+                effectiveModel,
                 normalizedPrompt,
                 referenceDocumentText,
                 referenceSourceLabel,
@@ -149,7 +155,7 @@ public class InpatientRecordAiService {
         }
         String baseUrl = normalizeChatCompletionsUrl(config.baseUrl());
         String apiKey = normalizeApiKey(config.apiKey());
-        String model = safe(config.model());
+        String model = safe(modelOverride).isBlank() ? safe(config.model()) : safe(modelOverride);
         if (!config.enabled() || baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
             throw new ResponseStatusException(
                 HttpStatus.SERVICE_UNAVAILABLE,
@@ -240,6 +246,7 @@ public class InpatientRecordAiService {
 
     private AiGeneration generateViaChapteredRelay(
         EffectiveAiConfig config,
+        String modelOverride,
         String prompt,
         String referenceDocumentText,
         String referenceSourceLabel,
@@ -253,7 +260,7 @@ public class InpatientRecordAiService {
     ) {
         String endpoint = normalizeChatCompletionsUrl(config.baseUrl());
         String apiKey = normalizeApiKey(config.apiKey());
-        String model = safe(config.model());
+        String model = safe(modelOverride).isBlank() ? safe(config.model()) : safe(modelOverride);
         if (!config.enabled() || endpoint.isBlank() || apiKey.isBlank() || model.isBlank()) {
             throw new ResponseStatusException(
                 HttpStatus.SERVICE_UNAVAILABLE,
@@ -660,6 +667,10 @@ public class InpatientRecordAiService {
             当前参考文档共有 %d 个非空正文段落，本次只允许输出第 %d 到第 %d 段。输出编号 n 必须对应参考范本中的【第N段】，不得越界、不得重复、不得合并相邻段落。
             参考范本只提供格式、结构、查房时序和语言风格；范本中的患者事实全部是示例，必须替换为当前患者事实。reviewedMaskedExport 是当前患者事实的权威口径，冲突时以它为准。
             纯标题段和签名行可以不输出，系统会沿用范本；含日期、姓名、数值、诊断、病程和治疗内容的短行必须输出。缺少事实时该项只写“待医生补充”。
+            严禁虚构：症状细节、体征、诊断、次诊断、术式、麻醉方式、检查与化验数值只能来自当前患者资料与已复核事实；系统未登记的诊断、术式或麻醉方式一律写“待医生补充”，不得按常见做法补写。
+            上下文中已提供的检查结果（心电图结论、化验指标、四测/生命体征数值等）必须如实写入对应段落，不得仍写“待医生补充”。
+            时间线必须先后一致：全部记录按 入院 → 术前准备/术前小结 → 手术 → 术后首次病程 → 逐日查房 → 出院 的顺序排列，日期从患者入院日期与诊疗经过推算，严禁出现手术早于术前记录、术后记录早于手术等矛盾。
+            医师姓名若以脱敏形式（如“桂xx”“罗x”）出现，正文中一律写作“xxx”，不得把脱敏名当作真实姓名写入。
             中医辨证、治法和方剂必须以主病、主证、兼证及四诊为依据，理法方药一致；方剂只能作为医生复核用参考，并明确标注“参考”。
             输出必须是单个 JSON 对象，格式只能为 {"items":[{"n":%d,"text":"第%d段改写后的完整正文"}]}。禁止 Markdown、解释、代码围栏或其他键。
             """.formatted(expectedCount, slice.startN(), slice.endN(), slice.startN(), slice.startN());

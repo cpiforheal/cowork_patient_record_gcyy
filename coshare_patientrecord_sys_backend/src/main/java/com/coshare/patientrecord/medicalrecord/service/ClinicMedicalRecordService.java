@@ -406,6 +406,7 @@ public class ClinicMedicalRecordService {
             reference.paragraphs().size(),
             controlledNodeKeys,
             request == null ? List.of() : request.conversationHistory(),
+            request == null ? "" : safe(request.model()),
             chapterProgress
         );
 

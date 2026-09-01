@@ -375,6 +375,7 @@ public class AuthNavigationService {
         List<NavigationMenu> result = new ArrayList<>();
         result.add(page("/welcome/index", "welcome", "/welcome/index", "主页", "HomeFilled", false, false, true));
         result.add(page("/home/index", "home", "/home/index", "我的待办", "List", false, false, false));
+        result.add(page("/billing/patients", "billingPatients", "/billing/index", "患者收费信息", "Coin", false, false, false));
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/pre-ai/encounters", "患者就诊", "UserFilled",
             page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen", false, false, false),
             page("/encounters/active", "encounterActive", "/encounters/active/index", "患者进度", "Connection", false, false, false),
@@ -581,6 +582,10 @@ public class AuthNavigationService {
             permissions("home=view"), inventoryWarehouseButtons
         )));
         result.put("inventory_reporter", role(paths("/welcome/index", "/home/index"), permissions("home=view")));
+        result.put(
+            "billing",
+            role(paths("/welcome/index", "/home/index", "/billing/patients"), permissions("home=view", "billingPatients=patient:read"))
+        );
         return Map.copyOf(result);
     }
 

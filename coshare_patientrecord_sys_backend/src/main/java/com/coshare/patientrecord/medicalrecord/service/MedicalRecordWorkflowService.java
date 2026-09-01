@@ -322,7 +322,8 @@ public class MedicalRecordWorkflowService {
             referenceAssetId,
             preAiExportId,
             preAiExportSnapshot,
-            sanitizeConversationHistory(request.conversationHistory())
+            sanitizeConversationHistory(request.conversationHistory()),
+            safe(request.model())
         );
         repository.insertTask(new Task(
             taskId,
@@ -457,7 +458,8 @@ public class MedicalRecordWorkflowService {
                 task.sourceRecordId(),
                 task.prompt(),
                 task.request().get("preAiExport"),
-                stringList(task.request().get("conversationHistory"))
+                stringList(task.request().get("conversationHistory")),
+                safe((Object) task.request().get("model"))
             );
             java.util.function.Consumer<String> chapterSink = text ->
                 repository.appendProgressEvent(taskId, text, user);
@@ -778,7 +780,8 @@ public class MedicalRecordWorkflowService {
         String referenceAssetId,
         String preAiExportId,
         Object preAiExportSnapshot,
-        List<String> conversationHistory
+        List<String> conversationHistory,
+        String model
     ) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("patientId", patientId);

@@ -10,7 +10,8 @@ public record MedicalRecordWorkflowSubmitRequest(
     String mappingMode,
     List<String> targetNodeKeys,
     String preAiExportId,
-    List<String> conversationHistory
+    List<String> conversationHistory,
+    String model
 ) {
     public MedicalRecordWorkflowSubmitRequest {
         targetNodeKeys = targetNodeKeys == null ? List.of() : List.copyOf(targetNodeKeys);
@@ -25,7 +26,7 @@ public record MedicalRecordWorkflowSubmitRequest(
         String mappingMode,
         List<String> targetNodeKeys
     ) {
-        this(reportId, referenceAssetId, sourceRecordId, prompt, mappingMode, targetNodeKeys, null, List.of());
+        this(reportId, referenceAssetId, sourceRecordId, prompt, mappingMode, targetNodeKeys, null, List.of(), null);
     }
 
     public MedicalRecordWorkflowSubmitRequest(
@@ -37,6 +38,6 @@ public record MedicalRecordWorkflowSubmitRequest(
         List<String> targetNodeKeys,
         String preAiExportId
     ) {
-        this(reportId, referenceAssetId, sourceRecordId, prompt, mappingMode, targetNodeKeys, preAiExportId, List.of());
+        this(reportId, referenceAssetId, sourceRecordId, prompt, mappingMode, targetNodeKeys, preAiExportId, List.of(), null);
     }
 }
