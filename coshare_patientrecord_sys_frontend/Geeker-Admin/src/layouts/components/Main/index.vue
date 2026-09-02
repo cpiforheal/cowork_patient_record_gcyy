@@ -105,7 +105,12 @@ const waitForQueueUpdate = async () => {
       queueLastNotifiedVersion = nextVersion;
       queueLastNotifiedAt = now;
       if (notifyAllowed) {
-        ElNotification({ title: "业务待办已更新", message: "前台或岗位已更新患者流程，已同步最新待办。", type: "info", duration: 3200 });
+        ElNotification({
+          title: "业务待办已更新",
+          message: "前台或岗位已更新患者流程，已同步最新待办。",
+          type: "info",
+          duration: 3200
+        });
       }
     }
     queueSyncedOnce = true;
