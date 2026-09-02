@@ -1814,12 +1814,9 @@ import {
   buildChiefComplaintText,
   buildColonoscopyConclusion,
   buildDiagnosisBasis,
-  buildHandoffText,
   buildInspectionConclusion,
   buildPhysicalExamText,
   buildPresentIllnessText,
-  buildProcedureSteps,
-  buildSurgeryFindings,
   buildSyndromeBasis,
   buildTreatmentPlan,
   stableSourceHash
@@ -3079,6 +3076,26 @@ const removeVitalRound = (index: number) => {
 watch(selectedStageCode, code => {
   if (code === "NURSING" && !stageForms.NURSING.measuredAt) stageForms.NURSING.measuredAt = nowTimeString();
 });
+// 手术卡自动带出：进入卡片时仅预填空值（手术者←主管医生、责任护士←手术室护士、
+// 术前诊断←医生岗西医主诊断、术后诊断←术前诊断值），全部可手工覆盖；
+// hydration 静默期不触发，避免刷新时覆盖服务端已保存的值。
+watch(selectedStageCode, code => {
+  if (code !== "SURGERY" || hydrationQuiet || !workspace.value) return;
+  const form = stageForms.SURGERY;
+  const dutyName = (dutyCode: PreAiDutyCode) => {
+    const assignment = (workspace.value?.dutyAssignments || []).find(item => item.dutyCode === dutyCode);
+    return String(assignment?.responsibleUserName || assignment?.participantUserNames?.[0] || "").trim();
+  };
+  const doctorPrimaryDiagnosis = String(stageForms.DOCTOR.primaryWesternDiagnosis || "").trim();
+  if (!String(form.surgeonName || "").trim()) form.surgeonName = dutyName("ATTENDING_DOCTOR");
+  if (!String(form.nurseName || "").trim()) form.nurseName = dutyName("OPERATING_ROOM_NURSE");
+  if (!String(form.preoperativeDiagnosis || "").trim() && doctorPrimaryDiagnosis) {
+    form.preoperativeDiagnosis = doctorPrimaryDiagnosis;
+  }
+  if (!String(form.postoperativeDiagnosis || "").trim() && String(form.preoperativeDiagnosis || "").trim()) {
+    form.postoperativeDiagnosis = form.preoperativeDiagnosis;
+  }
+});
 const isSecondaryStageField = (field: PreAiFieldConfig) =>
   Boolean(compactStageFieldKeys[selectedStageCode.value]?.has(field.key));
 const secondaryStageFieldsCount = computed(() => visibleStageFields.value.filter(field => isSecondaryStageField(field)).length);
@@ -3312,12 +3329,6 @@ const generatedTemplateText = (field: PreAiFieldConfig, form: Record<string, any
       return buildDiagnosisBasis(form);
     case "treatmentPlan":
       return buildTreatmentPlan(form);
-    case "surgeryFindings":
-      return buildSurgeryFindings(form);
-    case "procedureSteps":
-      return buildProcedureSteps(form);
-    case "handoff":
-      return buildHandoffText(form);
     case "colonoscopyConclusion":
       return buildColonoscopyConclusion(form);
     default:

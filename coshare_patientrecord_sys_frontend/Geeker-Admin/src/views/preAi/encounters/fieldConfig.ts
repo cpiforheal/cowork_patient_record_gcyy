@@ -1436,6 +1436,8 @@ export const preAiStages: PreAiStageConfig[] = [
     owner: "手术室护士",
     description: "只登记实际发生的手术和术中结果。门诊及非手术患者会自动跳过。",
     fields: [
+      { key: "preoperativeDiagnosis", label: "术前诊断", kind: "input", placeholder: "进入手术卡自动带出医生岗主诊断，可修改", span: 2 },
+      { key: "postoperativeDiagnosis", label: "术后诊断", kind: "input", placeholder: "默认同术前诊断，可修改", span: 2 },
       {
         key: "actualPrimaryOperation",
         label: "实际主术式",
@@ -1468,64 +1470,10 @@ export const preAiStages: PreAiStageConfig[] = [
         options: options(["局麻", "骶麻", "硬膜外麻醉", "静脉麻醉（无痛肠镜）"]),
         creatable: true
       },
-      {
-        key: "intraoperativeFindingOptions",
-        label: "术中所见模板短语",
-        kind: "multi",
-        options: options([
-          "病灶位置与术前检查一致",
-          "局部组织充血水肿",
-          "病灶边界清楚",
-          "未见活动性大出血",
-          "括约肌结构可辨",
-          "未见明显异常占位",
-          "其他"
-        ]),
-        creatable: true,
-        span: 2
-      },
-      {
-        key: "intraoperativeFindings",
-        label: "术中所见自动生成与修订",
-        kind: "template-text",
-        required: true,
-        rows: 4,
-        span: 2,
-        templateGenerator: "surgeryFindings",
-        overrideKey: "intraoperativeFindingsOverride",
-        sourceHashKey: "intraoperativeFindingsSourceHash",
-        confirmedKey: "intraoperativeFindingsConfirmed"
-      },
-      {
-        key: "procedureStepOptions",
-        label: "实际实施步骤模板短语",
-        kind: "multi",
-        options: options([
-          "常规消毒铺巾",
-          "麻醉满意后开始手术",
-          "显露并确认病灶",
-          "按计划完成主术式",
-          "完成附加操作",
-          "彻底止血",
-          "清点器械敷料无误",
-          "创面覆盖敷料",
-          "其他"
-        ]),
-        creatable: true,
-        span: 2
-      },
-      {
-        key: "procedurePerformed",
-        label: "实际实施步骤自动生成与修订",
-        kind: "template-text",
-        required: true,
-        rows: 4,
-        span: 2,
-        templateGenerator: "procedureSteps",
-        overrideKey: "procedurePerformedOverride",
-        sourceHashKey: "procedurePerformedSourceHash",
-        confirmedKey: "procedurePerformedConfirmed"
-      },
+      { key: "surgeonName", label: "手术者", kind: "input", placeholder: "自动带出主管医生，可修改" },
+      { key: "assistantName", label: "助手", kind: "input" },
+      { key: "nurseName", label: "责任护士", kind: "input", placeholder: "自动带出手术室护士，可修改" },
+      { key: "anesthesiologistName", label: "麻醉医师", kind: "input" },
       {
         key: "specimenPathology",
         label: "标本/病理送检",
@@ -1561,36 +1509,6 @@ export const preAiStages: PreAiStageConfig[] = [
         kind: "select",
         options: options(["返回病房", "留观室观察", "转上级医院", "其他"]),
         creatable: true
-      },
-      {
-        key: "postoperativeHandoffOptions",
-        label: "术后交接状态",
-        kind: "multi",
-        options: options([
-          "生命体征平稳",
-          "意识清楚",
-          "创面敷料固定",
-          "引流通畅",
-          "标本已交接",
-          "医嘱已交接",
-          "返回病房",
-          "留观",
-          "其他"
-        ]),
-        creatable: true,
-        span: 2
-      },
-      {
-        key: "postoperativeHandoff",
-        label: "术后交接自动生成与修订",
-        kind: "template-text",
-        required: true,
-        rows: 3,
-        span: 2,
-        templateGenerator: "handoff",
-        overrideKey: "postoperativeHandoffOverride",
-        sourceHashKey: "postoperativeHandoffSourceHash",
-        confirmedKey: "postoperativeHandoffConfirmed"
       },
       {
         key: "physicianConfirmed",

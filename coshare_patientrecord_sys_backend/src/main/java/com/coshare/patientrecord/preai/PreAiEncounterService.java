@@ -141,13 +141,10 @@ public class PreAiEncounterService {
         ),
         "SURGERY", Set.of(
             "actualPrimaryOperation", "actualSecondaryOperations", "actualOperationName", "operationDate", "operationStartTime",
-            "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindingOptions", "intraoperativeFindings",
-            "intraoperativeFindingsOverride", "intraoperativeFindingsSourceHash", "intraoperativeFindingsConfirmed",
-            "procedureStepOptions", "procedurePerformed", "procedurePerformedOverride", "procedurePerformedSourceHash",
-            "procedurePerformedConfirmed",
-            "specimenPathology", "bloodLossDrainDressing", "bloodLossMeasurement", "drainageOptions", "dressingOptions",
-            "complications", "postoperativeDestination", "postoperativeHandoffOptions", "postoperativeHandoff",
-            "postoperativeHandoffOverride", "postoperativeHandoffSourceHash", "postoperativeHandoffConfirmed",
+            "operationEndTime", "operationSite", "anesthesiaMethod",
+            "preoperativeDiagnosis", "postoperativeDiagnosis", "surgeonName", "assistantName", "nurseName", "anesthesiologistName",
+            "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions",
+            "complications", "postoperativeDestination",
             "physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"
         ),
         "REVIEW", Set.of("reviewStatement")
@@ -2131,9 +2128,6 @@ public class PreAiEncounterService {
                     missing.add("实际主术式");
                 }
                 required(data, missing, "operationDate", "手术日期");
-                required(data, missing, "intraoperativeFindings", "术中所见");
-                required(data, missing, "procedurePerformed", "实际实施步骤");
-                required(data, missing, "postoperativeHandoff", "术后交接说明");
             }
             default -> {
             }
@@ -2203,11 +2197,7 @@ public class PreAiEncounterService {
                 "diagnosisBasisOverride", List.of("diagnosisBasisConfirmed", "诊断依据"),
                 "treatmentPlanOverride", List.of("treatmentPlanConfirmed", "治疗方案")
             );
-            case "SURGERY" -> Map.of(
-                "intraoperativeFindingsOverride", List.of("intraoperativeFindingsConfirmed", "术中所见"),
-                "procedurePerformedOverride", List.of("procedurePerformedConfirmed", "实际实施步骤"),
-                "postoperativeHandoffOverride", List.of("postoperativeHandoffConfirmed", "术后交接")
-            );
+            case "SURGERY" -> Map.of();
             default -> Map.of();
         };
         confirmations.forEach((overrideKey, confirmation) -> {
