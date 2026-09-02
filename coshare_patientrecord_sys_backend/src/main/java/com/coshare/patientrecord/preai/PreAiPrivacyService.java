@@ -44,7 +44,13 @@ public class PreAiPrivacyService {
         ),
         "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "comorbidTcmItems", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
         "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "secondaryDiagnosisItems", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"),
-        "SURGERY", List.of("actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindingOptions", "intraoperativeFindings", "procedureStepOptions", "procedurePerformed", "pathologySubmitted", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoffOptions", "postoperativeHandoff")
+        "SURGERY", List.of("actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "intraoperativeFindingOptions", "intraoperativeFindings", "procedureStepOptions", "procedurePerformed", "pathologySubmitted", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "bloodLossDrainDressing", "complications", "postoperativeDestination", "postoperativeHandoffOptions", "postoperativeHandoff"),
+        // 护理部：病史采集（与接诊岗同名字段，接诊未填时由护理回退补齐）+ 四测信息；空值由 copyAllowed 自动跳过
+        "NURSING", List.of(
+            "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
+            "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory",
+            "measuredAt", "temperature", "pulse", "respiration", "systolicBp", "diastolicBp", "vitalSignRounds"
+        )
     );
     private static final Map<String, String> FIELD_LABELS = buildFieldLabels();
 
@@ -269,6 +275,7 @@ public class PreAiPrivacyService {
         JsonNode patient = masked.path("patient");
         JsonNode stages = masked.path("stages");
         JsonNode reception = stages.path("RECEPTION");
+        JsonNode nursing = stages.path("NURSING");
         JsonNode tcm = stages.path("TCM");
         JsonNode inspection = stages.path("INSPECTION");
         JsonNode doctor = stages.path("DOCTOR");
@@ -287,13 +294,14 @@ public class PreAiPrivacyService {
         addNodeRows(present, reception, List.of("presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"), Set.of("presentIllness"));
 
         ObjectNode history = addSection(sections, "04", "四、既往史 / 个人史 / 婚育史 / 家族史");
-        addNodeRows(history, reception, List.of("pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement", "receptionSpecialDescription", "specialCircumstances"), Set.of());
+        addNodeRowsWithFallback(history, reception, nursing, List.of("pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement", "receptionSpecialDescription", "specialCircumstances"), Set.of());
 
         ObjectNode tcmSection = addSection(sections, "05", "五、中医四诊与辨证");
         addNodeRows(tcmSection, tcm, List.of("inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "tcmDisease", "primarySyndrome", "syndromeBasis", "treatmentPrinciple"), Set.of("tcmDisease", "primarySyndrome"));
 
         ObjectNode physicalExam = addSection(sections, "06", "六、体格检查");
         addNodeRows(physicalExam, reception, List.of("physicalExam"), Set.of("physicalExam"));
+        addVitalRows(physicalExam, nursing);
 
         ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
         addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
@@ -369,6 +377,34 @@ public class PreAiPrivacyService {
         }
     }
 
+    /** 主岗位缺省时用护理岗同名字段回退补齐（病史采集主途径为接诊岗，护理岗兜底）。 */
+    private void addNodeRowsWithFallback(ObjectNode section, JsonNode primary, JsonNode fallback, List<String> keys, Set<String> emphasizedKeys) {
+        for (String key : keys) {
+            JsonNode value = isEmpty(primary.path(key)) ? fallback.path(key) : primary.path(key);
+            addViewRow(section, key, FIELD_LABELS.getOrDefault(key, key), value, emphasizedKeys.contains(key), "NORMAL");
+        }
+    }
+
+    /** 四测行：护理岗 {value,unit,status} 测量结构，无值自动跳过，异常状态标红。pulse 键与中医脉象标签冲突，此处使用显式标签。 */
+    private void addVitalRows(ObjectNode section, JsonNode nursing) {
+        if (nursing == null || nursing.isMissingNode() || nursing.isNull() || nursing.isEmpty()) return;
+        addViewRow(section, "measuredAt", "四测测量时间", nursing.path("measuredAt"), false, "NORMAL");
+        addVitalRow(section, "temperature", "体温", nursing);
+        addVitalRow(section, "pulse", "脉搏", nursing);
+        addVitalRow(section, "respiration", "呼吸", nursing);
+        addVitalRow(section, "systolicBp", "收缩压", nursing);
+        addVitalRow(section, "diastolicBp", "舒张压", nursing);
+        addViewRow(section, "vitalSignRounds", "四测补充记录", nursing.path("vitalSignRounds"), false, "NORMAL");
+    }
+
+    private void addVitalRow(ObjectNode section, String key, String label, JsonNode nursing) {
+        JsonNode value = nursing.path(key);
+        if (isEmpty(value)) return;
+        String status = value.path("status").asText("").trim();
+        boolean abnormal = !status.isBlank() && !"NORMAL".equals(status) && !"正常".equals(status);
+        addViewRow(section, key, label, value, abnormal, abnormal ? "ABNORMAL" : "NORMAL");
+    }
+
     private void addViewRow(ObjectNode section, String id, String label, JsonNode value, boolean emphasis, String severity) {
         String display = displayFieldValue(id, value);
         if (display.isBlank()) return;
@@ -397,12 +433,14 @@ public class PreAiPrivacyService {
         body.append(paragraph("中医肛肠医院住院病历自动生成表", "Title"));
         body.append(paragraph("前置事实版｜" + view.path("effectiveFieldCount").asInt() + " 项有效信息｜模板 " + TEMPLATE_VERSION, "Subtitle"));
         for (JsonNode section : view.path("sections")) {
-            body.append(paragraph(text(section, "title"), "Heading1"));
             List<DocumentRow> rows = new java.util.ArrayList<>();
             for (JsonNode item : section.path("rows")) {
                 rows.add(row(text(item, "label"), text(item, "value"), item.path("emphasis").asBoolean(false) || !"NORMAL".equals(text(item, "severity"))));
             }
-            if (!rows.isEmpty()) addTable(body, rows);
+            // 无内容的章节整体跳过：不输出空标题，符合“有值填充、无值跳过”的导出约定
+            if (rows.isEmpty()) continue;
+            body.append(paragraph(text(section, "title"), "Heading1"));
+            addTable(body, rows);
         }
         JsonNode footer = view.path("reviewFooter");
         body.append(paragraph("医生复核：" + text(footer, "reviewerRole") + optionalSuffix(text(footer, "reviewedAt")), "ReviewFooter"));
@@ -521,7 +559,7 @@ public class PreAiPrivacyService {
             String unit = value.path("unit").asText("").trim();
             String status = value.path("status").asText("").trim();
             String display = number + unit;
-            if (!status.isBlank() && !"NORMAL".equals(status)) display += "（" + status + "）";
+            if (!status.isBlank() && !"NORMAL".equals(status) && !"正常".equals(status)) display += "（" + status + "）";
             return display.isBlank() ? "" : display;
         }
         if (value.isObject()) {
@@ -706,7 +744,8 @@ public class PreAiPrivacyService {
             {"westernComorbidity", "西医合并症"}, {"includedInTcm", "纳入中医辨证"}, {"syndrome", "证型"}, {"note", "补充说明"}, {"name", "诊断名称"}, {"category", "分类"},
             {"taskType", "检查类型"}, {"title", "任务名称"}, {"project", "项目"}, {"sampledAt", "采样时间"}, {"reportedAt", "报告时间"}, {"result", "结果"}, {"abnormalItems", "异常项"},
             {"conclusion", "结论"}, {"examinedAt", "检查时间"}, {"findings", "主要表现"}, {"modality", "检查方式"}, {"bodyPart", "检查部位"},
-            {"reviewedAt", "复核时间"}, {"reviewerRole", "复核岗位"}, {"statement", "说明"}
+            {"reviewedAt", "复核时间"}, {"reviewerRole", "复核岗位"}, {"statement", "说明"},
+            {"measuredAt", "四测测量时间"}, {"vitalSignRounds", "四测补充记录"}
         };
         for (String[] value : values) labels.put(value[0], value[1]);
         return Map.copyOf(labels);

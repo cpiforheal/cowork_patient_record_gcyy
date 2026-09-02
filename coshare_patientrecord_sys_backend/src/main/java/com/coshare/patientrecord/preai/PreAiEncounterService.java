@@ -116,7 +116,7 @@ public class PreAiEncounterService {
             "chiefComplaintSupplement", "receptionSpecialDescription", "physicalExam", "physicalExamOverride",
             "physicalExamSourceHash", "physicalExamConfirmed"
         ),
-        // 护理部（住院专属）：病史采集照常归档至前置资料文档；四测与护理评估仅系统留存，不进导出白名单
+        // 护理部（住院专属）：病史采集与四测信息纳入导出白名单，接诊岗未填的病史字段由护理岗回退补齐（见 PreAiPrivacyService.buildDocumentView）
         "NURSING", Set.of(
             "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
             "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory",

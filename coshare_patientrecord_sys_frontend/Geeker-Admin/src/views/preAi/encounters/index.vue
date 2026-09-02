@@ -542,7 +542,7 @@
 
                       <ClinicalTemplateToolbar
                         v-if="
-                          ['REGISTRATION', 'INSPECTION', 'RECEPTION'].includes(selectedStageCode) &&
+                          ['INSPECTION', 'RECEPTION'].includes(selectedStageCode) &&
                           (selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT')
                         "
                         :simplified="selectedStageCode === 'INSPECTION'"
@@ -1262,15 +1262,6 @@
 
     <el-dialog v-model="createDialogVisible" title="就诊登记并发号" width="760px" destroy-on-close>
       <el-form label-position="top">
-        <ClinicalTemplateToolbar
-          :model-value="createTemplateIds"
-          :slot-values="createForm.clinicalTemplateSlots || {}"
-          :disabled="actionLoading"
-          :auto-match-label="autoMatchedCreateLabel"
-          @update:model-value="setCreateTemplateIds"
-          @update:slot-values="value => patchCreateForm('clinicalTemplateSlots', value)"
-          @apply="applyCreateClinicalTemplate"
-        />
         <section v-if="createSecondaryRegistrationFieldsCount" class="field-noise-toolbar dialog-field-noise-toolbar">
           <div>
             <strong>精简登记视图</strong>
@@ -2320,6 +2311,25 @@ const setClinicalTemplateIds = (code: PreAiStageCode, ids: string[]) => {
   markStageDirty(code);
 };
 
+/** 前台登记：点选主要症状后自动匹配病种模板，直接填充主诉/现病史，全文落在输入框内可继续修改。 */
+watch(
+  () => stageForms.REGISTRATION.registrationSymptoms,
+  symptoms => {
+    if (hydrationQuiet) return;
+    const ids = inferTemplateIdsBySymptoms(symptoms);
+    if (!ids.length) return;
+    const patched = applyClinicalTemplate("REGISTRATION", stageForms.REGISTRATION, ids, "fill");
+    const complaint = String(patched.registrationChiefComplaint || "").trim();
+    const illness = String(patched.registrationCurrentIllness || "").trim();
+    if (!complaint && !illness) return;
+    Object.assign(stageForms.REGISTRATION, patched);
+    markStageDirty("REGISTRATION");
+    ElMessage.success(`已按症状自动匹配「${clinicalTemplateById(ids[0])?.label || ""}」模板，主诉与现病史已生成，可直接修改`);
+  },
+  { deep: true }
+);
+
+/** 接诊室：点选主诉症状后自动填充规范主诉与现病史，可继续修改。 */
 watch(
   () => stageForms.RECEPTION.chiefComplaint,
   symptoms => {
@@ -2406,9 +2416,9 @@ const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTe
 
 // 检查室试点：选择病种即按默认变量生成检查记录全文（textarea 可直接修改）
 const onClinicalTemplateSelection = async (code: PreAiStageCode, ids: string[]) => {
+  if (code !== "INSPECTION") return;
   const previous = [...clinicalTemplateIds(code)];
   setClinicalTemplateIds(code, ids);
-  if (code !== "INSPECTION") return;
   const narrative = String(stageForms.INSPECTION.inspectionNarrative || "").trim();
   const applied = await applyStageClinicalTemplate("INSPECTION", narrative ? "overwrite" : "fill", ids);
   if (!applied && narrative) setClinicalTemplateIds(code, previous);

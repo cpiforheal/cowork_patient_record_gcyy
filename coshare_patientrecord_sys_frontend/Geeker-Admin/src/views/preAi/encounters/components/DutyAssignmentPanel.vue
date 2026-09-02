@@ -1,8 +1,15 @@
 <template>
   <section class="duty-panel">
+    <el-collapse v-model="expandedPanels">
+      <el-collapse-item name="duties">
+        <template #title>
+          <div class="duty-collapse-title">
+            <strong>本病例岗位安排</strong>
+            <small>{{ assignedSummary }}</small>
+          </div>
+        </template>
     <header>
       <div>
-        <strong>本病例岗位安排</strong>
         <small>同一人员可承担多个岗位；每个病例明确一名主管医生。</small>
       </div>
       <el-button v-if="!disabled" type="primary" plain :loading="saving" @click="save">保存岗位安排</el-button>
@@ -49,6 +56,8 @@
         </label>
       </article>
     </div>
+      </el-collapse-item>
+    </el-collapse>
   </section>
 </template>
 
@@ -69,6 +78,16 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ (event: "save", assignments: PreAiDutyAssignment[]): void }>();
+
+const expandedPanels = ref<string[]>([]);
+const assignedSummary = computed(() => {
+  const filled = props.assignments.filter(item => item.responsibleUserId || item.responsibleUserName || item.participantUserIds?.length);
+  const attending = filled.find(item => item.dutyCode === "ATTENDING_DOCTOR");
+  const attendingName = String(attending?.responsibleUserName || "").trim();
+  return filled.length
+    ? `已安排 ${filled.length} 个岗位${attendingName ? ` · 主管医生：${attendingName}` : ""}`
+    : "尚未安排岗位，展开后填写";
+});
 
 type DutyDefinition = {
   code: PreAiDutyCode;
@@ -236,6 +255,39 @@ watch(() => props.assignments, hydrate, { immediate: true, deep: true });
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
   background: var(--el-bg-color);
+}
+
+.duty-collapse-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+}
+
+.duty-collapse-title strong {
+  font-size: 14px;
+}
+
+.duty-collapse-title small {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.duty-panel :deep(.el-collapse) {
+  border: none;
+}
+
+.duty-panel :deep(.el-collapse-item__header) {
+  height: auto;
+  padding: 2px 0;
+}
+
+.duty-panel :deep(.el-collapse-item__wrap) {
+  border: none;
+}
+
+.duty-panel :deep(.el-collapse-item__content) {
+  padding-bottom: 4px;
 }
 
 .duty-panel > header {
