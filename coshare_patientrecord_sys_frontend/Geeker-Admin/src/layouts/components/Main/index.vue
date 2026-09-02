@@ -45,9 +45,16 @@ provide("refresh", refreshCurrentPage);
 
 let queueUpdateAbort: AbortController | undefined;
 let queueUpdateTimer: number | undefined;
-let queueUpdateVersion = 1;
+// 服务端版本是内存计数器，后端重启后会归 1。必须无条件跟随服务端版本（允许倒退），
+// 否则重启后 after 与服务端版本永不相等，长轮询每次立即返回 changed=true，通知会刷屏。
+let queueUpdateVersion = 0;
 let queueUpdateActive = false;
 let queueUpdateFailCount = 0;
+// 通知节流：首次同步静默、同一版本只提示一次、10 秒内最多提示一次
+const QUEUE_NOTIFY_COOLDOWN_MS = 10_000;
+let queueLastNotifiedVersion = 0;
+let queueLastNotifiedAt = 0;
+let queueSyncedOnce = false;
 const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
 
 const scheduleQueueUpdateWait = (delay = 200) => {
@@ -83,13 +90,25 @@ const waitForQueueUpdate = async () => {
       return;
     }
     queueUpdateFailCount = 0;
-    const nextVersion = Number(response.headers.get("X-Clinic-Queue-Version"));
+    const rawVersion = response.headers.get("X-Clinic-Queue-Version");
+    const nextVersion = Number(rawVersion);
     const changed = response.headers.get("X-Clinic-Queue-Changed") === "true";
-    if (Number.isFinite(nextVersion) && nextVersion > queueUpdateVersion) queueUpdateVersion = nextVersion;
-    if (changed) {
+    const versionUsable = rawVersion !== null && Number.isFinite(nextVersion);
+    // 关键：无条件采纳服务端版本（允许倒退），让长轮询协议在服务端重启后自动重新对齐
+    if (versionUsable) queueUpdateVersion = nextVersion;
+    // 服务端在版本不一致时会立即补发 changed=true，这里只在版本真正变化时才触发刷新/提示
+    const effectiveChanged = changed && versionUsable && nextVersion !== queueLastNotifiedVersion;
+    if (effectiveChanged) {
       window.dispatchEvent(new CustomEvent("clinic-queue-updated", { detail: { version: queueUpdateVersion } }));
-      ElNotification({ title: "业务待办已更新", message: "前台或岗位已更新患者流程，已同步最新待办。", type: "info", duration: 3200 });
+      const now = Date.now();
+      const notifyAllowed = queueSyncedOnce && now - queueLastNotifiedAt >= QUEUE_NOTIFY_COOLDOWN_MS;
+      queueLastNotifiedVersion = nextVersion;
+      queueLastNotifiedAt = now;
+      if (notifyAllowed) {
+        ElNotification({ title: "业务待办已更新", message: "前台或岗位已更新患者流程，已同步最新待办。", type: "info", duration: 3200 });
+      }
     }
+    queueSyncedOnce = true;
   } catch (error: any) {
     if (error?.name === "AuthExpiredError") return;
     if (error?.name !== "AbortError" && queueUpdateActive) scheduleQueueUpdateBackoff();
