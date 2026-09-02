@@ -183,6 +183,7 @@ public class PreAiEncounterService {
     private final ClinicDatabaseService clinicDatabaseService;
     private final ClinicFileService fileService;
     private final PreAiPrivacyService privacyService;
+    private final PreAiOutpatientDocxRenderer outpatientDocxRenderer;
     private final ClinicQueueService clinicQueueService;
     private final InventoryStageConsumptionService inventoryStageConsumptionService;
     private final AuthNavigationService navigationService;
@@ -194,6 +195,7 @@ public class PreAiEncounterService {
         ClinicDatabaseService clinicDatabaseService,
         ClinicFileService fileService,
         PreAiPrivacyService privacyService,
+        PreAiOutpatientDocxRenderer outpatientDocxRenderer,
         ClinicQueueService clinicQueueService,
         InventoryStageConsumptionService inventoryStageConsumptionService,
         AuthNavigationService navigationService,
@@ -204,6 +206,7 @@ public class PreAiEncounterService {
         this.clinicDatabaseService = clinicDatabaseService;
         this.fileService = fileService;
         this.privacyService = privacyService;
+        this.outpatientDocxRenderer = outpatientDocxRenderer;
         this.clinicQueueService = clinicQueueService;
         this.inventoryStageConsumptionService = inventoryStageConsumptionService;
         this.navigationService = navigationService;
@@ -1480,6 +1483,291 @@ public class PreAiEncounterService {
         summary.put("abnormalCount", abnormalCount);
         summary.put("criticalCount", criticalCount);
         return summary;
+    }
+
+    /** 门诊病历汇总预览：按门诊病历字段组织患者信息，供医生在前端确认后再生成 DOCX。 */
+    public Map<String, Object> outpatientPreview(String encounterId, SessionUser user) {
+        requireReadRole(user);
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireReviewer(encounter, user);
+        return toMap(outpatientSummary(encounter));
+    }
+
+    /** 生成门诊病历 DOCX 新版本（需医生复核已确认），持久化版本与快照，返回版本记录。 */
+    @Transactional
+    public Map<String, Object> generateOutpatientRecord(String encounterId, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        String requestId = UUID.randomUUID().toString();
+        String phase = "authorize";
+        Path temporary = null;
+        Path target = null;
+        try {
+            phase = "load";
+            ObjectNode encounter = loadEncounter(encounterId);
+            requireReviewer(encounter, user);
+            if (!Set.of("REVIEWED", "EXPORTED").contains(text(encounter, "status"))) {
+                throw conflict("请先完成医生复核确认后再生成门诊病历");
+            }
+            phase = "summary";
+            ObjectNode summary = outpatientSummary(encounter);
+            phase = "render";
+            byte[] bytes = outpatientDocxRenderer.render(summary);
+
+            phase = "version";
+            Integer nextVersion = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM pre_ai_outpatient_records WHERE encounter_id = ?",
+                Integer.class,
+                encounterId
+            );
+            int version = nextVersion == null || nextVersion < 1 ? 1 : nextVersion;
+            String caseToken = text(encounter, "caseToken");
+            String fileName = caseToken + "_门诊病历_v" + version + ".docx";
+            String recordId = "preoutp-" + UUID.randomUUID();
+            Path recordDirectory = generatedDir.resolve(encounterId).normalize();
+            target = recordDirectory.resolve(recordId + ".docx").normalize();
+            temporary = recordDirectory.resolve("." + recordId + ".tmp").normalize();
+            if (!target.startsWith(generatedDir) || !temporary.startsWith(generatedDir)) {
+                throw new IllegalStateException("门诊病历导出路径超出允许目录");
+            }
+
+            phase = "temporary-file";
+            Files.createDirectories(recordDirectory);
+            Files.write(temporary, bytes);
+
+            phase = "database-version";
+            jdbcTemplate.update("""
+                INSERT INTO pre_ai_outpatient_records (
+                  id, encounter_id, version, status, case_token, file_name, file_path, source_snapshot,
+                  generated_by, generated_by_role, generated_at
+                ) VALUES (?, ?, ?, 'GENERATED', ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
+                """, recordId, encounterId, version, caseToken, fileName, target.toString(), toJson(summary),
+                user.name(), user.role(), now());
+
+            phase = "file-move";
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            temporary = null;
+
+            phase = "finalize";
+            audit(encounterId, "outpatient-record.generate", "REVIEW", user, "生成门诊病历 DOCX v" + version + "，请求 " + requestId);
+            log.info("Outpatient record generated requestId={} encounterId={} version={}", requestId, encounterId, version);
+            return Map.of("record", toMap(loadOutpatientRecord(recordId)), "requestId", requestId);
+        } catch (Exception error) {
+            deleteQuietly(temporary);
+            deleteQuietly(target);
+            log.error("Outpatient record generation failed requestId={} encounterId={} phase={}", requestId, encounterId, phase, error);
+            if (error instanceof ResponseStatusException response && response.getStatusCode().is4xxClientError()) throw response;
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "门诊病历生成失败，请求编号：" + requestId, error);
+        }
+    }
+
+    public Map<String, Object> outpatientRecords(String encounterId, SessionUser user) {
+        requireReadRole(user);
+        requireEncounterAccess(encounterId, user);
+        loadEncounter(encounterId);
+        List<Map<String, Object>> rows = jdbcTemplate.query(
+            "SELECT * FROM pre_ai_outpatient_records WHERE encounter_id = ? ORDER BY version DESC",
+            (rs, rowNum) -> toMap(readOutpatientRecord(rs)),
+            encounterId
+        );
+        return Map.of("versions", rows);
+    }
+
+    public record OutpatientDownload(FileSystemResource resource, String fileName) {}
+
+    public OutpatientDownload downloadOutpatientRecord(String encounterId, String recordId, SessionUser user) {
+        requireReadRole(user);
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireReviewer(encounter, user);
+        ObjectNode row = loadOutpatientRecord(recordId);
+        if (!encounterId.equals(text(row, "encounterId"))) throw notFound("门诊病历版本不存在");
+        Path target = Path.of(text(row, "filePath")).toAbsolutePath().normalize();
+        if (!target.startsWith(generatedDir) || !Files.isRegularFile(target)) throw notFound("门诊病历文件不存在，请重新生成");
+        return new OutpatientDownload(new FileSystemResource(target), text(row, "fileName", "门诊病历.docx"));
+    }
+
+    /** 按门诊病历字段组装汇总：含门诊所需全部字段，空缺段落明确标注（空），避免住院模板占位留空的问题。 */
+    private ObjectNode outpatientSummary(ObjectNode encounter) {
+        ObjectNode summary = outpatientDocxRenderer.emptySummary();
+        String encounterId = text(encounter, "id");
+        JsonNode patient = encounter.path("patient");
+        List<ObjectNode> stages = new ArrayList<>();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_stage_submissions WHERE encounter_id = ? ORDER BY FIELD(stage_code, 'REGISTRATION','INSPECTION','RECEPTION','NURSING','TCM','DOCTOR','SURGERY','REVIEW')",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> stages.add(readStage(rs)),
+            encounterId
+        );
+        JsonNode registration = stageData(stages, "REGISTRATION");
+        JsonNode inspection = stageData(stages, "INSPECTION");
+        JsonNode reception = stageData(stages, "RECEPTION");
+        JsonNode nursing = stageData(stages, "NURSING");
+        JsonNode doctor = stageData(stages, "DOCTOR");
+
+        String chiefComplaint = firstNonBlank(
+            text(reception, "chiefComplaintText"), text(reception, "chiefComplaint"),
+            text(registration, "registrationChiefComplaint"), text(registration, "chiefComplaint")
+        );
+        String presentIllness = firstNonBlank(
+            text(reception, "presentIllnessOverride"), text(reception, "presentIllness"),
+            text(reception, "presentIllnessText")
+        );
+        String pastHistory = firstNonBlank(
+            text(reception, "pastHistory"), text(registration, "registrationPastHistory")
+        );
+        String allergyHistory = firstNonBlank(
+            text(reception, "allergyHistoryNote"), text(reception, "allergyHistory"),
+            text(nursing, "allergyHistoryNote"), text(nursing, "allergyHistory"),
+            text(registration, "allergyHistoryNote"), text(registration, "allergyHistory")
+        );
+        String physicalExam = firstNonBlank(
+            text(reception, "physicalExamOverride"), text(reception, "physicalExam"),
+            text(inspection, "visualFindings"), text(inspection, "factualConclusion")
+        );
+        String preliminaryDiagnosis = firstNonBlank(
+            text(inspection, "preliminaryDiagnosis"),
+            text(doctor, "primaryWesternDiagnosis"), text(reception, "preliminaryDiagnosis")
+        );
+        String routeCn = routeLabelCn(text(encounter, "route"));
+        String pathCn = treatmentPathLabelCn(text(encounter, "treatmentPath"));
+        String fallbackDisposition = (routeCn + (pathCn.isBlank() ? "" : " / " + pathCn)).isBlank()
+            ? ""
+            : routeCn + (pathCn.isBlank() ? "" : " / " + pathCn);
+        String disposition = firstNonBlank(
+            text(doctor, "treatmentPlan"), text(doctor, "finalRoute"),
+            text(inspection, "dispositionSuggestion"),
+            fallbackDisposition
+        );
+        String visitNo = text(encounter, "visitNo");
+        String visitTypeName = visitNo.isBlank() || "1".equals(visitNo) ? "初诊" : "复诊";
+
+        outpatientDocxRenderer.addBasic(summary, "科别", firstNonBlank(text(encounter, "owningDepartmentName"), "未指定"));
+        outpatientDocxRenderer.addBasic(summary, "就诊类型", visitTypeName);
+        outpatientDocxRenderer.addBasic(summary, "姓名", text(patient, "patientName"));
+        outpatientDocxRenderer.addBasic(summary, "性别", text(patient, "gender"));
+        outpatientDocxRenderer.addBasic(summary, "年龄", text(patient, "age"));
+        outpatientDocxRenderer.addBasic(summary, "电话", text(patient, "phone"));
+        outpatientDocxRenderer.addBasic(summary, "家庭住址", text(patient, "address"));
+        outpatientDocxRenderer.addBasic(summary, "药敏史", allergyHistory.isBlank() ? "未记录" : allergyHistory);
+        outpatientDocxRenderer.addBasic(summary, "就诊日期", text(patient, "visitDate"));
+
+        outpatientDocxRenderer.addSection(summary, "01", "主诉", List.of(chiefComplaint));
+        outpatientDocxRenderer.addSection(summary, "02", "现病史", List.of(presentIllness));
+        outpatientDocxRenderer.addSection(summary, "03", "既往史", List.of(pastHistory));
+        outpatientDocxRenderer.addSection(summary, "04", "体格检查", List.of(physicalExam));
+        outpatientDocxRenderer.addSection(summary, "05", "辅助检查", auxiliarySummary(encounterId));
+        outpatientDocxRenderer.addSection(summary, "06", "初步诊断", List.of(preliminaryDiagnosis));
+        outpatientDocxRenderer.addSection(summary, "07", "处理措施", List.of(disposition));
+        return summary;
+    }
+
+    /** 辅助检查段落：汇总化验报告与辅助任务的关键结论，供门诊病历引用。 */
+    private List<String> auxiliarySummary(String encounterId) {
+        List<String> items = new ArrayList<>();
+        jdbcTemplate.query(
+            "SELECT template_name, report_date, remark, metrics_json FROM pre_ai_lab_reports WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY report_date, id",
+            rs -> {
+                String title = safe(rs.getString("template_name"));
+                String date = safe(rs.getString("report_date"));
+                String content = safe(rs.getString("remark"));
+                if (content.isBlank()) {
+                    JsonNode metrics = readObject(rs.getString("metrics_json"));
+                    StringBuilder line = new StringBuilder();
+                    if (metrics.isArray()) {
+                        for (JsonNode metric : metrics) {
+                            String name = text(metric, "name");
+                            String value = text(metric, "value");
+                            String unit = text(metric, "unit");
+                            String abnormal = text(metric, "abnormal");
+                            if (name.isBlank() || value.isBlank()) continue;
+                            if (line.length() > 0) line.append("；");
+                            line.append(name).append(" ").append(value).append(unit);
+                            if (!abnormal.isBlank()) line.append("（").append(abnormal).append("）");
+                        }
+                    }
+                    content = line.toString();
+                }
+                if (!content.isBlank()) items.add((title.isBlank() ? "化验报告" : title) + (date.isBlank() ? "" : "（" + date + "）") + "：" + content);
+            },
+            encounterId
+        );
+        jdbcTemplate.query(
+            "SELECT task_type, title, data_json FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id",
+            rs -> {
+                String taskType = safe(rs.getString("task_type"));
+                String title = safe(rs.getString("title"));
+                JsonNode data = readObject(rs.getString("data_json"));
+                String content = firstNonBlank(text(data, "conclusion"), text(data, "result"), text(data, "findings"));
+                if (content.isBlank()) return;
+                String label = switch (taskType) {
+                    case "LAB" -> "检验";
+                    case "ECG" -> "心电";
+                    case "IMAGING" -> "影像";
+                    case "VITAL_SIGNS" -> "生命体征";
+                    case "COLONOSCOPY" -> "肠镜";
+                    default -> taskType.isBlank() ? "辅助检查" : taskType;
+                };
+                items.add(label + (title.isBlank() || label.equals(title) ? "：" : "（" + title + "）：") + content);
+            },
+            encounterId
+        );
+        return items;
+    }
+
+    private JsonNode stageData(List<ObjectNode> stages, String stageCode) {
+        for (ObjectNode stage : stages) {
+            if (stageCode.equals(text(stage, "stageCode"))) return stage.path("data");
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    private String routeLabelCn(String value) {
+        return switch (safe(value)) {
+            case "OUTPATIENT" -> "门诊处理";
+            case "INPATIENT" -> "住院治疗";
+            default -> "";
+        };
+    }
+
+    private String treatmentPathLabelCn(String value) {
+        return switch (safe(value)) {
+            case "CONSERVATIVE" -> "保守治疗";
+            case "SURGICAL" -> "手术治疗";
+            default -> "";
+        };
+    }
+
+    private ObjectNode loadOutpatientRecord(String recordId) {
+        List<ObjectNode> rows = jdbcTemplate.query(
+            "SELECT * FROM pre_ai_outpatient_records WHERE id = ? LIMIT 1",
+            (rs, rowNum) -> readOutpatientRecord(rs),
+            recordId
+        );
+        if (rows.isEmpty()) throw notFound("门诊病历版本不存在");
+        return rows.get(0);
+    }
+
+    private ObjectNode readOutpatientRecord(ResultSet rs) throws SQLException {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("id", rs.getString("id"));
+        row.put("encounterId", rs.getString("encounter_id"));
+        row.put("version", rs.getInt("version"));
+        row.put("status", rs.getString("status"));
+        row.put("caseToken", rs.getString("case_token"));
+        row.put("fileName", rs.getString("file_name"));
+        row.put("generatedBy", safe(rs.getString("generated_by")));
+        row.put("generatedByRole", safe(rs.getString("generated_by_role")));
+        row.put("generatedAt", rs.getString("generated_at"));
+        row.put("downloadUrl", outpatientDownloadUrl(text(row, "encounterId"), text(row, "id")));
+        return row;
+    }
+
+    static String outpatientDownloadUrl(String encounterId, String recordId) {
+        return "/pre-ai/encounters/" + encounterId + "/outpatient-records/" + recordId + "/download";
     }
 
     @Transactional

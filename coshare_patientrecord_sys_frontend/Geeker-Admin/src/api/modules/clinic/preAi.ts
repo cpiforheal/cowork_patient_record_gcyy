@@ -300,6 +300,26 @@ export interface PreAiReviewLabMetric {
   severity: "ABNORMAL" | "CRITICAL";
 }
 
+/** 门诊病历汇总：与后端 PreAiOutpatientDocxRenderer 的 summary 结构一致 */
+export interface PreAiOutpatientSummary {
+  templateVersion: string;
+  basic: Array<{ label: string; value: string }>;
+  sections: Array<{ code: string; title: string; empty: boolean; paragraphs: string[] }>;
+}
+
+export interface PreAiOutpatientRecordVersion {
+  id: string;
+  encounterId: string;
+  version: number;
+  status: string;
+  caseToken: string;
+  fileName: string;
+  generatedBy: string;
+  generatedByRole: string;
+  generatedAt: string;
+  downloadUrl: string;
+}
+
 export interface PreAiReviewPreview {
   workspace: PreAiWorkspace;
   maskedPreview: Record<string, any>;
@@ -690,6 +710,30 @@ export const generatePreAiExportApi = (encounterId: string) =>
     `/pre-ai/encounters/${encodeURIComponent(encounterId)}/exports`,
     "POST"
   );
+
+export const getPreAiOutpatientPreviewApi = async (encounterId: string, signal?: AbortSignal) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/outpatient-record/preview`, {
+    headers: authHeaders(),
+    signal
+  });
+  return clinicResponse(await parseClinicApiResponse<PreAiOutpatientSummary>(result));
+};
+
+export const generatePreAiOutpatientRecordApi = (encounterId: string) =>
+  jsonRequest<{ record: PreAiOutpatientRecordVersion; requestId: string }>(
+    `/pre-ai/encounters/${encodeURIComponent(encounterId)}/outpatient-record`,
+    "POST"
+  );
+
+export const getPreAiOutpatientRecordsApi = async (encounterId: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/outpatient-records`, {
+    headers: authHeaders()
+  });
+  return clinicResponse(await parseClinicApiResponse<{ versions: PreAiOutpatientRecordVersion[] }>(result));
+};
+
+export const downloadPreAiOutpatientRecordApi = (version: PreAiOutpatientRecordVersion) =>
+  downloadAuthenticatedFile(version.downloadUrl, version.fileName);
 
 export const normalizePreAiDownloadPath = (path: string) => {
   const value = String(path || "").trim();

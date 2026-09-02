@@ -159,6 +159,13 @@
             </el-button>
           </span>
         </el-tooltip>
+        <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核后生成门诊病历" placement="top">
+          <span>
+            <el-button type="danger" plain :disabled="!reviewConfirmed" @click="$emit('openOutpatientRecord')">
+              生成门诊病历
+            </el-button>
+          </span>
+        </el-tooltip>
       </div>
     </footer>
     <section v-if="reviewConfirmed" class="version-control">
@@ -422,6 +429,7 @@ const emit = defineEmits<{
   generateTarget: [];
   openRecordChat: [];
   openHealthArchive: [];
+  openOutpatientRecord: [];
   download: [version: PreAiExportVersion];
   downloadTarget: [version: GeneratedMedicalRecord];
   downloadAi: [version: GeneratedMedicalRecord];

@@ -338,5 +338,31 @@ public class PreAiEncounterController {
             .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(download.fileName(), StandardCharsets.UTF_8).build().toString())
             .body(download.resource());
     }
+
+    @GetMapping("/{encounterId}/outpatient-record/preview")
+    public ApiResult<Map<String, Object>> outpatientPreview(@PathVariable String encounterId) {
+        return ApiResult.success(service.outpatientPreview(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/outpatient-record")
+    public ApiResult<Map<String, Object>> generateOutpatientRecord(@PathVariable String encounterId) {
+        return ApiResult.of(200, "门诊病历 DOCX 已生成", service.generateOutpatientRecord(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/{encounterId}/outpatient-records")
+    public ApiResult<Map<String, Object>> outpatientRecords(@PathVariable String encounterId) {
+        return ApiResult.success(service.outpatientRecords(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/{encounterId}/outpatient-records/{recordId}/download")
+    public ResponseEntity<FileSystemResource> downloadOutpatientRecord(@PathVariable String encounterId, @PathVariable String recordId) {
+        PreAiEncounterService.OutpatientDownload download = service.downloadOutpatientRecord(encounterId, recordId, AuthPermission.currentUserOrThrow());
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+            .cacheControl(CacheControl.noStore().cachePrivate())
+            .header(HttpHeaders.PRAGMA, "no-cache")
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(download.fileName(), StandardCharsets.UTF_8).build().toString())
+            .body(download.resource());
+    }
 }
 

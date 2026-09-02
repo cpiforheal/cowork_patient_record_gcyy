@@ -1036,6 +1036,7 @@
                       @generate-target="generateTargetMedicalRecord"
                       @open-record-chat="openRecordChat"
                       @open-health-archive="openHealthArchive"
+                      @open-outpatient-record="openOutpatientRecord"
                       @download="downloadPreAiExportApi"
                       @download-target="downloadMedicalRecordApi"
                       @download-ai="downloadAiGeneratedRecord"
@@ -1354,6 +1355,16 @@
       :encounter-id="selectedEncounterId"
       :encounter-patient-name="recordChatPatientName"
       @completed="loadTargetMedicalRecordVersions"
+    />
+
+    <OutpatientRecordDialog
+      v-model="outpatientDialogVisible"
+      :loading="outpatientLoading"
+      :generating="outpatientGenerating"
+      :summary="outpatientSummary"
+      :versions="outpatientVersions"
+      @generate="generateOutpatientRecord"
+      @download="downloadOutpatientRecord"
     />
 
     <el-dialog
@@ -1735,10 +1746,14 @@ import {
   registerAndIssuePreAiFollowUpApi,
   downloadPreAiAttachmentApi,
   downloadPreAiExportApi,
+  downloadPreAiOutpatientRecordApi,
   generatePreAiExportApi,
+  generatePreAiOutpatientRecordApi,
   getPreAiAttachmentObjectUrlApi,
   getPreAiEncounterHistoryApi,
   getPreAiInspectionTimelineApi,
+  getPreAiOutpatientPreviewApi,
+  getPreAiOutpatientRecordsApi,
   getPreAiResponsibilityTimelineApi,
   getPreAiPatientCasesApi,
   getPatientListApi,
@@ -1767,6 +1782,8 @@ import {
   type PreAiEncounterHistoryItem,
   type PreAiEncounterSummary,
   type PreAiExportVersion,
+  type PreAiOutpatientRecordVersion,
+  type PreAiOutpatientSummary,
   type PreAiPatientCase,
   type PreAiReviewPreview,
   type PreAiStageCode,
@@ -1777,6 +1794,7 @@ import WorkflowSidebar, { type WorkflowCard } from "./components/WorkflowSidebar
 import MedicalRecordPreview from "./components/MedicalRecordPreview.vue";
 import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
+import OutpatientRecordDialog from "./components/OutpatientRecordDialog.vue";
 import RecordAiChat from "./components/RecordAiChat.vue";
 import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
 import FollowUpTimeline from "./components/FollowUpTimeline.vue";
@@ -2152,6 +2170,52 @@ const openRecordChat = () => {
 const healthArchiveVisible = ref(false);
 const openHealthArchive = () => {
   healthArchiveVisible.value = true;
+};
+// ===== 门诊病历生成（医生复核确认后可用） =====
+const outpatientDialogVisible = ref(false);
+const outpatientLoading = ref(false);
+const outpatientGenerating = ref(false);
+const outpatientSummary = ref<PreAiOutpatientSummary | null>(null);
+const outpatientVersions = ref<PreAiOutpatientRecordVersion[]>([]);
+const openOutpatientRecord = async () => {
+  outpatientDialogVisible.value = true;
+  outpatientLoading.value = true;
+  try {
+    const encounterId = selectedEncounterId.value;
+    const preview = await getPreAiOutpatientPreviewApi(encounterId);
+    outpatientSummary.value = preview.data;
+    try {
+      const versions = await getPreAiOutpatientRecordsApi(encounterId);
+      outpatientVersions.value = versions.data.versions;
+    } catch {
+      outpatientVersions.value = [];
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || "门诊病历汇总加载失败");
+  } finally {
+    outpatientLoading.value = false;
+  }
+};
+const generateOutpatientRecord = async () => {
+  outpatientGenerating.value = true;
+  try {
+    const encounterId = selectedEncounterId.value;
+    const { data } = await generatePreAiOutpatientRecordApi(encounterId);
+    outpatientVersions.value = [data.record, ...outpatientVersions.value];
+    ElMessage.success("门诊病历已生成，开始下载");
+    await downloadPreAiOutpatientRecordApi(data.record);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "门诊病历生成失败");
+  } finally {
+    outpatientGenerating.value = false;
+  }
+};
+const downloadOutpatientRecord = async (version: PreAiOutpatientRecordVersion) => {
+  try {
+    await downloadPreAiOutpatientRecordApi(version);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "门诊病历下载失败");
+  }
 };
 const recordChatPatientName = computed(() => workspace.value?.encounter?.patient?.patientName || "");
 const recordChatDiagnosisText = computed(() => {
