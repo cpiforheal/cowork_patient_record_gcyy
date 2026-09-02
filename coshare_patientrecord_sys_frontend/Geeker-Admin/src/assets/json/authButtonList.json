@@ -3,7 +3,7 @@
   "data": {
     "home": ["view"],
     "workbenchUpload": ["patient:search", "document:upload"],
-    "encounterActive": ["patient:read", "field:read"],
+    "patientsOverview": ["patient:read", "field:read"],
     "recordTemplate": ["field:read"],
     "patientList": ["patient:create", "patient:read", "patient:update"],
     "patientDetail": ["field:read", "field:edit", "document:read", "document:upload", "document:void", "document:download"],

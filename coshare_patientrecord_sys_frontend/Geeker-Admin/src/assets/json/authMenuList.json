@@ -44,12 +44,12 @@
           }
         },
         {
-          "path": "/encounters/active",
-          "name": "encounterActive",
-          "component": "/encounters/active/index",
+          "path": "/patients/overview",
+          "name": "patientsOverview",
+          "component": "/patients/overview/index",
           "meta": {
             "icon": "Connection",
-            "title": "患者进度",
+            "title": "患者概览",
             "isLink": "",
             "isHide": false,
             "isFull": false,

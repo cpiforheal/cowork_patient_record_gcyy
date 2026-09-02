@@ -70,7 +70,7 @@ public class AuthNavigationService {
     private final Map<String, RolePolicy> policies = buildPolicies();
     private final List<NavigationShortcut> shortcuts = List.of(
         shortcut("登记与事实采集", "登记患者并完成前置事实采集", "EditPen", "/pre-ai/encounters"),
-        shortcut("患者进度", "查看患者当前诊疗阶段", "Connection", "/encounters/active"),
+        shortcut("患者概览", "按患者查看当前诊疗阶段与基础检查汇总", "Connection", "/patients/overview"),
         shortcut("患者档案查询", "按姓名和门诊号查询历史档案", "Search", "/patients/list"),
         shortcut("患者资料上传", "定位患者后上传本科室资料", "UploadFilled", "/workbench/upload"),
         shortcut("检验报告填写", "填写并复核患者检验报告", "Memo", "/workbench/lab-report"),
@@ -378,7 +378,7 @@ public class AuthNavigationService {
         result.add(page("/billing/patients", "billingPatients", "/billing/index", "患者收费信息", "Coin", false, false, false));
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/pre-ai/encounters", "患者就诊", "UserFilled",
             page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen", false, false, false),
-            page("/encounters/active", "encounterActive", "/encounters/active/index", "患者进度", "Connection", false, false, false),
+            page("/patients/overview", "patientsOverview", "/patients/overview/index", "患者概览", "Connection", false, false, false),
             page("/patients/list", "patientList", "/patients/list/index", "患者档案查询", "Search", false, false, false),
             pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/list"),
             page("/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled", false, false, false),
@@ -428,7 +428,7 @@ public class AuthNavigationService {
             compatibility("/pre-ai", "preAi", "/pre-ai/encounters"),
             compatibility("/workbench", "workbench", "/workbench/upload"),
             compatibility("/patients", "patients", "/patients/list"),
-            compatibility("/encounters", "encounters", "/encounters/active"),
+            compatibility("/encounters", "encounters", "/patients/overview"),
             compatibility("/templates", "templates", "/templates/record"),
             compatibility("/documents", "documents", "/documents/recycle"),
             compatibility("/audit", "audit", "/audit/log"),
@@ -447,7 +447,7 @@ public class AuthNavigationService {
             "home=view",
             "workbenchUpload=patient:search,document:read",
             "workbenchLabReport=patient:search,field:read,document:read",
-            "encounterActive=patient:read,field:read",
+            "patientsOverview=patient:read,field:read",
             "recordTemplate=field:read",
             "patientList=patient:read",
             "patientDetail=field:read,document:read,document:download",
@@ -478,7 +478,7 @@ public class AuthNavigationService {
         );
         result.put("admin", new RolePolicy(Set.of("*"), administratorButtons));
 
-        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/encounters/active");
+        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record");
         Set<String> preAi = paths("/pre-ai/encounters");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
@@ -522,24 +522,24 @@ public class AuthNavigationService {
 
         result.put("frontdesk", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff), mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
-            "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:create,patient:read,patient:update",
+            "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:create,patient:read,patient:update",
             "patientDetail=field:read,field:edit,document:read,document:upload,document:download",
             "clinicQueueWorkbench=queue:read,queue:issue,queue:intervene,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         ), inventoryStaffButtons)));
         result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff), mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
-            "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
+            "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload",
             "clinicQueueWorkbench=queue:read,inspection:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         ), inventoryStaffButtons)));
         result.put("reception", role(union(patientFlow, preAi, clinicQueue), permissions(
-            "home=view", "encounterActive=patient:read,field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read",
+            "home=view", "patientsOverview=patient:read,field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         )));
 
         Map<String, List<String>> diagnosticButtons = mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:upload",
-            "encounterActive=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
+            "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload"
         ), inventoryStaffButtons);
         result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
@@ -560,7 +560,7 @@ public class AuthNavigationService {
         )));
 
         result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff), mergePermissions(permissions(
-            "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "encounterActive=patient:read,field:read",
+            "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "patientsOverview=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
@@ -568,7 +568,7 @@ public class AuthNavigationService {
         result.put("quality", role(union(patientFlow, inventoryQuality, paths(
             "/workbench/lab-report", "/templates/record", "/documents/recycle", "/audit/review", "/audit/log"
         )), mergePermissions(permissions(
-            "home=view", "workbenchLabReport=patient:search,field:read,document:read", "encounterActive=patient:read,field:read",
+            "home=view", "workbenchLabReport=patient:search,field:read,document:read", "patientsOverview=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,document:read,document:void,document:download",
             "documentRecycle=document:restore,document:read", "auditReview=audit:read,quality:approve,quality:reject", "auditLog=audit:read,audit:export"
         ), inventoryQualityButtons)));

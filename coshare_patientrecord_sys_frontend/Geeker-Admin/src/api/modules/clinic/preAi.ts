@@ -344,6 +344,64 @@ export const getPreAiEncountersApi = async () => {
   return clinicResponse(await parseClinicApiResponse<{ list: PreAiEncounterSummary[] }>(result));
 };
 
+export interface PreAiEncounterOverview {
+  patient: { name: string; gender: string; age: string; phone: string };
+  visit: {
+    encounterId: string;
+    patientCaseId: string;
+    caseToken: string;
+    visitNo: number;
+    status: string;
+    route: string;
+    inventoryCareType: string;
+    treatmentPath: string;
+    visitDate: string;
+    updatedAt: string;
+    normalizedCareType?: string;
+    effectiveCurrentStage?: string;
+    nextOwner?: string;
+    skippedStages?: string[];
+  };
+  clinical: {
+    chiefComplaint: string;
+    chiefComplaintSupplement: string;
+    presentIllness: string;
+    allergyHistory: string;
+    specialistExam: string;
+    nextReviewAt: string;
+    nextReviewNote: string;
+    diagnosis: { westernPrimary: string; westernSecondary: string[]; tcm: string };
+    treatment: { treatmentPath: string; plannedPrimaryOperation: string };
+    surgery: { actualPrimaryOperation: string; anesthesiaMethod: string; operationDate: string };
+    tcmDetail: { disease: string; primarySyndrome: string; concurrentSyndrome: string; treatmentPrinciple: string };
+  };
+  auxiliary: {
+    tasks: { taskType: string; status: string; title?: string; conclusion?: string }[];
+    labReportCount: number;
+    labSummary: {
+      abnormalCount: number;
+      criticalCount: number;
+      abnormalMetrics: {
+        reportName?: string;
+        name?: string;
+        value?: string;
+        unit?: string;
+        reference?: string;
+        severity?: string;
+      }[];
+    };
+  };
+}
+
+/** 患者概览悬浮窗：就诊浓缩检查信息汇总（只读）。 */
+export const getEncounterOverviewApi = async (encounterId: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/overview`, {
+    headers: authHeaders()
+  });
+  const data = await parseClinicApiResponse<PreAiEncounterOverview>(result);
+  return clinicResponse(data);
+};
+
 export const getPreAiPatientCasesApi = async () => {
   const result = await clinicFetch("/pre-ai/patients", { headers: authHeaders() });
   return clinicResponse(await parseClinicApiResponse<{ list: PreAiPatientCase[] }>(result));

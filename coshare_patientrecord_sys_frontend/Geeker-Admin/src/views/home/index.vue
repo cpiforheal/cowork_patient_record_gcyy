@@ -271,8 +271,8 @@ const roleActionConfig = computed(() => {
         desc: "优先处理建档不完整或今日未闭环患者",
         count: registrationTodoRows.value.length,
         level: registrationTodoRows.value.length ? "warning" : "success",
-        actionText: "查看看板",
-        path: "/encounters/active"
+        actionText: "查看概览",
+        path: "/patients/overview"
       },
       {
         id: "frontdesk-legacy",
@@ -302,8 +302,8 @@ const roleActionConfig = computed(() => {
         desc: "只处理当前岗位可编辑的检查/筛查字段",
         count: rolePendingRows.value.length,
         level: rolePendingRows.value.length ? "warning" : "success",
-        actionText: "进入看板",
-        path: "/encounters/active"
+        actionText: "进入概览",
+        path: "/patients/overview"
       },
       {
         id: "inspection-returned",
@@ -364,8 +364,8 @@ const roleActionConfig = computed(() => {
         desc: "关注超过规则时限仍未闭环的患者",
         count: stats.value.pendingPatients,
         level: stats.value.pendingPatients ? "warning" : "success",
-        actionText: "看流程",
-        path: "/encounters/active"
+        actionText: "看概览",
+        path: "/patients/overview"
       },
       {
         id: "admin-review",
@@ -386,7 +386,7 @@ const roleActionConfig = computed(() => {
       count: rolePendingRows.value.length,
       level: rolePendingRows.value.length ? "warning" : "success",
       actionText: "进入工作台",
-      path: "/encounters/active"
+      path: "/patients/overview"
     },
     {
       id: "clinical-submit",
@@ -427,7 +427,7 @@ const statCards = computed<StatCard[]>(() => {
         count: pendingRows.value.length,
         desc: "本岗位相关在办患者",
         tone: pendingRows.value.length ? "warning" : "success",
-        path: "/encounters/active"
+        path: "/patients/overview"
       },
       {
         id: "review",
@@ -459,7 +459,7 @@ const statCards = computed<StatCard[]>(() => {
         count: editableSectionCount.value,
         desc: `${roleName.value}可编辑的档案章节`,
         tone: "info",
-        path: "/encounters/active"
+        path: "/patients/overview"
       }
     ];
   }
@@ -552,7 +552,7 @@ const roleReminders = computed<WorkReminder[]>(() => {
         desc: "关注长时间停留在同一阶段的患者",
         count: stats.value.overduePatients,
         level: "warning",
-        path: "/encounters/active"
+        path: "/patients/overview"
       });
     }
   }

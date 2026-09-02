@@ -203,10 +203,10 @@ class AuthNavigationServiceTest {
         assertThat(patient.meta().icon()).isEqualTo("UserFilled");
         assertThat(patient.redirect()).isEqualTo("/pre-ai/encounters");
         assertThat(visibleChildren(patient).stream().map(NavigationMenu::path)).containsExactly(
-            "/pre-ai/encounters", "/encounters/active", "/patients/list", "/workbench/upload", "/workbench/lab-report"
+            "/pre-ai/encounters", "/patients/overview", "/patients/list", "/workbench/upload", "/workbench/lab-report"
         );
         assertThat(visibleChildren(patient).stream().map(item -> item.meta().title())).containsExactly(
-            "登记与事实采集", "患者进度", "患者档案查询", "患者资料上传", "检验报告填写"
+            "登记与事实采集", "患者概览", "患者档案查询", "患者资料上传", "检验报告填写"
         );
         assertThat(visibleChildren(patient).stream().map(item -> item.meta().icon())).containsExactly(
             "EditPen", "Connection", "Search", "UploadFilled", "Memo"
@@ -245,7 +245,7 @@ class AuthNavigationServiceTest {
 
         NavigationResult quality = service.navigationFor(user("quality"));
         NavigationMenu qualityPatient = findMenu(quality.menus(), "/navigation/patient-collaboration");
-        assertThat(qualityPatient.redirect()).isEqualTo("/encounters/active");
+        assertThat(qualityPatient.redirect()).isEqualTo("/patients/overview");
         assertThat(findMenuOrNull(qualityPatient.children(), "/pre-ai/encounters")).isNull();
         assertThat(findMenu(quality.menus(), "/navigation/quality-audit").redirect()).isEqualTo("/audit/review");
 

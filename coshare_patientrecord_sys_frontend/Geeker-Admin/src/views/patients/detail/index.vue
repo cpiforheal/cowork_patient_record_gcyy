@@ -539,7 +539,7 @@
                   <div v-if="layeredEditableFields.length" class="my-fields-footer">
                     <el-button :loading="saving" @click="saveMyFields">保存当前层内容</el-button>
 
-                    <el-button type="primary" :loading="saving" @click="saveMyFieldsAndBack">保存并返回看板</el-button>
+                    <el-button type="primary" :loading="saving" @click="saveMyFieldsAndBack">保存并返回概览</el-button>
                   </div>
                 </section>
 
@@ -4794,14 +4794,14 @@ const saveWorkflowRoleMaintenanceFields = async (fieldKeys: string[]) => {
 };
 
 const saveMyFieldsAndBack = async () => {
-  if (!ensureNoBlockingIssues("mine", "返回看板")) return;
+  if (!ensureNoBlockingIssues("mine", "返回概览")) return;
 
   const saved = await saveMyFields();
 
   if (saved) {
     cancelPendingPatientDetailWork();
 
-    router.push("/encounters/active");
+    router.push("/patients/overview");
   }
 };
 

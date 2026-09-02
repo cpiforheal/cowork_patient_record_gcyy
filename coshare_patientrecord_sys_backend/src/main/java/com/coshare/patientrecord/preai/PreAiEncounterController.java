@@ -80,6 +80,12 @@ public class PreAiEncounterController {
         return ApiResult.success(service.getWorkspace(encounterId, readOnly, patientCaseId, AuthPermission.currentUserOrThrow()));
     }
 
+    /** 患者概览悬浮窗：就诊浓缩检查信息汇总（只读）。 */
+    @GetMapping("/{encounterId}/overview")
+    public ApiResult<Map<String, Object>> encounterOverview(@PathVariable String encounterId) {
+        return ApiResult.success(service.encounterOverview(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/{encounterId}/responsibility-timeline")
     public ApiResult<Map<String, Object>> responsibilityTimeline(
         @PathVariable String encounterId,

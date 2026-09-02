@@ -2680,6 +2680,135 @@ public class PreAiEncounterService {
         return "/pre-ai/encounters/" + encounterId + "/exports/" + exportId + "/download";
     }
 
+    /** 患者概览悬浮窗：单个就诊的浓缩检查信息汇总（只读，鉴权与 workspace 一致）。 */
+    public Map<String, Object> encounterOverview(String encounterId, SessionUser user) {
+        requireReadRole(user);
+        String id = safe(encounterId);
+        ObjectNode encounter = loadEncounter(id);
+        requireEncounterAccess(id, user);
+        JsonNode patientJson = encounter.path("patient");
+
+        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode patient = result.putObject("patient");
+        patient.put("name", text(patientJson, "patientName"));
+        patient.put("gender", text(patientJson, "gender"));
+        patient.put("age", text(patientJson, "age"));
+        patient.put("phone", text(patientJson, "phone"));
+
+        ObjectNode visit = result.putObject("visit");
+        visit.put("encounterId", id);
+        visit.put("patientCaseId", text(encounter, "patientCaseId"));
+        visit.put("caseToken", text(encounter, "caseToken"));
+        visit.put("visitNo", encounter.path("visitNo").asInt(0));
+        visit.put("status", text(encounter, "status"));
+        visit.put("route", text(encounter, "route"));
+        visit.put("inventoryCareType", text(encounter, "inventoryCareType"));
+        visit.put("treatmentPath", text(encounter, "treatmentPath"));
+        visit.put("visitDate", text(patientJson, "visitDate"));
+        visit.put("updatedAt", text(encounter, "updatedAt"));
+        visit.set("stageStatuses", stageStatusMap(id));
+        enrichEncounterWorkflow(visit);
+
+        ObjectNode statuses = safeObject(visit.path("stageStatuses"));
+        ObjectNode clinical = result.putObject("clinical");
+        ObjectNode reception = stageDataIfPresent(id, "RECEPTION", statuses);
+        clinical.put("chiefComplaint", firstNonBlank(text(reception, "chiefComplaintText"), text(reception, "chiefComplaint")));
+        clinical.put("chiefComplaintSupplement", text(reception, "chiefComplaintSupplement"));
+        clinical.put("presentIllness", truncateText(firstNonBlank(text(reception, "presentIllnessOverride"), text(reception, "presentIllness")), 260));
+        clinical.put("allergyHistory", display(reception.path("allergyHistory")));
+        ObjectNode inspection = stageDataIfPresent(id, "INSPECTION", statuses);
+        clinical.put("specialistExam", firstNonBlank(text(inspection, "factualConclusion"), text(inspection, "inspectionNarrative")));
+        clinical.put("nextReviewAt", text(inspection, "nextReviewAt"));
+        clinical.put("nextReviewNote", text(inspection, "nextReviewNote"));
+
+        ObjectNode tcmStage = stageDataIfPresent(id, "TCM", statuses);
+        ObjectNode doctorStage = stageDataIfPresent(id, "DOCTOR", statuses);
+        ObjectNode surgeryStage = stageDataIfPresent(id, "SURGERY", statuses);
+
+        List<String> tcmDiagnosisTexts = new ArrayList<>();
+        List<String> westernSecondaryTexts = new ArrayList<>();
+        String[] westernPrimaryHolder = new String[1];
+        jdbcTemplate.query(
+            "SELECT diagnosis_type, diagnosis_text FROM pre_ai_diagnoses WHERE encounter_id = ? ORDER BY source_stage, sort_no, id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                String type = safe(rs.getString("diagnosis_type"));
+                String value = safe(rs.getString("diagnosis_text"));
+                if (value.isBlank()) return;
+                switch (type) {
+                    case "WESTERN_PRIMARY" -> westernPrimaryHolder[0] = value;
+                    case "WESTERN_SECONDARY", "WESTERN_COMORBIDITY" -> westernSecondaryTexts.add(value);
+                    case "TCM_DISEASE", "PRIMARY_SYNDROME" -> tcmDiagnosisTexts.add(value);
+                    default -> {
+                    }
+                }
+            },
+            id
+        );
+        ObjectNode diagnosis = clinical.putObject("diagnosis");
+        diagnosis.put("westernPrimary", firstNonBlank(westernPrimaryHolder[0], text(doctorStage, "primaryWesternDiagnosis")));
+        diagnosis.set("westernSecondary", objectMapper.valueToTree(westernSecondaryTexts));
+        diagnosis.put("tcm", String.join("、", tcmDiagnosisTexts));
+
+        ObjectNode treatment = clinical.putObject("treatment");
+        treatment.put("treatmentPath", text(doctorStage, "treatmentPath"));
+        treatment.put("plannedPrimaryOperation", firstNonBlank(text(doctorStage, "plannedPrimaryOperation"), text(doctorStage, "plannedOperationName")));
+        ObjectNode surgery = clinical.putObject("surgery");
+        surgery.put("actualPrimaryOperation", firstNonBlank(text(surgeryStage, "actualPrimaryOperation"), text(surgeryStage, "actualOperationName")));
+        surgery.put("anesthesiaMethod", text(surgeryStage, "anesthesiaMethod"));
+        surgery.put("operationDate", text(surgeryStage, "operationDate"));
+
+        ObjectNode tcm = clinical.putObject("tcmDetail");
+        tcm.put("disease", text(tcmStage, "tcmDisease"));
+        tcm.put("primarySyndrome", text(tcmStage, "primarySyndrome"));
+        tcm.put("concurrentSyndrome", display(tcmStage.path("concurrentSyndrome")));
+        tcm.put("treatmentPrinciple", text(tcmStage, "treatmentPrinciple"));
+
+        ObjectNode auxiliary = result.putObject("auxiliary");
+        ArrayNode tasks = auxiliary.putArray("tasks");
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                ObjectNode task = readAuxiliaryTask(rs);
+                ObjectNode projection = tasks.addObject();
+                projection.put("taskType", text(task, "taskType"));
+                projection.put("status", text(task, "status"));
+                projection.put("title", text(task, "title"));
+                if ("ECG".equals(text(task, "taskType"))) {
+                    projection.put("conclusion", text(safeObject(task.path("data")), "conclusion"));
+                }
+            },
+            id
+        );
+        ArrayNode labReports = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_lab_reports WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY report_date, saved_at, id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> labReports.add(readLabReport(rs)),
+            id
+        );
+        auxiliary.put("labReportCount", labReports.size());
+        ObjectNode labWrapper = objectMapper.createObjectNode();
+        labWrapper.set("labReports", labReports);
+        auxiliary.set("labSummary", labReviewSummary(labWrapper));
+
+        return toMap(result);
+    }
+
+    /** 阶段行存在才读取数据（老就诊可能缺行，缺行返回空节点而不是 404）。 */
+    private ObjectNode stageDataIfPresent(String encounterId, String stage, JsonNode statuses) {
+        if (statuses == null || !statuses.has(stage)) return objectMapper.createObjectNode();
+        try {
+            return safeObject(loadStage(encounterId, stage).path("data"));
+        } catch (ResponseStatusException error) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private String truncateText(String value, int maxLength) {
+        String text = safe(value);
+        if (text.length() <= maxLength) return text;
+        return text.substring(0, maxLength) + "…";
+    }
+
     private ObjectNode stageStatusMap(String encounterId) {
         ObjectNode statuses = objectMapper.createObjectNode();
         jdbcTemplate.query("SELECT stage_code, status FROM pre_ai_stage_submissions WHERE encounter_id = ?", (org.springframework.jdbc.core.RowCallbackHandler) rs -> statuses.put(rs.getString("stage_code"), rs.getString("status")), encounterId);

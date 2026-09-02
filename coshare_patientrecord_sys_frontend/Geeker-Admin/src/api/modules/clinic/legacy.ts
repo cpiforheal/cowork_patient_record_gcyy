@@ -1,4 +1,4 @@
-﻿import { ResultData } from "@/api/interface";
+import { ResultData } from "@/api/interface";
 import {
   allRecordFields,
   canEditField,
@@ -2639,7 +2639,7 @@ export const getWorkRemindersApi = async () => {
       level: stats.overduePatients ? "warning" : "success",
       title: "超时未闭环",
       desc: stats.overduePatients ? "超过 24 小时未更新，建议查看是否遗漏资料" : "暂无超时未闭环",
-      path: "/encounters/active",
+      path: "/patients/overview",
       count: stats.overduePatients
     },
     {

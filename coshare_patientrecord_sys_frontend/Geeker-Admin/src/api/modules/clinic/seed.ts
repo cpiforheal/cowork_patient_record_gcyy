@@ -28,6 +28,7 @@ export const roleToDepartment: Record<UserRole, string> = {
   doctor: "门诊",
   nurse: "治疗室",
   nursing: "护理部",
+  billing: "收费室",
   manager: "信息/院办",
   quality: "质控/病案",
   display: "信息/院办"
