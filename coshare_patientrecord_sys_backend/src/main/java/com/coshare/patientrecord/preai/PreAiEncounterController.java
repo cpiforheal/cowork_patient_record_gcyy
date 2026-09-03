@@ -310,6 +310,14 @@ public class PreAiEncounterController {
         return ApiResult.success(service.reviewPreview(encounterId, AuthPermission.currentUserOrThrow()));
     }
 
+    @PutMapping("/{encounterId}/review/overrides")
+    public ApiResult<Map<String, Object>> saveReviewOverrides(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.ReviewOverridesRequest request
+    ) {
+        return ApiResult.of(200, "医生复核修改已保存", service.saveReviewOverrides(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/{encounterId}/review/confirm")
     public ApiResult<Map<String, Object>> confirmReview(
         @PathVariable String encounterId,

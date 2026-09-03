@@ -33,10 +33,10 @@ public class PreAiPrivacyService {
         "identityNumber", "idNumber", "idCard", "visitNo", "admissionNo", "medicalRecordNo", "bedNo"
     );
     private static final Map<String, List<String>> STAGE_FIELDS = Map.of(
-        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"),
+        "INSPECTION", List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "inspectionNarrative", "nextReviewAt", "nextReviewNote"),
         "RECEPTION", List.of(
             "chiefComplaint", "chiefComplaintText", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
-            "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
+            "bleedingFeatures", "painFeatures", "recentAggravation",
             "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "presentIllness", "physicalExam",
             "pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory",
             "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
@@ -45,6 +45,7 @@ public class PreAiPrivacyService {
         "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "comorbidTcmItems", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
         "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "secondaryDiagnosisItems", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"),
         "SURGERY", List.of("preoperativeDiagnosis", "postoperativeDiagnosis", "actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "anesthesiologistName", "surgeonName", "assistantName", "nurseName", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "complications", "postoperativeDestination"),
+        "REVIEW", List.of("reviewStatement", "reviewOverrides"),
         // 护理部：病史采集（与接诊岗同名字段，接诊未填时由护理回退补齐）+ 四测信息；空值由 copyAllowed 自动跳过
         "NURSING", List.of(
             "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
@@ -98,7 +99,8 @@ public class PreAiPrivacyService {
         ObjectNode stages = result.putObject("stages");
         for (JsonNode stage : workspace.path("stages")) {
             String stageCode = text(stage, "stageCode");
-            if (!"COMPLETED".equals(text(stage, "status")) && !"SKIPPED".equals(text(stage, "status"))) continue;
+            boolean reviewOverridesDraft = "REVIEW".equals(stageCode) && stage.path("data").path("reviewOverrides").isArray();
+            if (!"COMPLETED".equals(text(stage, "status")) && !"SKIPPED".equals(text(stage, "status")) && !reviewOverridesDraft) continue;
             List<String> allowlist = STAGE_FIELDS.get(stageCode);
             if (allowlist == null || "SKIPPED".equals(text(stage, "status"))) continue;
             ObjectNode data = copyAllowed(stage.path("data"), allowlist, patient, caseToken);
@@ -267,7 +269,22 @@ public class PreAiPrivacyService {
         return TEMPLATE_VERSION;
     }
 
+    public ObjectNode applyReviewOverrides(ObjectNode masked) {
+        ObjectNode result = masked == null ? objectMapper.createObjectNode() : masked.deepCopy();
+        JsonNode review = result.path("stages").path("REVIEW");
+        JsonNode overrides = review.path("reviewOverrides");
+        if (overrides.isArray() && !overrides.isEmpty()) result.set("reviewOverrides", overrides.deepCopy());
+        return result;
+    }
+
+    private JsonNode reviewOverrideRows(ObjectNode masked) {
+        JsonNode direct = masked.path("reviewOverrides");
+        if (direct.isArray()) return direct;
+        return masked.path("stages").path("REVIEW").path("reviewOverrides");
+    }
+
     public ObjectNode buildDocumentView(ObjectNode masked) {
+        masked = applyReviewOverrides(masked);
         ObjectNode result = objectMapper.createObjectNode();
         result.put("templateVersion", TEMPLATE_VERSION);
         ArrayNode sections = result.putArray("sections");
@@ -291,7 +308,7 @@ public class PreAiPrivacyService {
         addNodeRows(complaint, reception, List.of("chiefComplaintText", "chiefComplaint", "chiefComplaintSupplement", "symptomDuration"), Set.of("chiefComplaintText"));
 
         ObjectNode present = addSection(sections, "03", "三、现病史");
-        addNodeRows(present, reception, List.of("presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"), Set.of("presentIllness"));
+        addNodeRows(present, reception, List.of("presentIllness", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors", "bleedingFeatures", "painFeatures", "recentAggravation", "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics"), Set.of("presentIllness"));
 
         ObjectNode history = addSection(sections, "04", "四、既往史 / 个人史 / 婚育史 / 家族史");
         addNodeRowsWithFallback(history, reception, nursing, List.of("pastHistory", "chronicDiseaseItems", "surgicalHistory", "surgicalHistoryItems", "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "allergyHistory", "personalHistory", "maritalHistory", "familyHistory", "historySupplement", "receptionSpecialDescription", "specialCircumstances"), Set.of());
@@ -304,7 +321,7 @@ public class PreAiPrivacyService {
         addVitalRows(physicalExam, nursing);
 
         ObjectNode inspectionSection = addSection(sections, "07", "七、专科检查");
-        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "visualFindings", "digitalExamFindings", "anoscopyFindings", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "factualConclusion", "nextReviewAt", "nextReviewNote"), Set.of("factualConclusion"));
+        addNodeRows(inspectionSection, inspection, List.of("examinationDirection", "diseaseDirections", "examinationTypes", "lesionCount", "lesionMorphology", "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "inspectionSpecialDescription", "inspectionNarrative", "nextReviewAt", "nextReviewNote"), Set.of("inspectionNarrative"));
 
         ObjectNode auxiliary = addSection(sections, "08", "八、辅助检查");
         addViewRow(auxiliary, "recommendedAuxiliaryExams", "建议辅助检查", reception.path("recommendedAuxiliaryExams"), false, "NORMAL");
@@ -359,6 +376,7 @@ public class PreAiPrivacyService {
         ObjectNode dip = addSection(sections, "13", "十三、DIP 病组与治疗路径");
         addNodeRows(dip, doctor, List.of("finalRoute", "treatmentPath", "treatmentPlan"), Set.of());
 
+        applyDocumentRowOverrides(result, masked);
         int effectiveFieldCount = 0;
         for (JsonNode section : sections) effectiveFieldCount += section.path("rows").size();
         result.put("effectiveFieldCount", effectiveFieldCount);
@@ -368,6 +386,30 @@ public class PreAiPrivacyService {
         footer.put("statement", text(masked.path("review"), "statement"));
         footer.put("generationScope", "仅呈现已填写、已选择且完成交接的前置事实；空字段和未选候选项已剔除。");
         return result;
+    }
+
+    private void applyDocumentRowOverrides(ObjectNode documentView, ObjectNode masked) {
+        JsonNode overrides = reviewOverrideRows(masked);
+        if (!overrides.isArray() || overrides.isEmpty()) return;
+        Map<String, String> values = new LinkedHashMap<>();
+        for (JsonNode item : overrides) {
+            String sectionCode = text(item, "sectionCode");
+            String rowId = text(item, "rowId");
+            if (!sectionCode.isBlank() && !rowId.isBlank()) values.put(sectionCode + ":" + rowId, text(item, "value"));
+        }
+        if (values.isEmpty()) return;
+        for (JsonNode section : documentView.path("sections")) {
+            String sectionCode = text(section, "code");
+            ArrayNode rows = (ArrayNode) section.path("rows");
+            for (int index = rows.size() - 1; index >= 0; index--) {
+                JsonNode row = rows.get(index);
+                if (!row.isObject()) continue;
+                String override = values.get(sectionCode + ":" + text(row, "id"));
+                if (override == null) continue;
+                if (safe(override).isBlank()) rows.remove(index);
+                else ((ObjectNode) row).put("value", override);
+            }
+        }
     }
 
     private ObjectNode addSection(ArrayNode sections, String code, String title) {
@@ -432,6 +474,7 @@ public class PreAiPrivacyService {
         row.put("contentType", Set.of("LIST", "MEASUREMENT", "IMAGE").contains(contentType) ? contentType : "TEXT");
         row.put("severity", Set.of("ABNORMAL", "CRITICAL").contains(severity) ? severity : "NORMAL");
         row.put("emphasis", emphasis);
+        row.put("editable", true);
     }
 
     private String buildDocumentXml(ObjectNode masked) {
@@ -731,11 +774,9 @@ public class PreAiPrivacyService {
             {"contactName", "联系人"}, {"contactRelation", "联系人关系"}, {"contactPhone", "联系人电话"}, {"patientSource", "患者来源"}, {"registrationNote", "登记备注"},
             {"admissionMethod", "入院方式"}, {"admissionSeverity", "入院病情"}, {"insuranceType", "医保类型"}, {"paymentMethod", "付费方式"},
             {"examinationDirection", "检查方向"}, {"diseaseDirections", "病种方向"}, {"examinationTypes", "已完成检查"},
-            {"lesionCount", "病灶数量"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"visualFindings", "外观所见"},
-            {"digitalExamFindings", "指检所见"}, {"anoscopyFindings", "镜下/肛门镜所见"}, {"otherFindings", "其他客观表现"}, {"preliminaryDiagnosis", "检查室初步诊断"}, {"preliminaryDiagnosisNote", "检查室诊断补充"}, {"inspectionSpecialDescription", "检查补充说明"}, {"factualConclusion", "检查事实结论"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
+            {"lesionCount", "病灶数量"}, {"lesionMorphology", "病灶形态"}, {"biopsyPerformed", "是否取活检"}, {"otherFindings", "其他客观表现"}, {"preliminaryDiagnosis", "检查室初步诊断"}, {"preliminaryDiagnosisNote", "检查室诊断补充"}, {"inspectionSpecialDescription", "检查补充说明"}, {"inspectionNarrative", "检查记录"}, {"nextReviewAt", "下次复查时间"}, {"nextReviewNote", "复查安排说明"},
             {"chiefComplaint", "主诉症状"}, {"chiefComplaintText", "主诉"}, {"symptomDuration", "主要症状病程"}, {"onsetTrigger", "起病诱因"}, {"symptomPattern", "症状发作方式"}, {"symptomChanges", "症状变化"},
-            {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"prolapseReduction", "脱出与回纳"}, {"associatedSymptoms", "伴随症状"},
-            {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
+            {"aggravatingFactors", "加重诱因"}, {"bleedingFeatures", "便血特征"}, {"painFeatures", "疼痛特征"}, {"recentAggravation", "近期加重情况"}, {"previousTreatment", "既往相关治疗"}, {"generalCondition", "一般情况"}, {"stoolFrequency", "大便频次"}, {"stoolCharacteristics", "大便性状"},
             {"presentIllness", "现病史最终文本"}, {"physicalExam", "体格检查"}, {"pastHistory", "既往史"}, {"chronicDiseaseItems", "慢性病史明细"}, {"surgicalHistory", "手术史"}, {"surgicalHistoryItems", "手术史明细"}, {"traumaHistory", "外伤史"}, {"transfusionHistory", "输血史"},
             {"vaccinationHistory", "预防接种史"}, {"medicationHistory", "用药史"}, {"allergyHistory", "过敏史"}, {"personalHistory", "个人史"}, {"maritalHistory", "婚育史"},
             {"familyHistory", "家族史"}, {"historySupplement", "病史补充原文"}, {"chiefComplaintSupplement", "患者原话速记"}, {"receptionSpecialDescription", "接诊特殊补充说明"}, {"specialCircumstances", "特殊情况"}, {"reviewOpinion", "检查材料回看意见"}, {"nextStepRecommendation", "下一步处置建议"},

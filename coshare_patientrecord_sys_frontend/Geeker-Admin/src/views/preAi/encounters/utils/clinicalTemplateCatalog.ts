@@ -30,9 +30,7 @@ export interface ClinicalTemplate {
 export const CLOCK_POSITION_OPTIONS = ["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"];
 const DURATION_OPTIONS = ["3天", "1周", "2周", "3周", "1月", "3月", "半年", "1年", "2年", "3年", "4年", "5年"];
 const AGGRAVATION_OPTIONS = ["3天", "1周", "2周", "1月", "无加重"];
-const REDUCTION_OPTIONS = ["可自行回纳", "需手托回纳", "不可回纳"];
 const DISTANCE_OPTIONS = ["2cm", "3cm", "4cm", "5cm"];
-const COMPANION_OPTIONS = ["直肠黏膜松弛", "肛乳头肥大", "血栓性外痔", "直肠息肉"];
 
 const slot = (key: string, label: string, options: string[], def: string | string[], kind: "select" | "multi" = "select"): ClinicalTemplateSlot => ({
   key,
@@ -44,9 +42,6 @@ const slot = (key: string, label: string, options: string[], def: string | strin
 
 const durationSlot = (def: string) => slot("duration", "病程时长", DURATION_OPTIONS, def);
 const aggravationSlot = (def: string) => slot("aggravation", "近期加重", AGGRAVATION_OPTIONS, def);
-const companionsSlot = () => slot("companions", "伴随诊断", COMPANION_OPTIONS, [], "multi");
-const skinTagSlot = (def: string[]) => slot("skinTags", "外痔/赘皮点位", CLOCK_POSITION_OPTIONS, def, "multi");
-const internalSlot = (def: string[]) => slot("internal", "内痔点位", CLOCK_POSITION_OPTIONS, def, "multi");
 
 export const clinicalTemplates: ClinicalTemplate[] = [
   {
@@ -55,10 +50,10 @@ export const clinicalTemplates: ClinicalTemplate[] = [
     label: "混合痔",
     chiefComplaint: "间断便血伴肿物脱出{duration}{aggravationPhrase}",
     presentIllness:
-      "患者自诉{duration}前无明显诱因出现便时滴血，色鲜红，无痛，便后即止，数天后自行缓解，后间断发作，进行性加重，出现肛门肿物脱出，初起便后可自行回纳，{aggravationClause}脱出后{reduction}，自购药物局部应用效不佳。今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、饮食、大小便可，体重未见明显变化，未见恶寒发热表现。",
+      "患者自诉{duration}前无明显诱因出现便时滴血，色鲜红，无痛，便后即止，数天后自行缓解，后间断发作，进行性加重，出现肛门肿物脱出，初起便后可自行回纳，{aggravationClause}自购药物局部应用效不佳。今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、饮食、大小便可，体重未见明显变化，未见恶寒发热表现。",
     inspectionConclusion:
-      "截石位{skinTags}点肛缘赘皮增生，屏气用腹压可见其缓慢增大，色青紫，质柔软；镜检示{internal}点内痔粘膜隆起糜烂，退镜时{internal}点粘膜可脱出肛外。",
-    slots: [durationSlot("3年"), aggravationSlot("2周"), skinTagSlot(["4点", "7点", "11点"]), internalSlot(["3点", "7点", "11点"]), slot("reduction", "脱出回纳情况", REDUCTION_OPTIONS, "需手托回纳"), companionsSlot()],
+      "截石位检查：肛缘赘皮增生，屏气用腹压可见其缓慢增大，色青紫，质柔软；镜检示内痔黏膜隆起糜烂，退镜时黏膜可脱出肛外。",
+    slots: [durationSlot("3年"), aggravationSlot("2周")],
     symptoms: ["便血", "肿物脱出", "肛门坠胀", "便不尽感"],
     visual: ["肛缘赘皮增生", "屏气用腹压可见肿物缓慢增大", "色青紫，质柔软"],
     digital: ["触及颗粒状硬结"],
@@ -71,8 +66,8 @@ export const clinicalTemplates: ClinicalTemplate[] = [
     chiefComplaint: "间断便血伴肛门坠胀、便不尽感{duration}{aggravationPhrase}",
     presentIllness:
       "患者自诉{duration}前无明显诱因出现便时出血，滴下状，色鲜红，无痛，便后即止，数天后自行好转，后间断发作，饮食辛辣刺激或饮酒、劳累后症状明显，{aggravationClause}未予系统检查与治疗。今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、二便可，体重未见明显变化，未见恶寒发热表现。",
-    inspectionConclusion: "镜检示{internal}点齿线上黏膜充血隆起，局部糜烂。",
-    slots: [durationSlot("1年"), aggravationSlot("1月"), internalSlot(["3点", "7点", "11点"]), companionsSlot()],
+    inspectionConclusion: "镜检示齿线上黏膜充血隆起，局部糜烂。",
+    slots: [durationSlot("1年"), aggravationSlot("1月")],
     symptoms: ["便血", "肛门坠胀", "便不尽感"],
     visual: ["蹲位或努挣时肛内肿物脱出"],
     digital: ["触及痔核"],
@@ -86,14 +81,11 @@ export const clinicalTemplates: ClinicalTemplate[] = [
     presentIllness:
       "患者自诉{duration}前无明显诱因出现便时手纸沾染血迹，后间断发作，进行性加重，出现肛缘赘皮增生，便时增大，便后缩小，{aggravationClause}伴有排便习惯改变，便次少，2-3天排便一次，时常干燥。今来院就诊，门诊检查后，以“{diagnosis}”收入院。患者近期精神、睡眠、饮食可，体重未见明显变化。",
     inspectionConclusion:
-      "视诊截石位{skinTags}点肛缘赘皮增生，{fissure}点肛管可见裂口，指诊肛门括约肌紧张，镜检示{internal}点内痔痔核隆起。",
+      "视诊截石位肛缘赘皮增生，{fissure}点肛管可见裂口，指诊肛门括约肌紧张，镜检示内痔痔核隆起。",
     slots: [
       durationSlot("1年"),
       aggravationSlot("1周"),
-      skinTagSlot(["6点", "11点"]),
       slot("fissure", "裂口点位", CLOCK_POSITION_OPTIONS, ["6点"], "multi"),
-      internalSlot(["3点", "7点", "11点"]),
-      companionsSlot()
     ],
     symptoms: ["肛周疼痛", "便血", "排便异常", "肛周瘙痒"],
     visual: ["肛缘赘皮增生", "肛管可见裂口"],
@@ -108,14 +100,12 @@ export const clinicalTemplates: ClinicalTemplate[] = [
     presentIllness:
       "患者自诉{duration}前因腹泻肛周突起肿块，疼痛呈持续性，后自行破溃，脓出痛减。后间断脓性分泌物，时多时少，肛门潮湿不洁；平素时有间断便血，手纸沾染血迹或滴血，无痛；反复发作，{aggravationClause}为求进一步诊疗今来院就诊。患者近期精神、睡眠、饮食、小便可，便次频、便稀，2-3次/日，体重未见明显变化，未见恶寒发热表现。门诊检查后以“{diagnosis}”收入院。",
     inspectionConclusion:
-      "截石位{fistula}点距肛门约{distance}处瘘口，皮下可触及索状硬结分别止于对应齿线处，肛门镜检可见{internal}点齿线上黏膜充血隆起。",
+      "截石位{fistula}点距肛门约{distance}处瘘口，皮下可触及索状硬结分别止于对应齿线处，肛门镜检可见齿线上黏膜充血隆起。",
     slots: [
       durationSlot("2年"),
       aggravationSlot("1周"),
       slot("fistula", "瘘口点位", CLOCK_POSITION_OPTIONS, ["9点"], "multi"),
-      slot("distance", "瘘口距肛门", DISTANCE_OPTIONS, "4cm"),
-      internalSlot(["3点", "7点", "11点"]),
-      companionsSlot()
+      slot("distance", "瘘口距肛门", DISTANCE_OPTIONS, "4cm")
     ],
     symptoms: ["肛周肿块", "肛周疼痛", "溢脓", "肛周潮湿", "便血"],
     visual: ["肛周可见外口", "外口增生凸起", "少量黄稠脓性分泌物附着"],
@@ -130,14 +120,12 @@ export const clinicalTemplates: ClinicalTemplate[] = [
     presentIllness:
       "患者自诉{duration}前无明显诱因出现肛周突起肿包，触痛明显，未见出血、溢脓，自用药物无效，{aggravationClause}为求进一步诊疗今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、饮食、大小便可，体重未见明显变化，未见恶寒发热表现。",
     inspectionConclusion:
-      "截石位{lump}点肛周肿块，触之疼痛明显，{fluctuation}点可触及波动感，镜检可见{fluctuation}点肛隐窝潮红凹陷明显，{internal}点齿线上黏膜充血隆起，局部糜烂。",
+      "截石位{lump}点肛周肿块，触之疼痛明显，{fluctuation}点可触及波动感，镜检可见{fluctuation}点肛隐窝潮红凹陷明显，齿线上黏膜充血隆起，局部糜烂。",
     slots: [
       durationSlot("3周"),
       aggravationSlot("3天"),
       slot("lump", "肿块点位", CLOCK_POSITION_OPTIONS, ["9点", "12点"], "multi"),
-      slot("fluctuation", "波动感点位", CLOCK_POSITION_OPTIONS, ["12点"], "multi"),
-      internalSlot(["3点", "7点", "10点"]),
-      companionsSlot()
+      slot("fluctuation", "波动感点位", CLOCK_POSITION_OPTIONS, ["12点"], "multi")
     ],
     symptoms: ["肛周肿块", "肛周疼痛"],
     visual: ["局部红肿隆起", "触痛明显"],
@@ -214,8 +202,7 @@ const deriveSlotValues = (slots: Record<string, any>, selected: ClinicalTemplate
     else values[key] = String(value ?? "").trim();
   }
   const primary = selected[0];
-  const companions = asList(slots.companions).map(String);
-  const diagnosis = joinUnique([primary.disease, ...selected.slice(1).map(item => item.disease), ...companions]);
+  const diagnosis = joinUnique([primary.disease, ...selected.slice(1).map(item => item.disease)]);
   const aggravation = values.aggravation && values.aggravation !== "无加重" ? values.aggravation : "";
   values.aggravationPhrase = aggravation ? `，加重${aggravation}` : "";
   values.aggravationClause = aggravation ? `近${aggravation}症状加重，` : "";
@@ -275,17 +262,9 @@ export const applyClinicalTemplate = (
     if (mode !== "render") {
       patch.diseaseDirections = mergeList(form.diseaseDirections, selected.map(item => item.disease), mode);
       patch.examinationTypes = mergeList(form.examinationTypes, ["VISUAL", "DIGITAL", "ANOSCOPY"], mode);
-      patch.visualFindings = mergeList(form.visualFindings, selected.flatMap(item => item.visual), mode);
-      patch.digitalExamFindings = mergeList(form.digitalExamFindings, selected.flatMap(item => item.digital), mode);
-      patch.anoscopyFindings = mergeList(form.anoscopyFindings, selected.flatMap(item => item.anoscopy), mode);
     }
     if (mode === "overwrite" || !String(form.examinationDirection || "").trim()) patch.examinationDirection = "肛肠";
     setTemplateText("inspectionNarrative", renderTemplate(primary.inspectionConclusion, values));
-    if (mode === "overwrite") {
-      patch.factualConclusionOverride = undefined;
-      patch.factualConclusionSourceHash = undefined;
-    }
-    patch.factualConclusionConfirmed = false;
   }
   patch.clinicalTemplateRendered = snapshot;
   return patch;

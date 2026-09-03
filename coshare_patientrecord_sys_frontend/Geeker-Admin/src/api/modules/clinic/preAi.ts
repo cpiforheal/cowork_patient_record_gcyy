@@ -320,6 +320,13 @@ export interface PreAiOutpatientRecordVersion {
   downloadUrl: string;
 }
 
+export interface PreAiReviewOverride {
+  sectionCode: string;
+  rowId: string;
+  label: string;
+  value: string;
+}
+
 export interface PreAiReviewPreview {
   workspace: PreAiWorkspace;
   maskedPreview: Record<string, any>;
@@ -333,6 +340,7 @@ export interface PreAiReviewPreview {
   templateVersion?: string;
   effectiveFieldCount?: number;
   documentSections?: PreAiDocumentSection[];
+  reviewOverrides?: PreAiReviewOverride[];
 }
 
 export interface PreAiDocumentRow {
@@ -342,6 +350,7 @@ export interface PreAiDocumentRow {
   contentType: "TEXT" | "LIST" | "MEASUREMENT" | "IMAGE";
   severity: "NORMAL" | "ABNORMAL" | "CRITICAL";
   emphasis?: boolean;
+  editable?: boolean;
 }
 
 export interface PreAiDocumentSection {
@@ -692,6 +701,12 @@ export const getPreAiReviewPreviewApi = async (encounterId: string, signal?: Abo
   });
   return clinicResponse(await parseClinicApiResponse<PreAiReviewPreview>(result));
 };
+
+export const savePreAiReviewOverridesApi = (encounterId: string, reviewOverrides: PreAiReviewOverride[], expectedVersion: number) =>
+  jsonRequest<PreAiReviewPreview>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review/overrides`, "PUT", {
+    data: { reviewOverrides },
+    expectedVersion
+  });
 
 export const confirmPreAiReviewApi = (
   encounterId: string,

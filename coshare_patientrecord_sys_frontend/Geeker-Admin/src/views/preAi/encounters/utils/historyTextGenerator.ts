@@ -16,9 +16,7 @@ export const buildPresentIllnessText = (form: Record<string, any>) => {
   const course = [
     selectedText(form.symptomPattern),
     selectedText(form.bleedingFeatures),
-    selectedText(form.painFeatures),
-    form.prolapseReduction,
-    selectedText(form.associatedSymptoms)
+    selectedText(form.painFeatures)
   ].filter(Boolean);
   const aggravation = [selectedText(form.aggravatingFactors), form.recentAggravation].filter(Boolean).join("，");
   const treatment = selectedText(form.previousTreatment);

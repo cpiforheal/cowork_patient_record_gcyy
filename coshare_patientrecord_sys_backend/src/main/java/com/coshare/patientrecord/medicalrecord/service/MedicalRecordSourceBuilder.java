@@ -5,6 +5,7 @@ import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.coshare.patientrecord.clinic.service.ClinicDatabaseService;
 import com.coshare.patientrecord.common.privacy.SensitiveDataMasker;
 import com.coshare.patientrecord.medicalrecord.model.TargetField;
+import com.coshare.patientrecord.preai.PreAiPrivacyService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,22 +29,30 @@ public class MedicalRecordSourceBuilder {
     private static final List<String> PRE_AI_SCOPE_READ_ROLES = List.of(
         "admin", "quality", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
     );
+    private static final Set<String> DEPRECATED_PRE_AI_FACT_KEYS = Set.of(
+        "visualFindings", "digitalExamFindings", "anoscopyFindings", "factualConclusion",
+        "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
+        "prolapseReduction", "associatedSymptoms"
+    );
 
     private final ObjectMapper objectMapper;
     private final ClinicDatabaseService databaseService;
     private final JdbcTemplate jdbcTemplate;
     private final SensitiveDataMasker sensitiveDataMasker;
+    private final PreAiPrivacyService preAiPrivacyService;
 
     public MedicalRecordSourceBuilder(
         ObjectMapper objectMapper,
         ClinicDatabaseService databaseService,
         JdbcTemplate jdbcTemplate,
-        SensitiveDataMasker sensitiveDataMasker
+        SensitiveDataMasker sensitiveDataMasker,
+        PreAiPrivacyService preAiPrivacyService
     ) {
         this.objectMapper = objectMapper;
         this.databaseService = databaseService;
         this.jdbcTemplate = jdbcTemplate;
         this.sensitiveDataMasker = sensitiveDataMasker;
+        this.preAiPrivacyService = preAiPrivacyService;
     }
 
     public ObjectNode readPatientSource(
@@ -118,7 +128,7 @@ public class MedicalRecordSourceBuilder {
                 ORDER BY FIELD(stage_code, 'REGISTRATION', 'INSPECTION', 'RECEPTION', 'TCM', 'DOCTOR', 'SURGERY', 'REVIEW'), updated_at
                 """,
             resultSet -> {
-                JsonNode data = readObject(resultSet.getString("data_json"));
+                JsonNode data = sanitizePreAiStageFacts(safe(resultSet.getString("stage_code")), readObject(resultSet.getString("data_json")));
                 mergeStageFacts(record, data);
                 ObjectNode stage = stages.addObject();
                 stage.put("stageCode", safe(resultSet.getString("stage_code")));
@@ -134,6 +144,7 @@ public class MedicalRecordSourceBuilder {
         putIfIncomplete(record, "age", patient.path("age").asText(""));
         putIfIncomplete(record, "patientAge", patient.path("age").asText(""));
 
+        applyReviewOverridesToRecord(record, stages, maskSensitive);
         ObjectNode source = buildSourceSnapshot(
             patient,
             record,
@@ -154,9 +165,41 @@ public class MedicalRecordSourceBuilder {
         return source;
     }
 
+    private void applyReviewOverridesToRecord(ObjectNode record, ArrayNode stages, boolean maskSensitive) {
+        ObjectNode masked = objectMapper.createObjectNode();
+        ObjectNode stageMap = masked.putObject("stages");
+        for (JsonNode stage : stages) {
+            if (!stage.isObject()) continue;
+            String stageCode = text(stage, "stageCode");
+            JsonNode facts = stage.path("facts");
+            if (!stageCode.isBlank() && facts.isObject()) stageMap.set(stageCode, facts.deepCopy());
+        }
+        ObjectNode view = preAiPrivacyService.buildDocumentView(masked);
+        for (JsonNode section : view.path("sections")) {
+            for (JsonNode row : section.path("rows")) {
+                String id = text(row, "id");
+                String value = text(row, "value");
+                if (id.isBlank()) continue;
+                record.put(id, maskSensitive ? sensitiveDataMasker.maskFieldValue(id, value) : value);
+            }
+        }
+    }
+
+    private JsonNode sanitizePreAiStageFacts(String stageCode, JsonNode source) {
+        if (source == null || !source.isObject()) return objectMapper.createObjectNode();
+        ObjectNode result = ((ObjectNode) source).deepCopy();
+        if ("INSPECTION".equals(stageCode)) {
+            result.remove(List.of("visualFindings", "digitalExamFindings", "anoscopyFindings", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed"));
+        } else if ("RECEPTION".equals(stageCode)) {
+            result.remove(List.of("prolapseReduction", "associatedSymptoms"));
+        }
+        return result;
+    }
+
     private void mergeStageFacts(ObjectNode target, JsonNode source) {
         if (source == null || !source.isObject()) return;
         source.fields().forEachRemaining(entry -> {
+            if (DEPRECATED_PRE_AI_FACT_KEYS.contains(entry.getKey())) return;
             JsonNode value = entry.getValue();
             if (value == null || value.isNull() || (value.isTextual() && value.asText("").isBlank())) return;
             if (value.isValueNode()) target.set(entry.getKey(), value.deepCopy());
@@ -204,7 +247,7 @@ public class MedicalRecordSourceBuilder {
                 stage.put("stageCode", safe(resultSet.getString("stage_code")));
                 stage.put("status", safe(resultSet.getString("status")));
                 stage.put("version", resultSet.getInt("version"));
-                JsonNode data = readObject(resultSet.getString("data_json"));
+                JsonNode data = sanitizePreAiStageFacts(safe(resultSet.getString("stage_code")), readObject(resultSet.getString("data_json")));
                 stage.set("facts", maskSensitive ? sensitiveDataMasker.maskJson(data) : data);
                 stage.put("completedAt", safe(resultSet.getString("completed_at")));
             },

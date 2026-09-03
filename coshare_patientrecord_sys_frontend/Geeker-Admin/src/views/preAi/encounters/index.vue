@@ -1032,6 +1032,7 @@
                       :deleting-target-version-id="deletingTargetVersionId"
                       @refresh="loadReviewPreview"
                       @confirm="confirmReview"
+                      @save-row-override="saveReviewRowOverride"
                       @generate="generateExport"
                       @generate-target="generateTargetMedicalRecord"
                       @open-record-chat="openRecordChat"
@@ -1755,6 +1756,7 @@ import {
   returnPreAiAuxiliaryTaskApi,
   returnPreAiStageApi,
   restorePreAiAttachmentApi,
+  savePreAiReviewOverridesApi,
   savePreAiDutyAssignmentsApi,
   savePreAiAdmissionProfileApi,
   savePreAiStageApi,
@@ -1776,6 +1778,7 @@ import {
   type PreAiOutpatientRecordVersion,
   type PreAiOutpatientSummary,
   type PreAiPatientCase,
+  type PreAiReviewOverride,
   type PreAiReviewPreview,
   type PreAiStageCode,
   type PreAiStageStatus,
@@ -3209,7 +3212,7 @@ const upstreamPriorityKeys: Partial<Record<PreAiStageCode, string[]>> = {
     "registrationPastHistory",
     "registrationCurrentIllness"
   ],
-  INSPECTION: ["diseaseDirections", "examinationTypes", "preliminaryDiagnosis", "factualConclusion"],
+  INSPECTION: ["diseaseDirections", "examinationTypes", "preliminaryDiagnosis", "inspectionNarrative"],
   RECEPTION: ["chiefComplaint", "presentIllness", "physicalExam"],
   NURSING: ["allergyHistory", "personalHistory", "chronicDiseaseItems"],
   TCM: ["tcmDisease", "primarySyndrome", "treatmentPrinciple"],
@@ -4646,6 +4649,26 @@ const loadReviewPreview = async () => {
     }
   }
 };
+
+const reviewOverrideKey = (item: Pick<PreAiReviewOverride, "sectionCode" | "rowId">) => `${item.sectionCode}:${item.rowId}`;
+const reviewOverrides = () => {
+  const reviewData = stageSubmission("REVIEW")?.data as Record<string, any> | undefined;
+  return Array.isArray(reviewData?.reviewOverrides) ? ([...reviewData.reviewOverrides] as PreAiReviewOverride[]) : [];
+};
+const saveReviewRowOverride = async (override: PreAiReviewOverride) =>
+  runAction(async () => {
+    const next = new Map(reviewOverrides().map(item => [reviewOverrideKey(item), item]));
+    next.set(reviewOverrideKey(override), override);
+    const { data } = await savePreAiReviewOverridesApi(
+      selectedEncounterId.value,
+      Array.from(next.values()),
+      stageSubmission("REVIEW")?.version ?? 0
+    );
+    reviewPreview.value = data;
+    hydrateWorkspace(data.workspace);
+    await loadEncounterList();
+    ElMessage.success("医生复核修改已保存，后续生成以本次修改为准");
+  });
 
 const confirmReview = async () =>
   runAction(async () => {

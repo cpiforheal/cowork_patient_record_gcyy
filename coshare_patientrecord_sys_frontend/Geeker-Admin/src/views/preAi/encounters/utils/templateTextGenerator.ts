@@ -34,8 +34,6 @@ export const buildPresentIllnessText = (form: Record<string, any>) => {
     join(form.aggravatingFactors) && `可因${join(form.aggravatingFactors)}加重`,
     join(form.bleedingFeatures) && `便血表现为${join(form.bleedingFeatures)}`,
     join(form.painFeatures) && `疼痛表现为${join(form.painFeatures)}`,
-    form.prolapseReduction && `脱出及回纳情况：${form.prolapseReduction}`,
-    join(form.associatedSymptoms) && `伴${join(form.associatedSymptoms)}`,
     form.recentAggravation,
     join(form.previousTreatment) && `既往相关处理：${join(form.previousTreatment)}`,
     join(form.generalCondition) && `一般情况：${join(form.generalCondition)}`,
@@ -67,21 +65,7 @@ const measurementText = (value: any) => {
 
 export const buildInspectionConclusion = (form: Record<string, any>) => {
   const narrative = String(form.inspectionNarrative || "").trim();
-  const notInNarrative = (value: unknown) => {
-    const text = String(value || "").trim();
-    return Boolean(text) && (!narrative || !narrative.includes(text));
-  };
-  const filteredFindings = (value: unknown) => list(value).filter(notInNarrative);
-  const visual = filteredFindings(form.visualFindings);
-  const digital = filteredFindings(form.digitalExamFindings);
-  const anoscopy = filteredFindings(form.anoscopyFindings);
-  const parts = [
-    narrative,
-    visual.length && `视诊见${visual.join("、")}`,
-    digital.length && `指诊见${digital.join("、")}`,
-    anoscopy.length && `肛门镜见${anoscopy.join("、")}`,
-    form.otherFindings
-  ];
+  const parts = [narrative, form.otherFindings];
   return parts.filter(Boolean).map(sentence).join("");
 };
 

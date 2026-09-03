@@ -105,55 +105,6 @@ const diseaseOptions = options([
   "藏毛窦",
   "其他"
 ]);
-const visualByDisease: Record<string, string[]> = {
-  痔: ["肛缘皮赘样隆起", "蹲位或努挣时肛内肿物脱出", "可自行还纳", "需手托还纳"],
-  混合痔: ["肛缘皮赘样隆起", "蹲位或努挣时肛内肿物脱出", "可自行还纳", "需手托还纳"],
-  内痔: ["蹲位或努挣时肛内肿物脱出", "可自行还纳", "需手托还纳"],
-  肛裂: ["可见裂口", "裂口色鲜红", "裂口灰白", "边缘增厚", "伴前哨痔", "伴肛乳头肥大"],
-  肛瘘: ["肛周可见外口", "乳头状隆起", "外口凹陷", "外口溢脓", "挤压可见脓性分泌物", "周围皮肤色素沉着"],
-  肛周脓肿: ["局部红肿隆起", "皮温高", "触痛明显", "无破溃", "已破溃流脓"],
-  直肠脱垂: ["努挣时直肠黏膜脱出", "全层脱出肛外", "环形脱出", "宝塔状脱出", "可自行回纳", "需手推回纳"],
-  直肠前突: ["肛门外观无明显异常", "无脱出", "无红肿"],
-  化脓性汗腺炎: ["肛周及会阴多发红肿结节", "脓疱", "破溃流脓", "窦道瘢痕", "皮肤增厚"],
-  坏死性筋膜炎: ["肛周会阴广泛红肿青紫", "皮肤坏死", "水疱", "渗液", "皮下捻发感"],
-  藏毛窦: ["骶尾部正中凹陷小孔", "多发外口", "局部毛发较多", "挤压溢皮脂或脓液", "局部红肿"]
-};
-const digitalCommon = [
-  "括约肌正常",
-  "括约肌紧张",
-  "括约肌松弛",
-  "触及痔核",
-  "触及肛乳头",
-  "触及息肉",
-  "触及波动感",
-  "触及条索硬结",
-  "指套无染血",
-  "指套染血",
-  "脓性分泌物",
-  "血性恶臭分泌物",
-  "未触及硬性肿物"
-];
-const anoscopyCommon = [
-  "齿线上黏膜充血",
-  "黏膜糜烂",
-  "黏膜隆起",
-  "黏膜堆积下垂",
-  "伴渗血",
-  "未见溃疡",
-  "未见占位",
-  "肛窦充血凹陷",
-  "对应肛窦溢脓",
-  "肛管及直肠黏膜未见明显异常"
-];
-const selectedDiseaseOptions = (form: Record<string, any>, dictionary: Record<string, string[]>, fallback: string[]) => {
-  const selected = Array.isArray(form.diseaseDirections)
-    ? form.diseaseDirections
-    : form.diseaseDirections
-      ? [form.diseaseDirections]
-      : [];
-  return options(Array.from(new Set([...selected.flatMap((item: string) => dictionary[item] || []), ...fallback])));
-};
-
 const hasExam = (form: Record<string, any>, type: string) =>
   Array.isArray(form.examinationTypes) && form.examinationTypes.includes(type);
 
@@ -357,33 +308,6 @@ export const preAiStages: PreAiStageConfig[] = [
       },
       { key: "examinationTypes", label: "已完成检查", kind: "multi", required: true, options: examinationOptions, span: 2 },
       {
-        key: "visualFindings",
-        label: "外观所见",
-        kind: "multi",
-        optionsFor: form => selectedDiseaseOptions(form, visualByDisease, []),
-        creatable: true,
-        visible: form => hasExam(form, "VISUAL"),
-        span: 2
-      },
-      {
-        key: "digitalExamFindings",
-        label: "指检所见",
-        kind: "multi",
-        options: options(digitalCommon),
-        creatable: true,
-        visible: form => hasExam(form, "DIGITAL"),
-        span: 2
-      },
-      {
-        key: "anoscopyFindings",
-        label: "镜下/肛门镜所见",
-        kind: "multi",
-        options: options(anoscopyCommon),
-        creatable: true,
-        visible: form => hasExam(form, "ANOSCOPY"),
-        span: 2
-      },
-      {
         key: "otherFindings",
         label: "其他客观表现",
         kind: "textarea",
@@ -408,18 +332,6 @@ export const preAiStages: PreAiStageConfig[] = [
         ]),
         creatable: true,
         placeholder: "选择常用诊断，也可直接输入其他结论"
-      },
-      {
-        key: "factualConclusion",
-        label: "检查事实结论",
-        kind: "template-text",
-        required: true,
-        rows: 4,
-        span: 2,
-        templateGenerator: "inspectionConclusion",
-        overrideKey: "factualConclusionOverride",
-        sourceHashKey: "factualConclusionSourceHash",
-        confirmedKey: "factualConclusionConfirmed"
       },
       {
         key: "inspectionSpecialDescription",
@@ -544,21 +456,6 @@ export const preAiStages: PreAiStageConfig[] = [
         kind: "multi",
         options: options(["无痛", "便时疼痛", "便后疼痛", "持续性疼痛", "间歇性疼痛", "胀痛", "灼痛", "刺痛", "跳痛"]),
         creatable: true
-      },
-      {
-        key: "prolapseReduction",
-        label: "脱出与回纳",
-        kind: "select",
-        options: options(["无脱出", "便时脱出便后自行回纳", "休息后自行回纳", "需手托回纳", "不能回纳", "平时亦可脱出"]),
-        creatable: true
-      },
-      {
-        key: "associatedSymptoms",
-        label: "伴随症状",
-        kind: "multi",
-        options: options(["肛周潮湿", "肛周瘙痒", "溢脓", "便不尽感", "肛门坠胀", "恶寒发热", "无恶寒发热"]),
-        creatable: true,
-        span: 2
       },
       {
         key: "recentAggravation",

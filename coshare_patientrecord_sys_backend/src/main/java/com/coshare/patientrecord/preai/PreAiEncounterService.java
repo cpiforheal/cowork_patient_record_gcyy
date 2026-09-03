@@ -99,14 +99,13 @@ public class PreAiEncounterService {
         ),
         "INSPECTION", Set.of(
             "examinationDirection", "diseaseDirections", "examinationTypes",
-            "visualFindings", "digitalExamFindings", "anoscopyFindings",
-            "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed",
+            "otherFindings", "preliminaryDiagnosis", "preliminaryDiagnosisNote",
             "inspectionSpecialDescription", "inspectionNarrative", "nextReviewAt", "nextReviewNote",
             "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots"
         ),
         "RECEPTION", Set.of(
             "chiefComplaint", "symptomDuration", "onsetTrigger", "symptomPattern", "symptomChanges", "aggravatingFactors",
-            "bleedingFeatures", "painFeatures", "prolapseReduction", "associatedSymptoms", "recentAggravation",
+            "bleedingFeatures", "painFeatures", "recentAggravation",
             "previousTreatment", "generalCondition", "stoolFrequency", "stoolCharacteristics", "chiefComplaintText", "presentIllness",
             "presentIllnessOverride", "presentIllnessSourceHash", "presentIllnessConfirmed", "chronicDiseaseItems", "surgicalHistoryItems",
             "clinicalTemplateIds", "clinicalTemplateDiseases", "clinicalTemplateVersion", "clinicalTemplateAppliedAt", "clinicalTemplateSlots",
@@ -147,7 +146,7 @@ public class PreAiEncounterService {
             "complications", "postoperativeDestination",
             "physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"
         ),
-        "REVIEW", Set.of("reviewStatement")
+        "REVIEW", Set.of("reviewStatement", "reviewOverrides")
     );
     private static final Set<String> ADMISSION_PROFILE_FIELDS = Set.of(
         "contactName", "contactRelation", "contactPhone", "nativePlace", "birthplace", "maritalStatus",
@@ -415,11 +414,8 @@ public class PreAiEncounterService {
         String encounterId = text(created.path("encounter"), "id");
 
         importStageDraft(encounterId, "INSPECTION", mapped(record, Map.of(
-            "specialExamFullText", "factualConclusion",
-            "inspectionBriefNote", "otherFindings",
-            "analVisual", "visualFindings",
-            "digitalRectalExam", "digitalExamFindings",
-            "anoscopy", "anoscopyFindings"
+            "specialExamFullText", "inspectionNarrative",
+            "inspectionBriefNote", "otherFindings"
         )), user);
         importStageDraft(encounterId, "RECEPTION", mapped(record, Map.ofEntries(
             Map.entry("chiefComplaintText", "chiefComplaint"),
@@ -1371,7 +1367,7 @@ public class PreAiEncounterService {
         ObjectNode workspace = workspace(encounterId, user);
         ArrayNode blockers = reviewBlockers(workspace);
         ObjectNode result = objectMapper.createObjectNode();
-        ObjectNode maskedPreview = privacyService.maskWorkspace(workspace);
+        ObjectNode maskedPreview = privacyService.applyReviewOverrides(privacyService.maskWorkspace(workspace));
         ObjectNode documentView = privacyService.buildDocumentView(maskedPreview);
         result.set("workspace", workspace);
         result.set("maskedPreview", maskedPreview);
@@ -1398,11 +1394,13 @@ public class PreAiEncounterService {
         boolean criticalAcknowledged = request != null && request.criticalAcknowledged();
         if (criticalCount > 0 && !criticalAcknowledged) throw badRequest("存在危急值，医生必须显式确认已阅后才能完成复核");
         ObjectNode reviewData = objectMapper.createObjectNode();
+        ObjectNode current = loadStage(encounterId, "REVIEW");
+        JsonNode existingOverrides = current.path("data").path("reviewOverrides");
+        if (existingOverrides.isArray() && !existingOverrides.isEmpty()) reviewData.set("reviewOverrides", existingOverrides.deepCopy());
         reviewData.put("reviewStatement", safe(request == null ? "" : request.statement()));
         reviewData.put("criticalCount", criticalCount);
         reviewData.put("criticalAcknowledged", criticalAcknowledged);
         if (criticalAcknowledged) reviewData.put("criticalAcknowledgedAt", now());
-        ObjectNode current = loadStage(encounterId, "REVIEW");
         updateStageVersioned(encounterId, "REVIEW", "COMPLETED", reviewData, "", user, now(), request == null ? null : request.expectedVersion());
         jdbcTemplate.update("""
             UPDATE pre_ai_encounters
@@ -1413,6 +1411,73 @@ public class PreAiEncounterService {
         String auditDetail = criticalCount > 0 ? "医生确认全部前置事实，并已阅 " + criticalCount + " 项危急值" : "医生确认全部前置事实";
         audit(encounterId, "review.confirm", "REVIEW", user, auditDetail);
         return toMap(workspace(encounterId, user));
+    }
+
+    @Transactional
+    public Map<String, Object> saveReviewOverrides(String encounterId, ReviewOverridesRequest request, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
+        requireReviewer(encounter, user);
+        ObjectNode workspace = workspace(encounterId, user);
+        ArrayNode blockers = reviewBlockers(workspace);
+        if (!blockers.isEmpty()) throw badRequest("复核编辑前仍有未完成内容：" + join(blockers));
+        ObjectNode current = loadStage(encounterId, "REVIEW");
+        ObjectNode reviewData = sanitizeStageData("REVIEW", request == null ? null : request.data());
+        if (request == null || request.data() == null || !request.data().containsKey("reviewStatement")) {
+            String existingStatement = text(current.path("data"), "reviewStatement");
+            if (!existingStatement.isBlank()) reviewData.put("reviewStatement", existingStatement);
+        }
+        ArrayNode cleanOverrides = sanitizeReviewOverrides(reviewData.path("reviewOverrides"));
+        reviewData.set("reviewOverrides", cleanOverrides);
+        String status = Set.of("COMPLETED", "RETURNED").contains(text(current, "status")) ? text(current, "status") : "DRAFT";
+        updateStageVersioned(encounterId, "REVIEW", status, reviewData, "医生最终复核修改汇总资料", user, "COMPLETED".equals(status) ? now() : "", request == null ? null : request.expectedVersion());
+        invalidateReview(encounterId, user, "医生最终复核修改汇总资料");
+        audit(encounterId, "review.overrides.save", "REVIEW", user, "医生最终复核修改 " + cleanOverrides.size() + " 项汇总资料");
+        refreshProgress(encounterId);
+        return reviewPreviewWithOverrides(encounterId, user, cleanOverrides);
+    }
+
+    private Map<String, Object> reviewPreviewWithOverrides(String encounterId, SessionUser user, ArrayNode overrides) {
+        ObjectNode workspace = workspace(encounterId, user);
+        ArrayNode blockers = reviewBlockers(workspace);
+        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode maskedPreview = privacyService.maskWorkspace(workspace);
+        if (overrides != null && !overrides.isEmpty()) maskedPreview.set("reviewOverrides", overrides.deepCopy());
+        ObjectNode documentView = privacyService.buildDocumentView(maskedPreview);
+        result.set("workspace", workspace);
+        ObjectNode effectiveMaskedPreview = privacyService.applyReviewOverrides(maskedPreview);
+        result.set("maskedPreview", effectiveMaskedPreview);
+        result.set("blockers", blockers);
+        result.set("labSummary", labReviewSummary(effectiveMaskedPreview));
+        result.put("templateVersion", privacyService.templateVersion());
+        result.put("effectiveFieldCount", documentView.path("effectiveFieldCount").asInt());
+        result.set("documentSections", documentView.path("sections"));
+        result.set("reviewOverrides", overrides == null ? objectMapper.createArrayNode() : overrides.deepCopy());
+        result.put("ready", blockers.isEmpty());
+        return toMap(result);
+    }
+
+    private ArrayNode sanitizeReviewOverrides(JsonNode overrides) {
+        ArrayNode clean = objectMapper.createArrayNode();
+        if (!overrides.isArray()) return clean;
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode item : overrides) {
+            String sectionCode = text(item, "sectionCode");
+            String rowId = text(item, "rowId");
+            String label = text(item, "label");
+            String value = text(item, "value");
+            if (sectionCode.isBlank() || rowId.isBlank() || label.isBlank()) continue;
+            if (!sectionCode.matches("\\d{2}")) continue;
+            String key = sectionCode + ":" + rowId;
+            if (!seen.add(key)) continue;
+            ObjectNode row = clean.addObject();
+            row.put("sectionCode", sectionCode);
+            row.put("rowId", rowId);
+            row.put("label", label);
+            row.put("value", value.length() > 2000 ? value.substring(0, 2000) : value);
+        }
+        return clean;
     }
 
     private void enqueueInventoryConsumption(ObjectNode encounter, String stage, long completionVersion, SessionUser user) {
@@ -1623,7 +1688,7 @@ public class PreAiEncounterService {
         );
         String physicalExam = firstNonBlank(
             text(reception, "physicalExamOverride"), text(reception, "physicalExam"),
-            text(inspection, "visualFindings"), text(inspection, "factualConclusion")
+            text(inspection, "inspectionNarrative")
         );
         String preliminaryDiagnosis = firstNonBlank(
             text(inspection, "preliminaryDiagnosis"),
@@ -2093,7 +2158,7 @@ public class PreAiEncounterService {
                 required(data, missing, "examinationDirection", "检查方向");
                 required(data, missing, "diseaseDirections", "病种方向");
                 if (data.path("examinationTypes").isMissingNode() || data.path("examinationTypes").isEmpty()) missing.add("已完成检查类型");
-                required(data, missing, "factualConclusion", "检查事实结论");
+                required(data, missing, "inspectionNarrative", "检查记录");
             }
             case "RECEPTION" -> {
                 required(data, missing, "chiefComplaint", "主诉");
@@ -2158,11 +2223,7 @@ public class PreAiEncounterService {
      */
     private void syncInspectionConclusion(String stage, ObjectNode data) {
         if (!"INSPECTION".equals(stage)) return;
-        String narrative = text(data, "inspectionNarrative");
-        if (narrative.isBlank()) return;
-        data.put("factualConclusion", narrative);
-        data.put("factualConclusionOverride", narrative);
-        data.put("factualConclusionConfirmed", true);
+        // 检查记录全文已成为专科检查权威文本；旧 factualConclusion 派生字段不再回写。
     }
 
     private void validateRepeatableRequired(JsonNode items, String key, String groupLabel, String fieldLabel, List<String> missing) {
@@ -2488,12 +2549,6 @@ public class PreAiEncounterService {
             if (value.isMissingNode() || value.isNull() || (value.isTextual() && value.asText().isBlank()) || ((value.isArray() || value.isObject()) && value.isEmpty())) continue;
             if (value.isTextual()) result.put(key, value.asText().trim());
             else result.set(key, value.deepCopy());
-        }
-        if ("INSPECTION".equals(findStageByFields(allowed))) {
-            JsonNode types = result.path("examinationTypes");
-            if (!containsAny(types, "VISUAL", "外观检查")) result.remove("visualFindings");
-            if (!containsAny(types, "DIGITAL", "指检")) result.remove("digitalExamFindings");
-            if (!containsAny(types, "ANOSCOPY", "肛门镜", "镜下检查")) result.remove("anoscopyFindings");
         }
         return result;
     }
@@ -2995,7 +3050,7 @@ public class PreAiEncounterService {
         clinical.put("presentIllness", truncateText(firstNonBlank(text(reception, "presentIllnessOverride"), text(reception, "presentIllness")), 260));
         clinical.put("allergyHistory", display(reception.path("allergyHistory")));
         ObjectNode inspection = stageDataIfPresent(id, "INSPECTION", statuses);
-        clinical.put("specialistExam", firstNonBlank(text(inspection, "factualConclusion"), text(inspection, "inspectionNarrative")));
+        clinical.put("specialistExam", text(inspection, "inspectionNarrative"));
         clinical.put("nextReviewAt", text(inspection, "nextReviewAt"));
         clinical.put("nextReviewNote", text(inspection, "nextReviewNote"));
 
@@ -3692,6 +3747,7 @@ public class PreAiEncounterService {
         Integer expectedVersion
     ) {}
     public record ReviewConfirmRequest(String statement, boolean criticalAcknowledged, Integer expectedVersion) {}
+    public record ReviewOverridesRequest(Map<String, Object> data, Integer expectedVersion) {}
     public record VersionRequest(Integer expectedVersion) {}
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
     public record FollowUpRegisterAndIssueRequest(String visitDate, Map<String, Object> visitMeta, String clientRequestId) {}

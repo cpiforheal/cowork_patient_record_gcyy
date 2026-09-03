@@ -87,11 +87,33 @@
             :class="{
               emphasized: row.emphasis,
               abnormal: row.severity === 'ABNORMAL',
-              critical: row.severity === 'CRITICAL'
+              critical: row.severity === 'CRITICAL',
+              editing: editKey(section.code, row.id) === editingKey
             }"
           >
             <span>{{ row.label }}</span>
-            <p>{{ row.value }}</p>
+            <div class="document-value">
+              <template v-if="editKey(section.code, row.id) === editingKey">
+                <el-input v-model="editingValue" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
+                <div class="row-edit-actions">
+                  <el-button size="small" @click="cancelRowEdit">取消</el-button>
+                  <el-button size="small" type="primary" :loading="loading" @click="saveRowEdit(section.code, row)">保存修改</el-button>
+                </div>
+              </template>
+              <template v-else>
+                <p>{{ row.value }}</p>
+                <el-button
+                  v-if="canReview && row.editable !== false"
+                  class="row-edit-button"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="startRowEdit(section.code, row)"
+                >
+                  编辑
+                </el-button>
+              </template>
+            </div>
           </div>
         </div>
         <p v-else class="section-empty">本节无有效内容</p>
@@ -358,7 +380,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { MoreFilled, Refresh } from "@element-plus/icons-vue";
 import type {
   GeneratedMedicalRecord,
@@ -399,6 +421,21 @@ const orderedExports = computed(() => [...props.exports].sort((left, right) => r
 const orderedAiVersions = computed(() => [...props.aiVersions].sort((left, right) => right.version - left.version));
 const latestTargetVersion = computed(() => props.targetVersions.find(version => version.id === props.latestTargetVersionId));
 const latestExportVersion = computed(() => props.exports.find(version => version.id === props.latestExportVersionId));
+const editingKey = ref("");
+const editingValue = ref("");
+const editKey = (sectionCode: string, rowId: string) => `${sectionCode}:${rowId}`;
+const startRowEdit = (sectionCode: string, row: PreAiDocumentSection["rows"][number]) => {
+  editingKey.value = editKey(sectionCode, row.id);
+  editingValue.value = row.value || "";
+};
+const cancelRowEdit = () => {
+  editingKey.value = "";
+  editingValue.value = "";
+};
+const saveRowEdit = (sectionCode: string, row: PreAiDocumentSection["rows"][number]) => {
+  emit("saveRowOverride", { sectionCode, rowId: row.id, label: row.label, value: editingValue.value });
+  cancelRowEdit();
+};
 
 const targetStatusLabel = (status: GeneratedMedicalRecord["status"]) =>
   ({ draft: "草稿", finalized: "已定稿", voided: "已作废" })[status] || status;
@@ -434,6 +471,7 @@ const emit = defineEmits<{
   downloadTarget: [version: GeneratedMedicalRecord];
   downloadAi: [version: GeneratedMedicalRecord];
   deleteTarget: [version: GeneratedMedicalRecord];
+  saveRowOverride: [override: { sectionCode: string; rowId: string; label: string; value: string }];
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
 }>();
@@ -647,18 +685,35 @@ const handleTargetVersionCommand = (command: string | number | object, version: 
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
-.document-row > p {
-  margin: 0;
+.document-value {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
   padding: 10px 14px;
+}
+.document-value > p {
+  margin: 0;
   color: var(--el-text-color-primary);
   font-size: 14px;
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.document-row.emphasized > p,
-.document-row.abnormal > p,
-.document-row.critical > p {
+.row-edit-button {
+  justify-self: start;
+  padding-left: 0;
+}
+.row-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.document-row.editing {
+  background: var(--el-color-primary-light-9);
+}
+.document-row.emphasized .document-value > p,
+.document-row.abnormal .document-value > p,
+.document-row.critical .document-value > p {
   font-weight: 700;
 }
 .document-row.abnormal,
