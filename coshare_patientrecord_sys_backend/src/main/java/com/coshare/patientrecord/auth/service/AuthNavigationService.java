@@ -51,7 +51,8 @@ public class AuthNavigationService {
         "ECG", Set.of("ecg"),
         "IMAGING", Set.of("ultrasound"),
         "VITAL_SIGNS", Set.of("nurse", "nursing"),
-        "COLONOSCOPY", Set.of("inspection")
+        "COLONOSCOPY", Set.of("inspection"),
+        "SURGERY_CONSENT", Set.of("doctor")
     );
     private static final Set<String> PRE_AI_FULL_OPERATOR_ROLES = Set.of(
         "admin", "reception", "inspection", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"

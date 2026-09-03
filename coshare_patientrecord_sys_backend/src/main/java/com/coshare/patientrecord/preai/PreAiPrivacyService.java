@@ -111,6 +111,8 @@ public class PreAiPrivacyService {
         for (JsonNode task : workspace.path("auxiliaryTasks")) {
             if (!"COMPLETED".equals(text(task, "status"))) continue;
             if ("LAB".equals(text(task, "taskType"))) continue;
+            // 手术知情同意书仅作图片存档，明确排除出病历生成事实。
+            if ("SURGERY_CONSENT".equals(text(task, "taskType"))) continue;
             ObjectNode row = auxiliaryTasks.addObject();
             row.put("taskType", text(task, "taskType"));
             putIfPresent(row, "title", maskClinicalText(text(task, "title"), patient, caseToken));
@@ -762,6 +764,7 @@ public class PreAiPrivacyService {
             case "LAB" -> "检验";
             case "ECG" -> "心电";
             case "IMAGING" -> "影像";
+            case "SURGERY_CONSENT" -> "手术知情同意书";
             default -> "辅助检查";
         };
     }

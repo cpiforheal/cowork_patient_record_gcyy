@@ -17,7 +17,13 @@
       </el-dropdown>
     </header>
 
-    <article v-for="task in editableTasks" :key="task.id" class="task-card">
+    <article
+      v-for="task in editableTasks"
+      :key="task.id"
+      :id="`aux-task-${task.taskType}`"
+      class="task-card"
+      :class="{ 'consent-card': task.taskType === 'SURGERY_CONSENT' }"
+    >
       <header>
         <div>
           <strong>{{ auxiliaryTaskLabel[task.taskType] }} · {{ forms[task.id]?.title }}</strong>
@@ -31,7 +37,7 @@
         }}</el-tag>
       </header>
 
-      <div class="task-meta">
+      <div v-if="task.taskType !== 'SURGERY_CONSENT'" class="task-meta">
         <el-input
           v-model="forms[task.id].title"
           :disabled="!canEdit(task)"
@@ -42,10 +48,11 @@
           v-model="forms[task.id].requiredBeforeExport"
           :disabled="!canEdit(task)"
           @update:model-value="markTaskDirty(task.id)"
-        >复核前必须完成</el-checkbox>
+          >复核前必须完成</el-checkbox
+        >
       </div>
 
-      <div class="task-grid">
+      <div v-if="task.taskType !== 'SURGERY_CONSENT'" class="task-grid">
         <el-form-item
           v-for="field in visibleFields(task)"
           :key="field.key"
@@ -106,12 +113,25 @@
         </el-form-item>
       </div>
 
-      <section class="task-attachments">
+      <section class="task-attachments" :class="{ 'consent-attachments': task.taskType === 'SURGERY_CONSENT' }">
         <div class="task-attachments__heading">
-          <strong>检查资料</strong>
-          <label v-if="canEdit(task)" class="task-upload-trigger">
+          <strong>{{ task.taskType === "SURGERY_CONSENT" ? "手术知情同意书图片" : "检查资料" }}</strong>
+          <span class="task-attachments__hint">
+            {{ task.taskType === "SURGERY_CONSENT" ? "仅作患者辅助资料存档，不进入病历" : "仅作患者辅助资料存档，不进入病历" }}
+          </span>
+        </div>
+        <div class="task-attachments__actions">
+          <label v-if="canEdit(task) || task.taskType === 'SURGERY_CONSENT'" class="task-upload-trigger">
             <input type="file" multiple accept="image/*,.pdf" @change="event => uploadTaskAttachments(event, task)" />
-            <el-button plain size="small" :loading="uploadingTasks[task.id]">上传图片或 PDF</el-button>
+            <el-button plain size="small" :loading="uploadingTasks[task.id]">
+              <el-icon class="upload-icon"><Upload /></el-icon> 选择图片或 PDF
+            </el-button>
+          </label>
+          <label v-if="task.taskType === 'SURGERY_CONSENT'" class="task-upload-trigger camera-trigger">
+            <input type="file" accept="image/*" capture="environment" @change="event => uploadTaskAttachments(event, task)" />
+            <el-button plain size="small" type="success" :loading="uploadingTasks[task.id]">
+              <el-icon class="upload-icon"><Camera /></el-icon> 手机拍照上传
+            </el-button>
           </label>
         </div>
         <AttachmentPreviewGallery
@@ -120,7 +140,9 @@
           compact
           @download="downloadPreAiAttachmentApi"
         />
-        <span v-else class="task-attachments__empty">暂未上传检查资料</span>
+        <span v-else class="task-attachments__empty">
+          {{ task.taskType === "SURGERY_CONSENT" ? "暂未上传手术知情同意书图片" : "暂未上传检查资料" }}
+        </span>
       </section>
 
       <footer>
@@ -137,6 +159,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from "vue";
 import { ElMessage } from "element-plus";
+import { Camera, Upload } from "@element-plus/icons-vue";
 import {
   createPreAiAuxiliaryTaskApi,
   downloadPreAiAttachmentApi,
@@ -307,7 +330,8 @@ const uploadTaskAttachments = async (event: Event, task: PreAiAuxiliaryTask) => 
   let failed = 0;
   let latestWorkspace: PreAiWorkspace | undefined;
   for (const file of files) {
-    const isAllowed = file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isAllowed =
+      file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     if (!isAllowed || file.size > 50 * 1024 * 1024) {
       failed += 1;
       continue;
@@ -370,6 +394,11 @@ watch(
   border-radius: 12px;
 }
 
+.task-card.consent-card {
+  border-color: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-border-color-light));
+  background: color-mix(in srgb, var(--el-bg-color) 80%, var(--el-color-primary-light-9));
+}
+
 .task-meta,
 .task-grid {
   display: grid;
@@ -388,7 +417,10 @@ watch(
 .task-attachments {
   display: grid;
   gap: 8px;
-  padding-top: 2px;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--el-color-primary) 26%, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--el-bg-color) 88%, var(--el-color-primary-light-9));
 }
 
 .task-attachments__heading {
@@ -398,8 +430,28 @@ watch(
   gap: 12px;
 }
 
+.task-attachments__heading strong {
+  font-size: 13px;
+  color: var(--el-color-primary);
+}
+
+.task-attachments__hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.task-attachments__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .task-upload-trigger input {
   display: none;
+}
+
+.upload-icon {
+  margin-right: 4px;
 }
 
 .task-attachments__empty {

@@ -8,7 +8,7 @@ export type PreAiStageStatus = "DRAFT" | "PENDING_CONFIRMATION" | "COMPLETED" | 
 export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED";
 export type PreAiEncounterRoute = "" | "OUTPATIENT" | "INPATIENT";
 export type PreAiTreatmentPath = "" | "CONSERVATIVE" | "SURGICAL";
-export type PreAiAuxiliaryTaskType = "LAB" | "ECG" | "IMAGING" | "VITAL_SIGNS" | "COLONOSCOPY";
+export type PreAiAuxiliaryTaskType = "LAB" | "ECG" | "IMAGING" | "VITAL_SIGNS" | "COLONOSCOPY" | "SURGERY_CONSENT";
 export type PreAiDutyCode =
   | "FRONT_DESK"
   | "RECEPTION_DOCTOR"
@@ -702,7 +702,11 @@ export const getPreAiReviewPreviewApi = async (encounterId: string, signal?: Abo
   return clinicResponse(await parseClinicApiResponse<PreAiReviewPreview>(result));
 };
 
-export const savePreAiReviewOverridesApi = (encounterId: string, reviewOverrides: PreAiReviewOverride[], expectedVersion: number) =>
+export const savePreAiReviewOverridesApi = (
+  encounterId: string,
+  reviewOverrides: PreAiReviewOverride[],
+  expectedVersion: number
+) =>
   jsonRequest<PreAiReviewPreview>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/review/overrides`, "PUT", {
     data: { reviewOverrides },
     expectedVersion

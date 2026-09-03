@@ -1620,7 +1620,9 @@ export const auxiliaryTaskFields: Record<PreAiAuxiliaryTaskType, PreAiFieldConfi
       visible: form => form.status === "COMPLETED",
       span: 2
     }
-  ]
+  ],
+  // 手术知情同意书：仅图片存档，不填写结构化事实、不进入病历。
+  SURGERY_CONSENT: []
 };
 
 export const stageByCode = (code: PreAiStageCode) => preAiStages.find(stage => stage.code === code)!;
@@ -1662,5 +1664,6 @@ export const auxiliaryTaskLabel: Record<PreAiAuxiliaryTaskType, string> = {
   ECG: "心电",
   IMAGING: "影像",
   VITAL_SIGNS: "生命体征",
-  COLONOSCOPY: "肠镜"
+  COLONOSCOPY: "肠镜",
+  SURGERY_CONSENT: "手术知情同意书"
 };

@@ -1046,139 +1046,158 @@
                   </section>
 
                   <section v-else :key="'auxiliary'" class="auxiliary-stack">
-                    <section class="dr-image-section aux-dr-section">
-                      <header class="dr-image-heading">
-                        <div>
-                          <span class="section-caption">辅助检查 · 影像采集</span>
-                          <strong>DR 影像资料</strong>
-                          <small
-                            >与前台岗共用同一影像库，作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区优先可见。</small
-                          >
-                        </div>
-                        <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
+                    <nav class="aux-position-nav" aria-label="辅助检查分栏快速定位">
+                      <button
+                        v-for="item in auxNavItems"
+                        :key="item.id"
+                        type="button"
+                        class="aux-nav-chip"
+                        :class="{ active: activeAuxSection === item.id }"
+                        @click="jumpToAuxSection(item.id)"
+                      >
+                        <span>{{ item.label }}</span>
+                        <em v-if="item.count">{{ item.count }}</em>
+                      </button>
+                    </nav>
+                    <section id="aux-dr-section" class="aux-upload-zone" :class="{ expanded: auxDrZoneExpanded }">
+                      <button type="button" class="zone-head" @click="auxDrZoneExpanded = !auxDrZoneExpanded">
+                        <span class="zone-badge" aria-hidden="true"
+                          ><el-icon><Upload /></el-icon
+                        ></span>
+                        <span class="zone-title">
+                          <strong>DR 影像资料（影像采集）</strong>
+                          <small>与前台岗共用影像库；独立附件存档，不进入病历内容，上传后各岗位在患者信息区优先可见</small>
+                        </span>
+                        <span class="zone-count" :class="{ filled: registrationImageAttachments.length }">
                           {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
-                        </el-tag>
-                      </header>
-                      <AttachmentPreviewGallery
-                        v-if="registrationImageAttachments.length"
-                        :attachments="registrationImageAttachments"
-                        :removable="canOpenLabWorkbench"
-                        @download="downloadPreAiAttachmentApi"
-                        @remove="removeImageAttachment"
-                      />
-                      <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
-                      <div v-if="canOpenLabWorkbench" class="upload-actions">
-                        <label class="upload-button">
-                          <input
-                            type="file"
-                            multiple
-                            accept="image/*"
-                            @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
-                          />
-                          <el-icon><Upload /></el-icon> 选择 DR 图片
-                        </label>
-                        <label class="upload-button camera-button">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
-                          />
-                          <el-icon><Camera /></el-icon> 拍照上传
-                        </label>
-                      </div>
-                      <el-progress
-                        v-if="attachmentUpload.total"
-                        :percentage="attachmentUpload.percent"
-                        :status="
-                          attachmentUpload.failed
-                            ? 'warning'
-                            : attachmentUpload.success === attachmentUpload.total
-                              ? 'success'
-                              : undefined
-                        "
-                      />
-                      <small v-if="attachmentUpload.total" class="upload-summary">
-                        共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                        {{ attachmentUpload.failed }} 个
-                      </small>
-                    </section>
-                    <section class="dr-image-section aux-dr-section endoscopy-report-section">
-                      <header class="dr-image-heading">
-                        <div>
-                          <span class="section-caption">辅助检查 · 报告采集</span>
-                          <strong>胃肠镜检查报告单</strong>
-                          <small
-                            >作为独立附件存储、不参与病历元数据；上传后各岗位在患者信息区可见，支持重复上传与误删恢复。</small
-                          >
+                        </span>
+                        <el-icon class="zone-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+                      </button>
+                      <div v-show="auxDrZoneExpanded" class="zone-body">
+                        <AttachmentPreviewGallery
+                          v-if="registrationImageAttachments.length"
+                          :attachments="registrationImageAttachments"
+                          :removable="canOpenLabWorkbench"
+                          @download="downloadPreAiAttachmentApi"
+                          @remove="removeImageAttachment"
+                        />
+                        <el-empty v-else :image-size="56" description="暂无 DR 影像，展开后可上传或拍照采集" />
+                        <div v-if="canOpenLabWorkbench" class="upload-actions">
+                          <label class="upload-button">
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*"
+                              @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+                            />
+                            <el-icon><Upload /></el-icon> 选择 DR 图片
+                          </label>
+                          <label class="upload-button camera-button">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+                            />
+                            <el-icon><Camera /></el-icon> 拍照上传
+                          </label>
                         </div>
-                        <el-tag :type="endoscopyReportAttachments.length ? 'primary' : 'info'" effect="plain">
-                          {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
-                        </el-tag>
-                      </header>
-                      <AttachmentPreviewGallery
-                        v-if="endoscopyReportAttachments.length"
-                        :attachments="endoscopyReportAttachments"
-                        :removable="canOpenLabWorkbench"
-                        @download="downloadPreAiAttachmentApi"
-                        @remove="removeImageAttachment"
-                      />
-                      <el-empty v-else :image-size="56" description="暂无胃肠镜报告，可在下方上传或拍照采集" />
-                      <div v-if="canOpenLabWorkbench" class="upload-actions">
-                        <label class="upload-button">
-                          <input
-                            type="file"
-                            multiple
-                            accept="image/*,.pdf"
-                            @change="
-                              event =>
-                                uploadAttachments(
-                                  event,
-                                  'REGISTRATION',
-                                  undefined,
-                                  false,
-                                  '胃肠镜报告',
-                                  endoscopyReportDescription
-                                )
-                            "
-                          />
-                          <el-icon><Upload /></el-icon> 选择报告图片/PDF
-                        </label>
-                        <label class="upload-button camera-button">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            @change="
-                              event =>
-                                uploadAttachments(
-                                  event,
-                                  'REGISTRATION',
-                                  undefined,
-                                  false,
-                                  '胃肠镜报告',
-                                  endoscopyReportDescription
-                                )
-                            "
-                          />
-                          <el-icon><Camera /></el-icon> 拍照上传
-                        </label>
+                        <el-progress
+                          v-if="attachmentUpload.total"
+                          :percentage="attachmentUpload.percent"
+                          :status="
+                            attachmentUpload.failed
+                              ? 'warning'
+                              : attachmentUpload.success === attachmentUpload.total
+                                ? 'success'
+                                : undefined
+                          "
+                        />
+                        <small v-if="attachmentUpload.total" class="upload-summary">
+                          共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                          {{ attachmentUpload.failed }} 个
+                        </small>
                       </div>
-                      <el-progress
-                        v-if="attachmentUpload.total"
-                        :percentage="attachmentUpload.percent"
-                        :status="
-                          attachmentUpload.failed
-                            ? 'warning'
-                            : attachmentUpload.success === attachmentUpload.total
-                              ? 'success'
-                              : undefined
-                        "
-                      />
-                      <small v-if="attachmentUpload.total" class="upload-summary">
-                        共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                        {{ attachmentUpload.failed }} 个
-                      </small>
+                    </section>
+                    <section id="aux-endoscopy-section" class="aux-upload-zone" :class="{ expanded: auxEndoscopyZoneExpanded }">
+                      <button type="button" class="zone-head" @click="auxEndoscopyZoneExpanded = !auxEndoscopyZoneExpanded">
+                        <span class="zone-badge" aria-hidden="true"
+                          ><el-icon><Upload /></el-icon
+                        ></span>
+                        <span class="zone-title">
+                          <strong>胃肠镜检查报告单（报告采集）</strong>
+                          <small>独立附件存档，不进入病历内容；支持重复上传与误删恢复</small>
+                        </span>
+                        <span class="zone-count" :class="{ filled: endoscopyReportAttachments.length }">
+                          {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
+                        </span>
+                        <el-icon class="zone-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+                      </button>
+                      <div v-show="auxEndoscopyZoneExpanded" class="zone-body">
+                        <AttachmentPreviewGallery
+                          v-if="endoscopyReportAttachments.length"
+                          :attachments="endoscopyReportAttachments"
+                          :removable="canOpenLabWorkbench"
+                          @download="downloadPreAiAttachmentApi"
+                          @remove="removeImageAttachment"
+                        />
+                        <el-empty v-else :image-size="56" description="暂无胃肠镜报告，展开后可上传或拍照采集" />
+                        <div v-if="canOpenLabWorkbench" class="upload-actions">
+                          <label class="upload-button">
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*,.pdf"
+                              @change="
+                                event =>
+                                  uploadAttachments(
+                                    event,
+                                    'REGISTRATION',
+                                    undefined,
+                                    false,
+                                    '胃肠镜报告',
+                                    endoscopyReportDescription
+                                  )
+                              "
+                            />
+                            <el-icon><Upload /></el-icon> 选择报告图片/PDF
+                          </label>
+                          <label class="upload-button camera-button">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              @change="
+                                event =>
+                                  uploadAttachments(
+                                    event,
+                                    'REGISTRATION',
+                                    undefined,
+                                    false,
+                                    '胃肠镜报告',
+                                    endoscopyReportDescription
+                                  )
+                              "
+                            />
+                            <el-icon><Camera /></el-icon> 拍照上传
+                          </label>
+                        </div>
+                        <el-progress
+                          v-if="attachmentUpload.total"
+                          :percentage="attachmentUpload.percent"
+                          :status="
+                            attachmentUpload.failed
+                              ? 'warning'
+                              : attachmentUpload.success === attachmentUpload.total
+                                ? 'success'
+                                : undefined
+                          "
+                        />
+                        <small v-if="attachmentUpload.total" class="upload-summary">
+                          共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                          {{ attachmentUpload.failed }} 个
+                        </small>
+                      </div>
                     </section>
                     <div v-if="voidedAttachments.length" class="voided-attachments-row aux-voided-row">
                       <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
@@ -1205,23 +1224,25 @@
                       @return-task="returnAuxTask"
                       @draft-change="auxiliaryTasksDirty = $event"
                     />
-                    <LabReportPanel
-                      v-model:active-report-id="activeLabReportId"
-                      :workspace="workspace"
-                      :lab-task="labTask"
-                      :legacy-tasks="legacyAuxiliaryTasks"
-                      :can-open-workbench="canOpenLabWorkbench"
-                      :can-review="canReview"
-                      :can-complete="canCompleteLab"
-                      :loading="actionLoading"
-                      :task-label="auxiliaryTaskLabel"
-                      :human-value="humanValue"
-                      :abnormal-label="labMetricAbnormalLabel"
-                      :is-metric-abnormal="isLabMetricAbnormal"
-                      @open-workbench="openLabWorkbench"
-                      @return-task="returnAuxTask"
-                      @complete="completeLab"
-                    />
+                    <div id="aux-lab-section" class="aux-lab-anchor">
+                      <LabReportPanel
+                        v-model:active-report-id="activeLabReportId"
+                        :workspace="workspace"
+                        :lab-task="labTask"
+                        :legacy-tasks="legacyAuxiliaryTasks"
+                        :can-open-workbench="canOpenLabWorkbench"
+                        :can-review="canReview"
+                        :can-complete="canCompleteLab"
+                        :loading="actionLoading"
+                        :task-label="auxiliaryTaskLabel"
+                        :human-value="humanValue"
+                        :abnormal-label="labMetricAbnormalLabel"
+                        :is-metric-abnormal="isLabMetricAbnormal"
+                        @open-workbench="openLabWorkbench"
+                        @return-task="returnAuxTask"
+                        @complete="completeLab"
+                      />
+                    </div>
                   </section>
                 </Transition>
               </div>
@@ -1703,7 +1724,7 @@
 <script setup lang="ts" name="preAiEncounters">
 import { computed, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElButton, ElMessage, ElMessageBox } from "element-plus";
-import { Camera, FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
+import { ArrowDown, Camera, FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
 import { useUserStore } from "@/stores/modules/user";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
@@ -2126,6 +2147,36 @@ const stageDirty = reactive<Record<PreAiStageCode, boolean>>({
   REVIEW: false
 });
 const auxiliaryTasksDirty = ref(false);
+// ===== 化验室辅助面板：分栏快速定位 + 上传区折叠 =====
+const auxDrZoneExpanded = ref(false);
+const auxEndoscopyZoneExpanded = ref(false);
+const activeAuxSection = ref("");
+const AUX_NAV_TASK_ORDER = ["ECG", "IMAGING", "VITAL_SIGNS", "COLONOSCOPY", "SURGERY_CONSENT"];
+const auxTaskAttachmentCount = (taskId: string) =>
+  (workspace.value?.attachments || []).filter(item => item.taskId === taskId).length;
+const auxNavItems = computed(() => {
+  const items: Array<{ id: string; label: string; count: number }> = [
+    { id: "aux-dr-section", label: "DR 影像", count: registrationImageAttachments.value.length },
+    { id: "aux-endoscopy-section", label: "胃肠镜报告", count: endoscopyReportAttachments.value.length }
+  ];
+  const tasks = workspace.value?.auxiliaryTasks || [];
+  const labelMap = auxiliaryTaskLabel as Record<string, string>;
+  for (const type of AUX_NAV_TASK_ORDER) {
+    const typeTasks = tasks.filter(task => task.taskType === type);
+    if (!typeTasks.length) continue;
+    items.push({
+      id: `aux-task-${type}`,
+      label: type === "SURGERY_CONSENT" ? "手术同意书" : labelMap[type] || type,
+      count: typeTasks.reduce((sum, task) => sum + auxTaskAttachmentCount(task.id), 0)
+    });
+  }
+  items.push({ id: "aux-lab-section", label: "化验指标", count: workspace.value?.labReports?.length || 0 });
+  return items;
+});
+const jumpToAuxSection = (sectionId: string) => {
+  activeAuxSection.value = sectionId;
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
@@ -3130,7 +3181,9 @@ watch(workspace, value => {
   restoreWorkflowContext();
 });
 const labTask = computed(() => workspace.value?.auxiliaryTasks.find(task => task.taskType === "LAB"));
-const legacyAuxiliaryTasks = computed(() => workspace.value?.auxiliaryTasks.filter(task => task.taskType !== "LAB") || []);
+const legacyAuxiliaryTasks = computed(
+  () => workspace.value?.auxiliaryTasks.filter(task => task.taskType !== "LAB" && task.taskType !== "SURGERY_CONSENT") || []
+);
 const activeWorkflowTitle = computed(() =>
   selectedPanel.value === "AUX" ? "化验等辅助检查" : stageByCode(selectedStageCode.value).title
 );
@@ -6340,6 +6393,127 @@ onBeforeUnmount(() => {
 }
 .aux-dr-section {
   margin-top: 0;
+}
+.aux-position-nav {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-light));
+  backdrop-filter: blur(4px);
+}
+.aux-nav-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 999px;
+  background: var(--el-bg-color);
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease-standard),
+    border-color 0.18s var(--ease-standard),
+    background-color 0.18s var(--ease-standard);
+}
+.aux-nav-chip em {
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 16px;
+  color: var(--el-color-primary);
+  text-align: center;
+  border-radius: 999px;
+  background: var(--el-color-primary-light-9);
+}
+.aux-nav-chip:hover,
+.aux-nav-chip.active {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.aux-upload-zone {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 24%, var(--el-border-color-light));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--el-bg-color) 84%, var(--el-color-primary-light-9));
+}
+.aux-upload-zone .zone-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.aux-upload-zone .zone-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  color: var(--el-color-primary);
+  border-radius: 9px;
+  background: var(--el-color-primary-light-8);
+}
+.aux-upload-zone .zone-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.aux-upload-zone .zone-title strong {
+  font-size: 14px;
+}
+.aux-upload-zone .zone-title small {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.aux-upload-zone .zone-count {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+}
+.aux-upload-zone .zone-count.filled {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.aux-upload-zone .zone-arrow {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  transition: transform 0.22s var(--ease-standard);
+}
+.aux-upload-zone.expanded .zone-arrow {
+  transform: rotate(180deg);
+}
+.aux-upload-zone .zone-body {
+  display: grid;
+  gap: 10px;
+  padding: 4px 14px 14px;
+}
+.aux-lab-anchor {
+  scroll-margin-top: 64px;
+}
+.aux-upload-zone,
+.task-card {
+  scroll-margin-top: 64px;
 }
 .workspace-mode-enter-active,
 .workspace-mode-leave-active {

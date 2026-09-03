@@ -374,7 +374,11 @@ const taskStatusLabel = (status?: string) =>
 const taskStatusType = (status?: string): StatusType =>
   status === "COMPLETED" ? "success" : status === "RETURNED" ? "danger" : "info";
 const auxiliaryTaskLabel = (type?: string) =>
-  ({ LAB: "化验", ECG: "心电", IMAGING: "影像", VITAL_SIGNS: "四测", COLONOSCOPY: "肠镜" })[type || ""] || type || "检查";
+  ({ LAB: "化验", ECG: "心电", IMAGING: "影像", VITAL_SIGNS: "四测", COLONOSCOPY: "肠镜", SURGERY_CONSENT: "手术同意书" })[
+    type || ""
+  ] ||
+  type ||
+  "检查";
 const formatTime = (value?: string) =>
   String(value || "")
     .replace("T", " ")

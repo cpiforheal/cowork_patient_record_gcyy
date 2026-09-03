@@ -154,14 +154,16 @@ public class PreAiEncounterService {
         "admissionMethod"
     );
     private static final Map<String, String> AUX_OWNER_ROLES = Map.of(
-        "LAB", "lab", "ECG", "ecg", "IMAGING", "ultrasound", "VITAL_SIGNS", "nursing", "COLONOSCOPY", "inspection"
+        "LAB", "lab", "ECG", "ecg", "IMAGING", "ultrasound", "VITAL_SIGNS", "nursing", "COLONOSCOPY", "inspection",
+        "SURGERY_CONSENT", "doctor"
     );
     private static final Map<String, Set<String>> AUX_DUTIES = Map.of(
         "LAB", Set.of("LAB_STAFF"),
         "VITAL_SIGNS", Set.of("BASIC_NURSING"),
         "COLONOSCOPY", Set.of("INSPECTION_DOCTOR"),
         "ECG", Set.of(),
-        "IMAGING", Set.of()
+        "IMAGING", Set.of(),
+        "SURGERY_CONSENT", Set.of()
     );
     private static final Map<String, Set<String>> AUX_FIELDS = Map.of(
         "LAB", Set.of("project", "sampledAt", "reportedAt", "result", "abnormalItems", "conclusion", "rawReport"),
@@ -171,7 +173,9 @@ public class PreAiEncounterService {
         "COLONOSCOPY", Set.of(
             "status", "examinedAt", "scope", "findings", "lesionLocation", "lesionCount", "lesionSize", "lesionMorphology",
             "biopsyPerformed", "resectionPerformed", "pathologySubmitted", "conclusion", "abnormalDescription"
-        )
+        ),
+        // 手术知情同意书仅作为患者辅助影像资料存档（图片走附件表），不携带任何结构化事实，因此不进入病历。
+        "SURGERY_CONSENT", Set.of()
     );
 
     private final JdbcTemplate jdbcTemplate;
@@ -1761,6 +1765,8 @@ public class PreAiEncounterService {
             "SELECT task_type, title, data_json FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id",
             rs -> {
                 String taskType = safe(rs.getString("task_type"));
+                // 手术知情同意书仅作图片存档，不进入病历正文。
+                if ("SURGERY_CONSENT".equals(taskType)) return;
                 String title = safe(rs.getString("title"));
                 JsonNode data = readObject(rs.getString("data_json"));
                 String content = firstNonBlank(text(data, "conclusion"), text(data, "result"), text(data, "findings"));
@@ -2087,6 +2093,7 @@ public class PreAiEncounterService {
         ArrayNode stages = result.putArray("stages");
         jdbcTemplate.query("SELECT * FROM pre_ai_stage_submissions WHERE encounter_id = ? ORDER BY FIELD(stage_code, 'REGISTRATION','INSPECTION','RECEPTION','NURSING','TCM','DOCTOR','SURGERY','REVIEW')", (org.springframework.jdbc.core.RowCallbackHandler) rs -> stages.add(readStage(rs)), encounterId);
         ArrayNode auxiliaryTasks = result.putArray("auxiliaryTasks");
+        ensureSurgeryConsentTask(encounterId, user.name());
         jdbcTemplate.query("SELECT * FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> auxiliaryTasks.add(readAuxiliaryTask(rs)), encounterId);
         ArrayNode labReports = result.putArray("labReports");
         jdbcTemplate.query("SELECT * FROM pre_ai_lab_reports WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY report_date, saved_at, id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> labReports.add(readLabReport(rs)), encounterId);
@@ -2119,6 +2126,22 @@ public class PreAiEncounterService {
             ) VALUES (?, ?, 'LAB', '化验室检验报告', 'lab', TRUE, 'DRAFT', JSON_OBJECT(), 0, '', ?, ?, ?, ?)
             """, id, encounterId, timestamp, safe(creator), timestamp, safe(creator));
         return loadAuxiliaryTask(encounterId, id);
+    }
+
+    /** 手术知情同意书任务随就诊自动补建，仅承载图片附件存档，不参与病历生成。 */
+    private void ensureSurgeryConsentTask(String encounterId, String creator) {
+        String id = "aux-consent-" + UUID.randomUUID();
+        String timestamp = now();
+        jdbcTemplate.update("""
+            INSERT INTO pre_ai_auxiliary_tasks (
+              id, encounter_id, task_type, title, owner_role, required_before_export, status, data_json, version,
+              completed_at, updated_at, updated_by, created_at, created_by
+            )
+            SELECT ?, ?, 'SURGERY_CONSENT', '手术知情同意书', 'doctor', FALSE, 'DRAFT', JSON_OBJECT(), 0, '', ?, ?, ?, ?
+            WHERE NOT EXISTS (
+              SELECT 1 FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? AND task_type = 'SURGERY_CONSENT'
+            )
+            """, id, encounterId, timestamp, safe(creator), timestamp, safe(creator), encounterId);
     }
 
     private void normalizeSurgeryConfirmation(ObjectNode encounter, ObjectNode data, SessionUser user) {
@@ -2605,6 +2628,9 @@ public class PreAiEncounterService {
                 required(data, missing, "bodyPart", "检查部位");
                 required(data, missing, "findings", "主要表现");
                 required(data, missing, "conclusion", "结论");
+            }
+            // 手术知情同意书仅归档图片，无结构化必填项。
+            case "SURGERY_CONSENT" -> {
             }
             default -> throw badRequest("不支持的辅助检查类型");
         }
@@ -3685,6 +3711,7 @@ public class PreAiEncounterService {
             case "IMAGING" -> "影像";
             case "VITAL_SIGNS" -> "生命体征";
             case "COLONOSCOPY" -> "肠镜";
+            case "SURGERY_CONSENT" -> "手术知情同意书";
             default -> type;
         };
     }
