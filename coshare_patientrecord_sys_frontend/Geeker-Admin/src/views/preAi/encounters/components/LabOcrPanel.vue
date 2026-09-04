@@ -300,7 +300,7 @@ const startStream = async () => {
         ? "识别超时（3 分钟），请检查网络后重试，或手动填写"
         : error?.message || "化验单识别失败，请重试或手动填写";
     streamStatus.value = message;
-    ElMessage.error(message);
+    ElMessage({ type: "error", message, duration: 6000 });
   } finally {
     window.clearTimeout(timeout);
     recognizing.value = false;

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Map;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.CacheControl;
@@ -24,7 +25,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 
 @RestController
@@ -259,16 +259,17 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "化验单识别完成", service.ocrLabReport(encounterId, file, metrics, templateName, model, AuthPermission.currentUserOrThrow()));
     }
 
-    /** 化验单 AI 识别流式端点：SSE 转发模型实时输出（status/delta/done/error）。 */
+    /** 化验单 AI 识别流式端点：同步直写 SSE 转发模型实时输出（status/delta/done/error）。 */
     @PostMapping(path = "/{encounterId}/lab-reports/ocr/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<StreamingResponseBody> ocrLabReportStream(
+    public void ocrLabReportStream(
         @PathVariable String encounterId,
         @RequestPart("file") MultipartFile file,
         @RequestParam(defaultValue = "") String metrics,
         @RequestParam(defaultValue = "") String templateName,
-        @RequestParam(defaultValue = "") String model
+        @RequestParam(defaultValue = "") String model,
+        HttpServletResponse response
     ) throws IOException {
-        return service.ocrLabReportStream(encounterId, file, metrics, templateName, model, AuthPermission.currentUserOrThrow());
+        service.ocrLabReportStream(encounterId, file, metrics, templateName, model, AuthPermission.currentUserOrThrow(), response);
     }
 
     @PostMapping(path = "/{encounterId}/attachments", consumes = MediaType.APPLICATION_JSON_VALUE)
