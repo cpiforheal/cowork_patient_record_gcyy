@@ -1367,6 +1367,7 @@
       v-model="healthArchiveVisible"
       :encounter-id="selectedEncounterId"
       :encounter-patient-name="recordChatPatientName"
+      :workspace="workspace"
       @completed="loadTargetMedicalRecordVersions"
     />
 
