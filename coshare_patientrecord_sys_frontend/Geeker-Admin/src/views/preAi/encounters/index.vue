@@ -1046,185 +1046,237 @@
                   </section>
 
                   <section v-else :key="'auxiliary'" class="auxiliary-stack">
-                    <nav class="aux-position-nav" aria-label="辅助检查分栏快速定位">
-                      <button
-                        v-for="item in auxNavItems"
-                        :key="item.id"
-                        type="button"
-                        class="aux-nav-chip"
-                        :class="{ active: activeAuxSection === item.id }"
-                        @click="jumpToAuxSection(item.id)"
-                      >
-                        <span>{{ item.label }}</span>
-                        <em v-if="item.count">{{ item.count }}</em>
-                      </button>
+                    <nav class="aux-tab-header" aria-label="辅助检查分区页签">
+                      <el-segmented v-model="activeAuxTab" class="aux-tab-switch" :options="auxTabOptions" />
+                      <div class="aux-tab-stats">
+                        <span
+                          >图片 <strong>{{ auxImageTotal }}</strong> 张</span
+                        >
+                        <span
+                          >化验单 <strong>{{ auxLabReportCount }}</strong> 份</span
+                        >
+                        <span
+                          >待办任务 <strong>{{ auxPendingTaskCount }}</strong> 项</span
+                        >
+                      </div>
                     </nav>
-                    <section id="aux-dr-section" class="aux-upload-zone" :class="{ expanded: auxDrZoneExpanded }">
-                      <button type="button" class="zone-head" @click="auxDrZoneExpanded = !auxDrZoneExpanded">
-                        <span class="zone-badge" aria-hidden="true"
-                          ><el-icon><Upload /></el-icon
-                        ></span>
-                        <span class="zone-title">
-                          <strong>DR 影像资料（影像采集）</strong>
-                          <small>与前台岗共用影像库；独立附件存档，不进入病历内容，上传后各岗位在患者信息区优先可见</small>
-                        </span>
-                        <span class="zone-count" :class="{ filled: registrationImageAttachments.length }">
-                          {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
-                        </span>
-                        <el-icon class="zone-arrow" aria-hidden="true"><ArrowDown /></el-icon>
-                      </button>
-                      <div v-show="auxDrZoneExpanded" class="zone-body">
-                        <AttachmentPreviewGallery
-                          v-if="registrationImageAttachments.length"
-                          :attachments="registrationImageAttachments"
-                          :removable="canOpenLabWorkbench"
-                          @download="downloadPreAiAttachmentApi"
-                          @remove="removeImageAttachment"
-                        />
-                        <el-empty v-else :image-size="56" description="暂无 DR 影像，展开后可上传或拍照采集" />
-                        <div v-if="canOpenLabWorkbench" class="upload-actions">
-                          <label class="upload-button">
-                            <input
-                              type="file"
-                              multiple
-                              accept="image/*"
-                              @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+
+                    <template v-if="activeAuxTab === 'images'">
+                      <div class="aux-folder-grid">
+                        <section class="aux-folder-card" :class="{ expanded: auxDrZoneExpanded }">
+                          <div class="folder-head" @click="auxDrZoneExpanded = !auxDrZoneExpanded">
+                            <span class="folder-badge" aria-hidden="true"
+                              ><el-icon><Upload /></el-icon
+                            ></span>
+                            <span class="folder-title">
+                              <strong>DR 影像资料</strong>
+                              <small>与前台岗共用影像库 · 独立存档，不进入病历内容</small>
+                            </span>
+                            <span class="folder-count" :class="{ filled: registrationImageAttachments.length }">
+                              {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                            </span>
+                            <el-icon class="folder-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+                          </div>
+                          <div v-if="canOpenLabWorkbench" class="folder-actions">
+                            <label class="upload-button">
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+                              />
+                              <el-icon><Upload /></el-icon> 选择 DR 图片
+                            </label>
+                            <label class="upload-button camera-button">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
+                              />
+                              <el-icon><Camera /></el-icon> 拍照上传
+                            </label>
+                          </div>
+                          <div v-show="auxDrZoneExpanded" class="folder-body">
+                            <AttachmentPreviewGallery
+                              v-if="registrationImageAttachments.length"
+                              :attachments="registrationImageAttachments"
+                              :removable="canOpenLabWorkbench"
+                              @download="downloadPreAiAttachmentApi"
+                              @remove="removeImageAttachment"
                             />
-                            <el-icon><Upload /></el-icon> 选择 DR 图片
-                          </label>
-                          <label class="upload-button camera-button">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              @change="event => uploadAttachments(event, 'REGISTRATION', undefined, false, '化验岗DR影像')"
-                            />
-                            <el-icon><Camera /></el-icon> 拍照上传
-                          </label>
-                        </div>
-                        <el-progress
-                          v-if="attachmentUpload.total"
-                          :percentage="attachmentUpload.percent"
-                          :status="
-                            attachmentUpload.failed
-                              ? 'warning'
-                              : attachmentUpload.success === attachmentUpload.total
-                                ? 'success'
-                                : undefined
-                          "
-                        />
-                        <small v-if="attachmentUpload.total" class="upload-summary">
-                          共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                          {{ attachmentUpload.failed }} 个
-                        </small>
-                      </div>
-                    </section>
-                    <section id="aux-endoscopy-section" class="aux-upload-zone" :class="{ expanded: auxEndoscopyZoneExpanded }">
-                      <button type="button" class="zone-head" @click="auxEndoscopyZoneExpanded = !auxEndoscopyZoneExpanded">
-                        <span class="zone-badge" aria-hidden="true"
-                          ><el-icon><Upload /></el-icon
-                        ></span>
-                        <span class="zone-title">
-                          <strong>胃肠镜检查报告单（报告采集）</strong>
-                          <small>独立附件存档，不进入病历内容；支持重复上传与误删恢复</small>
-                        </span>
-                        <span class="zone-count" :class="{ filled: endoscopyReportAttachments.length }">
-                          {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
-                        </span>
-                        <el-icon class="zone-arrow" aria-hidden="true"><ArrowDown /></el-icon>
-                      </button>
-                      <div v-show="auxEndoscopyZoneExpanded" class="zone-body">
-                        <AttachmentPreviewGallery
-                          v-if="endoscopyReportAttachments.length"
-                          :attachments="endoscopyReportAttachments"
-                          :removable="canOpenLabWorkbench"
-                          @download="downloadPreAiAttachmentApi"
-                          @remove="removeImageAttachment"
-                        />
-                        <el-empty v-else :image-size="56" description="暂无胃肠镜报告，展开后可上传或拍照采集" />
-                        <div v-if="canOpenLabWorkbench" class="upload-actions">
-                          <label class="upload-button">
-                            <input
-                              type="file"
-                              multiple
-                              accept="image/*,.pdf"
-                              @change="
-                                event =>
-                                  uploadAttachments(
-                                    event,
-                                    'REGISTRATION',
-                                    undefined,
-                                    false,
-                                    '胃肠镜报告',
-                                    endoscopyReportDescription
-                                  )
+                            <el-empty v-else :image-size="56" description="暂无 DR 影像，可先上传或拍照采集" />
+                            <el-progress
+                              v-if="attachmentUpload.total"
+                              :percentage="attachmentUpload.percent"
+                              :status="
+                                attachmentUpload.failed
+                                  ? 'warning'
+                                  : attachmentUpload.success === attachmentUpload.total
+                                    ? 'success'
+                                    : undefined
                               "
                             />
-                            <el-icon><Upload /></el-icon> 选择报告图片/PDF
-                          </label>
-                          <label class="upload-button camera-button">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              @change="
-                                event =>
-                                  uploadAttachments(
-                                    event,
-                                    'REGISTRATION',
-                                    undefined,
-                                    false,
-                                    '胃肠镜报告',
-                                    endoscopyReportDescription
-                                  )
+                            <small v-if="attachmentUpload.total" class="upload-summary">
+                              共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                              {{ attachmentUpload.failed }} 个
+                            </small>
+                          </div>
+                        </section>
+
+                        <section class="aux-folder-card" :class="{ expanded: auxEndoscopyZoneExpanded }">
+                          <div class="folder-head" @click="auxEndoscopyZoneExpanded = !auxEndoscopyZoneExpanded">
+                            <span class="folder-badge" aria-hidden="true"
+                              ><el-icon><Upload /></el-icon
+                            ></span>
+                            <span class="folder-title">
+                              <strong>胃肠镜检查报告单</strong>
+                              <small>独立附件存档，不进入病历内容 · 支持重复上传与误删恢复</small>
+                            </span>
+                            <span class="folder-count" :class="{ filled: endoscopyReportAttachments.length }">
+                              {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
+                            </span>
+                            <el-icon class="folder-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+                          </div>
+                          <div v-if="canOpenLabWorkbench" class="folder-actions">
+                            <label class="upload-button">
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*,.pdf"
+                                @change="
+                                  event =>
+                                    uploadAttachments(
+                                      event,
+                                      'REGISTRATION',
+                                      undefined,
+                                      false,
+                                      '胃肠镜报告',
+                                      endoscopyReportDescription
+                                    )
+                                "
+                              />
+                              <el-icon><Upload /></el-icon> 选择报告图片/PDF
+                            </label>
+                            <label class="upload-button camera-button">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                @change="
+                                  event =>
+                                    uploadAttachments(
+                                      event,
+                                      'REGISTRATION',
+                                      undefined,
+                                      false,
+                                      '胃肠镜报告',
+                                      endoscopyReportDescription
+                                    )
+                                "
+                              />
+                              <el-icon><Camera /></el-icon> 拍照上传
+                            </label>
+                          </div>
+                          <div v-show="auxEndoscopyZoneExpanded" class="folder-body">
+                            <AttachmentPreviewGallery
+                              v-if="endoscopyReportAttachments.length"
+                              :attachments="endoscopyReportAttachments"
+                              :removable="canOpenLabWorkbench"
+                              @download="downloadPreAiAttachmentApi"
+                              @remove="removeImageAttachment"
+                            />
+                            <el-empty v-else :image-size="56" description="暂无胃肠镜报告，可先上传或拍照采集" />
+                            <el-progress
+                              v-if="attachmentUpload.total"
+                              :percentage="attachmentUpload.percent"
+                              :status="
+                                attachmentUpload.failed
+                                  ? 'warning'
+                                  : attachmentUpload.success === attachmentUpload.total
+                                    ? 'success'
+                                    : undefined
                               "
                             />
-                            <el-icon><Camera /></el-icon> 拍照上传
-                          </label>
-                        </div>
-                        <el-progress
-                          v-if="attachmentUpload.total"
-                          :percentage="attachmentUpload.percent"
-                          :status="
-                            attachmentUpload.failed
-                              ? 'warning'
-                              : attachmentUpload.success === attachmentUpload.total
-                                ? 'success'
-                                : undefined
-                          "
-                        />
-                        <small v-if="attachmentUpload.total" class="upload-summary">
-                          共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
-                          {{ attachmentUpload.failed }} 个
-                        </small>
+                            <small v-if="attachmentUpload.total" class="upload-summary">
+                              共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                              {{ attachmentUpload.failed }} 个
+                            </small>
+                          </div>
+                        </section>
+
+                        <section
+                          v-if="surgeryConsentTask"
+                          class="aux-folder-card consent-folder"
+                          :class="{ expanded: auxConsentZoneExpanded }"
+                        >
+                          <div class="folder-head" @click="auxConsentZoneExpanded = !auxConsentZoneExpanded">
+                            <span class="folder-badge consent-badge" aria-hidden="true"
+                              ><el-icon><Camera /></el-icon
+                            ></span>
+                            <span class="folder-title">
+                              <strong>手术知情同意书</strong>
+                              <small>仅作患者辅助资料存档，不进入病历 · 支持手机拍照上传</small>
+                            </span>
+                            <span class="folder-count" :class="{ filled: surgeryConsentAttachments.length }">
+                              {{ surgeryConsentAttachments.length ? `${surgeryConsentAttachments.length} 张` : "暂无" }}
+                            </span>
+                            <el-icon class="folder-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+                          </div>
+                          <div v-if="canOpenLabWorkbench" class="folder-actions">
+                            <label class="upload-button">
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*,.pdf"
+                                @change="
+                                  event =>
+                                    uploadAttachments(event, 'REGISTRATION', surgeryConsentTask?.id, false, '手术知情同意书')
+                                "
+                              />
+                              <el-icon><Upload /></el-icon> 选择同意书图片
+                            </label>
+                            <label class="upload-button camera-button">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                @change="
+                                  event =>
+                                    uploadAttachments(event, 'REGISTRATION', surgeryConsentTask?.id, false, '手术知情同意书')
+                                "
+                              />
+                              <el-icon><Camera /></el-icon> 手机拍照上传
+                            </label>
+                          </div>
+                          <div v-show="auxConsentZoneExpanded" class="folder-body">
+                            <AttachmentPreviewGallery
+                              v-if="surgeryConsentAttachments.length"
+                              :attachments="surgeryConsentAttachments"
+                              :removable="canOpenLabWorkbench"
+                              @download="downloadPreAiAttachmentApi"
+                              @remove="removeImageAttachment"
+                            />
+                            <el-empty v-else :image-size="56" description="暂未上传手术知情同意书图片" />
+                          </div>
+                        </section>
                       </div>
-                    </section>
-                    <div v-if="voidedAttachments.length" class="voided-attachments-row aux-voided-row">
-                      <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
-                      <el-button
-                        v-for="attachment in voidedAttachments"
-                        :key="attachment.id"
-                        link
-                        type="primary"
-                        size="small"
-                        @click="restoreAttachment(attachment)"
-                      >
-                        恢复 {{ attachment.fileName }}
-                      </el-button>
-                    </div>
-                    <AuxiliaryTaskPanel
-                      :workspace="workspace"
-                      :capabilities="authStore.capabilities"
-                      :permissions="authStore.auxiliaryPermissions"
-                      :current-user-id="currentUserId"
-                      :current-user-name="currentUserName"
-                      :loading="actionLoading"
-                      :can-return="canReview"
-                      @updated="hydrateWorkspace"
-                      @return-task="returnAuxTask"
-                      @draft-change="auxiliaryTasksDirty = $event"
-                    />
-                    <div id="aux-lab-section" class="aux-lab-anchor">
+                      <div v-if="voidedAttachments.length" class="voided-attachments-row aux-voided-row">
+                        <span class="voided-caption">已作废 {{ voidedAttachments.length }} 张（可恢复）</span>
+                        <el-button
+                          v-for="attachment in voidedAttachments"
+                          :key="attachment.id"
+                          link
+                          type="primary"
+                          size="small"
+                          @click="restoreAttachment(attachment)"
+                        >
+                          恢复 {{ attachment.fileName }}
+                        </el-button>
+                      </div>
+                    </template>
+
+                    <div v-else-if="activeAuxTab === 'lab'" id="aux-lab-section" class="aux-lab-anchor">
                       <LabReportPanel
                         v-model:active-report-id="activeLabReportId"
                         :workspace="workspace"
@@ -1243,6 +1295,20 @@
                         @complete="completeLab"
                       />
                     </div>
+
+                    <AuxiliaryTaskPanel
+                      v-else
+                      :workspace="workspace"
+                      :capabilities="authStore.capabilities"
+                      :permissions="authStore.auxiliaryPermissions"
+                      :current-user-id="currentUserId"
+                      :current-user-name="currentUserName"
+                      :loading="actionLoading"
+                      :can-return="canReview"
+                      @updated="hydrateWorkspace"
+                      @return-task="returnAuxTask"
+                      @draft-change="auxiliaryTasksDirty = $event"
+                    />
                   </section>
                 </Transition>
               </div>
@@ -2148,36 +2214,32 @@ const stageDirty = reactive<Record<PreAiStageCode, boolean>>({
   REVIEW: false
 });
 const auxiliaryTasksDirty = ref(false);
-// ===== 化验室辅助面板：分栏快速定位 + 上传区折叠 =====
+// ===== 化验室辅助面板：三段式页签（资料图片 / 化验指标 / 检查任务） =====
+const activeAuxTab = ref("images");
 const auxDrZoneExpanded = ref(false);
 const auxEndoscopyZoneExpanded = ref(false);
-const activeAuxSection = ref("");
-const AUX_NAV_TASK_ORDER = ["ECG", "IMAGING", "VITAL_SIGNS", "COLONOSCOPY", "SURGERY_CONSENT"];
-const auxTaskAttachmentCount = (taskId: string) =>
-  (workspace.value?.attachments || []).filter(item => item.taskId === taskId).length;
-const auxNavItems = computed(() => {
-  const items: Array<{ id: string; label: string; count: number }> = [
-    { id: "aux-dr-section", label: "DR 影像", count: registrationImageAttachments.value.length },
-    { id: "aux-endoscopy-section", label: "胃肠镜报告", count: endoscopyReportAttachments.value.length }
-  ];
-  const tasks = workspace.value?.auxiliaryTasks || [];
-  const labelMap = auxiliaryTaskLabel as Record<string, string>;
-  for (const type of AUX_NAV_TASK_ORDER) {
-    const typeTasks = tasks.filter(task => task.taskType === type);
-    if (!typeTasks.length) continue;
-    items.push({
-      id: `aux-task-${type}`,
-      label: type === "SURGERY_CONSENT" ? "手术同意书" : labelMap[type] || type,
-      count: typeTasks.reduce((sum, task) => sum + auxTaskAttachmentCount(task.id), 0)
-    });
-  }
-  items.push({ id: "aux-lab-section", label: "化验指标", count: workspace.value?.labReports?.length || 0 });
-  return items;
+const auxConsentZoneExpanded = ref(false);
+const surgeryConsentTask = computed(() => workspace.value?.auxiliaryTasks.find(task => task.taskType === "SURGERY_CONSENT"));
+const surgeryConsentAttachments = computed(() => {
+  const taskId = surgeryConsentTask.value?.id;
+  return taskId ? (workspace.value?.attachments || []).filter(item => item.taskId === taskId) : [];
 });
-const jumpToAuxSection = (sectionId: string) => {
-  activeAuxSection.value = sectionId;
-  document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
-};
+const auxImageTotal = computed(
+  () =>
+    registrationImageAttachments.value.length + endoscopyReportAttachments.value.length + surgeryConsentAttachments.value.length
+);
+const auxLabReportCount = computed(() => workspace.value?.labReports?.length || 0);
+const auxPendingTaskCount = computed(
+  () =>
+    (workspace.value?.auxiliaryTasks || []).filter(
+      task => task.taskType !== "LAB" && task.taskType !== "SURGERY_CONSENT" && task.status !== "COMPLETED"
+    ).length
+);
+const auxTabOptions = computed(() => [
+  { label: `资料图片 ${auxImageTotal.value}`, value: "images" },
+  { label: `化验指标 ${auxLabReportCount.value}`, value: "lab" },
+  { label: `检查任务 ${auxPendingTaskCount.value}`, value: "tasks" }
+]);
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
@@ -6399,126 +6461,138 @@ onBeforeUnmount(() => {
 .aux-dr-section {
   margin-top: 0;
 }
-.aux-position-nav {
+.aux-tab-header {
   position: sticky;
   top: 0;
   z-index: 4;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px;
+  gap: 10px;
+  padding: 10px 12px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-light));
+  background: color-mix(in srgb, var(--el-bg-color) 94%, var(--el-fill-color-light));
   backdrop-filter: blur(4px);
 }
-.aux-nav-chip {
-  display: inline-flex;
+.aux-tab-switch {
+  flex-shrink: 1;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.aux-tab-stats {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 999px;
-  background: var(--el-bg-color);
-  cursor: pointer;
-  transition:
-    color 0.18s var(--ease-standard),
-    border-color 0.18s var(--ease-standard),
-    background-color 0.18s var(--ease-standard);
+  gap: 14px;
+  color: var(--el-text-color-secondary);
+  font-size: 12.5px;
+  white-space: nowrap;
 }
-.aux-nav-chip em {
-  min-width: 18px;
-  padding: 0 5px;
-  font-size: 11px;
-  font-style: normal;
-  line-height: 16px;
+.aux-tab-stats strong {
   color: var(--el-color-primary);
-  text-align: center;
-  border-radius: 999px;
-  background: var(--el-color-primary-light-9);
+  font-size: 14px;
 }
-.aux-nav-chip:hover,
-.aux-nav-chip.active {
-  color: var(--el-color-primary);
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
-.aux-upload-zone {
+.aux-folder-grid {
   display: grid;
-  gap: 0;
+  gap: 12px;
+}
+.aux-folder-card {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 24%, var(--el-border-color-light));
   border-radius: 14px;
-  background: color-mix(in srgb, var(--el-bg-color) 84%, var(--el-color-primary-light-9));
+  background: color-mix(in srgb, var(--el-bg-color) 86%, var(--el-color-primary-light-9));
 }
-.aux-upload-zone .zone-head {
+.aux-folder-card .folder-head {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
-  padding: 10px 14px;
-  text-align: left;
-  border: 0;
-  background: transparent;
+  padding: 12px 14px;
   cursor: pointer;
+  user-select: none;
 }
-.aux-upload-zone .zone-badge {
+.aux-folder-card .folder-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   color: var(--el-color-primary);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--el-color-primary-light-8);
+  font-size: 16px;
 }
-.aux-upload-zone .zone-title {
+.aux-folder-card .consent-badge {
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-8);
+}
+.aux-folder-card .folder-title {
   display: grid;
   gap: 2px;
-  min-width: 0;
   flex: 1;
+  min-width: 0;
 }
-.aux-upload-zone .zone-title strong {
+.aux-folder-card .folder-title strong {
   font-size: 14px;
 }
-.aux-upload-zone .zone-title small {
+.aux-folder-card .folder-title small {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.aux-upload-zone .zone-count {
+.aux-folder-card .folder-count {
   flex-shrink: 0;
-  padding: 2px 10px;
+  padding: 3px 10px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
   border-radius: 999px;
   background: var(--el-fill-color-light);
 }
-.aux-upload-zone .zone-count.filled {
+.aux-folder-card .folder-count.filled {
   color: var(--el-color-primary);
+  font-weight: 600;
   background: var(--el-color-primary-light-9);
 }
-.aux-upload-zone .zone-arrow {
+.aux-folder-card .folder-arrow {
   flex-shrink: 0;
   color: var(--el-text-color-secondary);
-  transition: transform 0.22s var(--ease-standard);
+  transition: transform 0.2s var(--ease-standard);
 }
-.aux-upload-zone.expanded .zone-arrow {
+.aux-folder-card.expanded .folder-arrow {
   transform: rotate(180deg);
 }
-.aux-upload-zone .zone-body {
+.aux-folder-card .folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+.aux-folder-card .folder-body {
   display: grid;
   gap: 10px;
-  padding: 4px 14px 14px;
+  margin: 0 14px 14px;
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--el-color-primary) 32%, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--el-bg-color);
 }
 .aux-lab-anchor {
   scroll-margin-top: 64px;
 }
-.aux-upload-zone,
+.aux-folder-card,
 .task-card {
   scroll-margin-top: 64px;
+}
+@media (max-width: 760px) {
+  .aux-tab-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .aux-folder-card .folder-actions .upload-button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }
 .workspace-mode-enter-active,
 .workspace-mode-leave-active {

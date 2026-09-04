@@ -2,8 +2,8 @@
   <section class="auxiliary-editor">
     <header>
       <div>
-        <strong>辅助任务</strong>
-        <small>生命体征、肠镜、心电和影像均为轻量任务，不增加主流程阶段。</small>
+        <strong>检查任务</strong>
+        <small>生命体征、肠镜、心电、影像均为轻量任务，不增加主流程阶段；点击任务行展开填写。</small>
       </div>
       <el-dropdown v-if="canCreate" @command="createTask">
         <el-button type="primary" plain>新增辅助任务</el-button>
@@ -17,149 +17,145 @@
       </el-dropdown>
     </header>
 
-    <article
-      v-for="task in editableTasks"
-      :key="task.id"
-      :id="`aux-task-${task.taskType}`"
-      class="task-card"
-      :class="{ 'consent-card': task.taskType === 'SURGERY_CONSENT' }"
-    >
-      <header>
-        <div>
-          <strong>{{ auxiliaryTaskLabel[task.taskType] }} · {{ forms[task.id]?.title }}</strong>
-          <small>{{ task.status === "COMPLETED" ? "已完成" : task.status === "RETURNED" ? "已退回" : "填写中" }}</small>
-          <small v-if="task.updatedBy"
-            >实际填写人：{{ task.updatedBy }}{{ task.completedBy ? ` · 完成人：${task.completedBy}` : "" }}</small
-          >
-        </div>
-        <el-tag :type="task.requiredBeforeExport ? 'warning' : 'info'">{{
-          task.requiredBeforeExport ? "复核前必需" : "非阻断"
-        }}</el-tag>
-      </header>
-
-      <div v-if="task.taskType !== 'SURGERY_CONSENT'" class="task-meta">
-        <el-input
-          v-model="forms[task.id].title"
-          :disabled="!canEdit(task)"
-          placeholder="任务名称"
-          @update:model-value="markTaskDirty(task.id)"
-        />
-        <el-checkbox
-          v-model="forms[task.id].requiredBeforeExport"
-          :disabled="!canEdit(task)"
-          @update:model-value="markTaskDirty(task.id)"
-          >复核前必须完成</el-checkbox
-        >
-      </div>
-
-      <div v-if="task.taskType !== 'SURGERY_CONSENT'" class="task-grid">
-        <el-form-item
-          v-for="field in visibleFields(task)"
-          :key="field.key"
-          :label="field.label"
-          :required="field.required"
-          :class="{ 'span-2': field.span === 2 }"
-        >
-          <StructuredField
-            v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
-            v-model="forms[task.id].data[field.key]"
-            :field="field"
-            :form="forms[task.id].data"
-            :generated-text="generatedText(field, forms[task.id].data)"
-            :source-hash="stableSourceHash([forms[task.id].data])"
-            :disabled="!canEdit(task)"
-            @patch="value => patchForm(task.id, value)"
-          />
-          <el-input
-            v-else-if="field.kind === 'input' || field.kind === 'number'"
-            v-model="forms[task.id].data[field.key]"
-            :type="field.kind === 'number' ? 'number' : 'text'"
-            :disabled="!canEdit(task)"
-            @update:model-value="markTaskDirty(task.id)"
-          />
-          <el-input
-            v-else-if="field.kind === 'textarea'"
-            v-model="forms[task.id].data[field.key]"
-            type="textarea"
-            :rows="field.rows || 3"
-            :disabled="!canEdit(task)"
-            @update:model-value="markTaskDirty(task.id)"
-          />
-          <el-select
-            v-else-if="field.kind === 'select' || field.kind === 'multi'"
-            v-model="forms[task.id].data[field.key]"
-            :multiple="field.kind === 'multi'"
-            clearable
-            filterable
-            :allow-create="field.creatable"
-            :disabled="!canEdit(task)"
-            @update:model-value="markTaskDirty(task.id)"
-          >
-            <el-option
-              v-for="option in fieldOptions(field, forms[task.id].data)"
-              :key="String(option.value)"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-          <el-date-picker
-            v-else
-            v-model="forms[task.id].data[field.key]"
-            :type="field.kind === 'date' ? 'date' : 'datetime'"
-            :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
-            :disabled="!canEdit(task)"
-            @update:model-value="markTaskDirty(task.id)"
-          />
-        </el-form-item>
-      </div>
-
-      <section class="task-attachments" :class="{ 'consent-attachments': task.taskType === 'SURGERY_CONSENT' }">
-        <div class="task-attachments__heading">
-          <strong>{{ task.taskType === "SURGERY_CONSENT" ? "手术知情同意书图片" : "检查资料" }}</strong>
-          <span class="task-attachments__hint">
-            {{ task.taskType === "SURGERY_CONSENT" ? "仅作患者辅助资料存档，不进入病历" : "仅作患者辅助资料存档，不进入病历" }}
-          </span>
-        </div>
-        <div class="task-attachments__actions">
-          <label v-if="canEdit(task) || task.taskType === 'SURGERY_CONSENT'" class="task-upload-trigger">
-            <input type="file" multiple accept="image/*,.pdf" @change="event => uploadTaskAttachments(event, task)" />
-            <el-button plain size="small" :loading="uploadingTasks[task.id]">
-              <el-icon class="upload-icon"><Upload /></el-icon> 选择图片或 PDF
-            </el-button>
-          </label>
-          <label v-if="task.taskType === 'SURGERY_CONSENT'" class="task-upload-trigger camera-trigger">
-            <input type="file" accept="image/*" capture="environment" @change="event => uploadTaskAttachments(event, task)" />
-            <el-button plain size="small" type="success" :loading="uploadingTasks[task.id]">
-              <el-icon class="upload-icon"><Camera /></el-icon> 手机拍照上传
-            </el-button>
-          </label>
-        </div>
-        <AttachmentPreviewGallery
-          v-if="taskAttachments(task.id).length"
-          :attachments="taskAttachments(task.id)"
-          compact
-          @download="downloadPreAiAttachmentApi"
-        />
-        <span v-else class="task-attachments__empty">
-          {{ task.taskType === "SURGERY_CONSENT" ? "暂未上传手术知情同意书图片" : "暂未上传检查资料" }}
+    <article v-for="task in editableTasks" :key="task.id" class="task-card" :class="{ expanded: expandedTasks[task.id] }">
+      <button type="button" class="task-summary" @click="toggleTask(task.id)">
+        <span class="task-chip">{{ auxiliaryTaskLabel[task.taskType] }}</span>
+        <strong class="task-summary-title">{{ forms[task.id]?.title || task.title }}</strong>
+        <el-tag :type="statusTagType(task.status)" size="small" effect="plain">{{ statusText(task.status) }}</el-tag>
+        <span class="task-summary-count" :class="{ filled: taskAttachments(task.id).length }">
+          {{ taskAttachments(task.id).length }} 图
         </span>
-      </section>
+        <el-icon class="task-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+      </button>
 
-      <footer>
-        <el-button v-if="canReturn" type="warning" plain @click="$emit('return-task', task.id)">退回</el-button>
-        <span></span>
-        <el-button v-if="canEdit(task)" :loading="loading" @click="saveTask(task, false)">保存草稿</el-button>
-        <el-button v-if="canEdit(task)" type="primary" :loading="loading" @click="saveTask(task, true)">完成任务</el-button>
-      </footer>
+      <div v-show="expandedTasks[task.id]" class="task-detail">
+        <header>
+          <div>
+            <strong>{{ auxiliaryTaskLabel[task.taskType] }} · {{ forms[task.id]?.title }}</strong>
+            <small>{{ statusText(task.status) }}</small>
+            <small v-if="task.updatedBy"
+              >实际填写人：{{ task.updatedBy }}{{ task.completedBy ? ` · 完成人：${task.completedBy}` : "" }}</small
+            >
+          </div>
+          <el-tag :type="task.requiredBeforeExport ? 'warning' : 'info'">{{
+            task.requiredBeforeExport ? "复核前必需" : "非阻断"
+          }}</el-tag>
+        </header>
+
+        <div class="task-meta">
+          <el-input
+            v-model="forms[task.id].title"
+            :disabled="!canEdit(task)"
+            placeholder="任务名称"
+            @update:model-value="markTaskDirty(task.id)"
+          />
+          <el-checkbox
+            v-model="forms[task.id].requiredBeforeExport"
+            :disabled="!canEdit(task)"
+            @update:model-value="markTaskDirty(task.id)"
+            >复核前必须完成</el-checkbox
+          >
+        </div>
+
+        <div class="task-grid">
+          <el-form-item
+            v-for="field in visibleFields(task)"
+            :key="field.key"
+            :label="field.label"
+            :required="field.required"
+            :class="{ 'span-2': field.span === 2 }"
+          >
+            <StructuredField
+              v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
+              v-model="forms[task.id].data[field.key]"
+              :field="field"
+              :form="forms[task.id].data"
+              :generated-text="generatedText(field, forms[task.id].data)"
+              :source-hash="stableSourceHash([forms[task.id].data])"
+              :disabled="!canEdit(task)"
+              @patch="value => patchForm(task.id, value)"
+            />
+            <el-input
+              v-else-if="field.kind === 'input' || field.kind === 'number'"
+              v-model="forms[task.id].data[field.key]"
+              :type="field.kind === 'number' ? 'number' : 'text'"
+              :disabled="!canEdit(task)"
+              @update:model-value="markTaskDirty(task.id)"
+            />
+            <el-input
+              v-else-if="field.kind === 'textarea'"
+              v-model="forms[task.id].data[field.key]"
+              type="textarea"
+              :rows="field.rows || 3"
+              :disabled="!canEdit(task)"
+              @update:model-value="markTaskDirty(task.id)"
+            />
+            <el-select
+              v-else-if="field.kind === 'select' || field.kind === 'multi'"
+              v-model="forms[task.id].data[field.key]"
+              :multiple="field.kind === 'multi'"
+              clearable
+              filterable
+              :allow-create="field.creatable"
+              :disabled="!canEdit(task)"
+              @update:model-value="markTaskDirty(task.id)"
+            >
+              <el-option
+                v-for="option in fieldOptions(field, forms[task.id].data)"
+                :key="String(option.value)"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-date-picker
+              v-else
+              v-model="forms[task.id].data[field.key]"
+              :type="field.kind === 'date' ? 'date' : 'datetime'"
+              :value-format="field.kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'"
+              :disabled="!canEdit(task)"
+              @update:model-value="markTaskDirty(task.id)"
+            />
+          </el-form-item>
+        </div>
+
+        <section class="task-attachments">
+          <div class="task-attachments__heading">
+            <strong>检查资料</strong>
+            <span class="task-attachments__hint">仅作患者辅助资料存档，不进入病历</span>
+          </div>
+          <div class="task-attachments__actions">
+            <label v-if="canEdit(task)" class="task-upload-trigger">
+              <input type="file" multiple accept="image/*,.pdf" @change="event => uploadTaskAttachments(event, task)" />
+              <el-button plain size="small" :loading="uploadingTasks[task.id]">
+                <el-icon class="upload-icon"><Upload /></el-icon> 选择图片或 PDF
+              </el-button>
+            </label>
+          </div>
+          <AttachmentPreviewGallery
+            v-if="taskAttachments(task.id).length"
+            :attachments="taskAttachments(task.id)"
+            compact
+            @download="downloadPreAiAttachmentApi"
+          />
+          <span v-else class="task-attachments__empty">暂未上传检查资料</span>
+        </section>
+
+        <footer>
+          <el-button v-if="canReturn" type="warning" plain @click="$emit('return-task', task.id)">退回</el-button>
+          <span></span>
+          <el-button v-if="canEdit(task)" :loading="loading" @click="saveTask(task, false)">保存草稿</el-button>
+          <el-button v-if="canEdit(task)" type="primary" :loading="loading" @click="saveTask(task, true)">完成任务</el-button>
+        </footer>
+      </div>
     </article>
-    <el-empty v-if="!editableTasks.length" :image-size="72" description="尚未创建生命体征、肠镜、心电或影像任务" />
+    <el-empty v-if="!editableTasks.length" :image-size="72" description="暂无检查任务，可点击右上角「新增辅助任务」创建" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { Camera, Upload } from "@element-plus/icons-vue";
+import { ArrowDown, Upload } from "@element-plus/icons-vue";
 import {
   createPreAiAuxiliaryTaskApi,
   downloadPreAiAttachmentApi,
@@ -193,8 +189,13 @@ const emit = defineEmits<{
 const forms = reactive<Record<string, { title: string; requiredBeforeExport: boolean; data: Record<string, any> }>>({});
 const dirtyTasks = reactive<Record<string, boolean>>({});
 const uploadingTasks = reactive<Record<string, boolean>>({});
+const expandedTasks = reactive<Record<string, boolean>>({});
 let draftEncounterId = "";
-const editableTasks = computed(() => props.workspace.auxiliaryTasks.filter(task => task.taskType !== "LAB"));
+// 手术知情同意书图片入口已收敛至「资料图片」页签，此处不再展示
+const editableTasks = computed(() => {
+  const tasks = props.workspace.auxiliaryTasks.filter(task => task.taskType !== "LAB" && task.taskType !== "SURGERY_CONSENT");
+  return [...tasks].sort((left, right) => Number(left.status === "COMPLETED") - Number(right.status === "COMPLETED"));
+});
 const taskDutyCodes: Partial<Record<PreAiAuxiliaryTaskType, string[]>> = {
   VITAL_SIGNS: ["BASIC_NURSING"],
   COLONOSCOPY: ["INSPECTION_DOCTOR"],
@@ -226,6 +227,12 @@ const canCreateTask = (type: PreAiAuxiliaryTaskType) => {
 };
 const taskCreationOptions = computed(() => creationCandidates.filter(item => canCreateTask(item.type)));
 const canCreate = computed(() => taskCreationOptions.value.length > 0);
+const statusText = (status: string) => (status === "COMPLETED" ? "已完成" : status === "RETURNED" ? "已退回" : "填写中");
+const statusTagType = (status: string) =>
+  (status === "COMPLETED" ? "success" : status === "RETURNED" ? "danger" : "info") as "success" | "danger" | "info";
+const toggleTask = (taskId: string) => {
+  expandedTasks[taskId] = !expandedTasks[taskId];
+};
 
 const hydrate = () => {
   const switchedEncounter = draftEncounterId !== props.workspace.encounter.id;
@@ -368,8 +375,8 @@ watch(
 }
 
 .auxiliary-editor > header,
-.task-card > header,
-.task-card > footer {
+.task-detail > header,
+.task-detail > footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -377,26 +384,92 @@ watch(
 }
 
 .auxiliary-editor header div,
-.task-card header div {
+.task-detail header div {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .auxiliary-editor small,
-.task-card small {
+.task-detail small {
   color: var(--el-text-color-secondary);
 }
 
 .task-card {
-  padding: 16px;
+  overflow: hidden;
+  padding: 0;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
+  transition: border-color 0.18s var(--ease-standard);
+
+  &.expanded {
+    border-color: color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-light));
+  }
 }
 
-.task-card.consent-card {
-  border-color: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-border-color-light));
-  background: color-mix(in srgb, var(--el-bg-color) 80%, var(--el-color-primary-light-9));
+.task-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.task-chip {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  border-radius: 999px;
+  background: var(--el-color-primary-light-9);
+}
+
+.task-summary-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-summary-count {
+  flex-shrink: 0;
+  padding: 2px 9px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+
+  &.filled {
+    color: var(--el-color-primary);
+    font-weight: 600;
+    background: var(--el-color-primary-light-9);
+  }
+}
+
+.task-arrow {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  transition: transform 0.2s var(--ease-standard);
+}
+
+.task-card.expanded .task-arrow {
+  transform: rotate(180deg);
+}
+
+.task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  background: color-mix(in srgb, var(--el-bg-color) 97%, var(--el-fill-color-lighter));
 }
 
 .task-meta,
@@ -410,7 +483,7 @@ watch(
   grid-column: 1 / -1;
 }
 
-.task-card > footer span {
+.task-detail > footer span {
   flex: 1;
 }
 
@@ -463,6 +536,16 @@ watch(
   .task-meta,
   .task-grid {
     grid-template-columns: 1fr;
+  }
+
+  .task-summary {
+    flex-wrap: wrap;
+  }
+
+  .task-summary-title {
+    flex-basis: 100%;
+    order: 5;
+    white-space: normal;
   }
 }
 </style>
