@@ -29,6 +29,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -2346,9 +2347,9 @@ public class PreAiEncounterService {
         return value;
     }
 
-    /** 流式调用上游：返回 SSE 原始字节流，由调用方逐行解析并转发。 */
+    /** 流式调用上游：返回 SSE 原始字节流，由调用方逐行解析并转发。流式模式下首字节很快到达，数据持续流动即无空闲超时。 */
     private InputStream callLabOcrVisionStream(EffectiveAiConfig config, String model, String prompt, String dataUrl) throws IOException {
-        Map<String, Object> payload = buildLabOcrPayload(model, prompt, dataUrl);
+        Map<String, Object> payload = buildLabOcrPayload(model, prompt, dataUrl, true);
         String body;
         try {
             body = objectMapper.writeValueAsString(payload);
@@ -2357,7 +2358,7 @@ public class PreAiEncounterService {
         }
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(config.baseUrl().replaceAll("/+$", "") + "/chat/completions"))
-                .timeout(Duration.ofSeconds(60))
+                .timeout(Duration.ofSeconds(120))
                 .header("Authorization", "Bearer " + config.apiKey())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
@@ -2372,6 +2373,9 @@ public class PreAiEncounterService {
                 throw badRequest(labOcrUpstreamMessage(response.statusCode()));
             }
             return response.body();
+        } catch (HttpTimeoutException error) {
+            log.warn("Lab OCR stream upstream timed out: model={}", model);
+            throw badRequest("AI 识别连接超时（模型未及时响应），请重试一次或手动填写");
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw badRequest("AI 识别被中断，请重试");
@@ -2434,8 +2438,8 @@ public class PreAiEncounterService {
             """ + list;
     }
 
-    /** 构造化验单识别的上游请求体（sync 与 stream 共用）。 */
-    private Map<String, Object> buildLabOcrPayload(String model, String prompt, String dataUrl) {
+    /** 构造化验单识别的上游请求体（sync 与 stream 共用；stream 决定是否实时流式返回）。 */
+    private Map<String, Object> buildLabOcrPayload(String model, String prompt, String dataUrl, boolean stream) {
         Map<String, Object> textPart = new LinkedHashMap<>();
         textPart.put("type", "text");
         textPart.put("text", prompt);
@@ -2450,11 +2454,12 @@ public class PreAiEncounterService {
         payload.put("messages", List.of(message));
         payload.put("temperature", 0);
         payload.put("max_tokens", LAB_OCR_MAX_TOKENS);
+        if (stream) payload.put("stream", true);
         return payload;
     }
 
     private String callLabOcrVision(EffectiveAiConfig config, String model, String prompt, String dataUrl) {
-        Map<String, Object> payload = buildLabOcrPayload(model, prompt, dataUrl);
+        Map<String, Object> payload = buildLabOcrPayload(model, prompt, dataUrl, false);
 
         String body;
         try {
@@ -2466,7 +2471,7 @@ public class PreAiEncounterService {
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
-                    .timeout(Duration.ofSeconds(90))
+                    .timeout(Duration.ofSeconds(180))
                     .header("Authorization", "Bearer " + config.apiKey())
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
