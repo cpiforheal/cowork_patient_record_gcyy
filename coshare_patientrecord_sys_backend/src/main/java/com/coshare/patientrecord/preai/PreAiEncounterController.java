@@ -246,6 +246,17 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "化验室已完成并交接", service.completeLab(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    /** 化验单 AI 拍照识别：按模板指标白名单提取数值（结果仅供预填，须人工核对后另行保存）。 */
+    @PostMapping(path = "/{encounterId}/lab-reports/ocr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<Map<String, Object>> ocrLabReport(
+        @PathVariable String encounterId,
+        @RequestPart("file") MultipartFile file,
+        @RequestParam(defaultValue = "") String metrics,
+        @RequestParam(defaultValue = "") String templateName
+    ) throws IOException {
+        return ApiResult.of(200, "化验单识别完成", service.ocrLabReport(encounterId, file, metrics, templateName, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping(path = "/{encounterId}/attachments", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ApiResult<Map<String, Object>> uploadAttachment(
         @PathVariable String encounterId,

@@ -677,6 +677,40 @@ export const savePreAiLabReportApi = (
   }
 ) => jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports`, "POST", payload);
 
+export interface PreAiLabOcrItem {
+  key?: string;
+  name: string;
+  value: string;
+  unit?: string;
+  reference?: string;
+  abnormal?: boolean;
+  confidence?: number;
+}
+
+export interface PreAiLabOcrResult {
+  items: PreAiLabOcrItem[];
+  unmatched: string[];
+  attachmentId?: string;
+}
+
+/** 化验单 AI 拍照识别：按模板指标白名单提取（结果仅供预填，须人工核对后另行保存）。 */
+export const ocrLabReportApi = async (
+  encounterId: string,
+  payload: { file: File; metrics: Array<Record<string, unknown>>; templateName: string }
+) => {
+  const body = new FormData();
+  body.append("file", payload.file);
+  body.append("metrics", JSON.stringify(payload.metrics));
+  body.append("templateName", payload.templateName);
+  const result = await clinicFetch(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports/ocr`, {
+    method: "POST",
+    headers: authHeaders(),
+    body
+  });
+  const data = await parseClinicApiResponse<PreAiLabOcrResult>(result);
+  return clinicResponse(data);
+};
+
 export const completePreAiLabApi = (encounterId: string, expectedVersion: number) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab/complete`, "POST", {
     expectedVersion

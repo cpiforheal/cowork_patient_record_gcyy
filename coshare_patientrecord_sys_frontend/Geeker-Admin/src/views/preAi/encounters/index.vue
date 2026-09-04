@@ -1297,7 +1297,7 @@
                     </div>
 
                     <AuxiliaryTaskPanel
-                      v-else
+                      v-else-if="activeAuxTab === 'tasks'"
                       :workspace="workspace"
                       :capabilities="authStore.capabilities"
                       :permissions="authStore.auxiliaryPermissions"
@@ -1308,6 +1308,14 @@
                       @updated="hydrateWorkspace"
                       @return-task="returnAuxTask"
                       @draft-change="auxiliaryTasksDirty = $event"
+                    />
+                    <LabOcrPanel
+                      v-else-if="activeAuxTab === 'ocr'"
+                      :workspace="workspace"
+                      :encounter-id="selectedEncounterId"
+                      :can-edit="canOpenLabWorkbench"
+                      @updated="hydrateWorkspace"
+                      @saved="activeAuxTab = 'lab'"
                     />
                   </section>
                 </Transition>
@@ -1881,6 +1889,7 @@ import RecordAiChat from "./components/RecordAiChat.vue";
 import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
 import FollowUpTimeline from "./components/FollowUpTimeline.vue";
 import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
+import LabOcrPanel from "./components/LabOcrPanel.vue";
 import DutyAssignmentPanel from "./components/DutyAssignmentPanel.vue";
 import StructuredField from "./components/StructuredField.vue";
 import CreatableSelect from "./components/CreatableSelect.vue";
@@ -2238,7 +2247,8 @@ const auxPendingTaskCount = computed(
 const auxTabOptions = computed(() => [
   { label: `资料图片 ${auxImageTotal.value}`, value: "images" },
   { label: `化验指标 ${auxLabReportCount.value}`, value: "lab" },
-  { label: `检查任务 ${auxPendingTaskCount.value}`, value: "tasks" }
+  { label: `检查任务 ${auxPendingTaskCount.value}`, value: "tasks" },
+  { label: "化验单识别", value: "ocr" }
 ]);
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");

@@ -1,6 +1,8 @@
 package com.coshare.patientrecord.preai;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.ai.model.EffectiveAiConfig;
+import com.coshare.patientrecord.ai.service.ClinicAiConfigService;
 import com.coshare.patientrecord.auth.service.AuthNavigationService;
 import com.coshare.patientrecord.auth.service.RoleCatalog;
 import com.coshare.patientrecord.common.exception.VersionConflictException;
@@ -11,21 +13,29 @@ import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
 import com.coshare.patientrecord.inventory.service.InventoryStageConsumptionService;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -187,7 +197,11 @@ public class PreAiEncounterService {
     private final ClinicQueueService clinicQueueService;
     private final InventoryStageConsumptionService inventoryStageConsumptionService;
     private final AuthNavigationService navigationService;
+    private final ClinicAiConfigService aiConfigService;
     private final Path generatedDir;
+    private static final String LAB_OCR_MODEL = "glm-5.3-flash";
+    private static final int LAB_OCR_MAX_TOKENS = 4096;
+    private final HttpClient labOcrHttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public PreAiEncounterService(
         JdbcTemplate jdbcTemplate,
@@ -199,6 +213,7 @@ public class PreAiEncounterService {
         ClinicQueueService clinicQueueService,
         InventoryStageConsumptionService inventoryStageConsumptionService,
         AuthNavigationService navigationService,
+        ClinicAiConfigService aiConfigService,
         @Value("${clinic.generated-pre-ai-dir:${clinic.attachment-dir}/../generated-pre-ai}") String generatedDir
     ) {
         this.jdbcTemplate = jdbcTemplate;
@@ -210,6 +225,7 @@ public class PreAiEncounterService {
         this.clinicQueueService = clinicQueueService;
         this.inventoryStageConsumptionService = inventoryStageConsumptionService;
         this.navigationService = navigationService;
+        this.aiConfigService = aiConfigService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
 
@@ -2109,6 +2125,206 @@ public class PreAiEncounterService {
         jdbcTemplate.query("SELECT * FROM pre_ai_exports WHERE encounter_id = ? ORDER BY version DESC", (org.springframework.jdbc.core.RowCallbackHandler) rs -> exports.add(readExport(rs)), encounterId);
         result.put("currentUserRole", user.role());
         return result;
+    }
+
+    /**
+     * 化验单 AI 拍照识别：按前端传入的模板指标白名单提取数值，原图归档留档对照。
+     * 结果仅供预填草稿，必须人工核对后另行保存，不直接写入正式报告。
+     */
+    public Map<String, Object> ocrLabReport(
+        String encounterId,
+        MultipartFile file,
+        String metricsJson,
+        String templateName,
+        SessionUser user
+    ) throws IOException {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireAuxTaskEditor(encounter, "LAB", user);
+        if (file == null || file.isEmpty()) throw badRequest("请先拍摄或选择化验单图片");
+        String mime = safe(file.getContentType());
+        if (!mime.startsWith("image/") && !mime.contains("pdf")) throw badRequest("仅支持化验单图片或 PDF 识别");
+        List<ObjectNode> whitelist = parseLabOcrWhitelist(metricsJson);
+        if (whitelist.isEmpty()) throw badRequest("化验模板指标清单为空，无法识别");
+
+        EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
+        if (!config.enabled() || safe(config.baseUrl()).isBlank() || safe(config.apiKey()).isBlank()) {
+            throw conflict("AI 识别服务未配置，请联系管理员");
+        }
+        String dataUrl = "data:" + (mime.startsWith("image/") ? mime : "application/pdf")
+            + ";base64," + Base64.getEncoder().encodeToString(file.getBytes());
+        String content = callLabOcrVision(config, buildLabOcrPrompt(whitelist), dataUrl);
+        JsonNode parsed = parseLabOcrJson(content);
+
+        Map<String, ObjectNode> byNameKey = new LinkedHashMap<>();
+        for (ObjectNode metric : whitelist) {
+            byNameKey.putIfAbsent(text(metric, "name").toLowerCase(Locale.ROOT), metric);
+            String shortName = text(metric, "shortName");
+            if (!shortName.isBlank()) byNameKey.putIfAbsent(shortName.toLowerCase(Locale.ROOT), metric);
+        }
+        ArrayNode items = objectMapper.createArrayNode();
+        List<String> unmatched = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode item : parsed.path("items")) {
+            String rawName = text(item, "name");
+            if (rawName.isBlank()) continue;
+            ObjectNode metric = byNameKey.get(rawName.toLowerCase(Locale.ROOT));
+            if (metric == null) {
+                unmatched.add(rawName);
+                continue;
+            }
+            String canonical = text(metric, "name");
+            if (!seen.add(canonical)) continue;
+            ObjectNode row = items.addObject();
+            row.put("key", text(metric, "key"));
+            row.put("name", canonical);
+            row.put("value", text(item, "value"));
+            row.put("unit", firstNonBlank(text(item, "unit"), text(metric, "unit")));
+            row.put("reference", firstNonBlank(text(item, "reference"), text(metric, "reference")));
+            row.put("abnormal", item.path("abnormal").asBoolean(false));
+            row.put("confidence", item.path("confidence").asDouble(0.0));
+        }
+        for (JsonNode extra : parsed.path("unmatched")) {
+            String name = extra.asText("");
+            if (!name.isBlank()) unmatched.add(name);
+        }
+
+        String archivedId = archiveLabOcrImage(encounterId, file, templateName, user);
+        audit(encounterId, "lab.ocr", "", user, safe(templateName) + "：AI 识别 " + items.size() + " 项（原图已归档）");
+
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("items", items);
+        ArrayNode unmatchedNode = result.putArray("unmatched");
+        unmatched.stream().distinct().forEach(unmatchedNode::add);
+        result.put("attachmentId", archivedId);
+        return toMap(result);
+    }
+
+    private List<ObjectNode> parseLabOcrWhitelist(String metricsJson) {
+        List<ObjectNode> whitelist = new ArrayList<>();
+        if (safe(metricsJson).isBlank()) return whitelist;
+        try {
+            for (JsonNode item : objectMapper.readTree(metricsJson)) {
+                String name = text(item, "name");
+                if (name.isBlank()) continue;
+                ObjectNode metric = objectMapper.createObjectNode();
+                metric.put("key", text(item, "key"));
+                metric.put("name", name);
+                metric.put("shortName", text(item, "shortName"));
+                metric.put("unit", text(item, "unit"));
+                metric.put("reference", text(item, "reference"));
+                whitelist.add(metric);
+            }
+        } catch (JsonProcessingException error) {
+            throw badRequest("化验模板指标清单格式不正确");
+        }
+        return whitelist;
+    }
+
+    private String buildLabOcrPrompt(List<ObjectNode> whitelist) {
+        StringBuilder list = new StringBuilder();
+        for (ObjectNode metric : whitelist) {
+            list.append("- 名称：").append(text(metric, "name"));
+            String shortName = text(metric, "shortName");
+            if (!shortName.isBlank()) list.append("（简称 ").append(shortName).append("）");
+            String unit = text(metric, "unit");
+            if (!unit.isBlank()) list.append("，单位 ").append(unit);
+            String reference = text(metric, "reference");
+            if (!reference.isBlank()) list.append("，参考范围 ").append(reference);
+            list.append("\n");
+        }
+        return """
+            你是检验科化验单录入助手。请阅读图片中的化验单/检验报告，按下面的指标清单逐项提取数值。
+            规则：
+            1. 只提取清单中存在的指标；清单中没有的指标一律不要输出到 items。
+            2. 数值保持图片原样（含小数位），不要换算或四舍五入；单位使用清单给出的单位。
+            3. 图片中找不到的指标不要输出，也不要猜测或编造。
+            4. abnormal：数值明显超出参考范围时为 true，否则 false；无法判断时为 false。
+            5. confidence：0 到 1 的小数，表示对该数值识别的把握；模糊难辨时如实给低值。
+            6. 图片中存在、但清单之外的项目，把名称汇总到 unmatched（只写名称）。
+            仅输出一个 JSON 对象，不要输出任何其他文字：
+            {"items":[{"name":"清单中的指标名称","value":"...","unit":"...","reference":"...","abnormal":false,"confidence":0.9}],"unmatched":[]}
+            指标清单：
+            """ + list;
+    }
+
+    private String callLabOcrVision(EffectiveAiConfig config, String prompt, String dataUrl) {
+        Map<String, Object> textPart = new LinkedHashMap<>();
+        textPart.put("type", "text");
+        textPart.put("text", prompt);
+        Map<String, Object> imagePart = new LinkedHashMap<>();
+        imagePart.put("type", "image_url");
+        imagePart.put("image_url", Map.of("url", dataUrl));
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("role", "user");
+        message.put("content", List.of(textPart, imagePart));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", LAB_OCR_MODEL);
+        payload.put("messages", List.of(message));
+        payload.put("temperature", 0);
+        payload.put("max_tokens", LAB_OCR_MAX_TOKENS);
+
+        String body;
+        try {
+            body = objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException error) {
+            throw badRequest("AI 识别请求构造失败");
+        }
+        String endpoint = config.baseUrl().replaceAll("/+$", "") + "/chat/completions";
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+                    .timeout(Duration.ofSeconds(90))
+                    .header("Authorization", "Bearer " + config.apiKey())
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+                HttpResponse<String> response = labOcrHttpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    log.warn("Lab OCR upstream returned HTTP {}: attempt={}, model={}", response.statusCode(), attempt, LAB_OCR_MODEL);
+                    if (attempt == 2) throw badRequest("AI 识别服务暂时不可用，请稍后重试或手动填写");
+                    continue;
+                }
+                JsonNode root = objectMapper.readTree(response.body());
+                String content = root.path("choices").path(0).path("message").path("content").asText("");
+                if (!content.isBlank()) return content;
+                log.warn("Lab OCR upstream returned empty content: attempt={}, model={}", attempt, LAB_OCR_MODEL);
+            } catch (IOException error) {
+                log.warn("Lab OCR upstream call failed: attempt={}, error={}", attempt, error.getMessage());
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw badRequest("AI 识别被中断，请重试");
+            }
+        }
+        throw badRequest("AI 识别未返回内容，请重试或手动填写");
+    }
+
+    private JsonNode parseLabOcrJson(String content) {
+        String trimmed = safe(content).trim();
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start < 0 || end <= start) throw badRequest("AI 识别结果无法解析，请重试或手动填写");
+        try {
+            return objectMapper.readTree(trimmed.substring(start, end + 1));
+        } catch (JsonProcessingException error) {
+            throw badRequest("AI 识别结果无法解析，请重试或手动填写");
+        }
+    }
+
+    private String archiveLabOcrImage(String encounterId, MultipartFile file, String templateName, SessionUser user) throws IOException {
+        ClinicStoredFile stored = fileService.store(file, encounterId);
+        String id = "preatt-" + UUID.randomUUID();
+        jdbcTemplate.update("""
+            INSERT INTO pre_ai_attachments (
+              id, encounter_id, stage_code, task_id, file_name, storage_path, mime_type, file_size, sha256,
+              description, captured_at, uploader, uploader_role, batch_id, batch_name, relative_path, sequence_no, status, created_at
+            ) VALUES (?, ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'ACTIVE', ?)
+            """,
+            id, encounterId, stored.fileName(), stored.storagePath(), stored.mimeType(), stored.size(), stored.sha256(),
+            "化验单AI识别原图（" + safe(templateName) + "）", now(), user.name(), user.role(),
+            "lab-ocr-" + UUID.randomUUID(), "化验单AI识别-" + safe(templateName), safe(file.getOriginalFilename()), now()
+        );
+        return id;
     }
 
     private ObjectNode ensureLabTask(String encounterId, String creator) {
