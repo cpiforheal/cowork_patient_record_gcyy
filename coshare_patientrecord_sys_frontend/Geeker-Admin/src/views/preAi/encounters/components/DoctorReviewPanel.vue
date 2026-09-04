@@ -97,7 +97,9 @@
                 <el-input v-model="editingValue" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" />
                 <div class="row-edit-actions">
                   <el-button size="small" @click="cancelRowEdit">取消</el-button>
-                  <el-button size="small" type="primary" :loading="loading" @click="saveRowEdit(section.code, row)">保存修改</el-button>
+                  <el-button size="small" type="primary" :loading="loading" @click="saveRowEdit(section.code, row)"
+                    >保存修改</el-button
+                  >
                 </div>
               </template>
               <template v-else>
@@ -116,7 +118,36 @@
             </div>
           </div>
         </div>
-        <p v-else class="section-empty">本节无有效内容</p>
+        <div v-else class="section-empty-block">
+          <p class="section-empty">本节无有效内容</p>
+          <div v-if="canReview && fillableFields(section.code).length" class="section-supplement">
+            <template v-if="supplementingCode === section.code">
+              <el-select v-model="supplementField" size="small" placeholder="选择要补充的字段" class="supplement-field">
+                <el-option v-for="field in fillableFields(section.code)" :key="field.id" :label="field.label" :value="field.id" />
+              </el-select>
+              <el-input
+                v-model="supplementValue"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                placeholder="填写补充内容（留空字段可在此补齐）"
+                class="supplement-input"
+              />
+              <div class="supplement-actions">
+                <el-button size="small" @click="cancelSupplement">取消</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :loading="loading"
+                  :disabled="!supplementField || !supplementValue.trim()"
+                  @click="saveSupplement(section.code)"
+                >
+                  保存补充
+                </el-button>
+              </div>
+            </template>
+            <el-button v-else size="small" text type="primary" @click="startSupplement(section.code)"> 补充内容 </el-button>
+          </div>
+        </div>
       </section>
     </div>
     <el-input
@@ -437,6 +468,59 @@ const saveRowEdit = (sectionCode: string, row: PreAiDocumentSection["rows"][numb
   cancelRowEdit();
 };
 
+// 空章节可补充字段清单（rowId 用规范字段 key：阶段重填同名行后覆盖自动退化为替换，且可按 key 进病历生成源）
+const SECTION_FILLABLE: Record<string, Array<{ id: string; label: string }>> = {
+  "09": [
+    { id: "primaryWesternDiagnosis", label: "西医主诊断" },
+    { id: "tcmDisease", label: "中医病名" },
+    { id: "primarySyndrome", label: "中医主证" },
+    { id: "diagnosisBasis", label: "诊断依据" }
+  ],
+  "10": [
+    { id: "secondaryDiagnosisItems", label: "次诊断" },
+    { id: "secondaryWesternDiagnoses", label: "西医次诊断" },
+    { id: "differentialDiagnoses", label: "鉴别诊断" }
+  ],
+  "11": [
+    { id: "comorbidTcmItems", label: "合并病中医病名及证型" },
+    { id: "concurrentSyndrome", label: "兼夹证" }
+  ],
+  "12": [
+    { id: "plannedPrimaryOperation", label: "拟行主术式" },
+    { id: "plannedSecondaryOperations", label: "拟行次术式" },
+    { id: "operationIndications", label: "手术指征" },
+    { id: "recommendedAnesthesia", label: "建议麻醉方式" },
+    { id: "operationGrade", label: "手术等级" },
+    { id: "surgeryArrangements", label: "手术安排" }
+  ],
+  "13": [
+    { id: "finalRoute", label: "最终就诊分支（门诊/住院）" },
+    { id: "treatmentPath", label: "治疗路径（保守/手术）" },
+    { id: "treatmentPlan", label: "治疗方案" }
+  ]
+};
+const supplementingCode = ref("");
+const supplementField = ref("");
+const supplementValue = ref("");
+const fillableFields = (sectionCode: string) => SECTION_FILLABLE[sectionCode] || [];
+const startSupplement = (sectionCode: string) => {
+  supplementingCode.value = sectionCode;
+  supplementField.value = "";
+  supplementValue.value = "";
+};
+const cancelSupplement = () => {
+  supplementingCode.value = "";
+  supplementField.value = "";
+  supplementValue.value = "";
+};
+const saveSupplement = (sectionCode: string) => {
+  const field = fillableFields(sectionCode).find(item => item.id === supplementField.value);
+  const value = supplementValue.value.trim();
+  if (!field || !value) return;
+  emit("saveRowOverride", { sectionCode, rowId: field.id, label: field.label, value });
+  cancelSupplement();
+};
+
 const targetStatusLabel = (status: GeneratedMedicalRecord["status"]) =>
   ({ draft: "草稿", finalized: "已定稿", voided: "已作废" })[status] || status;
 const targetStatusType = (status: GeneratedMedicalRecord["status"]) => {
@@ -720,11 +804,28 @@ const handleTargetVersionCommand = (command: string | number | object, version: 
 .document-row.critical {
   box-shadow: inset 3px 0 0 var(--el-text-color-primary);
 }
+.section-empty-block {
+  display: grid;
+  gap: 4px;
+}
 .section-empty {
   margin: 0;
-  padding: 11px 14px;
+  padding: 11px 14px 0;
   color: var(--el-text-color-placeholder);
   font-size: 13px;
+}
+.section-supplement {
+  display: grid;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+.supplement-field {
+  max-width: 280px;
+}
+.supplement-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .lab-review-section {
   background: var(--el-fill-color-lighter);

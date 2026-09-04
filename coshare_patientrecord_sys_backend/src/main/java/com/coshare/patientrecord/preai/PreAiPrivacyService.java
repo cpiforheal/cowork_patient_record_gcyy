@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -411,6 +412,38 @@ public class PreAiPrivacyService {
                 if (safe(override).isBlank()) rows.remove(index);
                 else ((ObjectNode) row).put("value", override);
             }
+        }
+        appendSupplementOverrides(documentView, overrides, values);
+    }
+
+    /** 复核补充：未被任何已有行命中的覆盖项按所属章节追加为新行（rowId 用规范字段 key，阶段重填同名行后自动退化为替换）。 */
+    private void appendSupplementOverrides(ObjectNode documentView, JsonNode overrides, Map<String, String> values) {
+        Set<String> matchedKeys = new LinkedHashSet<>();
+        for (JsonNode section : documentView.path("sections")) {
+            String sectionCode = text(section, "code");
+            for (JsonNode row : section.path("rows")) {
+                if (row.isObject() && values.containsKey(sectionCode + ":" + text(row, "id"))) {
+                    matchedKeys.add(sectionCode + ":" + text(row, "id"));
+                }
+            }
+        }
+        for (JsonNode item : overrides) {
+            String sectionCode = text(item, "sectionCode");
+            String rowId = text(item, "rowId");
+            String value = text(item, "value");
+            String key = sectionCode + ":" + rowId;
+            if (sectionCode.isBlank() || rowId.isBlank() || safe(value).isBlank() || matchedKeys.contains(key)) continue;
+            ObjectNode targetSection = null;
+            for (JsonNode section : documentView.path("sections")) {
+                if (section.isObject() && sectionCode.equals(text(section, "code"))) {
+                    targetSection = (ObjectNode) section;
+                    break;
+                }
+            }
+            if (targetSection == null) continue;
+            String label = text(item, "label");
+            if (label.isBlank()) label = FIELD_LABELS.getOrDefault(rowId, rowId);
+            addViewTextRow(targetSection, rowId, label, value, false, "NORMAL");
         }
     }
 
