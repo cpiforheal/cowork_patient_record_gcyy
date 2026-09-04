@@ -3613,6 +3613,10 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   value.stages.forEach(stage => {
     const normalized = deepCopy(stage.data);
     if (stage.stageCode === "DOCTOR") {
+      // 注入接诊室建议分支（仅作前端"分支更正原因"字段的显隐判断，非白名单字段后端会剥除）
+      normalized.receptionDispositionSuggestion = String(
+        value.stages.find(item => item.stageCode === "RECEPTION")?.data?.dispositionSuggestion || ""
+      ).toUpperCase();
       if (!normalized.plannedPrimaryOperation && normalized.plannedOperationName) {
         normalized.plannedPrimaryOperation = normalized.plannedOperationName;
       }

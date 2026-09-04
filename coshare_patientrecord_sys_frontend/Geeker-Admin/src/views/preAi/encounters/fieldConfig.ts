@@ -1125,6 +1125,18 @@ export const preAiStages: PreAiStageConfig[] = [
     fields: [
       { key: "finalRoute", label: "最终门诊/住院分支", kind: "select", required: true, options: routeOptions },
       {
+        key: "routeOverrideReason",
+        label: "分支更正原因",
+        kind: "textarea",
+        rows: 2,
+        span: 2,
+        placeholder: "最终分支与接诊室建议不一致时必须填写更正原因",
+        visible: form =>
+          Boolean(form.receptionDispositionSuggestion) &&
+          Boolean(form.finalRoute) &&
+          form.finalRoute !== form.receptionDispositionSuggestion
+      },
+      {
         key: "primaryWesternDiagnosis",
         label: "西医主诊断",
         kind: "select",
@@ -1333,7 +1345,13 @@ export const preAiStages: PreAiStageConfig[] = [
     owner: "手术室护士",
     description: "只登记实际发生的手术和术中结果。门诊及非手术患者会自动跳过。",
     fields: [
-      { key: "preoperativeDiagnosis", label: "术前诊断", kind: "input", placeholder: "进入手术卡自动带出医生岗主诊断，可修改", span: 2 },
+      {
+        key: "preoperativeDiagnosis",
+        label: "术前诊断",
+        kind: "input",
+        placeholder: "进入手术卡自动带出医生岗主诊断，可修改",
+        span: 2
+      },
       { key: "postoperativeDiagnosis", label: "术后诊断", kind: "input", placeholder: "默认同术前诊断，可修改", span: 2 },
       {
         key: "actualPrimaryOperation",
