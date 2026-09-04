@@ -19,7 +19,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -48,11 +51,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
@@ -2136,6 +2142,7 @@ public class PreAiEncounterService {
         MultipartFile file,
         String metricsJson,
         String templateName,
+        String model,
         SessionUser user
     ) throws IOException {
         requireEncounterAccess(encounterId, user);
@@ -2151,11 +2158,145 @@ public class PreAiEncounterService {
         if (!config.enabled() || safe(config.baseUrl()).isBlank() || safe(config.apiKey()).isBlank()) {
             throw conflict("AI 识别服务未配置，请联系管理员");
         }
+        String safeModel = sanitizeLabOcrModel(model);
+        long startedAt = System.currentTimeMillis();
         String dataUrl = "data:" + (mime.startsWith("image/") ? mime : "application/pdf")
             + ";base64," + Base64.getEncoder().encodeToString(file.getBytes());
-        String content = callLabOcrVision(config, buildLabOcrPrompt(whitelist), dataUrl);
+        String content = callLabOcrVision(config, safeModel, buildLabOcrPrompt(whitelist), dataUrl);
         JsonNode parsed = parseLabOcrJson(content);
+        ObjectNode filtered = filterLabOcrItems(parsed, whitelist);
+        String archivedId = archiveLabOcrImage(encounterId, file, templateName, user);
+        audit(encounterId, "lab.ocr", "", user, safe(templateName) + "：AI 识别 " + filtered.path("items").size() + " 项（原图已归档）");
+        log.info("Lab OCR finished: encounter={}, model={}, items={}, unmatched={}, costMs={}",
+            encounterId, safeModel, filtered.path("items").size(), filtered.path("unmatched").size(), System.currentTimeMillis() - startedAt);
 
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("items", filtered.path("items"));
+        result.set("unmatched", filtered.path("unmatched"));
+        result.put("attachmentId", archivedId);
+        return toMap(result);
+    }
+
+    /**
+     * 化验单 AI 识别流式端点：上游 SSE 逐段转发（status/delta/done/error），
+     * 让前端实时看到模型是否已连接、是否正在输出；归档与审计在流结束时执行。
+     */
+    public ResponseEntity<StreamingResponseBody> ocrLabReportStream(
+        String encounterId,
+        MultipartFile file,
+        String metricsJson,
+        String templateName,
+        String model,
+        SessionUser user
+    ) throws IOException {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireAuxTaskEditor(encounter, "LAB", user);
+        if (file == null || file.isEmpty()) throw badRequest("请先拍摄或选择化验单图片");
+        String mime = safe(file.getContentType());
+        if (!mime.startsWith("image/") && !mime.contains("pdf")) throw badRequest("仅支持化验单图片或 PDF 识别");
+        List<ObjectNode> whitelist = parseLabOcrWhitelist(metricsJson);
+        if (whitelist.isEmpty()) throw badRequest("化验模板指标清单为空，无法识别");
+        EffectiveAiConfig config = aiConfigService.resolveEffectiveConfig();
+        if (!config.enabled() || safe(config.baseUrl()).isBlank() || safe(config.apiKey()).isBlank()) {
+            throw conflict("AI 识别服务未配置，请联系管理员");
+        }
+        String safeModel = sanitizeLabOcrModel(model);
+        byte[] imageBytes = file.getBytes();
+        String dataUrl = "data:" + (mime.startsWith("image/") ? mime : "application/pdf")
+            + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
+        String prompt = buildLabOcrPrompt(whitelist);
+
+        StreamingResponseBody body = outputStream -> {
+            long startedAt = System.currentTimeMillis();
+            StringBuilder sse = new StringBuilder();
+            Runnable flush = () -> {
+                try {
+                    outputStream.write(sse.toString().getBytes(StandardCharsets.UTF_8));
+                    outputStream.flush();
+                } catch (IOException ignored) {
+                    // 客户端断开时忽略写失败，循环会在下一次读/写中自然退出
+                }
+                sse.setLength(0);
+            };
+            java.util.function.Consumer<ObjectNode> send = event -> {
+                try {
+                    sse.append("data: ").append(objectMapper.writeValueAsString(event)).append("\n\n");
+                } catch (JsonProcessingException ignored) {
+                    // 事件序列化失败则跳过该事件
+                }
+                flush.run();
+            };
+            long chars = 0;
+            try {
+                ObjectNode status = objectMapper.createObjectNode();
+                status.put("type", "status");
+                status.put("message", "图片已接收，正在连接识别模型…");
+                send.accept(status);
+                StringBuilder contentBuilder = new StringBuilder();
+                try (InputStream upstream = callLabOcrVisionStream(config, safeModel, prompt, dataUrl)) {
+                    ObjectNode connected = objectMapper.createObjectNode();
+                    connected.put("type", "status");
+                    connected.put("message", "已连接模型，正在输出…");
+                    send.accept(connected);
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(upstream, StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (!line.startsWith("data:")) continue;
+                        String data = line.substring(5).trim();
+                        if (data.isEmpty()) continue;
+                        if ("[DONE]".equals(data)) break;
+                        JsonNode chunk = null;
+                        try {
+                            chunk = objectMapper.readTree(data);
+                        } catch (JsonProcessingException ignored) {
+                            // 忽略无法解析的心跳/杂项行
+                        }
+                        if (chunk == null) continue;
+                        String delta = chunk.path("choices").path(0).path("delta").path("content").asText("");
+                        if (!delta.isEmpty()) {
+                            contentBuilder.append(delta);
+                            chars += delta.length();
+                            ObjectNode deltaEvent = objectMapper.createObjectNode();
+                            deltaEvent.put("type", "delta");
+                            deltaEvent.put("text", delta);
+                            send.accept(deltaEvent);
+                        }
+                    }
+                }
+                String content = contentBuilder.toString();
+                if (content.isBlank()) throw badRequest("AI 识别未返回内容，请重试或手动填写");
+                JsonNode parsed = parseLabOcrJson(content);
+                ObjectNode filtered = filterLabOcrItems(parsed, whitelist);
+                String archivedId = archiveLabOcrImage(encounterId, file, templateName, user);
+                audit(encounterId, "lab.ocr", "", user, safe(templateName) + "：AI 识别 " + filtered.path("items").size() + " 项（原图已归档，流式）");
+                log.info("Lab OCR stream finished: encounter={}, model={}, items={}, chars={}, costMs={}",
+                    encounterId, safeModel, filtered.path("items").size(), chars, System.currentTimeMillis() - startedAt);
+                ObjectNode done = objectMapper.createObjectNode();
+                done.put("type", "done");
+                done.set("items", filtered.path("items"));
+                done.set("unmatched", filtered.path("unmatched"));
+                done.put("attachmentId", archivedId);
+                send.accept(done);
+            } catch (ResponseStatusException error) {
+                log.warn("Lab OCR stream failed: encounter={}, model={}, reason={}", encounterId, safeModel, error.getReason());
+                ObjectNode errorEvent = objectMapper.createObjectNode();
+                errorEvent.put("type", "error");
+                errorEvent.put("message", safe(error.getReason()).isBlank() ? "识别失败，请重试" : error.getReason());
+                send.accept(errorEvent);
+            } catch (IOException error) {
+                log.warn("Lab OCR stream failed: encounter={}, model={}, error={}", encounterId, safeModel, error.getMessage());
+                ObjectNode errorEvent = objectMapper.createObjectNode();
+                errorEvent.put("type", "error");
+                errorEvent.put("message", "识别连接中断，请重试或手动填写");
+                send.accept(errorEvent);
+            }
+        };
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(body);
+    }
+
+    /** 模型输出按模板白名单过滤：仅保留清单内指标，模板外项归入 unmatched。 */
+    private ObjectNode filterLabOcrItems(JsonNode parsed, List<ObjectNode> whitelist) {
         Map<String, ObjectNode> byNameKey = new LinkedHashMap<>();
         for (ObjectNode metric : whitelist) {
             byNameKey.putIfAbsent(text(metric, "name").toLowerCase(Locale.ROOT), metric);
@@ -2188,16 +2329,47 @@ public class PreAiEncounterService {
             String name = extra.asText("");
             if (!name.isBlank()) unmatched.add(name);
         }
-
-        String archivedId = archiveLabOcrImage(encounterId, file, templateName, user);
-        audit(encounterId, "lab.ocr", "", user, safe(templateName) + "：AI 识别 " + items.size() + " 项（原图已归档）");
-
         ObjectNode result = objectMapper.createObjectNode();
         result.set("items", items);
         ArrayNode unmatchedNode = result.putArray("unmatched");
         unmatched.stream().distinct().forEach(unmatchedNode::add);
-        result.put("attachmentId", archivedId);
-        return toMap(result);
+        return result;
+    }
+
+    private String sanitizeLabOcrModel(String model) {
+        String value = safe(model);
+        if (value.isBlank()) return LAB_OCR_MODEL;
+        if (value.length() > 64 || !value.matches("[A-Za-z0-9._-]+")) throw badRequest("模型名称不正确");
+        return value;
+    }
+
+    /** 流式调用上游：返回 SSE 原始字节流，由调用方逐行解析并转发。 */
+    private InputStream callLabOcrVisionStream(EffectiveAiConfig config, String model, String prompt, String dataUrl) throws IOException {
+        Map<String, Object> payload = buildLabOcrPayload(model, prompt, dataUrl);
+        String body;
+        try {
+            body = objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException error) {
+            throw badRequest("AI 识别请求构造失败");
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(config.baseUrl().replaceAll("/+$", "") + "/chat/completions"))
+                .timeout(Duration.ofSeconds(60))
+                .header("Authorization", "Bearer " + config.apiKey())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .build();
+            HttpResponse<InputStream> response = labOcrHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                response.body().close();
+                log.warn("Lab OCR stream upstream returned HTTP {}: model={}", response.statusCode(), model);
+                throw badRequest("AI 识别服务暂时不可用（HTTP " + response.statusCode() + "），请稍后重试或手动填写");
+            }
+            return response.body();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw badRequest("AI 识别被中断，请重试");
+        }
     }
 
     private List<ObjectNode> parseLabOcrWhitelist(String metricsJson) {
@@ -2248,7 +2420,8 @@ public class PreAiEncounterService {
             """ + list;
     }
 
-    private String callLabOcrVision(EffectiveAiConfig config, String prompt, String dataUrl) {
+    /** 构造化验单识别的上游请求体（sync 与 stream 共用）。 */
+    private Map<String, Object> buildLabOcrPayload(String model, String prompt, String dataUrl) {
         Map<String, Object> textPart = new LinkedHashMap<>();
         textPart.put("type", "text");
         textPart.put("text", prompt);
@@ -2259,10 +2432,15 @@ public class PreAiEncounterService {
         message.put("role", "user");
         message.put("content", List.of(textPart, imagePart));
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", LAB_OCR_MODEL);
+        payload.put("model", model);
         payload.put("messages", List.of(message));
         payload.put("temperature", 0);
         payload.put("max_tokens", LAB_OCR_MAX_TOKENS);
+        return payload;
+    }
+
+    private String callLabOcrVision(EffectiveAiConfig config, String model, String prompt, String dataUrl) {
+        Map<String, Object> payload = buildLabOcrPayload(model, prompt, dataUrl);
 
         String body;
         try {
@@ -2281,14 +2459,14 @@ public class PreAiEncounterService {
                     .build();
                 HttpResponse<String> response = labOcrHttpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    log.warn("Lab OCR upstream returned HTTP {}: attempt={}, model={}", response.statusCode(), attempt, LAB_OCR_MODEL);
+                    log.warn("Lab OCR upstream returned HTTP {}: attempt={}, model={}", response.statusCode(), attempt, model);
                     if (attempt == 2) throw badRequest("AI 识别服务暂时不可用，请稍后重试或手动填写");
                     continue;
                 }
                 JsonNode root = objectMapper.readTree(response.body());
                 String content = root.path("choices").path(0).path("message").path("content").asText("");
                 if (!content.isBlank()) return content;
-                log.warn("Lab OCR upstream returned empty content: attempt={}, model={}", attempt, LAB_OCR_MODEL);
+                log.warn("Lab OCR upstream returned empty content: attempt={}, model={}", attempt, model);
             } catch (IOException error) {
                 log.warn("Lab OCR upstream call failed: attempt={}, error={}", attempt, error.getMessage());
             } catch (InterruptedException error) {

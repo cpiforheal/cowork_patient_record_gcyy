@@ -711,6 +711,26 @@ export const ocrLabReportApi = async (
   return clinicResponse(data);
 };
 
+/** 化验单 AI 识别流式请求：返回原始 Response（SSE），由调用方逐段读取 status/delta/done/error 事件。 */
+export const ocrLabReportStreamRequest = async (
+  encounterId: string,
+  payload: { file: File; metrics: Array<Record<string, unknown>>; templateName: string; model: string },
+  signal?: AbortSignal
+) =>
+  fetch(`/clinic-api/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports/ocr/stream`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: (() => {
+      const body = new FormData();
+      body.append("file", payload.file);
+      body.append("metrics", JSON.stringify(payload.metrics));
+      body.append("templateName", payload.templateName);
+      body.append("model", payload.model);
+      return body;
+    })(),
+    signal
+  });
+
 export const completePreAiLabApi = (encounterId: string, expectedVersion: number) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab/complete`, "POST", {
     expectedVersion
