@@ -46,10 +46,10 @@
       <el-dialog
         v-model="townshipDialogVisible"
         :title="townshipDialogTitle"
-        width="min(1100px, 92vw)"
+        fullscreen
         append-to-body
         destroy-on-close
-        class="township-patient-dialog"
+        class="township-patient-dialog is-fullscreen"
       >
         <p class="township-subtitle">{{ townshipDialogSubtitle }}</p>
         <el-empty v-if="!townshipPatients.length" description="该乡镇暂无来访患者（可能地址未登记或归属县外）" :image-size="56" />
@@ -75,10 +75,10 @@
       <el-dialog
         v-model="courseDialogVisible"
         :title="`${coursePatient?.name || '患者'} · 主要病程`"
-        width="min(640px, 92vw)"
+        fullscreen
         append-to-body
         destroy-on-close
-        class="course-dialog"
+        class="course-dialog is-fullscreen"
       >
         <div v-loading="courseLoading" class="course-body" element-loading-text="病程加载中…">
           <el-alert v-if="courseError" type="warning" :closable="false" show-icon :title="courseError" />
@@ -208,7 +208,6 @@ const GUSHI_TOWNSHIPS = [
   "马堽"
 ];
 const URBAN_STREETS = ["蓼城", "秀水", "番城"];
-const BAR_LIMIT = 12;
 /** 柱状图逐行配色（相邻行不同色；饱和度与主题协调） */
 const BAR_ROW_PALETTE = [
   "#0f766e",
@@ -416,19 +415,13 @@ const donutOption = computed<EChartsOption>(() => {
 });
 
 const barOption = computed<EChartsOption>(() => {
-  const ranking = townshipRanking.value;
-  const top = ranking.slice(0, BAR_LIMIT);
-  const restCount = ranking.slice(BAR_LIMIT).reduce((sum, item) => sum + item.count, 0);
-  const restNames = ranking.slice(BAR_LIMIT).map(item => item.name);
-  const rows: Array<{ name: string; count: number; muted?: boolean; mergedNames?: string[] }> = [...top];
-  if (restCount > 0)
-    rows.push({ name: `其他乡镇（${restNames.length} 个）`, count: restCount, muted: true, mergedNames: restNames });
+  // 粒度对齐全量病历患者：全部乡镇逐行展示，不再合并"其他乡镇"
+  const rows = townshipRanking.value.map(row => ({ name: row.name, count: row.count }));
   const palette = chartPalette.value;
-  // 每行独立色块，相邻行颜色必不相同；聚合的"其他乡镇"灰色弱化置底
-  const rowColor = (index: number, muted?: boolean) => {
-    if (muted) return isDark.value ? "#475569" : "#cbd5e1";
-    return BAR_ROW_PALETTE[index % BAR_ROW_PALETTE.length];
-  };
+  // 行数多时 dataZoom 平移滚动：默认展示前 12 行，可滚轮/拖拽查看全部
+  const zoomEnd = Math.min(100, Math.round((12 / Math.max(rows.length, 1)) * 100));
+  // 每行独立色块，相邻行颜色必不相同
+  const rowColor = (index: number) => BAR_ROW_PALETTE[index % BAR_ROW_PALETTE.length];
   return {
     tooltip: {
       trigger: "axis",
@@ -451,16 +444,19 @@ const barOption = computed<EChartsOption>(() => {
       axisLine: { lineStyle: { color: palette.split } },
       axisLabel: { color: palette.label, fontSize: 12 }
     },
+    dataZoom: [
+      { type: "inside", yAxisIndex: 0, start: 0, end: zoomEnd, zoomOnMouseWheel: false, moveOnMouseWheel: true },
+      { type: "slider", yAxisIndex: 0, right: 4, width: 14, start: 0, end: zoomEnd, brushSelect: false }
+    ],
     series: [
       {
         type: "bar",
         data: rows.map((row, index) => ({
           name: row.name,
           value: row.count,
-          mergedNames: row.mergedNames,
           itemStyle: {
             borderRadius: [0, 8, 8, 0],
-            color: rowColor(index, row.muted)
+            color: rowColor(index)
           }
         })),
         barMaxWidth: 16,
@@ -724,7 +720,6 @@ const loadPatients = async () => {
 const onBarClick = (params: any) => {
   const rowName = String(params?.name || "");
   if (!rowName) return;
-  const mergedNames: string[] = params?.data?.mergedNames || [];
   const cards: TownshipPatientCard[] = patients.value
     .map(patient => {
       const classified = classifyAddress(patient.address);
@@ -739,11 +734,7 @@ const onBarClick = (params: any) => {
         address: patient.address
       };
     })
-    .filter(card =>
-      mergedNames.length
-        ? mergedNames.includes(card.classified.township)
-        : card.classified.bucket === "township" && card.classified.township === rowName
-    )
+    .filter(card => card.classified.bucket === "township" && card.classified.township === rowName)
     .map(card => ({
       caseId: card.caseId,
       patientId: card.patientId,
@@ -756,7 +747,7 @@ const onBarClick = (params: any) => {
     }))
     .sort((a, b) => (a.visitDate < b.visitDate ? 1 : -1));
   townshipDialogTitle.value = `${rowName} · 来访患者`;
-  townshipDialogSubtitle.value = `共 ${cards.length} 位患者 · ${mergedNames.length ? "聚合乡镇，覆盖全部小乡镇来源" : "数据来源：患者收费信息"}`;
+  townshipDialogSubtitle.value = `共 ${cards.length} 位患者 · 数据来源：患者收费信息（全部病历患者）`;
   townshipPatients.value = cards;
   townshipDialogVisible.value = true;
 };
@@ -880,7 +871,7 @@ onMounted(() => {
   height: 280px;
 }
 .bars {
-  height: 320px;
+  height: 460px;
 }
 .township-subtitle {
   margin: 0 0 12px;
@@ -895,6 +886,31 @@ onMounted(() => {
   max-height: 480px;
   padding-right: 4px;
   overflow-y: auto;
+}
+
+// 全屏弹窗：body 占满并可滚动，内容居中收窄
+.township-patient-dialog.is-fullscreen,
+.course-dialog.is-fullscreen {
+  :deep(.el-dialog__header) {
+    padding: 14px 24px;
+    margin-right: 0;
+    border-bottom: 1px solid var(--el-border-color-lighter);
+  }
+  :deep(.el-dialog__body) {
+    width: 100%;
+    max-width: 1200px;
+    height: calc(100vh - 130px);
+    margin: 0 auto;
+    overflow-y: auto;
+  }
+  :deep(.el-dialog__footer) {
+    padding: 12px 24px;
+    border-top: 1px solid var(--el-border-color-lighter);
+  }
+}
+.township-patient-dialog.is-fullscreen .township-patient-rows {
+  max-height: none;
+  overflow: visible;
 }
 .patient-row {
   display: grid;
