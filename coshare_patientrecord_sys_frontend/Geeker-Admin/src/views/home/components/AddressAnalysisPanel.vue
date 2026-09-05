@@ -34,7 +34,7 @@
       <div class="chart-row">
         <div class="chart-block">
           <span class="chart-title">本地构成占比</span>
-          <VChart class="chart donut" :option="donutOption" autoresize />
+          <VChart class="chart donut" :option="donutOption" autoresize @mouseover="onDonutHover" @globalout="resetDonutCenter" />
         </div>
         <div class="chart-block">
           <span class="chart-title">乡镇来访排行（迁移分析）</span>
@@ -50,7 +50,7 @@ import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { BarChart, EffectScatterChart, MapChart, PieChart } from "echarts/charts";
 import { GeoComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
-import { registerMap, use, graphic } from "echarts/core";
+import { registerMap, use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
 import type { EChartsOption } from "echarts";
@@ -107,6 +107,22 @@ const GUSHI_TOWNSHIPS = [
 ];
 const URBAN_STREETS = ["蓼城", "秀水", "番城"];
 const BAR_LIMIT = 12;
+/** 柱状图逐行配色（相邻行不同色；饱和度与主题协调） */
+const BAR_ROW_PALETTE = [
+  "#0f766e",
+  "#0284c7",
+  "#7c3aed",
+  "#db2777",
+  "#d97706",
+  "#059669",
+  "#dc2626",
+  "#0891b2",
+  "#9333ea",
+  "#ea580c",
+  "#4f46e5",
+  "#16a34a",
+  "#b45309"
+];
 /** 本院（城区）锚点 */
 const HOSPITAL_COORD: [number, number] = [115.65, 32.17];
 /** 乡镇驻地近似经纬度（仅用于分布可视化，非精确行政边界） */
@@ -203,11 +219,19 @@ const chartPalette = computed(() => ({
   unknown: isDark.value ? "#374151" : "#cbd5e1"
 }));
 
+// 环形图中心单一 label 的响应式内容：hover 切换分块明细，移开恢复本地占比
+const centerText = ref({ title: "本地占比", value: "—" });
+const onDonutHover = (params: any) => {
+  if (params?.name == null) return;
+  centerText.value = { title: String(params.name), value: `${params.value} 人（${params.percent}%）` };
+};
+const resetDonutCenter = () => {
+  centerText.value = { title: "本地占比", value: localRatioText.value };
+};
+
 const donutOption = computed<EChartsOption>(() => {
   const d = distribution.value;
   const palette = chartPalette.value;
-  const total = patients.value.length;
-  const localRatio = total ? Math.round(((d.urban + d.townshipTotal) / total) * 100) : 0;
   return {
     tooltip: {
       trigger: "item",
@@ -229,27 +253,22 @@ const donutOption = computed<EChartsOption>(() => {
         label: {
           show: true,
           position: "center",
-          formatter: `本地占比\n{val|${localRatio}%}`,
-          color: palette.text,
-          fontSize: 12,
-          lineHeight: 20,
+          // 中心单一 label：hover 事件驱动内容切换，杜绝静态文字与 emphasis 文字叠影
+          formatter: `{t|${centerText.value.title}}\n{v|${centerText.value.value}}`,
+          lineHeight: 22,
           rich: {
-            val: {
+            t: {
+              color: palette.text,
+              fontSize: 12,
+              lineHeight: 18
+            },
+            v: {
               fontSize: 26,
               fontWeight: 700,
               color: isDark.value ? "#f1f5f9" : "#0f766e",
-              fontVariantNumeric: "tabular-nums"
+              fontVariantNumeric: "tabular-nums",
+              lineHeight: 30
             }
-          }
-        },
-        emphasis: {
-          label: {
-            show: true,
-            fontSize: 15,
-            fontWeight: 700 as const,
-            lineHeight: 22,
-            formatter: "{b}\n{c} 人（{d}%）",
-            color: palette.label
           }
         },
         labelLine: { show: false },
@@ -260,7 +279,10 @@ const donutOption = computed<EChartsOption>(() => {
           { name: "固始县其他", value: d.gushiOther, itemStyle: { color: "#d97706" } },
           { name: "未登记地址", value: d.unknown, itemStyle: { color: palette.unknown } }
         ].filter(item => item.value > 0),
-        animationDuration: 800
+        // 载入动画：线性过渡 + 逐分块错峰
+        animationEasing: "linear",
+        animationDuration: 900,
+        animationDelay: (idx: number) => idx * 150
       }
     ]
   };
@@ -273,6 +295,11 @@ const barOption = computed<EChartsOption>(() => {
   const rows: Array<{ name: string; count: number; muted?: boolean }> = [...top];
   if (restCount > 0) rows.push({ name: `其他乡镇（${ranking.length - BAR_LIMIT} 个）`, count: restCount, muted: true });
   const palette = chartPalette.value;
+  // 每行独立色块，相邻行颜色必不相同；聚合的"其他乡镇"灰色弱化置底
+  const rowColor = (index: number, muted?: boolean) => {
+    if (muted) return isDark.value ? "#475569" : "#cbd5e1";
+    return BAR_ROW_PALETTE[index % BAR_ROW_PALETTE.length];
+  };
   return {
     tooltip: {
       trigger: "axis",
@@ -298,24 +325,17 @@ const barOption = computed<EChartsOption>(() => {
     series: [
       {
         type: "bar",
-        data: rows.map(row => ({
+        data: rows.map((row, index) => ({
           value: row.count,
           itemStyle: {
             borderRadius: [0, 8, 8, 0],
-            // 真实乡镇 teal 渐变；聚合的"其他乡镇"灰色弱化置底，避免聚合值霸榜误导排行
-            color: row.muted
-              ? isDark.value
-                ? "#475569"
-                : "#cbd5e1"
-              : new graphic.LinearGradient(0, 0, 1, 0, [
-                  { offset: 0, color: "#14b8a6" },
-                  { offset: 1, color: "#0f766e" }
-                ])
+            color: rowColor(index, row.muted)
           }
         })),
         barMaxWidth: 16,
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
-        animationDuration: 700
+        animationDuration: 700,
+        animationDelay: (idx: number) => idx * 45
       }
     ]
   };
@@ -557,6 +577,7 @@ const loadPatients = async () => {
   try {
     const { data } = await getBillingPatientsApi("");
     patients.value = data.patients || [];
+    resetDonutCenter();
   } catch (error) {
     ElMessage.error((error as Error).message || "患者收费信息加载失败");
   } finally {
