@@ -221,11 +221,11 @@ const donutOption = computed<EChartsOption>(() => {
       {
         // 移植官方 pie-borderRadius 示例：分块间留缝 + 圆角切片 + 中心 hover 明细
         type: "pie",
-        radius: ["52%", "72%"],
+        radius: ["46%", "70%"],
         center: ["50%", "44%"],
         avoidLabelOverlap: false,
-        padAngle: 3,
-        itemStyle: { borderRadius: 10, borderColor: palette.maskBorder, borderWidth: 2 },
+        padAngle: 2,
+        itemStyle: { borderRadius: 8, borderColor: palette.maskBorder, borderWidth: 2 },
         label: {
           show: true,
           position: "center",
@@ -273,11 +273,7 @@ const barOption = computed<EChartsOption>(() => {
   const rows: Array<{ name: string; count: number; muted?: boolean }> = [...top];
   if (restCount > 0) rows.push({ name: `其他乡镇（${ranking.length - BAR_LIMIT} 个）`, count: restCount, muted: true });
   const palette = chartPalette.value;
-  // 移植官方 dataset-encode0 示例：dataset 声明数据，series.encode 映射横纵轴
   return {
-    dataset: {
-      source: rows.map(row => ({ name: row.name, count: row.count, muted: Boolean(row.muted) }))
-    },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "shadow" },
@@ -294,6 +290,7 @@ const barOption = computed<EChartsOption>(() => {
     yAxis: {
       type: "category",
       inverse: true,
+      data: rows.map(row => row.name),
       axisTick: { show: false },
       axisLine: { lineStyle: { color: palette.split } },
       axisLabel: { color: palette.label, fontSize: 12 }
@@ -301,13 +298,12 @@ const barOption = computed<EChartsOption>(() => {
     series: [
       {
         type: "bar",
-        encode: { x: "count", y: "name" },
-        barMaxWidth: 16,
-        itemStyle: {
-          borderRadius: [0, 8, 8, 0],
-          // 真实乡镇 teal 渐变；聚合的"其他乡镇"灰色弱化，避免聚合值霸榜误导排行
-          color: (params: any) =>
-            params.data?.muted
+        data: rows.map(row => ({
+          value: row.count,
+          itemStyle: {
+            borderRadius: [0, 8, 8, 0],
+            // 真实乡镇 teal 渐变；聚合的"其他乡镇"灰色弱化置底，避免聚合值霸榜误导排行
+            color: row.muted
               ? isDark.value
                 ? "#475569"
                 : "#cbd5e1"
@@ -315,7 +311,9 @@ const barOption = computed<EChartsOption>(() => {
                   { offset: 0, color: "#14b8a6" },
                   { offset: 1, color: "#0f766e" }
                 ])
-        },
+          }
+        })),
+        barMaxWidth: 16,
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
         animationDuration: 700
       }
