@@ -217,22 +217,42 @@ const donutOption = computed<EChartsOption>(() => {
       textStyle: { color: palette.label }
     },
     legend: { bottom: 0, icon: "circle", textStyle: { color: palette.text, fontSize: 12 } },
-    title: {
-      text: `${localRatio}%`,
-      subtext: "本地占比",
-      left: "center",
-      top: "38%",
-      textStyle: { fontSize: 24, color: isDark.value ? "#f1f5f9" : "#0f766e" },
-      subtextStyle: { color: palette.text, fontSize: 12 }
-    },
     series: [
       {
+        // 移植官方 pie-borderRadius 示例：分块间留缝 + 圆角切片 + 中心 hover 明细
         type: "pie",
         radius: ["52%", "72%"],
         center: ["50%", "44%"],
-        avoidLabelOverlap: true,
-        itemStyle: { borderRadius: 6, borderColor: palette.maskBorder, borderWidth: 2 },
-        label: { show: false },
+        avoidLabelOverlap: false,
+        padAngle: 3,
+        itemStyle: { borderRadius: 10, borderColor: palette.maskBorder, borderWidth: 2 },
+        label: {
+          show: true,
+          position: "center",
+          formatter: `本地占比\n{val|${localRatio}%}`,
+          color: palette.text,
+          fontSize: 12,
+          lineHeight: 20,
+          rich: {
+            val: {
+              fontSize: 26,
+              fontWeight: 700,
+              color: isDark.value ? "#f1f5f9" : "#0f766e",
+              fontVariantNumeric: "tabular-nums"
+            }
+          }
+        },
+        emphasis: {
+          label: {
+            show: true,
+            fontSize: 15,
+            fontWeight: 700 as const,
+            lineHeight: 22,
+            formatter: "{b}\n{c} 人（{d}%）",
+            color: palette.label
+          }
+        },
+        labelLine: { show: false },
         data: [
           { name: "周边乡镇", value: d.townshipTotal, itemStyle: { color: "#0f766e" } },
           { name: "城区", value: d.urban, itemStyle: { color: "#14b8a6" } },
@@ -250,10 +270,14 @@ const barOption = computed<EChartsOption>(() => {
   const ranking = townshipRanking.value;
   const top = ranking.slice(0, BAR_LIMIT);
   const restCount = ranking.slice(BAR_LIMIT).reduce((sum, item) => sum + item.count, 0);
-  const rows = [...top];
-  if (restCount > 0) rows.push({ name: `其他乡镇（${ranking.length - BAR_LIMIT} 个）`, count: restCount });
+  const rows: Array<{ name: string; count: number; muted?: boolean }> = [...top];
+  if (restCount > 0) rows.push({ name: `其他乡镇（${ranking.length - BAR_LIMIT} 个）`, count: restCount, muted: true });
   const palette = chartPalette.value;
+  // 移植官方 dataset-encode0 示例：dataset 声明数据，series.encode 映射横纵轴
   return {
+    dataset: {
+      source: rows.map(row => ({ name: row.name, count: row.count, muted: Boolean(row.muted) }))
+    },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "shadow" },
@@ -270,7 +294,6 @@ const barOption = computed<EChartsOption>(() => {
     yAxis: {
       type: "category",
       inverse: true,
-      data: rows.map(row => row.name),
       axisTick: { show: false },
       axisLine: { lineStyle: { color: palette.split } },
       axisLabel: { color: palette.label, fontSize: 12 }
@@ -278,14 +301,20 @@ const barOption = computed<EChartsOption>(() => {
     series: [
       {
         type: "bar",
-        data: rows.map(row => row.count),
+        encode: { x: "count", y: "name" },
         barMaxWidth: 16,
         itemStyle: {
           borderRadius: [0, 8, 8, 0],
-          color: new graphic.LinearGradient(0, 0, 1, 0, [
-            { offset: 0, color: "#14b8a6" },
-            { offset: 1, color: "#0f766e" }
-          ])
+          // 真实乡镇 teal 渐变；聚合的"其他乡镇"灰色弱化，避免聚合值霸榜误导排行
+          color: (params: any) =>
+            params.data?.muted
+              ? isDark.value
+                ? "#475569"
+                : "#cbd5e1"
+              : new graphic.LinearGradient(0, 0, 1, 0, [
+                  { offset: 0, color: "#14b8a6" },
+                  { offset: 1, color: "#0f766e" }
+                ])
         },
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
         animationDuration: 700
