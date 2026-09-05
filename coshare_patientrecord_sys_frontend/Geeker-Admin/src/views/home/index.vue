@@ -896,8 +896,9 @@ const calendarCells = computed<CalendarDayCell[]>(() => {
     const col = index % 7;
     const used = new Set<string>();
     const neighbors: number[] = [];
-    if (col > 0) neighbors.push(index - 1);
-    if (col < 6) neighbors.push(index + 1);
+    // 尾行可能不满 7 格：左右邻接必须同时校验数组边界，否则越界 undefined 读取 isBlank 崩页
+    if (col > 0 && index - 1 >= 0) neighbors.push(index - 1);
+    if (col < 6 && index + 1 < allCells.length) neighbors.push(index + 1);
     if (index - 7 >= 0) neighbors.push(index - 7);
     if (index + 7 < allCells.length) neighbors.push(index + 7);
     neighbors.forEach(neighborIndex => {
