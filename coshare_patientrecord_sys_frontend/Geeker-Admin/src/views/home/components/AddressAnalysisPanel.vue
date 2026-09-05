@@ -37,10 +37,91 @@
           <VChart class="chart donut" :option="donutOption" autoresize @mouseover="onDonutHover" @globalout="resetDonutCenter" />
         </div>
         <div class="chart-block">
-          <span class="chart-title">乡镇来访排行（迁移分析）</span>
-          <VChart class="chart bars" :option="barOption" autoresize />
+          <span class="chart-title">乡镇来访排行（点击条形下钻 · 迁移分析）</span>
+          <VChart class="chart bars" :option="barOption" autoresize @click="onBarClick" />
         </div>
       </div>
+
+      <!-- 二级悬浮窗：乡镇来访患者卡片（横向滚动） -->
+      <el-dialog
+        v-model="townshipDialogVisible"
+        :title="townshipDialogTitle"
+        width="min(920px, 92vw)"
+        append-to-body
+        destroy-on-close
+        class="township-patient-dialog"
+      >
+        <p class="township-subtitle">{{ townshipDialogSubtitle }}</p>
+        <el-empty v-if="!townshipPatients.length" description="该乡镇暂无来访患者（可能地址未登记或归属县外）" :image-size="56" />
+        <div v-else class="patient-card-scroll">
+          <button
+            v-for="card in townshipPatients"
+            :key="card.caseId"
+            type="button"
+            class="patient-mini-card"
+            :disabled="!card.encounterId && !card.patientId"
+            @click="openCourseDialog(card)"
+          >
+            <strong class="card-name">{{ card.name || "未登记姓名" }}</strong>
+            <span class="card-field"><label>手机号</label>{{ card.phone || "—" }}</span>
+            <span class="card-field"><label>就诊时间</label>{{ card.visitDate || "—" }}</span>
+            <span class="card-field address"><label>详细住址</label>{{ card.address || "—" }}</span>
+            <em class="card-more">查看病程 »</em>
+          </button>
+        </div>
+      </el-dialog>
+
+      <!-- 三级弹窗：主要病程信息（复用患者概览 encounter overview 接口） -->
+      <el-dialog
+        v-model="courseDialogVisible"
+        :title="`${coursePatient?.name || '患者'} · 主要病程`"
+        width="min(640px, 92vw)"
+        append-to-body
+        destroy-on-close
+        class="course-dialog"
+      >
+        <div v-loading="courseLoading" class="course-body" element-loading-text="病程加载中…">
+          <el-alert v-if="courseError" type="warning" :closable="false" show-icon :title="courseError" />
+          <template v-else-if="courseOverview">
+            <section class="course-sec">
+              <span class="course-sec-title">基础信息</span>
+              <div class="course-grid">
+                <span><label>姓名</label>{{ courseOverview.patient.name || "—" }}</span>
+                <span
+                  ><label>性别/年龄</label
+                  >{{ [courseOverview.patient.gender, courseOverview.patient.age].filter(Boolean).join(" / ") || "—" }}</span
+                >
+                <span><label>联系电话</label>{{ coursePatient?.phone || courseOverview.patient.phone || "—" }}</span>
+                <span><label>就诊日期</label>{{ courseOverview.visit.visitDate || "—" }}</span>
+              </div>
+            </section>
+            <section class="course-sec">
+              <span class="course-sec-title">主要病情</span>
+              <p><label>主诉</label>{{ courseOverview.clinical.chiefComplaint || "—" }}</p>
+              <p><label>现病史</label>{{ courseOverview.clinical.presentIllness || "—" }}</p>
+              <p><label>过敏史</label>{{ courseOverview.clinical.allergyHistory || "—" }}</p>
+            </section>
+            <section class="course-sec">
+              <span class="course-sec-title">诊断与治疗</span>
+              <p><label>西医诊断</label>{{ courseOverview.clinical.diagnosis.westernPrimary || "—" }}</p>
+              <p><label>中医诊断</label>{{ courseOverview.clinical.diagnosis.tcm || "—" }}</p>
+              <p><label>治疗路径</label>{{ courseOverview.clinical.treatment.treatmentPath || "—" }}</p>
+              <p v-if="courseOverview.clinical.surgery.actualPrimaryOperation">
+                <label>手术</label>{{ courseOverview.clinical.surgery.actualPrimaryOperation
+                }}{{
+                  courseOverview.clinical.surgery.anesthesiaMethod
+                    ? `（${courseOverview.clinical.surgery.anesthesiaMethod}）`
+                    : ""
+                }}
+              </p>
+            </section>
+          </template>
+        </div>
+        <template #footer>
+          <el-button @click="courseDialogVisible = false">关闭</el-button>
+          <el-button type="primary" :disabled="!coursePatient?.patientId" @click="gotoPatientArchive"> 进入完整档案 </el-button>
+        </template>
+      </el-dialog>
     </template>
   </section>
 </template>
@@ -57,8 +138,15 @@ import type { EChartsOption } from "echarts";
 import { Delaunay } from "d3-delaunay";
 import polygonClipping from "polygon-clipping";
 import { getBillingPatientsApi, type BillingPatientInfo } from "@/api/modules/clinic/billing";
+import {
+  getEncounterOverviewApi,
+  getPreAiPatientCasesApi,
+  type PreAiEncounterOverview,
+  type PreAiPatientCase
+} from "@/api/modules/clinic/preAi";
 import { useGlobalStore } from "@/stores/modules/global";
 import gushiCountyGeo from "@/assets/geo/gushi-county.json";
+import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 
 use([
   CanvasRenderer,
@@ -165,6 +253,30 @@ const patients = ref<BillingPatientInfo[]>([]);
 const loading = ref(false);
 const mapLoading = ref(false);
 const mapRegistered = ref(false);
+
+// ---------- 乡镇下钻：二级患者卡片悬浮窗 + 三级病程弹窗 ----------
+interface TownshipPatientCard {
+  caseId: string;
+  patientId: string;
+  encounterId: string;
+  name: string;
+  phone: string;
+  address: string;
+  visitDate: string;
+  township: string;
+}
+const caseMapById = ref(new Map<string, PreAiPatientCase>());
+const townshipDialogVisible = ref(false);
+const townshipDialogTitle = ref("");
+const townshipDialogSubtitle = ref("");
+const townshipPatients = ref<TownshipPatientCard[]>([]);
+const courseDialogVisible = ref(false);
+const courseLoading = ref(false);
+const coursePatient = ref<TownshipPatientCard | null>(null);
+const courseOverview = ref<PreAiEncounterOverview | null>(null);
+const courseError = ref("");
+
+const { openPatientDetail } = usePatientNavigation();
 
 const classifyAddress = (
   raw: string
@@ -292,8 +404,10 @@ const barOption = computed<EChartsOption>(() => {
   const ranking = townshipRanking.value;
   const top = ranking.slice(0, BAR_LIMIT);
   const restCount = ranking.slice(BAR_LIMIT).reduce((sum, item) => sum + item.count, 0);
-  const rows: Array<{ name: string; count: number; muted?: boolean }> = [...top];
-  if (restCount > 0) rows.push({ name: `其他乡镇（${ranking.length - BAR_LIMIT} 个）`, count: restCount, muted: true });
+  const restNames = ranking.slice(BAR_LIMIT).map(item => item.name);
+  const rows: Array<{ name: string; count: number; muted?: boolean; mergedNames?: string[] }> = [...top];
+  if (restCount > 0)
+    rows.push({ name: `其他乡镇（${restNames.length} 个）`, count: restCount, muted: true, mergedNames: restNames });
   const palette = chartPalette.value;
   // 每行独立色块，相邻行颜色必不相同；聚合的"其他乡镇"灰色弱化置底
   const rowColor = (index: number, muted?: boolean) => {
@@ -326,7 +440,9 @@ const barOption = computed<EChartsOption>(() => {
       {
         type: "bar",
         data: rows.map((row, index) => ({
+          name: row.name,
           value: row.count,
+          mergedNames: row.mergedNames,
           itemStyle: {
             borderRadius: [0, 8, 8, 0],
             color: rowColor(index, row.muted)
@@ -575,14 +691,85 @@ const registerTownshipMap = () => {
 const loadPatients = async () => {
   loading.value = true;
   try {
-    const { data } = await getBillingPatientsApi("");
+    const [{ data }, casesResult] = await Promise.all([
+      getBillingPatientsApi(""),
+      getPreAiPatientCasesApi().catch(() => ({ data: { list: [] as PreAiPatientCase[] } }))
+    ]);
     patients.value = data.patients || [];
+    caseMapById.value = new Map((casesResult.data.list || []).map(item => [item.id, item]));
     resetDonutCenter();
   } catch (error) {
     ElMessage.error((error as Error).message || "患者收费信息加载失败");
   } finally {
     loading.value = false;
   }
+};
+
+/** 点击乡镇柱形条：按乡镇归类打开二级患者卡片悬浮窗（聚合行展示其覆盖的全部乡镇患者）。 */
+const onBarClick = (params: any) => {
+  const rowName = String(params?.name || "");
+  if (!rowName) return;
+  const mergedNames: string[] = params?.data?.mergedNames || [];
+  const cards: TownshipPatientCard[] = patients.value
+    .map(patient => {
+      const classified = classifyAddress(patient.address);
+      return {
+        caseId: patient.id,
+        classified,
+        patientId: caseMapById.value.get(patient.id)?.sourcePatientId || "",
+        encounterId: caseMapById.value.get(patient.id)?.latestEncounter?.id || "",
+        visitDate: caseMapById.value.get(patient.id)?.latestEncounter?.visitDate || patient.updatedAt,
+        name: patient.patientName,
+        phone: patient.phone,
+        address: patient.address
+      };
+    })
+    .filter(card =>
+      mergedNames.length
+        ? mergedNames.includes(card.classified.township)
+        : card.classified.bucket === "township" && card.classified.township === rowName
+    )
+    .map(card => ({
+      caseId: card.caseId,
+      patientId: card.patientId,
+      encounterId: card.encounterId,
+      name: card.name,
+      phone: card.phone,
+      address: card.address,
+      visitDate: card.visitDate,
+      township: card.classified.township
+    }))
+    .sort((a, b) => (a.visitDate < b.visitDate ? 1 : -1));
+  townshipDialogTitle.value = `${rowName} · 来访患者`;
+  townshipDialogSubtitle.value = `共 ${cards.length} 位患者 · ${mergedNames.length ? "聚合乡镇，覆盖全部小乡镇来源" : "数据来源：患者收费信息"}`;
+  townshipPatients.value = cards;
+  townshipDialogVisible.value = true;
+};
+
+/** 三级病程弹窗：复用患者概览的 encounter overview 接口。 */
+const openCourseDialog = async (card: TownshipPatientCard) => {
+  if (!card.encounterId) return;
+  coursePatient.value = card;
+  courseOverview.value = null;
+  courseError.value = "";
+  courseDialogVisible.value = true;
+  courseLoading.value = true;
+  try {
+    const { data } = await getEncounterOverviewApi(card.encounterId);
+    courseOverview.value = data;
+  } catch (error: any) {
+    courseError.value = error?.message || "病程信息加载失败";
+  } finally {
+    courseLoading.value = false;
+  }
+};
+
+const gotoPatientArchive = () => {
+  const card = coursePatient.value;
+  if (!card?.patientId) return;
+  courseDialogVisible.value = false;
+  townshipDialogVisible.value = false;
+  openPatientDetail(card.patientId);
 };
 
 onMounted(() => {
@@ -664,6 +851,109 @@ onMounted(() => {
 }
 .bars {
   height: 320px;
+}
+.township-subtitle {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.patient-card-scroll {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 8px;
+  overflow-x: auto;
+}
+.patient-mini-card {
+  display: grid;
+  flex-shrink: 0;
+  gap: 6px;
+  width: 240px;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+  &:hover:not(:disabled) {
+    border-color: var(--el-color-primary);
+    box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+    transform: translateY(-2px);
+  }
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  .card-name {
+    font-size: 15px;
+    color: var(--el-text-color-primary);
+  }
+  .card-field {
+    display: grid;
+    gap: 1px;
+    font-size: 12px;
+    color: var(--el-text-color-regular);
+    label {
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+    }
+    &.address {
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+  }
+  .card-more {
+    margin-top: 2px;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+    color: var(--el-color-primary);
+  }
+}
+.course-body {
+  display: grid;
+  gap: 14px;
+  min-height: 180px;
+}
+.course-sec {
+  display: grid;
+  gap: 8px;
+  .course-sec-title {
+    padding-left: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--el-color-primary);
+    border-left: 3px solid var(--el-color-primary);
+  }
+  p {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    label {
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+    }
+  }
+}
+.course-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  span {
+    font-size: 13px;
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+    }
+  }
 }
 
 @media (width <= 1080px) {
