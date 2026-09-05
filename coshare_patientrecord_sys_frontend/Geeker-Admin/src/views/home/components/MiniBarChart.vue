@@ -1,5 +1,5 @@
 <template>
-  <section class="mini-bar-chart">
+  <section class="mini-bar-chart" :class="{ 'is-compact': compact }">
     <div v-if="title" class="chart-head">
       <h3>{{ title }}</h3>
       <span v-if="subtitle">{{ subtitle }}</span>
@@ -32,8 +32,9 @@ const props = withDefaults(
     items: MiniBarItem[];
     maxBars?: number;
     unit?: string;
+    compact?: boolean;
   }>(),
-  { title: "", subtitle: "", maxBars: 7, unit: "" }
+  { title: "", subtitle: "", maxBars: 7, unit: "", compact: false }
 );
 
 const visibleItems = computed(() => props.items.slice(0, props.maxBars));
@@ -48,21 +49,33 @@ const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) 
 }
 .chart-head {
   display: flex;
+  gap: 10px;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
   h3 {
     margin: 0;
     font-size: 15px;
   }
   span {
-    color: var(--el-text-color-secondary);
     font-size: 12px;
+    color: var(--el-text-color-secondary);
   }
 }
 .bar-list {
   display: grid;
   gap: 8px;
+}
+.mini-bar-chart.is-compact .bar-list {
+  gap: 5px;
+  max-height: 360px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+.mini-bar-chart.is-compact .bar-row {
+  min-height: 24px;
+}
+.mini-bar-chart.is-compact .bar-track {
+  height: 8px;
 }
 .bar-row {
   display: grid;
@@ -72,8 +85,8 @@ const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) 
 }
 .bar-label {
   overflow: hidden;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -84,10 +97,10 @@ const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) 
   border-radius: 10px;
   i {
     display: block;
-    height: 100%;
     min-width: 2px;
-    border-radius: 10px;
+    height: 100%;
     background: linear-gradient(90deg, #14b8a6, #0f766e);
+    border-radius: 10px;
     transition: width 320ms ease;
   }
 }
@@ -101,9 +114,9 @@ const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) 
   background: linear-gradient(90deg, #fbd38a, #d9a114);
 }
 .bar-value {
-  color: var(--el-text-color-primary);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-primary);
   text-align: right;
 }
 </style>

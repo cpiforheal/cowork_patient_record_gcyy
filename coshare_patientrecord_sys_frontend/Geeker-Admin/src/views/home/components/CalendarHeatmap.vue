@@ -30,6 +30,7 @@
             'is-selected': day.isSelected
           }
         ]"
+        :style="day.hoverColor ? { '--hover-color': day.hoverColor } : undefined"
         :disabled="day.isBlank"
         :aria-label="day.ariaLabel"
         @click="$emit('selectDate', day)"
@@ -60,6 +61,7 @@ type CalendarDayCell = {
   isToday: boolean;
   isSelected: boolean;
   ariaLabel: string;
+  hoverColor: string;
 };
 
 defineProps<{
@@ -83,62 +85,52 @@ defineEmits<{
   background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary-light-9) 58%, transparent), var(--el-bg-color));
   border-color: rgb(20 184 166 / 18%);
 }
-
 .scope-eyebrow {
-  color: #008f84;
   font-size: 12px;
   font-weight: 700;
+  color: #008f84;
 }
-
 .calendar-toolbar {
   display: flex;
+  gap: 14px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
-
   h2,
   p {
     margin: 0;
   }
-
   h2 {
     margin-top: 4px;
-    color: var(--el-text-color-primary);
     font-size: 18px;
     line-height: 1.35;
+    color: var(--el-text-color-primary);
   }
-
   p {
     margin-top: 4px;
     color: var(--el-text-color-secondary);
   }
 }
-
 .calendar-actions {
   display: flex;
-  align-items: center;
   flex-shrink: 0;
   gap: 8px;
+  align-items: center;
 }
-
 .calendar-weekdays,
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
 }
-
 .calendar-weekdays {
   margin: 14px 0 7px;
-
   span {
-    color: var(--el-text-color-secondary);
     font-size: 12px;
     font-weight: 700;
+    color: var(--el-text-color-secondary);
     text-align: center;
   }
 }
-
 .calendar-day {
   display: flex;
   flex-direction: column;
@@ -156,122 +148,107 @@ defineEmits<{
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     transform 0.18s ease;
-
   &:not(.is-empty):hover {
-    border-color: #0f9f8f;
-    box-shadow: 0 7px 16px rgb(15 118 110 / 12%);
+    // hover 贪心色块：每格专属强调色（父组件按网格邻接贪心分配，相邻格不重复）
+    background: var(--hover-color, #0f9f8f);
+    border-color: var(--hover-color, #0f9f8f);
+    box-shadow: 0 7px 16px rgb(15 118 110 / 18%);
     transform: translateY(-1px);
+    .day-number,
+    .day-count {
+      color: #ffffff;
+    }
   }
-
   &.is-empty {
-    visibility: hidden;
     pointer-events: none;
+    visibility: hidden;
   }
-
   &.is-level-1 {
     background: var(--el-color-primary-light-9);
     border-color: #ccecdf;
   }
-
   &.is-level-2 {
     background: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-bg-color));
     border-color: #a4dfc8;
   }
-
   &.is-level-3 {
     color: #07594f;
     background: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-bg-color));
     border-color: #62c6a8;
   }
-
   &.is-level-4 {
     color: var(--el-bg-color);
     background: #0f9f8f;
     border-color: #0d857a;
-
     .day-count {
       color: rgb(255 255 255 / 86%);
     }
   }
-
   &.is-selected {
     border-color: #07594f;
     box-shadow: 0 0 0 2px rgb(15 118 110 / 20%);
   }
-
   &.is-today .day-number::after {
     margin-left: 4px;
-    color: #b45309;
     font-size: 11px;
     font-weight: 700;
+    color: #b45309;
     content: "今";
   }
 }
-
 .day-number {
   font-size: 14px;
   font-weight: 700;
 }
-
 .day-count {
   overflow: hidden;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .heatmap-legend {
   display: flex;
+  gap: 6px;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
   margin-top: 10px;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
-
+  color: var(--el-text-color-secondary);
   i {
     width: 18px;
     height: 10px;
     border: 1px solid #dfeee9;
     border-radius: 3px;
   }
-
   .legend-anchor {
     font-variant-numeric: tabular-nums;
   }
-
   .is-level-0 {
     background: var(--el-fill-color-light);
   }
-
   .is-level-1 {
     background: var(--el-color-primary-light-9);
   }
-
   .is-level-2 {
     background: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-bg-color));
   }
-
   .is-level-3 {
     background: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-bg-color));
   }
-
   .is-level-4 {
     background: #0f9f8f;
     border-color: #0d857a;
   }
 }
 
-@media (max-width: 760px) {
+@media (width <= 760px) {
   .calendar-toolbar {
     flex-direction: column;
   }
-
   .calendar-actions {
     flex-wrap: wrap;
   }
-
   .calendar-day {
     min-height: 46px;
     padding: 6px;

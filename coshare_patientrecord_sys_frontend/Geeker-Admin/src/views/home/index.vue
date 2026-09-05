@@ -37,29 +37,47 @@
 
       <div class="workbench-grid">
         <div class="workbench-main">
-          <HomeTaskPanel
-            class="board-card"
-            :role-name="roleName"
-            :action-tasks="actionTasks"
-            :task-cards="taskCards"
-            @refresh="reloadAll"
-            @open-task="openTask"
-            @open-action-task="openActionTask"
-          />
-          <!-- 数据看板：降级为默认收起的折叠区 -->
+          <!-- 数据看板（升主位，默认展开） -->
           <section class="board-card dashboard-fold">
             <button type="button" class="fold-head" @click="dashboardOpen = !dashboardOpen">
               <el-icon><TrendCharts /></el-icon>
               <strong>数据看板</strong>
-              <small>收录趋势 · 阶段分布 · 月历热力</small>
+              <small>收录趋势 · 月历热力</small>
               <span class="fold-spacer"></span>
               <el-icon class="fold-arrow" :class="{ open: dashboardOpen }"><ArrowDown /></el-icon>
             </button>
             <div v-if="dashboardOpen" class="fold-body">
-              <div class="chart-row">
-                <MiniBarChart title="近 7 日就诊收录" subtitle="按就诊日期" :items="trendItems" unit=" 人" />
-                <MiniBarChart title="在办阶段分布" subtitle="当前流程所处阶段" :items="stageItems" unit=" 人" />
+              <div class="trend-toolbar">
+                <el-segmented v-model="trendRange" :options="trendRangeOptions" size="small" />
+                <div class="summary-chips">
+                  <span class="chip"
+                    >窗口合计 <b>{{ trendSummary.total }}</b> 人</span
+                  >
+                  <span class="chip"
+                    >日均 <b>{{ trendSummary.avg }}</b> 人</span
+                  >
+                  <span v-if="trendSummary.peakDay" class="chip"
+                    >峰值 <b>{{ trendSummary.peakDay.label }} {{ trendSummary.peakDay.value }}</b> 人</span
+                  >
+                </div>
               </div>
+              <el-progress
+                v-if="trendSwitching"
+                class="trend-progress"
+                :percentage="100"
+                :indeterminate="true"
+                :duration="1"
+                :show-text="false"
+                :stroke-width="6"
+              />
+              <MiniBarChart
+                compact
+                :title="trendTitle"
+                subtitle="按就诊日期"
+                :items="trendItems"
+                :max-bars="trendItems.length"
+                unit=" 人"
+              />
               <CalendarHeatmap
                 :month-title="calendarMonthTitle"
                 :month-total="calendarMonthTotal"
@@ -72,6 +90,30 @@
                 @select-date="selectCalendarDate"
               />
             </div>
+          </section>
+
+          <!-- 我的待办（可折叠，默认收起） -->
+          <section class="board-card dashboard-fold todo-fold">
+            <div class="fold-head" @click="todoOpen = !todoOpen">
+              <el-icon><List /></el-icon>
+              <strong>我的待办</strong>
+              <span class="maint-badge" :class="pendingRows.length ? 'is-warning' : 'is-success'"
+                >待处理 {{ pendingRows.length }}</span
+              >
+              <span class="fold-spacer"></span>
+              <el-button :icon="Refresh" link size="small" :loading="dashboardLoading" @click.stop="reloadAll">刷新</el-button>
+              <el-icon class="fold-arrow" :class="{ open: todoOpen }"><ArrowDown /></el-icon>
+            </div>
+            <HomeTaskPanel
+              v-if="todoOpen"
+              class="todo-panel-body"
+              :role-name="roleName"
+              :action-tasks="actionTasks"
+              :task-cards="taskCards"
+              @refresh="reloadAll"
+              @open-task="openTask"
+              @open-action-task="openActionTask"
+            />
           </section>
         </div>
 
@@ -130,10 +172,10 @@
 </template>
 
 <script setup lang="ts" name="home">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { ArrowDown, ArrowRight, Refresh, Setting, TrendCharts } from "@element-plus/icons-vue";
+import { ArrowDown, ArrowRight, List, Refresh, Setting, TrendCharts } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
@@ -209,6 +251,7 @@ type CalendarDayCell = {
   isToday: boolean;
   isSelected: boolean;
   ariaLabel: string;
+  hoverColor: string;
 };
 
 const router = useRouter();
@@ -279,7 +322,8 @@ const headerDateText = computed(() => {
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
   return `${now.getMonth() + 1} 月 ${now.getDate()} 日 · 周${weekdays[now.getDay()]}`;
 });
-const dashboardOpen = ref(false);
+const dashboardOpen = ref(true);
+const todoOpen = ref(false);
 const maintenanceOpen = ref(false);
 
 // 严格按后端下发的菜单权限决定加载哪块工作面板——绝不调用本岗位无权的接口。
@@ -707,7 +751,15 @@ const patientEncounterDates = (patient: PatientRow) => {
   const history = patient.encounterHistory?.length
     ? patient.encounterHistory
     : [{ visitDate: patient.visitDate, visitNo: patient.visitNo, visitType: patient.visitType, doctor: patient.doctor }];
-  return [...new Set(history.map(item => item.visitDate).filter(Boolean))];
+  // 归一化为 YYYY-MM-DD：visitDate 可能是带时间的完整串（含 T 分隔），整串当键会导致趋势/热力全 0
+  return [
+    ...new Set(
+      history
+        .map(item => String(item.visitDate || ""))
+        .filter(Boolean)
+        .map(date => date.replace("T", " ").slice(0, 10))
+    )
+  ];
 };
 
 const countByDate = computed(() => {
@@ -723,10 +775,24 @@ const countByDate = computed(() => {
 const rangeCount = (from: string, to: string) =>
   patientRows.value.filter(patient => patientEncounterDates(patient).some(date => date >= from && date <= to)).length;
 
-// 近 7 日趋势（含今天）。
+// 趋势窗口：近 7 日 / 近 14 天 / 近一个月（近 30 天滚动，含今天）
+const trendRange = ref(7);
+const trendRangeOptions = [
+  { label: "近 7 日", value: 7 },
+  { label: "近 14 天", value: 14 },
+  { label: "近一个月", value: 30 }
+];
+const trendSwitching = ref(false);
+watch(trendRange, () => {
+  trendSwitching.value = true;
+  window.setTimeout(() => {
+    trendSwitching.value = false;
+  }, 320);
+});
+
 const trendItems = computed(() => {
   const items: { label: string; value: number }[] = [];
-  for (let offset = 6; offset >= 0; offset--) {
+  for (let offset = trendRange.value - 1; offset >= 0; offset--) {
     const date = new Date();
     date.setDate(date.getDate() - offset);
     const dateText = toDateText(date);
@@ -738,9 +804,21 @@ const trendItems = computed(() => {
   return items;
 });
 
-const stageItems = computed(() =>
-  stats.value.stageBuckets.slice(0, 6).map(bucket => ({ label: bucket.stage, value: bucket.count }))
-);
+const trendSummary = computed(() => {
+  const values = trendItems.value.map(item => item.value);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  let peakIndex = 0;
+  values.forEach((value, index) => {
+    if (value > values[peakIndex]) peakIndex = index;
+  });
+  return {
+    total,
+    avg: values.length ? Math.round(total / values.length) : 0,
+    peakDay: values.length ? trendItems.value[peakIndex] : undefined
+  };
+});
+
+const trendTitle = computed(() => `近 ${trendRange.value} 日就诊收录`);
 
 const pharmacyChartItems = computed(() => {
   const counts = tcmCounts.value;
@@ -790,7 +868,8 @@ const calendarCells = computed<CalendarDayCell[]>(() => {
     isBlank: true,
     isToday: false,
     isSelected: false,
-    ariaLabel: "空白日期"
+    ariaLabel: "空白日期",
+    hoverColor: ""
   }));
   const days = currentMonthDateTexts.value.map(date => {
     const count = countByDate.value.get(date) || 0;
@@ -804,10 +883,32 @@ const calendarCells = computed<CalendarDayCell[]>(() => {
       isBlank: false,
       isToday: date === todayText,
       isSelected: date === selectedCalendarDate.value,
-      ariaLabel: `${date} 收录 ${count} 人`
+      ariaLabel: `${date} 收录 ${count} 人`,
+      hoverColor: ""
     };
   });
-  return [...blanks, ...days];
+  const allCells = [...blanks, ...days];
+  // hover 强调色：按日历网格邻接（同行左右、同列上下跨行）贪心分配，相邻格必不同色
+  const hoverPalette = ["#0d9488", "#2563eb", "#d97706", "#7c3aed", "#db2777"];
+  const hoverColors: string[] = new Array(allCells.length).fill("");
+  allCells.forEach((cell, index) => {
+    if (cell.isBlank) return;
+    const col = index % 7;
+    const used = new Set<string>();
+    const neighbors: number[] = [];
+    if (col > 0) neighbors.push(index - 1);
+    if (col < 6) neighbors.push(index + 1);
+    if (index - 7 >= 0) neighbors.push(index - 7);
+    if (index + 7 < allCells.length) neighbors.push(index + 7);
+    neighbors.forEach(neighborIndex => {
+      if (!allCells[neighborIndex].isBlank && hoverColors[neighborIndex]) used.add(hoverColors[neighborIndex]);
+    });
+    hoverColors[index] = hoverPalette.find(color => !used.has(color)) ?? hoverPalette[index % hoverPalette.length];
+  });
+  allCells.forEach((cell, index) => {
+    cell.hoverColor = hoverColors[index];
+  });
+  return allCells;
 });
 
 const taskCards = computed<HomeTask[]>(() =>
@@ -1158,6 +1259,38 @@ onMounted(reloadAll);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 22px;
+}
+.trend-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.trend-progress {
+  width: 100%;
+}
+.summary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  .chip {
+    padding: 3px 10px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    background: var(--el-fill-color-light);
+    border-radius: 999px;
+    b {
+      font-variant-numeric: tabular-nums;
+      color: var(--el-color-primary);
+    }
+  }
+}
+.todo-fold :deep(.panel-head) {
+  display: none;
+}
+.todo-panel-body {
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 // 侧栏维护摘要行（admin）
