@@ -50,7 +50,7 @@ import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { BarChart, EffectScatterChart, LinesChart, MapChart, PieChart } from "echarts/charts";
 import { GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
-import { use, graphic } from "echarts/core";
+import { registerMap, use, graphic } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
 import type { EChartsOption } from "echarts";
@@ -58,6 +58,7 @@ import { Delaunay } from "d3-delaunay";
 import polygonClipping from "polygon-clipping";
 import { getBillingPatientsApi, type BillingPatientInfo } from "@/api/modules/clinic/billing";
 import { useGlobalStore } from "@/stores/modules/global";
+import gushiCountyGeo from "@/assets/geo/gushi-county.json";
 
 use([
   CanvasRenderer,
@@ -474,13 +475,9 @@ const geoOption = computed(() => {
   };
 });
 
-const registerTownshipMap = async () => {
-  mapLoading.value = true;
+const registerTownshipMap = () => {
   try {
-    const { registerMap } = await import("echarts/core");
-    const response = await fetch("/geo/gushi-county.json");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    countyGeo.value = await response.json();
+    countyGeo.value = gushiCountyGeo;
     const featureCollection = buildTownshipMapFeatureCollection();
     if (!featureCollection) throw new Error("乡镇分区构建失败");
     registerMap("gushi-townships", featureCollection as never);
@@ -506,7 +503,7 @@ const loadPatients = async () => {
 
 onMounted(() => {
   void loadPatients();
-  void registerTownshipMap();
+  registerTownshipMap();
 });
 </script>
 
