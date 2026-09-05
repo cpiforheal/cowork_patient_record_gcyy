@@ -42,7 +42,7 @@ public class BillingPatientController {
             FROM pre_ai_patient_cases
             WHERE (? = '' OR patient_json LIKE ?)
             ORDER BY updated_at DESC
-            LIMIT 200
+            LIMIT 2000
             """,
             (rs, rowNum) -> {
                 Map<String, Object> row = new LinkedHashMap<>();

@@ -46,27 +46,27 @@
       <el-dialog
         v-model="townshipDialogVisible"
         :title="townshipDialogTitle"
-        width="min(920px, 92vw)"
+        width="min(1100px, 92vw)"
         append-to-body
         destroy-on-close
         class="township-patient-dialog"
       >
         <p class="township-subtitle">{{ townshipDialogSubtitle }}</p>
         <el-empty v-if="!townshipPatients.length" description="该乡镇暂无来访患者（可能地址未登记或归属县外）" :image-size="56" />
-        <div v-else class="patient-card-scroll">
+        <div v-else class="township-patient-rows">
           <button
             v-for="card in townshipPatients"
             :key="card.caseId"
             type="button"
-            class="patient-mini-card"
-            :disabled="!card.encounterId && !card.patientId"
+            class="patient-row"
             @click="openCourseDialog(card)"
           >
-            <strong class="card-name">{{ card.name || "未登记姓名" }}</strong>
-            <span class="card-field"><label>手机号</label>{{ card.phone || "—" }}</span>
-            <span class="card-field"><label>就诊时间</label>{{ card.visitDate || "—" }}</span>
-            <span class="card-field address"><label>详细住址</label>{{ card.address || "—" }}</span>
-            <em class="card-more">查看病程 »</em>
+            <span class="row-name">{{ card.name || "未登记姓名" }}</span>
+            <span class="row-cell"><label>就诊时间</label>{{ card.visitDate || "—" }}</span>
+            <span class="row-cell"><label>手机号</label>{{ card.phone || "—" }}</span>
+            <span class="row-cell address"><label>详细住址</label>{{ card.address || "—" }}</span>
+            <span class="row-cell"><label>乡镇</label>{{ card.township }}</span>
+            <em class="row-more">查看病程 »</em>
           </button>
         </div>
       </el-dialog>
@@ -115,6 +115,16 @@
                 }}
               </p>
             </section>
+            <section class="course-sec">
+              <span class="course-sec-title">照片资料（点击放大）</span>
+              <AttachmentPreviewGallery
+                v-if="courseAttachments.length"
+                :attachments="courseAttachments"
+                compact
+                @download="downloadCourseAttachment"
+              />
+              <p v-else class="course-empty">该就诊暂无照片资料</p>
+            </section>
           </template>
         </div>
         <template #footer>
@@ -139,14 +149,18 @@ import { Delaunay } from "d3-delaunay";
 import polygonClipping from "polygon-clipping";
 import { getBillingPatientsApi, type BillingPatientInfo } from "@/api/modules/clinic/billing";
 import {
+  downloadPreAiAttachmentApi,
   getEncounterOverviewApi,
   getPreAiPatientCasesApi,
+  getPreAiWorkspaceApi,
+  type PreAiAttachment,
   type PreAiEncounterOverview,
   type PreAiPatientCase
 } from "@/api/modules/clinic/preAi";
 import { useGlobalStore } from "@/stores/modules/global";
 import gushiCountyGeo from "@/assets/geo/gushi-county.json";
 import { usePatientNavigation } from "@/hooks/usePatientNavigation";
+import AttachmentPreviewGallery from "@/views/preAi/encounters/components/AttachmentPreviewGallery.vue";
 
 use([
   CanvasRenderer,
@@ -275,6 +289,7 @@ const courseLoading = ref(false);
 const coursePatient = ref<TownshipPatientCard | null>(null);
 const courseOverview = ref<PreAiEncounterOverview | null>(null);
 const courseError = ref("");
+const courseAttachments = ref<PreAiAttachment[]>([]);
 
 const { openPatientDetail } = usePatientNavigation();
 
@@ -751,17 +766,32 @@ const openCourseDialog = async (card: TownshipPatientCard) => {
   if (!card.encounterId) return;
   coursePatient.value = card;
   courseOverview.value = null;
+  courseAttachments.value = [];
   courseError.value = "";
   courseDialogVisible.value = true;
   courseLoading.value = true;
   try {
-    const { data } = await getEncounterOverviewApi(card.encounterId);
-    courseOverview.value = data;
+    const [overviewResult, workspaceResult] = await Promise.allSettled([
+      getEncounterOverviewApi(card.encounterId),
+      getPreAiWorkspaceApi(card.encounterId)
+    ]);
+    if (overviewResult.status === "fulfilled") {
+      courseOverview.value = overviewResult.value.data;
+    } else {
+      courseError.value = overviewResult.reason?.message || "病程信息加载失败";
+    }
+    if (workspaceResult.status === "fulfilled") {
+      courseAttachments.value = workspaceResult.value.data.attachments || [];
+    }
   } catch (error: any) {
     courseError.value = error?.message || "病程信息加载失败";
   } finally {
     courseLoading.value = false;
   }
+};
+
+const downloadCourseAttachment = (attachment: PreAiAttachment) => {
+  void downloadPreAiAttachmentApi(attachment);
 };
 
 const gotoPatientArchive = () => {
@@ -857,43 +887,47 @@ onMounted(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.patient-card-scroll {
-  display: flex;
-  gap: 12px;
-  padding-bottom: 8px;
-  overflow-x: auto;
-}
-.patient-mini-card {
+
+// 档案化纵向行式列表（对齐患者主档案视图）
+.township-patient-rows {
   display: grid;
-  flex-shrink: 0;
-  gap: 6px;
-  width: 240px;
-  padding: 12px 14px;
+  gap: 8px;
+  max-height: 480px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+.patient-row {
+  display: grid;
+  grid-template-columns: 96px minmax(96px, 0.9fr) 112px minmax(0, 1.6fr) minmax(72px, 0.6fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
   text-align: left;
   cursor: pointer;
   background: var(--el-fill-color-extra-light);
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
+  border-radius: 10px;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     transform 0.18s ease;
-  &:hover:not(:disabled) {
+  &:hover {
     border-color: var(--el-color-primary);
     box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
-    transform: translateY(-2px);
+    transform: translateY(-1px);
+    .row-more {
+      opacity: 1;
+    }
   }
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-  .card-name {
-    font-size: 15px;
+  .row-name {
+    font-size: 14px;
+    font-weight: 700;
     color: var(--el-text-color-primary);
   }
-  .card-field {
+  .row-cell {
     display: grid;
     gap: 1px;
+    min-width: 0;
     font-size: 12px;
     color: var(--el-text-color-regular);
     label {
@@ -903,26 +937,27 @@ onMounted(() => {
     &.address {
       display: -webkit-box;
       overflow: hidden;
-      -webkit-box-orient: vertical;
       -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
     }
   }
-  .card-more {
-    margin-top: 2px;
+  .row-more {
+    flex-shrink: 0;
     font-size: 12px;
     font-style: normal;
     font-weight: 600;
     color: var(--el-color-primary);
+    opacity: 0.75;
   }
 }
 .course-body {
   display: grid;
-  gap: 14px;
-  min-height: 180px;
+  gap: 12px;
+  min-height: 160px;
 }
 .course-sec {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   .course-sec-title {
     padding-left: 8px;
     font-size: 13px;
@@ -932,26 +967,34 @@ onMounted(() => {
   }
   p {
     display: grid;
-    gap: 2px;
+    gap: 1px;
     margin: 0;
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.55;
     label {
+      margin-right: 8px;
       font-size: 11px;
       color: var(--el-text-color-secondary);
     }
   }
-}
-.course-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 16px;
-  span {
-    font-size: 13px;
-    label {
-      display: block;
-      font-size: 11px;
-      color: var(--el-text-color-secondary);
+  .course-empty {
+    margin: 0;
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+  }
+  :deep(.attachment-gallery) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    .attachment-card {
+      width: 132px;
+      padding: 6px;
+      border-radius: 8px;
+    }
+    .image-thumbnail {
+      width: 100%;
+      height: 86px;
+      border-radius: 6px;
     }
   }
 }
