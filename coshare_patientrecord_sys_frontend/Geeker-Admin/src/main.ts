@@ -12,6 +12,8 @@ import "element-plus/theme-chalk/dark/css-vars.css";
 import "@/styles/element-dark.scss";
 // custom element css
 import "@/styles/element.scss";
+// inspira 动效基建（Tailwind v4，无 preflight，不影响 Element Plus）
+import "@/styles/tailwind.css";
 // element plus service styles and directives
 import { registerElementPlusServices } from "@/plugins/elementPlusServices";
 // element icons used by dynamic menus

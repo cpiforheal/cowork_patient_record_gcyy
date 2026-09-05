@@ -1,0 +1,31 @@
+/* Inspira 风格动效基建（Tailwind v4 选择性引入）
+ * 只挂 theme + utilities 两层，刻意不导 preflight——避免全局重置冲击 Element Plus。
+ * 服务范围：src/components/inspira 与 views/home 等新增动效页面。 */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* 暗色变体跟随 Geeker 既有机制（html.dark） */
+@custom-variant dark (&:is(.dark *));
+
+/* 内容扫描范围：仅新增动效组件与试点页面 */
+@source "../components/inspira";
+@source "../views/home";
+
+/* 主题桥接：Tailwind 色板指向运行时 CSS 变量（Element Plus 主题/暗色均可用） */
+@theme inline {
+  --color-primary: var(--el-color-primary);
+  --color-primary-light-9: var(--el-color-primary-light-9);
+  --color-success: var(--el-color-success);
+  --color-warning: var(--el-color-warning);
+  --color-danger: var(--el-color-danger);
+  --color-info: var(--el-color-info);
+  --color-hos-primary: var(--hos-primary);
+  --color-hos-accent: var(--hos-accent);
+  --color-status-success: var(--hos-status-success);
+  --color-status-warning: var(--hos-status-warning);
+  --color-status-danger: var(--hos-status-danger);
+  --color-status-success-soft: var(--hos-status-success-soft);
+  --color-status-warning-soft: var(--hos-status-warning-soft);
+  --color-status-danger-soft: var(--hos-status-danger-soft);
+}

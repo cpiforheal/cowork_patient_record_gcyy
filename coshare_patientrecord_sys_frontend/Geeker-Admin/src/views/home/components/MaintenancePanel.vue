@@ -145,7 +145,7 @@ defineEmits<{
   gap: 10px;
   margin-top: 12px;
   padding: 12px;
-  background: #f7fbfa;
+  background: var(--el-fill-color-light);
   border: 1px solid rgb(20 184 166 / 16%);
   border-radius: 6px;
   span,

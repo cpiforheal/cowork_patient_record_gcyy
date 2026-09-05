@@ -27,6 +27,7 @@ module.exports = {
     "no-empty-source": null, // 禁止空源码
     "selector-class-pattern": null, // 强制选择器类名的格式
     "value-no-vendor-prefix": null, // 关闭 vendor-prefix (为了解决多行省略 -webkit-box)
+    "property-no-vendor-prefix": null, // 关闭属性 vendor-prefix（inspira 组件的 -webkit-mask-composite 兼容旧 Safari）
     "no-descending-specificity": null, // 不允许较低特异性的选择器出现在覆盖较高特异性的选择器
     "value-keyword-case": null, // 解决在 scss 中使用 v-bind 大写单词报错
     "selector-pseudo-class-no-unknown": [
@@ -36,5 +37,5 @@ module.exports = {
       }
     ]
   },
-  ignoreFiles: ["**/*.js", "**/*.jsx", "**/*.tsx", "**/*.ts"]
+  ignoreFiles: ["**/*.js", "**/*.jsx", "**/*.tsx", "**/*.ts", "**/styles/tailwind.css"]
 };

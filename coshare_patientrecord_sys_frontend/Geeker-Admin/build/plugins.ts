@@ -1,6 +1,7 @@
 import type { PluginOption } from "vite";
 import vue from "@vitejs/plugin-vue";
 import vueJsx from "@vitejs/plugin-vue-jsx";
+import tailwindcss from "@tailwindcss/vite";
 import { createHtmlPlugin } from "vite-plugin-html";
 import viteCompression from "vite-plugin-compression";
 import vueSetupExtend from "unplugin-vue-setup-extend-plus/vite";
@@ -13,6 +14,8 @@ export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOptio
   return [
     vue(),
     vueJsx(),
+    // Tailwind v4：只服务新增的 inspira 动效组件，样式入口未导 preflight，不影响 Element Plus
+    tailwindcss(),
     vueSetupExtend({}),
     Components({
       dts: false,

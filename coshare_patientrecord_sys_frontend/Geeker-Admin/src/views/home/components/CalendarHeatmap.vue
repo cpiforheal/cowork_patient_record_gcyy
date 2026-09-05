@@ -80,7 +80,7 @@ defineEmits<{
 
 <style scoped lang="scss">
 .calendar-heatmap-card {
-  background: linear-gradient(135deg, rgb(236 253 245 / 58%), rgb(255 255 255 / 92%)), #ffffff;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary-light-9) 58%, transparent), var(--el-bg-color));
   border-color: rgb(20 184 166 / 18%);
 }
 
@@ -149,7 +149,7 @@ defineEmits<{
   color: var(--el-text-color-primary);
   text-align: left;
   cursor: pointer;
-  background: #f8fbfa;
+  background: var(--el-fill-color-light);
   border: 1px solid #dfeee9;
   border-radius: 8px;
   transition:
@@ -169,23 +169,23 @@ defineEmits<{
   }
 
   &.is-level-1 {
-    background: #e7f7f1;
+    background: var(--el-color-primary-light-9);
     border-color: #ccecdf;
   }
 
   &.is-level-2 {
-    background: #caefdf;
+    background: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-bg-color));
     border-color: #a4dfc8;
   }
 
   &.is-level-3 {
     color: #07594f;
-    background: #8edcc3;
+    background: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-bg-color));
     border-color: #62c6a8;
   }
 
   &.is-level-4 {
-    color: #ffffff;
+    color: var(--el-bg-color);
     background: #0f9f8f;
     border-color: #0d857a;
 
@@ -242,19 +242,19 @@ defineEmits<{
   }
 
   .is-level-0 {
-    background: #f8fbfa;
+    background: var(--el-fill-color-light);
   }
 
   .is-level-1 {
-    background: #e7f7f1;
+    background: var(--el-color-primary-light-9);
   }
 
   .is-level-2 {
-    background: #caefdf;
+    background: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-bg-color));
   }
 
   .is-level-3 {
-    background: #8edcc3;
+    background: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-bg-color));
   }
 
   .is-level-4 {

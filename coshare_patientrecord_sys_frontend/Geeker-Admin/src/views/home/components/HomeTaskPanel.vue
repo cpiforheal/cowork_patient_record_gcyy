@@ -123,7 +123,7 @@ defineEmits<{
   overflow: hidden;
   text-align: left;
   cursor: pointer;
-  background: linear-gradient(135deg, rgb(236 253 245 / 62%), #ffffff);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary-light-9) 62%, transparent), var(--el-bg-color));
   border: 1px solid rgb(15 118 110 / 14%);
   border-radius: 8px;
   transition:
@@ -223,7 +223,7 @@ defineEmits<{
   padding: 12px;
   text-align: left;
   cursor: pointer;
-  background: #ffffff;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 6px;
   transition:

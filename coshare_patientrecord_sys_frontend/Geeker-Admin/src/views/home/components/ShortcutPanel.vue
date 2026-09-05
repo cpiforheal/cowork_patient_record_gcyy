@@ -105,7 +105,7 @@ defineEmits<{ navigate: [path: string] }>();
       border-color 160ms ease,
       transform 160ms ease;
     &:hover {
-      background: #f8fffd;
+      background: var(--el-fill-color-light);
       border-color: rgb(15 118 110 / 22%);
       transform: translateX(2px);
     }

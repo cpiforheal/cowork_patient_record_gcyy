@@ -1,26 +1,40 @@
 <template>
   <div class="home-page">
-    <GreetingBanner
-      :user-name="userName"
-      :role-name="roleName"
-      :department="department"
-      :task-title="focusTask?.title"
-      @open-first="openFocusTask"
-    />
+    <!-- 紧凑 header：问候 + 角色 + 日期 + 当前焦点 -->
+    <header class="home-header board-card">
+      <div class="header-main">
+        <h2>{{ greetingText }}，{{ userName }}</h2>
+        <p class="header-meta">
+          <AnimatedShinyText class="role-badge">{{ roleName }} · {{ department }}</AnimatedShinyText>
+          <span>{{ headerDateText }}</span>
+          <span v-if="focusTask" class="header-focus">今天要处理什么：{{ focusTask.title }}</span>
+        </p>
+      </div>
+      <el-button circle :icon="Refresh" :loading="dashboardLoading" title="刷新待办" @click="reloadAll" />
+    </header>
 
-    <section class="stat-strip">
-      <button v-for="card in statCards" :key="card.id" class="stat-card" :class="`is-${card.tone}`" @click="openStatCard(card)">
-        <span>{{ card.label }}</span>
-        <strong>{{ card.count }}</strong>
-        <small>{{ card.desc }}</small>
-      </button>
-    </section>
+    <template v-if="showPatientBoard">
+      <!-- 真待办聚合：可执行的大数字入口卡 -->
+      <section v-loading="dashboardLoading" class="todo-grid">
+        <BlurFade v-for="(card, index) in primaryTodoCards" :key="card.id" :delay="index * 0.05">
+          <button type="button" class="todo-card" :class="`is-${card.tone}`" @click="openStatCard(card)">
+            <BorderBeam v-if="card.urgent" :duration="4.5" />
+            <span class="todo-label">
+              {{ card.label }}
+              <el-icon><ArrowRight /></el-icon>
+            </span>
+            <strong class="todo-count">
+              <NumberTicker :value="typeof card.count === 'number' ? card.count : 0" />
+            </strong>
+            <small>{{ card.desc }}</small>
+          </button>
+        </BlurFade>
+        <el-empty v-if="!primaryTodoCards.length && !dashboardLoading" description="暂无待办，一切尽在掌握" :image-size="60" />
+      </section>
 
-    <div class="workbench-grid">
-      <div class="workbench-main">
-        <template v-if="showPatientBoard">
+      <div class="workbench-grid">
+        <div class="workbench-main">
           <HomeTaskPanel
-            v-loading="dashboardLoading"
             class="board-card"
             :role-name="roleName"
             :action-tasks="actionTasks"
@@ -29,54 +43,86 @@
             @open-task="openTask"
             @open-action-task="openActionTask"
           />
-          <div class="board-card chart-row">
-            <MiniBarChart title="近 7 日就诊收录" subtitle="按就诊日期" :items="trendItems" unit=" 人" />
-            <MiniBarChart title="在办阶段分布" subtitle="当前流程所处阶段" :items="stageItems" unit=" 人" />
-          </div>
-          <CalendarHeatmap
-            class="board-card"
-            :month-title="calendarMonthTitle"
-            :month-total="calendarMonthTotal"
-            :peak-count="calendarPeakCount"
-            :weekday-labels="weekdayLabels"
-            :cells="calendarCells"
-            @shift-month="shiftCalendarMonth"
-            @current-month="jumpToCurrentMonth"
-            @select-month="selectCalendarMonth"
-            @select-date="selectCalendarDate"
-          />
-        </template>
-        <template v-else-if="showPharmacyBoard">
-          <div class="board-card">
-            <MiniBarChart title="处方状态分布" subtitle="中药房当前流水线" :items="pharmacyChartItems" unit=" 张" />
-          </div>
-        </template>
-      </div>
+          <!-- 数据看板：降级为默认收起的折叠区 -->
+          <section class="board-card dashboard-fold">
+            <button type="button" class="fold-head" @click="dashboardOpen = !dashboardOpen">
+              <el-icon><TrendCharts /></el-icon>
+              <strong>数据看板</strong>
+              <small>收录趋势 · 阶段分布 · 月历热力</small>
+              <span class="fold-spacer"></span>
+              <el-icon class="fold-arrow" :class="{ open: dashboardOpen }"><ArrowDown /></el-icon>
+            </button>
+            <div v-if="dashboardOpen" class="fold-body">
+              <div class="chart-row">
+                <MiniBarChart title="近 7 日就诊收录" subtitle="按就诊日期" :items="trendItems" unit=" 人" />
+                <MiniBarChart title="在办阶段分布" subtitle="当前流程所处阶段" :items="stageItems" unit=" 人" />
+              </div>
+              <CalendarHeatmap
+                :month-title="calendarMonthTitle"
+                :month-total="calendarMonthTotal"
+                :peak-count="calendarPeakCount"
+                :weekday-labels="weekdayLabels"
+                :cells="calendarCells"
+                @shift-month="shiftCalendarMonth"
+                @current-month="jumpToCurrentMonth"
+                @select-month="selectCalendarMonth"
+                @select-date="selectCalendarDate"
+              />
+            </div>
+          </section>
+        </div>
 
+        <aside class="workbench-side board-card">
+          <ShortcutPanel :quick-entries="quickEntries" :reminders="roleReminders" @navigate="navigateTo" />
+          <template v-if="isAdmin">
+            <button type="button" class="maintenance-summary" @click="maintenanceOpen = !maintenanceOpen">
+              <el-icon><Setting /></el-icon>
+              <strong>生产维护</strong>
+              <span class="maint-badge" :class="`is-${maintenanceTone}`">{{ maintenanceBadgeText }}</span>
+              <el-icon class="fold-arrow" :class="{ open: maintenanceOpen }"><ArrowDown /></el-icon>
+            </button>
+            <MaintenancePanel
+              v-if="maintenanceOpen"
+              v-model:backup-enabled="backupEnabled"
+              v-model:backup-path="backupPath"
+              :maintenance-loading="maintenanceLoading"
+              :storage-summary="storageSummary"
+              :snapshot-summary="snapshotSummary"
+              :maintenance-status="maintenanceStatus"
+              :latest-backup-summary="latestBackupSummary"
+              :backup-status="backupStatus"
+              :backup-loading="backupLoading"
+              :choosing-backup-dir="choosingBackupDir"
+              :backup-storage-summary="backupStorageSummary"
+              :backup-health-items="backupHealthItems"
+              @refresh="loadMaintenanceDashboard({ fullMaintenanceScan: true })"
+              @create-snapshot="createSnapshot"
+              @choose-backup-directory="chooseBackupDirectory"
+              @save-backup-config="saveBackupConfig"
+              @run-backup-now="runBackupNow"
+            />
+          </template>
+        </aside>
+      </div>
+    </template>
+
+    <template v-else-if="showPharmacyBoard">
+      <section v-loading="dashboardLoading" class="stat-strip">
+        <BlurFade v-for="(card, index) in statCards" :key="card.id" :delay="index * 0.04">
+          <button type="button" class="stat-card" :class="`is-${card.tone}`" @click="openStatCard(card)">
+            <span>{{ card.label }}</span>
+            <strong>{{ card.count }}</strong>
+            <small>{{ card.desc }}</small>
+          </button>
+        </BlurFade>
+      </section>
+      <div class="board-card pharmacy-chart">
+        <MiniBarChart title="处方状态分布" subtitle="中药房当前流水线" :items="pharmacyChartItems" unit=" 张" />
+      </div>
       <aside class="workbench-side board-card">
         <ShortcutPanel :quick-entries="quickEntries" :reminders="roleReminders" @navigate="navigateTo" />
-        <MaintenancePanel
-          v-if="isAdmin"
-          v-model:backup-enabled="backupEnabled"
-          v-model:backup-path="backupPath"
-          :maintenance-loading="maintenanceLoading"
-          :storage-summary="storageSummary"
-          :snapshot-summary="snapshotSummary"
-          :maintenance-status="maintenanceStatus"
-          :latest-backup-summary="latestBackupSummary"
-          :backup-status="backupStatus"
-          :backup-loading="backupLoading"
-          :choosing-backup-dir="choosingBackupDir"
-          :backup-storage-summary="backupStorageSummary"
-          :backup-health-items="backupHealthItems"
-          @refresh="loadMaintenanceDashboard({ fullMaintenanceScan: true })"
-          @create-snapshot="createSnapshot"
-          @choose-backup-directory="chooseBackupDirectory"
-          @save-backup-config="saveBackupConfig"
-          @run-backup-now="runBackupNow"
-        />
       </aside>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -84,6 +130,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
+import { ArrowDown, ArrowRight, Refresh, Setting, TrendCharts } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
@@ -108,10 +155,13 @@ import { useAuthStore } from "@/stores/modules/auth";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 import CalendarHeatmap from "./components/CalendarHeatmap.vue";
 import HomeTaskPanel from "./components/HomeTaskPanel.vue";
-import GreetingBanner from "./components/GreetingBanner.vue";
 import MiniBarChart from "./components/MiniBarChart.vue";
 import ShortcutPanel from "./components/ShortcutPanel.vue";
 import MaintenancePanel from "./components/MaintenancePanel.vue";
+import AnimatedShinyText from "@/components/inspira/AnimatedShinyText.vue";
+import BlurFade from "@/components/inspira/BlurFade.vue";
+import BorderBeam from "@/components/inspira/BorderBeam.vue";
+import NumberTicker from "@/components/inspira/NumberTicker.vue";
 import { useHomeDashboard } from "./composables/useHomeDashboard";
 
 interface HomeTask {
@@ -142,6 +192,7 @@ interface StatCard {
   tone: "success" | "warning" | "danger" | "info";
   path: string;
   query?: Record<string, string>;
+  urgent?: boolean;
 }
 
 type CalendarDayCell = {
@@ -207,13 +258,126 @@ const roleName = computed(() => roleLabel(currentRole.value));
 const userName = computed(() => userStore.userInfo.name || "同事");
 const department = computed(() => userStore.userInfo.department || "门诊");
 const editableSections = computed(() => recordSections.filter(section => canEditSection(currentRole.value, section)));
-const editableSectionCount = computed(() => editableSections.value.length);
 const firstEditableSection = computed(() => editableSections.value[0] ?? recordSections[0]);
+
+// 紧凑 header 的问候语与日期（替代原 GreetingBanner 的 30 秒轮换横幅）
+const greetingText = computed(() => {
+  const hour = new Date().getHours();
+  if (hour < 6) return "夜深了";
+  if (hour < 9) return "早上好";
+  if (hour < 12) return "上午好";
+  if (hour < 14) return "中午好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+});
+const headerDateText = computed(() => {
+  const now = new Date();
+  const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+  return `${now.getMonth() + 1} 月 ${now.getDate()} 日 · 周${weekdays[now.getDay()]}`;
+});
+const dashboardOpen = ref(false);
+const maintenanceOpen = ref(false);
 
 // 严格按后端下发的菜单权限决定加载哪块工作面板——绝不调用本岗位无权的接口。
 const menuPaths = computed(() => new Set(authStore.flatMenuListGet.map(item => item.path)));
 const showPatientBoard = computed(() => menuPaths.value.has("/patients/list"));
 const showPharmacyBoard = computed(() => !showPatientBoard.value && menuPaths.value.has("/tcm-pharmacy/workbench"));
+
+// 真待办聚合：只保留可直接执行、数字与列表页同源的入口卡；按菜单权限自适应裁剪。
+const primaryTodoCards = computed<StatCard[]>(() => {
+  if (!showPatientBoard.value) return [];
+  const cards: StatCard[] = [
+    {
+      id: "todo-pending",
+      label: "本岗位待处理",
+      count: pendingRows.value.length,
+      desc: "点名到人，点击直达患者档案",
+      tone: pendingRows.value.length ? "warning" : "success",
+      path: "/patients/overview"
+    }
+  ];
+  if (menuPaths.value.has("/audit/review")) {
+    cards.push(
+      {
+        id: "todo-review",
+        label: "待档案审核",
+        count: stats.value.reviewPatients,
+        desc: "等待质控审核的档案",
+        tone: stats.value.reviewPatients ? "warning" : "success",
+        path: "/audit/review"
+      },
+      {
+        id: "todo-returned",
+        label: "退回整改",
+        count: stats.value.returnedPatients,
+        desc: "需按原因补齐后重新提交",
+        tone: stats.value.returnedPatients ? "danger" : "success",
+        path: "/audit/review"
+      }
+    );
+  }
+  cards.push({
+    id: "todo-overdue",
+    label: "超 24h 未更新",
+    count: stats.value.overduePatients,
+    desc: "长时间停留在同一阶段",
+    tone: stats.value.overduePatients ? "warning" : "success",
+    path: "/patients/overview"
+  });
+  if (menuPaths.value.has("/workbench/upload")) {
+    cards.push({
+      id: "todo-attachment",
+      label: "附件待补",
+      count: attachmentTodoRows.value.length,
+      desc: "缺少证据附件的档案",
+      tone: attachmentTodoRows.value.length ? "warning" : "success",
+      path: "/workbench/upload"
+    });
+  }
+  if (isAdmin.value) {
+    const duplicateReminder = workReminders.value.find(item => /重复/.test(item.title));
+    if (duplicateReminder) {
+      cards.push({
+        id: "todo-duplicates",
+        label: "疑似重复患者",
+        count: duplicateReminder.count ?? 0,
+        desc: duplicateReminder.desc || "合并前请人工核对",
+        tone: duplicateReminder.level === "danger" ? "danger" : duplicateReminder.count ? "warning" : "success",
+        path: duplicateReminder.path || "/patients/overview"
+      });
+    }
+    const fileReminder = workReminders.value.find(item => /缺失|附件完整/.test(item.title));
+    if (fileReminder) {
+      cards.push({
+        id: "todo-files",
+        label: "附件磁盘缺失",
+        count: fileReminder.count ?? 0,
+        desc: fileReminder.desc || "巡检发现的磁盘缺失附件",
+        tone: fileReminder.level === "danger" ? "danger" : fileReminder.count ? "warning" : "success",
+        path: fileReminder.path || "/documents/recycle"
+      });
+    }
+  }
+  const urgentCard = cards.find(card => card.tone === "danger" && Number(card.count) > 0);
+  if (urgentCard) urgentCard.urgent = true;
+  return cards;
+});
+
+// admin 生产维护摘要行的徽标（展开后才显示完整维护面板）
+const maintenanceBadgeText = computed(() => {
+  if (maintenanceLoading.value) return "巡检中…";
+  if (backupStatus.value?.running) return "备份运行中";
+  if (backupStatus.value?.latestRun?.status === "failed") return "备份失败";
+  const missing = maintenanceStatus.value?.storage?.missingFileCount;
+  if (typeof missing === "number" && missing > 0) return `附件缺失 ${missing}`;
+  return "运行正常";
+});
+const maintenanceTone = computed(() => {
+  if (backupStatus.value?.latestRun?.status === "failed") return "danger";
+  const missing = maintenanceStatus.value?.storage?.missingFileCount;
+  if (typeof missing === "number" && missing > 0) return "warning";
+  return "success";
+});
 
 const {
   quickEntries,
@@ -417,107 +581,61 @@ const actionTasks = computed<ActionTask[]>(() =>
   }))
 );
 
-// 岗位统计卡：不同岗位组呈现完全不同的数据面。
+// 岗位统计卡：仅中药房板块使用（患者板块已升级为 primaryTodoCards 真待办聚合）。
 const statCards = computed<StatCard[]>(() => {
-  if (showPatientBoard.value) {
-    return [
-      {
-        id: "pending",
-        label: "待处理",
-        count: pendingRows.value.length,
-        desc: "本岗位相关在办患者",
-        tone: pendingRows.value.length ? "warning" : "success",
-        path: "/patients/overview"
-      },
-      {
-        id: "review",
-        label: "待档案审核",
-        count: stats.value.reviewPatients,
-        desc: "等待质控审核",
-        tone: stats.value.reviewPatients ? "warning" : "success",
-        path: "/audit/review"
-      },
-      {
-        id: "returned",
-        label: "退回整改",
-        count: stats.value.returnedPatients,
-        desc: "需按原因补齐后重新提交",
-        tone: stats.value.returnedPatients ? "danger" : "success",
-        path: "/audit/review"
-      },
-      {
-        id: "attachment",
-        label: "附件待补",
-        count: attachmentTodoRows.value.length,
-        desc: "缺少证据附件的档案",
-        tone: attachmentTodoRows.value.length ? "warning" : "success",
-        path: "/workbench/upload"
-      },
-      {
-        id: "sections",
-        label: "可写章节",
-        count: editableSectionCount.value,
-        desc: `${roleName.value}可编辑的档案章节`,
-        tone: "info",
-        path: "/patients/overview"
-      }
-    ];
-  }
-  if (showPharmacyBoard.value) {
-    const counts = tcmCounts.value;
-    const value = (key: keyof TcmStatusCounts) => counts?.[key] ?? 0;
-    return [
-      {
-        id: "charge",
-        label: "待收费",
-        count: value("waitingCharge"),
-        desc: "医师已签署提交",
-        tone: value("waitingCharge") ? "warning" : "success",
-        path: "/tcm-pharmacy/workbench"
-      },
-      {
-        id: "reviewRx",
-        label: "待审方",
-        count: value("waitingReview"),
-        desc: "收费完成待药师审核",
-        tone: value("waitingReview") ? "warning" : "success",
-        path: "/tcm-pharmacy/workbench"
-      },
-      {
-        id: "dispensing",
-        label: "调剂中",
-        count: value("dispensing"),
-        desc: "抓药与复核进行中",
-        tone: "info",
-        path: "/tcm-pharmacy/workbench"
-      },
-      {
-        id: "decocting",
-        label: "代煎中",
-        count: value("decocting"),
-        desc: "浸泡、煎制与包装",
-        tone: "info",
-        path: "/tcm-pharmacy/workbench"
-      },
-      {
-        id: "ready",
-        label: "待取药",
-        count: value("ready"),
-        desc: "可叫号发药",
-        tone: value("ready") ? "warning" : "success",
-        path: "/tcm-pharmacy/workbench"
-      },
-      {
-        id: "exception",
-        label: "异常处方",
-        count: value("exception"),
-        desc: "缺药或设备异常",
-        tone: value("exception") ? "danger" : "success",
-        path: "/tcm-pharmacy/workbench"
-      }
-    ];
-  }
-  return [];
+  if (!showPharmacyBoard.value) return [];
+  const counts = tcmCounts.value;
+  const value = (key: keyof TcmStatusCounts) => counts?.[key] ?? 0;
+  return [
+    {
+      id: "charge",
+      label: "待收费",
+      count: value("waitingCharge"),
+      desc: "医师已签署提交",
+      tone: value("waitingCharge") ? "warning" : "success",
+      path: "/tcm-pharmacy/workbench"
+    },
+    {
+      id: "reviewRx",
+      label: "待审方",
+      count: value("waitingReview"),
+      desc: "收费完成待药师审核",
+      tone: value("waitingReview") ? "warning" : "success",
+      path: "/tcm-pharmacy/workbench"
+    },
+    {
+      id: "dispensing",
+      label: "调剂中",
+      count: value("dispensing"),
+      desc: "抓药与复核进行中",
+      tone: "info",
+      path: "/tcm-pharmacy/workbench"
+    },
+    {
+      id: "decocting",
+      label: "代煎中",
+      count: value("decocting"),
+      desc: "浸泡、煎制与包装",
+      tone: "info",
+      path: "/tcm-pharmacy/workbench"
+    },
+    {
+      id: "ready",
+      label: "待取药",
+      count: value("ready"),
+      desc: "可叫号发药",
+      tone: value("ready") ? "warning" : "success",
+      path: "/tcm-pharmacy/workbench"
+    },
+    {
+      id: "exception",
+      label: "异常处方",
+      count: value("exception"),
+      desc: "缺药或设备异常",
+      tone: value("exception") ? "danger" : "success",
+      path: "/tcm-pharmacy/workbench"
+    }
+  ];
 });
 
 // 横幅"今天要处理什么"：优先取有告警的项。
@@ -848,17 +966,16 @@ const openTask = (task?: HomeTask) => {
 
 const openActionTask = (task?: ActionTask) => {
   if (!task) return;
-  if (task.path === "/") return;
+  // 备份健康卡：展开同页的生产维护面板（替代原先指向 "/" 的死链）
+  if (task.path === "/") {
+    maintenanceOpen.value = true;
+    return;
+  }
   router.push({ path: task.path, query: task.query });
 };
 
 const openStatCard = (card: StatCard) => {
   router.push({ path: card.path, query: card.query });
-};
-
-const openFocusTask = () => {
-  if (!focusTask.value) return;
-  router.push({ path: focusTask.value.path, query: focusTask.value.query });
 };
 
 const navigateTo = (path: string) => {
@@ -869,20 +986,233 @@ onMounted(reloadAll);
 </script>
 
 <style scoped lang="scss">
+// 页面级状态 token：全部指向全局 --hos-* 变量，html.dark 下自动切换，无硬编码浅色
 .home-page {
-  --clinic-success: #15803d;
-  --clinic-warning: #b45309;
-  --clinic-danger: #b91c1c;
-  --clinic-info: #0f766e;
-  --clinic-success-soft: #ecf8f0;
-  --clinic-warning-soft: #fef7e8;
-  --clinic-danger-soft: #fdeeee;
+  --clinic-success: var(--hos-status-success, #16a34a);
+  --clinic-warning: var(--hos-status-warning, #b45309);
+  --clinic-danger: var(--hos-status-danger, #dc2626);
+  --clinic-info: var(--hos-primary, #0f766e);
+  --clinic-success-soft: var(--hos-status-success-soft, #ecf8f0);
+  --clinic-warning-soft: var(--hos-status-warning-soft, #fef7e8);
+  --clinic-danger-soft: var(--hos-status-danger-soft, #fdeeee);
 
   display: grid;
   gap: 14px;
   padding: 4px 2px 16px;
 }
+.board-card {
+  padding: 16px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+}
 
+// 紧凑 header
+.home-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  h2 {
+    margin: 0;
+    font-size: 20px;
+  }
+}
+.header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.role-badge {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hos-primary, var(--el-color-primary));
+  background: var(--el-color-primary-light-9);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, transparent);
+  border-radius: 999px;
+}
+.header-focus {
+  font-weight: 500;
+  color: var(--el-text-color-regular);
+}
+
+// 真待办聚合入口卡
+.todo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+.todo-card {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 16px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+  &:hover {
+    border-color: color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-light));
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+    transform: translateY(-2px);
+  }
+  .todo-label {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--el-text-color-secondary);
+  }
+  .todo-count {
+    font-size: 30px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    color: var(--el-text-color-primary);
+  }
+  small {
+    overflow: hidden;
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &.is-warning .todo-count {
+    color: var(--clinic-warning);
+  }
+  &.is-danger .todo-count {
+    color: var(--clinic-danger);
+  }
+  &.is-success .todo-count {
+    color: var(--clinic-success);
+  }
+  &.is-info .todo-count {
+    color: var(--clinic-info);
+  }
+}
+
+// 数据看板折叠区
+.dashboard-fold {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  .fold-head {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    padding: 13px 16px;
+    text-align: left;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    strong {
+      font-size: 14px;
+    }
+    small {
+      color: var(--el-text-color-secondary);
+    }
+    &:hover strong {
+      color: var(--el-color-primary);
+    }
+  }
+  .fold-spacer {
+    flex: 1;
+  }
+  .fold-arrow {
+    color: var(--el-text-color-secondary);
+    transition: transform 0.2s var(--ease-standard, ease);
+    &.open {
+      transform: rotate(180deg);
+    }
+  }
+  .fold-body {
+    display: grid;
+    gap: 16px;
+    padding: 4px 16px 16px;
+    border-top: 1px solid var(--el-border-color-lighter);
+  }
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+// 侧栏维护摘要行（admin）
+.maintenance-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 0 2px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+  strong {
+    flex: 1;
+    font-size: 13px;
+  }
+  &:hover strong {
+    color: var(--el-color-primary);
+  }
+}
+.maint-badge {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  &.is-success {
+    color: var(--clinic-success);
+    background: var(--clinic-success-soft);
+  }
+  &.is-warning {
+    color: var(--clinic-warning);
+    background: var(--clinic-warning-soft);
+  }
+  &.is-danger {
+    color: var(--clinic-danger);
+    background: var(--clinic-danger-soft);
+  }
+}
+.workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 14px;
+  align-items: start;
+}
+.workbench-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.workbench-side {
+  min-width: 0;
+}
+.pharmacy-chart {
+  min-width: 0;
+}
+
+// 药房统计卡（沿用原视觉，token 已接全局变量）
 .stat-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -902,25 +1232,25 @@ onMounted(reloadAll);
     box-shadow 160ms ease,
     border-color 160ms ease;
   &:hover {
-    border-color: rgb(15 118 110 / 26%);
-    box-shadow: 0 8px 20px rgb(15 118 110 / 10%);
+    border-color: color-mix(in srgb, var(--el-color-primary) 26%, var(--el-border-color-light));
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--el-color-primary) 10%, transparent);
     transform: translateY(-2px);
   }
   span {
-    color: var(--el-text-color-secondary);
     font-size: 13px;
     font-weight: 600;
+    color: var(--el-text-color-secondary);
   }
   strong {
-    color: var(--el-text-color-primary);
     font-size: 26px;
     font-variant-numeric: tabular-nums;
     line-height: 1.15;
+    color: var(--el-text-color-primary);
   }
   small {
     overflow: hidden;
-    color: var(--el-text-color-placeholder);
     font-size: 12px;
+    color: var(--el-text-color-placeholder);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -935,33 +1265,7 @@ onMounted(reloadAll);
   }
 }
 
-.workbench-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
-  gap: 14px;
-  align-items: start;
-}
-.workbench-main {
-  min-width: 0;
-  display: grid;
-  gap: 14px;
-}
-.board-card {
-  padding: 16px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 10px;
-}
-.chart-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px;
-}
-.workbench-side {
-  min-width: 0;
-}
-
-@media (max-width: 1080px) {
+@media (width <= 1080px) {
   .workbench-grid {
     grid-template-columns: 1fr;
   }

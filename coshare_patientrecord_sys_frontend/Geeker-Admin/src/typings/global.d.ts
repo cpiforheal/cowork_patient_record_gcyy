@@ -1,3 +1,10 @@
+/* Tailwind v4 Vite 插件：包类型经 exports 暴露，Node10 解析策略读不到，此处环境声明兜底 */
+declare module "@tailwindcss/vite" {
+  import type { Plugin } from "vite";
+  const tailwindcss: () => Plugin;
+  export default tailwindcss;
+}
+
 /* Menu */
 declare namespace Menu {
   interface MenuOptions {
