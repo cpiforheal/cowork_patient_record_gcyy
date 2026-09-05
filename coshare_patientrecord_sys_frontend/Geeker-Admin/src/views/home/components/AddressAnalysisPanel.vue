@@ -48,8 +48,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { BarChart, EffectScatterChart, LinesChart, MapChart, PieChart } from "echarts/charts";
-import { GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { BarChart, EffectScatterChart, MapChart, PieChart } from "echarts/charts";
+import { GeoComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { registerMap, use, graphic } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
@@ -66,12 +66,10 @@ use([
   BarChart,
   MapChart,
   EffectScatterChart,
-  LinesChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  GeoComponent,
-  VisualMapComponent
+  GeoComponent
 ]);
 
 /** 固始县乡镇对照表（可扩展）：按长度降序含匹配，先长后短避免"陈集/陈淋子"类误配。 */
@@ -202,9 +200,7 @@ const chartPalette = computed(() => ({
   tooltipBg: isDark.value ? "#1f2937" : "#ffffff",
   tooltipBorder: isDark.value ? "#374151" : "#e2e8f0",
   maskBorder: isDark.value ? "#111827" : "#ffffff",
-  unknown: isDark.value ? "#374151" : "#cbd5e1",
-  areaBase: isDark.value ? "#1b2a2b" : "#e8f6f2",
-  areaBorder: isDark.value ? "#2f4a48" : "#9fd6cb"
+  unknown: isDark.value ? "#374151" : "#cbd5e1"
 }));
 
 const donutOption = computed<EChartsOption>(() => {
@@ -298,8 +294,9 @@ const barOption = computed<EChartsOption>(() => {
   };
 });
 
-// ---------- 迁移地图：Voronoi 近似分块 + choropleth + 涟漪散点 + 迁移光线 ----------
+// ---------- 迁移地图：Voronoi 近似分块（锯齿边界）+ 灰底 hover 彩色强调 + 涟漪散点 ----------
 const countyGeo = ref<unknown>(null);
+const regionHoverColors = ref<Record<string, string>>({});
 
 const mapTotalByRegion = computed(() => {
   const d = distribution.value;
@@ -313,7 +310,50 @@ const maxRegionCount = computed(() => Math.max(1, ...mapTotalByRegion.value.valu
 
 const localCoord = (name: string): [number, number] => TOWNSHIP_COORDS[name] || HOSPITAL_COORD;
 
-/** 以乡镇驻点为种子生成 Voronoi 分块，再用固始县真实轮廓裁剪，得到近似乡镇分区 GeoJSON。 */
+const hash32 = (str: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+};
+const mulberry32 = (seedNum: number) => () => {
+  seedNum |= 0;
+  seedNum = (seedNum + 0x6d2b79f5) | 0;
+  let t = Math.imul(seedNum ^ (seedNum >>> 15), 1 | seedNum);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+/** 共享边确定性锯齿化：同一条 Voronoi 边在相邻分块中生成完全一致的锯齿路径，避免缝隙与重叠。 */
+const jaggedSegmentCache = new Map<string, number[][]>();
+const jaggedSegment = (a: number[], b: number[]): number[][] => {
+  const samePoint = (p: number[], q: number[]) => p[0] === q[0] && p[1] === q[1];
+  const first = a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]) ? a : b;
+  const second = samePoint(first, a) ? b : a;
+  const key = `${first[0]},${first[1]}->${second[0]},${second[1]}`;
+  const cached = jaggedSegmentCache.get(key);
+  if (cached) return samePoint(first, a) ? cached : [...cached].reverse();
+  const rand = mulberry32(hash32(key));
+  const dx = second[0] - first[0];
+  const dy = second[1] - first[1];
+  const len = Math.hypot(dx, dy) || 1e-9;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const amp = Math.min(0.02, len * 0.14);
+  const steps = 4;
+  const jag: number[][] = [];
+  for (let s = 1; s <= steps; s++) {
+    const t = s / (steps + 1);
+    const disp = (rand() - 0.5) * 2 * amp;
+    jag.push([first[0] + dx * t + nx * disp, first[1] + dy * t + ny * disp]);
+  }
+  jaggedSegmentCache.set(key, jag);
+  return jag;
+};
+
+/** 以乡镇驻点为种子生成 Voronoi 分块（锯齿化边界），再用固始县真实轮廓裁剪，得到近似乡镇分区 GeoJSON。 */
 const buildTownshipMapFeatureCollection = () => {
   const county = countyGeo.value as { features: Array<{ geometry: { coordinates: number[][][][] } }> } | null;
   if (!county?.features?.length) return null;
@@ -347,7 +387,14 @@ const buildTownshipMapFeatureCollection = () => {
     const cell = voronoi.cellPolygon(index) as Array<[number, number]> | null;
     let geometry: { type: "MultiPolygon"; coordinates: number[][][][] } | null = null;
     if (cell && cell.length >= 4) {
-      const ring = cell.slice(0, -1).map(point => [point[0], point[1]]);
+      const ring: number[][] = [];
+      for (let i = 0; i < cell.length - 1; i++) {
+        const edgeStart = cell[i] as number[];
+        const edgeEnd = cell[i + 1] as number[];
+        ring.push(edgeStart);
+        ring.push(...jaggedSegment(edgeStart, edgeEnd));
+      }
+      ring.push(cell[0] as number[]);
       ring.push(ring[0]);
       // polygon-clipping 的 Geom 类型与裸坐标数组不兼容，此处统一按未知类型桥接
       const clip = polygonClipping.intersection as (a: unknown, b: unknown) => number[][][][] | null;
@@ -362,6 +409,17 @@ const buildTownshipMapFeatureCollection = () => {
       geometry: geometry ?? { type: "MultiPolygon", coordinates: [] as number[][][][] }
     };
   });
+
+  // 相邻地区 hover 强调色不重复：按 Voronoi 邻接关系贪心分配饱和色
+  const hoverPalette = ["#0d9488", "#2563eb", "#e11d48", "#d97706", "#7c3aed", "#16a34a", "#db2777", "#0284c7"];
+  const assigned: Record<string, string> = {};
+  seeds.forEach((seed, index) => {
+    const usedByNeighbors = new Set(
+      [...voronoi.neighbors(index)].map(neighborIndex => assigned[seeds[neighborIndex].name]).filter(Boolean)
+    );
+    assigned[seed.name] = hoverPalette.find(color => !usedByNeighbors.has(color)) ?? hoverPalette[index % hoverPalette.length];
+  });
+  regionHoverColors.value = assigned;
   return { type: "FeatureCollection" as const, features };
 };
 
@@ -369,21 +427,23 @@ const geoOption = computed(() => {
   if (!mapRegistered.value) return {} as EChartsOption;
   const palette = chartPalette.value;
   const maxCount = maxRegionCount.value;
-  const regionData = [...mapTotalByRegion.value.entries()].map(([name, value]) => ({ name, value }));
+  const regionData = [...mapTotalByRegion.value.entries()].map(([name, value]) => ({
+    name,
+    value,
+    // 每个地区预分配专属强调色（贪心保证相邻不重复），hover 时灰底浮起并亮出该色
+    emphasis: {
+      label: { show: true, fontSize: 14, fontWeight: 700 as const, color: "#ffffff" },
+      itemStyle: {
+        areaColor: regionHoverColors.value[name] || "#0d9488",
+        shadowBlur: 18,
+        shadowOffsetY: 10,
+        shadowColor: isDark.value ? "rgba(0, 0, 0, 0.55)" : "rgba(15, 23, 42, 0.4)"
+      }
+    }
+  }));
   const scatterData = [...mapTotalByRegion.value.entries()]
     .filter(([name, value]) => value > 0 && TOWNSHIP_COORDS[name])
-    .map(([name, value]) => ({
-      name,
-      value: [...localCoord(name), value],
-      lineStyle: { width: 0.8 + (value / maxCount) * 2.4 }
-    }));
-  const linesData = scatterData
-    .filter(item => item.name !== "城区" && item.value[2] > 0)
-    .map(item => ({
-      coords: [[...item.value.slice(0, 2)] as number[], HOSPITAL_COORD],
-      value: item.value[2],
-      lineStyle: { width: 0.6 + (item.value[2] / maxCount) * 2.6, curveness: 0.18 }
-    }));
+    .map(([name, value]) => ({ name, value: [...localCoord(name), value] }));
   return {
     tooltip: {
       trigger: "item",
@@ -403,29 +463,20 @@ const geoOption = computed(() => {
       zoom: 1.05,
       scaleLimit: { min: 0.8, max: 4 },
       label: { show: true, color: palette.label, fontSize: 10 },
-      itemStyle: { areaColor: palette.areaBase, borderColor: palette.areaBorder, borderWidth: 1 },
+      itemStyle: {
+        areaColor: isDark.value ? "#414b5a" : "#d5dbe4",
+        borderColor: isDark.value ? "#232b36" : "#ffffff",
+        borderWidth: 1
+      },
       emphasis: {
-        label: { show: true, color: isDark.value ? "#f8fafc" : "#14532d", fontWeight: 700 as const },
+        label: { show: true, color: "#ffffff", fontWeight: 700 as const, fontSize: 14 },
         itemStyle: {
-          // 凸起浮出的高度差错觉：亮色填充 + 下沉阴影
-          areaColor: isDark.value ? "#0d9488" : "#5eead4",
-          shadowBlur: 20,
-          shadowOffsetY: 12,
-          shadowColor: isDark.value ? "rgba(13, 148, 136, 0.5)" : "rgba(15, 118, 110, 0.45)"
+          shadowBlur: 18,
+          shadowOffsetY: 10,
+          shadowColor: isDark.value ? "rgba(0, 0, 0, 0.55)" : "rgba(15, 23, 42, 0.4)"
         }
       },
       select: { disabled: true }
-    },
-    visualMap: {
-      type: "continuous",
-      min: 0,
-      max: maxCount,
-      left: 12,
-      bottom: 12,
-      text: ["来访多", "来访少"],
-      calculable: false,
-      inRange: { color: isDark.value ? ["#134e4a", "#0f766e", "#2dd4bf"] : ["#ccfbf1", "#14b8a6", "#0f766e"] },
-      textStyle: { color: palette.text, fontSize: 11 }
     },
     series: [
       {
@@ -433,21 +484,6 @@ const geoOption = computed(() => {
         geoIndex: 0,
         data: regionData,
         animationDuration: 700
-      },
-      {
-        type: "lines",
-        coordinateSystem: "geo",
-        zlevel: 2,
-        data: linesData,
-        lineStyle: { color: isDark.value ? "#5eead4" : "#0d9488", opacity: 0.55, curveness: 0.18 },
-        effect: {
-          show: true,
-          period: 4.5,
-          trailLength: 0.28,
-          symbol: "arrow",
-          symbolSize: 6,
-          color: isDark.value ? "#99f6e4" : "#ccfbf1"
-        }
       },
       {
         type: "effectScatter",
