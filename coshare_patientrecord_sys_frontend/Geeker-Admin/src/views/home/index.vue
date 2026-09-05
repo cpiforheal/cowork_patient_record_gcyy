@@ -32,6 +32,9 @@
         <el-empty v-if="!primaryTodoCards.length && !dashboardLoading" description="暂无待办，一切尽在掌握" :image-size="60" />
       </section>
 
+      <!-- 来访患者住址分布分析（数据源：患者收费信息，仅管理员） -->
+      <AddressAnalysisPanel v-if="isAdmin" class="board-card" />
+
       <div class="workbench-grid">
         <div class="workbench-main">
           <HomeTaskPanel
@@ -158,6 +161,7 @@ import HomeTaskPanel from "./components/HomeTaskPanel.vue";
 import MiniBarChart from "./components/MiniBarChart.vue";
 import ShortcutPanel from "./components/ShortcutPanel.vue";
 import MaintenancePanel from "./components/MaintenancePanel.vue";
+import AddressAnalysisPanel from "./components/AddressAnalysisPanel.vue";
 import AnimatedShinyText from "@/components/inspira/AnimatedShinyText.vue";
 import BlurFade from "@/components/inspira/BlurFade.vue";
 import BorderBeam from "@/components/inspira/BorderBeam.vue";
