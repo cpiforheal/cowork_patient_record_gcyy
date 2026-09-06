@@ -46,19 +46,21 @@
       <el-dialog
         v-model="townshipDialogVisible"
         :title="townshipDialogTitle"
-        fullscreen
+        width="min(1280px, 94vw)"
+        top="5vh"
         append-to-body
         destroy-on-close
-        class="township-patient-dialog is-fullscreen"
+        class="township-patient-dialog"
       >
         <p class="township-subtitle">{{ townshipDialogSubtitle }}</p>
         <el-empty v-if="!townshipPatients.length" description="该乡镇暂无来访患者（可能地址未登记或归属县外）" :image-size="56" />
         <div v-else class="township-patient-rows">
           <button
-            v-for="card in townshipPatients"
+            v-for="(card, index) in townshipPatients"
             :key="card.caseId"
             type="button"
             class="patient-row"
+            :style="{ '--row-delay': `${index * 0.04}s` }"
             @click="openCourseDialog(card)"
           >
             <span class="row-name">{{ card.name || "未登记姓名" }}</span>
@@ -75,10 +77,11 @@
       <el-dialog
         v-model="courseDialogVisible"
         :title="`${coursePatient?.name || '患者'} · 主要病程`"
-        fullscreen
+        width="min(1080px, 94vw)"
+        top="5vh"
         append-to-body
         destroy-on-close
-        class="course-dialog is-fullscreen"
+        class="course-dialog"
       >
         <div v-loading="courseLoading" class="course-body" element-loading-text="病程加载中…">
           <el-alert v-if="courseError" type="warning" :closable="false" show-icon :title="courseError" />
@@ -873,6 +876,23 @@ onMounted(() => {
 .bars {
   height: 460px;
 }
+
+@keyframes township-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patient-row {
+    animation: none;
+  }
+}
 .township-subtitle {
   margin: 0 0 12px;
   font-size: 12px;
@@ -888,29 +908,19 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-// 全屏弹窗：body 占满并可滚动，内容居中收窄
-.township-patient-dialog.is-fullscreen,
-.course-dialog.is-fullscreen {
+// 悬浮窗：body 限高滚动（不全屏、保留灰暗遮罩）
+.township-patient-dialog,
+.course-dialog {
   :deep(.el-dialog__header) {
-    padding: 14px 24px;
+    padding-bottom: 10px;
     margin-right: 0;
     border-bottom: 1px solid var(--el-border-color-lighter);
   }
   :deep(.el-dialog__body) {
-    width: 100%;
-    max-width: 1200px;
-    height: calc(100vh - 130px);
-    margin: 0 auto;
+    max-height: calc(92vh - 150px);
+    padding-top: 10px;
     overflow-y: auto;
   }
-  :deep(.el-dialog__footer) {
-    padding: 12px 24px;
-    border-top: 1px solid var(--el-border-color-lighter);
-  }
-}
-.township-patient-dialog.is-fullscreen .township-patient-rows {
-  max-height: none;
-  overflow: visible;
 }
 .patient-row {
   display: grid;
@@ -926,13 +936,18 @@ onMounted(() => {
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
+    background-color 0.18s ease,
     transform 0.18s ease;
+  animation: township-row-in 0.32s ease both;
+  animation-delay: var(--row-delay, 0s);
   &:hover {
+    background: color-mix(in srgb, var(--el-color-primary) 7%, var(--el-bg-color));
     border-color: var(--el-color-primary);
     box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
-    transform: translateY(-1px);
+    transform: translateX(6px);
     .row-more {
       opacity: 1;
+      transform: translateX(2px);
     }
   }
   .row-name {
