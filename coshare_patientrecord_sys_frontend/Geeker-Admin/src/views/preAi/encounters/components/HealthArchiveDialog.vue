@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="modelValue"
-    width="calc(100vw - 48px)"
+    :width="previewOnly ? 'min(920px, 94vw)' : 'calc(100vw - 48px)'"
     top="4vh"
     append-to-body
     destroy-on-close
@@ -17,16 +17,24 @@
           <small v-else>加载中…</small>
         </div>
         <div class="ha-header-actions">
-          <el-button :loading="saving" :disabled="!editable" @click="saveDraft">保存草稿</el-button>
-          <el-button v-if="canComplete" type="primary" :loading="completing" @click="completeArchive">
-            完成并生成合并文档
-          </el-button>
+          <template v-if="!previewOnly">
+            <el-button :loading="saving" :disabled="!editable" @click="saveDraft">保存草稿</el-button>
+            <el-button v-if="canComplete" type="primary" :loading="completing" @click="completeArchive">
+              完成并生成合并文档
+            </el-button>
+          </template>
+          <el-tag v-else type="info" effect="plain">只读预览</el-tag>
         </div>
       </div>
     </template>
 
     <div v-loading="loading" class="ha-body" element-loading-text="健康管理档案加载中…">
-      <div class="ha-input-pane" :style="{ width: inputPaneWidth + 'px' }" :class="{ 'pane-transition': !resizing }">
+      <div
+        v-if="!previewOnly"
+        class="ha-input-pane"
+        :style="{ width: inputPaneWidth + 'px' }"
+        :class="{ 'pane-transition': !resizing }"
+      >
         <el-alert type="info" :closable="false" show-icon>
           带出信息已按当前就诊同步，可下拉修正；保存后生效于右侧预览与合并文档。
         </el-alert>
@@ -337,13 +345,21 @@
         </section>
       </div>
 
-      <div class="ha-resizer" :class="{ 'pane-transition': !resizing }" title="拖动调整左右栏宽度" @mousedown="startResize"></div>
+      <div
+        v-if="!previewOnly"
+        class="ha-resizer"
+        :class="{ 'pane-transition': !resizing }"
+        title="拖动调整左右栏宽度"
+        @mousedown="startResize"
+      ></div>
 
-      <div class="ha-preview-pane" :class="{ 'pane-transition': !resizing }">
+      <div class="ha-preview-pane" :class="{ 'pane-transition': !resizing, 'is-preview-only': previewOnly }">
         <section class="ha-doc-paper">
           <div class="ha-doc-toolbar">
             <span class="ha-doc-badge">合并文档实时预览</span>
-            <small>AI 病历正文原样保留 · 档案内容随左侧填写实时更新</small>
+            <small>{{
+              previewOnly ? "只读预览 · 完整内容以患者档案合并文档为准" : "AI 病历正文原样保留 · 档案内容随左侧填写实时更新"
+            }}</small>
           </div>
 
           <div class="ha-doc-part">
@@ -714,12 +730,14 @@ const props = defineProps<{
   encounterId: string;
   encounterPatientName?: string;
   workspace?: PreAiWorkspace;
+  /** 只读预览模式：隐藏左侧填写栏，仅展示右侧合并文档预览态（供地图下钻等只读场景复用）。 */
+  previewOnly?: boolean;
 }>();
 const emit = defineEmits<{ (event: "update:modelValue", value: boolean): void; (event: "completed"): void }>();
 
 const userStore = useUserStore();
 const currentRole = computed(() => userStore.userInfo.role || "");
-const editable = computed(() => ["doctor", "nurse", "admin"].includes(currentRole.value));
+const editable = computed(() => !props.previewOnly && ["doctor", "nurse", "admin"].includes(currentRole.value));
 const canComplete = computed(() => ["doctor", "admin"].includes(currentRole.value));
 const currentUserName = computed(() => (userStore.userInfo.name as string) || (userStore.userInfo.username as string) || "");
 const VISITOR_OPTIONS = computed(() => Array.from(new Set([currentUserName.value].filter(Boolean))) as string[]);
@@ -1190,14 +1208,12 @@ watch(
 <style scoped lang="scss">
 .ha-header {
   display: flex;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-
   strong {
     font-size: 16px;
   }
-
   small {
     display: block;
     color: var(--el-text-color-secondary);
@@ -1215,17 +1231,16 @@ watch(
 }
 .ha-input-pane {
   flex-shrink: 0;
-  overflow-y: auto;
   max-height: calc(84vh - 140px);
   padding-right: 8px;
+  overflow-y: auto;
 }
 .ha-resizer {
   flex-shrink: 0;
   width: 6px;
   cursor: col-resize;
-  border-radius: 3px;
   background: var(--el-fill-color);
-
+  border-radius: 3px;
   &:hover {
     background: var(--el-color-primary-light-5);
   }
@@ -1234,23 +1249,30 @@ watch(
   transition: width 0.18s linear;
 }
 .ha-preview-pane {
-  flex: 1;
-  min-width: 340px;
   display: grid;
+  flex: 1;
   gap: 12px;
   align-content: start;
-  overflow-y: auto;
+  min-width: 340px;
   max-height: calc(84vh - 140px);
+  overflow-y: auto;
   contain: content;
+
+  // 只读预览模式：无左栏时预览态居中限宽，保持阅读舒适
+  &.is-preview-only {
+    justify-content: center;
+    .ha-doc-paper {
+      width: min(100%, 820px);
+    }
+  }
 }
 .ha-section {
   margin-bottom: 18px;
-
   h4 {
-    margin: 0 0 8px;
     padding: 6px 10px;
-    border-left: 3px solid var(--el-color-warning);
+    margin: 0 0 8px;
     background: var(--el-color-warning-light-9);
+    border-left: 3px solid var(--el-color-warning);
     border-radius: 4px;
   }
 }
@@ -1258,7 +1280,6 @@ watch(
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-
   .span2 {
     grid-column: span 2;
   }
@@ -1273,8 +1294,8 @@ watch(
 .ha-line-label {
   display: block;
   margin: 6px 0 4px;
-  color: var(--el-text-color-regular);
   font-size: 12px;
+  color: var(--el-text-color-regular);
 }
 .ha-grid-4,
 .ha-grid-3 {
@@ -1282,37 +1303,34 @@ watch(
 }
 .ha-other {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   margin: 4px 0 6px;
-
   span {
-    color: var(--el-text-color-secondary);
     font-size: 12px;
+    color: var(--el-text-color-secondary);
     white-space: nowrap;
   }
 }
 .ha-preview-card {
+  padding: 12px 14px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
-  padding: 12px 14px;
-
   h4 {
     margin: 0 0 10px;
     font-size: 14px;
   }
 }
 .ha-empty {
-  color: var(--el-text-color-secondary);
   font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 .ha-doc-row {
   display: flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
   padding: 6px 0;
   border-bottom: 1px dashed var(--el-border-color-lighter);
-
   &:last-child {
     border-bottom: none;
   }
@@ -1323,12 +1341,10 @@ watch(
 .ha-doc-detail {
   flex: 1;
   min-width: 0;
-
   strong {
     display: block;
     font-size: 13px;
   }
-
   small {
     color: var(--el-text-color-secondary);
   }
@@ -1336,101 +1352,93 @@ watch(
 
 // ---------- 文档纸面预览 ----------
 .ha-doc-paper {
+  padding: 16px 18px;
+  background: #ffffff;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
-  background: #fff;
-  padding: 16px 18px;
   box-shadow: 0 1px 4px rgb(0 0 0 / 4%);
 }
 .ha-doc-toolbar {
   display: flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
   margin-bottom: 12px;
-
   small {
     color: var(--el-text-color-secondary);
   }
 }
 .ha-doc-badge {
+  padding: 1px 8px;
   font-size: 12px;
   color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
   border: 1px solid var(--el-color-primary-light-5);
   border-radius: 4px;
-  padding: 1px 8px;
-  background: var(--el-color-primary-light-9);
 }
 .ha-doc-part {
   margin-bottom: 16px;
-
   .ha-version-select {
     width: 100%;
     margin-bottom: 8px;
   }
 }
 .ha-doc-part-head {
-  font-weight: 600;
-  font-size: 13px;
   margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .ha-doc-ai-meta {
+  padding: 10px 12px;
   border: 1px dashed var(--el-border-color);
   border-radius: 8px;
-  padding: 10px 12px;
-
   p {
     margin: 0 0 4px;
   }
-
   small {
     display: block;
-    color: var(--el-text-color-secondary);
     line-height: 1.7;
+    color: var(--el-text-color-secondary);
   }
 }
 .ha-doc-form-title {
-  text-align: center;
+  margin-bottom: 4px;
   font-size: 17px;
   font-weight: 700;
+  text-align: center;
   letter-spacing: 2px;
-  margin-bottom: 4px;
 }
 .ha-doc-subtitle {
-  text-align: center;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
   margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
 }
 
 // ---------- 左侧前置资料参考卡 ----------
 .ha-pre-ref {
   margin-bottom: 12px;
+  overflow: hidden;
   border: 1px solid var(--el-color-primary-light-5);
   border-radius: 10px;
-  overflow: hidden;
-
   :deep(.el-collapse-item__header) {
     padding: 0 12px;
     background: var(--el-color-primary-light-9);
   }
-
   :deep(.el-collapse-item__wrap) {
     border-bottom: 0;
   }
-
   :deep(.el-collapse-item__content) {
     padding: 10px 12px;
   }
 }
 .ha-pre-ref-title {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   font-size: 13px;
   font-weight: 600;
   color: var(--el-color-primary);
-
   small {
     font-weight: 400;
     color: var(--el-text-color-secondary);
@@ -1445,21 +1453,18 @@ watch(
   grid-template-columns: 96px 1fr;
   gap: 8px;
   align-items: start;
-
   label {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
     padding-top: 2px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
   }
-
   p {
     margin: 0;
     font-size: 13px;
     line-height: 1.6;
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
-
   &.key p {
     font-weight: 600;
     color: var(--el-color-primary-dark-2);
@@ -1468,11 +1473,10 @@ watch(
 
 // ---------- 右侧预览：分节卡片化 ----------
 .ha-doc-card {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
   overflow: hidden;
   background: var(--el-bg-color);
-
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
   & + .ha-doc-card {
     margin-top: 12px;
   }
@@ -1481,23 +1485,21 @@ watch(
   display: flex;
   align-items: center;
   padding: 9px 14px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: var(--el-fill-color-light);
   font-size: 13.5px;
   font-weight: 700;
   color: var(--el-text-color-primary);
-
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
   span {
     display: inline-flex;
-    align-items: center;
     gap: 8px;
-
+    align-items: center;
     &::before {
-      content: "";
       width: 4px;
       height: 13px;
-      border-radius: 2px;
+      content: "";
       background: var(--el-color-primary);
+      border-radius: 2px;
     }
   }
 }
@@ -1515,36 +1517,30 @@ watch(
   display: grid;
   gap: 3px;
   padding: 8px 10px;
+  background: var(--el-fill-color-extra-light);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 9px;
-  background: var(--el-fill-color-extra-light);
-
   label {
     font-size: 11px;
     color: var(--el-text-color-secondary);
   }
-
   strong {
     font-size: 14px;
     overflow-wrap: anywhere;
   }
-
   &.wide {
     grid-column: span 2;
   }
-
   &.name strong {
     font-size: 17px;
     color: var(--el-color-primary);
   }
-
   &.key {
-    border-color: var(--el-color-primary-light-5);
     background: var(--el-color-primary-light-9);
-
+    border-color: var(--el-color-primary-light-5);
     strong {
-      color: var(--el-color-primary-dark-2);
       font-weight: 700;
+      color: var(--el-color-primary-dark-2);
     }
   }
 }
@@ -1553,38 +1549,32 @@ watch(
   grid-template-columns: 104px 1fr;
   gap: 10px;
   align-items: start;
-
   > label {
     padding-top: 2px;
     font-size: 12px;
     color: var(--el-text-color-secondary);
   }
-
   > p {
     margin: 0;
     font-size: 13.5px;
     line-height: 1.65;
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
-
   &.diagnosis,
   &.allergy {
     padding: 8px 10px;
+    background: color-mix(in srgb, var(--el-color-primary) 4%, var(--el-bg-color));
     border: 1px dashed var(--el-color-primary-light-5);
     border-radius: 9px;
-    background: color-mix(in srgb, var(--el-color-primary) 4%, var(--el-bg-color));
-
     > p {
       font-weight: 600;
       color: var(--el-color-primary-dark-2);
     }
   }
-
   &.allergy {
-    border-color: var(--el-color-warning-light-5);
     background: var(--el-color-warning-light-9);
-
+    border-color: var(--el-color-warning-light-5);
     > p {
       color: var(--el-color-warning-dark-2);
     }
@@ -1599,15 +1589,14 @@ watch(
   padding: 2px 10px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 999px;
-  background: var(--el-fill-color-lighter);
-
   &.checked {
-    color: var(--el-color-primary);
-    border-color: var(--el-color-primary-light-5);
-    background: var(--el-color-primary-light-9);
     font-weight: 600;
+    color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+    border-color: var(--el-color-primary-light-5);
   }
 }
 .ha-exam-grid {
@@ -1619,33 +1608,29 @@ watch(
   display: flex;
   gap: 6px;
   font-size: 13px;
-
   label {
     flex-shrink: 0;
     color: var(--el-text-color-secondary);
   }
-
   strong {
     font-weight: 600;
   }
 }
 .ha-doc-table {
   width: 100%;
-  border-collapse: collapse;
   margin: 4px 0 8px;
-
+  border-collapse: collapse;
   th,
   td {
-    border: 1px solid var(--el-border-color);
-    font-size: 12px;
     padding: 3px 6px;
+    font-size: 12px;
     text-align: left;
     word-break: break-all;
+    border: 1px solid var(--el-border-color);
   }
-
   th {
-    background: var(--el-fill-color-light);
     font-weight: 600;
+    background: var(--el-fill-color-light);
   }
 }
 .ha-fade-enter-active,

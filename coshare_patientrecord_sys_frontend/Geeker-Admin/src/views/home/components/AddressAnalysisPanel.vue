@@ -46,7 +46,7 @@
         </div>
       </div>
 
-      <!-- 二级悬浮窗：乡镇来访患者卡片（横向滚动） -->
+      <!-- 二级悬浮窗：乡镇来访患者卡片（患者概览卡片样式 · 住址重心强调） -->
       <el-dialog
         v-model="townshipDialogVisible"
         :title="townshipDialogTitle"
@@ -58,26 +58,43 @@
       >
         <p class="township-subtitle">{{ townshipDialogSubtitle }}</p>
         <el-empty v-if="!townshipPatients.length" description="该乡镇暂无来访患者（可能地址未登记或归属县外）" :image-size="56" />
-        <div v-else class="township-patient-rows">
+        <div v-else class="township-card-grid">
           <button
             v-for="(card, index) in townshipPatients"
             :key="card.caseId"
             type="button"
-            class="patient-row"
-            :style="{ '--row-delay': `${index * 0.04}s` }"
+            class="patient-card"
+            :style="{ '--row-delay': `${index * 0.05}s` }"
             @click="openCourseDialog(card)"
           >
-            <span class="row-name">{{ card.name || "未登记姓名" }}</span>
-            <span class="row-cell"><label>就诊时间</label>{{ card.visitDate || "—" }}</span>
-            <span class="row-cell"><label>手机号</label>{{ card.phone || "—" }}</span>
-            <span class="row-cell address"><label>详细住址</label>{{ card.address || "—" }}</span>
-            <span class="row-cell"><label>乡镇</label>{{ card.township }}</span>
-            <em class="row-more">查看病程 »</em>
+            <span class="card-head">
+              <span class="card-id">
+                <span class="card-name">{{ card.name || "未登记姓名" }}</span>
+                <small>{{ [card.gender, card.age].filter(Boolean).join(" · ") || "信息未登记" }}</small>
+              </span>
+              <el-tag v-if="card.visitCount > 0" size="small" effect="plain" round>就诊 {{ card.visitCount }} 次</el-tag>
+            </span>
+            <span class="card-address">
+              <el-icon><Location /></el-icon>
+              <span class="address-text">{{ card.address || "住址未登记" }}</span>
+            </span>
+            <span class="card-facts">
+              <span class="fact"
+                ><label>最近就诊</label><b>{{ card.visitDate || "—" }}</b></span
+              >
+              <span class="fact"
+                ><label>联系电话</label><b>{{ card.phone || "—" }}</b></span
+              >
+            </span>
+            <span class="card-foot">
+              <span>点击查看病程</span>
+              <el-icon><ArrowRight /></el-icon>
+            </span>
           </button>
         </div>
       </el-dialog>
 
-      <!-- 三级弹窗：主要病程信息（复用患者概览 encounter overview 接口） -->
+      <!-- 三级弹窗：主要病程（模板预览态层级：文档头 + 节段标题/描述 + 字段网格） -->
       <el-dialog
         v-model="courseDialogVisible"
         :title="`${coursePatient?.name || '患者'} · 主要病程`"
@@ -90,40 +107,117 @@
         <div v-loading="courseLoading" class="course-body" element-loading-text="病程加载中…">
           <el-alert v-if="courseError" type="warning" :closable="false" show-icon :title="courseError" />
           <template v-else-if="courseOverview">
-            <section class="course-sec">
-              <span class="course-sec-title">基础信息</span>
-              <div class="course-grid">
-                <span><label>姓名</label>{{ courseOverview.patient.name || "—" }}</span>
-                <span
-                  ><label>性别/年龄</label
-                  >{{ [courseOverview.patient.gender, courseOverview.patient.age].filter(Boolean).join(" / ") || "—" }}</span
-                >
-                <span><label>联系电话</label>{{ coursePatient?.phone || courseOverview.patient.phone || "—" }}</span>
+            <header class="doc-header">
+              <h2>{{ courseOverview.patient.name || coursePatient?.name || "—" }}</h2>
+              <p class="doc-subtitle">
+                主要病程事实预览 ·
+                {{ [courseOverview.patient.gender, courseOverview.patient.age].filter(Boolean).join(" / ") || "性别/年龄未登记" }}
+                · 联系电话 {{ coursePatient?.phone || courseOverview.patient.phone || "—" }}
+              </p>
+              <div class="doc-meta">
                 <span><label>就诊日期</label>{{ courseOverview.visit.visitDate || "—" }}</span>
+                <span><label>归属乡镇</label>{{ coursePatient?.township || "—" }}</span>
+                <span><label>就诊次数</label>第 {{ courseOverview.visit.visitNo || 1 }} 次</span>
+              </div>
+            </header>
+
+            <section class="doc-section">
+              <div class="doc-section-heading">
+                <h3>主要病情</h3>
+                <p class="doc-section-note">主诉与现病史为本次诊疗核心事实</p>
+              </div>
+              <div class="doc-fields">
+                <div class="doc-field wide chief">
+                  <strong>主诉</strong>
+                  <span>{{ courseOverview.clinical.chiefComplaint || "—" }}</span>
+                </div>
+                <div class="doc-field wide">
+                  <strong>现病史</strong>
+                  <span>{{ courseOverview.clinical.presentIllness || "—" }}</span>
+                </div>
+                <div v-if="courseOverview.clinical.specialistExam" class="doc-field wide">
+                  <strong>专科检查</strong>
+                  <span>{{ courseOverview.clinical.specialistExam }}</span>
+                </div>
+                <div class="doc-field wide allergy">
+                  <strong>过敏史</strong>
+                  <span>{{ courseOverview.clinical.allergyHistory || "未记录" }}</span>
+                </div>
               </div>
             </section>
-            <section class="course-sec">
-              <span class="course-sec-title">主要病情</span>
-              <p><label>主诉</label>{{ courseOverview.clinical.chiefComplaint || "—" }}</p>
-              <p><label>现病史</label>{{ courseOverview.clinical.presentIllness || "—" }}</p>
-              <p><label>过敏史</label>{{ courseOverview.clinical.allergyHistory || "—" }}</p>
+
+            <section class="doc-section">
+              <div class="doc-section-heading">
+                <h3>诊断与治疗</h3>
+                <p class="doc-section-note">中西医诊断结论与本次治疗路径</p>
+              </div>
+              <div class="doc-fields">
+                <div class="doc-field diagnosis">
+                  <strong>西医诊断</strong>
+                  <span>{{ courseOverview.clinical.diagnosis.westernPrimary || "—" }}</span>
+                </div>
+                <div class="doc-field diagnosis">
+                  <strong>中医诊断</strong>
+                  <span>{{ courseOverview.clinical.diagnosis.tcm || "—" }}</span>
+                </div>
+                <div class="doc-field">
+                  <strong>治疗路径</strong>
+                  <span>{{ courseOverview.clinical.treatment.treatmentPath || "—" }}</span>
+                </div>
+                <div class="doc-field">
+                  <strong>手术 · 麻醉</strong>
+                  <span>
+                    {{ courseOverview.clinical.surgery.actualPrimaryOperation || "未手术 / 未记录"
+                    }}{{
+                      courseOverview.clinical.surgery.anesthesiaMethod
+                        ? `（${courseOverview.clinical.surgery.anesthesiaMethod}）`
+                        : ""
+                    }}
+                  </span>
+                </div>
+              </div>
             </section>
-            <section class="course-sec">
-              <span class="course-sec-title">诊断与治疗</span>
-              <p><label>西医诊断</label>{{ courseOverview.clinical.diagnosis.westernPrimary || "—" }}</p>
-              <p><label>中医诊断</label>{{ courseOverview.clinical.diagnosis.tcm || "—" }}</p>
-              <p><label>治疗路径</label>{{ courseOverview.clinical.treatment.treatmentPath || "—" }}</p>
-              <p v-if="courseOverview.clinical.surgery.actualPrimaryOperation">
-                <label>手术</label>{{ courseOverview.clinical.surgery.actualPrimaryOperation
-                }}{{
-                  courseOverview.clinical.surgery.anesthesiaMethod
-                    ? `（${courseOverview.clinical.surgery.anesthesiaMethod}）`
-                    : ""
-                }}
-              </p>
+
+            <section v-if="courseOverview.auxiliary?.labSummary" class="doc-section">
+              <div class="doc-section-heading">
+                <h3>辅助检查摘要</h3>
+                <p class="doc-section-note">化验异常与危急值提示</p>
+              </div>
+              <div class="doc-fields">
+                <div class="doc-field">
+                  <strong>化验概览</strong>
+                  <span>
+                    报告 {{ courseOverview.auxiliary.labReportCount || 0 }} 份 ·
+                    <em class="abnormal-num" :class="{ none: !courseOverview.auxiliary.labSummary.abnormalCount }">
+                      异常 {{ courseOverview.auxiliary.labSummary.abnormalCount || 0 }} 项</em
+                    >
+                    <template v-if="courseOverview.auxiliary.labSummary.criticalCount">
+                      · <em class="critical-num">危急 {{ courseOverview.auxiliary.labSummary.criticalCount }} 项</em></template
+                    >
+                  </span>
+                </div>
+                <div v-if="abnormalMetricList.length" class="doc-field wide">
+                  <strong>异常指标</strong>
+                  <span class="metric-tags">
+                    <el-tag
+                      v-for="metric in abnormalMetricList"
+                      :key="`${metric.reportName}-${metric.name}-${metric.value}`"
+                      size="small"
+                      :type="metric.severity === 'CRITICAL' ? 'danger' : 'warning'"
+                      effect="plain"
+                    >
+                      {{ metric.name || "未知指标" }} {{ metric.value || "—" }}{{ metric.unit || "" }}
+                    </el-tag>
+                  </span>
+                </div>
+              </div>
             </section>
-            <section class="course-sec">
-              <span class="course-sec-title">照片资料（点击放大）</span>
+
+            <section class="doc-section">
+              <div class="doc-section-heading">
+                <h3>照片资料</h3>
+                <p class="doc-section-note">该就诊全部附件 · 点击可放大查看</p>
+              </div>
               <AttachmentPreviewGallery
                 v-if="courseAttachments.length"
                 :attachments="courseAttachments"
@@ -136,9 +230,21 @@
         </div>
         <template #footer>
           <el-button @click="courseDialogVisible = false">关闭</el-button>
+          <el-button type="warning" plain :disabled="!coursePatient?.encounterId" @click="healthArchiveVisible = true">
+            健康管理档案
+          </el-button>
           <el-button type="primary" :disabled="!coursePatient?.patientId" @click="gotoPatientArchive"> 进入完整档案 </el-button>
         </template>
       </el-dialog>
+
+      <!-- 四级弹窗：健康管理档案只读预览（复用右侧合并文档预览态） -->
+      <HealthArchiveDialog
+        v-model="healthArchiveVisible"
+        preview-only
+        :encounter-id="coursePatient?.encounterId || ''"
+        :encounter-patient-name="coursePatient?.name"
+        :workspace="courseWorkspace || undefined"
+      />
     </template>
   </section>
 </template>
@@ -146,6 +252,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
+import { ArrowRight, Location } from "@element-plus/icons-vue";
 import { BarChart, EffectScatterChart, MapChart, PieChart } from "echarts/charts";
 import { GeoComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { registerMap, use } from "echarts/core";
@@ -168,6 +275,8 @@ import { useGlobalStore } from "@/stores/modules/global";
 import gushiCountyGeo from "@/assets/geo/gushi-county.json";
 import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 import AttachmentPreviewGallery from "@/views/preAi/encounters/components/AttachmentPreviewGallery.vue";
+import HealthArchiveDialog from "@/views/preAi/encounters/components/HealthArchiveDialog.vue";
+import type { PreAiWorkspace } from "@/api/modules/clinic";
 
 use([
   CanvasRenderer,
@@ -215,9 +324,35 @@ const GUSHI_TOWNSHIPS = [
   "马堽"
 ];
 const URBAN_STREETS = ["蓼城", "秀水", "番城"];
-/** Dashboard 图表语义色：高频看板用少量稳定色阶，避免按行号彩虹化。 */
-const LIGHT_BAR_TONES = ["#0f766e", "#2563eb", "#16a34a", "#0891b2", "#64748b"];
-const DARK_BAR_TONES = ["#2dd4bf", "#60a5fa", "#4ade80", "#22d3ee", "#94a3b8"];
+interface BarTone {
+  color: string;
+  family: string;
+}
+/** Dashboard 图表色块：参考高饱和积极色值，但加入 mint/sky/violet/rose 扩展，避免刻板复制。 */
+const LIGHT_BAR_TONES: BarTone[] = [
+  { color: "#ffb84d", family: "orange" },
+  { color: "#b9ca5c", family: "lime" },
+  { color: "#6fc779", family: "green" },
+  { color: "#58c7a4", family: "mint" },
+  { color: "#55b6e8", family: "sky" },
+  { color: "#7f92f2", family: "blue" },
+  { color: "#a983e8", family: "violet" },
+  { color: "#ffcf4a", family: "yellow" },
+  { color: "#ff7a61", family: "coral" },
+  { color: "#f27aa3", family: "rose" }
+];
+const DARK_BAR_TONES: BarTone[] = [
+  { color: "#ffc866", family: "orange" },
+  { color: "#d2e36f", family: "lime" },
+  { color: "#86df8d", family: "green" },
+  { color: "#74dec1", family: "mint" },
+  { color: "#72c9ff", family: "sky" },
+  { color: "#9aa9ff", family: "blue" },
+  { color: "#bd9cff", family: "violet" },
+  { color: "#ffda6b", family: "yellow" },
+  { color: "#ff9278", family: "coral" },
+  { color: "#ff91b7", family: "rose" }
+];
 /** 本院（城区）锚点 */
 const HOSPITAL_COORD: [number, number] = [115.65, 32.17];
 /** 乡镇驻地近似经纬度（仅用于分布可视化，非精确行政边界） */
@@ -261,12 +396,15 @@ const loading = ref(false);
 const mapLoading = ref(false);
 const mapRegistered = ref(false);
 
-// ---------- 乡镇下钻：二级患者卡片悬浮窗 + 三级病程弹窗 ----------
+// ---------- 乡镇下钻：二级患者卡片悬浮窗 + 三级病程弹窗 + 四级健康档案预览 ----------
 interface TownshipPatientCard {
   caseId: string;
   patientId: string;
   encounterId: string;
   name: string;
+  gender: string;
+  age: string;
+  visitCount: number;
   phone: string;
   address: string;
   visitDate: string;
@@ -283,6 +421,8 @@ const coursePatient = ref<TownshipPatientCard | null>(null);
 const courseOverview = ref<PreAiEncounterOverview | null>(null);
 const courseError = ref("");
 const courseAttachments = ref<PreAiAttachment[]>([]);
+const courseWorkspace = ref<PreAiWorkspace | null>(null);
+const healthArchiveVisible = ref(false);
 
 const { openPatientDetail } = usePatientNavigation();
 
@@ -331,26 +471,28 @@ const localRatioText = computed(() => {
 });
 
 const chartPalette = computed(() => ({
-  text: isDark.value ? "#94a3b8" : "#64748b",
-  label: isDark.value ? "#e5e7eb" : "#17212b",
-  split: isDark.value ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.08)",
+  text: isDark.value ? "#a8b3c2" : "#6f7680",
+  label: isDark.value ? "#eef5ff" : "#4f5661",
+  split: isDark.value ? "rgba(166, 184, 205, 0.18)" : "rgba(91, 108, 130, 0.16)",
   tooltipBg: isDark.value ? "#111827" : "#ffffff",
-  tooltipBorder: isDark.value ? "rgba(148, 163, 184, 0.22)" : "rgba(15, 23, 42, 0.12)",
-  maskBorder: isDark.value ? "rgba(15, 23, 42, 0.76)" : "rgba(255, 255, 255, 0.82)",
-  primary: isDark.value ? "#2dd4bf" : "#0f766e",
-  info: isDark.value ? "#60a5fa" : "#2563eb",
-  success: isDark.value ? "#4ade80" : "#16a34a",
-  warning: isDark.value ? "#fbbf24" : "#d97706",
-  danger: isDark.value ? "#f87171" : "#dc2626",
-  purple: isDark.value ? "#a78bfa" : "#7655b7",
-  mutedFill: isDark.value ? "#64748b" : "#94a3b8",
-  unknown: isDark.value ? "#475569" : "#cbd5e1",
-  mapArea: isDark.value ? "#263244" : "#e4e9ef",
-  mapBorder: isDark.value ? "rgba(148, 163, 184, 0.22)" : "rgba(15, 23, 42, 0.10)",
-  mapShadow: isDark.value ? "rgba(0, 0, 0, 0.34)" : "rgba(15, 23, 42, 0.18)",
-  dataZoomBg: isDark.value ? "rgba(148, 163, 184, 0.08)" : "rgba(15, 23, 42, 0.04)",
-  dataZoomFill: isDark.value ? "rgba(45, 212, 191, 0.24)" : "rgba(15, 118, 110, 0.14)",
-  barTop: isDark.value ? "#fbbf24" : "#d97706",
+  tooltipBorder: isDark.value ? "rgba(166, 184, 205, 0.26)" : "rgba(91, 108, 130, 0.16)",
+  maskBorder: isDark.value ? "rgba(15, 23, 42, 0.70)" : "rgba(255, 255, 255, 0.86)",
+  primary: isDark.value ? "#7ddf8f" : "#66bb7a",
+  info: isDark.value ? "#6cc4ff" : "#5aa9e6",
+  success: isDark.value ? "#9de27a" : "#8bc06f",
+  warning: isDark.value ? "#ffc85a" : "#ffb347",
+  danger: isDark.value ? "#ff8a6b" : "#ff7a59",
+  purple: isDark.value ? "#b59cff" : "#9b7bd8",
+  mutedFill: isDark.value ? "#c6d76a" : "#b7c85b",
+  yellow: isDark.value ? "#ffd166" : "#ffca3a",
+  orange: isDark.value ? "#ffb86b" : "#ff9f43",
+  unknown: isDark.value ? "#6c7a89" : "#cfd7df",
+  mapArea: isDark.value ? "#2b3850" : "#eef3f8",
+  mapBorder: isDark.value ? "rgba(166, 184, 205, 0.20)" : "rgba(91, 108, 130, 0.18)",
+  mapShadow: isDark.value ? "rgba(0, 0, 0, 0.28)" : "rgba(91, 108, 130, 0.16)",
+  dataZoomBg: isDark.value ? "rgba(166, 184, 205, 0.10)" : "rgba(91, 108, 130, 0.06)",
+  dataZoomFill: isDark.value ? "rgba(125, 223, 143, 0.28)" : "rgba(102, 187, 122, 0.18)",
+  barTop: isDark.value ? "#ffc85a" : "#ffb347",
   barTones: isDark.value ? DARK_BAR_TONES : LIGHT_BAR_TONES
 }));
 
@@ -359,6 +501,17 @@ const stableToneIndex = (name: string, size: number) => {
   let total = 0;
   for (const char of name) total = (total * 31 + char.charCodeAt(0)) >>> 0;
   return total % size;
+};
+
+const greedyBarColors = (names: string[], tones: BarTone[]) => {
+  let previous: BarTone | undefined;
+  return names.map((name, index) => {
+    const start = index === 0 ? 0 : stableToneIndex(`${name}-${index}`, tones.length);
+    const ordered = tones.slice(start).concat(tones.slice(0, start));
+    const picked = ordered.find(tone => tone.family !== previous?.family && tone.color !== previous?.color) || ordered[0];
+    previous = picked;
+    return picked?.color || "#66bb7a";
+  });
 };
 
 // 环形图中心单一 label 的响应式内容：hover 切换分块明细，移开恢复本地占比
@@ -419,8 +572,8 @@ const donutOption = computed<EChartsOption>(() => {
         data: [
           { name: "周边乡镇", value: d.townshipTotal, itemStyle: { color: palette.primary } },
           { name: "城区", value: d.urban, itemStyle: { color: palette.info } },
-          { name: "县外", value: d.outside, itemStyle: { color: palette.mutedFill } },
-          { name: "固始县其他", value: d.gushiOther, itemStyle: { color: palette.warning } },
+          { name: "县外", value: d.outside, itemStyle: { color: palette.yellow } },
+          { name: "固始县其他", value: d.gushiOther, itemStyle: { color: palette.orange } },
           { name: "未登记地址", value: d.unknown, itemStyle: { color: palette.unknown } }
         ].filter(item => item.value > 0),
         animationEasing: "cubicOut",
@@ -439,8 +592,10 @@ const barOption = computed<EChartsOption>(() => {
   const palette = chartPalette.value;
   const hasScrollableRows = rows.length > 12;
   const zoomEnd = Math.min(100, Math.round((12 / Math.max(rows.length, 1)) * 100));
-  const rowColor = (name: string, index: number) =>
-    index === 0 ? palette.barTop : palette.barTones[stableToneIndex(name, palette.barTones.length)];
+  const rowColors = greedyBarColors(
+    rows.map(row => row.name),
+    palette.barTones
+  );
   return {
     tooltip: {
       trigger: "axis",
@@ -490,11 +645,13 @@ const barOption = computed<EChartsOption>(() => {
           name: row.name,
           value: row.count,
           itemStyle: {
-            borderRadius: [0, 8, 8, 0],
-            color: rowColor(row.name, index)
+            borderRadius: [0, 7, 7, 0],
+            color: rowColors[index]
           }
         })),
-        barMaxWidth: 16,
+        barWidth: 14,
+        barMaxWidth: 18,
+        barCategoryGap: "36%",
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
         animationEasing: "cubicOut",
         animationEasingUpdate: "cubicOut",
@@ -623,7 +780,7 @@ const buildTownshipMapFeatureCollection = () => {
   });
 
   // 相邻地区 hover 强调色不重复：按 Voronoi 邻接关系贪心分配低饱和语义色
-  const hoverPalette = ["#0f766e", "#2563eb", "#16a34a", "#d97706", "#7655b7", "#0891b2"];
+  const hoverPalette = ["#b7c85b", "#66bb7a", "#8bc06f", "#ffb347", "#ffca3a", "#ff9f43", "#ff7a59", "#5aa9e6", "#9b7bd8"];
   const assigned: Record<string, string> = {};
   seeds.forEach((seed, index) => {
     const usedByNeighbors = new Set(
@@ -764,22 +921,26 @@ const loadPatients = async () => {
   }
 };
 
-/** 点击乡镇柱形条：按乡镇归类打开二级患者卡片悬浮窗（聚合行展示其覆盖的全部乡镇患者）。 */
+/** 点击乡镇柱形条：按乡镇归类打开二级患者卡片悬浮窗（概览卡片样式，聚合其覆盖的全部乡镇患者）。 */
 const onBarClick = (params: any) => {
   const rowName = String(params?.name || "");
   if (!rowName) return;
   const cards: TownshipPatientCard[] = patients.value
     .map(patient => {
       const classified = classifyAddress(patient.address);
+      const caseInfo = caseMapById.value.get(patient.id);
       return {
         caseId: patient.id,
         classified,
-        patientId: caseMapById.value.get(patient.id)?.sourcePatientId || "",
-        encounterId: caseMapById.value.get(patient.id)?.latestEncounter?.id || "",
-        visitDate: caseMapById.value.get(patient.id)?.latestEncounter?.visitDate || patient.updatedAt,
+        patientId: caseInfo?.sourcePatientId || "",
+        encounterId: caseInfo?.latestEncounter?.id || "",
+        visitDate: caseInfo?.latestEncounter?.visitDate || patient.updatedAt,
         name: patient.patientName,
         phone: patient.phone,
-        address: patient.address
+        address: patient.address,
+        gender: caseInfo?.gender || "",
+        age: caseInfo?.age || "",
+        visitCount: caseInfo?.visitCount || 0
       };
     })
     .filter(card => card.classified.bucket === "township" && card.classified.township === rowName)
@@ -791,7 +952,10 @@ const onBarClick = (params: any) => {
       phone: card.phone,
       address: card.address,
       visitDate: card.visitDate,
-      township: card.classified.township
+      township: card.classified.township,
+      gender: card.gender,
+      age: card.age,
+      visitCount: card.visitCount
     }))
     .sort((a, b) => (a.visitDate < b.visitDate ? 1 : -1));
   townshipDialogTitle.value = `${rowName} · 来访患者`;
@@ -800,12 +964,13 @@ const onBarClick = (params: any) => {
   townshipDialogVisible.value = true;
 };
 
-/** 三级病程弹窗：复用患者概览的 encounter overview 接口。 */
+/** 三级病程弹窗：复用患者概览的 encounter overview 接口，同时保留 workspace 供四级健康档案预览回填。 */
 const openCourseDialog = async (card: TownshipPatientCard) => {
   if (!card.encounterId) return;
   coursePatient.value = card;
   courseOverview.value = null;
   courseAttachments.value = [];
+  courseWorkspace.value = null;
   courseError.value = "";
   courseDialogVisible.value = true;
   courseLoading.value = true;
@@ -820,6 +985,7 @@ const openCourseDialog = async (card: TownshipPatientCard) => {
       courseError.value = overviewResult.reason?.message || "病程信息加载失败";
     }
     if (workspaceResult.status === "fulfilled") {
+      courseWorkspace.value = workspaceResult.value.data;
       courseAttachments.value = workspaceResult.value.data.attachments || [];
     }
   } catch (error: any) {
@@ -828,6 +994,9 @@ const openCourseDialog = async (card: TownshipPatientCard) => {
     courseLoading.value = false;
   }
 };
+
+/** 辅助检查摘要：异常指标列表（对象结构，拼接名称+值展示）。 */
+const abnormalMetricList = computed(() => courseOverview.value?.auxiliary?.labSummary?.abnormalMetrics || []);
 
 const downloadCourseAttachment = (attachment: PreAiAttachment) => {
   void downloadPreAiAttachmentApi(attachment);
@@ -894,9 +1063,9 @@ onMounted(() => {
 }
 .analysis-loading {
   min-height: 340px;
+  background: var(--hos-chart-panel-soft, var(--el-fill-color-extra-light));
   border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
   border-radius: 10px;
-  background: var(--hos-chart-panel-soft, var(--el-fill-color-extra-light));
 }
 .chart-block {
   display: grid;
@@ -904,9 +1073,9 @@ onMounted(() => {
   align-content: start;
   min-width: 0;
   padding: 10px;
+  background: var(--hos-chart-panel, var(--el-bg-color));
   border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
   border-radius: 10px;
-  background: var(--hos-chart-panel, var(--el-bg-color));
   box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
   .chart-title {
     font-size: 13px;
@@ -948,7 +1117,7 @@ onMounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .patient-row {
+  .patient-card {
     transition: none;
     animation: none;
   }
@@ -959,11 +1128,12 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-// 档案化纵向行式列表（对齐患者主档案视图）
-.township-patient-rows {
+// 患者概览卡片式网格（对齐 patients/overview 的 overview-card 风格）
+.township-card-grid {
   display: grid;
-  gap: 8px;
-  max-height: 480px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  max-height: min(560px, calc(88vh - 190px));
   padding-right: 4px;
   overflow-y: auto;
 }
@@ -982,96 +1152,269 @@ onMounted(() => {
     overflow-y: auto;
   }
 }
-.patient-row {
+.patient-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 96px minmax(96px, 0.9fr) 112px minmax(0, 1.6fr) minmax(72px, 0.6fr) auto;
-  gap: 14px;
-  align-items: center;
-  padding: 10px 14px;
+  gap: 10px;
+  align-content: start;
+  padding: 14px 16px 12px;
+  overflow: hidden;
   text-align: left;
   cursor: pointer;
-  background: var(--hos-chart-panel-soft, var(--el-fill-color-extra-light));
+  background: var(--hos-chart-panel, var(--el-bg-color));
   border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
-  border-radius: 10px;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgb(15 23 42 / 6%);
   transition:
     border-color var(--motion-control, 180ms) var(--ease-out, ease),
     box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
-    background-color var(--motion-control, 180ms) var(--ease-out, ease),
     transform var(--motion-control, 180ms) var(--ease-out, ease);
   animation: township-row-in var(--motion-panel, 240ms) var(--ease-out, ease) both;
   animation-delay: var(--row-delay, 0s);
+
+  // 左侧主色竖条（对齐患者概览卡片的风险标识位）
+  &::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 5px;
+    content: "";
+    background: var(--hos-chart-primary, var(--el-color-primary));
+  }
+
   @media (hover: hover) and (pointer: fine) {
     &:hover {
-      background: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 7%, var(--el-bg-color));
       border-color: color-mix(
         in srgb,
-        var(--hos-chart-primary, var(--el-color-primary)) 38%,
-        var(--hos-chart-line, var(--el-border-color-light))
+        var(--hos-chart-primary, var(--el-color-primary)) 45%,
+        var(--hos-chart-line-soft, var(--el-border-color-lighter))
       );
-      box-shadow: 0 6px 16px color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 12%, transparent);
-      transform: translateX(4px);
-      .row-more {
-        opacity: 1;
-        transform: translateX(2px);
+      box-shadow: 0 14px 34px color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 16%, transparent);
+      transform: translateY(-2px);
+      .card-foot {
+        color: var(--hos-chart-primary, var(--el-color-primary));
+        .el-icon {
+          transform: translateX(3px);
+        }
       }
     }
   }
-  .row-name {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--el-text-color-primary);
+  .card-head {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    justify-content: space-between;
+    .card-id {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      .card-name {
+        font-size: 20px;
+        font-weight: 800;
+        color: var(--el-text-color-primary);
+        letter-spacing: 1px;
+      }
+      small {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+    }
   }
-  .row-cell {
+
+  // 住址重心强调块：主色浅底渐变 + 定位图标 + 加粗
+  .card-address {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 9px 12px;
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 12%, transparent),
+      color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 3%, transparent)
+    );
+    border-radius: 8px;
+    .el-icon {
+      flex-shrink: 0;
+      margin-top: 2px;
+      font-size: 15px;
+      color: var(--hos-chart-primary, var(--el-color-primary));
+    }
+    .address-text {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.55;
+      color: var(--el-text-color-primary);
+      word-break: break-all;
+    }
+  }
+  .card-facts {
     display: grid;
-    gap: 1px;
-    min-width: 0;
-    font-size: 12px;
-    color: var(--el-text-color-regular);
-    label {
-      font-size: 11px;
-      color: var(--el-text-color-secondary);
-    }
-    &.address {
-      display: -webkit-box;
-      overflow: hidden;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 14px;
+    .fact {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      label {
+        font-size: 11px;
+        color: var(--el-text-color-secondary);
+      }
+      b {
+        overflow: hidden;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     }
   }
-  .row-more {
-    flex-shrink: 0;
+  .card-foot {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    justify-content: flex-end;
     font-size: 12px;
-    font-style: normal;
     font-weight: 600;
-    color: var(--hos-chart-primary, var(--el-color-primary));
-    opacity: 0.75;
+    color: var(--el-text-color-secondary);
+    transition: color var(--motion-control, 180ms) var(--ease-out, ease);
+    .el-icon {
+      transition: transform var(--motion-control, 180ms) var(--ease-out, ease);
+    }
   }
 }
 .course-body {
   display: grid;
-  gap: 12px;
+  gap: 18px;
   min-height: 160px;
 }
-.course-sec {
+
+// 文档头：姓名大标题 + 副标题 + meta（对齐模板预览态 document-header 层级）
+.doc-header {
   display: grid;
   gap: 6px;
-  .course-sec-title {
-    padding-left: 8px;
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--hos-chart-primary, var(--el-color-primary));
-    border-left: 3px solid var(--hos-chart-primary, var(--el-color-primary));
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--hos-chart-primary, var(--el-color-primary));
+  h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--el-text-color-primary);
+    letter-spacing: 1px;
   }
-  p {
-    display: grid;
-    gap: 1px;
+  .doc-subtitle {
     margin: 0;
     font-size: 13px;
-    line-height: 1.55;
+    color: var(--el-text-color-secondary);
+  }
+  .doc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 24px;
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--el-text-color-primary);
+    span {
+      display: inline-flex;
+      gap: 6px;
+      align-items: baseline;
+    }
     label {
-      margin-right: 8px;
-      font-size: 11px;
+      font-size: 12px;
       color: var(--el-text-color-secondary);
+    }
+  }
+}
+
+// 节段：标题 + 描述 note + 字段网格（点线分隔，对齐模板预览态 document-section 层级）
+.doc-section {
+  display: grid;
+  gap: 10px;
+  .doc-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    align-items: baseline;
+    h3 {
+      padding-left: 10px;
+      margin: 0;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--el-text-color-primary);
+      border-left: 4px solid var(--hos-chart-primary, var(--el-color-primary));
+    }
+    .doc-section-note {
+      margin: 0;
+      font-size: 12px;
+      color: var(--el-text-color-placeholder);
+    }
+  }
+  .doc-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 26px;
+  }
+  .doc-field {
+    display: grid;
+    gap: 3px;
+    align-content: start;
+    padding-bottom: 8px;
+    border-bottom: 1px dotted var(--el-border-color);
+    strong {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--el-text-color-secondary);
+    }
+    span {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--el-text-color-primary);
+    }
+    &.wide {
+      grid-column: 1 / -1;
+    }
+
+    // 主诉：一级视觉重心
+    &.chief span {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--hos-chart-primary, var(--el-color-primary));
+    }
+
+    // 诊断：二级重心
+    &.diagnosis span {
+      font-weight: 700;
+    }
+
+    // 过敏史：警示重心（warning 左条 + 浅底）
+    &.allergy {
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--el-color-warning) 8%, transparent);
+      border-bottom: none;
+      border-left: 3px solid var(--el-color-warning);
+      border-radius: 6px;
+      span {
+        font-weight: 600;
+      }
+    }
+    .abnormal-num {
+      font-style: normal;
+      font-weight: 700;
+      color: var(--el-color-warning);
+      &.none {
+        color: var(--el-text-color-secondary);
+      }
+    }
+    .critical-num {
+      font-style: normal;
+      font-weight: 700;
+      color: var(--el-color-danger);
+    }
+    .metric-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
     }
   }
   .course-empty {
@@ -1093,6 +1436,12 @@ onMounted(() => {
       height: 86px;
       border-radius: 6px;
     }
+  }
+}
+
+@media (width <= 720px) {
+  .doc-section .doc-fields {
+    grid-template-columns: 1fr;
   }
 }
 
