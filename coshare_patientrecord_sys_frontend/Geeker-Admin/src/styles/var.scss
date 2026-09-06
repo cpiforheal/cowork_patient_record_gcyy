@@ -42,6 +42,31 @@ $primary-color: var(--el-color-primary);
   --hos-shadow-card-hover: 0 10px 24px rgb(15 23 42 / 8%);
   --hos-touch-target: 40px;
   --hos-density-scale: 1;
+  --hos-chart-bg: #ffffff;
+  --hos-chart-panel: #ffffff;
+  --hos-chart-panel-soft: #f8fbfb;
+  --hos-chart-line: rgb(15 23 42 / 10%);
+  --hos-chart-line-soft: rgb(15 23 42 / 6%);
+  --hos-chart-text: #17212b;
+  --hos-chart-muted: #64748b;
+  --hos-chart-tooltip-bg: #ffffff;
+  --hos-chart-tooltip-text: #17212b;
+  --hos-chart-tooltip-border: rgb(15 23 42 / 12%);
+  --hos-chart-primary: #0f766e;
+  --hos-chart-primary-soft: #dff6f2;
+  --hos-chart-info: #2563eb;
+  --hos-chart-success: #16a34a;
+  --hos-chart-warning: #d97706;
+  --hos-chart-danger: #dc2626;
+  --hos-chart-purple: #7655b7;
+  --hos-chart-muted-fill: #94a3b8;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --motion-fast: 140ms;
+  --motion-control: 180ms;
+  --motion-panel: 240ms;
+  --motion-chart: 420ms;
+  --motion-chart-update: 220ms;
 }
 
 html.dark {
@@ -73,6 +98,24 @@ html.dark {
   --hos-field-editable-bg: #111827;
   --hos-shadow-card: 0 1px 2px rgb(0 0 0 / 24%);
   --hos-shadow-card-hover: 0 12px 28px rgb(0 0 0 / 32%);
+  --hos-chart-bg: #101827;
+  --hos-chart-panel: #16213e;
+  --hos-chart-panel-soft: #111b2f;
+  --hos-chart-line: rgb(148 163 184 / 18%);
+  --hos-chart-line-soft: rgb(148 163 184 / 10%);
+  --hos-chart-text: #e5e7eb;
+  --hos-chart-muted: #94a3b8;
+  --hos-chart-tooltip-bg: #111827;
+  --hos-chart-tooltip-text: #e5e7eb;
+  --hos-chart-tooltip-border: rgb(148 163 184 / 22%);
+  --hos-chart-primary: #2dd4bf;
+  --hos-chart-primary-soft: #0b3b3a;
+  --hos-chart-info: #60a5fa;
+  --hos-chart-success: #4ade80;
+  --hos-chart-warning: #fbbf24;
+  --hos-chart-danger: #f87171;
+  --hos-chart-purple: #a78bfa;
+  --hos-chart-muted-fill: #64748b;
 }
 
 html[data-density="compact"] {

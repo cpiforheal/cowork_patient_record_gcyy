@@ -2723,20 +2723,27 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .inventory-page {
-  --inventory-bg: #f4f7f9;
-  --inventory-panel: #ffffff;
-  --inventory-line: #dfe7ee;
-  --inventory-line-soft: #edf1f5;
-  --inventory-text: #17212b;
-  --inventory-muted: #647282;
-  --inventory-primary: #08766f;
-  --inventory-primary-soft: #e8f5f3;
-  --inventory-danger: #c83232;
-  --inventory-danger-soft: #fff0f0;
-  --inventory-warning: #b7791f;
-  --inventory-warning-soft: #fff7e6;
-  --inventory-success: #23805f;
-  --inventory-success-soft: #edf8f2;
+  --inventory-bg: var(--hos-chart-bg, #f4f7f9);
+  --inventory-panel: var(--hos-chart-panel, #ffffff);
+  --inventory-panel-soft: var(--hos-chart-panel-soft, #f8fbfb);
+  --inventory-line: var(--hos-chart-line, #dfe7ee);
+  --inventory-line-soft: var(--hos-chart-line-soft, #edf1f5);
+  --inventory-text: var(--hos-chart-text, #17212b);
+  --inventory-muted: var(--hos-chart-muted, #647282);
+  --inventory-tooltip-bg: var(--hos-chart-tooltip-bg, #ffffff);
+  --inventory-tooltip-text: var(--hos-chart-tooltip-text, #17212b);
+  --inventory-tooltip-border: var(--hos-chart-tooltip-border, rgb(23 33 43 / 12%));
+  --inventory-primary: var(--hos-chart-primary, #08766f);
+  --inventory-primary-soft: var(--hos-chart-primary-soft, #e8f5f3);
+  --inventory-info: var(--hos-chart-info, #4f7cac);
+  --inventory-danger: var(--hos-chart-danger, #c83232);
+  --inventory-danger-soft: var(--hos-status-danger-soft, #fff0f0);
+  --inventory-warning: var(--hos-chart-warning, #b7791f);
+  --inventory-warning-soft: var(--hos-status-warning-soft, #fff7e6);
+  --inventory-success: var(--hos-chart-success, #23805f);
+  --inventory-success-soft: var(--hos-status-success-soft, #edf8f2);
+  --inventory-purple: var(--hos-chart-purple, #7655b7);
+  --inventory-muted-fill: var(--hos-chart-muted-fill, #94a3b8);
 
   display: grid;
   min-width: 0;
@@ -2874,8 +2881,8 @@ onMounted(() => {
 
 .inventory-loading-skeleton {
   padding: 18px;
-  background: #ffffff;
-  border: 1px solid var(--el-border-color-light);
+  background: var(--inventory-panel);
+  border: 1px solid var(--inventory-line-soft);
   border-radius: 8px;
 }
 
@@ -2889,7 +2896,7 @@ onMounted(() => {
 .inventory-fade-enter-active,
 .inventory-fade-leave-active {
   transition:
-    opacity 0.18s ease,
+    opacity var(--motion-control, 180ms) var(--ease-out, ease),
     transform 0.18s ease;
 }
 

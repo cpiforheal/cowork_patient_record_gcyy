@@ -1097,7 +1097,7 @@ onMounted(reloadAll);
   --clinic-success: var(--hos-status-success, #16a34a);
   --clinic-warning: var(--hos-status-warning, #b45309);
   --clinic-danger: var(--hos-status-danger, #dc2626);
-  --clinic-info: var(--hos-primary, #0f766e);
+  --clinic-info: var(--hos-chart-info, var(--hos-primary, #0f766e));
   --clinic-success-soft: var(--hos-status-success-soft, #ecf8f0);
   --clinic-warning-soft: var(--hos-status-warning-soft, #fef7e8);
   --clinic-danger-soft: var(--hos-status-danger-soft, #fdeeee);
@@ -1108,8 +1108,8 @@ onMounted(reloadAll);
 }
 .board-card {
   padding: 16px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
+  background: var(--hos-chart-panel, var(--el-bg-color));
+  border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-light));
   border-radius: 12px;
 }
 
@@ -1167,17 +1167,23 @@ onMounted(reloadAll);
   overflow: hidden;
   text-align: left;
   cursor: pointer;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
+  background: var(--hos-chart-panel, var(--el-bg-color));
+  border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-light));
   border-radius: 12px;
   transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    border-color 160ms ease;
-  &:hover {
-    border-color: color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-light));
-    box-shadow: 0 10px 24px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
-    transform: translateY(-2px);
+    transform var(--motion-fast, 140ms) var(--ease-out, ease),
+    box-shadow var(--motion-fast, 140ms) var(--ease-out, ease),
+    border-color var(--motion-fast, 140ms) var(--ease-out, ease);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      border-color: color-mix(
+        in srgb,
+        var(--hos-chart-primary, var(--el-color-primary)) 30%,
+        var(--hos-chart-line-soft, var(--el-border-color-light))
+      );
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 10%, transparent);
+      transform: translateY(-2px);
+    }
   }
   .todo-label {
     display: inline-flex;
@@ -1196,7 +1202,7 @@ onMounted(reloadAll);
   small {
     overflow: hidden;
     font-size: 12px;
-    color: var(--el-text-color-placeholder);
+    color: var(--hos-chart-muted, var(--el-text-color-placeholder));
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1236,7 +1242,7 @@ onMounted(reloadAll);
       color: var(--el-text-color-secondary);
     }
     &:hover strong {
-      color: var(--el-color-primary);
+      color: var(--hos-chart-primary, var(--el-color-primary));
     }
   }
   .fold-spacer {
@@ -1244,7 +1250,7 @@ onMounted(reloadAll);
   }
   .fold-arrow {
     color: var(--el-text-color-secondary);
-    transition: transform 0.2s var(--ease-standard, ease);
+    transition: transform var(--motion-control, 180ms) var(--ease-out, ease);
     &.open {
       transform: rotate(180deg);
     }
@@ -1253,7 +1259,7 @@ onMounted(reloadAll);
     display: grid;
     gap: 16px;
     padding: 4px 16px 16px;
-    border-top: 1px solid var(--el-border-color-lighter);
+    border-top: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
   }
 }
 .chart-row {
@@ -1278,8 +1284,8 @@ onMounted(reloadAll);
   .chip {
     padding: 3px 10px;
     font-size: 12px;
-    color: var(--el-text-color-secondary);
-    background: var(--el-fill-color-light);
+    color: var(--hos-chart-muted, var(--el-text-color-secondary));
+    background: var(--hos-chart-panel-soft, var(--el-fill-color-light));
     border-radius: 999px;
     b {
       font-variant-numeric: tabular-nums;
@@ -1366,13 +1372,19 @@ onMounted(reloadAll);
   border: 1px solid var(--el-border-color-light);
   border-radius: 10px;
   transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    border-color 160ms ease;
-  &:hover {
-    border-color: color-mix(in srgb, var(--el-color-primary) 26%, var(--el-border-color-light));
-    box-shadow: 0 8px 20px color-mix(in srgb, var(--el-color-primary) 10%, transparent);
-    transform: translateY(-2px);
+    transform var(--motion-fast, 140ms) var(--ease-out, ease),
+    box-shadow var(--motion-fast, 140ms) var(--ease-out, ease),
+    border-color var(--motion-fast, 140ms) var(--ease-out, ease);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      border-color: color-mix(
+        in srgb,
+        var(--hos-chart-primary, var(--el-color-primary)) 26%,
+        var(--hos-chart-line-soft, var(--el-border-color-light))
+      );
+      box-shadow: 0 7px 18px color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 9%, transparent);
+      transform: translateY(-2px);
+    }
   }
   span {
     font-size: 13px;
@@ -1388,7 +1400,7 @@ onMounted(reloadAll);
   small {
     overflow: hidden;
     font-size: 12px;
-    color: var(--el-text-color-placeholder);
+    color: var(--hos-chart-muted, var(--el-text-color-placeholder));
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1400,6 +1412,18 @@ onMounted(reloadAll);
   }
   &.is-success strong {
     color: var(--clinic-success);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-card,
+  .stat-card,
+  .fold-arrow {
+    transition: none;
+  }
+  .todo-card:hover,
+  .stat-card:hover {
+    transform: none;
   }
 }
 

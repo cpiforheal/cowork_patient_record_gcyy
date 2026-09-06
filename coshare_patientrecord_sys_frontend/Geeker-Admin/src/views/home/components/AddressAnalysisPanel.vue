@@ -3,7 +3,10 @@
     <header class="analysis-head">
       <div>
         <strong>来访患者住址分布</strong>
-        <small>数据来源：患者收费信息 · 固始县周边乡镇对照 · 样本 {{ patients.length }} 人</small>
+        <small
+          >数据来源：患者收费信息 · 固始县周边乡镇对照 · 总样本 {{ patients.length }} 人 · 本地样本
+          {{ localSampleCount }} 人</small
+        >
       </div>
       <div class="summary-chips">
         <span class="chip"
@@ -18,7 +21,8 @@
       </div>
     </header>
 
-    <el-empty v-if="!loading && !patients.length" description="暂无患者收费信息，无法分析住址分布" :image-size="56" />
+    <div v-if="loading" class="analysis-loading" v-loading="true" element-loading-text="住址分布加载中…" />
+    <el-empty v-else-if="!patients.length" description="暂无患者收费信息，无法分析住址分布" :image-size="56" />
     <template v-else>
       <!-- 迁移地图：近似乡镇分块（hover 凸起强调） + 涟漪散点 + 迁移光线 -->
       <div class="chart-block map-block">
@@ -211,22 +215,9 @@ const GUSHI_TOWNSHIPS = [
   "马堽"
 ];
 const URBAN_STREETS = ["蓼城", "秀水", "番城"];
-/** 柱状图逐行配色（相邻行不同色；饱和度与主题协调） */
-const BAR_ROW_PALETTE = [
-  "#0f766e",
-  "#0284c7",
-  "#7c3aed",
-  "#db2777",
-  "#d97706",
-  "#059669",
-  "#dc2626",
-  "#0891b2",
-  "#9333ea",
-  "#ea580c",
-  "#4f46e5",
-  "#16a34a",
-  "#b45309"
-];
+/** Dashboard 图表语义色：高频看板用少量稳定色阶，避免按行号彩虹化。 */
+const LIGHT_BAR_TONES = ["#0f766e", "#2563eb", "#16a34a", "#0891b2", "#64748b"];
+const DARK_BAR_TONES = ["#2dd4bf", "#60a5fa", "#4ade80", "#22d3ee", "#94a3b8"];
 /** 本院（城区）锚点 */
 const HOSPITAL_COORD: [number, number] = [115.65, 32.17];
 /** 乡镇驻地近似经纬度（仅用于分布可视化，非精确行政边界） */
@@ -332,21 +323,43 @@ const townshipRanking = computed(() =>
 );
 const coverageCount = computed(() => townshipRanking.value.length);
 const topTownship = computed(() => townshipRanking.value[0]);
+const localSampleCount = computed(() => distribution.value.urban + distribution.value.townshipTotal);
 const localRatioText = computed(() => {
   const total = patients.value.length;
   if (!total) return "—";
-  return `${Math.round(((distribution.value.urban + distribution.value.townshipTotal) / total) * 100)}%`;
+  return `${Math.round((localSampleCount.value / total) * 100)}%`;
 });
 
 const chartPalette = computed(() => ({
-  text: isDark.value ? "#cbd5e1" : "#475569",
-  label: isDark.value ? "#e5eaf1" : "#1e293b",
-  split: isDark.value ? "#334155" : "#e2e8f0",
-  tooltipBg: isDark.value ? "#1f2937" : "#ffffff",
-  tooltipBorder: isDark.value ? "#374151" : "#e2e8f0",
-  maskBorder: isDark.value ? "#111827" : "#ffffff",
-  unknown: isDark.value ? "#374151" : "#cbd5e1"
+  text: isDark.value ? "#94a3b8" : "#64748b",
+  label: isDark.value ? "#e5e7eb" : "#17212b",
+  split: isDark.value ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.08)",
+  tooltipBg: isDark.value ? "#111827" : "#ffffff",
+  tooltipBorder: isDark.value ? "rgba(148, 163, 184, 0.22)" : "rgba(15, 23, 42, 0.12)",
+  maskBorder: isDark.value ? "rgba(15, 23, 42, 0.76)" : "rgba(255, 255, 255, 0.82)",
+  primary: isDark.value ? "#2dd4bf" : "#0f766e",
+  info: isDark.value ? "#60a5fa" : "#2563eb",
+  success: isDark.value ? "#4ade80" : "#16a34a",
+  warning: isDark.value ? "#fbbf24" : "#d97706",
+  danger: isDark.value ? "#f87171" : "#dc2626",
+  purple: isDark.value ? "#a78bfa" : "#7655b7",
+  mutedFill: isDark.value ? "#64748b" : "#94a3b8",
+  unknown: isDark.value ? "#475569" : "#cbd5e1",
+  mapArea: isDark.value ? "#263244" : "#e4e9ef",
+  mapBorder: isDark.value ? "rgba(148, 163, 184, 0.22)" : "rgba(15, 23, 42, 0.10)",
+  mapShadow: isDark.value ? "rgba(0, 0, 0, 0.34)" : "rgba(15, 23, 42, 0.18)",
+  dataZoomBg: isDark.value ? "rgba(148, 163, 184, 0.08)" : "rgba(15, 23, 42, 0.04)",
+  dataZoomFill: isDark.value ? "rgba(45, 212, 191, 0.24)" : "rgba(15, 118, 110, 0.14)",
+  barTop: isDark.value ? "#fbbf24" : "#d97706",
+  barTones: isDark.value ? DARK_BAR_TONES : LIGHT_BAR_TONES
 }));
+
+const stableToneIndex = (name: string, size: number) => {
+  if (!size) return 0;
+  let total = 0;
+  for (const char of name) total = (total * 31 + char.charCodeAt(0)) >>> 0;
+  return total % size;
+};
 
 // 环形图中心单一 label 的响应式内容：hover 切换分块明细，移开恢复本地占比
 const centerText = ref({ title: "本地占比", value: "—" });
@@ -364,12 +377,14 @@ const donutOption = computed<EChartsOption>(() => {
   return {
     tooltip: {
       trigger: "item",
-      formatter: "{b}：{c} 人（{d}%）",
+      formatter: (params: any) =>
+        `${params.name}：${params.value} 人（${params.percent}%）<br/>总样本：${patients.value.length} 人`,
+      confine: true,
       backgroundColor: palette.tooltipBg,
       borderColor: palette.tooltipBorder,
       textStyle: { color: palette.label }
     },
-    legend: { bottom: 0, icon: "circle", textStyle: { color: palette.text, fontSize: 12 } },
+    legend: { bottom: 0, icon: "circle", itemGap: 14, textStyle: { color: palette.text, fontSize: 12 } },
     series: [
       {
         // 移植官方 pie-borderRadius 示例：分块间留缝 + 圆角切片 + 中心 hover 明细
@@ -378,7 +393,7 @@ const donutOption = computed<EChartsOption>(() => {
         center: ["50%", "44%"],
         avoidLabelOverlap: false,
         padAngle: 2,
-        itemStyle: { borderRadius: 8, borderColor: palette.maskBorder, borderWidth: 2 },
+        itemStyle: { borderRadius: 8, borderColor: palette.maskBorder, borderWidth: 1 },
         label: {
           show: true,
           position: "center",
@@ -394,7 +409,7 @@ const donutOption = computed<EChartsOption>(() => {
             v: {
               fontSize: 26,
               fontWeight: 700,
-              color: isDark.value ? "#f1f5f9" : "#0f766e",
+              color: palette.primary,
               fontVariantNumeric: "tabular-nums",
               lineHeight: 30
             }
@@ -402,16 +417,17 @@ const donutOption = computed<EChartsOption>(() => {
         },
         labelLine: { show: false },
         data: [
-          { name: "周边乡镇", value: d.townshipTotal, itemStyle: { color: "#0f766e" } },
-          { name: "城区", value: d.urban, itemStyle: { color: "#14b8a6" } },
-          { name: "县外", value: d.outside, itemStyle: { color: "#94a3b8" } },
-          { name: "固始县其他", value: d.gushiOther, itemStyle: { color: "#d97706" } },
+          { name: "周边乡镇", value: d.townshipTotal, itemStyle: { color: palette.primary } },
+          { name: "城区", value: d.urban, itemStyle: { color: palette.info } },
+          { name: "县外", value: d.outside, itemStyle: { color: palette.mutedFill } },
+          { name: "固始县其他", value: d.gushiOther, itemStyle: { color: palette.warning } },
           { name: "未登记地址", value: d.unknown, itemStyle: { color: palette.unknown } }
         ].filter(item => item.value > 0),
-        // 载入动画：线性过渡 + 逐分块错峰
-        animationEasing: "linear",
-        animationDuration: 900,
-        animationDelay: (idx: number) => idx * 150
+        animationEasing: "cubicOut",
+        animationEasingUpdate: "cubicOut",
+        animationDuration: 420,
+        animationDurationUpdate: 220,
+        animationDelay: (idx: number) => idx * 32
       }
     ]
   };
@@ -421,19 +437,20 @@ const barOption = computed<EChartsOption>(() => {
   // 粒度对齐全量病历患者：全部乡镇逐行展示，不再合并"其他乡镇"
   const rows = townshipRanking.value.map(row => ({ name: row.name, count: row.count }));
   const palette = chartPalette.value;
-  // 行数多时 dataZoom 平移滚动：默认展示前 12 行，可滚轮/拖拽查看全部
+  const hasScrollableRows = rows.length > 12;
   const zoomEnd = Math.min(100, Math.round((12 / Math.max(rows.length, 1)) * 100));
-  // 每行独立色块，相邻行颜色必不相同
-  const rowColor = (index: number) => BAR_ROW_PALETTE[index % BAR_ROW_PALETTE.length];
+  const rowColor = (name: string, index: number) =>
+    index === 0 ? palette.barTop : palette.barTones[stableToneIndex(name, palette.barTones.length)];
   return {
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "shadow" },
+      confine: true,
       backgroundColor: palette.tooltipBg,
       borderColor: palette.tooltipBorder,
       textStyle: { color: palette.label }
     },
-    grid: { left: 8, right: 44, top: 8, bottom: 8, containLabel: true },
+    grid: { left: 8, right: hasScrollableRows ? 44 : 26, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: "value",
       splitLine: { lineStyle: { color: palette.split } },
@@ -447,10 +464,25 @@ const barOption = computed<EChartsOption>(() => {
       axisLine: { lineStyle: { color: palette.split } },
       axisLabel: { color: palette.label, fontSize: 12 }
     },
-    dataZoom: [
-      { type: "inside", yAxisIndex: 0, start: 0, end: zoomEnd, zoomOnMouseWheel: false, moveOnMouseWheel: true },
-      { type: "slider", yAxisIndex: 0, right: 4, width: 14, start: 0, end: zoomEnd, brushSelect: false }
-    ],
+    dataZoom: hasScrollableRows
+      ? [
+          { type: "inside", yAxisIndex: 0, start: 0, end: zoomEnd, zoomOnMouseWheel: false, moveOnMouseWheel: true },
+          {
+            type: "slider",
+            yAxisIndex: 0,
+            right: 4,
+            width: 14,
+            start: 0,
+            end: zoomEnd,
+            brushSelect: false,
+            borderColor: "transparent",
+            backgroundColor: palette.dataZoomBg,
+            fillerColor: palette.dataZoomFill,
+            handleStyle: { color: palette.primary, borderColor: palette.primary },
+            textStyle: { color: palette.text }
+          }
+        ]
+      : [],
     series: [
       {
         type: "bar",
@@ -459,13 +491,16 @@ const barOption = computed<EChartsOption>(() => {
           value: row.count,
           itemStyle: {
             borderRadius: [0, 8, 8, 0],
-            color: rowColor(index)
+            color: rowColor(row.name, index)
           }
         })),
         barMaxWidth: 16,
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
-        animationDuration: 700,
-        animationDelay: (idx: number) => idx * 45
+        animationEasing: "cubicOut",
+        animationEasingUpdate: "cubicOut",
+        animationDuration: 420,
+        animationDurationUpdate: 220,
+        animationDelay: (idx: number) => Math.min(idx * 28, 240)
       }
     ]
   };
@@ -587,8 +622,8 @@ const buildTownshipMapFeatureCollection = () => {
     };
   });
 
-  // 相邻地区 hover 强调色不重复：按 Voronoi 邻接关系贪心分配饱和色
-  const hoverPalette = ["#0d9488", "#2563eb", "#e11d48", "#d97706", "#7c3aed", "#16a34a", "#db2777", "#0284c7"];
+  // 相邻地区 hover 强调色不重复：按 Voronoi 邻接关系贪心分配低饱和语义色
+  const hoverPalette = ["#0f766e", "#2563eb", "#16a34a", "#d97706", "#7655b7", "#0891b2"];
   const assigned: Record<string, string> = {};
   seeds.forEach((seed, index) => {
     const usedByNeighbors = new Set(
@@ -607,14 +642,14 @@ const geoOption = computed(() => {
   const regionData = [...mapTotalByRegion.value.entries()].map(([name, value]) => ({
     name,
     value,
-    // 每个地区预分配专属强调色（贪心保证相邻不重复），hover 时灰底浮起并亮出该色
+    // 每个地区预分配专属强调色（贪心保证相邻不重复），hover 时只做局部轻量高亮
     emphasis: {
-      label: { show: true, fontSize: 14, fontWeight: 700 as const, color: "#ffffff" },
+      label: { show: true, fontSize: 14, fontWeight: 700 as const, color: isDark.value ? "#0f172a" : "#ffffff" },
       itemStyle: {
-        areaColor: regionHoverColors.value[name] || "#0d9488",
-        shadowBlur: 18,
-        shadowOffsetY: 10,
-        shadowColor: isDark.value ? "rgba(0, 0, 0, 0.55)" : "rgba(15, 23, 42, 0.4)"
+        areaColor: regionHoverColors.value[name] || palette.primary,
+        shadowBlur: 8,
+        shadowOffsetY: 3,
+        shadowColor: palette.mapShadow
       }
     }
   }));
@@ -624,14 +659,15 @@ const geoOption = computed(() => {
   return {
     tooltip: {
       trigger: "item",
+      confine: true,
       backgroundColor: palette.tooltipBg,
       borderColor: palette.tooltipBorder,
       textStyle: { color: palette.label },
       formatter: (params: any) => {
         const value = Number(params.value?.[2] ?? params.value ?? 0);
-        const total = distribution.value.urban + distribution.value.townshipTotal;
+        const total = localSampleCount.value;
         const ratio = total ? Math.round((value / total) * 100) : 0;
-        return `${params.name}<br/>来访患者：${value} 人<br/>占本地样本：${ratio}%`;
+        return `${params.name}<br/>来访患者：${value} 人<br/>占本地样本：${ratio}%<br/>本地样本：${total} 人`;
       }
     },
     geo: {
@@ -641,16 +677,16 @@ const geoOption = computed(() => {
       scaleLimit: { min: 0.8, max: 4 },
       label: { show: true, color: palette.label, fontSize: 10 },
       itemStyle: {
-        areaColor: isDark.value ? "#414b5a" : "#d5dbe4",
-        borderColor: isDark.value ? "#232b36" : "#ffffff",
+        areaColor: palette.mapArea,
+        borderColor: palette.mapBorder,
         borderWidth: 1
       },
       emphasis: {
-        label: { show: true, color: "#ffffff", fontWeight: 700 as const, fontSize: 14 },
+        label: { show: true, color: isDark.value ? "#0f172a" : "#ffffff", fontWeight: 700 as const, fontSize: 14 },
         itemStyle: {
-          shadowBlur: 18,
-          shadowOffsetY: 10,
-          shadowColor: isDark.value ? "rgba(0, 0, 0, 0.55)" : "rgba(15, 23, 42, 0.4)"
+          shadowBlur: 8,
+          shadowOffsetY: 3,
+          shadowColor: palette.mapShadow
         }
       },
       select: { disabled: true }
@@ -660,7 +696,10 @@ const geoOption = computed(() => {
         type: "map",
         geoIndex: 0,
         data: regionData,
-        animationDuration: 700
+        animationEasing: "cubicOut",
+        animationEasingUpdate: "cubicOut",
+        animationDuration: 420,
+        animationDurationUpdate: 220
       },
       {
         type: "effectScatter",
@@ -668,10 +707,13 @@ const geoOption = computed(() => {
         zlevel: 3,
         data: scatterData.map(item => ({ name: item.name, value: item.value })),
         symbolSize: (value: unknown) => 10 + (Number((value as number[])?.[2] ?? 0) / maxCount) * 22,
-        rippleEffect: { brushType: "stroke", scale: 2.4 },
+        rippleEffect: { brushType: "stroke", scale: 1.8, period: 4.2 },
         label: { show: false },
-        itemStyle: { color: isDark.value ? "#5eead4" : "#0d9488" },
-        animationDuration: 700
+        itemStyle: { color: palette.primary },
+        animationEasing: "cubicOut",
+        animationEasingUpdate: "cubicOut",
+        animationDuration: 420,
+        animationDurationUpdate: 220
       },
       {
         type: "effectScatter",
@@ -679,10 +721,13 @@ const geoOption = computed(() => {
         zlevel: 4,
         data: [{ name: "本院", value: [HOSPITAL_COORD[0], HOSPITAL_COORD[1], distribution.value.urban] }],
         symbolSize: 14,
-        rippleEffect: { brushType: "stroke", scale: 3.2, numberRipples: 2 },
+        rippleEffect: { brushType: "stroke", scale: 2.2, numberRipples: 2, period: 4.5 },
         label: { show: true, position: "top", formatter: "本院", color: palette.label, fontSize: 12, fontWeight: 700 as const },
-        itemStyle: { color: "#f59e0b" },
-        animationDuration: 700
+        itemStyle: { color: palette.warning },
+        animationEasing: "cubicOut",
+        animationEasingUpdate: "cubicOut",
+        animationDuration: 420,
+        animationDurationUpdate: 220
       }
     ]
   };
@@ -819,9 +864,10 @@ onMounted(() => {
   }
   strong {
     font-size: 14px;
+    color: var(--hos-chart-text, var(--el-text-color-primary));
   }
   small {
-    color: var(--el-text-color-secondary);
+    color: var(--hos-chart-muted, var(--el-text-color-secondary));
   }
 }
 .summary-chips {
@@ -831,12 +877,13 @@ onMounted(() => {
   .chip {
     padding: 4px 10px;
     font-size: 12px;
-    color: var(--el-text-color-secondary);
-    background: var(--el-fill-color-light);
+    color: var(--hos-chart-muted, var(--el-text-color-secondary));
+    background: var(--hos-chart-panel-soft, var(--el-fill-color-light));
+    border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
     border-radius: 999px;
     b {
       font-variant-numeric: tabular-nums;
-      color: var(--el-color-primary);
+      color: var(--hos-chart-primary, var(--el-color-primary));
     }
   }
 }
@@ -845,13 +892,25 @@ onMounted(() => {
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   gap: 16px;
 }
+.analysis-loading {
+  min-height: 340px;
+  border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--hos-chart-panel-soft, var(--el-fill-color-extra-light));
+}
 .chart-block {
   display: grid;
   gap: 6px;
   align-content: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--hos-chart-panel, var(--el-bg-color));
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
   .chart-title {
     font-size: 13px;
-    color: var(--el-text-color-secondary);
+    color: var(--hos-chart-muted, var(--el-text-color-secondary));
   }
 }
 .map-block {
@@ -861,7 +920,7 @@ onMounted(() => {
   .map-note {
     font-size: 11px;
     line-height: 1.6;
-    color: var(--el-text-color-placeholder);
+    color: var(--hos-chart-muted, var(--el-text-color-placeholder));
   }
 }
 .chart {
@@ -890,6 +949,7 @@ onMounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .patient-row {
+    transition: none;
     animation: none;
   }
 }
@@ -930,24 +990,30 @@ onMounted(() => {
   padding: 10px 14px;
   text-align: left;
   cursor: pointer;
-  background: var(--el-fill-color-extra-light);
-  border: 1px solid var(--el-border-color-lighter);
+  background: var(--hos-chart-panel-soft, var(--el-fill-color-extra-light));
+  border: 1px solid var(--hos-chart-line-soft, var(--el-border-color-lighter));
   border-radius: 10px;
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background-color 0.18s ease,
-    transform 0.18s ease;
-  animation: township-row-in 0.32s ease both;
+    border-color var(--motion-control, 180ms) var(--ease-out, ease),
+    box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
+    background-color var(--motion-control, 180ms) var(--ease-out, ease),
+    transform var(--motion-control, 180ms) var(--ease-out, ease);
+  animation: township-row-in var(--motion-panel, 240ms) var(--ease-out, ease) both;
   animation-delay: var(--row-delay, 0s);
-  &:hover {
-    background: color-mix(in srgb, var(--el-color-primary) 7%, var(--el-bg-color));
-    border-color: var(--el-color-primary);
-    box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
-    transform: translateX(6px);
-    .row-more {
-      opacity: 1;
-      transform: translateX(2px);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      background: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 7%, var(--el-bg-color));
+      border-color: color-mix(
+        in srgb,
+        var(--hos-chart-primary, var(--el-color-primary)) 38%,
+        var(--hos-chart-line, var(--el-border-color-light))
+      );
+      box-shadow: 0 6px 16px color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 12%, transparent);
+      transform: translateX(4px);
+      .row-more {
+        opacity: 1;
+        transform: translateX(2px);
+      }
     }
   }
   .row-name {
@@ -977,7 +1043,7 @@ onMounted(() => {
     font-size: 12px;
     font-style: normal;
     font-weight: 600;
-    color: var(--el-color-primary);
+    color: var(--hos-chart-primary, var(--el-color-primary));
     opacity: 0.75;
   }
 }
@@ -993,8 +1059,8 @@ onMounted(() => {
     padding-left: 8px;
     font-size: 13px;
     font-weight: 700;
-    color: var(--el-color-primary);
-    border-left: 3px solid var(--el-color-primary);
+    color: var(--hos-chart-primary, var(--el-color-primary));
+    border-left: 3px solid var(--hos-chart-primary, var(--el-color-primary));
   }
   p {
     display: grid;

@@ -150,6 +150,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
 import type { EChartsOption } from "echarts";
 import type { InventoryAdminDepartmentDailyRollup, InventoryAdminMaterialSummary } from "@/api/modules/inventory";
+import { useGlobalStore } from "@/stores/modules/global";
 
 use([
   CanvasRenderer,
@@ -168,6 +169,8 @@ type MaterialScope = "top" | "all";
 
 const props = defineProps<{ report?: InventoryAdminDepartmentDailyRollup }>();
 const emit = defineEmits<{ drill: [payload: Drill]; reset: [] }>();
+const globalStore = useGlobalStore();
+const isDark = computed(() => globalStore.isDark);
 const report = computed(() => props.report);
 const dashboard = computed(() => props.report?.dashboard);
 const periodLabel = computed(() => (props.report ? props.report.periodStart + " 至 " + props.report.periodEnd : ""));
@@ -176,15 +179,16 @@ const number = (value: number | null | undefined) =>
 const percent = (value: number | null | undefined) =>
   value == null ? "—" : (Number(value) * 100).toLocaleString("zh-CN", { maximumFractionDigits: 1 }) + "%";
 const amount = (value: number | null | undefined) => (value == null ? "未核价" : "¥" + number(value));
-const tooltipSurface = {
-  backgroundColor: "#fff",
-  borderColor: "rgb(23 33 43 / 12%)",
+const tooltipSurface = computed(() => ({
+  confine: true,
+  backgroundColor: isDark.value ? "#111827" : "#ffffff",
+  borderColor: isDark.value ? "rgb(148 163 184 / 22%)" : "rgb(23 33 43 / 12%)",
   borderWidth: 1,
   borderRadius: 8,
   padding: [10, 12],
-  textStyle: { color: "#17212b", fontSize: 12, lineHeight: 19 },
-  extraCssText: "box-shadow:0 10px 28px rgb(23 33 43 / 14%);"
-};
+  textStyle: { color: isDark.value ? "#e5e7eb" : "#17212b", fontSize: 12, lineHeight: 19 },
+  extraCssText: isDark.value ? "box-shadow:0 12px 30px rgb(0 0 0 / 34%);" : "box-shadow:0 10px 28px rgb(23 33 43 / 14%);"
+}));
 
 const metrics = computed(() => {
   const d = dashboard.value;
@@ -267,10 +271,11 @@ watch(
   () => props.report,
   () => {
     selectedDepartmentKey.value = null;
-    if (dashboardMounted) void nextTick(() => {
-      observeChartRoots();
-      observeRevealCards();
-    });
+    if (dashboardMounted)
+      void nextTick(() => {
+        observeChartRoots();
+        observeRevealCards();
+      });
   }
 );
 
@@ -329,32 +334,40 @@ const materialChartRows = computed(() =>
 );
 const hasMaterialChart = computed(() => materialChartRows.value.length > 0 && materialTotal.value > 0);
 
-const palette = {
-  primary: "#08766f",
-  info: "#4f7cac",
-  warning: "#c9822b",
-  danger: "#c83232",
-  purple: "#7655b7",
-  text: "#17212b",
-  muted: "#647282"
+const LIGHT_MATERIAL_COLORS = ["#08766f", "#2563eb", "#23805f", "#c9822b", "#7655b7", "#647282"];
+const DARK_MATERIAL_COLORS = ["#2dd4bf", "#60a5fa", "#4ade80", "#fbbf24", "#a78bfa", "#94a3b8"];
+const palette = computed(() => ({
+  primary: isDark.value ? "#2dd4bf" : "#08766f",
+  info: isDark.value ? "#60a5fa" : "#4f7cac",
+  warning: isDark.value ? "#fbbf24" : "#c9822b",
+  danger: isDark.value ? "#f87171" : "#c83232",
+  purple: isDark.value ? "#a78bfa" : "#7655b7",
+  text: isDark.value ? "#e5e7eb" : "#17212b",
+  muted: isDark.value ? "#94a3b8" : "#647282",
+  mutedFill: isDark.value ? "#64748b" : "#8aa8c3",
+  line: isDark.value ? "rgb(148 163 184 / 18%)" : "rgb(23 33 43 / 8%)",
+  lineSoft: isDark.value ? "rgb(148 163 184 / 10%)" : "rgb(23 33 43 / 6%)",
+  maskBorder: isDark.value ? "rgb(15 23 42 / 78%)" : "rgb(255 255 255 / 84%)",
+  shadow: isDark.value ? "rgb(0 0 0 / 34%)" : "rgb(23 33 43 / 14%)",
+  dataZoomBg: isDark.value ? "rgb(148 163 184 / 8%)" : "rgb(23 33 43 / 4%)",
+  dataZoomFill: isDark.value ? "rgb(45 212 191 / 24%)" : "rgb(8 118 111 / 14%)",
+  materialColors: isDark.value ? DARK_MATERIAL_COLORS : LIGHT_MATERIAL_COLORS
+}));
+const stableToneIndex = (key: string, size: number) => {
+  if (!size) return 0;
+  let total = 0;
+  for (const char of key) total = (total * 31 + char.charCodeAt(0)) >>> 0;
+  return total % size;
 };
-const materialColors = [
-  "#08766f",
-  "#2f9d91",
-  "#4f7cac",
-  "#6ca6cf",
-  "#c9822b",
-  "#d99a4a",
-  "#7655b7",
-  "#9274c5",
-  "#c83232",
-  "#e06b6b"
-];
+const materialColorFor = (row: InventoryAdminMaterialSummary) => {
+  const colors = palette.value.materialColors;
+  return colors[stableToneIndex(materialKey(row), colors.length)];
+};
 const grid = { left: 52, right: 24, top: 54, bottom: 44, containLabel: true };
 const chartMotion = computed(() => ({
   animation: !prefersReducedMotion.value,
-  animationDuration: prefersReducedMotion.value ? 0 : 460,
-  animationDurationUpdate: prefersReducedMotion.value ? 0 : 280,
+  animationDuration: prefersReducedMotion.value ? 0 : 420,
+  animationDurationUpdate: prefersReducedMotion.value ? 0 : 220,
   animationEasing: "cubicOut" as const,
   animationEasingUpdate: "cubicOut" as const
 }));
@@ -366,27 +379,27 @@ const trendLegend = (items: string[]) => ({
   itemWidth: 10,
   itemHeight: 6,
   itemGap: 16,
-  textStyle: { color: palette.muted, fontSize: 11 }
+  textStyle: { color: palette.value.muted, fontSize: 11 }
 });
 const trendXAxis = (labels: string[]) => ({
   type: "category" as const,
   boundaryGap: false,
   data: labels,
   axisTick: { show: false },
-  axisLine: { lineStyle: { color: "#d9e2e7" } },
-  axisLabel: { color: palette.muted, fontSize: 11, hideOverlap: true, margin: 12 }
+  axisLine: { lineStyle: { color: palette.value.line } },
+  axisLabel: { color: palette.value.muted, fontSize: 11, hideOverlap: true, margin: 12 }
 });
 const trendYAxis = (name: string, extra: Record<string, unknown> = {}) => ({
   type: "value" as const,
   name,
-  nameTextStyle: { color: palette.muted, fontSize: 11, padding: [0, 0, 0, 4] },
-  axisLabel: { color: palette.muted, fontSize: 11 },
+  nameTextStyle: { color: palette.value.muted, fontSize: 11, padding: [0, 0, 0, 4] },
+  axisLabel: { color: palette.value.muted, fontSize: 11 },
   axisLine: { show: false },
   axisTick: { show: false },
-  splitLine: { lineStyle: { color: "rgb(23 33 43 / 7%)", type: "dashed" as const } },
+  splitLine: { lineStyle: { color: palette.value.lineSoft, type: "dashed" as const } },
   ...extra
 });
-const trendDataZoom = [
+const trendDataZoom = () => [
   { type: "inside" as const, start: 0, end: 100 },
   {
     type: "slider" as const,
@@ -395,10 +408,10 @@ const trendDataZoom = [
     start: 0,
     end: 100,
     borderColor: "transparent",
-    backgroundColor: "rgb(23 33 43 / 4%)",
-    fillerColor: "rgb(8 118 111 / 14%)",
-    handleStyle: { color: "#08766f", borderColor: "#08766f" },
-    textStyle: { color: palette.muted }
+    backgroundColor: palette.value.dataZoomBg,
+    fillerColor: palette.value.dataZoomFill,
+    handleStyle: { color: palette.value.primary, borderColor: palette.value.primary },
+    textStyle: { color: palette.value.muted }
   }
 ];
 
@@ -409,7 +422,7 @@ const departmentCompletionTotal = computed(() =>
 const riskOption = computed<EChartsOption>(() => ({
   ...chartMotion.value,
   tooltip: {
-    ...tooltipSurface,
+    ...tooltipSurface.value,
     trigger: "item",
     formatter: (params: any) => {
       const row = departmentCompletionRows.value[params.dataIndex];
@@ -432,12 +445,13 @@ const riskOption = computed<EChartsOption>(() => ({
       left: "50%",
       top: "37%",
       style: {
-        text: number(departmentCompletionTotal.value) +
+        text:
+          number(departmentCompletionTotal.value) +
           " / " +
           number(dashboard.value?.expectedDepartmentDays) +
           "\n已填报科室日\n点击扇区定位",
         textAlign: "center",
-        fill: palette.text,
+        fill: palette.value.text,
         fontSize: 14,
         fontWeight: 700,
         lineHeight: 22
@@ -448,29 +462,30 @@ const riskOption = computed<EChartsOption>(() => ({
     {
       name: "12科室填报完成度",
       type: "pie",
-      roseType: "area",
-      radius: ["28%", "72%"],
+      radius: ["42%", "72%"],
       center: ["50%", "52%"],
       minAngle: 5,
       padAngle: 2,
       animationType: "expansion",
       animationDelay: (index: number) => index * 55,
       animationDelayUpdate: (index: number) => index * 20,
-      itemStyle: { borderRadius: 8, borderColor: "#fff", borderWidth: 3 },
+      itemStyle: { borderRadius: 8, borderColor: palette.value.maskBorder, borderWidth: 1 },
       emphasis: {
         focus: "self",
         scale: true,
         scaleSize: 8,
-        itemStyle: { shadowBlur: 16, shadowOffsetY: 4, shadowColor: "rgb(23 33 43 / 20%)" }
+        itemStyle: { shadowBlur: 10, shadowOffsetY: 3, shadowColor: palette.value.shadow }
       },
       blur: { itemStyle: { opacity: 0.38 } },
       label: { show: false },
       labelLine: { show: false },
-      data: departmentCompletionRows.value.map((row, index) => ({
+      data: departmentCompletionRows.value.map(row => ({
         name: row.departmentName,
         // Keep missing departments visible as a thin sector while preserving the real value in tooltip.
         value: row.submittedDayCount || 0.25,
-        itemStyle: { color: materialColors[index % materialColors.length] }
+        itemStyle: {
+          color: palette.value.materialColors[stableToneIndex(row.departmentKey, palette.value.materialColors.length)]
+        }
       }))
     }
   ]
@@ -479,7 +494,7 @@ const riskOption = computed<EChartsOption>(() => ({
 const materialOption = computed<EChartsOption>(() => ({
   ...chartMotion.value,
   tooltip: {
-    ...tooltipSurface,
+    ...tooltipSurface.value,
     trigger: "item",
     formatter: (params: any) => {
       const item = materialChartRows.value[params.dataIndex];
@@ -520,7 +535,7 @@ const materialOption = computed<EChartsOption>(() => ({
       style: {
         text: materialCenterText.value,
         textAlign: "center",
-        fill: palette.text,
+        fill: palette.value.text,
         fontSize: 14,
         fontWeight: 700,
         lineHeight: 22
@@ -540,12 +555,12 @@ const materialOption = computed<EChartsOption>(() => ({
       animationType: "expansion",
       animationDelay: (index: number) => index * 28,
       animationDelayUpdate: (index: number) => index * 16,
-      itemStyle: { borderRadius: 7, borderColor: "#fff", borderWidth: 2 },
+      itemStyle: { borderRadius: 7, borderColor: palette.value.maskBorder, borderWidth: 1 },
       emphasis: {
         focus: "self",
         scale: true,
         scaleSize: 7,
-        itemStyle: { shadowBlur: 16, shadowOffsetY: 4, shadowColor: "rgb(23 33 43 / 20%)" }
+        itemStyle: { shadowBlur: 10, shadowOffsetY: 3, shadowColor: palette.value.shadow }
       },
       blur: { itemStyle: { opacity: 0.38 } },
       label: { show: false },
@@ -554,7 +569,7 @@ const materialOption = computed<EChartsOption>(() => ({
         name: item.row.materialName + " · " + item.row.unit,
         value: item.value,
         selected: selectedMaterialIndex.value === item.index,
-        itemStyle: { color: materialColors[item.index % materialColors.length] }
+        itemStyle: { color: materialColorFor(item.row) }
       }))
     }
   ]
@@ -566,9 +581,9 @@ const amountTrendOption = computed<EChartsOption>(() => {
     ...chartMotion.value,
     grid,
     tooltip: {
-      ...tooltipSurface,
+      ...tooltipSurface.value,
       trigger: "axis",
-      axisPointer: { type: "cross", label: { backgroundColor: palette.primary } },
+      axisPointer: { type: "cross", label: { backgroundColor: palette.value.primary } },
       formatter: (raw: any) => {
         const p = Array.isArray(raw) ? raw : [raw];
         const row = rows[p[0]?.dataIndex];
@@ -589,13 +604,13 @@ const amountTrendOption = computed<EChartsOption>(() => {
     },
     legend: trendLegend(["理论金额", "实际金额", "日报完成率"]),
     xAxis: trendXAxis(rows.map(row => row.businessDate.slice(5))),
-    dataZoom: trendDataZoom,
+    dataZoom: trendDataZoom(),
     yAxis: [
       trendYAxis("金额"),
       trendYAxis("完成率", {
         max: 1,
         splitLine: { show: false },
-        axisLabel: { color: palette.muted, fontSize: 11, formatter: (value: number) => value * 100 + "%" }
+        axisLabel: { color: palette.value.info, fontSize: 11, formatter: (value: number) => value * 100 + "%" }
       })
     ],
     series: [
@@ -608,7 +623,7 @@ const amountTrendOption = computed<EChartsOption>(() => {
         symbol: "circle",
         showSymbol: false,
         lineStyle: { width: 2.5 },
-        itemStyle: { color: palette.primary },
+        itemStyle: { color: palette.value.primary },
         emphasis: { focus: "series", lineStyle: { width: 3.5 }, itemStyle: { borderWidth: 3 } },
         animationDelay: 0
       },
@@ -621,7 +636,7 @@ const amountTrendOption = computed<EChartsOption>(() => {
         symbol: "circle",
         showSymbol: false,
         lineStyle: { width: 2.5 },
-        itemStyle: { color: palette.warning },
+        itemStyle: { color: palette.value.warning },
         emphasis: { focus: "series", lineStyle: { width: 3.5 }, itemStyle: { borderWidth: 3 } },
         animationDelay: 60
       },
@@ -634,7 +649,7 @@ const amountTrendOption = computed<EChartsOption>(() => {
         symbol: "circle",
         showSymbol: false,
         lineStyle: { width: 2.25, type: "dashed" },
-        itemStyle: { color: palette.info },
+        itemStyle: { color: palette.value.info },
         emphasis: { focus: "series", lineStyle: { width: 3.25 }, itemStyle: { borderWidth: 3 } },
         animationDelay: 120
       }
@@ -648,9 +663,9 @@ const riskTrendOption = computed<EChartsOption>(() => {
     ...chartMotion.value,
     grid,
     tooltip: {
-      ...tooltipSurface,
+      ...tooltipSurface.value,
       trigger: "axis",
-      axisPointer: { type: "shadow", shadowStyle: { color: "rgb(8 118 111 / 7%)" } },
+      axisPointer: { type: "shadow", shadowStyle: { color: palette.value.dataZoomFill } },
       formatter: (raw: any) => {
         const params = Array.isArray(raw) ? raw : [raw];
         const row = rows[params[0]?.dataIndex];
@@ -675,7 +690,7 @@ const riskTrendOption = computed<EChartsOption>(() => {
     legend: trendLegend(["未核验", "关注", "异常", "特殊待说明"]),
     xAxis: trendXAxis(rows.map(row => row.businessDate.slice(5))),
     yAxis: trendYAxis("风险数", { minInterval: 1 }),
-    dataZoom: trendDataZoom,
+    dataZoom: trendDataZoom(),
     series: [
       {
         name: "未核验",
@@ -686,9 +701,9 @@ const riskTrendOption = computed<EChartsOption>(() => {
         showSymbol: false,
         lineStyle: { width: 2 },
         emphasis: { focus: "series", lineStyle: { width: 3.25 }, itemStyle: { borderWidth: 3 } },
-        areaStyle: { opacity: 0.1 },
+        areaStyle: { opacity: 0.04 },
         data: rows.map(row => row.unverifiedCount),
-        itemStyle: { color: "#8aa8c3" },
+        itemStyle: { color: palette.value.mutedFill },
         animationDelay: 0
       },
       {
@@ -700,9 +715,9 @@ const riskTrendOption = computed<EChartsOption>(() => {
         showSymbol: false,
         lineStyle: { width: 2 },
         emphasis: { focus: "series", lineStyle: { width: 3.25 }, itemStyle: { borderWidth: 3 } },
-        areaStyle: { opacity: 0.11 },
+        areaStyle: { opacity: 0.06 },
         data: rows.map(row => row.attentionCount),
-        itemStyle: { color: palette.warning },
+        itemStyle: { color: palette.value.warning },
         animationDelay: 45
       },
       {
@@ -714,13 +729,13 @@ const riskTrendOption = computed<EChartsOption>(() => {
         showSymbol: false,
         lineStyle: { width: 2.5 },
         emphasis: { focus: "series", lineStyle: { width: 3.5 }, itemStyle: { borderWidth: 3 } },
-        areaStyle: { opacity: 0.2 },
+        areaStyle: { opacity: 0.16 },
         data: rows.map(row => row.abnormalCount),
-        itemStyle: { color: palette.danger },
+        itemStyle: { color: palette.value.danger },
         markPoint: {
           symbolSize: 32,
           label: { color: "#fff", fontSize: 10 },
-          itemStyle: { color: palette.danger },
+          itemStyle: { color: palette.value.danger },
           data: rows.length ? [{ type: "max", name: "异常峰值" }] : []
         },
         animationDelay: 90
@@ -734,9 +749,9 @@ const riskTrendOption = computed<EChartsOption>(() => {
         showSymbol: false,
         lineStyle: { width: 2 },
         emphasis: { focus: "series", lineStyle: { width: 3.25 }, itemStyle: { borderWidth: 3 } },
-        areaStyle: { opacity: 0.11 },
+        areaStyle: { opacity: 0.05 },
         data: rows.map(row => row.specialPendingNoteCount),
-        itemStyle: { color: palette.purple },
+        itemStyle: { color: palette.value.purple },
         animationDelay: 135
       }
     ]
@@ -864,8 +879,8 @@ const handleChartClick = (params: any) => {
   padding: 16px;
   border: 1px solid var(--inventory-line-soft);
   border-radius: 12px;
-  background: #fcfdfe;
-  box-shadow: 0 6px 20px rgb(23 33 43 / 3%);
+  background: var(--inventory-bg);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--inventory-text) 3%, transparent);
 }
 .dashboard-head {
   display: flex;
@@ -912,17 +927,19 @@ const handleChartClick = (params: any) => {
   padding: 14px;
   border: 1px solid var(--inventory-line-soft);
   border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(23 33 43 / 2%);
+  background: var(--inventory-panel);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--inventory-text) 2%, transparent);
   transition:
-    transform 220ms ease-out,
-    box-shadow 220ms ease-out,
-    border-color 220ms ease-out;
+    transform var(--motion-control, 180ms) var(--ease-out, ease),
+    box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
+    border-color var(--motion-control, 180ms) var(--ease-out, ease);
 }
-.metric-card:hover {
-  transform: translateY(-1px);
-  border-color: var(--inventory-line);
-  box-shadow: 0 6px 16px rgb(23 33 43 / 5%);
+@media (hover: hover) and (pointer: fine) {
+  .metric-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--inventory-line);
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--inventory-primary) 8%, transparent);
+  }
 }
 .metric-label {
   display: flex;
@@ -961,13 +978,13 @@ const handleChartClick = (params: any) => {
   background: var(--inventory-warning);
 }
 .tone-info .metric-label::before {
-  background: #4f7cac;
+  background: var(--inventory-info);
 }
 .tone-success .metric-label::before {
   background: var(--inventory-success);
 }
 .tone-purple .metric-label::before {
-  background: #7655b7;
+  background: var(--inventory-purple);
 }
 .tone-primary .metric-label::before {
   background: var(--inventory-primary);
@@ -981,16 +998,18 @@ const handleChartClick = (params: any) => {
   min-width: 0;
   border: 1px solid var(--inventory-line-soft);
   border-radius: 10px;
-  background: #fff;
+  background: var(--inventory-panel);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgb(23 33 43 / 2.5%);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--inventory-text) 2.5%, transparent);
   transition:
-    border-color 220ms ease-out,
-    box-shadow 220ms ease-out;
+    border-color var(--motion-control, 180ms) var(--ease-out, ease),
+    box-shadow var(--motion-control, 180ms) var(--ease-out, ease);
 }
-.chart-card:hover {
-  border-color: var(--inventory-line);
-  box-shadow: 0 5px 14px rgb(23 33 43 / 5%);
+@media (hover: hover) and (pointer: fine) {
+  .chart-card:hover {
+    border-color: var(--inventory-line);
+    box-shadow: 0 5px 14px color-mix(in srgb, var(--inventory-primary) 7%, transparent);
+  }
 }
 .chart-card header {
   display: flex;
@@ -1038,7 +1057,7 @@ const handleChartClick = (params: any) => {
   padding: 8px 5px 5px 10px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgb(23 33 43 / 18%) transparent;
+  scrollbar-color: color-mix(in srgb, var(--inventory-muted) 28%, transparent) transparent;
 }
 .list-heading {
   display: flex;
@@ -1069,20 +1088,22 @@ const handleChartClick = (params: any) => {
   text-align: left;
   cursor: pointer;
   transition:
-    background 160ms ease-out,
-    border-color 160ms ease-out,
-    transform 160ms ease-out;
+    background var(--motion-fast, 140ms) var(--ease-out, ease),
+    border-color var(--motion-fast, 140ms) var(--ease-out, ease),
+    transform var(--motion-fast, 140ms) var(--ease-out, ease);
 }
 .drill-list-item:hover,
 .drill-list-item.active {
-  border-color: rgb(8 118 111 / 14%);
-  background: rgb(8 118 111 / 5%);
+  border-color: color-mix(in srgb, var(--inventory-primary) 20%, transparent);
+  background: color-mix(in srgb, var(--inventory-primary) 7%, transparent);
 }
 .drill-list-item.active {
-  background: rgb(8 118 111 / 8%);
+  background: color-mix(in srgb, var(--inventory-primary) 10%, transparent);
 }
-.drill-list-item:hover {
-  transform: translateX(1px);
+@media (hover: hover) and (pointer: fine) {
+  .drill-list-item:hover {
+    transform: translateX(1px);
+  }
 }
 .item-name {
   min-width: 0;
@@ -1118,7 +1139,12 @@ const handleChartClick = (params: any) => {
   padding: 24px;
 }
 .chart-placeholder :deep(.el-skeleton__item) {
-  background: linear-gradient(90deg, var(--el-fill-color-light) 25%, var(--el-fill-color) 37%, var(--el-fill-color-light) 63%);
+  background: linear-gradient(
+    90deg,
+    var(--inventory-panel-soft) 25%,
+    color-mix(in srgb, var(--inventory-primary) 8%, var(--inventory-panel)) 37%,
+    var(--inventory-panel-soft) 63%
+  );
 }
 @media (max-width: 1280px) {
   .metric-grid {
@@ -1159,6 +1185,7 @@ const handleChartClick = (params: any) => {
 }
 @media (prefers-reduced-motion: reduce) {
   .metric-card,
+  .chart-card,
   .drill-list-item,
   .chart-placeholder :deep(.el-skeleton__item) {
     transition: none;
@@ -1172,8 +1199,8 @@ const handleChartClick = (params: any) => {
   opacity: 0;
 }
 [data-reveal].revealed {
-  animation: reveal-rise 480ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  animation: reveal-rise var(--motion-chart, 420ms) var(--ease-out, cubic-bezier(0.2, 0.7, 0.3, 1)) backwards;
+  animation-delay: calc(var(--i, 0) * 32ms);
   opacity: 1;
 }
 @keyframes reveal-rise {

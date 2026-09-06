@@ -5,7 +5,13 @@
       <span v-if="subtitle">{{ subtitle }}</span>
     </div>
     <div v-if="visibleItems.length" class="bar-list">
-      <div v-for="item in visibleItems" :key="item.label" class="bar-row">
+      <div
+        v-for="item in visibleItems"
+        :key="item.label"
+        class="bar-row"
+        :class="{ 'is-peak': item.value === peak && peak > 0 }"
+        :title="`${item.label}：${item.value}${unit}`"
+      >
         <span class="bar-label" :title="item.label">{{ item.label }}</span>
         <div class="bar-track">
           <i :style="{ width: `${percent(item.value)}%` }"></i>
@@ -38,14 +44,15 @@ const props = withDefaults(
 );
 
 const visibleItems = computed(() => props.items.slice(0, props.maxBars));
-const peak = computed(() => Math.max(1, ...visibleItems.value.map(item => item.value)));
-const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) * 100);
+const peak = computed(() => Math.max(0, ...visibleItems.value.map(item => item.value)));
+const percent = (value: number) => (peak.value ? Math.round((Math.max(0, value) / peak.value) * 100) : 0);
 </script>
 
 <style scoped lang="scss">
 .mini-bar-chart {
   display: grid;
   gap: 10px;
+  min-height: 120px;
 }
 .chart-head {
   display: flex;
@@ -82,6 +89,7 @@ const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) 
   grid-template-columns: minmax(56px, 92px) minmax(0, 1fr) 48px;
   gap: 10px;
   align-items: center;
+  min-height: 28px;
 }
 .bar-label {
   overflow: hidden;
@@ -93,30 +101,48 @@ const percent = (value: number) => Math.round((Math.max(0, value) / peak.value) 
 .bar-track {
   height: 10px;
   overflow: hidden;
-  background: var(--el-fill-color-light);
+  background: var(--hos-chart-panel-soft, var(--el-fill-color-light));
   border-radius: 10px;
   i {
     display: block;
     min-width: 2px;
     height: 100%;
-    background: linear-gradient(90deg, #14b8a6, #0f766e);
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--hos-chart-primary, #0f766e) 72%, #ffffff),
+      var(--hos-chart-primary, #0f766e)
+    );
     border-radius: 10px;
-    transition: width 320ms ease;
+    transition:
+      width var(--motion-chart-update, 220ms) var(--ease-out, ease),
+      background-color var(--motion-control, 180ms) var(--ease-out, ease);
   }
 }
-.bar-row:nth-child(4n + 2) .bar-track i {
-  background: linear-gradient(90deg, #38bdf8, #087fa9);
+.bar-row.is-peak .bar-track i {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--hos-chart-warning, #d97706) 68%, #ffffff),
+    var(--hos-chart-warning, #d97706)
+  );
 }
-.bar-row:nth-child(4n + 3) .bar-track i {
-  background: linear-gradient(90deg, #86dcb1, #2f9461);
-}
-.bar-row:nth-child(4n + 4) .bar-track i {
-  background: linear-gradient(90deg, #fbd38a, #d9a114);
+@media (hover: hover) and (pointer: fine) {
+  .bar-row:hover .bar-track i {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--hos-chart-info, #2563eb) 68%, #ffffff),
+      var(--hos-chart-info, #2563eb)
+    );
+  }
 }
 .bar-value {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--el-text-color-primary);
   text-align: right;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar-track i {
+    transition: none;
+  }
 }
 </style>

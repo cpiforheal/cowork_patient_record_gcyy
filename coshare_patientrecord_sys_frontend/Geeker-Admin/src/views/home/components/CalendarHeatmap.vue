@@ -33,17 +33,18 @@
         :style="day.hoverColor ? { '--hover-color': day.hoverColor } : undefined"
         :disabled="day.isBlank"
         :aria-label="day.ariaLabel"
+        :title="day.ariaLabel"
         @click="$emit('selectDate', day)"
       >
         <span class="day-number">{{ day.day || "" }}</span>
         <span v-if="!day.isBlank" class="day-count">{{ day.count ? `${day.count} 人` : "空" }}</span>
       </button>
     </div>
-    <div class="heatmap-legend">
+    <div class="heatmap-legend" aria-label="热力图颜色说明">
       <span class="legend-anchor">0 人</span>
       <i v-for="level in [0, 1, 2, 3, 4]" :key="level" :class="`is-level-${level}`" />
-      <span class="legend-anchor">1-3 人</span>
-      <span class="legend-anchor">4+ 人</span>
+      <span class="legend-anchor">低 → 高（按当月峰值分级）</span>
+      <span class="legend-anchor">峰值 {{ peakCount }} 人</span>
     </div>
   </div>
 </template>
@@ -82,13 +83,17 @@ defineEmits<{
 
 <style scoped lang="scss">
 .calendar-heatmap-card {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary-light-9) 58%, transparent), var(--el-bg-color));
-  border-color: rgb(20 184 166 / 18%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--hos-chart-primary-soft, var(--el-color-primary-light-9)) 58%, transparent),
+    var(--hos-chart-panel, var(--el-bg-color))
+  );
+  border-color: var(--hos-chart-line-soft, rgb(20 184 166 / 18%));
 }
 .scope-eyebrow {
   font-size: 12px;
   font-weight: 700;
-  color: #008f84;
+  color: var(--hos-chart-primary, #008f84);
 }
 .calendar-toolbar {
   display: flex;
@@ -141,22 +146,24 @@ defineEmits<{
   color: var(--el-text-color-primary);
   text-align: left;
   cursor: pointer;
-  background: var(--el-fill-color-light);
-  border: 1px solid #dfeee9;
+  background: var(--hos-chart-panel-soft, var(--el-fill-color-light));
+  border: 1px solid var(--hos-chart-line-soft, #dfeee9);
   border-radius: 8px;
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
-  &:not(.is-empty):hover {
-    // hover 贪心色块：每格专属强调色（父组件按网格邻接贪心分配，相邻格不重复）
-    background: var(--hover-color, #0f9f8f);
-    border-color: var(--hover-color, #0f9f8f);
-    box-shadow: 0 7px 16px rgb(15 118 110 / 18%);
-    transform: translateY(-1px);
-    .day-number,
-    .day-count {
-      color: #ffffff;
+    border-color var(--motion-control, 180ms) var(--ease-out, ease),
+    box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
+    transform var(--motion-control, 180ms) var(--ease-out, ease);
+  @media (hover: hover) and (pointer: fine) {
+    &:not(.is-empty):hover {
+      // hover 贪心色块：每格专属强调色（父组件按网格邻接贪心分配，相邻格不重复）
+      background: var(--hover-color, var(--hos-chart-primary, #0f9f8f));
+      border-color: var(--hover-color, var(--hos-chart-primary, #0f9f8f));
+      box-shadow: 0 6px 14px color-mix(in srgb, var(--hos-chart-primary, #0f766e) 15%, transparent);
+      transform: translateY(-1px);
+      .day-number,
+      .day-count {
+        color: #ffffff;
+      }
     }
   }
   &.is-empty {
@@ -164,35 +171,47 @@ defineEmits<{
     visibility: hidden;
   }
   &.is-level-1 {
-    background: var(--el-color-primary-light-9);
-    border-color: #ccecdf;
+    background: color-mix(
+      in srgb,
+      var(--hos-chart-primary, var(--el-color-primary)) 12%,
+      var(--hos-chart-panel, var(--el-bg-color))
+    );
+    border-color: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 18%, transparent);
   }
   &.is-level-2 {
-    background: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-bg-color));
-    border-color: #a4dfc8;
+    background: color-mix(
+      in srgb,
+      var(--hos-chart-primary, var(--el-color-primary)) 30%,
+      var(--hos-chart-panel, var(--el-bg-color))
+    );
+    border-color: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 34%, transparent);
   }
   &.is-level-3 {
-    color: #07594f;
-    background: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-bg-color));
-    border-color: #62c6a8;
+    color: var(--hos-chart-text, #07594f);
+    background: color-mix(
+      in srgb,
+      var(--hos-chart-primary, var(--el-color-primary)) 52%,
+      var(--hos-chart-panel, var(--el-bg-color))
+    );
+    border-color: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 56%, transparent);
   }
   &.is-level-4 {
-    color: var(--el-bg-color);
-    background: #0f9f8f;
-    border-color: #0d857a;
+    color: #ffffff;
+    background: var(--hos-chart-primary, #0f9f8f);
+    border-color: color-mix(in srgb, var(--hos-chart-primary, #0f766e) 70%, #000000);
     .day-count {
       color: rgb(255 255 255 / 86%);
     }
   }
   &.is-selected {
-    border-color: #07594f;
-    box-shadow: 0 0 0 2px rgb(15 118 110 / 20%);
+    border-color: var(--hos-chart-primary, #07594f);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--hos-chart-primary, #0f766e) 22%, transparent);
   }
   &.is-today .day-number::after {
     margin-left: 4px;
     font-size: 11px;
     font-weight: 700;
-    color: #b45309;
+    color: var(--hos-chart-warning, #b45309);
     content: "今";
   }
 }
@@ -218,27 +237,39 @@ defineEmits<{
   i {
     width: 18px;
     height: 10px;
-    border: 1px solid #dfeee9;
+    border: 1px solid var(--hos-chart-line-soft, #dfeee9);
     border-radius: 3px;
   }
   .legend-anchor {
     font-variant-numeric: tabular-nums;
   }
   .is-level-0 {
-    background: var(--el-fill-color-light);
+    background: var(--hos-chart-panel-soft, var(--el-fill-color-light));
   }
   .is-level-1 {
-    background: var(--el-color-primary-light-9);
+    background: color-mix(
+      in srgb,
+      var(--hos-chart-primary, var(--el-color-primary)) 12%,
+      var(--hos-chart-panel, var(--el-bg-color))
+    );
   }
   .is-level-2 {
-    background: color-mix(in srgb, var(--el-color-primary) 32%, var(--el-bg-color));
+    background: color-mix(
+      in srgb,
+      var(--hos-chart-primary, var(--el-color-primary)) 30%,
+      var(--hos-chart-panel, var(--el-bg-color))
+    );
   }
   .is-level-3 {
-    background: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-bg-color));
+    background: color-mix(
+      in srgb,
+      var(--hos-chart-primary, var(--el-color-primary)) 52%,
+      var(--hos-chart-panel, var(--el-bg-color))
+    );
   }
   .is-level-4 {
-    background: #0f9f8f;
-    border-color: #0d857a;
+    background: var(--hos-chart-primary, #0f9f8f);
+    border-color: color-mix(in srgb, var(--hos-chart-primary, #0f766e) 70%, #000000);
   }
 }
 
@@ -255,3 +286,5 @@ defineEmits<{
   }
 }
 </style>
+
+@media (prefers-reduced-motion: reduce) { .calendar-day { transition: none; } }
