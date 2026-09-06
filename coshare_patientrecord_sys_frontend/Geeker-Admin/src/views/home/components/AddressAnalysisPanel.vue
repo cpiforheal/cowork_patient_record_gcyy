@@ -254,7 +254,7 @@ import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowRight, Location } from "@element-plus/icons-vue";
 import { BarChart, EffectScatterChart, MapChart, PieChart } from "echarts/charts";
-import { GeoComponent, GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { GeoComponent, GridComponent, LegendComponent, TitleComponent, TooltipComponent } from "echarts/components";
 import { registerMap, use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
@@ -287,6 +287,7 @@ use([
   GridComponent,
   TooltipComponent,
   LegendComponent,
+  TitleComponent,
   GeoComponent
 ]);
 
@@ -537,38 +538,50 @@ const donutOption = computed<EChartsOption>(() => {
       borderColor: palette.tooltipBorder,
       textStyle: { color: palette.label }
     },
-    legend: { bottom: 0, icon: "circle", itemGap: 14, textStyle: { color: palette.text, fontSize: 12 } },
+    // 中心响应式汇总：hover 切换分块明细，移开恢复本地占比（title 组件承载，规避 label 双层渲染）
+    title: {
+      text: centerText.value.title,
+      subtext: centerText.value.value,
+      left: "center",
+      top: "40%",
+      itemGap: 8,
+      textStyle: { color: palette.text, fontSize: 12, fontWeight: 500 },
+      subtextStyle: { color: palette.primary, fontSize: 24, fontWeight: 700 }
+    },
     series: [
       {
-        // 移植官方 pie-borderRadius 示例：分块间留缝 + 圆角切片 + 中心 hover 明细
+        // 参考饼图引导线样式：外侧标签 + 跟随切片色的引导线，中心保留交互式汇总
         type: "pie",
-        radius: ["46%", "70%"],
-        center: ["50%", "44%"],
-        avoidLabelOverlap: false,
+        radius: ["36%", "56%"],
+        center: ["50%", "50%"],
+        avoidLabelOverlap: true,
         padAngle: 2,
         itemStyle: { borderRadius: 8, borderColor: palette.maskBorder, borderWidth: 1 },
         label: {
           show: true,
-          position: "center",
-          // 中心单一 label：hover 事件驱动内容切换，杜绝静态文字与 emphasis 文字叠影
-          formatter: `{t|${centerText.value.title}}\n{v|${centerText.value.value}}`,
-          lineHeight: 22,
+          position: "outside",
+          formatter: "{b|{b}}\n{v|{c}人 · {d}%}",
           rich: {
-            t: {
-              color: palette.text,
+            b: {
+              color: palette.label,
               fontSize: 12,
-              lineHeight: 18
+              fontWeight: 600,
+              lineHeight: 17
             },
             v: {
-              fontSize: 26,
-              fontWeight: 700,
-              color: palette.primary,
-              fontVariantNumeric: "tabular-nums",
-              lineHeight: 30
+              color: palette.text,
+              fontSize: 11,
+              lineHeight: 15
             }
           }
         },
-        labelLine: { show: false },
+        labelLine: {
+          show: true,
+          smooth: true,
+          length: 12,
+          length2: 16,
+          lineStyle: { color: "inherit" }
+        },
         data: [
           { name: "周边乡镇", value: d.townshipTotal, itemStyle: { color: palette.primary } },
           { name: "城区", value: d.urban, itemStyle: { color: palette.info } },
@@ -645,13 +658,13 @@ const barOption = computed<EChartsOption>(() => {
           name: row.name,
           value: row.count,
           itemStyle: {
-            borderRadius: [0, 7, 7, 0],
+            borderRadius: [0, 3, 3, 0],
             color: rowColors[index]
           }
         })),
         barWidth: 14,
         barMaxWidth: 18,
-        barCategoryGap: "36%",
+        barCategoryGap: "60%",
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
         animationEasing: "cubicOut",
         animationEasingUpdate: "cubicOut",
@@ -1099,7 +1112,7 @@ onMounted(() => {
   height: 460px;
 }
 .donut {
-  height: 280px;
+  height: 300px;
 }
 .bars {
   height: 460px;
