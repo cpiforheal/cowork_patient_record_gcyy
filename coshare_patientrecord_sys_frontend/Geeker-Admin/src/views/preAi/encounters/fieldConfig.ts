@@ -1343,98 +1343,16 @@ export const preAiStages: PreAiStageConfig[] = [
     title: "手术室登记",
     shortTitle: "手术",
     owner: "手术室护士",
-    description: "只登记实际发生的手术和术中结果。门诊及非手术患者会自动跳过。",
+    description: "只登记实际发生的手术和术中结果，一个手术记录框自由书写。门诊及非手术患者会自动跳过。",
     fields: [
       {
-        key: "preoperativeDiagnosis",
-        label: "术前诊断",
-        kind: "input",
-        placeholder: "进入手术卡自动带出医生岗主诊断，可修改",
-        span: 2
-      },
-      { key: "postoperativeDiagnosis", label: "术后诊断", kind: "input", placeholder: "默认同术前诊断，可修改", span: 2 },
-      {
-        key: "actualPrimaryOperation",
-        label: "实际主术式",
-        kind: "select",
+        key: "operationRecord",
+        label: "手术记录",
+        kind: "textarea",
+        rows: 10,
+        span: 2,
         required: true,
-        options: surgeryOptions,
-        creatable: true
-      },
-      {
-        key: "actualSecondaryOperations",
-        label: "实际次术式及附加操作",
-        kind: "multi",
-        options: surgeryOptions,
-        creatable: true
-      },
-      { key: "operationDate", label: "手术日期", kind: "date", required: true },
-      { key: "operationStartTime", label: "开始时间", kind: "datetime" },
-      { key: "operationEndTime", label: "结束时间", kind: "datetime" },
-      {
-        key: "operationSite",
-        label: "手术部位",
-        kind: "select",
-        options: options(["肛管", "直肠", "结肠", "肛周", "骶尾部", "其他"]),
-        creatable: true
-      },
-      {
-        key: "anesthesiaMethod",
-        label: "麻醉方式",
-        kind: "select",
-        options: options(["局麻", "骶麻", "硬膜外麻醉", "静脉麻醉（无痛肠镜）"]),
-        creatable: true
-      },
-      { key: "surgeonName", label: "手术者", kind: "input", placeholder: "自动带出主管医生，可修改" },
-      { key: "assistantName", label: "助手", kind: "input" },
-      { key: "nurseName", label: "责任护士", kind: "input", placeholder: "自动带出手术室护士，可修改" },
-      { key: "anesthesiologistName", label: "麻醉医师", kind: "input" },
-      {
-        key: "specimenPathology",
-        label: "标本/病理送检",
-        kind: "multi",
-        options: options(["未送检", "标本已送病理", "组织已送病理", "息肉已送病理"]),
-        creatable: true
-      },
-      { key: "bloodLossMeasurement", label: "术中出血量", kind: "measurement", unitOptions: ["mL"], abnormalOptions },
-      {
-        key: "drainageOptions",
-        label: "引流",
-        kind: "multi",
-        options: options(["未留置引流", "留置引流条", "留置引流管", "其他"]),
-        creatable: true
-      },
-      {
-        key: "dressingOptions",
-        label: "敷料",
-        kind: "multi",
-        options: options(["敷料包扎固定", "油纱填塞", "纱布覆盖", "其他"]),
-        creatable: true
-      },
-      {
-        key: "complications",
-        label: "异常或并发症",
-        kind: "multi",
-        options: options(["无明显异常", "无并发症", "术中出血", "局部组织损伤", "麻醉相关异常"]),
-        creatable: true
-      },
-      {
-        key: "postoperativeDestination",
-        label: "术后去向",
-        kind: "select",
-        options: options(["返回病房", "留观室观察", "转上级医院", "其他"]),
-        creatable: true
-      },
-      {
-        key: "physicianConfirmed",
-        label: "手术医生确认",
-        kind: "select",
-        required: true,
-        options: [
-          { label: "尚未确认", value: false as any },
-          { label: "已由手术医生确认", value: true as any }
-        ],
-        span: 2
+        placeholder: "记录实际术式、麻醉方式、手术日期、手术者、术中经过与结果等关键信息"
       }
     ]
   },

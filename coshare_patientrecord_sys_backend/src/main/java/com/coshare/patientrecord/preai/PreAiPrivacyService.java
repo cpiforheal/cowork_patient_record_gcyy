@@ -45,7 +45,7 @@ public class PreAiPrivacyService {
         ),
         "TCM", List.of("tcmDisease", "primarySyndrome", "concurrentSyndrome", "comorbidTcmItems", "inspection", "auscultationOlfaction", "inquiry", "palpation", "tongue", "pulse", "syndromeBasis", "treatmentPrinciple"),
         "DOCTOR", List.of("finalRoute", "primaryWesternDiagnosis", "secondaryWesternDiagnoses", "secondaryDiagnosisItems", "diagnosisBasis", "differentialDiagnoses", "treatmentPath", "treatmentPlan", "plannedPrimaryOperation", "plannedOperationName", "plannedSecondaryOperations", "plannedOperationSite", "operationIndications", "recommendedAnesthesia", "operationGrade", "specialOperationPlan", "surgeryArrangements"),
-        "SURGERY", List.of("preoperativeDiagnosis", "postoperativeDiagnosis", "actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "anesthesiologistName", "surgeonName", "assistantName", "nurseName", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "complications", "postoperativeDestination"),
+        "SURGERY", List.of("operationRecord", "preoperativeDiagnosis", "postoperativeDiagnosis", "actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "anesthesiologistName", "surgeonName", "assistantName", "nurseName", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "complications", "postoperativeDestination"),
         "REVIEW", List.of("reviewStatement", "reviewOverrides"),
         // 护理部：病史采集（与接诊岗同名字段，接诊未填时由护理回退补齐）+ 四测信息；空值由 copyAllowed 自动跳过
         "NURSING", List.of(
@@ -373,7 +373,8 @@ public class PreAiPrivacyService {
             addViewRow(operation, "preoperativeDiagnosis", FIELD_LABELS.getOrDefault("preoperativeDiagnosis", "术前诊断"), preoperativeDiagnosis, false, "NORMAL");
             JsonNode postoperativeDiagnosis = isEmpty(surgery.path("postoperativeDiagnosis")) ? preoperativeDiagnosis : surgery.path("postoperativeDiagnosis");
             addViewRow(operation, "postoperativeDiagnosis", FIELD_LABELS.getOrDefault("postoperativeDiagnosis", "术后诊断"), postoperativeDiagnosis, false, "NORMAL");
-            addNodeRows(operation, surgery, List.of("actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "anesthesiologistName", "surgeonName", "assistantName", "nurseName", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "complications", "postoperativeDestination"), Set.of("actualPrimaryOperation", "actualOperationName", "complications"));
+            // 手术记录全文为手术节段主体行（强调展示，参照检查记录先例）；旧结构化行保留供历史就诊导出
+            addNodeRows(operation, surgery, List.of("operationRecord", "actualPrimaryOperation", "actualOperationName", "actualSecondaryOperations", "operationDate", "operationStartTime", "operationEndTime", "operationSite", "anesthesiaMethod", "anesthesiologistName", "surgeonName", "assistantName", "nurseName", "specimenPathology", "bloodLossMeasurement", "drainageOptions", "dressingOptions", "complications", "postoperativeDestination"), Set.of("operationRecord", "actualPrimaryOperation", "actualOperationName", "complications"));
         }
 
         ObjectNode dip = addSection(sections, "13", "十三、DIP 病组与治疗路径");
@@ -821,7 +822,7 @@ public class PreAiPrivacyService {
             {"tongue", "舌象"}, {"pulse", "脉象"}, {"syndromeBasis", "辨证依据"}, {"treatmentPrinciple", "治法治则"},
             {"finalRoute", "最终就诊分支"}, {"primaryWesternDiagnosis", "西医主诊断"}, {"secondaryWesternDiagnoses", "西医次诊断"}, {"secondaryDiagnosisItems", "西医次诊断与合并症"}, {"diagnosisBasis", "诊断依据"}, {"differentialDiagnoses", "待排/鉴别诊断"},
             {"treatmentPath", "治疗方式"}, {"treatmentPlan", "治疗方案"}, {"plannedPrimaryOperation", "拟行主术式"}, {"plannedOperationName", "拟行手术"}, {"plannedSecondaryOperations", "拟行次术式/附加操作"}, {"plannedOperationSite", "拟手术部位"}, {"operationIndications", "手术适应证"}, {"recommendedAnesthesia", "建议麻醉方式"}, {"operationGrade", "手术级别"}, {"specialOperationPlan", "特殊手术计划"}, {"surgeryArrangements", "手术安排"},
-            {"actualPrimaryOperation", "实际主术式"}, {"actualOperationName", "实际手术名称"}, {"actualSecondaryOperations", "实际次术式/附加操作"}, {"operationDate", "手术日期"}, {"operationStartTime", "开始时间"}, {"operationEndTime", "结束时间"}, {"operationSite", "手术部位"},
+            {"operationRecord", "手术记录"}, {"actualPrimaryOperation", "实际主术式"}, {"actualOperationName", "实际手术名称"}, {"actualSecondaryOperations", "实际次术式/附加操作"}, {"operationDate", "手术日期"}, {"operationStartTime", "开始时间"}, {"operationEndTime", "结束时间"}, {"operationSite", "手术部位"},
             {"anesthesiaMethod", "麻醉方式"}, {"intraoperativeFindingOptions", "术中所见要点"}, {"intraoperativeFindings", "术中所见"}, {"procedureStepOptions", "实际实施步骤要点"}, {"procedurePerformed", "实际实施步骤"}, {"pathologySubmitted", "是否送病理"}, {"specimenPathology", "标本/病理送检"}, {"bloodLossMeasurement", "术中出血量"}, {"drainageOptions", "引流"}, {"dressingOptions", "敷料"}, {"bloodLossDrainDressing", "出血、引流及敷料"},
             {"complications", "异常或并发症"}, {"postoperativeDestination", "术后去向"}, {"postoperativeHandoffOptions", "术后交接状态"}, {"postoperativeHandoff", "术后交接"},
             {"preoperativeDiagnosis", "术前诊断"}, {"postoperativeDiagnosis", "术后诊断"}, {"surgeonName", "手术者"}, {"assistantName", "助手"}, {"nurseName", "责任护士"}, {"anesthesiologistName", "麻醉医师"},

@@ -155,6 +155,8 @@ public class PreAiEncounterService {
             "requiredAuxiliaryTaskIds", "routeOverrideReason"
         ),
         "SURGERY", Set.of(
+            // operationRecord：手术记录全文（表单收敛后的唯一填写字段）；旧结构化 key 保留以兼容历史数据读写导出
+            "operationRecord",
             "actualPrimaryOperation", "actualSecondaryOperations", "actualOperationName", "operationDate", "operationStartTime",
             "operationEndTime", "operationSite", "anesthesiaMethod",
             "preoperativeDiagnosis", "postoperativeDiagnosis", "surgeonName", "assistantName", "nurseName", "anesthesiologistName",
@@ -2625,10 +2627,12 @@ public class PreAiEncounterService {
             }
             case "SURGERY" -> {
                 if (encounter != null && !"SURGICAL".equals(text(encounter, "treatmentPath"))) throw badRequest("当前患者不属于手术治疗分支");
-                if (text(data, "actualPrimaryOperation").isBlank() && text(data, "actualOperationName").isBlank()) {
-                    missing.add("实际主术式");
+                // 表单已收敛为单手术记录框：新数据要求手术记录非空；历史在途数据（主术式/旧手术名）仍然放行
+                if (text(data, "operationRecord").isBlank()
+                    && text(data, "actualPrimaryOperation").isBlank()
+                    && text(data, "actualOperationName").isBlank()) {
+                    missing.add("手术记录");
                 }
-                required(data, missing, "operationDate", "手术日期");
             }
             default -> {
             }
