@@ -1,10 +1,9 @@
 /* global css variable */
 $primary-color: var(--el-color-primary);
-
 :root {
   --hos-bg-primary: #ffffff;
   --hos-bg-surface: #f8fafc;
-  --hos-bg-overlay: rgba(0, 0, 0, 0.45);
+  --hos-bg-overlay: rgb(0 0 0 / 45%);
   --hos-text-primary: #111827;
   --hos-text-secondary: #6b7280;
   --hos-text-muted: #9ca3af;
@@ -42,24 +41,24 @@ $primary-color: var(--el-color-primary);
   --hos-shadow-card-hover: 0 10px 24px rgb(15 23 42 / 8%);
   --hos-touch-target: 40px;
   --hos-density-scale: 1;
-  --hos-chart-bg: #ffffff;
+  --hos-chart-bg: #fbfcff;
   --hos-chart-panel: #ffffff;
-  --hos-chart-panel-soft: #f8fbfb;
-  --hos-chart-line: rgb(15 23 42 / 10%);
-  --hos-chart-line-soft: rgb(15 23 42 / 6%);
-  --hos-chart-text: #17212b;
-  --hos-chart-muted: #64748b;
+  --hos-chart-panel-soft: #f7fbff;
+  --hos-chart-line: rgb(90 110 130 / 14%);
+  --hos-chart-line-soft: rgb(90 110 130 / 8%);
+  --hos-chart-text: #4f5661;
+  --hos-chart-muted: #6f7680;
   --hos-chart-tooltip-bg: #ffffff;
-  --hos-chart-tooltip-text: #17212b;
-  --hos-chart-tooltip-border: rgb(15 23 42 / 12%);
-  --hos-chart-primary: #0f766e;
-  --hos-chart-primary-soft: #dff6f2;
-  --hos-chart-info: #2563eb;
-  --hos-chart-success: #16a34a;
-  --hos-chart-warning: #d97706;
-  --hos-chart-danger: #dc2626;
-  --hos-chart-purple: #7655b7;
-  --hos-chart-muted-fill: #94a3b8;
+  --hos-chart-tooltip-text: #4f5661;
+  --hos-chart-tooltip-border: rgb(90 110 130 / 16%);
+  --hos-chart-primary: #66bb7a;
+  --hos-chart-primary-soft: #eef8d1;
+  --hos-chart-info: #5aa9e6;
+  --hos-chart-success: #8bc06f;
+  --hos-chart-warning: #ffb347;
+  --hos-chart-danger: #ff7a59;
+  --hos-chart-purple: #9b7bd8;
+  --hos-chart-muted-fill: #b7c85b;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --motion-fast: 140ms;
@@ -68,11 +67,10 @@ $primary-color: var(--el-color-primary);
   --motion-chart: 420ms;
   --motion-chart-update: 220ms;
 }
-
 html.dark {
   --hos-bg-primary: #1a1a2e;
   --hos-bg-surface: #16213e;
-  --hos-bg-overlay: rgba(0, 0, 0, 0.6);
+  --hos-bg-overlay: rgb(0 0 0 / 60%);
   --hos-text-primary: #e5e7eb;
   --hos-text-secondary: #9ca3af;
   --hos-text-muted: #6b7280;
@@ -100,24 +98,23 @@ html.dark {
   --hos-shadow-card-hover: 0 12px 28px rgb(0 0 0 / 32%);
   --hos-chart-bg: #101827;
   --hos-chart-panel: #16213e;
-  --hos-chart-panel-soft: #111b2f;
-  --hos-chart-line: rgb(148 163 184 / 18%);
-  --hos-chart-line-soft: rgb(148 163 184 / 10%);
-  --hos-chart-text: #e5e7eb;
-  --hos-chart-muted: #94a3b8;
+  --hos-chart-panel-soft: #12213a;
+  --hos-chart-line: rgb(166 184 205 / 18%);
+  --hos-chart-line-soft: rgb(166 184 205 / 10%);
+  --hos-chart-text: #eef5ff;
+  --hos-chart-muted: #a8b3c2;
   --hos-chart-tooltip-bg: #111827;
-  --hos-chart-tooltip-text: #e5e7eb;
-  --hos-chart-tooltip-border: rgb(148 163 184 / 22%);
-  --hos-chart-primary: #2dd4bf;
-  --hos-chart-primary-soft: #0b3b3a;
-  --hos-chart-info: #60a5fa;
-  --hos-chart-success: #4ade80;
-  --hos-chart-warning: #fbbf24;
-  --hos-chart-danger: #f87171;
-  --hos-chart-purple: #a78bfa;
-  --hos-chart-muted-fill: #64748b;
+  --hos-chart-tooltip-text: #eef5ff;
+  --hos-chart-tooltip-border: rgb(166 184 205 / 26%);
+  --hos-chart-primary: #7ddf8f;
+  --hos-chart-primary-soft: #1f3f2b;
+  --hos-chart-info: #6cc4ff;
+  --hos-chart-success: #9de27a;
+  --hos-chart-warning: #ffc85a;
+  --hos-chart-danger: #ff8a6b;
+  --hos-chart-purple: #b59cff;
+  --hos-chart-muted-fill: #c6d76a;
 }
-
 html[data-density="compact"] {
   --hos-density-scale: 0.86;
   --hos-touch-target: 36px;

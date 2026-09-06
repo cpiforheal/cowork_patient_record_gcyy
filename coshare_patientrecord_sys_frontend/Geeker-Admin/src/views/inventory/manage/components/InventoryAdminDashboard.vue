@@ -334,23 +334,25 @@ const materialChartRows = computed(() =>
 );
 const hasMaterialChart = computed(() => materialChartRows.value.length > 0 && materialTotal.value > 0);
 
-const LIGHT_MATERIAL_COLORS = ["#08766f", "#2563eb", "#23805f", "#c9822b", "#7655b7", "#647282"];
-const DARK_MATERIAL_COLORS = ["#2dd4bf", "#60a5fa", "#4ade80", "#fbbf24", "#a78bfa", "#94a3b8"];
+const LIGHT_MATERIAL_COLORS = ["#b7c85b", "#66bb7a", "#8bc06f", "#ffb347", "#ffca3a", "#ff9f43", "#ff7a59", "#5aa9e6", "#9b7bd8"];
+const DARK_MATERIAL_COLORS = ["#c6d76a", "#7ddf8f", "#9de27a", "#ffc85a", "#ffd166", "#ffb86b", "#ff8a6b", "#6cc4ff", "#b59cff"];
 const palette = computed(() => ({
-  primary: isDark.value ? "#2dd4bf" : "#08766f",
-  info: isDark.value ? "#60a5fa" : "#4f7cac",
-  warning: isDark.value ? "#fbbf24" : "#c9822b",
-  danger: isDark.value ? "#f87171" : "#c83232",
-  purple: isDark.value ? "#a78bfa" : "#7655b7",
-  text: isDark.value ? "#e5e7eb" : "#17212b",
-  muted: isDark.value ? "#94a3b8" : "#647282",
-  mutedFill: isDark.value ? "#64748b" : "#8aa8c3",
-  line: isDark.value ? "rgb(148 163 184 / 18%)" : "rgb(23 33 43 / 8%)",
-  lineSoft: isDark.value ? "rgb(148 163 184 / 10%)" : "rgb(23 33 43 / 6%)",
-  maskBorder: isDark.value ? "rgb(15 23 42 / 78%)" : "rgb(255 255 255 / 84%)",
-  shadow: isDark.value ? "rgb(0 0 0 / 34%)" : "rgb(23 33 43 / 14%)",
-  dataZoomBg: isDark.value ? "rgb(148 163 184 / 8%)" : "rgb(23 33 43 / 4%)",
-  dataZoomFill: isDark.value ? "rgb(45 212 191 / 24%)" : "rgb(8 118 111 / 14%)",
+  primary: isDark.value ? "#7ddf8f" : "#66bb7a",
+  info: isDark.value ? "#6cc4ff" : "#5aa9e6",
+  warning: isDark.value ? "#ffc85a" : "#ffb347",
+  danger: isDark.value ? "#ff8a6b" : "#ff7a59",
+  purple: isDark.value ? "#b59cff" : "#9b7bd8",
+  text: isDark.value ? "#eef5ff" : "#4f5661",
+  muted: isDark.value ? "#a8b3c2" : "#6f7680",
+  mutedFill: isDark.value ? "#c6d76a" : "#b7c85b",
+  yellow: isDark.value ? "#ffd166" : "#ffca3a",
+  orange: isDark.value ? "#ffb86b" : "#ff9f43",
+  line: isDark.value ? "rgb(166 184 205 / 18%)" : "rgb(91 108 130 / 12%)",
+  lineSoft: isDark.value ? "rgb(166 184 205 / 10%)" : "rgb(91 108 130 / 7%)",
+  maskBorder: isDark.value ? "rgb(15 23 42 / 70%)" : "rgb(255 255 255 / 86%)",
+  shadow: isDark.value ? "rgb(0 0 0 / 30%)" : "rgb(91 108 130 / 14%)",
+  dataZoomBg: isDark.value ? "rgb(166 184 205 / 10%)" : "rgb(91 108 130 / 6%)",
+  dataZoomFill: isDark.value ? "rgb(125 223 143 / 28%)" : "rgb(102 187 122 / 18%)",
   materialColors: isDark.value ? DARK_MATERIAL_COLORS : LIGHT_MATERIAL_COLORS
 }));
 const stableToneIndex = (key: string, size: number) => {
@@ -877,29 +879,29 @@ const handleChartClick = (params: any) => {
   display: grid;
   gap: 14px;
   padding: 16px;
+  background: var(--inventory-bg);
   border: 1px solid var(--inventory-line-soft);
   border-radius: 12px;
-  background: var(--inventory-bg);
   box-shadow: 0 6px 20px color-mix(in srgb, var(--inventory-text) 3%, transparent);
 }
 .dashboard-head {
   display: flex;
-  justify-content: space-between;
   gap: 18px;
   align-items: flex-start;
+  justify-content: space-between;
 }
 .dashboard-head h3 {
   margin: 3px 0 4px;
   font-size: 19px;
   font-weight: 600;
-  letter-spacing: -0.01em;
   color: var(--inventory-text);
+  letter-spacing: -0.01em;
 }
 .dashboard-head p,
 .eyebrow {
   margin: 0;
-  color: var(--inventory-muted);
   font-size: 13px;
+  color: var(--inventory-muted);
 }
 .eyebrow {
   font-weight: 500;
@@ -925,51 +927,52 @@ const handleChartClick = (params: any) => {
 .metric-card {
   min-height: 108px;
   padding: 14px;
+  background: var(--inventory-panel);
   border: 1px solid var(--inventory-line-soft);
   border-radius: 10px;
-  background: var(--inventory-panel);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--inventory-text) 2%, transparent);
   transition:
     transform var(--motion-control, 180ms) var(--ease-out, ease),
     box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
     border-color var(--motion-control, 180ms) var(--ease-out, ease);
 }
+
 @media (hover: hover) and (pointer: fine) {
   .metric-card:hover {
-    transform: translateY(-1px);
     border-color: var(--inventory-line);
     box-shadow: 0 6px 16px color-mix(in srgb, var(--inventory-primary) 8%, transparent);
+    transform: translateY(-1px);
   }
 }
 .metric-label {
   display: flex;
-  align-items: center;
   gap: 6px;
-  color: var(--inventory-muted);
+  align-items: center;
   font-size: 12px;
   font-weight: 500;
+  color: var(--inventory-muted);
 }
 .metric-label::before {
-  content: "";
+  flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
+  content: "";
   background: var(--inventory-line);
+  border-radius: 50%;
 }
 .metric-value {
   margin-top: 10px;
-  color: var(--inventory-text);
   font-size: clamp(20px, 2vw, 28px);
   font-weight: 600;
-  line-height: 1.15;
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  color: var(--inventory-text);
 }
 .metric-note {
   margin-top: 8px;
-  color: var(--inventory-muted);
   font-size: 11px;
   line-height: 1.4;
+  color: var(--inventory-muted);
 }
 .tone-danger .metric-label::before {
   background: var(--inventory-danger);
@@ -996,15 +999,16 @@ const handleChartClick = (params: any) => {
 }
 .chart-card {
   min-width: 0;
+  overflow: hidden;
+  background: var(--inventory-panel);
   border: 1px solid var(--inventory-line-soft);
   border-radius: 10px;
-  background: var(--inventory-panel);
-  overflow: hidden;
   box-shadow: 0 1px 3px color-mix(in srgb, var(--inventory-text) 2.5%, transparent);
   transition:
     border-color var(--motion-control, 180ms) var(--ease-out, ease),
     box-shadow var(--motion-control, 180ms) var(--ease-out, ease);
 }
+
 @media (hover: hover) and (pointer: fine) {
   .chart-card:hover {
     border-color: var(--inventory-line);
@@ -1013,9 +1017,9 @@ const handleChartClick = (params: any) => {
 }
 .chart-card header {
   display: flex;
-  justify-content: space-between;
   gap: 10px;
   align-items: flex-start;
+  justify-content: space-between;
   padding: 12px 14px 0;
   color: var(--inventory-text);
 }
@@ -1027,9 +1031,9 @@ const handleChartClick = (params: any) => {
   gap: 4px;
 }
 .chart-card header span {
-  color: var(--inventory-muted);
   font-size: 11px;
   font-weight: 400;
+  color: var(--inventory-muted);
 }
 .chart-box {
   height: 280px;
@@ -1056,37 +1060,37 @@ const handleChartClick = (params: any) => {
   max-height: 330px;
   padding: 8px 5px 5px 10px;
   overflow-y: auto;
-  scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--inventory-muted) 28%, transparent) transparent;
+  scrollbar-width: thin;
 }
 .list-heading {
   display: flex;
-  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  justify-content: space-between;
   padding-bottom: 7px;
-  border-bottom: 1px solid var(--inventory-line-soft);
-  color: var(--inventory-text);
+  margin-bottom: 8px;
   font-size: 12px;
+  color: var(--inventory-text);
+  border-bottom: 1px solid var(--inventory-line-soft);
 }
 .list-heading span {
-  color: var(--inventory-muted);
   font-size: 11px;
   font-weight: 400;
+  color: var(--inventory-muted);
 }
 .drill-list-item {
   display: flex;
-  width: 100%;
-  justify-content: space-between;
   gap: 8px;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   padding: 8px 7px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
   color: var(--inventory-text);
   text-align: left;
   cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
   transition:
     background var(--motion-fast, 140ms) var(--ease-out, ease),
     border-color var(--motion-fast, 140ms) var(--ease-out, ease),
@@ -1094,12 +1098,13 @@ const handleChartClick = (params: any) => {
 }
 .drill-list-item:hover,
 .drill-list-item.active {
-  border-color: color-mix(in srgb, var(--inventory-primary) 20%, transparent);
   background: color-mix(in srgb, var(--inventory-primary) 7%, transparent);
+  border-color: color-mix(in srgb, var(--inventory-primary) 20%, transparent);
 }
 .drill-list-item.active {
   background: color-mix(in srgb, var(--inventory-primary) 10%, transparent);
 }
+
 @media (hover: hover) and (pointer: fine) {
   .drill-list-item:hover {
     transform: translateX(1px);
@@ -1108,34 +1113,34 @@ const handleChartClick = (params: any) => {
 .item-name {
   min-width: 0;
   overflow: hidden;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
 }
 .item-name small {
   margin-left: 5px;
-  color: var(--inventory-muted);
   font-size: 10px;
+  color: var(--inventory-muted);
 }
 .item-value {
   flex: 0 0 auto;
-  color: var(--inventory-text);
   font-size: 12px;
   font-weight: 550;
   font-variant-numeric: tabular-nums;
+  color: var(--inventory-text);
 }
 .risk-total {
   color: var(--inventory-danger);
 }
 .dashboard-empty {
-  min-height: 220px;
   display: grid;
   place-items: center;
+  min-height: 220px;
 }
 .chart-placeholder {
   display: grid;
-  height: 100%;
   align-items: center;
+  height: 100%;
   padding: 24px;
 }
 .chart-placeholder :deep(.el-skeleton__item) {
@@ -1146,12 +1151,14 @@ const handleChartClick = (params: any) => {
     var(--inventory-panel-soft) 63%
   );
 }
-@media (max-width: 1280px) {
+
+@media (width <= 1280px) {
   .metric-grid {
     grid-template-columns: repeat(3, minmax(150px, 1fr));
   }
 }
-@media (max-width: 980px) {
+
+@media (width <= 980px) {
   .pie-layout,
   .material-view {
     grid-template-columns: 1fr;
@@ -1161,7 +1168,8 @@ const handleChartClick = (params: any) => {
     max-height: 220px;
   }
 }
-@media (max-width: 760px) {
+
+@media (width <= 760px) {
   .dashboard-head {
     flex-direction: column;
   }
@@ -1183,6 +1191,7 @@ const handleChartClick = (params: any) => {
     height: 300px;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .metric-card,
   .chart-card,
@@ -1199,10 +1208,11 @@ const handleChartClick = (params: any) => {
   opacity: 0;
 }
 [data-reveal].revealed {
+  opacity: 1;
   animation: reveal-rise var(--motion-chart, 420ms) var(--ease-out, cubic-bezier(0.2, 0.7, 0.3, 1)) backwards;
   animation-delay: calc(var(--i, 0) * 32ms);
-  opacity: 1;
 }
+
 @keyframes reveal-rise {
   from {
     opacity: 0;
@@ -1213,6 +1223,7 @@ const handleChartClick = (params: any) => {
     transform: translateY(0);
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   [data-reveal] {
     opacity: 1;

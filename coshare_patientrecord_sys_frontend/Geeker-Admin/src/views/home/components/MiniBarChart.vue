@@ -107,31 +107,47 @@ const percent = (value: number) => (peak.value ? Math.round((Math.max(0, value) 
     display: block;
     min-width: 2px;
     height: 100%;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--hos-chart-primary, #0f766e) 72%, #ffffff),
-      var(--hos-chart-primary, #0f766e)
-    );
+
+    --bar-tone: var(--hos-chart-primary, #66bb7a);
+
+    background: linear-gradient(90deg, color-mix(in srgb, var(--bar-tone) 58%, #ffffff), var(--bar-tone));
     border-radius: 10px;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--bar-tone) 24%, transparent);
     transition:
       width var(--motion-chart-update, 220ms) var(--ease-out, ease),
-      background-color var(--motion-control, 180ms) var(--ease-out, ease);
+      background-color var(--motion-control, 180ms) var(--ease-out, ease),
+      box-shadow var(--motion-control, 180ms) var(--ease-out, ease);
   }
 }
-.bar-row.is-peak .bar-track i {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--hos-chart-warning, #d97706) 68%, #ffffff),
-    var(--hos-chart-warning, #d97706)
-  );
+.bar-row:nth-child(6n + 1) .bar-track i {
+  --bar-tone: var(--hos-chart-muted-fill, #b7c85b);
 }
+.bar-row:nth-child(6n + 2) .bar-track i {
+  --bar-tone: var(--hos-chart-primary, #66bb7a);
+}
+.bar-row:nth-child(6n + 3) .bar-track i {
+  --bar-tone: var(--hos-chart-success, #8bc06f);
+}
+.bar-row:nth-child(6n + 4) .bar-track i {
+  --bar-tone: var(--hos-chart-warning, #ffb347);
+}
+.bar-row:nth-child(6n + 5) .bar-track i {
+  --bar-tone: #ffca3a;
+}
+.bar-row:nth-child(6n) .bar-track i {
+  --bar-tone: var(--hos-chart-danger, #ff7a59);
+}
+.bar-row.is-peak .bar-track i {
+  --bar-tone: var(--hos-chart-warning, #ffb347);
+
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--bar-tone) 30%, transparent);
+}
+
 @media (hover: hover) and (pointer: fine) {
   .bar-row:hover .bar-track i {
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--hos-chart-info, #2563eb) 68%, #ffffff),
-      var(--hos-chart-info, #2563eb)
-    );
+    --bar-tone: var(--hos-chart-info, #5aa9e6);
+
+    box-shadow: 0 7px 16px color-mix(in srgb, var(--bar-tone) 28%, transparent);
   }
 }
 .bar-value {
@@ -140,6 +156,7 @@ const percent = (value: number) => (peak.value ? Math.round((Math.max(0, value) 
   color: var(--el-text-color-primary);
   text-align: right;
 }
+
 @media (prefers-reduced-motion: reduce) {
   .bar-track i {
     transition: none;

@@ -153,12 +153,13 @@ defineEmits<{
     border-color var(--motion-control, 180ms) var(--ease-out, ease),
     box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
     transform var(--motion-control, 180ms) var(--ease-out, ease);
+
   @media (hover: hover) and (pointer: fine) {
     &:not(.is-empty):hover {
       // hover 贪心色块：每格专属强调色（父组件按网格邻接贪心分配，相邻格不重复）
       background: var(--hover-color, var(--hos-chart-primary, #0f9f8f));
       border-color: var(--hover-color, var(--hos-chart-primary, #0f9f8f));
-      box-shadow: 0 6px 14px color-mix(in srgb, var(--hos-chart-primary, #0f766e) 15%, transparent);
+      box-shadow: 0 6px 14px color-mix(in srgb, var(--hover-color, #66bb7a) 24%, transparent);
       transform: translateY(-1px);
       .day-number,
       .day-count {
@@ -171,41 +172,29 @@ defineEmits<{
     visibility: hidden;
   }
   &.is-level-1 {
-    background: color-mix(
-      in srgb,
-      var(--hos-chart-primary, var(--el-color-primary)) 12%,
-      var(--hos-chart-panel, var(--el-bg-color))
-    );
-    border-color: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 18%, transparent);
+    background: color-mix(in srgb, var(--hos-chart-muted-fill, #b7c85b) 38%, var(--hos-chart-panel, var(--el-bg-color)));
+    border-color: color-mix(in srgb, var(--hos-chart-muted-fill, #b7c85b) 34%, transparent);
   }
   &.is-level-2 {
-    background: color-mix(
-      in srgb,
-      var(--hos-chart-primary, var(--el-color-primary)) 30%,
-      var(--hos-chart-panel, var(--el-bg-color))
-    );
-    border-color: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 34%, transparent);
+    background: color-mix(in srgb, var(--hos-chart-success, #8bc06f) 52%, var(--hos-chart-panel, var(--el-bg-color)));
+    border-color: color-mix(in srgb, var(--hos-chart-success, #8bc06f) 42%, transparent);
   }
   &.is-level-3 {
-    color: var(--hos-chart-text, #07594f);
-    background: color-mix(
-      in srgb,
-      var(--hos-chart-primary, var(--el-color-primary)) 52%,
-      var(--hos-chart-panel, var(--el-bg-color))
-    );
-    border-color: color-mix(in srgb, var(--hos-chart-primary, var(--el-color-primary)) 56%, transparent);
+    color: var(--hos-chart-text, #4f5661);
+    background: color-mix(in srgb, var(--hos-chart-warning, #ffb347) 68%, var(--hos-chart-panel, var(--el-bg-color)));
+    border-color: color-mix(in srgb, var(--hos-chart-warning, #ffb347) 58%, transparent);
   }
   &.is-level-4 {
     color: #ffffff;
-    background: var(--hos-chart-primary, #0f9f8f);
-    border-color: color-mix(in srgb, var(--hos-chart-primary, #0f766e) 70%, #000000);
+    background: linear-gradient(135deg, var(--hos-chart-warning, #ffb347), var(--hos-chart-danger, #ff7a59));
+    border-color: color-mix(in srgb, var(--hos-chart-danger, #ff7a59) 66%, #ffffff);
     .day-count {
-      color: rgb(255 255 255 / 86%);
+      color: rgb(255 255 255 / 88%);
     }
   }
   &.is-selected {
-    border-color: var(--hos-chart-primary, #07594f);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--hos-chart-primary, #0f766e) 22%, transparent);
+    border-color: var(--hos-chart-warning, #ffb347);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--hos-chart-warning, #ffb347) 30%, transparent);
   }
   &.is-today .day-number::after {
     margin-left: 4px;
@@ -247,29 +236,17 @@ defineEmits<{
     background: var(--hos-chart-panel-soft, var(--el-fill-color-light));
   }
   .is-level-1 {
-    background: color-mix(
-      in srgb,
-      var(--hos-chart-primary, var(--el-color-primary)) 12%,
-      var(--hos-chart-panel, var(--el-bg-color))
-    );
+    background: color-mix(in srgb, var(--hos-chart-muted-fill, #b7c85b) 38%, var(--hos-chart-panel, var(--el-bg-color)));
   }
   .is-level-2 {
-    background: color-mix(
-      in srgb,
-      var(--hos-chart-primary, var(--el-color-primary)) 30%,
-      var(--hos-chart-panel, var(--el-bg-color))
-    );
+    background: color-mix(in srgb, var(--hos-chart-success, #8bc06f) 52%, var(--hos-chart-panel, var(--el-bg-color)));
   }
   .is-level-3 {
-    background: color-mix(
-      in srgb,
-      var(--hos-chart-primary, var(--el-color-primary)) 52%,
-      var(--hos-chart-panel, var(--el-bg-color))
-    );
+    background: color-mix(in srgb, var(--hos-chart-warning, #ffb347) 68%, var(--hos-chart-panel, var(--el-bg-color)));
   }
   .is-level-4 {
-    background: var(--hos-chart-primary, #0f9f8f);
-    border-color: color-mix(in srgb, var(--hos-chart-primary, #0f766e) 70%, #000000);
+    background: linear-gradient(135deg, var(--hos-chart-warning, #ffb347), var(--hos-chart-danger, #ff7a59));
+    border-color: color-mix(in srgb, var(--hos-chart-danger, #ff7a59) 66%, #ffffff);
   }
 }
 
@@ -285,6 +262,10 @@ defineEmits<{
     padding: 6px;
   }
 }
-</style>
 
-@media (prefers-reduced-motion: reduce) { .calendar-day { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .calendar-day {
+    transition: none;
+  }
+}
+</style>
