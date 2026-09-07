@@ -831,27 +831,16 @@ const dailyCurveItems = computed(() => {
     date: string;
     label: string;
     total: number;
-    pending: number;
-    review: number;
-    returned: number;
-    overdue: number;
-    attachmentTodo: number;
   }[] = [];
   for (let offset = trendRange.value - 1; offset >= 0; offset--) {
     const date = new Date();
     date.setDate(date.getDate() - offset);
     const dateText = toDateText(date);
-    const rows = patientsByEncounterDate.value.get(dateText) || [];
-    const flags = rows.map(patient => statusFlagsForPatient(patient));
+    // 收费患者数据无工作流状态字段，仅来访患者总数是真实信号
     items.push({
       date: dateText,
       label: offset === 0 ? "今天" : `${date.getMonth() + 1}/${date.getDate()}`,
-      total: rows.length,
-      pending: flags.filter(flag => flag.isPending).length,
-      review: flags.filter(flag => flag.isReviewPending).length,
-      returned: flags.filter(flag => flag.isReturned).length,
-      overdue: rows.filter(patient => statusFlagsForPatient(patient).riskTone === "warning").length,
-      attachmentTodo: flags.filter(flag => flag.isAttachmentTodo).length
+      total: (patientsByEncounterDate.value.get(dateText) || []).length
     });
   }
   return items;

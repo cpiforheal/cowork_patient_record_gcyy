@@ -37,12 +37,8 @@ use([CanvasRenderer, LineChart, GridComponent, LegendComponent, TooltipComponent
 export interface DailyCurveItem {
   date: string;
   label: string;
+  /** 当日来访患者数（数据源：患者收费信息，无工作流状态字段，其余状态系列已移除） */
   total: number;
-  pending: number;
-  review: number;
-  returned: number;
-  overdue: number;
-  attachmentTodo: number;
 }
 
 const props = withDefaults(
@@ -67,12 +63,7 @@ const palette = computed(() => ({
   split: isDark.value ? "rgba(166, 184, 205, 0.16)" : "rgba(120, 128, 138, 0.12)",
   tooltipBg: isDark.value ? "rgba(17, 24, 39, 0.94)" : "rgba(255, 255, 255, 0.94)",
   tooltipBorder: isDark.value ? "rgba(166, 184, 205, 0.22)" : "rgba(120, 128, 138, 0.12)",
-  blue: "#1683ff",
-  green: "#239246",
-  violet: "#8f6cf0",
-  red: "#ec2f2f",
-  orange: "#df8200",
-  cyan: "#08aaa2"
+  blue: "#1683ff"
 }));
 
 const total = computed(() => props.items.reduce((sum, item) => sum + item.total, 0));
@@ -80,24 +71,13 @@ const peak = computed(() =>
   props.items.reduce((max, item) => (item.total > max.total ? item : max), props.items[0] || { label: "—", total: 0 })
 );
 const peakLabel = computed(() => (peak.value.total ? `${peak.value.label} ${peak.value.total}人` : "—"));
-const maxValue = computed(() =>
-  Math.max(
-    5,
-    ...props.items.flatMap(item => [item.total, item.pending, item.review, item.returned, item.overdue, item.attachmentTodo])
-  )
-);
+const maxValue = computed(() => Math.max(5, ...props.items.map(item => item.total)));
 
 const chartOption = computed<EChartsOption>(() => {
   const p = palette.value;
   const labels = props.items.map(item => item.label);
   const actual = props.items.map(item => item.total);
-  const pending = props.items.map(item => item.pending);
-  const review = props.items.map(item => item.review);
-  const returned = props.items.map(item => item.returned);
-  const overdue = props.items.map(item => item.overdue);
-  const attachmentTodo = props.items.map(item => item.attachmentTodo);
   return {
-    color: [p.blue, p.green, p.violet, p.red, p.orange, p.cyan],
     animation: true,
     animationDuration: 520,
     animationDurationUpdate: 240,
@@ -117,30 +97,12 @@ const chartOption = computed<EChartsOption>(() => {
         lineStyle: { color: p.blue, width: 1, type: "dashed" }
       },
       formatter: (params: any) => {
-        const points = Array.isArray(params) ? params : [params];
-        const main = points[0];
-        const date = props.items[main?.dataIndex]?.date || main?.axisValue || "";
-        const rows = points
-          .filter(point => Number(point.value) > 0)
-          .map(
-            point =>
-              `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${point.color};margin-right:8px"></span>${point.seriesName}<span style="float:right;margin-left:20px;font-weight:700;color:${p.text}">${point.value} 人</span>`
-          )
-          .join("<br/>");
-        return `<b>${date}</b><br/>${rows || "暂无患者"}`;
+        const point = Array.isArray(params) ? params[0] : params;
+        const date = props.items[point?.dataIndex]?.date || point?.axisValue || "";
+        return `<b>${date}</b><br/><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.blue};margin-right:8px"></span>来访患者<span style="float:right;margin-left:20px;font-weight:700;color:${p.text}">${point?.value ?? 0} 人</span>`;
       }
     },
-    legend: {
-      top: 8,
-      left: 10,
-      itemWidth: 10,
-      itemHeight: 10,
-      icon: "circle",
-      itemGap: 18,
-      textStyle: { color: p.muted, fontSize: 13 },
-      data: ["来访患者", "待处理", "待审核", "退回整改", "超时关注", "附件待补"]
-    },
-    grid: { left: 58, right: 34, top: 68, bottom: 42, containLabel: true },
+    grid: { left: 58, right: 34, top: 40, bottom: 42, containLabel: true },
     xAxis: {
       type: "category",
       boundaryGap: false,
@@ -173,66 +135,6 @@ const chartOption = computed<EChartsOption>(() => {
         emphasis: { focus: "series", scale: true },
         areaStyle: { color: "rgba(22, 131, 255, 0.05)" },
         z: 6
-      },
-      {
-        name: "待处理",
-        type: "line",
-        data: pending,
-        smooth: 0.42,
-        symbol: "circle",
-        symbolSize: 7,
-        showSymbol: false,
-        lineStyle: { width: 3, color: p.green, cap: "round", join: "round" },
-        itemStyle: { color: p.green },
-        z: 4
-      },
-      {
-        name: "待审核",
-        type: "line",
-        data: review,
-        smooth: 0.42,
-        symbol: "circle",
-        symbolSize: 7,
-        showSymbol: false,
-        lineStyle: { width: 3, color: p.violet, cap: "round", join: "round" },
-        itemStyle: { color: p.violet },
-        z: 3
-      },
-      {
-        name: "退回整改",
-        type: "line",
-        data: returned,
-        smooth: 0.42,
-        symbol: "circle",
-        symbolSize: 7,
-        showSymbol: false,
-        lineStyle: { width: 3, color: p.red, cap: "round", join: "round" },
-        itemStyle: { color: p.red },
-        z: 3
-      },
-      {
-        name: "超时关注",
-        type: "line",
-        data: overdue,
-        smooth: 0.42,
-        symbol: "circle",
-        symbolSize: 7,
-        showSymbol: false,
-        lineStyle: { width: 3, color: p.orange, cap: "round", join: "round" },
-        itemStyle: { color: p.orange },
-        z: 3
-      },
-      {
-        name: "附件待补",
-        type: "line",
-        data: attachmentTodo,
-        smooth: 0.42,
-        symbol: "circle",
-        symbolSize: 7,
-        showSymbol: false,
-        lineStyle: { width: 3, color: p.cyan, cap: "round", join: "round" },
-        itemStyle: { color: p.cyan },
-        z: 3
       }
     ]
   };
@@ -288,6 +190,7 @@ const chartOption = computed<EChartsOption>(() => {
   width: 100%;
   height: 340px;
 }
+
 @media (width <= 760px) {
   .curve-head {
     flex-direction: column;
@@ -299,6 +202,7 @@ const chartOption = computed<EChartsOption>(() => {
     height: 300px;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .daily-patient-curve :deep(canvas) {
     transition: none;
