@@ -32,6 +32,8 @@ export interface PolicyBriefResult {
   briefDate: string;
   total: number;
   items: PolicyBriefItem[];
+  /** 今日综述（AI 将当日各条要点汇总为一段话，仿早报版式；未生成时为空串） */
+  digest: string;
   lastRun: PolicyBriefLastRun;
 }
 

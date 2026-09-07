@@ -179,6 +179,7 @@ public class PolicyBriefCollectService {
         int[] summarized = {0};
         int[] failed = {0};
         summarizePending(briefDate, summarized, failed);
+        String digest = generateDailyDigest(briefDate);
         lastRun = new CollectRun(
             false,
             briefDate,
@@ -187,11 +188,87 @@ public class PolicyBriefCollectService {
             summarized[0],
             failed[0],
             "完成：抓取 " + fetched + " 条，新增 " + fresh + " 条，生成摘要 " + summarized[0] + " 条"
-                + (failed[0] > 0 ? "，摘要失败 " + failed[0] + " 条" : ""),
+                + (failed[0] > 0 ? "，摘要失败 " + failed[0] + " 条" : "")
+                + (digest == null ? "" : "，已生成今日综述"),
             lastRun.startedAt(),
             LocalDateTime.now().format(TIME_FORMATTER)
         );
-        LOG.info("[policy-brief] {} 采集完成: fetched={} fresh={} summarized={} failed={}", briefDate, fetched, fresh, summarized[0], failed[0]);
+        LOG.info("[policy-brief] {} 采集完成: fetched={} fresh={} summarized={} failed={} digest={}",
+            briefDate, fetched, fresh, summarized[0], failed[0], digest != null);
+    }
+
+    /** 当日各条要点 → AI 汇总为一段"今日综述"（仿早报版式），失败仅记日志不影响条目展示。 */
+    private String generateDailyDigest(String briefDate) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT ai_summary, title FROM policy_brief_item WHERE brief_date = ? AND status = 'SUMMARIZED' ORDER BY published_at DESC, id DESC LIMIT 30",
+            briefDate
+        );
+        if (rows.isEmpty()) return null;
+        StringBuilder points = new StringBuilder();
+        int index = 1;
+        for (Map<String, Object> row : rows) {
+            String point = String.valueOf(row.getOrDefault("ai_summary", ""));
+            if (point.isBlank()) point = String.valueOf(row.getOrDefault("title", ""));
+            points.append(index++).append(". ").append(trim(point, 120)).append("\n");
+        }
+        try {
+            EffectiveAiConfig aiConfig = aiConfigService.resolveEffectiveConfig();
+            String apiKey = String.valueOf(aiConfig.apiKey() == null ? "" : aiConfig.apiKey()).trim();
+            if (!aiConfig.enabled() || apiKey.isBlank() || aiConfig.baseUrl().isBlank()) {
+                LOG.warn("[policy-brief] AI 未配置，跳过今日综述");
+                return null;
+            }
+            String endpoint = normalizeChatCompletionsUrl(aiConfig.baseUrl());
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("model", AI_MODEL);
+            payload.put("temperature", 0.4);
+            payload.put("max_tokens", 300);
+            payload.put("stream", false);
+            ArrayNode messages = payload.putArray("messages");
+            messages.addObject()
+                .put(
+                    "role",
+                    "system"
+                )
+                .put(
+                    "content",
+                    """
+                    你是医院信息科的医政资讯编辑。基于给定的当日资讯要点，输出一段"今日综述"：
+                    60~120 字，概括当日整体动态与最值得关注的变化，服务医院管理者阅读。
+                    不要逐条罗列，不要编造要点之外的信息，不写套话。
+                    直接返回综述正文，不要标题、不要序号、不要 JSON、不要 Markdown。
+                    """
+                );
+            messages.addObject().put("role", "user").put("content", "今日资讯要点：\n" + points);
+
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(endpoint))
+                .timeout(Duration.ofSeconds(60))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
+                .build();
+            HttpResponse<String> response = aiCallGuard.execute(
+                () -> httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+            );
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IOException("上游状态 " + response.statusCode());
+            }
+            String digest = trim(extractContent(response.body()), 500);
+            jdbcTemplate.update(
+                "INSERT INTO policy_brief_daily (brief_date, digest, item_count, ai_model, generated_at) VALUES (?, ?, ?, ?, ?) "
+                    + "ON DUPLICATE KEY UPDATE digest = VALUES(digest), item_count = VALUES(item_count), ai_model = VALUES(ai_model), generated_at = VALUES(generated_at)",
+                briefDate,
+                digest,
+                rows.size(),
+                AI_MODEL,
+                LocalDateTime.now().format(TIME_FORMATTER)
+            );
+            return digest;
+        } catch (IOException | InterruptedException | RuntimeException error) {
+            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+            LOG.warn("[policy-brief] 今日综述生成失败: {}", error.getMessage());
+            return null;
+        }
     }
 
     // ---------- 列表页启发式解析 ----------
@@ -479,8 +556,17 @@ public class PolicyBriefCollectService {
         result.put("briefDate", safeDate);
         result.put("total", rows.size());
         result.put("items", rows);
+        result.put("digest", queryDailyDigest(safeDate));
         result.put("lastRun", lastRun);
         return result;
+    }
+
+    private String queryDailyDigest(String briefDate) {
+        List<Map<String, Object>> daily = jdbcTemplate.queryForList(
+            "SELECT digest FROM policy_brief_daily WHERE brief_date = ?",
+            briefDate
+        );
+        return daily.isEmpty() ? "" : String.valueOf(daily.get(0).getOrDefault("digest", ""));
     }
 
     // ---------- 基础工具 ----------
