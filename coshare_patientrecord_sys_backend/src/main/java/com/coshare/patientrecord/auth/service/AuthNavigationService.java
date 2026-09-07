@@ -386,6 +386,7 @@ public class AuthNavigationService {
             page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false)
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "Operation",
+            page("/policy-brief", "policyBrief", "/policyBrief/index", "医政早报", "Reading", false, false, false),
             group("/inventory", "inventory", "/inventory/overview", "进销存管理", "Box",
                 page("/inventory/overview", "inventoryOverview", "/inventory/manage/index", "今日待办", "Monitor", false, false, false),
                 page("/inventory/executive", "inventoryExecutive", "/inventory/manage/index", "管理看板", "TrendCharts", false, false, false),
@@ -446,6 +447,7 @@ public class AuthNavigationService {
         Map<String, RolePolicy> result = new LinkedHashMap<>();
         Map<String, List<String>> administratorButtons = permissions(
             "home=view",
+            "policyBrief=policy:read,policy:collect",
             "workbenchUpload=patient:search,document:read",
             "workbenchLabReport=patient:search,field:read,document:read",
             "patientsOverview=patient:read,field:read",

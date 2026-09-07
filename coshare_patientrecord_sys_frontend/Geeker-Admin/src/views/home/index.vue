@@ -35,6 +35,24 @@
       <!-- 来访患者住址分布分析（数据源：患者收费信息，仅管理员） -->
       <AddressAnalysisPanel v-if="isAdmin" class="board-card" />
 
+      <!-- 医政早报（每日医疗政策资讯，仅管理员） -->
+      <button v-if="isAdmin" type="button" class="board-card policy-brief-card" @click="router.push('/policy-brief')">
+        <span class="brief-card-head">
+          <el-icon><Reading /></el-icon>
+          <strong>医政早报</strong>
+          <small v-if="policyBriefLatest">{{ policyBriefLatest.briefDate }} · {{ policyBriefLatest.total }} 条</small>
+          <small v-else>每日 7:30 自动采集</small>
+          <span class="fold-spacer"></span>
+          <span class="brief-card-more"
+            >查看 <el-icon><ArrowRight /></el-icon
+          ></span>
+        </span>
+        <ul v-if="policyBriefLatest?.items?.length" class="brief-card-list">
+          <li v-for="item in policyBriefLatest.items" :key="item.id">{{ item.title }}</li>
+        </ul>
+        <small v-else class="brief-card-empty">今日暂无资讯，进入「业务工作台 → 医政早报」可立即采集</small>
+      </button>
+
       <div class="workbench-grid">
         <div class="workbench-main">
           <!-- 数据看板（升主位，默认展开） -->
@@ -70,6 +88,7 @@
                 :show-text="false"
                 :stroke-width="6"
               />
+              <DailyPatientCurve :items="dailyCurveItems" />
               <MiniBarChart
                 compact
                 :title="trendTitle"
@@ -175,7 +194,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { ArrowDown, ArrowRight, List, Refresh, Setting, TrendCharts } from "@element-plus/icons-vue";
+import { ArrowDown, ArrowRight, List, Reading, Refresh, Setting, TrendCharts } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
@@ -194,11 +213,13 @@ import {
   type WorkReminder
 } from "@/api/modules/clinic";
 import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/tcmPharmacy";
+import { getPolicyBriefLatestApi, type PolicyBriefResult } from "@/api/modules/clinic/policyBrief";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 import CalendarHeatmap from "./components/CalendarHeatmap.vue";
+import DailyPatientCurve from "./components/DailyPatientCurve.vue";
 import HomeTaskPanel from "./components/HomeTaskPanel.vue";
 import MiniBarChart from "./components/MiniBarChart.vue";
 import ShortcutPanel from "./components/ShortcutPanel.vue";
@@ -790,19 +811,49 @@ watch(trendRange, () => {
   }, 320);
 });
 
-const trendItems = computed(() => {
-  const items: { label: string; value: number }[] = [];
+const patientsByEncounterDate = computed(() => {
+  const grouped = new Map<string, PatientRow[]>();
+  patientRows.value.forEach(patient => {
+    patientEncounterDates(patient).forEach(date => {
+      if (!grouped.has(date)) grouped.set(date, []);
+      grouped.get(date)?.push(patient);
+    });
+  });
+  return grouped;
+});
+
+const dailyCurveItems = computed(() => {
+  const items: {
+    date: string;
+    label: string;
+    total: number;
+    pending: number;
+    review: number;
+    returned: number;
+    overdue: number;
+    attachmentTodo: number;
+  }[] = [];
   for (let offset = trendRange.value - 1; offset >= 0; offset--) {
     const date = new Date();
     date.setDate(date.getDate() - offset);
     const dateText = toDateText(date);
+    const rows = patientsByEncounterDate.value.get(dateText) || [];
+    const flags = rows.map(patient => statusFlagsForPatient(patient));
     items.push({
+      date: dateText,
       label: offset === 0 ? "今天" : `${date.getMonth() + 1}/${date.getDate()}`,
-      value: countByDate.value.get(dateText) || 0
+      total: rows.length,
+      pending: flags.filter(flag => flag.isPending).length,
+      review: flags.filter(flag => flag.isReviewPending).length,
+      returned: flags.filter(flag => flag.isReturned).length,
+      overdue: rows.filter(patient => statusFlagsForPatient(patient).riskTone === "warning").length,
+      attachmentTodo: flags.filter(flag => flag.isAttachmentTodo).length
     });
   }
   return items;
 });
+
+const trendItems = computed(() => dailyCurveItems.value.map(({ label, total }) => ({ label, value: total })));
 
 const trendSummary = computed(() => {
   const values = trendItems.value.map(item => item.value);
@@ -971,8 +1022,22 @@ const reloadAll = async () => {
   const jobs: Promise<unknown>[] = [];
   if (showPatientBoard.value) jobs.push(loadPrimaryDashboard());
   if (showPharmacyBoard.value) jobs.push(loadPharmacyBoard());
-  if (isAdmin.value) jobs.push(loadMaintenanceDashboard());
+  if (isAdmin.value) {
+    jobs.push(loadMaintenanceDashboard());
+    jobs.push(loadPolicyBriefLatest());
+  }
   await Promise.allSettled(jobs);
+};
+
+// 医政早报首页卡：最新一日概览（失败静默，不打扰待办主视图）
+const policyBriefLatest = ref<PolicyBriefResult | null>(null);
+const loadPolicyBriefLatest = async () => {
+  try {
+    const { data } = await getPolicyBriefLatestApi();
+    policyBriefLatest.value = data;
+  } catch {
+    policyBriefLatest.value = null;
+  }
 };
 
 const saveBackupConfig = async () => {
@@ -1113,6 +1178,75 @@ onMounted(reloadAll);
   border-radius: 12px;
 }
 
+// 医政早报首页卡（仅管理员）：点击进入资讯页
+.policy-brief-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-control, 180ms) var(--ease-out, ease),
+    box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
+    transform var(--motion-control, 180ms) var(--ease-out, ease);
+
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      border-color: color-mix(in srgb, var(--el-color-primary) 45%, var(--el-border-color-light));
+      box-shadow: 0 10px 26px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+      transform: translateY(-1px);
+      .brief-card-more {
+        color: var(--el-color-primary);
+      }
+    }
+  }
+  .brief-card-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 14px;
+    color: var(--el-text-color-primary);
+    .el-icon {
+      color: var(--el-color-primary);
+    }
+    small {
+      color: var(--el-text-color-secondary);
+    }
+    .brief-card-more {
+      display: inline-flex;
+      gap: 2px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      transition: color var(--motion-control, 180ms) var(--ease-out, ease);
+    }
+  }
+  .brief-card-list {
+    display: grid;
+    gap: 5px;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    li {
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--el-text-color-regular);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      &::before {
+        margin-right: 6px;
+        color: var(--el-color-primary);
+        content: "·";
+      }
+    }
+  }
+  .brief-card-empty {
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+  }
+}
+
 // 紧凑 header
 .home-header {
   display: flex;
@@ -1174,6 +1308,7 @@ onMounted(reloadAll);
     transform var(--motion-fast, 140ms) var(--ease-out, ease),
     box-shadow var(--motion-fast, 140ms) var(--ease-out, ease),
     border-color var(--motion-fast, 140ms) var(--ease-out, ease);
+
   @media (hover: hover) and (pointer: fine) {
     &:hover {
       border-color: color-mix(
@@ -1375,6 +1510,7 @@ onMounted(reloadAll);
     transform var(--motion-fast, 140ms) var(--ease-out, ease),
     box-shadow var(--motion-fast, 140ms) var(--ease-out, ease),
     border-color var(--motion-fast, 140ms) var(--ease-out, ease);
+
   @media (hover: hover) and (pointer: fine) {
     &:hover {
       border-color: color-mix(
