@@ -15,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -59,6 +60,10 @@ public class PolicyBriefCollectService {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
     private static final int DAILY_SUMMARY_CAP = 30;
     private static final int ARTICLE_TEXT_LIMIT = 4000;
+    private static final int FRESH_DAYS = 90;
+    private static final int HOT_TOPIC_LIMIT = 10;
+    private static final java.time.format.DateTimeFormatter MINUTE_FORMATTER =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final JdbcTemplate jdbcTemplate;
     private final ClinicAiConfigService aiConfigService;
@@ -156,6 +161,7 @@ public class PolicyBriefCollectService {
 
     private void executeCollect() {
         String briefDate = LocalDateTime.now().format(DATE_FORMATTER);
+        purgeExpired();
         int fetched = 0;
         int fresh = 0;
         Set<String> seenHashes = new HashSet<>();
@@ -172,10 +178,12 @@ public class PolicyBriefCollectService {
                 String hash = sha256(item.url() + "|" + item.title());
                 if (!seenHashes.add(hash)) continue;
                 if (existsByHash(hash)) continue;
-                insertItem(briefDate, source, item, hash);
+                if (isExpired(item.publishedAt())) continue;
+                insertItem(briefDate, source.name(), source.category(), item, hash);
                 fresh += 1;
             }
         }
+        int hotInserted = collectHotTopics(briefDate);
         int[] summarized = {0};
         int[] failed = {0};
         summarizePending(briefDate, summarized, failed);
@@ -187,14 +195,115 @@ public class PolicyBriefCollectService {
             fresh,
             summarized[0],
             failed[0],
-            "完成：抓取 " + fetched + " 条，新增 " + fresh + " 条，生成摘要 " + summarized[0] + " 条"
+            "完成：抓取 " + fetched + " 条，新增 " + fresh + " 条，热点 " + hotInserted + " 条，生成摘要 " + summarized[0] + " 条"
                 + (failed[0] > 0 ? "，摘要失败 " + failed[0] + " 条" : "")
                 + (digest == null ? "" : "，已生成今日综述"),
             lastRun.startedAt(),
             LocalDateTime.now().format(TIME_FORMATTER)
         );
-        LOG.info("[policy-brief] {} 采集完成: fetched={} fresh={} summarized={} failed={} digest={}",
-            briefDate, fetched, fresh, summarized[0], failed[0], digest != null);
+        LOG.info("[policy-brief] {} 采集完成: fetched={} fresh={} hot={} summarized={} failed={} digest={}",
+            briefDate, fetched, fresh, hotInserted, summarized[0], failed[0], digest != null);
+    }
+
+    /** 清理发布时间早于三个月窗口的过期条目（仅命中归一化日期格式，旧原始串由一次性清理处理）。 */
+    private void purgeExpired() {
+        String cutoff = LocalDate.now().minusDays(FRESH_DAYS).format(DATE_FORMATTER);
+        int removed = jdbcTemplate.update(
+            "DELETE FROM policy_brief_item WHERE published_at LIKE '____-__-__%' AND LEFT(published_at, 10) < ?",
+            cutoff
+        );
+        if (removed > 0) LOG.info("[policy-brief] 清理过期条目 {} 条（早于 {}）", removed, cutoff);
+    }
+
+    /** 发布时间可解析且早于三个月窗口 → 剔除；无可解析日期不剔除。 */
+    private boolean isExpired(String publishedAt) {
+        String date = trim(publishedAt, 10);
+        if (!date.matches("20\\d{2}-\\d{2}-\\d{2}")) return false;
+        return LocalDate.parse(date).isBefore(LocalDate.now().minusDays(FRESH_DAYS));
+    }
+
+    // ---------- 微博 / 今日头条热点聚合 ----------
+
+    private record HotTopic(String source, String title, String url) {}
+
+    /** 头条热榜 + 微博热搜 → 医疗健康关键词过滤 → 合并去重取 TOP10 入库（category=HOT）。 */
+    private int collectHotTopics(String briefDate) {
+        List<HotTopic> pool = new ArrayList<>();
+        try {
+            pool.addAll(fetchToutiaoHot());
+        } catch (IOException | InterruptedException | RuntimeException error) {
+            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+            LOG.warn("[policy-brief] 头条热榜获取失败: {}", error.getMessage());
+        }
+        try {
+            pool.addAll(fetchWeiboHot());
+        } catch (IOException | InterruptedException | RuntimeException error) {
+            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+            LOG.warn("[policy-brief] 微博热搜获取失败: {}", error.getMessage());
+        }
+        int inserted = 0;
+        Set<String> seenTitles = new HashSet<>();
+        for (HotTopic topic : pool) {
+            if (inserted >= HOT_TOPIC_LIMIT) break;
+            String title = normalizeTitle(topic.title());
+            if (PolicyBriefSources.HOT_MEDICAL_KEYWORDS.stream().noneMatch(title::contains)) continue;
+            if (!seenTitles.add(title)) continue;
+            String hash = sha256(topic.url() + "|" + topic.title());
+            if (existsByHash(hash)) continue;
+            insertItem(
+                briefDate,
+                topic.source(),
+                PolicyBriefSources.CATEGORY_HOT,
+                new ExtractedItem(title, topic.url(), LocalDateTime.now().format(MINUTE_FORMATTER)),
+                hash
+            );
+            inserted += 1;
+        }
+        return inserted;
+    }
+
+    /** 今日头条热榜 JSON 接口（实测可达）。 */
+    private List<HotTopic> fetchToutiaoHot() throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc"))
+            .timeout(Duration.ofSeconds(10))
+            .header("User-Agent", USER_AGENT)
+            .GET()
+            .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) throw new IOException("状态 " + response.statusCode());
+        JsonNode data = objectMapper.readTree(response.body()).path("data");
+        List<HotTopic> items = new ArrayList<>();
+        if (data.isArray()) {
+            for (JsonNode node : data) {
+                String title = node.path("Title").asText("");
+                String url = node.path("Url").asText("");
+                if (title.isBlank() || url.isBlank()) continue;
+                items.add(new HotTopic("今日头条热榜", normalizeTitle(title), url));
+            }
+        }
+        return items;
+    }
+
+    /** 微博热搜接口（存在登录墙/风控，403/432 时自动跳过由调用方降级）。 */
+    private List<HotTopic> fetchWeiboHot() throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("https://weibo.com/ajax/side/hotSearch"))
+            .timeout(Duration.ofSeconds(10))
+            .header("User-Agent", USER_AGENT)
+            .GET()
+            .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) throw new IOException("状态 " + response.statusCode() + "（风控/登录墙）");
+        JsonNode realtime = objectMapper.readTree(response.body()).path("data").path("realtime");
+        List<HotTopic> items = new ArrayList<>();
+        if (realtime.isArray()) {
+            for (JsonNode node : realtime) {
+                String word = node.path("word").asText("");
+                if (word.isBlank()) continue;
+                String url = "https://s.weibo.com/weibo?q=" + java.net.URLEncoder.encode("#" + word + "#", StandardCharsets.UTF_8);
+                items.add(new HotTopic("微博热搜", normalizeTitle(word), url));
+            }
+        }
+        return items;
     }
 
     /** 当日各条要点 → AI 汇总为一段"今日综述"（仿早报版式），失败仅记日志不影响条目展示。 */
@@ -294,7 +403,7 @@ public class PolicyBriefCollectService {
             String url = anchor.absUrl("href");
             String title = String.valueOf(anchor.attr("title")).isBlank() ? anchor.text() : anchor.attr("title");
             title = normalizeTitle(title);
-            if (url.isBlank() || !url.startsWith("http") || title.length() < 10) continue;
+            if (url.isBlank() || !url.startsWith("http") || title.length() < 12) continue;
             if (url.equals(source.listUrl()) || !perSourceUrls.add(url)) continue;
             if (title.matches("^(更多|详情|首页|上一页|下一页|末页|返回).*")) continue;
             if (isNoise(source, title, url)) continue;
@@ -313,7 +422,7 @@ public class PolicyBriefCollectService {
             String title = normalizeTitle(item.selectFirst("title") != null ? item.selectFirst("title").text() : "");
             String url = item.selectFirst("link") != null ? item.selectFirst("link").text().trim() : "";
             String pubDate = item.selectFirst("pubDate") != null ? item.selectFirst("pubDate").text().trim() : "";
-            if (url.isBlank() || !url.startsWith("http") || title.length() < 10) continue;
+            if (url.isBlank() || !url.startsWith("http") || title.length() < 12) continue;
             if (!perSourceUrls.add(url)) continue;
             if (isNoise(source, title, url)) continue;
             items.add(new ExtractedItem(title, url, normalizeRssDate(pubDate)));
@@ -321,7 +430,7 @@ public class PolicyBriefCollectService {
         return items;
     }
 
-    /** 通用噪音过滤：UGC 域名黑名单 + 标题噪音词 + 必含词 + 任一关键词。 */
+    /** 通用噪音过滤：UGC 域名黑名单 + 标题噪音词 + 必含词 + 任一关键词 + 非文章链接（首页/栏目/词典页 URL 无数字段）。 */
     private boolean isNoise(PolicyBriefSources.SourceSpec source, String title, String url) {
         String urlLower = url.toLowerCase();
         for (String domain : PolicyBriefSources.DOMAIN_BLACKLIST) {
@@ -334,6 +443,12 @@ public class PolicyBriefCollectService {
             if (!title.contains(required)) return true;
         }
         if (!source.keywords().isEmpty() && source.keywords().stream().noneMatch(title::contains)) return true;
+        String path = url.replaceFirst("^https?://[^/]+/", "");
+        boolean articleLike = path.matches(".*\\d.*")
+            || path.endsWith(".html")
+            || path.endsWith(".shtml")
+            || path.endsWith(".htm");
+        if (!articleLike) return true;
         return false;
     }
 
@@ -512,13 +627,18 @@ public class PolicyBriefCollectService {
             "SELECT brief_date, COUNT(*) AS total FROM policy_brief_item GROUP BY brief_date ORDER BY brief_date DESC LIMIT 1"
         );
         if (dateRows.isEmpty()) {
-            return Map.of("briefDate", "", "total", 0, "items", List.of(), "lastRun", lastRun);
+            return Map.of("briefDate", "", "total", 0, "items", List.of(), "digest", "", "lastRun", lastRun);
         }
         String briefDate = String.valueOf(dateRows.get(0).get("brief_date"));
-        return items(briefDate, "");
+        // 首页卡片最多展示 10 条
+        return items(briefDate, "", 10);
     }
 
     public Map<String, Object> items(String briefDate, String category) {
+        return items(briefDate, category, 100);
+    }
+
+    private Map<String, Object> items(String briefDate, String category, int limit) {
         String safeDate = String.valueOf(briefDate == null ? "" : briefDate).trim();
         String safeCategory = String.valueOf(category == null ? "" : category).trim();
         if (!safeDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
@@ -535,7 +655,7 @@ public class PolicyBriefCollectService {
             args.add(safeCategory);
         }
         // 发布时间 desc 优先（published_at 已归一为定长格式，字符串序即时间序），无发布时间的按入库时间沉底
-        sql.append(" ORDER BY published_at DESC, created_at DESC, id DESC LIMIT 100");
+        sql.append(" ORDER BY published_at DESC, created_at DESC, id DESC LIMIT ").append(Math.max(1, limit));
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(sql.toString(), args.toArray())) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -571,14 +691,14 @@ public class PolicyBriefCollectService {
 
     // ---------- 基础工具 ----------
 
-    private void insertItem(String briefDate, PolicyBriefSources.SourceSpec source, ExtractedItem item, String hash) {
+    private void insertItem(String briefDate, String sourceName, String category, ExtractedItem item, String hash) {
         jdbcTemplate.update(
             "INSERT IGNORE INTO policy_brief_item (id, brief_date, source_name, category, title, url, published_at, ai_summary, ai_model, status, content_hash, created_at) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'PENDING', ?, ?)",
             UUID.randomUUID().toString(),
             briefDate,
-            source.name(),
-            source.category(),
+            trim(sourceName, 60),
+            trim(category, 20),
             trim(item.title(), 500),
             trim(item.url(), 890),
             trim(item.publishedAt(), 30),

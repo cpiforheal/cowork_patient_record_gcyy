@@ -16,20 +16,29 @@ import java.util.List;
  */
 public final class PolicyBriefSources {
 
-    /** 资讯分类：政策法规 / 医保支付(DIP/DRG) / 肛肠学术 / 行业动态 */
+    /** 资讯分类：政策法规 / 医保支付(DIP/DRG) / 肛肠学术 / 热点(微博头条) / 行业动态 */
     public static final String CATEGORY_POLICY = "POLICY";
     public static final String CATEGORY_DIP = "DIP";
     public static final String CATEGORY_ANORECTAL = "ANORECTAL";
+    public static final String CATEGORY_HOT = "HOT";
     public static final String CATEGORY_GENERAL = "GENERAL";
 
-    /** UGC/词条类站点黑名单：内容噪音大且正文抓取普遍 403，解析阶段直接跳过不入库 */
+    /** UGC/词条/词典类站点黑名单：内容噪音大且正文抓取普遍 403，解析阶段直接跳过不入库 */
     public static final List<String> DOMAIN_BLACKLIST = List.of(
-        "baike.baidu.com", "zhihu.com", "zhuanlan.zhihu.com", "baijiahao.baidu.com", "zhidao.baidu.com",
-        "wenku.baidu.com", "360doc.com", "docin.com", "doc88.com", "csdn.net", "jianshu.com", "sogou.com"
+        "baidu.com", "zhihu.com", "zhuanlan.zhihu.com", "360doc.com", "docin.com", "doc88.com", "csdn.net",
+        "jianshu.com", "sogou.com", "cambridge.org", "iciba.com", "youdao.com", "dict.cn", "bing.com/search"
     );
 
-    /** 标题噪音词：命中即跳过（电子封装歧义、词条解释类） */
-    public static final List<String> TITLE_NOISE_WORDS = List.of("百科", "SMT", "封装", "双列直插", "是什么意思");
+    /** 标题噪音词：命中即跳过（电子封装歧义、词条解释、词典/导航类） */
+    public static final List<String> TITLE_NOISE_WORDS = List.of(
+        "百科", "SMT", "封装", "双列直插", "是什么意思", "词典", "翻译", "搜索", "官网", "下载"
+    );
+
+    /** 医疗健康热点关键词：微博/头条热榜条目需命中其一才进入热点板块 */
+    public static final List<String> HOT_MEDICAL_KEYWORDS = List.of(
+        "医疗", "医院", "医生", "患者", "疾病", "健康", "卫生", "医保", "药", "疫苗", "手术",
+        "护士", "门诊", "癌", "病毒", "感染", "流行", "DRG", "DIP", "肛肠", "痔", "诊疗", "病历"
+    );
 
     public record SourceSpec(
         String name,
@@ -64,14 +73,6 @@ public final class PolicyBriefSources {
                 10
             ),
             new SourceSpec(
-                "DIP 付费动态（全网）",
-                CATEGORY_DIP,
-                bingRss("DIP 医保 支付方式改革 -百科 -知乎 -知道 -文库"),
-                List.of("医保", "支付", "结算", "病种", "分组", "DRG", "预算", "付费"),
-                List.of("DIP"),
-                10
-            ),
-            new SourceSpec(
                 "人民网健康 · DIP",
                 CATEGORY_DIP,
                 bingRss("DIP OR DRG OR 医保支付 site:health.people.com.cn"),
@@ -103,6 +104,20 @@ public final class PolicyBriefSources {
                 "光明网 · DIP",
                 CATEGORY_DIP,
                 bingRss("DIP OR DRG 医保 site:gmw.cn"),
+                List.of(),
+                6
+            ),
+            new SourceSpec(
+                "39健康 · 肛肠科普",
+                CATEGORY_ANORECTAL,
+                bingRss("肛肠 OR 痔疮 OR 肛瘘 科普 OR 治疗 site:39.net"),
+                List.of(),
+                6
+            ),
+            new SourceSpec(
+                "家庭医生在线 · 肛肠科普",
+                CATEGORY_ANORECTAL,
+                bingRss("肛肠 OR 痔疮 科普 site:familydoctor.com.cn"),
                 List.of(),
                 6
             )

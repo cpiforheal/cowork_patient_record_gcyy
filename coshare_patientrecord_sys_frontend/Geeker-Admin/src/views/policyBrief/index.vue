@@ -29,7 +29,7 @@
         <h2 class="report-title">医政早报 ｜ {{ briefDate }}</h2>
         <div class="report-divider" role="separator"></div>
         <ol class="report-list">
-          <li v-for="(item, index) in items" :key="item.id" class="report-item">
+          <li v-for="(item, index) in mainItems" :key="item.id" class="report-item">
             <span class="report-text">
               <b class="report-index">{{ index + 1 }}.</b>
               {{ item.aiSummary || item.title }}
@@ -40,6 +40,21 @@
             </a>
           </li>
         </ol>
+        <template v-if="hotItems.length">
+          <div class="report-divider" role="separator"></div>
+          <h3 class="report-hot-title">🔥 热点医疗<span>微博 / 今日头条聚合 · 最多 10 条</span></h3>
+          <ol class="report-list report-hot">
+            <li v-for="item in hotItems" :key="item.id" class="report-item">
+              <span class="report-text">
+                🔥 {{ item.aiSummary || item.title }}
+                <el-tag v-if="item.status === 'FAILED'" size="small" type="warning" effect="plain">摘要失败</el-tag>
+              </span>
+              <a class="report-link" :href="item.url" target="_blank" rel="noopener noreferrer">
+                原文·{{ shortSource(item.sourceName) }} <el-icon><TopRight /></el-icon>
+              </a>
+            </li>
+          </ol>
+        </template>
         <div class="report-divider" role="separator"></div>
         <p v-if="digest" class="report-digest">今日综述：{{ digest }}</p>
         <p class="report-footnote">摘要与综述由 AI 生成，仅供参考，政策内容以官方原文为准；点击每条末尾「原文」查看来源全文。</p>
@@ -67,7 +82,7 @@ const isAdmin = computed(() => (userStore.userInfo.role || "") === "admin");
 
 const briefDate = ref("");
 const category = ref("全部");
-const categoryOptions = ["全部", "医保DIP", "政策法规", "肛肠学术", "行业动态"];
+const categoryOptions = ["全部", "医保DIP", "政策法规", "热点", "肛肠学术", "行业动态"];
 const items = ref<PolicyBriefItem[]>([]);
 const lastRun = ref<PolicyBriefLastRun | null>(null);
 const digest = ref("");
@@ -78,10 +93,15 @@ const CATEGORY_KEY_BY_LABEL: Record<string, string> = {
   全部: "",
   医保DIP: "DIP",
   政策法规: "POLICY",
+  热点: "HOT",
   肛肠学术: "ANORECTAL",
   行业动态: "GENERAL"
 };
 const categoryParam = computed(() => CATEGORY_KEY_BY_LABEL[category.value] || "");
+
+// 主列表与热点板块拆分（热点单列，不占编号）
+const mainItems = computed(() => items.value.filter(item => item.category !== "HOT"));
+const hotItems = computed(() => items.value.filter(item => item.category === "HOT"));
 
 const shortSource = (sourceName: string) =>
   String(sourceName || "")
@@ -228,6 +248,23 @@ onMounted(async () => {
   font-weight: 600;
   line-height: 1.8;
   color: var(--el-text-color-primary);
+}
+.report-hot-title {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  span {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--el-text-color-placeholder);
+  }
+}
+.report-hot .report-text {
+  color: var(--el-text-color-regular);
 }
 .report-footnote {
   margin: 10px 0 0;

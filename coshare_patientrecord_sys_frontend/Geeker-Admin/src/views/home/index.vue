@@ -35,11 +35,12 @@
       <!-- 来访患者住址分布分析（数据源：患者收费信息，仅管理员） -->
       <AddressAnalysisPanel v-if="isAdmin" class="board-card" />
 
-      <!-- 医政早报（每日医疗政策资讯，仅管理员） -->
+      <!-- 医政早报（每日医疗政策资讯，仅管理员）：统计卡样式 + emoji 概览 + 悬浮呼吸动画 -->
       <button v-if="isAdmin" type="button" class="board-card policy-brief-card" @click="router.push('/policy-brief')">
         <span class="brief-card-head">
           <el-icon><Reading /></el-icon>
           <strong>医政早报</strong>
+          <el-tag size="small" effect="plain" round>早报</el-tag>
           <small v-if="policyBriefLatest">{{ policyBriefLatest.briefDate }} · {{ policyBriefLatest.total }} 条</small>
           <small v-else>每日 7:30 自动采集</small>
           <span class="fold-spacer"></span>
@@ -47,9 +48,12 @@
             >查看 <el-icon><ArrowRight /></el-icon
           ></span>
         </span>
-        <ul v-if="policyBriefLatest?.items?.length" class="brief-card-list">
-          <li v-for="item in policyBriefLatest.items" :key="item.id">{{ item.title }}</li>
-        </ul>
+        <span v-if="briefRows.length" class="brief-card-rows">
+          <span v-for="row in briefRows" :key="row.id" class="brief-row">
+            <i class="brief-row-emoji">{{ row.emoji }}</i>
+            <span class="brief-row-text">{{ row.text }}</span>
+          </span>
+        </span>
         <small v-else class="brief-card-empty">今日暂无资讯，进入「业务工作台 → 医政早报」可立即采集</small>
       </button>
 
@@ -1040,6 +1044,16 @@ const loadPolicyBriefLatest = async () => {
   }
 };
 
+// 卡片概览行：最多 10 条，按分类配 emoji 前缀（DIP💰 政策📋 肛肠🔬 热点🔥 兜底📰）
+const BRIEF_EMOJI: Record<string, string> = { DIP: "💰", POLICY: "📋", ANORECTAL: "🔬", HOT: "🔥" };
+const briefRows = computed(() =>
+  (policyBriefLatest.value?.items ?? []).slice(0, 10).map(item => ({
+    id: item.id,
+    emoji: BRIEF_EMOJI[item.category] || "📰",
+    text: item.aiSummary || item.title
+  }))
+);
+
 const saveBackupConfig = async () => {
   const path = backupPath.value.trim();
   if (!path) {
@@ -1178,11 +1192,20 @@ onMounted(reloadAll);
   border-radius: 12px;
 }
 
-// 医政早报首页卡（仅管理员）：点击进入资讯页
+// 医政早报首页卡（仅管理员）：统计卡行式布局 + emoji 概览 + 悬浮呼吸光晕
+@keyframes brief-breathe {
+  0%,
+  100% {
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+  }
+  50% {
+    box-shadow: 0 16px 38px color-mix(in srgb, var(--el-color-primary) 26%, transparent);
+  }
+}
 .policy-brief-card {
   display: grid;
-  gap: 8px;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 16px 18px 10px;
   text-align: left;
   cursor: pointer;
   transition:
@@ -1193,10 +1216,14 @@ onMounted(reloadAll);
   @media (hover: hover) and (pointer: fine) {
     &:hover {
       border-color: color-mix(in srgb, var(--el-color-primary) 45%, var(--el-border-color-light));
-      box-shadow: 0 10px 26px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
-      transform: translateY(-1px);
+      box-shadow: 0 12px 30px color-mix(in srgb, var(--el-color-primary) 16%, transparent);
+      transform: translateY(-2px);
+      animation: brief-breathe 2.4s var(--ease-in-out, ease-in-out) infinite;
       .brief-card-more {
         color: var(--el-color-primary);
+      }
+      .brief-row-text {
+        color: var(--el-text-color-primary);
       }
     }
   }
@@ -1204,7 +1231,7 @@ onMounted(reloadAll);
     display: flex;
     gap: 8px;
     align-items: center;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--el-text-color-primary);
     .el-icon {
       color: var(--el-color-primary);
@@ -1221,29 +1248,44 @@ onMounted(reloadAll);
       transition: color var(--motion-control, 180ms) var(--ease-out, ease);
     }
   }
-  .brief-card-list {
+
+  // 概览行：虚线分隔（对齐统计卡行式布局），末行无分隔线
+  .brief-card-rows {
     display: grid;
-    gap: 5px;
-    padding: 0;
-    margin: 0;
-    list-style: none;
-    li {
+  }
+  .brief-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 2px;
+    border-bottom: 1px dashed var(--el-border-color-lighter);
+    &:last-child {
+      border-bottom: none;
+    }
+    .brief-row-emoji {
+      flex-shrink: 0;
+      font-size: 14px;
+      font-style: normal;
+    }
+    .brief-row-text {
       overflow: hidden;
       font-size: 13px;
-      line-height: 1.55;
+      line-height: 1.5;
       color: var(--el-text-color-regular);
       text-overflow: ellipsis;
       white-space: nowrap;
-      &::before {
-        margin-right: 6px;
-        color: var(--el-color-primary);
-        content: "·";
-      }
+      transition: color var(--motion-control, 180ms) var(--ease-out, ease);
     }
   }
   .brief-card-empty {
     font-size: 12px;
     color: var(--el-text-color-placeholder);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .policy-brief-card:hover {
+    animation: none;
   }
 }
 
