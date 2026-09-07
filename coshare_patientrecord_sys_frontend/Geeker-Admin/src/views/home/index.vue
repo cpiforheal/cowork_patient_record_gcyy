@@ -218,6 +218,7 @@ import {
 } from "@/api/modules/clinic";
 import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/tcmPharmacy";
 import { getPolicyBriefLatestApi, type PolicyBriefResult } from "@/api/modules/clinic/policyBrief";
+import { getPreAiPatientCasesApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -826,21 +827,39 @@ const patientsByEncounterDate = computed(() => {
   return grouped;
 });
 
+// 前置病例（仅管理员加载）：登记主诉 → 曲线悬浮词典卡
+const preAiCases = ref<PreAiPatientCase[]>([]);
+const complaintKeyMap = computed(() => {
+  const map = new Map<string, string>();
+  preAiCases.value.forEach(cases => {
+    const complaint = String(cases.patient?.registrationChiefComplaint || cases.patient?.registrationSymptoms || "").trim();
+    if (!complaint) return;
+    if (cases.sourcePatientId) map.set(cases.sourcePatientId, complaint);
+    if (cases.patientName) map.set(cases.patientName, complaint);
+  });
+  return map;
+});
+const complaintForPatient = (patient: PatientRow) =>
+  complaintKeyMap.value.get(patient.id) || complaintKeyMap.value.get(patient.name) || "";
+
 const dailyCurveItems = computed(() => {
   const items: {
     date: string;
     label: string;
     total: number;
+    patients?: { name: string; complaint: string }[];
   }[] = [];
   for (let offset = trendRange.value - 1; offset >= 0; offset--) {
     const date = new Date();
     date.setDate(date.getDate() - offset);
     const dateText = toDateText(date);
-    // 收费患者数据无工作流状态字段，仅来访患者总数是真实信号
+    const rows = patientsByEncounterDate.value.get(dateText) || [];
     items.push({
       date: dateText,
       label: offset === 0 ? "今天" : `${date.getMonth() + 1}/${date.getDate()}`,
-      total: (patientsByEncounterDate.value.get(dateText) || []).length
+      total: rows.length,
+      // 悬浮词典卡明细：最多 10 条（主诉仅管理员可见）
+      patients: rows.slice(0, 10).map(patient => ({ name: patient.name, complaint: complaintForPatient(patient) }))
     });
   }
   return items;
@@ -979,6 +998,15 @@ const loadPrimaryDashboard = async () => {
     ElMessage.error((error as Error).message);
   } finally {
     dashboardLoading.value = false;
+  }
+  // 管理员额外加载前置病例（登记主诉）供曲线悬浮词典卡使用；失败静默不打扰主视图
+  if (isAdmin.value) {
+    try {
+      const { data } = await getPreAiPatientCasesApi();
+      preAiCases.value = data.list || [];
+    } catch {
+      preAiCases.value = [];
+    }
   }
 };
 

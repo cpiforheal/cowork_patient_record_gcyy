@@ -37,8 +37,10 @@ use([CanvasRenderer, LineChart, GridComponent, LegendComponent, TooltipComponent
 export interface DailyCurveItem {
   date: string;
   label: string;
-  /** 当日来访患者数（数据源：患者收费信息，无工作流状态字段，其余状态系列已移除） */
+  /** 当日来访患者数 */
   total: number;
+  /** 当日患者明细（姓名+登记主诉），悬浮词典卡展示，最多 10 条；仅管理员提供主诉 */
+  patients?: { name: string; complaint: string }[];
 }
 
 const props = withDefaults(
@@ -73,6 +75,14 @@ const peak = computed(() =>
 const peakLabel = computed(() => (peak.value.total ? `${peak.value.label} ${peak.value.total}人` : "—"));
 const maxValue = computed(() => Math.max(5, ...props.items.map(item => item.total)));
 
+/** HTML 转义：患者姓名/主诉进入 tooltip 富文本前转义 */
+const escapeHtml = (value: string) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
 const chartOption = computed<EChartsOption>(() => {
   const p = palette.value;
   const labels = props.items.map(item => item.label);
@@ -80,9 +90,10 @@ const chartOption = computed<EChartsOption>(() => {
   return {
     animation: true,
     animationDuration: 520,
-    animationDurationUpdate: 240,
+    // 切换 7/14/30 天窗口时曲线平滑形变过渡
+    animationDurationUpdate: 600,
     animationEasing: "cubicOut",
-    animationEasingUpdate: "cubicOut",
+    animationEasingUpdate: "cubicInOut",
     tooltip: {
       trigger: "axis",
       confine: true,
@@ -98,8 +109,22 @@ const chartOption = computed<EChartsOption>(() => {
       },
       formatter: (params: any) => {
         const point = Array.isArray(params) ? params[0] : params;
-        const date = props.items[point?.dataIndex]?.date || point?.axisValue || "";
-        return `<b>${date}</b><br/><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.blue};margin-right:8px"></span>来访患者<span style="float:right;margin-left:20px;font-weight:700;color:${p.text}">${point?.value ?? 0} 人</span>`;
+        const item = props.items[point?.dataIndex];
+        const date = item?.date || point?.axisValue || "";
+        const head = `<b>${date} · 来访患者 ${point?.value ?? 0} 人</b>`;
+        const patients = item?.patients || [];
+        if (!patients.length) return `${head}<br/><span style="color:${p.muted}">暂无患者</span>`;
+        const rows = patients
+          .map(patient => {
+            const value = patient.complaint || "—";
+            return `<span style="color:${p.muted}">${escapeHtml(patient.name)}</span>：<span style="font-weight:600">${escapeHtml(value)}</span>`;
+          })
+          .join("<br/>");
+        const overflow =
+          item.total > patients.length
+            ? `<br/><span style="color:${p.muted};font-size:12px">仅展示前 ${patients.length} 位患者</span>`
+            : "";
+        return `${head}<br/>${rows}${overflow}`;
       }
     },
     grid: { left: 58, right: 34, top: 40, bottom: 42, containLabel: true },
@@ -128,9 +153,9 @@ const chartOption = computed<EChartsOption>(() => {
         data: actual,
         smooth: 0.42,
         symbol: "circle",
-        symbolSize: 9,
+        symbolSize: 8,
         showSymbol: false,
-        lineStyle: { width: 4, color: p.blue, cap: "round", join: "round" },
+        lineStyle: { width: 3, color: p.blue, cap: "round", join: "round" },
         itemStyle: { color: p.blue, borderColor: "#ffffff", borderWidth: 2 },
         emphasis: { focus: "series", scale: true },
         areaStyle: { color: "rgba(22, 131, 255, 0.05)" },
