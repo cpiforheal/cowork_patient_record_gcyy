@@ -220,7 +220,7 @@ public class PolicyBriefCollectService {
             if (url.isBlank() || !url.startsWith("http") || title.length() < 10) continue;
             if (url.equals(source.listUrl()) || !perSourceUrls.add(url)) continue;
             if (title.matches("^(更多|详情|首页|上一页|下一页|末页|返回).*")) continue;
-            if (!source.keywords().isEmpty() && source.keywords().stream().noneMatch(title::contains)) continue;
+            if (isNoise(source, title, url)) continue;
             items.add(new ExtractedItem(title, url, extractDateNear(anchor)));
         }
         return items;
@@ -238,19 +238,35 @@ public class PolicyBriefCollectService {
             String pubDate = item.selectFirst("pubDate") != null ? item.selectFirst("pubDate").text().trim() : "";
             if (url.isBlank() || !url.startsWith("http") || title.length() < 10) continue;
             if (!perSourceUrls.add(url)) continue;
-            if (!source.keywords().isEmpty() && source.keywords().stream().noneMatch(title::contains)) continue;
+            if (isNoise(source, title, url)) continue;
             items.add(new ExtractedItem(title, url, normalizeRssDate(pubDate)));
         }
         return items;
     }
 
-    /** RFC-1123 日期（Bing RSS pubDate）→ yyyy-MM-dd；解析失败原样截断保留。 */
+    /** 通用噪音过滤：UGC 域名黑名单 + 标题噪音词 + 必含词 + 任一关键词。 */
+    private boolean isNoise(PolicyBriefSources.SourceSpec source, String title, String url) {
+        String urlLower = url.toLowerCase();
+        for (String domain : PolicyBriefSources.DOMAIN_BLACKLIST) {
+            if (urlLower.contains(domain)) return true;
+        }
+        for (String noise : PolicyBriefSources.TITLE_NOISE_WORDS) {
+            if (title.contains(noise)) return true;
+        }
+        for (String required : source.requireAll()) {
+            if (!title.contains(required)) return true;
+        }
+        if (!source.keywords().isEmpty() && source.keywords().stream().noneMatch(title::contains)) return true;
+        return false;
+    }
+
+    /** RFC-1123 日期（Bing RSS pubDate）→ yyyy-MM-dd HH:mm；解析失败原样截断保留。 */
     private String normalizeRssDate(String raw) {
         try {
-            return LocalDateTime.ofInstant(
+            return java.time.LocalDateTime.ofInstant(
                 java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME.parse(raw, java.time.Instant::from),
                 java.time.ZoneId.systemDefault()
-            ).format(DATE_FORMATTER);
+            ).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
         } catch (RuntimeException error) {
             return trim(raw, 30);
         }
@@ -260,15 +276,15 @@ public class PolicyBriefCollectService {
         return String.valueOf(raw == null ? "" : raw).replaceAll("\\s+", " ").trim();
     }
 
-    /** 条目日期：优先锚点自身与父块文本中的 20xx 日期串；解析不出留空（不阻塞入库）。 */
+    /** 条目日期：优先锚点自身与父块文本中的 20xx 日期串，归一为 yyyy-MM-dd；解析不出留空（不阻塞入库）。 */
     private String extractDateNear(Element anchor) {
         for (Element scope : List.of(anchor, anchor.parent(), anchor.parent() != null ? anchor.parent().parent() : null)) {
             if (scope == null) continue;
             java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("20\\d{2}[-/年.]\\s?\\d{1,2}[-/月.]\\s?\\d{1,2}日?")
+                .compile("(20\\d{2})[-/年.]\\s?(\\d{1,2})[-/月.]\\s?(\\d{1,2})日?")
                 .matcher(scope.text());
             if (matcher.find()) {
-                return matcher.group().replaceAll("\\s+", "");
+                return String.format("%s-%02d-%02d", matcher.group(1), Integer.parseInt(matcher.group(2)), Integer.parseInt(matcher.group(3)));
             }
         }
         return "";
@@ -339,15 +355,16 @@ public class PolicyBriefCollectService {
         }
     }
 
-    private String fetchArticleText(String url, String fallbackTitle) throws IOException {
+    private String fetchArticleText(String url, String fallbackTitle) {
         try {
             Document document = Jsoup.connect(url).userAgent(USER_AGENT).timeout(10_000).followRedirects(true).get();
             String text = document.body() == null ? "" : document.body().text();
             text = text.replaceAll("\\s+", " ").trim();
             if (text.length() > ARTICLE_TEXT_LIMIT) text = text.substring(0, ARTICLE_TEXT_LIMIT);
             return text.isBlank() ? "(正文抓取失败，仅基于标题判断)" : text;
-        } catch (RuntimeException error) {
-            return "(正文抓取失败，仅基于标题判断)";
+        } catch (IOException | RuntimeException error) {
+            // 正文被反爬拦截（如 403）时退回标题摘要，不让单条正文失败拖垮整条资讯
+            return "(正文抓取失败，仅基于标题判断) 标题：" + fallbackTitle;
         }
     }
 
@@ -440,7 +457,8 @@ public class PolicyBriefCollectService {
             sql.append(" AND category = ?");
             args.add(safeCategory);
         }
-        sql.append(" ORDER BY created_at DESC, id DESC LIMIT 100");
+        // 发布时间 desc 优先（published_at 已归一为定长格式，字符串序即时间序），无发布时间的按入库时间沉底
+        sql.append(" ORDER BY published_at DESC, created_at DESC, id DESC LIMIT 100");
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(sql.toString(), args.toArray())) {
             Map<String, Object> item = new LinkedHashMap<>();
