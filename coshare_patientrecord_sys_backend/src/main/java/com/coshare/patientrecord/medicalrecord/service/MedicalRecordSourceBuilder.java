@@ -191,7 +191,8 @@ public class MedicalRecordSourceBuilder {
         if ("INSPECTION".equals(stageCode)) {
             result.remove(List.of("visualFindings", "digitalExamFindings", "anoscopyFindings", "factualConclusion", "factualConclusionOverride", "factualConclusionSourceHash", "factualConclusionConfirmed"));
         } else if ("RECEPTION".equals(stageCode)) {
-            result.remove(List.of("prolapseReduction", "associatedSymptoms"));
+            // receptionCommunication 为接诊沟通留存信息，不进入 AI 病历生成
+            result.remove(List.of("prolapseReduction", "associatedSymptoms", "receptionCommunication"));
         }
         return result;
     }

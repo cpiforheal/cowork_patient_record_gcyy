@@ -25,31 +25,29 @@ export const humanValue = (value: any): string => {
 };
 
 export const buildLabPreviewReports = (reports: LabReportSnapshot[]): DocumentPreviewLabReport[] =>
-  reports
-    .map(report => {
-      const metrics = materializeLabMetrics(report.templateId, report.metrics)
-        .map<DocumentPreviewLabMetric>((metric, index) => {
-          const abnormal = labMetricAbnormalLabel(metric);
-          return {
-            key: `${report.id}-${metric.shortName || metric.name || index}`,
-            name: metric.name || "未命名指标",
-            shortName: metric.shortName || "",
-            value: String(metric.value || "待补充"),
-            unit: metric.unit || "",
-            reference: metric.reference || "",
-            abnormal,
-            severity: metric.severity || (metric.critical ? "CRITICAL" : abnormal ? "ABNORMAL" : "NORMAL")
-          };
-        });
-
+  reports.map(report => {
+    const metrics = materializeLabMetrics(report.templateId, report.metrics).map<DocumentPreviewLabMetric>((metric, index) => {
+      const abnormal = labMetricAbnormalLabel(metric);
       return {
-        key: report.id,
-        title: report.templateName,
-        reportDate: report.reportDate,
-        abnormalMetrics: metrics.filter(metric => Boolean(metric.abnormal)),
-        normalMetrics: metrics.filter(metric => !metric.abnormal)
+        key: `${report.id}-${metric.shortName || metric.name || index}`,
+        name: metric.name || "未命名指标",
+        shortName: metric.shortName || "",
+        value: String(metric.value || "待补充"),
+        unit: metric.unit || "",
+        reference: metric.reference || "",
+        abnormal,
+        severity: metric.severity || (metric.critical ? "CRITICAL" : abnormal ? "ABNORMAL" : "NORMAL")
       };
     });
+
+    return {
+      key: report.id,
+      title: report.templateName,
+      reportDate: report.reportDate,
+      abnormalMetrics: metrics.filter(metric => Boolean(metric.abnormal)),
+      normalMetrics: metrics.filter(metric => !metric.abnormal)
+    };
+  });
 
 interface DocumentPreviewBuilderOptions {
   workspace: PreAiWorkspace;
@@ -90,6 +88,7 @@ const buildStageSection = (
   const form = stageForms[code];
   const rows = stageByCode(code)
     .fields.filter(field => !excludedKeys.includes(field.key))
+    .filter(field => !field.patientInfoOnly)
     .filter(field => !field.visible || field.visible(form))
     .filter(field => {
       const value = form[field.key];

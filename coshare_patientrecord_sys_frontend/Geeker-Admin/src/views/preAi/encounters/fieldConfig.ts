@@ -49,6 +49,8 @@ export interface PreAiFieldConfig {
   quickTemplates?: Array<{ label: string; value: string }>;
   supplementKey?: string;
   emphasis?: "priority";
+  /** 仅作为患者信息留存：不进入模板预览态与导出/AI 病历（后端导出白名单同样不含该字段） */
+  patientInfoOnly?: boolean;
 }
 
 export interface PreAiStageConfig {
@@ -687,6 +689,16 @@ export const preAiStages: PreAiStageConfig[] = [
         span: 2
       },
       { key: "dispositionSuggestion", label: "建议门诊/住院", kind: "select", required: true, options: routeOptions },
+      {
+        key: "receptionCommunication",
+        label: "接诊沟通",
+        kind: "textarea",
+        rows: 3,
+        span: 2,
+        emphasis: "priority",
+        patientInfoOnly: true,
+        placeholder: "记录与患者的沟通要点（如报销说明、自费金额区间、手术室特殊交代等）；仅作为患者信息留存，不进入病历文档"
+      },
       {
         key: "dispositionSupplement",
         label: "就诊情况补充说明",

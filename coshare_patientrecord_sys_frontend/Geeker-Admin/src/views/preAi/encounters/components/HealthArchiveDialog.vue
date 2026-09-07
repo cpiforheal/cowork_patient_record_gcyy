@@ -950,6 +950,8 @@ const preAiReference = computed(() => {
     "接诊建议分支",
     reception.dispositionSuggestion === "INPATIENT" ? "住院" : reception.dispositionSuggestion === "OUTPATIENT" ? "门诊" : ""
   );
+  // 接诊沟通：中优先级患者信息词条（仅留存展示，不进病历文档）
+  push("接诊沟通", reception.receptionCommunication);
   return { items };
 });
 

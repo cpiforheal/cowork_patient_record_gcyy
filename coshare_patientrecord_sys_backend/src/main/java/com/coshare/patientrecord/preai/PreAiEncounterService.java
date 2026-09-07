@@ -129,7 +129,9 @@ public class PreAiEncounterService {
             "medicationHistory", "allergyHistory", "allergyHistoryNote", "personalHistory", "maritalHistory", "familyHistory", "historySupplement",
             "reviewOpinion", "nextStepRecommendation", "dispositionSuggestion", "dispositionSupplement", "recommendedAuxiliaryExams", "specialCircumstances",
             "chiefComplaintSupplement", "receptionSpecialDescription", "physicalExam", "physicalExamOverride",
-            "physicalExamSourceHash", "physicalExamConfirmed"
+            "physicalExamSourceHash", "physicalExamConfirmed",
+            // 接诊沟通：仅患者信息留存，后端导出白名单与 AI 病历源均不含该字段
+            "receptionCommunication"
         ),
         // 护理部（住院专属）：病史采集与四测信息纳入导出白名单，接诊岗未填的病史字段由护理岗回退补齐（见 PreAiPrivacyService.buildDocumentView）
         "NURSING", Set.of(
