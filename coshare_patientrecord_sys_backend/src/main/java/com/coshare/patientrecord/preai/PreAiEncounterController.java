@@ -62,6 +62,12 @@ public class PreAiEncounterController {
             service.registerExistingAndIssue(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    /** 撤回复诊（仅管理员）：作废最新一次误建的来访子病历，主档案回到上一次来访。 */
+    @PostMapping("/{encounterId}/follow-up/withdraw")
+    public ApiResult<Map<String, Object>> withdrawFollowUp(@PathVariable String encounterId) {
+        return ApiResult.of(200, "复诊已撤回", service.withdrawFollowUp(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/imports/{patientId}")
     public ApiResult<Map<String, Object>> importLegacy(@PathVariable String patientId) {
         return ApiResult.of(200, "旧患者资料已导入或复用现有前置病历", service.importLegacy(patientId, AuthPermission.currentUserOrThrow()));

@@ -505,7 +505,7 @@ public class PreAiEncounterService {
                 rows.add(patientCase);
                 return;
             }
-            encounters.removeIf(encounter -> !canAccessEncounter(text(encounter, "id"), user));
+            encounters.removeIf(encounter -> "CANCELLED".equals(text(encounter, "status")) || !canAccessEncounter(text(encounter, "id"), user));
             if (encounters.isEmpty()) return;
             patientCase.put("visitCount", encounters.size());
             if (!encounters.isEmpty()) patientCase.set("latestEncounter", encounterSummary(encounters.get(0)));
@@ -577,6 +577,66 @@ public class PreAiEncounterService {
         jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", toJson(patient), now(), patientCaseId);
         audit(text(workspace.path("encounter"), "id"), "encounter.followup.create", "REGISTRATION", user, "创建第 " + visitNo + " 次来访子病历");
         return toMap(workspace);
+    }
+
+    /**
+     * 撤回复诊（仅管理员）：作废最新一次误建的来访子病历，患者主档案回到上一次来访。
+     * 仅允许撤回"最新且无后续科室内容"的复诊：除登记外全部阶段仍为草稿、无化验报告、状态进行中。
+     */
+    @Transactional
+    public Map<String, Object> withdrawFollowUp(String encounterId, SessionUser user) {
+        requireRole(user, "admin");
+        ObjectNode encounter = loadEncounter(encounterId);
+        int visitNo = encounter.path("visitNo").asInt(1);
+        if (visitNo <= 1) throw conflict("初诊记录不能撤回");
+        if (!"IN_PROGRESS".equals(text(encounter, "status"))) throw conflict("仅进行中的复诊可撤回");
+        String patientCaseId = text(encounter, "patientCaseId");
+        Integer laterCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_encounters WHERE patient_case_id = ? AND visit_no > ?",
+            Integer.class, patientCaseId, visitNo
+        );
+        if (laterCount != null && laterCount > 0) throw conflict("仅可撤回最新一次来访复诊");
+        List<String> advanced = jdbcTemplate.query(
+            "SELECT stage_code FROM pre_ai_stage_submissions WHERE encounter_id = ? AND stage_code <> 'REGISTRATION' AND status <> 'DRAFT'",
+            (rs, rowNum) -> rs.getString("stage_code"), encounterId
+        );
+        if (!advanced.isEmpty()) throw conflict("该复诊已有后续科室内容（" + String.join("、", advanced) + "），不能撤回");
+        Integer labReports = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_lab_reports WHERE encounter_id = ? AND status = 'ACTIVE'",
+            Integer.class, encounterId
+        );
+        if (labReports != null && labReports > 0) throw conflict("该复诊已上传化验报告，不能撤回");
+
+        String previousId = text(encounter, "followUpOfEncounterId");
+        if (previousId.isBlank()) {
+            List<ObjectNode> previous = jdbcTemplate.query(
+                "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? AND visit_no = ? ORDER BY created_at DESC LIMIT 1",
+                (rs, rowNum) -> readEncounter(rs), patientCaseId, visitNo - 1
+            );
+            if (previous.isEmpty()) throw conflict("找不到上一次来访记录，无法撤回");
+            previousId = text(previous.get(0), "id");
+        }
+        ObjectNode previousEncounter = loadEncounter(previousId);
+        String originalVisitDate = text(previousEncounter.path("patient"), "visitDate");
+
+        // 作废来访子病历与就诊卡
+        jdbcTemplate.update("UPDATE pre_ai_encounters SET status = 'CANCELLED', current_stage = 'RECEPTION', updated_at = ? WHERE id = ?", now(), encounterId);
+        jdbcTemplate.update("UPDATE pre_ai_care_encounters SET status = 'CANCELLED', ended_at = CURRENT_TIMESTAMP(3) WHERE clinical_encounter_id = ? AND status = 'ACTIVE'", encounterId);
+        // 作废化验/知情任务与队列号
+        jdbcTemplate.update("UPDATE pre_ai_auxiliary_tasks SET status = 'CANCELLED', updated_at = ?, updated_by = ? WHERE encounter_id = ? AND status NOT IN ('CANCELLED', 'INACTIVE')", now(), user.name(), encounterId);
+        jdbcTemplate.update(
+            "UPDATE clinic_queue_tasks t JOIN clinic_queue_tickets k ON k.id = t.ticket_id SET t.status = 'CANCELLED', t.updated_at = ?, t.updated_by = ? "
+                + "WHERE k.encounter_id = ? AND t.status NOT IN ('CANCELLED', 'DONE', 'SKIPPED')",
+            now(), user.name(), encounterId
+        );
+        jdbcTemplate.update("UPDATE clinic_queue_tickets SET overall_status = 'CANCELLED', updated_at = ? WHERE encounter_id = ? AND overall_status <> 'CANCELLED'", now(), encounterId);
+        // 主档案就诊日期回到上一次来访
+        ObjectNode patientCase = loadPatientCase(patientCaseId);
+        ObjectNode patient = safeObject(patientCase.path("patient"));
+        if (!originalVisitDate.isBlank()) patient.put("visitDate", originalVisitDate);
+        jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", toJson(patient), now(), patientCaseId);
+        audit(encounterId, "encounter.followup.withdraw", "REGISTRATION", user, "撤回第 " + visitNo + " 次来访复诊，流程回到第 " + (visitNo - 1) + " 次");
+        return toMap(workspace(previousId, user));
     }
 
     private String validateRegistrationRequestId(String value) {

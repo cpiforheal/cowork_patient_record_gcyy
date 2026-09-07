@@ -465,6 +465,10 @@ export const registerAndIssuePreAiFollowUpApi = (patientCaseId: string, payload:
     payload
   );
 
+/** 撤回复诊（仅管理员）：作废最新一次误建的来访子病历，主档案回到上一次来访 */
+export const withdrawPreAiFollowUpApi = (encounterId: string) =>
+  jsonRequest<unknown>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/follow-up/withdraw`, "POST", {});
+
 export const getPreAiEncounterHistoryApi = async (patientCaseId: string, signal?: AbortSignal) => {
   const result = await clinicFetch(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/encounters/history`, {
     headers: authHeaders(),

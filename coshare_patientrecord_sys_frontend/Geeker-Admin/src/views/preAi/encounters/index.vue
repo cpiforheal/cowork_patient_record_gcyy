@@ -131,6 +131,19 @@
               >
                 新增复诊
               </button>
+              <button
+                v-if="
+                  canWithdrawFollowUp &&
+                  item.latestEncounter?.visitNo &&
+                  item.latestEncounter.visitNo > 1 &&
+                  item.latestEncounter.status === 'IN_PROGRESS'
+                "
+                type="button"
+                class="encounter-row-followup is-withdraw"
+                @click.stop="withdrawFollowUp(item)"
+              >
+                撤回复诊
+              </button>
             </article>
           </div>
           <div v-else class="patient-archive-masonry">
@@ -188,6 +201,19 @@
                 @click.stop="openFollowUpDialog(item)"
               >
                 新增复诊
+              </button>
+              <button
+                v-if="
+                  canWithdrawFollowUp &&
+                  item.latestEncounter?.visitNo &&
+                  item.latestEncounter.visitNo > 1 &&
+                  item.latestEncounter.status === 'IN_PROGRESS'
+                "
+                type="button"
+                class="encounter-row-followup is-withdraw"
+                @click.stop="withdrawFollowUp(item)"
+              >
+                撤回复诊
               </button>
             </article>
           </div>
@@ -1832,6 +1858,7 @@ import {
   confirmPreAiReviewApi,
   registerAndIssuePreAiEncounterApi,
   registerAndIssuePreAiFollowUpApi,
+  withdrawPreAiFollowUpApi,
   downloadPreAiAttachmentApi,
   downloadPreAiExportApi,
   downloadPreAiOutpatientRecordApi,
@@ -1936,6 +1963,7 @@ const route = useRoute();
 const router = useRouter();
 const currentRole = computed(() => userStore.userInfo.role || "");
 const canManageFollowUp = computed(() => ["inspection", "admin", "doctor", "tcm"].includes(currentRole.value));
+const canWithdrawFollowUp = computed(() => currentRole.value === "admin" && canCreateEncounter.value);
 const currentUser = computed(() => userStore.userInfo as typeof userStore.userInfo & { id?: string; username?: string });
 const currentUserId = computed(() => String(currentUser.value.id || ""));
 const currentUserName = computed(() => String(currentUser.value.name || currentUser.value.username || ""));
@@ -4120,6 +4148,27 @@ const openFollowUpDialog = (patientCase: PreAiPatientCase) => {
   followUpDialogVisible.value = true;
 };
 
+// 撤回复诊（仅管理员）：作废最新一次误建的来访子病历，患者流程回到上一次来访
+const withdrawFollowUp = (patientCase: PreAiPatientCase) => {
+  const latest = patientCase.latestEncounter;
+  if (!latest || !latest.visitNo || latest.visitNo <= 1) return;
+  ElMessageBox.confirm(
+    `确认撤回 ${patientCase.patientName} 的第 ${latest.visitNo} 次复诊吗？该次来访记录将作废，患者流程回到第 ${latest.visitNo - 1} 次。`,
+    "撤回复诊",
+    { type: "warning", confirmButtonText: "确认撤回", cancelButtonText: "取消" }
+  )
+    .then(() =>
+      runAction(async () => {
+        await withdrawPreAiFollowUpApi(latest.id);
+        ElMessage.success("复诊已撤回，患者流程已回到上一次来访");
+        await loadEncounterList();
+      })
+    )
+    .catch(error => {
+      if (error !== "cancel" && error !== "close") ElMessage.error((error as Error)?.message || "撤回复诊失败");
+    });
+};
+
 const createFollowUp = async () => {
   if (!followUpPatientCase.value || !followUpForm.visitDate) {
     ElMessage.warning("请选择本次来访时间");
@@ -6186,6 +6235,13 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .encounter-row-main:focus-visible,
+.encounter-row-followup.is-withdraw {
+  color: var(--el-color-danger);
+  border-color: color-mix(in srgb, var(--el-color-danger) 35%, var(--el-border-color));
+}
+.encounter-row-followup.is-withdraw:hover {
+  background: color-mix(in srgb, var(--el-color-danger) 8%, var(--el-bg-color));
+}
 .encounter-row-followup:focus-visible {
   outline: 2px solid var(--el-color-primary);
   outline-offset: 2px;
