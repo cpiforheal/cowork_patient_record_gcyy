@@ -1,13 +1,15 @@
 package com.coshare.patientrecord.policybrief;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
  * 医政早报信息源配置（一期代码常量，二期再做源管理界面）。
  *
- * <p>解析策略为通用启发式（见 PolicyBriefCollectService.extractListItems）：按"同域链接 + 标题长度 + 日期正则"
- * 从列表页提取条目，不依赖每个站点的精确 CSS 选择器；单源结构变化时优先微调本处的 keywords / url，
- * 单源失败只记日志不影响其他源。
+ * <p>两类源：① 政府/机构列表页直连（通用启发式解析：同域链接 + 标题长度 + 日期正则）；
+ * ② Bing 搜索 RSS（format=rss，服务会自动识别 XML 分支解析 item/title/link/pubDate），
+ * 用于覆盖无 RSS、反爬（如卫健委 412）或已下线的目标站点。源 2026-09-07 全部实测可达。
  */
 public final class PolicyBriefSources {
 
@@ -28,15 +30,12 @@ public final class PolicyBriefSources {
 
     private PolicyBriefSources() {}
 
+    private static String bingRss(String query) {
+        return "https://cn.bing.com/search?format=rss&q=" + URLEncoder.encode(query, StandardCharsets.UTF_8);
+    }
+
     public static List<SourceSpec> all() {
         return List.of(
-            new SourceSpec(
-                "国家卫健委 · 政策文件",
-                CATEGORY_POLICY,
-                "http://www.nhc.gov.cn/wjw/zcwj/list.shtml",
-                List.of(),
-                10
-            ),
             new SourceSpec(
                 "国家医保局 · 政策法规",
                 CATEGORY_DIP,
@@ -45,31 +44,31 @@ public final class PolicyBriefSources {
                 10
             ),
             new SourceSpec(
-                "国家医保局 · DRG/DIP 支付方式改革",
-                CATEGORY_DIP,
-                "https://www.nhsa.gov.cn/col/col892/index.html",
-                List.of("DIP", "DRG", "支付", "结算", "医保"),
-                8
-            ),
-            new SourceSpec(
-                "河南省医疗保障局 · 政务动态",
-                CATEGORY_DIP,
-                "https://ylbz.henan.gov.cn/zwdt/index.html",
-                List.of("医保", "DIP", "DRG", "支付", "报销", "集采"),
-                8
-            ),
-            new SourceSpec(
-                "河南省卫生健康委 · 新闻动态",
+                "河南省卫健委 · 要闻动态",
                 CATEGORY_POLICY,
-                "https://wsjkw.henan.gov.cn/2021/05-27/xwzx.shtml",
-                List.of("医疗", "医院", "卫生", "诊疗", "规范", "质控"),
+                "https://wsjkw.henan.gov.cn/ywdt/",
+                List.of("医疗", "卫生", "医院", "诊疗", "质控", "公卫", "护理"),
                 8
             ),
             new SourceSpec(
                 "肛肠学术动态",
                 CATEGORY_ANORECTAL,
-                "https://www.gcjxzz.com/CN/volumn/home.shtml",
+                bingRss("肛肠 OR 痔疮 OR 肛瘘 指南 OR 共识 OR 研究"),
                 List.of("肛", "痔", "瘘", "直肠"),
+                8
+            ),
+            new SourceSpec(
+                "DIP 支付改革动态",
+                CATEGORY_DIP,
+                bingRss("DIP 支付方式改革 医保"),
+                List.of("DIP", "DRG", "医保", "支付", "结算"),
+                8
+            ),
+            new SourceSpec(
+                "医政政策动态",
+                CATEGORY_POLICY,
+                bingRss("卫健委 政策文件 医疗 规范"),
+                List.of("卫生", "医疗", "政策", "规范", "通知", "委"),
                 8
             )
         );

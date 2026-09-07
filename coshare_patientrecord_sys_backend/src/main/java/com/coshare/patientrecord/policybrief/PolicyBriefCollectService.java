@@ -199,11 +199,17 @@ public class PolicyBriefCollectService {
     private record ExtractedItem(String title, String url, String publishedAt) {}
 
     private List<ExtractedItem> extractListItems(PolicyBriefSources.SourceSpec source) throws IOException {
-        Document document = Jsoup.connect(source.listUrl())
+        org.jsoup.Connection.Response response = Jsoup.connect(source.listUrl())
             .userAgent(USER_AGENT)
             .timeout(10_000)
             .followRedirects(true)
-            .get();
+            .execute();
+        String body = response.body();
+        // RSS 源（如 Bing 搜索 RSS）：XML 解析 item/title/link/pubDate
+        if (body.contains("<rss") || body.contains("<?xml")) {
+            return extractRssItems(body, source);
+        }
+        Document document = response.parse();
         List<ExtractedItem> items = new ArrayList<>();
         Set<String> perSourceUrls = new HashSet<>();
         for (Element anchor : document.select("a[href]")) {
@@ -218,6 +224,36 @@ public class PolicyBriefCollectService {
             items.add(new ExtractedItem(title, url, extractDateNear(anchor)));
         }
         return items;
+    }
+
+    /** RSS/Atom 简版解析：取 item 的 title/link/pubDate，套用与直连源相同的关键词与去重规则。 */
+    private List<ExtractedItem> extractRssItems(String xml, PolicyBriefSources.SourceSpec source) {
+        Document document = Jsoup.parse(xml, source.listUrl(), org.jsoup.parser.Parser.xmlParser());
+        List<ExtractedItem> items = new ArrayList<>();
+        Set<String> perSourceUrls = new HashSet<>();
+        for (Element item : document.select("item")) {
+            if (items.size() >= source.maxItems()) break;
+            String title = normalizeTitle(item.selectFirst("title") != null ? item.selectFirst("title").text() : "");
+            String url = item.selectFirst("link") != null ? item.selectFirst("link").text().trim() : "";
+            String pubDate = item.selectFirst("pubDate") != null ? item.selectFirst("pubDate").text().trim() : "";
+            if (url.isBlank() || !url.startsWith("http") || title.length() < 10) continue;
+            if (!perSourceUrls.add(url)) continue;
+            if (!source.keywords().isEmpty() && source.keywords().stream().noneMatch(title::contains)) continue;
+            items.add(new ExtractedItem(title, url, normalizeRssDate(pubDate)));
+        }
+        return items;
+    }
+
+    /** RFC-1123 日期（Bing RSS pubDate）→ yyyy-MM-dd；解析失败原样截断保留。 */
+    private String normalizeRssDate(String raw) {
+        try {
+            return LocalDateTime.ofInstant(
+                java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME.parse(raw, java.time.Instant::from),
+                java.time.ZoneId.systemDefault()
+            ).format(DATE_FORMATTER);
+        } catch (RuntimeException error) {
+            return trim(raw, 30);
+        }
     }
 
     private String normalizeTitle(String raw) {
@@ -266,12 +302,29 @@ public class PolicyBriefCollectService {
             try {
                 String articleText = fetchArticleText(url, title);
                 String[] summaryResult = requestAiSummary(endpoint, apiKey, title, articleText);
-                jdbcTemplate.update(
-                    "UPDATE policy_brief_item SET ai_summary = ?, ai_model = ?, status = 'SUMMARIZED' WHERE id = ?",
-                    summaryResult[0],
-                    AI_MODEL,
-                    id
-                );
+                String aiCategory = summaryResult[1];
+                boolean categoryValid = List.of(
+                    PolicyBriefSources.CATEGORY_POLICY,
+                    PolicyBriefSources.CATEGORY_DIP,
+                    PolicyBriefSources.CATEGORY_ANORECTAL,
+                    PolicyBriefSources.CATEGORY_GENERAL
+                ).contains(aiCategory);
+                if (categoryValid) {
+                    jdbcTemplate.update(
+                        "UPDATE policy_brief_item SET ai_summary = ?, ai_model = ?, category = ?, status = 'SUMMARIZED' WHERE id = ?",
+                        summaryResult[0],
+                        AI_MODEL,
+                        aiCategory,
+                        id
+                    );
+                } else {
+                    jdbcTemplate.update(
+                        "UPDATE policy_brief_item SET ai_summary = ?, ai_model = ?, status = 'SUMMARIZED' WHERE id = ?",
+                        summaryResult[0],
+                        AI_MODEL,
+                        id
+                    );
+                }
                 summarized[0] += 1;
             } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
