@@ -92,7 +92,7 @@
                 :show-text="false"
                 :stroke-width="6"
               />
-              <DailyPatientCurve :items="dailyCurveItems" />
+              <DailyPatientCurve :items="dailyCurveItems" :disease-stats="diseaseStats" />
               <MiniBarChart
                 compact
                 :title="trendTitle"
@@ -841,6 +841,39 @@ const complaintKeyMap = computed(() => {
 });
 const complaintForPatient = (patient: PatientRow) =>
   complaintKeyMap.value.get(patient.id) || complaintKeyMap.value.get(patient.name) || "";
+
+// 病种分布（仅管理员）：登记病种模板分类 → 窗口内来访患者按病种去重计数
+const diseasesKeyMap = computed(() => {
+  const map = new Map<string, string[]>();
+  preAiCases.value.forEach(cases => {
+    const diseases = cases.patient?.clinicalTemplateDiseases;
+    if (!Array.isArray(diseases) || !diseases.length) return;
+    const names = diseases.map(item => String(item)).filter(Boolean);
+    if (!names.length) return;
+    if (cases.sourcePatientId) map.set(cases.sourcePatientId, names);
+    if (cases.patientName) map.set(cases.patientName, names);
+  });
+  return map;
+});
+const diseaseStats = computed(() => {
+  if (!preAiCases.value.length) return [];
+  const patientsByDisease = new Map<string, Set<string>>();
+  for (let offset = trendRange.value - 1; offset >= 0; offset--) {
+    const date = new Date();
+    date.setDate(date.getDate() - offset);
+    const dateText = toDateText(date);
+    for (const patient of patientsByEncounterDate.value.get(dateText) || []) {
+      const key = patient.id || patient.name;
+      for (const disease of diseasesKeyMap.value.get(patient.id) || diseasesKeyMap.value.get(patient.name) || []) {
+        if (!patientsByDisease.has(disease)) patientsByDisease.set(disease, new Set());
+        patientsByDisease.get(disease)!.add(key);
+      }
+    }
+  }
+  return [...patientsByDisease.entries()]
+    .map(([disease, patients]) => ({ disease, count: patients.size }))
+    .sort((a, b) => b.count - a.count);
+});
 
 const dailyCurveItems = computed(() => {
   const items: {

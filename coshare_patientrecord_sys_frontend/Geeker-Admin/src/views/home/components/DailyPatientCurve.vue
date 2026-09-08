@@ -19,6 +19,13 @@
     </div>
     <VChart v-if="items.length" class="curve-chart" :option="chartOption" autoresize />
     <el-empty v-else description="暂无每日患者数据" :image-size="56" />
+    <!-- 病种分布：窗口内来访患者按预置病种模板分类去重计数（仅管理员有数据） -->
+    <div v-if="diseaseStats?.length" class="disease-strip">
+      <span class="disease-strip-title">病种分布</span>
+      <span v-for="stat in diseaseStats" :key="stat.disease" class="disease-chip">
+        {{ stat.disease }} <b>{{ stat.count }}</b> 人
+      </span>
+    </div>
   </section>
 </template>
 
@@ -48,10 +55,13 @@ const props = withDefaults(
     title?: string;
     subtitle?: string;
     items: DailyCurveItem[];
+    /** 病种分布统计（窗口内来访患者按预置病种模板分类去重计数，降序；仅管理员提供） */
+    diseaseStats?: { disease: string; count: number }[];
   }>(),
   {
     title: "每日患者趋势图",
-    subtitle: "按就诊日期统计 · 与每日患者数据粒度一致"
+    subtitle: "按就诊日期统计 · 与每日患者数据粒度一致",
+    diseaseStats: () => []
   }
 );
 
@@ -214,6 +224,29 @@ const chartOption = computed<EChartsOption>(() => {
 .curve-chart {
   width: 100%;
   height: 340px;
+}
+.disease-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  .disease-strip-title {
+    font-size: 12px;
+    color: var(--hos-chart-muted, #74777d);
+  }
+  .disease-chip {
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--hos-chart-text, #2d2f33);
+    background: var(--hos-chart-panel, #ffffff);
+    border: 1px solid var(--hos-chart-line-soft, rgb(90 110 130 / 10%));
+    border-radius: 999px;
+    b {
+      margin: 0 2px;
+      font-variant-numeric: tabular-nums;
+      color: var(--el-color-primary);
+    }
+  }
 }
 
 @media (width <= 760px) {
