@@ -1830,7 +1830,19 @@
 </template>
 
 <script setup lang="ts" name="preAiEncounters">
-import { computed, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  h,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+  type ComponentPublicInstance
+} from "vue";
 import { ElButton, ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown, Camera, FolderOpened, Plus, Refresh, Search, Upload, User } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -3009,15 +3021,20 @@ const observePatientArchiveCard = (element: Element, item: PreAiPatientCase) => 
   if (observer) observer.observe(element);
   else queuePatientArchiveCardLoad(item);
 };
-const setPatientArchiveMasonryCardRef = (element: Element | null, item: PreAiPatientCase) => {
+const setPatientArchiveMasonryCardRef = (element: Element | ComponentPublicInstance | null, item: PreAiPatientCase) => {
+  // FlipCard 是组件：ref 拿到的是组件实例，需解包 $el 才能交给 IntersectionObserver
+  const el =
+    element && "$el" in (element as Record<string, unknown>)
+      ? ((element as ComponentPublicInstance).$el as Element)
+      : (element as Element | null);
   const existing = patientArchiveCardElements.get(item.id);
   if (existing) patientArchiveObserver?.unobserve(existing);
-  if (!element) {
+  if (!el) {
     patientArchiveCardElements.delete(item.id);
     return;
   }
-  patientArchiveCardElements.set(item.id, element);
-  observePatientArchiveCard(element, item);
+  patientArchiveCardElements.set(item.id, el);
+  observePatientArchiveCard(el, item);
 };
 const abortPatientArchiveMasonryRequests = () => {
   patientArchiveAbortController?.abort();
@@ -6009,7 +6026,7 @@ onBeforeUnmount(() => {
   height: 400px;
   border-radius: 16px;
 }
-.patient-flip-card .flip-card-face {
+.patient-flip-card :deep(.flip-card-face) {
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-left: 4px solid transparent;
@@ -6144,7 +6161,17 @@ onBeforeUnmount(() => {
   gap: 10px;
   height: 100%;
   padding: 14px 16px;
+  overflow: hidden;
   background: color-mix(in srgb, var(--el-color-primary) 4%, var(--el-bg-color));
+  border-radius: inherit;
+}
+
+// 图片仅供预览：小尺寸缩略图，点击经组件内查看器放大
+.patient-flip-back :deep(.attachment-gallery .attachment-card) {
+  width: 104px;
+}
+.patient-flip-back :deep(.attachment-gallery .image-thumbnail) {
+  height: 72px;
 }
 .flip-back-facts {
   display: grid;

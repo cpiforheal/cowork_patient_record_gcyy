@@ -8,7 +8,9 @@
 </template>
 
 <script setup lang="ts">
-// 翻转卡片（inspira 规范本地化）：桌面 hover 翻面，触屏点按翻面；reduced-motion 时无旋转动画直接切换
+// 翻转卡片（inspira 规范本地化）：桌面 hover 翻面，触屏点按翻面。
+// 面切换使用 opacity + visibility 双保险：即使浏览器 backface-visibility 失效，
+// 也不会出现背面内容逃逸容器堆叠渲染的问题。
 import { onMounted, ref } from "vue";
 
 const flipped = ref(false);
@@ -46,12 +48,46 @@ const onToggle = () => {
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
+.flip-card-front {
+  visibility: visible;
+  opacity: 1;
+  transition:
+    opacity 0.3s ease 0.15s,
+    visibility 0.3s ease 0.15s;
+}
 .flip-card-back {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 0.3s ease,
+    visibility 0.3s ease;
   transform: rotateY(180deg);
+}
+.flip-card:hover .flip-card-front,
+.flip-card.is-flipped .flip-card-front {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 0.3s ease,
+    visibility 0.3s ease;
+}
+.flip-card:hover .flip-card-back,
+.flip-card.is-flipped .flip-card-back {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0.15s;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .flip-card-inner {
+    transition: none;
+  }
+  .flip-card-front,
+  .flip-card-back,
+  .flip-card:hover .flip-card-front,
+  .flip-card:hover .flip-card-back,
+  .flip-card.is-flipped .flip-card-front,
+  .flip-card.is-flipped .flip-card-back {
     transition: none;
   }
 }
