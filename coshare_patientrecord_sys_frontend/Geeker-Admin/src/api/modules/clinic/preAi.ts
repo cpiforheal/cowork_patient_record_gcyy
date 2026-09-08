@@ -469,10 +469,6 @@ export const registerAndIssuePreAiFollowUpApi = (patientCaseId: string, payload:
 export const withdrawPreAiFollowUpApi = (encounterId: string) =>
   jsonRequest<unknown>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/follow-up/withdraw`, "POST", {});
 
-/** AI 病种归类（仅管理员）：批量阅读登记主诉归类预置病种并缓存标签 */
-export const runDiseaseTaggingApi = () =>
-  jsonRequest<{ started: boolean; message: string }>("/pre-ai/patients/disease-tags/run", "POST", {});
-
 export const getPreAiEncounterHistoryApi = async (patientCaseId: string, signal?: AbortSignal) => {
   const result = await clinicFetch(`/pre-ai/patients/${encodeURIComponent(patientCaseId)}/encounters/history`, {
     headers: authHeaders(),
