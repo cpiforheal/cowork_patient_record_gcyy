@@ -85,7 +85,7 @@
             </button>
           </div>
           <small v-if="patientArchiveView === 'MASONRY'" class="patient-archive-toolbar__hint">
-            {{ patientArchiveMasonryLoading ? "正在加载图片与主诉" : "保留关键信息，图片点击可放大" }}
+            {{ patientArchiveMasonryLoading ? "正在加载主诉与检查图片" : "hover 翻转查看主诉 · 病种 · 检查图片，背面可直达档案" }}
           </small>
         </div>
         <el-scrollbar height="min(62vh, 620px)">
@@ -146,76 +146,81 @@
               </button>
             </article>
           </div>
-          <div v-else class="patient-archive-masonry">
-            <article
+          <div v-else class="patient-archive-flip-grid">
+            <FlipCard
               v-for="item in filteredPatientCases"
               :key="item.id"
               :ref="element => setPatientArchiveMasonryCardRef(element, item)"
-              class="patient-archive-masonry-card"
+              class="patient-flip-card"
               :class="{ active: item.id === selectedPatientCaseId }"
               :data-patient-case-id="item.id"
             >
-              <button type="button" class="patient-archive-masonry-main" @click="selectPatientCase(item)">
-                <header class="patient-archive-masonry-head">
-                  <strong>{{ item.patientName || "待补姓名" }}</strong>
-                  <span>{{ item.visitCount }} 次来访</span>
-                </header>
-                <div class="patient-archive-info-tags">
-                  <span
-                    v-for="tag in patientArchiveCardTags(item)"
-                    :key="tag.key"
-                    :class="patientArchiveTagClass(tag.key, item.id)"
-                  >
-                    {{ tag.label }}
-                  </span>
-                </div>
-                <div v-if="patientArchiveCardImages(item).length" class="patient-archive-image-strip" @click.stop>
-                  <template v-for="attachment in patientArchiveCardImages(item)" :key="attachment.id">
-                    <el-image
-                      v-if="patientArchiveImageUrls[attachment.id]"
-                      class="patient-archive-thumbnail"
-                      :src="patientArchiveImageUrls[attachment.id]"
-                      :preview-src-list="patientArchiveCardPreviewUrls(item)"
-                      :initial-index="patientArchiveCardPreviewIndex(item, attachment)"
-                      fit="contain"
-                      preview-teleported
-                      hide-on-click-modal
+              <template #front>
+                <button type="button" class="patient-flip-front" @click="selectPatientCase(item)">
+                  <header class="patient-flip-head">
+                    <strong>{{ item.patientName || "待补姓名" }}</strong>
+                    <span class="patient-flip-visit">{{ item.visitCount }} 次来访</span>
+                  </header>
+                  <div class="patient-flip-lines">
+                    <span class="patient-flip-line">📱 {{ item.patient?.phone || "手机号未登记" }}</span>
+                    <span class="patient-flip-line patient-flip-address">📍 {{ item.patient?.address || "住址未登记" }}</span>
+                    <span class="patient-flip-line">
+                      🗓 接诊日期 {{ item.patient?.visitDate || item.latestEncounter?.visitDate || "—" }}
+                    </span>
+                  </div>
+                  <div class="patient-archive-info-tags">
+                    <span
+                      v-for="tag in patientArchiveCardTags(item).slice(0, 3)"
+                      :key="tag.key"
+                      :class="patientArchiveTagClass(tag.key, item.id)"
+                    >
+                      {{ tag.label }}
+                    </span>
+                  </div>
+                  <footer class="patient-flip-foot">
+                    <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
+                    <small>{{ formatPatientCaseRecordTime(item) }}</small>
+                  </footer>
+                  <small class="patient-flip-hint">hover 翻面查看主诉 · 病种 · 检查图片</small>
+                </button>
+              </template>
+              <template #back>
+                <div class="patient-flip-back" @click.stop>
+                  <div class="flip-back-facts">
+                    <p><label>主诉</label>{{ truncatePatientArchiveText(patientArchiveChiefComplaint(item), 60) || "—" }}</p>
+                    <p><label>病种</label>{{ patientArchiveDiseaseDirection(item) || "—" }}</p>
+                  </div>
+                  <div class="flip-back-images">
+                    <AttachmentPreviewGallery
+                      v-if="patientArchiveCardAllImages(item).length"
+                      :attachments="patientArchiveCardAllImages(item).map(attachmentWithDownloadUrl)"
+                      compact
                     />
-                    <div v-else class="patient-archive-thumbnail-state">
-                      {{ patientArchiveImageErrors[attachment.id] || "缩略图加载中" }}
-                    </div>
-                  </template>
+                    <span v-else class="flip-back-empty">{{ patientArchiveCardEmptyText(item) }}</span>
+                  </div>
+                  <div class="flip-back-actions">
+                    <button type="button" @click="openPatientArchiveDetail(item)">主档案</button>
+                    <button type="button" :disabled="!item.latestEncounter" @click="openPatientHealthArchive(item)">
+                      健康档案
+                    </button>
+                    <button v-if="canCreateEncounter" type="button" @click="openFollowUpDialog(item)">新增复诊</button>
+                    <button
+                      v-if="
+                        canWithdrawFollowUp &&
+                        item.latestEncounter?.visitNo &&
+                        item.latestEncounter.visitNo > 1 &&
+                        item.latestEncounter.status === 'IN_PROGRESS'
+                      "
+                      type="button"
+                      class="is-withdraw"
+                      @click="withdrawFollowUp(item)"
+                    >
+                      撤回
+                    </button>
+                  </div>
                 </div>
-                <div v-else class="patient-archive-thumbnail-empty">
-                  {{ patientArchiveCardEmptyText(item) }}
-                </div>
-                <footer class="patient-archive-masonry-foot">
-                  <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
-                  <small>{{ formatPatientCaseRecordTime(item) }}</small>
-                </footer>
-              </button>
-              <button
-                v-if="canCreateEncounter"
-                type="button"
-                class="encounter-row-followup"
-                @click.stop="openFollowUpDialog(item)"
-              >
-                新增复诊
-              </button>
-              <button
-                v-if="
-                  canWithdrawFollowUp &&
-                  item.latestEncounter?.visitNo &&
-                  item.latestEncounter.visitNo > 1 &&
-                  item.latestEncounter.status === 'IN_PROGRESS'
-                "
-                type="button"
-                class="encounter-row-followup is-withdraw"
-                @click.stop="withdrawFollowUp(item)"
-              >
-                撤回复诊
-              </button>
-            </article>
+              </template>
+            </FlipCard>
           </div>
           <el-empty v-if="!filteredPatientCases.length" :image-size="92" description="暂无患者主档案" />
         </el-scrollbar>
@@ -1917,6 +1922,8 @@ import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import OutpatientRecordDialog from "./components/OutpatientRecordDialog.vue";
 import RecordAiChat from "./components/RecordAiChat.vue";
 import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
+import { usePatientNavigation } from "@/hooks/usePatientNavigation";
+import FlipCard from "@/components/inspira/FlipCard.vue";
 import FollowUpTimeline from "./components/FollowUpTimeline.vue";
 import AuxiliaryTaskPanel from "./components/AuxiliaryTaskPanel.vue";
 import LabOcrPanel from "./components/LabOcrPanel.vue";
@@ -1993,7 +2000,7 @@ const patientCases = ref<PreAiPatientCase[]>([]);
 const keyword = ref("");
 const patientArchiveDate = ref("");
 const careSituationFilter = ref<"ALL" | "OUTPATIENT" | "INPATIENT" | "LOW_INCOME">("ALL");
-const patientArchiveView = ref<"LIST" | "MASONRY">("LIST");
+const patientArchiveView = ref<"LIST" | "MASONRY">("MASONRY");
 const selectedPatientCaseId = ref("");
 const patientDrawerOpen = ref(false);
 const selectedEncounterId = ref("");
@@ -2743,7 +2750,6 @@ const patientArchiveCardElements = new Map<string, Element>();
 const patientArchiveLoadQueue: PreAiPatientCase[] = [];
 const patientArchiveQueuedCaseIds = new Set<string>();
 const PATIENT_ARCHIVE_CARD_LOAD_LIMIT = 2;
-const PATIENT_ARCHIVE_THUMBNAIL_LIMIT = 4;
 let patientArchiveActiveLoads = 0;
 let patientArchiveRequestSequence = 0;
 let patientArchiveAbortController: AbortController | undefined;
@@ -2771,15 +2777,13 @@ const patientArchiveDiseaseDirectionText = (value: any) => {
 };
 const patientArchiveStageData = (value: PreAiWorkspace, code: PreAiStageCode) =>
   value.stages.find(stage => stage.stageCode === code)?.data || {};
+// 背面图片墙：当前来访全阶段图片附件（检查室照片 INSPECTION + DR 影像 REGISTRATION 等）
 const patientArchiveImagesFromWorkspace = (value: PreAiWorkspace) =>
   value.attachments
-    .filter(
-      attachment =>
-        attachment.stageCode && patientArchiveImageStageCodes.includes(attachment.stageCode) && isImageAttachment(attachment)
-    )
+    .filter(attachment => isImageAttachment(attachment))
     .sort((left, right) => {
-      const leftStage = patientArchiveImageStageCodes.indexOf(left.stageCode as PreAiStageCode);
-      const rightStage = patientArchiveImageStageCodes.indexOf(right.stageCode as PreAiStageCode);
+      const leftStage = left.stageCode ? patientArchiveImageStageCodes.indexOf(left.stageCode as PreAiStageCode) : -1;
+      const rightStage = right.stageCode ? patientArchiveImageStageCodes.indexOf(right.stageCode as PreAiStageCode) : -1;
       if (leftStage !== rightStage) return leftStage - rightStage;
       return (
         (left.sequenceNo || 0) - (right.sequenceNo || 0) ||
@@ -2844,17 +2848,21 @@ const patientArchiveCardTags = (item: PreAiPatientCase): PatientArchiveInfoTag[]
   if (item.latestEncounter) tags.push({ key: "status", label: encounterStatusLabel[item.latestEncounter.status] });
   return tags.slice(0, 6);
 };
-const patientArchiveCardImages = (item: PreAiPatientCase) =>
-  (patientArchiveDetailOf(item)?.images || []).slice(0, PATIENT_ARCHIVE_THUMBNAIL_LIMIT);
-const patientArchiveCardPreviewUrls = (item: PreAiPatientCase) =>
-  patientArchiveCardImages(item)
-    .map(attachment => patientArchiveImageUrls[attachment.id])
-    .filter(Boolean);
-const patientArchiveCardPreviewIndex = (item: PreAiPatientCase, attachment: PreAiAttachment) => {
-  const imageIds = patientArchiveCardImages(item)
-    .filter(image => patientArchiveImageUrls[image.id])
-    .map(image => image.id);
-  return Math.max(0, imageIds.indexOf(attachment.id));
+const patientArchiveCardAllImages = (item: PreAiPatientCase) => patientArchiveDetailOf(item)?.images || [];
+const { openPatientDetail } = usePatientNavigation();
+const openPatientArchiveDetail = (item: PreAiPatientCase) => {
+  const patientId = item.sourcePatientId || String(item.patient?.id || "");
+  if (!patientId) {
+    ElMessage.warning("该患者暂无主档案 ID，无法直达档案页");
+    return;
+  }
+  patientDrawerOpen.value = false;
+  openPatientDetail(patientId);
+};
+const openPatientHealthArchive = async (item: PreAiPatientCase) => {
+  if (!item.latestEncounter) return;
+  await selectPatientCase(item);
+  openHealthArchive();
 };
 const patientArchiveCardEmptyText = (item: PreAiPatientCase) => {
   const detail = patientArchiveDetailOf(item);
@@ -2922,7 +2930,7 @@ const loadPatientArchiveCard = async (item: PreAiPatientCase, requestSequence: n
       diseaseDirection: patientArchiveDiseaseDirectionFromWorkspace(data),
       images
     };
-    for (const attachment of images.slice(0, PATIENT_ARCHIVE_THUMBNAIL_LIMIT)) {
+    for (const attachment of images) {
       if (signal.aborted || requestSequence !== patientArchiveRequestSequence) return;
       await loadPatientArchiveImage(attachment, signal, requestSequence);
     }
@@ -5321,23 +5329,19 @@ onBeforeUnmount(() => {
   max-height: 68vh;
   padding-right: 4px;
   overflow-y: auto;
-
   &__reference {
     display: grid;
     gap: 8px;
   }
-
   &__file-input {
     display: none;
   }
-
   &__file-actions {
     display: flex;
-    align-items: center;
     flex-wrap: wrap;
     gap: 8px 12px;
+    align-items: center;
   }
-
   &__file-name {
     max-width: 420px;
     overflow: hidden;
@@ -5345,134 +5349,116 @@ onBeforeUnmount(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   &__file-empty {
-    color: #9ca3af;
     font-size: 13px;
+    color: #9ca3af;
   }
-
   &__label {
-    color: #1f2937;
     font-size: 14px;
     font-weight: 650;
+    color: #1f2937;
   }
-
   p {
     margin: 0;
-    color: #6b7280;
     font-size: 12px;
     line-height: 1.7;
+    color: #6b7280;
   }
 }
-
 .workflow-card {
   display: grid;
   gap: 12px;
   padding: 14px;
+  background: var(--el-fill-color-lighter);
   border: 1px solid var(--el-border-color-light);
   border-radius: 12px;
-  background: var(--el-fill-color-lighter);
 }
-
 .workflow-card__head {
   display: flex;
+  gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
 }
-
 .workflow-card__head > div {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 8px;
+  align-items: center;
 }
-
 .workflow-card__head > div:first-child {
   display: grid;
   gap: 4px;
 }
-
 .workflow-card__head small {
-  color: var(--el-text-color-secondary);
   font-weight: 400;
+  color: var(--el-text-color-secondary);
 }
-
 .finding-list,
 .mapping-list {
   display: grid;
   gap: 8px;
 }
-
 .finding-list > div,
 .mapping-list > div {
   display: flex;
-  align-items: flex-start;
   gap: 8px;
-  color: var(--el-text-color-regular);
+  align-items: flex-start;
   font-size: 13px;
   line-height: 1.6;
+  color: var(--el-text-color-regular);
 }
-
 .node-catalog {
   display: grid;
   max-height: 240px;
   padding: 8px;
   overflow-y: auto;
-  border-radius: 8px;
   background: var(--el-bg-color);
+  border-radius: 8px;
 }
-
 .node-catalog :deep(.el-checkbox) {
   height: auto;
   min-height: 38px;
-  margin-right: 0;
   padding: 6px 4px;
+  margin-right: 0;
   white-space: normal;
 }
-
 .node-catalog :deep(.el-checkbox__label) {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
-
 .node-catalog small {
   overflow: hidden;
-  color: var(--el-text-color-secondary);
   font-size: 11px;
+  color: var(--el-text-color-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .task-events {
   max-height: 220px;
   padding: 4px 8px;
   overflow-y: auto;
 }
-
 .inpatient-ai-result {
   display: grid;
   gap: 16px;
-
   &__meta {
     display: flex;
     flex-wrap: wrap;
     gap: 8px 20px;
-    color: #4b5563;
     font-size: 13px;
+    color: #4b5563;
   }
-
   :deep(.el-textarea__inner) {
-    color: #1f2937;
     font-family: inherit;
     line-height: 1.8;
+    color: #1f2937;
     background: #f8fafc;
   }
 }
-
 .pre-ai-page {
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -5486,16 +5472,16 @@ onBeforeUnmount(() => {
 .stage-panel,
 .workflow-empty-panel,
 .template-preview-panel {
-  border: 1px solid var(--el-border-color-light);
   background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-light);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgb(31 78 120 / 8%);
 }
 .page-hero {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
   gap: 20px;
+  align-items: center;
+  justify-content: space-between;
   min-height: 86px;
   padding: 20px 24px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color)), var(--el-bg-color));
@@ -5515,13 +5501,13 @@ onBeforeUnmount(() => {
 }
 .context-restore {
   padding: 6px 12px;
-  color: var(--el-color-primary);
   font-size: 13px;
   font-weight: 700;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 70%, var(--el-bg-color));
   border: 1px solid var(--el-color-primary-light-7);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--el-color-primary-light-9) 70%, var(--el-bg-color));
-  cursor: pointer;
 }
 .context-restore:focus-visible {
   outline: 2px solid var(--el-color-primary-light-3);
@@ -5534,8 +5520,8 @@ onBeforeUnmount(() => {
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
 }
 .hero-actions :deep(.el-button),
 .panel-actions :deep(.el-button),
@@ -5544,29 +5530,29 @@ onBeforeUnmount(() => {
 }
 .panel-heading {
   display: flex;
+  gap: 14px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
   padding-bottom: 12px;
+  margin-bottom: 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--el-border-color-lighter));
 }
 .panel-heading > div:first-child {
-  min-width: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .work-surface-kicker {
-  width: fit-content;
   display: inline-flex;
   align-items: center;
+  width: fit-content;
   padding: 3px 8px;
-  color: var(--el-color-primary);
   font-size: 12px;
   font-weight: 800;
+  color: var(--el-color-primary);
   letter-spacing: 0;
-  border-radius: 999px;
   background: color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color));
+  border-radius: 999px;
 }
 .panel-heading h3 {
   margin: 0;
@@ -5587,9 +5573,10 @@ onBeforeUnmount(() => {
   left: 0;
   width: 4px;
   content: "";
-  border-radius: 0 999px 999px 0;
   background: var(--el-color-primary);
+  border-radius: 0 999px 999px 0;
 }
+
 // 护理部四测强调区：与病史采集常规表单形成视觉分层
 .nursing-vitals-section {
   padding: 14px 16px;
@@ -5598,28 +5585,24 @@ onBeforeUnmount(() => {
   border: 1px solid var(--el-color-primary-light-7);
   border-left: 4px solid var(--el-color-primary);
   border-radius: 10px;
-
   .nursing-vitals-heading {
     display: flex;
+    gap: 12px;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 12px;
     margin-bottom: 10px;
-
     strong {
       font-size: 15px;
       color: var(--el-text-color-primary);
     }
-
     small {
       display: block;
       margin-top: 3px;
-      color: var(--el-text-color-secondary);
       font-size: 12px;
       line-height: 1.6;
+      color: var(--el-text-color-secondary);
     }
   }
-
   .nursing-vitals-input {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5628,19 +5611,16 @@ onBeforeUnmount(() => {
     background: var(--el-bg-color);
     border: 1px dashed var(--el-color-primary-light-5);
     border-radius: 8px;
-
     .vital-field {
       display: flex;
       flex-direction: column;
       gap: 4px;
       min-width: 0;
-
       > span {
         font-size: 12px;
         color: var(--el-text-color-regular);
       }
     }
-
     .vital-record-action {
       display: flex;
       grid-column: 1 / -1;
@@ -5649,53 +5629,44 @@ onBeforeUnmount(() => {
       border-top: 1px solid var(--el-border-color-lighter);
     }
   }
-
   .nursing-vitals-summary {
     margin-top: 12px;
-
     .vitals-summary-title {
       display: flex;
-      align-items: baseline;
       gap: 8px;
+      align-items: baseline;
       margin-bottom: 8px;
-
       strong {
         font-size: 13px;
         color: var(--el-text-color-primary);
       }
-
       small {
         font-size: 12px;
         color: var(--el-text-color-secondary);
       }
     }
-
     .vitals-timeline {
       padding-left: 2px;
-
       :deep(.el-timeline-item__timestamp) {
         font-size: 12px;
         font-variant-numeric: tabular-nums;
       }
     }
-
     .vital-round-card {
       display: flex;
+      gap: 10px;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 10px;
       padding: 8px 10px;
       background: var(--el-bg-color);
       border: 1px solid var(--el-border-color-lighter);
       border-radius: 8px;
     }
-
     .vital-round-values {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
     }
-
     .vital-value-chip {
       display: inline-flex;
       gap: 4px;
@@ -5704,70 +5675,60 @@ onBeforeUnmount(() => {
       font-size: 12px;
       background: var(--el-fill-color-light);
       border-radius: 6px;
-
       em {
         font-style: normal;
         color: var(--el-text-color-secondary);
       }
-
       strong {
         font-variant-numeric: tabular-nums;
       }
-
       i {
         font-style: normal;
         color: var(--el-color-warning);
       }
-
       &.abnormal {
         background: var(--el-color-warning-light-9);
-
         i {
-          color: var(--el-color-danger);
           font-weight: 600;
+          color: var(--el-color-danger);
         }
       }
     }
   }
-
   .vitals-empty-hint {
     margin: 10px 0 0;
     font-size: 12px;
     color: var(--el-text-color-secondary);
   }
 }
-
 .nursing-history-heading {
   margin-top: 4px;
 }
-
 .inspection-narrative-edit {
-  margin: 0 0 16px;
   padding: 14px 16px;
+  margin: 0 0 16px;
+  background: var(--el-color-primary-light-9);
   border: 1px solid var(--el-color-primary-light-5);
   border-radius: 10px;
-  background: var(--el-color-primary-light-9);
 }
 .narrative-heading {
   display: grid;
   gap: 3px;
   margin-bottom: 8px;
-
   strong {
     font-size: 14px;
     color: var(--el-text-color-primary);
   }
-
   small {
-    color: var(--el-text-color-secondary);
     font-size: 12px;
+    color: var(--el-text-color-secondary);
   }
 }
 .stage-form {
   padding: 16px;
+  background: color-mix(in srgb, var(--el-bg-color) 88%, var(--el-color-primary-light-9));
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 16%, var(--el-border-color-lighter));
   border-radius: 14px;
-  background: color-mix(in srgb, var(--el-bg-color) 88%, var(--el-color-primary-light-9));
 }
 .form-grid {
   display: grid;
@@ -5779,9 +5740,9 @@ onBeforeUnmount(() => {
 }
 .form-grid .priority-field {
   padding: 12px;
+  background: var(--el-bg-color);
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--el-border-color-lighter));
   border-radius: 12px;
-  background: var(--el-bg-color);
 }
 .form-grid .secondary-field {
   opacity: 0.88;
@@ -5791,8 +5752,8 @@ onBeforeUnmount(() => {
 }
 .stage-form :deep(.el-form-item__label) {
   padding-bottom: 6px;
-  color: var(--el-text-color-primary);
   font-weight: 700;
+  color: var(--el-text-color-primary);
 }
 .stage-form :deep(.el-input__wrapper),
 .stage-form :deep(.el-textarea__inner),
@@ -5802,28 +5763,28 @@ onBeforeUnmount(() => {
 .heading-tags {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
 }
 .field-noise-toolbar {
   display: flex;
+  gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin: 12px 0 14px;
   padding: 12px 14px;
+  margin: 12px 0 14px;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 76%, var(--el-bg-color));
   border: 1px dashed var(--el-color-primary-light-5);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-color-primary-light-9) 76%, var(--el-bg-color));
 }
 .field-noise-toolbar > div {
-  min-width: 0;
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 .field-noise-toolbar small {
-  color: var(--el-text-color-secondary);
   line-height: 1.5;
+  color: var(--el-text-color-secondary);
 }
 .dialog-field-noise-toolbar {
   margin-top: 14px;
@@ -5836,25 +5797,25 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-regular);
 }
 .history-intake-field :deep(.el-form-item__label) {
-  color: var(--el-color-primary);
   font-weight: 700;
+  color: var(--el-color-primary);
 }
 .history-intake-field :deep(.el-form-item__label)::before {
-  content: "";
   display: inline-block;
   width: 6px;
   height: 6px;
   margin-right: 6px;
-  border-radius: 50%;
-  background: var(--el-color-primary);
   vertical-align: middle;
+  content: "";
+  background: var(--el-color-primary);
+  border-radius: 50%;
 }
 .panel-actions {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
   margin-top: 18px;
 }
 .panel-actions > div {
@@ -5862,15 +5823,15 @@ onBeforeUnmount(() => {
 }
 .patient-archive-trigger {
   display: inline-flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
   min-height: 54px;
   padding: 8px 20px;
-  color: #ffffff;
   font-weight: 800;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 76%, #0f766e));
   border: 0;
   border-radius: 14px;
-  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 76%, #0f766e));
   box-shadow: 0 12px 24px rgb(0 150 136 / 24%);
 }
 .patient-archive-trigger__glyph {
@@ -5878,15 +5839,14 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
   background: rgb(255 255 255 / 18%);
+  border-radius: 10px;
 }
 .patient-archive-trigger__copy {
   display: grid;
   gap: 1px;
   line-height: 1.25;
   text-align: left;
-
   small {
     font-size: 11px;
     font-weight: 500;
@@ -5900,22 +5860,22 @@ onBeforeUnmount(() => {
   box-shadow: 0 14px 28px rgb(0 150 136 / 30%);
 }
 .patient-archive-trigger__count {
-  min-width: 30px;
   display: inline-flex;
   justify-content: center;
+  min-width: 30px;
   padding: 2px 9px;
-  color: var(--el-color-primary);
-  border-radius: 999px;
-  background: #ffffff;
   font-size: 13px;
+  color: var(--el-color-primary);
+  background: #ffffff;
+  border-radius: 999px;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 70%);
 }
 .workspace-shell {
   position: relative;
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
-  flex: 1;
   min-height: 650px;
 }
 .workspace-shell.with-history {
@@ -5926,17 +5886,14 @@ onBeforeUnmount(() => {
   top: 12px;
   align-self: stretch;
   min-height: 240px;
+  touch-action: none;
   cursor: col-resize;
   border-radius: 999px;
-  touch-action: none;
   transition: background-color 0.16s ease;
 }
 .history-resizer::before {
   position: absolute;
-  top: 0;
-  right: -7px;
-  bottom: 0;
-  left: -7px;
+  inset: 0 -7px;
   content: "";
 }
 .history-resizer span {
@@ -5946,8 +5903,8 @@ onBeforeUnmount(() => {
   width: 4px;
   height: 56px;
   margin: 0 auto;
-  border-radius: 999px;
   background: var(--el-border-color);
+  border-radius: 999px;
   transition:
     background-color 0.16s ease,
     transform 0.16s ease;
@@ -5966,18 +5923,18 @@ onBeforeUnmount(() => {
 }
 .history-entry-bar {
   display: flex;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
   padding: 12px 16px;
+  background: var(--el-color-primary-light-9);
   border: 1px solid var(--el-color-primary-light-7);
   border-radius: 12px;
-  background: var(--el-color-primary-light-9);
 }
 .history-entry-bar > div {
-  min-width: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .history-entry-bar small {
   color: var(--el-text-color-secondary);
@@ -6003,35 +5960,35 @@ onBeforeUnmount(() => {
 }
 .patient-archive-toolbar {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
 .patient-archive-view-tags {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
+  background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color-light);
   border-radius: 999px;
-  background: var(--el-fill-color-light);
 }
 .patient-archive-view-tags button {
   min-width: 86px;
   padding: 6px 14px;
-  color: var(--el-text-color-secondary);
   font-size: 13px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: transparent;
   border: 0;
   border-radius: 999px;
-  background: transparent;
-  cursor: pointer;
   transition:
     color 0.16s ease,
     background-color 0.16s ease,
     box-shadow 0.16s ease;
 }
 .patient-archive-view-tags button.active {
-  color: var(--el-color-primary);
   font-weight: 700;
+  color: var(--el-color-primary);
   background: var(--el-bg-color);
   box-shadow: 0 4px 14px rgb(15 23 42 / 8%);
 }
@@ -6042,81 +5999,99 @@ onBeforeUnmount(() => {
 .patient-archive-toolbar__hint {
   color: var(--el-text-color-secondary);
 }
-.patient-archive-masonry {
-  columns: 3 260px;
-  column-gap: 14px;
+.patient-archive-flip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
   padding-right: 8px;
 }
-.patient-archive-masonry-card {
-  display: inline-block;
-  width: 100%;
-  margin: 0 0 14px;
-  overflow: hidden;
+.patient-flip-card {
+  height: 400px;
+  border-radius: 16px;
+}
+.patient-flip-card .flip-card-face {
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-left: 4px solid transparent;
-  border-radius: 14px;
-  background: var(--el-bg-color);
+  border-radius: 16px;
   box-shadow: 0 10px 24px rgb(15 23 42 / 6%);
-  break-inside: avoid;
   transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    background-color 0.16s ease;
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
-.patient-archive-masonry-card:hover,
-.patient-archive-masonry-card.active {
+.patient-flip-card:hover .flip-card-face,
+.patient-flip-card.active .flip-card-face {
   border-color: var(--el-color-primary-light-3);
-  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
-  box-shadow: 0 14px 30px rgb(0 150 136 / 13%);
+  box-shadow: 0 14px 30px rgb(0 150 136 / 15%);
 }
-.patient-archive-masonry-card.active {
+.patient-flip-card.active .flip-card-face {
   border-left-color: var(--el-color-primary);
 }
-.patient-archive-masonry-main {
-  width: 100%;
+.patient-flip-front {
   display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
   gap: 10px;
-  padding: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
   text-align: left;
-  border: 0;
-  background: transparent;
   cursor: pointer;
+  background: transparent;
+  border: 0;
 }
-.patient-archive-masonry-main:focus-visible {
+.patient-flip-front:focus-visible {
   outline: 2px solid var(--el-color-primary);
   outline-offset: -3px;
 }
-.patient-archive-masonry-head {
+.patient-flip-head {
   display: flex;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
 }
-.patient-archive-masonry-head strong {
+.patient-flip-head strong {
   overflow: hidden;
+  font-size: 18px;
   color: var(--el-text-color-primary);
-  font-size: 17px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.patient-archive-masonry-head span {
+.patient-flip-visit {
   flex: 0 0 auto;
   padding: 2px 8px;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 999px;
-  background: var(--el-fill-color-light);
+}
+.patient-flip-lines {
+  display: grid;
+  gap: 6px;
+}
+.patient-flip-line {
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.patient-flip-address {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
 }
 .patient-archive-info-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+  align-content: start;
 }
 .patient-archive-info-tag {
-  max-width: 100%;
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   padding: 4px 8px;
   overflow: hidden;
   font-size: 12px;
@@ -6149,45 +6124,80 @@ onBeforeUnmount(() => {
   color: #15803d;
   background: #dcfce7;
 }
-.patient-archive-image-strip {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-.patient-archive-thumbnail {
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-fill-color-lighter);
-}
-.patient-archive-thumbnail :deep(.el-image__inner) {
-  width: 100%;
-  height: auto;
-  max-height: 86px;
-  display: block;
-  object-fit: contain;
-}
-.patient-archive-thumbnail-state,
-.patient-archive-thumbnail-empty {
-  min-height: 76px;
-  display: grid;
-  place-items: center;
-  padding: 10px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  border: 1px dashed var(--el-border-color-light);
-  border-radius: 8px;
-  background: var(--el-fill-color-lighter);
-}
-.patient-archive-masonry-foot {
+.patient-flip-foot {
   display: grid;
   gap: 4px;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
-.patient-archive-masonry-foot span {
+.patient-flip-foot span {
   color: var(--el-text-color-regular);
+}
+.patient-flip-hint {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
+}
+.patient-flip-back {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  height: 100%;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--el-color-primary) 4%, var(--el-bg-color));
+}
+.flip-back-facts {
+  display: grid;
+  gap: 5px;
+}
+.flip-back-facts p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--el-text-color-primary);
+}
+.flip-back-facts label {
+  margin-right: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.flip-back-images {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.flip-back-empty {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border: 1px dashed var(--el-border-color-light);
+  border-radius: 10px;
+}
+.flip-back-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.flip-back-actions button {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  background: var(--el-bg-color);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+  border-radius: 999px;
+  &:hover {
+    background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  }
+  &.is-withdraw {
+    color: var(--el-color-danger);
+    border-color: color-mix(in srgb, var(--el-color-danger) 35%, transparent);
+    &:hover {
+      background: color-mix(in srgb, var(--el-color-danger) 8%, transparent);
+    }
+  }
 }
 .patient-archive-card-grid {
   display: grid;
@@ -6211,18 +6221,18 @@ onBeforeUnmount(() => {
 }
 .sidebar-title__head {
   display: flex;
+  gap: 10px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
 }
 .sidebar-title__head > div {
-  min-width: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .sidebar-title__head small {
-  color: var(--el-text-color-secondary);
   line-height: 1.45;
+  color: var(--el-text-color-secondary);
 }
 .sidebar-title__head :deep(.el-button) {
   margin-left: 0;
@@ -6231,17 +6241,17 @@ onBeforeUnmount(() => {
   font-size: 17px;
 }
 .encounter-row {
-  width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px 12px;
-  margin-bottom: 10px;
+  width: 100%;
   padding: 12px;
+  margin-bottom: 10px;
   text-align: left;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-left: 4px solid transparent;
   border-radius: 12px;
-  background: var(--el-bg-color);
   transition:
     background-color 0.16s ease,
     border-color 0.16s ease,
@@ -6249,22 +6259,22 @@ onBeforeUnmount(() => {
 }
 .encounter-row:hover,
 .encounter-row.active {
-  border-color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
   box-shadow: 0 10px 22px rgb(0 150 136 / 12%);
 }
 .encounter-row.active {
   border-left-color: var(--el-color-primary);
 }
 .encounter-row-main {
-  min-width: 0;
   display: grid;
   gap: 6px;
+  min-width: 0;
   padding: 0;
   text-align: left;
-  border: 0;
-  background: transparent;
   cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 .encounter-row-main:focus-visible,
 .encounter-row-followup.is-withdraw {
@@ -6280,9 +6290,9 @@ onBeforeUnmount(() => {
 }
 .encounter-row__head {
   display: flex;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
 }
 .encounter-row__head strong {
   overflow: hidden;
@@ -6299,12 +6309,12 @@ onBeforeUnmount(() => {
 .encounter-row-followup {
   align-self: end;
   padding: 4px 0;
-  color: var(--el-color-primary);
   font-size: 12px;
+  color: var(--el-color-primary);
   white-space: nowrap;
-  border: 0;
-  background: transparent;
   cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 .mini-steps {
   display: grid;
@@ -6313,8 +6323,8 @@ onBeforeUnmount(() => {
 }
 .mini-steps i {
   height: 4px;
-  border-radius: 8px;
   background: var(--el-fill-color-dark);
+  border-radius: 8px;
 }
 .mini-steps i.done {
   background: var(--el-color-success);
@@ -6329,9 +6339,9 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .workflow-empty-panel {
-  min-height: 650px;
   display: grid;
   place-items: center;
+  min-height: 650px;
   padding: 30px;
 }
 .workflow-empty-panel :deep(.el-empty__description) {
@@ -6345,14 +6355,14 @@ onBeforeUnmount(() => {
 }
 .patient-banner {
   display: flex;
+  gap: 14px;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
   padding: 12px 14px;
   margin-bottom: 8px;
   overflow: hidden;
-  border-color: var(--el-border-color-lighter);
   background: color-mix(in srgb, var(--el-bg-color) 94%, var(--el-fill-color-light));
+  border-color: var(--el-border-color-lighter);
   box-shadow: 0 6px 18px rgb(31 78 120 / 5%);
   transition:
     padding 0.28s var(--ease-standard),
@@ -6364,23 +6374,23 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 12px rgb(31 78 120 / 4%);
 }
 .patient-banner__identity {
-  min-width: 0;
   display: flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
+  min-width: 0;
 }
 .patient-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
   width: 38px;
   height: 38px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  color: var(--el-color-primary);
   font-size: 17px;
   font-weight: 800;
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 72%, var(--el-bg-color));
   border: 1px solid var(--el-color-primary-light-8);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-color-primary-light-9) 72%, var(--el-bg-color));
   transition:
     width 0.28s var(--ease-standard),
     height 0.28s var(--ease-standard),
@@ -6393,8 +6403,8 @@ onBeforeUnmount(() => {
 }
 .patient-banner__identity small,
 .context-stat small {
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .patient-banner h3 {
   margin: 1px 0 2px;
@@ -6403,64 +6413,64 @@ onBeforeUnmount(() => {
 }
 .patient-banner p {
   margin: 0;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .patient-banner__compact-meta {
-  overflow: hidden;
   max-width: min(64vw, 640px);
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .patient-banner__overview {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 .context-stat {
-  min-width: 68px;
   display: grid;
   gap: 1px;
+  min-width: 68px;
   padding: 6px 10px;
+  background: color-mix(in srgb, var(--el-bg-color) 72%, var(--el-fill-color-light));
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--el-bg-color) 72%, var(--el-fill-color-light));
 }
 .context-stat strong {
-  color: var(--el-color-primary);
   font-size: 15px;
+  color: var(--el-color-primary);
 }
 .context-stat.warning strong {
   color: var(--el-color-warning);
 }
 .patient-banner__meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
 }
 .patient-banner__meta > span {
   padding: 5px 9px;
-  color: var(--el-text-color-regular);
   font-size: 12px;
-  border-radius: 999px;
+  color: var(--el-text-color-regular);
   background: var(--el-fill-color-light);
+  border-radius: 999px;
 }
 .workspace-modebar {
   position: sticky;
-  z-index: 10;
   top: 0;
+  z-index: 10;
   display: grid;
   grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
-  align-items: center;
   gap: 12px;
+  align-items: center;
   padding: 8px 12px;
   margin-bottom: 8px;
+  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-lighter));
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-lighter));
   box-shadow: 0 5px 14px rgb(31 78 120 / 5%);
 }
 .workspace-modebar > .el-tag:last-child {
@@ -6482,8 +6492,8 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(104px, 1fr));
   gap: 0;
   padding: 4px;
-  border-radius: 999px;
   background: var(--el-fill-color-light);
+  border-radius: 999px;
 }
 .mode-slider {
   position: absolute;
@@ -6491,8 +6501,8 @@ onBeforeUnmount(() => {
   bottom: 4px;
   left: 4px;
   width: calc((100% - 8px) / 2);
-  border-radius: 999px;
   background-color: var(--el-color-primary);
+  border-radius: 999px;
   transition:
     transform 0.16s ease,
     background-color 0.16s ease;
@@ -6506,13 +6516,13 @@ onBeforeUnmount(() => {
   z-index: 1;
   min-width: 104px;
   padding: 8px 16px;
-  color: var(--el-text-color-regular);
   font-weight: 700;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
+  color: var(--el-text-color-regular);
   cursor: pointer;
   user-select: none;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
   transition: color 0.16s ease;
 }
 .mode-pill:focus-visible {
@@ -6544,15 +6554,15 @@ onBeforeUnmount(() => {
   top: 0;
   z-index: 4;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 12px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
   background: color-mix(in srgb, var(--el-bg-color) 94%, var(--el-fill-color-light));
   backdrop-filter: blur(4px);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
 }
 .aux-tab-switch {
   flex-shrink: 1;
@@ -6561,15 +6571,15 @@ onBeforeUnmount(() => {
 }
 .aux-tab-stats {
   display: flex;
-  align-items: center;
   gap: 14px;
-  color: var(--el-text-color-secondary);
+  align-items: center;
   font-size: 12.5px;
+  color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
 .aux-tab-stats strong {
-  color: var(--el-color-primary);
   font-size: 14px;
+  color: var(--el-color-primary);
 }
 .aux-folder-grid {
   display: grid;
@@ -6577,29 +6587,29 @@ onBeforeUnmount(() => {
 }
 .aux-folder-card {
   overflow: hidden;
+  background: color-mix(in srgb, var(--el-bg-color) 86%, var(--el-color-primary-light-9));
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 24%, var(--el-border-color-light));
   border-radius: 14px;
-  background: color-mix(in srgb, var(--el-bg-color) 86%, var(--el-color-primary-light-9));
 }
 .aux-folder-card .folder-head {
   display: flex;
-  align-items: center;
   gap: 12px;
+  align-items: center;
   padding: 12px 14px;
   cursor: pointer;
   user-select: none;
 }
 .aux-folder-card .folder-badge {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
   width: 34px;
   height: 34px;
-  color: var(--el-color-primary);
-  border-radius: 10px;
-  background: var(--el-color-primary-light-8);
   font-size: 16px;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-8);
+  border-radius: 10px;
 }
 .aux-folder-card .consent-badge {
   color: var(--el-color-warning);
@@ -6607,8 +6617,8 @@ onBeforeUnmount(() => {
 }
 .aux-folder-card .folder-title {
   display: grid;
-  gap: 2px;
   flex: 1;
+  gap: 2px;
   min-width: 0;
 }
 .aux-folder-card .folder-title strong {
@@ -6623,12 +6633,12 @@ onBeforeUnmount(() => {
   padding: 3px 10px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  border-radius: 999px;
   background: var(--el-fill-color-light);
+  border-radius: 999px;
 }
 .aux-folder-card .folder-count.filled {
-  color: var(--el-color-primary);
   font-weight: 600;
+  color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
 }
 .aux-folder-card .folder-arrow {
@@ -6648,11 +6658,11 @@ onBeforeUnmount(() => {
 .aux-folder-card .folder-body {
   display: grid;
   gap: 10px;
-  margin: 0 14px 14px;
   padding: 12px;
+  margin: 0 14px 14px;
+  background: var(--el-bg-color);
   border: 1px dashed color-mix(in srgb, var(--el-color-primary) 32%, var(--el-border-color-lighter));
   border-radius: 10px;
-  background: var(--el-bg-color);
 }
 .aux-lab-anchor {
   scroll-margin-top: 64px;
@@ -6661,11 +6671,12 @@ onBeforeUnmount(() => {
 .task-card {
   scroll-margin-top: 64px;
 }
-@media (max-width: 760px) {
+
+@media (width <= 760px) {
   .aux-tab-header {
-    align-items: stretch;
     flex-direction: column;
     gap: 8px;
+    align-items: stretch;
   }
   .aux-folder-card .folder-actions .upload-button {
     flex: 1 1 auto;
@@ -6698,6 +6709,7 @@ onBeforeUnmount(() => {
 .stage-switch-leave-to {
   pointer-events: none;
 }
+
 @media (prefers-reduced-motion: reduce) {
   .page-hero,
   .patient-banner,
@@ -6723,20 +6735,20 @@ onBeforeUnmount(() => {
   gap: 4px;
   padding: 4px;
   margin: 12px 0;
-  border-radius: 10px;
   background: var(--el-fill-color-light);
+  border-radius: 10px;
 }
 .inspection-view-tabs button {
   padding: 8px 18px;
   color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: transparent;
   border: 0;
   border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
 }
 .inspection-view-tabs button.active {
-  color: var(--el-color-primary);
   font-weight: 700;
+  color: var(--el-color-primary);
   background: var(--el-bg-color);
   box-shadow: 0 3px 10px rgb(31 78 120 / 10%);
 }
@@ -6756,9 +6768,9 @@ onBeforeUnmount(() => {
 .timeline-node {
   position: relative;
   padding: 16px;
+  background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color-light);
   border-radius: 14px;
-  background: var(--el-fill-color-blank);
 }
 .timeline-node.latest {
   border-color: var(--el-color-primary-light-5);
@@ -6770,9 +6782,9 @@ onBeforeUnmount(() => {
   left: -26px;
   width: 12px;
   height: 12px;
+  background: var(--el-color-info);
   border: 3px solid var(--el-bg-color);
   border-radius: 50%;
-  background: var(--el-color-info);
   box-shadow: 0 0 0 1px var(--el-border-color);
 }
 .timeline-node.latest .timeline-dot {
@@ -6780,8 +6792,8 @@ onBeforeUnmount(() => {
 }
 .timeline-node > header {
   display: flex;
-  justify-content: space-between;
   gap: 12px;
+  justify-content: space-between;
 }
 .timeline-node > header div {
   display: grid;
@@ -6805,6 +6817,7 @@ onBeforeUnmount(() => {
 }
 .responsibility-timeline {
   --el-timeline-node-color: var(--el-color-primary-light-7);
+
   margin-top: 18px;
 }
 .responsibility-timeline :deep(.el-timeline-item) {
@@ -6814,21 +6827,21 @@ onBeforeUnmount(() => {
   border-left-color: var(--el-color-primary-light-7);
 }
 .responsibility-timeline :deep(.el-timeline-item__node) {
-  border-color: var(--el-color-primary);
   background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
   box-shadow: 0 0 0 3px var(--el-color-primary-light-9);
 }
 .responsibility-timeline :deep(.el-timeline-item__timestamp) {
   margin-bottom: 6px;
-  color: var(--el-color-primary-dark-2);
   font-weight: 600;
+  color: var(--el-color-primary-dark-2);
 }
 .responsibility-timeline :deep(.el-timeline-item__wrapper) {
   top: -4px;
   padding: 10px 12px;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-light);
   border-radius: 10px;
-  background: var(--el-bg-color);
   box-shadow: 0 6px 16px rgb(31 78 120 / 6%);
 }
 .responsibility-timeline p {
@@ -6839,8 +6852,8 @@ onBeforeUnmount(() => {
 }
 .responsibility-group-details {
   margin-top: 8px;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .responsibility-group-details summary {
   color: var(--el-color-primary);
@@ -6875,11 +6888,11 @@ onBeforeUnmount(() => {
 .timeline-follow-up {
   display: grid;
   gap: 4px;
-  margin-top: 14px;
   padding: 10px 12px;
-  border-radius: 8px;
+  margin-top: 14px;
   color: var(--el-color-primary-dark-2);
   background: var(--el-color-primary-light-9);
+  border-radius: 8px;
 }
 .timeline-follow-up span,
 .timeline-follow-up p {
@@ -6898,8 +6911,8 @@ onBeforeUnmount(() => {
 }
 .timeline-attachment-group {
   padding: 10px;
-  border-radius: 10px;
   background: var(--el-fill-color-light);
+  border-radius: 10px;
 }
 .timeline-attachment-group .timeline-images {
   margin-top: 0;
@@ -6916,20 +6929,20 @@ onBeforeUnmount(() => {
   padding: 7px;
   overflow: hidden;
   text-align: left;
+  cursor: pointer;
+  background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color-light);
   border-radius: 10px;
-  background: var(--el-fill-color-light);
-  cursor: pointer;
 }
 .timeline-image img,
 .timeline-image > span {
-  width: 100%;
-  height: 92px;
   display: grid;
   place-items: center;
+  width: 100%;
+  height: 92px;
   object-fit: cover;
-  border-radius: 7px;
   background: var(--el-fill-color);
+  border-radius: 7px;
 }
 .timeline-image small {
   overflow: hidden;
@@ -6937,58 +6950,58 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .visit-meta-summary {
-  margin-top: 14px;
   padding-top: 10px;
+  margin-top: 14px;
   color: var(--el-text-color-secondary);
   border-top: 1px dashed var(--el-border-color);
 }
 .history-template-toolbar {
   display: flex;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
   padding: 14px 16px;
+  margin-bottom: 16px;
+  background: var(--el-color-primary-light-9);
   border: 1px solid var(--el-color-primary-light-7);
   border-radius: 12px;
-  background: var(--el-color-primary-light-9);
 }
 .history-template-toolbar > div {
-  min-width: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .history-template-toolbar small {
-  color: var(--el-text-color-secondary);
   line-height: 1.5;
+  color: var(--el-text-color-secondary);
 }
 .section-caption {
-  color: var(--el-text-color-primary);
   font-size: 14px;
   font-weight: 700;
+  color: var(--el-text-color-primary);
 }
 .primary-evidence-section {
   margin-top: 0;
-  border-color: var(--el-color-primary-light-5);
   background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-5);
 }
 .primary-evidence-heading {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
 }
 .primary-evidence-heading > div {
-  min-width: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .primary-evidence-heading strong {
   font-size: 17px;
 }
 .primary-evidence-heading small {
-  color: var(--el-text-color-secondary);
   line-height: 1.5;
+  color: var(--el-text-color-secondary);
 }
 .primary-evidence-section .upstream-image-grid {
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -7000,16 +7013,16 @@ onBeforeUnmount(() => {
 .upstream-section {
   display: grid;
   gap: 10px;
-  margin-top: 14px;
   padding-top: 2px;
+  margin-top: 14px;
 }
 .upstream-heading,
 .upstream-image-heading,
 .upstream-stage-card > header {
   display: flex;
+  gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
 }
 .upstream-heading > div,
 .upstream-image-heading > div,
@@ -7028,29 +7041,29 @@ onBeforeUnmount(() => {
 }
 .upstream-stage-card {
   overflow: hidden;
+  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-lighter));
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-bg-color) 92%, var(--el-fill-color-lighter));
 }
 .upstream-stage-card > header {
   padding: 12px 14px 8px;
 }
 .upstream-summary-label {
   display: flex;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
   padding: 0 14px 8px;
 }
 .upstream-summary-label span {
-  color: var(--el-color-primary);
   font-size: 12px;
   font-weight: 800;
+  color: var(--el-color-primary);
 }
 .upstream-summary-label small {
   overflow: hidden;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -7061,37 +7074,37 @@ onBeforeUnmount(() => {
   padding: 0 14px 12px;
 }
 .upstream-summary-grid > div {
-  min-width: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
   padding: 8px 10px;
-  border-radius: 8px;
   background: color-mix(in srgb, var(--el-bg-color) 70%, var(--el-fill-color-light));
+  border-radius: 8px;
 }
 .upstream-summary-grid span,
 .read-only-grid dt {
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .upstream-summary-grid strong {
+  display: -webkit-box;
   overflow: hidden;
   line-height: 1.55;
   text-overflow: ellipsis;
-  display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 .upstream-detail-collapse {
+  background: color-mix(in srgb, var(--el-bg-color) 80%, var(--el-fill-color-lighter));
   border-top: 1px solid color-mix(in srgb, var(--el-border-color-lighter) 82%, transparent);
   border-bottom: 0;
-  background: color-mix(in srgb, var(--el-bg-color) 80%, var(--el-fill-color-lighter));
 }
 .upstream-detail-collapse :deep(.el-collapse-item__header) {
   height: 40px;
   padding: 0 14px;
-  color: var(--el-text-color-secondary);
   font-size: 12px;
   font-weight: 700;
+  color: var(--el-text-color-secondary);
   background: transparent;
 }
 .read-only-grid {
@@ -7111,25 +7124,26 @@ onBeforeUnmount(() => {
 }
 .read-only-grid dd {
   margin: 0;
-  color: var(--el-text-color-regular);
   line-height: 1.6;
+  color: var(--el-text-color-regular);
   white-space: pre-wrap;
 }
+
 /* ===== 前台 DR 影像：独立附件，不参与病历元数据 ===== */
 .patient-dr-strip {
   display: grid;
   gap: 8px;
-  margin-top: 4px;
   padding: 10px 12px;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--el-bg-color) 82%, var(--el-color-primary-light-9));
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, var(--el-border-color-light));
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-bg-color) 82%, var(--el-color-primary-light-9));
 }
 .patient-dr-strip__head {
   display: flex;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
 }
 .patient-dr-strip__head strong {
   display: block;
@@ -7138,17 +7152,17 @@ onBeforeUnmount(() => {
 .dr-image-section {
   display: grid;
   gap: 10px;
-  margin-top: 14px;
   padding: 13px;
+  margin-top: 14px;
+  background: color-mix(in srgb, var(--el-bg-color) 76%, var(--el-color-primary-light-9));
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 20%, var(--el-border-color-light));
   border-radius: 14px;
-  background: color-mix(in srgb, var(--el-bg-color) 76%, var(--el-color-primary-light-9));
 }
 .dr-image-heading {
   display: flex;
+  gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
 }
 .dr-image-heading > div {
   display: grid;
@@ -7163,50 +7177,50 @@ onBeforeUnmount(() => {
 .voided-attachments-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 6px;
+  align-items: center;
   padding-top: 4px;
 }
 .voided-attachments-row .voided-caption {
-  color: var(--el-text-color-secondary);
   font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .voided-attachments-row :deep(.el-button) {
   margin-left: 0;
   font-size: 12px;
 }
 .aux-voided-row {
-  margin-top: -4px;
   padding: 2px 4px 6px;
+  margin-top: -4px;
 }
 .attachment-undo-message {
   display: inline-flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
 }
 .camera-button {
-  border-color: var(--el-color-success-light-5);
-  background: var(--el-color-success-light-9);
   color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-5);
 }
 .camera-button:hover {
-  border-color: var(--el-color-success);
   background: var(--el-color-success-light-8);
+  border-color: var(--el-color-success);
 }
 .upstream-image-section,
 .attachment-section {
   display: grid;
   gap: 10px;
-  margin-top: 14px;
   padding: 13px;
+  margin-top: 14px;
+  background: color-mix(in srgb, var(--el-bg-color) 70%, var(--el-fill-color-lighter));
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--el-bg-color) 70%, var(--el-fill-color-lighter));
 }
 .priority-image-section {
   margin-top: 14px;
-  border-color: color-mix(in srgb, var(--el-color-primary) 20%, var(--el-border-color-light));
   background: color-mix(in srgb, var(--el-bg-color) 78%, var(--el-color-primary-light-9));
+  border-color: color-mix(in srgb, var(--el-color-primary) 20%, var(--el-border-color-light));
 }
 .upstream-image-grid {
   display: grid;
@@ -7214,25 +7228,25 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 .upstream-image-card {
-  min-width: 0;
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 8px;
   overflow: hidden;
   color: var(--el-text-color-primary);
   text-align: left;
+  cursor: pointer;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-light);
   border-radius: 11px;
-  background: var(--el-bg-color);
-  cursor: pointer;
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
     background-color 0.2s ease;
 }
 .upstream-image-card:hover {
-  border-color: var(--el-color-primary-light-5);
   background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
+  border-color: var(--el-color-primary-light-5);
   box-shadow: 0 8px 20px rgb(64 158 255 / 12%);
 }
 .upstream-image-card.featured {
@@ -7240,23 +7254,23 @@ onBeforeUnmount(() => {
 }
 .upstream-image-card img,
 .upstream-image-card > span:not(.upstream-image-caption) {
-  width: 100%;
-  height: 120px;
   display: grid;
   place-items: center;
-  object-fit: cover;
+  width: 100%;
+  height: 120px;
   color: var(--el-text-color-secondary);
-  border-radius: 8px;
+  object-fit: cover;
   background: var(--el-fill-color);
+  border-radius: 8px;
 }
 .upstream-image-card.featured img,
 .upstream-image-card.featured > span:not(.upstream-image-caption) {
   height: 240px;
 }
 .upstream-image-caption {
-  min-width: 0;
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 .upstream-image-caption strong,
 .upstream-image-caption small {
@@ -7275,18 +7289,18 @@ onBeforeUnmount(() => {
 }
 .attachment-batch {
   overflow: hidden;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 11px;
-  background: var(--el-bg-color);
 }
 .attachment-batch > header {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
   background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .attachment-batch > header small,
 .attachment-name small,
@@ -7295,8 +7309,8 @@ onBeforeUnmount(() => {
 }
 .attachment-row {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   padding: 10px 12px;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
@@ -7308,10 +7322,10 @@ onBeforeUnmount(() => {
   margin-left: 0;
 }
 .attachment-name {
-  min-width: 0;
-  flex: 1;
   display: grid;
+  flex: 1;
   gap: 3px;
+  min-width: 0;
 }
 .attachment-name span,
 .attachment-name small {
@@ -7325,46 +7339,46 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 .upload-button {
-  min-height: 38px;
   display: inline-flex;
+  gap: 7px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  min-height: 38px;
   padding: 0 15px;
-  color: var(--el-color-primary);
   font-size: 14px;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  background: var(--el-color-primary-light-9);
   border: 1px dashed var(--el-color-primary-light-5);
   border-radius: 9px;
-  background: var(--el-color-primary-light-9);
-  cursor: pointer;
   transition:
     border-color 0.2s ease,
     background-color 0.2s ease;
 }
 .upload-button:hover {
-  border-color: var(--el-color-primary);
   background: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary);
 }
 .upload-button input {
   position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
-  opacity: 0;
   pointer-events: none;
+  opacity: 0;
 }
 .upload-summary {
   display: block;
 }
 .priority-field {
   padding: 14px;
+  background: var(--el-color-warning-light-9);
   border: 1px solid var(--el-color-warning-light-5);
   border-radius: 8px;
-  background: var(--el-color-warning-light-9);
 }
 .priority-field :deep(.el-form-item__label) {
-  color: var(--el-color-warning-dark-2);
   font-weight: 700;
+  color: var(--el-color-warning-dark-2);
 }
 .diagnosis-field {
   display: grid;
@@ -7406,16 +7420,17 @@ onBeforeUnmount(() => {
 }
 .sticky-actions {
   position: sticky;
-  z-index: 9;
   bottom: 10px;
+  z-index: 9;
   padding: 12px 14px;
+  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
+  backdrop-filter: blur(10px);
   border: 1px solid var(--el-border-color-light);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
   box-shadow: 0 -8px 26px rgb(31 78 120 / 10%);
-  backdrop-filter: blur(10px);
 }
-@media (max-width: 1100px) {
+
+@media (width <= 1100px) {
   .workspace-shell,
   .workspace-shell.with-history {
     grid-template-columns: minmax(0, 1fr);
@@ -7424,22 +7439,24 @@ onBeforeUnmount(() => {
     display: none;
   }
   .workspace-shell.with-history :deep(.history-panel) {
-    grid-column: 1 / -1;
     position: static;
+    grid-column: 1 / -1;
     max-height: 680px;
   }
   .page-hero {
     align-items: flex-start;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .upstream-image-card,
   .patient-archive-view-tags button,
-  .patient-archive-masonry-card {
+  .patient-flip-card .flip-card-inner {
     transition: none;
   }
 }
-@media (max-width: 680px) {
+
+@media (width <= 680px) {
   .page-hero,
   .patient-banner,
   .panel-heading,
@@ -7490,8 +7507,8 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
   .patient-archive-toolbar {
-    align-items: flex-start;
     flex-direction: column;
+    align-items: flex-start;
   }
   .patient-archive-view-tags {
     width: 100%;
@@ -7499,8 +7516,8 @@ onBeforeUnmount(() => {
   .patient-archive-view-tags button {
     flex: 1;
   }
-  .patient-archive-masonry {
-    columns: 1;
+  .patient-archive-flip-grid {
+    grid-template-columns: 1fr;
   }
   :global(.patient-archive-dialog) {
     width: calc(100vw - 20px) !important;
@@ -7512,18 +7529,16 @@ onBeforeUnmount(() => {
     padding-left: 16px;
   }
   .workspace-modebar {
-    align-items: flex-start;
     flex-direction: column;
-  }
-  .workspace-modebar {
     grid-template-columns: 1fr;
+    align-items: flex-start;
   }
   .workspace-modebar > .el-tag:last-child {
     justify-self: start;
   }
   .patient-banner__overview {
-    width: 100%;
     justify-content: flex-start;
+    width: 100%;
   }
   .context-stat {
     flex: 1;
@@ -7537,9 +7552,9 @@ onBeforeUnmount(() => {
     display: none;
   }
   .sticky-actions :deep(.el-button) {
+    flex: 1 1 120px;
     width: auto;
     min-width: 0;
-    flex: 1 1 120px;
     margin-left: 0;
   }
   .document-sheet {
@@ -7554,8 +7569,8 @@ onBeforeUnmount(() => {
     grid-column: span 1;
   }
   .attachment-row {
-    align-items: flex-start;
     flex-wrap: wrap;
+    align-items: flex-start;
   }
   .timeline-facts {
     grid-template-columns: 1fr;
@@ -7572,8 +7587,8 @@ onBeforeUnmount(() => {
   }
   .dr-image-section {
     gap: 7px;
-    margin-top: 8px;
     padding: 8px;
+    margin-top: 8px;
     border-radius: 9px;
   }
   .dr-image-heading {
