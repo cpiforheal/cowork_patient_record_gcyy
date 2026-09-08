@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PreAiPatientCaseController {
 
     private final PreAiEncounterService service;
+    private final DiseaseTagService diseaseTagService;
 
-    public PreAiPatientCaseController(PreAiEncounterService service) {
+    public PreAiPatientCaseController(PreAiEncounterService service, DiseaseTagService diseaseTagService) {
         this.service = service;
+        this.diseaseTagService = diseaseTagService;
     }
 
     @GetMapping
@@ -53,5 +55,12 @@ public class PreAiPatientCaseController {
     @GetMapping("/{patientCaseId}/inspection-timeline")
     public ApiResult<Map<String, Object>> inspectionTimeline(@PathVariable String patientCaseId) {
         return ApiResult.success(service.inspectionTimeline(patientCaseId, AuthPermission.currentUserOrThrow()));
+    }
+
+    /** AI 病种归类（仅管理员）：批量阅读登记主诉并缓存标签，供病种分布统计补齐全样本。 */
+    @PostMapping("/disease-tags/run")
+    public ApiResult<Map<String, Object>> runDiseaseTagging() {
+        AuthPermission.requireAnyRole("仅管理员可触发AI病种归类", "admin");
+        return ApiResult.success(diseaseTagService.triggerRun(AuthPermission.currentUserOrThrow()));
     }
 }

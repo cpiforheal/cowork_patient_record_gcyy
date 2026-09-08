@@ -513,7 +513,36 @@ public class PreAiEncounterService {
             if (!encounters.isEmpty()) patientCase.set("latestEncounter", encounterSummary(encounters.get(0)));
             rows.add(patientCase);
         });
+        injectDiseaseTags(rows);
         return Map.of("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
+    }
+
+    /** 批量把 AI 病种归类标签挂到 patient 对象上（aiDiseaseTags 数组），供前端统计合并。 */
+    private void injectDiseaseTags(ArrayNode rows) {
+        if (rows.isEmpty()) return;
+        List<String> caseIds = new ArrayList<>();
+        rows.forEach(node -> caseIds.add(text(node, "id")));
+        Map<String, JsonNode> tagsByCase = new LinkedHashMap<>();
+        for (int start = 0; start < caseIds.size(); start += 300) {
+            List<String> chunk = caseIds.subList(start, Math.min(start + 300, caseIds.size()));
+            String inClause = chunk.stream().map(id -> "'" + id.replace("'", "") + "'").collect(java.util.stream.Collectors.joining(","));
+            jdbcTemplate.query(
+                "SELECT patient_case_id, tags_json FROM pre_ai_disease_tags WHERE patient_case_id IN (" + inClause + ")",
+                rs -> {
+                    JsonNode tags = readObject(rs.getString("tags_json"));
+                    if (tags != null && tags.isArray() && tags.size() > 0) {
+                        tagsByCase.put(rs.getString("patient_case_id"), tags);
+                    }
+                }
+            );
+        }
+        if (tagsByCase.isEmpty()) return;
+        rows.forEach(node -> {
+            JsonNode tags = tagsByCase.get(text(node, "id"));
+            if (tags == null) return;
+            JsonNode patient = node.path("patient");
+            if (patient.isObject()) ((ObjectNode) patient).set("aiDiseaseTags", tags);
+        });
     }
 
     public Map<String, Object> encounterHistory(String patientCaseId, SessionUser user) {

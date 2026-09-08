@@ -19,10 +19,18 @@
     </div>
     <VChart v-if="items.length" class="curve-chart" :option="chartOption" autoresize />
     <el-empty v-else description="暂无每日患者数据" :image-size="56" />
-    <!-- 病种分布：窗口内来访患者按预置病种模板分类去重计数（仅管理员有数据） -->
+    <!-- 病种分布：窗口内来访患者按预置病种模板+AI归类合并去重计数（仅管理员有数据） -->
     <div v-if="diseaseStats?.length" class="disease-strip">
-      <span class="disease-strip-title">病种分布</span>
-      <span v-for="stat in diseaseStats" :key="stat.disease" class="disease-chip">
+      <span class="disease-strip-title">
+        病种分布
+        <button v-if="isAdmin" type="button" class="disease-retag" @click="emit('retag')">AI 归类</button>
+      </span>
+      <span
+        v-for="stat in diseaseStats"
+        :key="stat.disease"
+        class="disease-chip"
+        :class="{ 'is-pending': stat.disease === '待归类' }"
+      >
         {{ stat.disease }} <b>{{ stat.count }}</b> 人
       </span>
     </div>
@@ -55,15 +63,19 @@ const props = withDefaults(
     title?: string;
     subtitle?: string;
     items: DailyCurveItem[];
-    /** 病种分布统计（窗口内来访患者按预置病种模板分类去重计数，降序；仅管理员提供） */
+    /** 病种分布统计（窗口内来访患者按预置病种模板+AI归类合并去重计数，降序；仅管理员提供） */
     diseaseStats?: { disease: string; count: number }[];
+    /** 是否管理员（决定 AI 归类按钮是否显示） */
+    isAdmin?: boolean;
   }>(),
   {
     title: "每日患者趋势图",
     subtitle: "按就诊日期统计 · 与每日患者数据粒度一致",
-    diseaseStats: () => []
+    diseaseStats: () => [],
+    isAdmin: false
   }
 );
+const emit = defineEmits<{ (event: "retag"): void }>();
 
 const globalStore = useGlobalStore();
 const isDark = computed(() => globalStore.isDark);
@@ -241,10 +253,30 @@ const chartOption = computed<EChartsOption>(() => {
     background: var(--hos-chart-panel, #ffffff);
     border: 1px solid var(--hos-chart-line-soft, rgb(90 110 130 / 10%));
     border-radius: 999px;
+    &.is-pending {
+      color: var(--hos-chart-muted, #74777d);
+      border-style: dashed;
+      b {
+        color: var(--hos-chart-muted, #74777d);
+      }
+    }
     b {
       margin: 0 2px;
       font-variant-numeric: tabular-nums;
       color: var(--el-color-primary);
+    }
+  }
+  .disease-retag {
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 12px;
+    color: var(--el-color-primary);
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+    border-radius: 999px;
+    &:hover {
+      background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
     }
   }
 }

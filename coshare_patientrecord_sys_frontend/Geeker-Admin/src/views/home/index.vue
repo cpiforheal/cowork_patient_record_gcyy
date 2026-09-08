@@ -92,7 +92,7 @@
                 :show-text="false"
                 :stroke-width="6"
               />
-              <DailyPatientCurve :items="dailyCurveItems" :disease-stats="diseaseStats" />
+              <DailyPatientCurve :items="dailyCurveItems" :disease-stats="diseaseStats" is-admin @retag="onRetagDiseases" />
               <MiniBarChart
                 compact
                 :title="trendTitle"
@@ -218,7 +218,7 @@ import {
 } from "@/api/modules/clinic";
 import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/tcmPharmacy";
 import { getPolicyBriefLatestApi, type PolicyBriefResult } from "@/api/modules/clinic/policyBrief";
-import { getPreAiPatientCasesApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
+import { getPreAiPatientCasesApi, runDiseaseTaggingApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -846,9 +846,12 @@ const complaintForPatient = (patient: PatientRow) =>
 const diseasesKeyMap = computed(() => {
   const map = new Map<string, string[]>();
   preAiCases.value.forEach(cases => {
-    const diseases = cases.patient?.clinicalTemplateDiseases;
-    if (!Array.isArray(diseases) || !diseases.length) return;
-    const names = diseases.map(item => String(item)).filter(Boolean);
+    const templateDiseases = Array.isArray(cases.patient?.clinicalTemplateDiseases)
+      ? cases.patient.clinicalTemplateDiseases.map(String)
+      : [];
+    const aiTags = Array.isArray(cases.patient?.aiDiseaseTags) ? cases.patient.aiDiseaseTags.map(String) : [];
+    // 模板明确分类（医生确认）与 AI 归类标签合并去重
+    const names = [...new Set([...templateDiseases, ...aiTags])].filter(Boolean);
     if (!names.length) return;
     if (cases.sourcePatientId) map.set(cases.sourcePatientId, names);
     if (cases.patientName) map.set(cases.patientName, names);
@@ -857,6 +860,7 @@ const diseasesKeyMap = computed(() => {
 });
 const diseaseStats = computed(() => {
   if (!preAiCases.value.length) return [];
+  const windowKeys = new Set<string>();
   const patientsByDisease = new Map<string, Set<string>>();
   for (let offset = trendRange.value - 1; offset >= 0; offset--) {
     const date = new Date();
@@ -864,16 +868,39 @@ const diseaseStats = computed(() => {
     const dateText = toDateText(date);
     for (const patient of patientsByEncounterDate.value.get(dateText) || []) {
       const key = patient.id || patient.name;
+      windowKeys.add(key);
       for (const disease of diseasesKeyMap.value.get(patient.id) || diseasesKeyMap.value.get(patient.name) || []) {
         if (!patientsByDisease.has(disease)) patientsByDisease.set(disease, new Set());
         patientsByDisease.get(disease)!.add(key);
       }
     }
   }
-  return [...patientsByDisease.entries()]
+  const stats = [...patientsByDisease.entries()]
     .map(([disease, patients]) => ({ disease, count: patients.size }))
     .sort((a, b) => b.count - a.count);
+  // 待归类兜底：窗口总人数 - 已有任一病种标签的人数，保证与窗口合计对账
+  const tagged = new Set<string>();
+  patientsByDisease.values().forEach(keys => keys.forEach(key => tagged.add(key)));
+  if (windowKeys.size > tagged.size) stats.push({ disease: "待归类", count: windowKeys.size - tagged.size });
+  return stats;
 });
+const loadPreAiCases = async () => {
+  try {
+    const { data } = await getPreAiPatientCasesApi();
+    preAiCases.value = data.list || [];
+  } catch {
+    preAiCases.value = [];
+  }
+};
+const onRetagDiseases = async () => {
+  try {
+    const { data } = await runDiseaseTaggingApi();
+    ElMessage[data.started ? "success" : "warning"](data.message || "AI 归类任务已启动");
+    if (data.started) window.setTimeout(() => void loadPreAiCases(), 90_000);
+  } catch (error) {
+    ElMessage.error((error as Error).message || "触发 AI 归类失败");
+  }
+};
 
 const dailyCurveItems = computed(() => {
   const items: {
@@ -1032,15 +1059,8 @@ const loadPrimaryDashboard = async () => {
   } finally {
     dashboardLoading.value = false;
   }
-  // 管理员额外加载前置病例（登记主诉）供曲线悬浮词典卡使用；失败静默不打扰主视图
-  if (isAdmin.value) {
-    try {
-      const { data } = await getPreAiPatientCasesApi();
-      preAiCases.value = data.list || [];
-    } catch {
-      preAiCases.value = [];
-    }
-  }
+  // 管理员额外加载前置病例（登记主诉/病种标签）供曲线词典卡与病种分布使用；失败静默不打扰主视图
+  if (isAdmin.value) await loadPreAiCases();
 };
 
 const loadPharmacyBoard = async () => {
