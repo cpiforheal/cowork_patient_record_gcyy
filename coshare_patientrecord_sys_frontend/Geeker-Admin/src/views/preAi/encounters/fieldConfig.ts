@@ -1604,7 +1604,8 @@ export const encounterStatusLabel: Record<string, string> = {
   PENDING_REVIEW: "待医生复核",
   REVIEWED: "已复核",
   EXPORTED: "已生成资料",
-  CANCELLED: "已取消"
+  CANCELLED: "已离院（终止治疗）",
+  WITHDRAWN: "已撤回"
 };
 
 export const auxiliaryTaskLabel: Record<PreAiAuxiliaryTaskType, string> = {

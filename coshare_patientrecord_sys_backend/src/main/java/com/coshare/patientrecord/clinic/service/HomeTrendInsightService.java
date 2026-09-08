@@ -178,7 +178,8 @@ public class HomeTrendInsightService {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("model", AI_MODEL);
         payload.put("temperature", 0.5);
-        payload.put("max_tokens", 1500);
+        // glm-5.3-flash 为推理模型：思考消耗预算，max_tokens 过小会导致正文为空
+        payload.put("max_tokens", 4096);
         payload.put("stream", true);
         ArrayNode messages = payload.putArray("messages");
         messages.addObject().put("role", "system").put("content", systemPrompt());

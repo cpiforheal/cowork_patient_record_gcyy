@@ -507,7 +507,7 @@ public class PreAiEncounterService {
                 rows.add(patientCase);
                 return;
             }
-            encounters.removeIf(encounter -> "CANCELLED".equals(text(encounter, "status")) || !canAccessEncounter(text(encounter, "id"), user));
+            encounters.removeIf(encounter -> "WITHDRAWN".equals(text(encounter, "status")) || !canAccessEncounter(text(encounter, "id"), user));
             if (encounters.isEmpty()) return;
             patientCase.put("visitCount", encounters.size());
             if (!encounters.isEmpty()) patientCase.set("latestEncounter", encounterSummary(encounters.get(0)));
@@ -622,7 +622,7 @@ public class PreAiEncounterService {
         String originalVisitDate = text(previousEncounter.path("patient"), "visitDate");
 
         // 作废来访子病历与就诊卡
-        jdbcTemplate.update("UPDATE pre_ai_encounters SET status = 'CANCELLED', current_stage = 'RECEPTION', updated_at = ? WHERE id = ?", now(), encounterId);
+        jdbcTemplate.update("UPDATE pre_ai_encounters SET status = 'WITHDRAWN', current_stage = 'RECEPTION', updated_at = ? WHERE id = ?", now(), encounterId);
         jdbcTemplate.update("UPDATE pre_ai_care_encounters SET status = 'CANCELLED', ended_at = CURRENT_TIMESTAMP(3) WHERE clinical_encounter_id = ? AND status = 'ACTIVE'", encounterId);
         // 作废化验/知情任务与队列号
         jdbcTemplate.update("UPDATE pre_ai_auxiliary_tasks SET status = 'CANCELLED', updated_at = ?, updated_by = ? WHERE encounter_id = ? AND status NOT IN ('CANCELLED', 'INACTIVE')", now(), user.name(), encounterId);
@@ -1360,6 +1360,16 @@ public class PreAiEncounterService {
             }
         }
         if (metrics.isEmpty()) throw badRequest("请至少填写一个检验指标");
+        // 患者维度查重：同患者其他来访下已存在同模板同日期的 ACTIVE 报告时拒绝录入（防止跨子病历重复）
+        String patientCaseId = text(encounter, "patientCaseId");
+        Integer duplicateElsewhere = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_lab_reports r JOIN pre_ai_encounters e ON e.id = r.encounter_id "
+                + "WHERE e.patient_case_id = ? AND r.encounter_id <> ? AND r.template_id = ? AND r.report_date = ? AND r.status = 'ACTIVE'",
+            Integer.class, patientCaseId, encounterId, templateId, reportDate
+        );
+        if (duplicateElsewhere != null && duplicateElsewhere > 0) {
+            throw conflict("该患者已存在同项目同日期的化验报告（另一次来访下），请先在化验端删除旧报告或核对日期后再上传");
+        }
         List<Integer> versions = jdbcTemplate.queryForList("""
             SELECT version FROM pre_ai_lab_reports
             WHERE encounter_id = ? AND template_id = ? AND report_date = ?
@@ -1388,6 +1398,34 @@ public class PreAiEncounterService {
             version, user.name(), user.role(), now());
         invalidateReview(encounterId, user, "化验报告发生修改");
         audit(encounterId, "lab.report.save", null, user, templateName + "（" + reportDate + "）");
+        refreshProgress(encounterId);
+        return toMap(workspace(encounterId, user));
+    }
+
+    /** 删除化验报告（软删除）：化验岗/医生可删除本来访下的 ACTIVE 报告，用于纠正重复或误传。 */
+    @Transactional
+    public Map<String, Object> deleteLabReport(String encounterId, String reportId, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireAuxTaskEditor(encounter, "LAB", user);
+        ObjectNode task = ensureLabTask(encounterId, user.name());
+        if ("COMPLETED".equals(text(task, "status")) && !"doctor".equals(user.role())) {
+            throw conflict("化验室已完成交接，需医生退回后才能删除报告");
+        }
+        List<Map<String, Object>> reports = jdbcTemplate.queryForList(
+            "SELECT template_name, report_date FROM pre_ai_lab_reports WHERE id = ? AND encounter_id = ? AND status = 'ACTIVE'",
+            reportId, encounterId
+        );
+        if (reports.isEmpty()) throw notFound("检验报告不存在或已删除");
+        String templateName = String.valueOf(reports.get(0).getOrDefault("template_name", ""));
+        String reportDate = String.valueOf(reports.get(0).getOrDefault("report_date", ""));
+        int changed = jdbcTemplate.update(
+            "UPDATE pre_ai_lab_reports SET status = 'DELETED' WHERE id = ? AND encounter_id = ? AND status = 'ACTIVE'",
+            reportId, encounterId
+        );
+        if (changed == 0) throw notFound("检验报告不存在或已删除");
+        audit(encounterId, "lab.report.delete", null, user, templateName + "（" + reportDate + "）已删除");
+        invalidateReview(encounterId, user, "化验报告被删除");
         refreshProgress(encounterId);
         return toMap(workspace(encounterId, user));
     }

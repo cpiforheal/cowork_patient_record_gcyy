@@ -356,7 +356,8 @@ const encounterStatusLabel = (status?: string) =>
     PENDING_REVIEW: "待复核",
     REVIEWED: "已复核",
     EXPORTED: "已归档",
-    CANCELLED: "已终止",
+    CANCELLED: "已离院（终止治疗）",
+    WITHDRAWN: "已撤回",
     LEGACY: "历史档案"
   })[status || ""] ||
   status ||

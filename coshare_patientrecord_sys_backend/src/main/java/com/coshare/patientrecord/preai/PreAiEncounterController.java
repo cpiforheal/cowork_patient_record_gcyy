@@ -237,6 +237,14 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "辅助检查任务已退回", service.returnAuxiliaryTask(encounterId, taskId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @DeleteMapping("/{encounterId}/lab-reports/{reportId}")
+    public ApiResult<Map<String, Object>> deleteLabReport(
+        @PathVariable String encounterId,
+        @PathVariable String reportId
+    ) {
+        return ApiResult.of(200, "检验报告已删除", service.deleteLabReport(encounterId, reportId, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/{encounterId}/lab-reports")
     public ApiResult<Map<String, Object>> saveLabReport(
         @PathVariable String encounterId,

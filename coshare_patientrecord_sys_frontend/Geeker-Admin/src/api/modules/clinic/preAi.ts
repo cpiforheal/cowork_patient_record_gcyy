@@ -5,7 +5,7 @@ import type { QueueWorkspace } from "./clinicQueue";
 
 export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "NURSING" | "TCM" | "DOCTOR" | "SURGERY" | "REVIEW";
 export type PreAiStageStatus = "DRAFT" | "PENDING_CONFIRMATION" | "COMPLETED" | "RETURNED" | "SKIPPED";
-export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED";
+export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED" | "WITHDRAWN";
 export type PreAiEncounterRoute = "" | "OUTPATIENT" | "INPATIENT";
 export type PreAiTreatmentPath = "" | "CONSERVATIVE" | "SURGICAL";
 export type PreAiAuxiliaryTaskType = "LAB" | "ECG" | "IMAGING" | "VITAL_SIGNS" | "COLONOSCOPY" | "SURGERY_CONSENT";
@@ -734,6 +734,12 @@ export const ocrLabReportStreamRequest = async (
     })(),
     signal
   });
+
+export const deletePreAiLabReportApi = (encounterId: string, reportId: string) =>
+  jsonRequest<PreAiWorkspace>(
+    `/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports/${encodeURIComponent(reportId)}`,
+    "DELETE"
+  );
 
 export const completePreAiLabApi = (encounterId: string, expectedVersion: number) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab/complete`, "POST", {

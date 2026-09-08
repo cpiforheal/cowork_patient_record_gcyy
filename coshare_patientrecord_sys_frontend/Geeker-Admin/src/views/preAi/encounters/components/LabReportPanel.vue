@@ -14,77 +14,80 @@
     <el-empty v-if="!workspace.labReports.length" :image-size="72" description="尚未保存检验报告，请进入化验报告模板填写" />
     <div v-else class="lab-report-body">
       <el-tabs
-      :model-value="activeReportId"
-      class="lab-report-tabs"
-      @update:model-value="$emit('update:activeReportId', String($event))"
+        :model-value="activeReportId"
+        class="lab-report-tabs"
+        @update:model-value="$emit('update:activeReportId', String($event))"
       >
-      <el-tab-pane
-        v-for="report in workspace.labReports"
-        :key="report.id"
-        :name="report.id"
-        :label="`${report.templateName} · ${report.reportDate}`"
-      >
-        <article class="lab-report-paper">
-          <header>
-            <h3>固始中医肛肠医院检验报告单</h3>
-            <p>{{ report.templateName }}</p>
-          </header>
-          <div class="lab-patient-line">
-            <span>姓名：{{ workspace.encounter.patient.patientName }}</span>
-            <span>性别：{{ workspace.encounter.patient.gender || "待补充" }}</span>
-            <span>病例标识：{{ workspace.encounter.caseToken }}</span>
-            <span>日期：{{ report.reportDate }}</span>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>项目</th>
-                <th>简称</th>
-                <th>结果</th>
-                <th>单位</th>
-                <th>参考范围</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="metric in materializeLabMetrics(report.templateId, report.metrics, workspace.encounter.patient.gender)"
-                :key="metric.key"
-                :class="{
-                  'abnormal-metric': isMetricAbnormal(metric),
-                  'critical-metric': metric.severity === 'CRITICAL' || metric.critical
-                }"
-              >
-                <td>{{ metric.name }}</td>
-                <td>{{ metric.shortName }}</td>
-                <td>
-                  <strong>{{ metric.value || "待补充" }}</strong>
-                  <el-tag v-if="metric.severity === 'CRITICAL' || metric.critical" type="danger" size="small" effect="dark">
-                    危急值
-                  </el-tag>
-                  <el-tag v-else-if="metric.value && isMetricAbnormal(metric)" type="warning" size="small" effect="dark">
-                    {{ abnormalLabel(metric) }}
-                  </el-tag>
-                </td>
-                <td>{{ metric.unit }}</td>
-                <td>{{ metric.reference }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <footer>
-            <span>报告版本：v{{ report.version }}</span
-            ><span>备注：{{ report.remark || "无" }}</span>
-          </footer>
-        </article>
-      </el-tab-pane>
+        <el-tab-pane
+          v-for="report in workspace.labReports"
+          :key="report.id"
+          :name="report.id"
+          :label="`${report.templateName} · ${report.reportDate}`"
+        >
+          <article class="lab-report-paper">
+            <header>
+              <h3>固始中医肛肠医院检验报告单</h3>
+              <p>{{ report.templateName }}</p>
+            </header>
+            <div class="lab-patient-line">
+              <span>姓名：{{ workspace.encounter.patient.patientName }}</span>
+              <span>性别：{{ workspace.encounter.patient.gender || "待补充" }}</span>
+              <span>病例标识：{{ workspace.encounter.caseToken }}</span>
+              <span>日期：{{ report.reportDate }}</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>项目</th>
+                  <th>简称</th>
+                  <th>结果</th>
+                  <th>单位</th>
+                  <th>参考范围</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="metric in materializeLabMetrics(report.templateId, report.metrics, workspace.encounter.patient.gender)"
+                  :key="metric.key"
+                  :class="{
+                    'abnormal-metric': isMetricAbnormal(metric),
+                    'critical-metric': metric.severity === 'CRITICAL' || metric.critical
+                  }"
+                >
+                  <td>{{ metric.name }}</td>
+                  <td>{{ metric.shortName }}</td>
+                  <td>
+                    <strong>{{ metric.value || "待补充" }}</strong>
+                    <el-tag v-if="metric.severity === 'CRITICAL' || metric.critical" type="danger" size="small" effect="dark">
+                      危急值
+                    </el-tag>
+                    <el-tag v-else-if="metric.value && isMetricAbnormal(metric)" type="warning" size="small" effect="dark">
+                      {{ abnormalLabel(metric) }}
+                    </el-tag>
+                  </td>
+                  <td>{{ metric.unit }}</td>
+                  <td>{{ metric.reference }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <footer>
+              <span>报告版本：v{{ report.version }}</span
+              ><span>备注：{{ report.remark || "无" }}</span>
+              <el-button v-if="canDeleteReport" type="danger" plain size="small" @click="emit('delete-report', report.id)">
+                删除该报告
+              </el-button>
+            </footer>
+          </article>
+        </el-tab-pane>
       </el-tabs>
       <section v-if="legacyTasks.length" class="legacy-auxiliary">
-      <div class="section-caption">旧辅助资料（只读保留）</div>
-      <div v-for="task in legacyTasks" :key="task.id" class="read-only-grid">
-        <div>
-          <span>{{ taskLabel[task.taskType] }}</span>
-          <p>{{ humanValue(task.data) }}</p>
+        <div class="section-caption">旧辅助资料（只读保留）</div>
+        <div v-for="task in legacyTasks" :key="task.id" class="read-only-grid">
+          <div>
+            <span>{{ taskLabel[task.taskType] }}</span>
+            <p>{{ humanValue(task.data) }}</p>
+          </div>
         </div>
-      </div>
       </section>
     </div>
     <footer class="panel-actions compact-actions sticky-actions">
@@ -126,12 +129,15 @@ defineProps<{
   humanValue: (value: any) => string;
   abnormalLabel: (metric: LabReportMetricSnapshot) => string;
   isMetricAbnormal: (metric: LabReportMetricSnapshot) => boolean;
+  /** 可删除化验报告（化验岗/管理员） */
+  canDeleteReport: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   "update:activeReportId": [value: string];
   "open-workbench": [];
   "return-task": [taskId: string];
+  "delete-report": [reportId: string];
   complete: [];
 }>();
 </script>

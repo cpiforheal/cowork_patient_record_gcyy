@@ -1305,6 +1305,7 @@
                     <div v-else-if="activeAuxTab === 'lab'" id="aux-lab-section" class="aux-lab-anchor">
                       <LabReportPanel
                         v-model:active-report-id="activeLabReportId"
+                        :can-delete-report="canOpenLabWorkbench || currentRole === 'admin'"
                         :workspace="workspace"
                         :lab-task="labTask"
                         :legacy-tasks="legacyAuxiliaryTasks"
@@ -1318,6 +1319,7 @@
                         :is-metric-abnormal="isLabMetricAbnormal"
                         @open-workbench="openLabWorkbench"
                         @return-task="returnAuxTask"
+                        @delete-report="deleteLabReport"
                         @complete="completeLab"
                       />
                     </div>
@@ -1857,6 +1859,7 @@ import {
   completePreAiLabApi,
   confirmPreAiReviewApi,
   registerAndIssuePreAiEncounterApi,
+  deletePreAiLabReportApi,
   registerAndIssuePreAiFollowUpApi,
   withdrawPreAiFollowUpApi,
   downloadPreAiAttachmentApi,
@@ -3291,7 +3294,7 @@ const nursingUnlocked = computed(() => {
 });
 const canEditSelectedStage = computed(() => {
   if (!workspace.value || selectedStageCode.value === "REVIEW") return false;
-  if (workspace.value.encounter.status === "CANCELLED") return false;
+  if (["CANCELLED", "WITHDRAWN"].includes(workspace.value.encounter.status)) return false;
   if (selectedStageCode.value === "NURSING" && !nursingUnlocked.value) return false;
   const submission = selectedStageSubmission.value;
   const roleAllowed = Boolean(authStore.stagePermissions[selectedStageCode.value]?.editable);
@@ -3308,7 +3311,7 @@ const canPhysicianConfirmSelectedSurgery = computed(
 );
 const canCorrectSelectedStage = computed(
   () =>
-    workspace.value?.encounter.status !== "CANCELLED" &&
+    !["CANCELLED", "WITHDRAWN"].includes(workspace.value?.encounter.status || "") &&
     Boolean(authStore.stagePermissions[selectedStageCode.value]?.correctable) &&
     ["COMPLETED", "SKIPPED"].includes(selectedStageSubmission.value?.status || "") &&
     selectedStageCode.value !== "REVIEW"
@@ -3528,7 +3531,15 @@ const stageStatusType = (status: PreAiStageStatus) =>
         ? "info"
         : "info";
 const encounterStatusType = (status: PreAiEncounterStatus) =>
-  status === "EXPORTED" ? "success" : status === "REVIEWED" ? "success" : status === "PENDING_REVIEW" ? "warning" : "info";
+  status === "EXPORTED" || status === "REVIEWED"
+    ? "success"
+    : status === "PENDING_REVIEW"
+      ? "warning"
+      : status === "CANCELLED"
+        ? "danger"
+        : status === "WITHDRAWN"
+          ? "info"
+          : "info";
 const fieldLabel = (stageCode: PreAiStageCode, key: string) =>
   stageByCode(stageCode).fields.find(field => field.key === key)?.label || key;
 const loadEncounterList = async () => {
@@ -4166,6 +4177,27 @@ const withdrawFollowUp = (patientCase: PreAiPatientCase) => {
     )
     .catch(error => {
       if (error !== "cancel" && error !== "close") ElMessage.error((error as Error)?.message || "撤回复诊失败");
+    });
+};
+
+// 删除化验报告（化验岗/管理员）：软删除，纠正重复或误传
+const deleteLabReport = (reportId: string) => {
+  if (!selectedEncounterId.value) return;
+  ElMessageBox.confirm("确认删除该检验报告吗？删除后不可恢复。", "删除检验报告", {
+    type: "warning",
+    confirmButtonText: "确认删除",
+    cancelButtonText: "取消"
+  })
+    .then(() =>
+      runAction(async () => {
+        const { data } = await deletePreAiLabReportApi(selectedEncounterId.value, reportId);
+        hydrateWorkspace(data);
+        if (activeLabReportId.value === reportId) activeLabReportId.value = workspace.value.labReports[0]?.id || "";
+        ElMessage.success("检验报告已删除");
+      })
+    )
+    .catch(error => {
+      if (error !== "cancel" && error !== "close") ElMessage.error((error as Error)?.message || "删除检验报告失败");
     });
 };
 
