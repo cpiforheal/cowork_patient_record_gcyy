@@ -92,7 +92,14 @@
                 :show-text="false"
                 :stroke-width="6"
               />
-              <DailyPatientCurve :items="dailyCurveItems" :disease-stats="diseaseStats" is-admin @retag="onRetagDiseases" />
+              <DailyPatientCurve
+                :items="dailyCurveItems"
+                :disease-stats="diseaseStats"
+                is-admin
+                :insight-text="trendInsight"
+                :insight-loading="trendInsightLoading"
+                @analyze="onAnalyzeTrend"
+              />
               <MiniBarChart
                 compact
                 :title="trendTitle"
@@ -218,7 +225,8 @@ import {
 } from "@/api/modules/clinic";
 import { getTcmDashboardApi, type TcmStatusCounts } from "@/api/modules/clinic/tcmPharmacy";
 import { getPolicyBriefLatestApi, type PolicyBriefResult } from "@/api/modules/clinic/policyBrief";
-import { getPreAiPatientCasesApi, runDiseaseTaggingApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
+import { getPreAiPatientCasesApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
+import { streamTrendInsightApi } from "@/api/modules/clinic/homeSummary";
 import { canEditSection, recordSections, roleLabel } from "@/config/fieldPermissions";
 import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
@@ -846,12 +854,10 @@ const complaintForPatient = (patient: PatientRow) =>
 const diseasesKeyMap = computed(() => {
   const map = new Map<string, string[]>();
   preAiCases.value.forEach(cases => {
-    const templateDiseases = Array.isArray(cases.patient?.clinicalTemplateDiseases)
+    const diseases = Array.isArray(cases.patient?.clinicalTemplateDiseases)
       ? cases.patient.clinicalTemplateDiseases.map(String)
       : [];
-    const aiTags = Array.isArray(cases.patient?.aiDiseaseTags) ? cases.patient.aiDiseaseTags.map(String) : [];
-    // 模板明确分类（医生确认）与 AI 归类标签合并去重
-    const names = [...new Set([...templateDiseases, ...aiTags])].filter(Boolean);
+    const names = [...new Set(diseases)].filter(Boolean);
     if (!names.length) return;
     if (cases.sourcePatientId) map.set(cases.sourcePatientId, names);
     if (cases.patientName) map.set(cases.patientName, names);
@@ -875,14 +881,9 @@ const diseaseStats = computed(() => {
       }
     }
   }
-  const stats = [...patientsByDisease.entries()]
+  return [...patientsByDisease.entries()]
     .map(([disease, patients]) => ({ disease, count: patients.size }))
     .sort((a, b) => b.count - a.count);
-  // 待归类兜底：窗口总人数 - 已有任一病种标签的人数，保证与窗口合计对账
-  const tagged = new Set<string>();
-  patientsByDisease.values().forEach(keys => keys.forEach(key => tagged.add(key)));
-  if (windowKeys.size > tagged.size) stats.push({ disease: "待归类", count: windowKeys.size - tagged.size });
-  return stats;
 });
 const loadPreAiCases = async () => {
   try {
@@ -892,13 +893,85 @@ const loadPreAiCases = async () => {
     preAiCases.value = [];
   }
 };
-const onRetagDiseases = async () => {
+
+// AI 汇总分析（仅管理员）：收集窗口内患者主诉 → SSE 流式接收，暂存于曲线下方分析区
+const trendInsight = ref("");
+const trendInsightLoading = ref(false);
+let trendInsightAbort: AbortController | null = null;
+const onAnalyzeTrend = async () => {
+  const complaints: string[] = [];
+  const seen = new Set<string>();
+  for (const item of dailyCurveItems.value) {
+    for (const patient of item.patients || []) {
+      const text = (patient.complaint || "").trim();
+      if (!text || text === "—" || seen.has(text)) continue;
+      seen.add(text);
+      complaints.push(text);
+    }
+  }
+  if (!complaints.length) {
+    ElMessage.warning("当前时间窗内没有可分析的患者主诉");
+    return;
+  }
+  trendInsightAbort?.abort();
+  trendInsightAbort = new AbortController();
+  trendInsightLoading.value = true;
+  trendInsight.value = "";
   try {
-    const { data } = await runDiseaseTaggingApi();
-    ElMessage[data.started ? "success" : "warning"](data.message || "AI 归类任务已启动");
-    if (data.started) window.setTimeout(() => void loadPreAiCases(), 90_000);
-  } catch (error) {
-    ElMessage.error((error as Error).message || "触发 AI 归类失败");
+    const response = await streamTrendInsightApi(
+      { days: trendRange.value, total: trendSummary.value.total, complaints },
+      trendInsightAbort.signal
+    );
+    if (!response.ok) {
+      let message = `分析请求失败（HTTP ${response.status}）`;
+      try {
+        const payload = await response.json();
+        message = payload?.msg || message;
+      } catch {
+        // 非 JSON 错误体则用默认信息
+      }
+      throw new Error(message);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("当前浏览器不支持流式读取，请更换浏览器");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let streamDone = false;
+    while (!streamDone) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separator = buffer.indexOf("\n\n");
+      while (separator >= 0) {
+        const rawEvent = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        separator = buffer.indexOf("\n\n");
+        for (const line of rawEvent.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payloadText = line.slice(5).trim();
+          if (!payloadText) continue;
+          let event: any;
+          try {
+            event = JSON.parse(payloadText);
+          } catch {
+            continue;
+          }
+          if (event.type === "delta" && event.text) {
+            trendInsight.value += event.text;
+          } else if (event.type === "error") {
+            throw new Error(event.message || "AI 分析失败");
+          } else if (event.type === "done") {
+            streamDone = true;
+          }
+        }
+      }
+    }
+    if (!trendInsight.value) throw new Error("AI 分析未返回内容，请重试");
+    ElMessage.success("AI 汇总分析完成");
+  } catch (error: any) {
+    if (error?.name !== "AbortError") ElMessage.error(error?.message || "AI 汇总分析失败");
+  } finally {
+    trendInsightLoading.value = false;
   }
 };
 

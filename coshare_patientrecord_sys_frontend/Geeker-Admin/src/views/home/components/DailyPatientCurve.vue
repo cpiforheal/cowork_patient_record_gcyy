@@ -19,20 +19,26 @@
     </div>
     <VChart v-if="items.length" class="curve-chart" :option="chartOption" autoresize />
     <el-empty v-else description="暂无每日患者数据" :image-size="56" />
-    <!-- 病种分布：窗口内来访患者按预置病种模板+AI归类合并去重计数（仅管理员有数据） -->
+    <!-- 病种分布：窗口内来访患者按预置病种模板分类去重计数（仅管理员有数据） -->
     <div v-if="diseaseStats?.length" class="disease-strip">
       <span class="disease-strip-title">
         病种分布
-        <button v-if="isAdmin" type="button" class="disease-retag" @click="emit('retag')">AI 归类</button>
+        <button v-if="isAdmin" type="button" class="disease-retag" :disabled="insightLoading" @click="emit('analyze')">
+          {{ insightLoading ? "分析中…" : "AI 分析" }}
+        </button>
       </span>
-      <span
-        v-for="stat in diseaseStats"
-        :key="stat.disease"
-        class="disease-chip"
-        :class="{ 'is-pending': stat.disease === '待归类' }"
-      >
+      <span v-for="stat in diseaseStats" :key="stat.disease" class="disease-chip">
         {{ stat.disease }} <b>{{ stat.count }}</b> 人
       </span>
+    </div>
+    <!-- AI 汇总分析暂存区：流式输出，刷新页面后清除 -->
+    <div v-if="insightLoading || insightText" class="insight-panel">
+      <div class="insight-head">
+        <strong>AI 汇总分析</strong>
+        <small v-if="insightLoading">分析中 · 内容实时生成…</small>
+        <small v-else>暂存内容 · 刷新页面后清除</small>
+      </div>
+      <pre class="insight-body" :class="{ 'is-loading': insightLoading }">{{ insightText || "正在连接分析模型…" }}</pre>
     </div>
   </section>
 </template>
@@ -65,17 +71,23 @@ const props = withDefaults(
     items: DailyCurveItem[];
     /** 病种分布统计（窗口内来访患者按预置病种模板+AI归类合并去重计数，降序；仅管理员提供） */
     diseaseStats?: { disease: string; count: number }[];
-    /** 是否管理员（决定 AI 归类按钮是否显示） */
+    /** 是否管理员（决定 AI 分析按钮是否显示） */
     isAdmin?: boolean;
+    /** AI 汇总分析流式内容（暂存区） */
+    insightText?: string;
+    /** AI 分析进行中 */
+    insightLoading?: boolean;
   }>(),
   {
     title: "每日患者趋势图",
     subtitle: "按就诊日期统计 · 与每日患者数据粒度一致",
     diseaseStats: () => [],
-    isAdmin: false
+    isAdmin: false,
+    insightText: "",
+    insightLoading: false
   }
 );
-const emit = defineEmits<{ (event: "retag"): void }>();
+const emit = defineEmits<{ (event: "analyze"): void }>();
 
 const globalStore = useGlobalStore();
 const isDark = computed(() => globalStore.isDark);
@@ -278,6 +290,58 @@ const chartOption = computed<EChartsOption>(() => {
     &:hover {
       background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
     }
+    &:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+  }
+
+  // AI 汇总分析暂存区
+  .insight-panel {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+    background: color-mix(in srgb, var(--el-color-primary) 4%, var(--hos-chart-panel, #ffffff));
+    border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, var(--hos-chart-line-soft, rgb(90 110 130 / 10%)));
+    border-radius: 12px;
+    .insight-head {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      strong {
+        font-size: 13px;
+        color: var(--el-color-primary);
+      }
+      small {
+        color: var(--hos-chart-muted, #74777d);
+      }
+    }
+    .insight-body {
+      max-height: 320px;
+      margin: 0;
+      overflow-y: auto;
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--hos-chart-text, #2d2f33);
+      word-break: break-word;
+      white-space: pre-wrap;
+      &.is-loading::after {
+        color: var(--el-color-primary);
+        content: "▍";
+        animation: insight-blink 0.9s step-end infinite;
+      }
+    }
+  }
+}
+
+@keyframes insight-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 

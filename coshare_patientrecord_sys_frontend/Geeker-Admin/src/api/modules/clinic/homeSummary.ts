@@ -20,3 +20,12 @@ export const getHomeSummaryApi = async () => {
   const result = await clinicFetch("/home/summary", { headers: authHeaders() });
   return clinicResponse(await parseClinicApiResponse<HomeSummary>(result));
 };
+
+/** 数据看板 AI 汇总分析：SSE 流式接口（返回原始 Response，由调用方逐块解析 delta 事件） */
+export const streamTrendInsightApi = (payload: { days: number; total: number; complaints: string[] }, signal?: AbortSignal) =>
+  fetch("/clinic-api/home/trend-insight/stream", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal
+  });
