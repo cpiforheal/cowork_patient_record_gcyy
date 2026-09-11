@@ -9,8 +9,8 @@
 
 <script setup lang="ts">
 // 翻转卡片（inspira 规范本地化）：桌面 hover 翻面，触屏点按翻面。
-// 面切换使用 opacity + visibility 双保险：即使浏览器 backface-visibility 失效，
-// 也不会出现背面内容逃逸容器堆叠渲染的问题。
+// 采用 2D 翻面过渡（不使用 preserve-3d/backface-visibility），
+// 规避 Chrome 中 3D 变换逃逸 overflow 裁剪导致内容堆叠渲染的已知问题。
 import { onMounted, ref } from "vue";
 
 const flipped = ref(false);
@@ -28,67 +28,49 @@ const onToggle = () => {
 <style scoped lang="scss">
 .flip-card {
   height: 100%;
-  perspective: 1600px;
+  contain: paint;
+  border-radius: inherit;
 }
 .flip-card-inner {
   position: relative;
   width: 100%;
   height: 100%;
-  transform-style: preserve-3d;
-  transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
-}
-.flip-card:hover .flip-card-inner,
-.flip-card.is-flipped .flip-card-inner {
-  transform: rotateY(180deg);
 }
 .flip-card-face {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
+  transition:
+    opacity 0.28s ease,
+    transform 0.4s cubic-bezier(0.4, 0.2, 0.2, 1),
+    visibility 0.28s ease;
 }
 .flip-card-front {
   visibility: visible;
   opacity: 1;
-  transition:
-    opacity 0.3s ease 0.15s,
-    visibility 0.3s ease 0.15s;
+  transform: rotateY(0deg) scale(1);
 }
 .flip-card-back {
   visibility: hidden;
   opacity: 0;
-  transition:
-    opacity 0.3s ease,
-    visibility 0.3s ease;
-  transform: rotateY(180deg);
+  transform: rotateY(14deg) scale(0.96);
 }
 .flip-card:hover .flip-card-front,
 .flip-card.is-flipped .flip-card-front {
   visibility: hidden;
   opacity: 0;
-  transition:
-    opacity 0.3s ease,
-    visibility 0.3s ease;
+  transform: rotateY(-14deg) scale(0.96);
 }
 .flip-card:hover .flip-card-back,
 .flip-card.is-flipped .flip-card-back {
   visibility: visible;
   opacity: 1;
-  transition-delay: 0.15s;
+  transform: rotateY(0deg) scale(1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flip-card-inner {
-    transition: none;
-  }
-  .flip-card-front,
-  .flip-card-back,
-  .flip-card:hover .flip-card-front,
-  .flip-card:hover .flip-card-back,
-  .flip-card.is-flipped .flip-card-front,
-  .flip-card.is-flipped .flip-card-back {
-    transition: none;
+  .flip-card-face {
+    transition: opacity 0.2s ease;
   }
 }
 </style>
