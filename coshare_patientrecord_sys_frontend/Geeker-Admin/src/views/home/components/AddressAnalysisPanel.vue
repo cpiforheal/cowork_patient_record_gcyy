@@ -323,8 +323,20 @@ const GUSHI_TOWNSHIPS = [
   "张老埠",
   "赵岗",
   "丰港",
-  "马堽"
+  "马堽集",
+  "三河尖"
 ];
+/** 乡镇简写/别称/异体字 → 规范名（归类计数合并到规范乡镇） */
+const TOWNSHIP_ALIASES: Record<string, string> = {
+  祖师: "祖师庙",
+  草庙: "草庙集",
+  武庙: "武庙集",
+  张广: "张广庙",
+  分水: "分水亭",
+  马罡: "马堽集",
+  马堽: "马堽集",
+  城郊: "城区"
+};
 const URBAN_STREETS = ["蓼城", "秀水", "番城"];
 interface BarTone {
   color: string;
@@ -387,7 +399,8 @@ const TOWNSHIP_COORDS: Record<string, [number, number]> = {
   武庙集: [115.92, 31.75],
   张老埠: [115.85, 31.95],
   黎集: [115.95, 31.9],
-  陈淋子: [116.05, 31.8]
+  陈淋子: [116.05, 31.8],
+  三河尖: [115.95, 32.48]
 };
 
 const globalStore = useGlobalStore();
@@ -437,9 +450,16 @@ const classifyAddress = (
 ): { bucket: "township" | "urban" | "gushi-other" | "outside" | "unknown"; township: string } => {
   const address = String(raw || "").replace(/\s+/g, "");
   if (!address) return { bucket: "unknown", township: "" };
+  // 城区街道（蓼城/秀水/番城，含"街道办事处"写法）优先识别，避免被"固始县其他/县外"吞掉
+  const urbanStreet = URBAN_STREETS.find(name => address.includes(name));
+  if (urbanStreet) return { bucket: "urban", township: "城区" };
   const township = [...GUSHI_TOWNSHIPS].sort((a, b) => b.length - a.length).find(name => address.includes(name));
-  if (township) {
-    return { bucket: URBAN_STREETS.includes(township) ? "urban" : "township", township };
+  if (township) return { bucket: "township", township };
+  // 简写/别称/异体字归并到规范乡镇
+  const alias = Object.keys(TOWNSHIP_ALIASES).find(name => address.includes(name));
+  if (alias) {
+    const canonical = TOWNSHIP_ALIASES[alias];
+    return { bucket: canonical === "城区" ? "urban" : "township", township: canonical };
   }
   if (/(城区|城关|县城|产业集聚区)/.test(address)) return { bucket: "urban", township: "城区" };
   if (address.includes("固始")) return { bucket: "gushi-other", township: "固始县其他" };
