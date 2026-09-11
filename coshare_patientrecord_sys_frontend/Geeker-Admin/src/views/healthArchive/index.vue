@@ -91,6 +91,12 @@ const diseasesOf = (item: PreAiPatientCase) => {
   const diseases = item.patient?.clinicalTemplateDiseases;
   return Array.isArray(diseases) ? diseases.map(String).filter(Boolean) : [];
 };
+const diseaseDirectionOf = (item: PreAiPatientCase) => {
+  const directions = Array.isArray(item.patient?.diseaseDirections)
+    ? item.patient.diseaseDirections.map(String).filter(Boolean).slice(0, 2).join(" / ")
+    : String(item.patient?.diseaseDirection || item.patient?.inspectionDiseaseDirections || "").trim();
+  return directions || diseasesOf(item).join(" / ");
+};
 const complaintOf = (item: PreAiPatientCase) =>
   String(
     item.patient?.registrationChiefComplaint || item.patient?.registrationSymptoms || item.patient?.chiefComplaint || ""
