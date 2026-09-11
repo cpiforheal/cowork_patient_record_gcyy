@@ -230,17 +230,19 @@
         </div>
         <template #footer>
           <el-button @click="courseDialogVisible = false">关闭</el-button>
-          <el-button type="warning" plain :disabled="!coursePatient?.encounterId" @click="healthArchiveVisible = true">
+          <el-button type="warning" plain :disabled="!coursePatient?.encounterId" @click="openHealthArchive(true)">
             健康管理档案
           </el-button>
-          <el-button type="primary" :disabled="!coursePatient?.patientId" @click="gotoPatientArchive"> 进入完整档案 </el-button>
+          <el-button type="primary" :disabled="!coursePatient?.encounterId" @click="openHealthArchive(false)">
+            进入完整档案
+          </el-button>
         </template>
       </el-dialog>
 
       <!-- 四级弹窗：健康管理档案只读预览（复用右侧合并文档预览态） -->
       <HealthArchiveDialog
         v-model="healthArchiveVisible"
-        preview-only
+        :preview-only="healthArchivePreviewOnly"
         :encounter-id="coursePatient?.encounterId || ''"
         :encounter-patient-name="coursePatient?.name"
         :workspace="courseWorkspace || undefined"
@@ -273,7 +275,6 @@ import {
 } from "@/api/modules/clinic/preAi";
 import { useGlobalStore } from "@/stores/modules/global";
 import gushiCountyGeo from "@/assets/geo/gushi-county.json";
-import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 import AttachmentPreviewGallery from "@/views/preAi/encounters/components/AttachmentPreviewGallery.vue";
 import HealthArchiveDialog from "@/views/preAi/encounters/components/HealthArchiveDialog.vue";
 import type { PreAiWorkspace } from "@/api/modules/clinic";
@@ -424,8 +425,12 @@ const courseError = ref("");
 const courseAttachments = ref<PreAiAttachment[]>([]);
 const courseWorkspace = ref<PreAiWorkspace | null>(null);
 const healthArchiveVisible = ref(false);
-
-const { openPatientDetail } = usePatientNavigation();
+const healthArchivePreviewOnly = ref(true);
+const openHealthArchive = (previewOnly: boolean) => {
+  if (!coursePatient.value?.encounterId) return;
+  healthArchivePreviewOnly.value = previewOnly;
+  healthArchiveVisible.value = true;
+};
 
 const classifyAddress = (
   raw: string
@@ -1013,14 +1018,6 @@ const abnormalMetricList = computed(() => courseOverview.value?.auxiliary?.labSu
 
 const downloadCourseAttachment = (attachment: PreAiAttachment) => {
   void downloadPreAiAttachmentApi(attachment);
-};
-
-const gotoPatientArchive = () => {
-  const card = coursePatient.value;
-  if (!card?.patientId) return;
-  courseDialogVisible.value = false;
-  townshipDialogVisible.value = false;
-  openPatientDetail(card.patientId);
 };
 
 onMounted(() => {
