@@ -1470,14 +1470,6 @@
       @record-generated="loadTargetMedicalRecordVersions"
     />
 
-    <HealthArchiveDialog
-      v-model="healthArchiveVisible"
-      :encounter-id="selectedEncounterId"
-      :encounter-patient-name="recordChatPatientName"
-      :workspace="workspace"
-      @completed="loadTargetMedicalRecordVersions"
-    />
-
     <OutpatientRecordDialog
       v-model="outpatientDialogVisible"
       :loading="outpatientLoading"
@@ -1933,7 +1925,6 @@ import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
 import OutpatientRecordDialog from "./components/OutpatientRecordDialog.vue";
 import RecordAiChat from "./components/RecordAiChat.vue";
-import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
 import { usePatientNavigation } from "@/hooks/usePatientNavigation";
 import FlipCard from "@/components/inspira/FlipCard.vue";
 import FollowUpTimeline from "./components/FollowUpTimeline.vue";
@@ -2332,9 +2323,9 @@ const recordChatVisible = ref(false);
 const openRecordChat = () => {
   recordChatVisible.value = true;
 };
-const healthArchiveVisible = ref(false);
+// 健康管理档案已独立页面化（护理部入院即维护）：统一跳转新入口页
 const openHealthArchive = () => {
-  healthArchiveVisible.value = true;
+  router.push({ path: "/health-archive", query: { encounterId: selectedEncounterId.value || "" } });
 };
 // ===== 门诊病历生成（医生复核确认后可用） =====
 const outpatientDialogVisible = ref(false);
@@ -2871,10 +2862,9 @@ const openPatientArchiveDetail = (item: PreAiPatientCase) => {
   patientDrawerOpen.value = false;
   openPatientDetail(patientId);
 };
-const openPatientHealthArchive = async (item: PreAiPatientCase) => {
+const openPatientHealthArchive = (item: PreAiPatientCase) => {
   if (!item.latestEncounter) return;
-  await selectPatientCase(item);
-  openHealthArchive();
+  router.push({ path: "/health-archive", query: { encounterId: item.latestEncounter.id } });
 };
 const patientArchiveCardEmptyText = (item: PreAiPatientCase) => {
   const detail = patientArchiveDetailOf(item);

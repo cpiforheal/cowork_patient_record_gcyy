@@ -268,8 +268,32 @@
 
         <section v-show="!loading" class="ha-section">
           <h4>六、分级随访</h4>
-          <el-table :data="form.followUpRows" size="small" border>
-            <el-table-column prop="timeNode" label="随访时间" width="88" />
+          <!-- 随访监控：基于手术日期推算各节点应随访日期，纯前端派生，表格结构零改动 -->
+          <div v-if="followUpMonitor" class="followup-monitor" :class="{ 'has-overdue': followUpMonitor.overdue > 0 }">
+            <span
+              >随访进度：已完成 <b>{{ followUpMonitor.done }}</b
+              >/{{ followUpMonitor.total }}</span
+            >
+            <span v-if="followUpMonitor.today > 0"
+              >今日应随访 <b>{{ followUpMonitor.today }}</b></span
+            >
+            <span v-if="followUpMonitor.overdue > 0" class="monitor-overdue"
+              >超期 <b>{{ followUpMonitor.overdue }}</b></span
+            >
+            <span v-if="followUpMonitor.pending > 0"
+              >待随访 <b>{{ followUpMonitor.pending }}</b></span
+            >
+            <span v-if="followUpMonitor.unknown" class="monitor-hint">未填手术日期，节点时间待定</span>
+          </div>
+          <el-table :data="form.followUpRows" size="small" border :row-class="followUpRowClass">
+            <el-table-column prop="timeNode" label="随访时间" width="108">
+              <template #default="{ row }">
+                <div class="fu-time-cell">
+                  <span>{{ row.timeNode }}</span>
+                  <span class="fu-state" :class="`is-${followUpRowState(row).state}`">{{ followUpRowState(row).text }}</span>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="随访方式" width="120">
               <template #default="{ row }">
                 <el-select v-model="row.method" :disabled="!editable" filterable allow-create placeholder="选择或输入">
@@ -680,6 +704,7 @@ import {
   loadHealthArchiveApi,
   saveHealthArchiveDraftApi,
   type HealthArchiveAuto,
+  type HealthArchiveFollowUpRow,
   type HealthArchiveDocumentItem,
   type HealthArchiveForm,
   type HealthArchiveLoadResult,
@@ -805,6 +830,49 @@ const form = reactive<HealthArchiveForm>({
 
 const selectedVersion = computed(() => aiVersions.value.find(item => item.id === selectedRecordId.value) || null);
 const draftMeta = computed(() => Boolean(draftStatus.value));
+// 随访监控：手术日期 + 节点偏移 → 应随访日期；行内任一内容列已填即视为已完成
+const followUpDueDate = (node: string, surgery: string) => {
+  if (!surgery) return "";
+  const base = new Date(surgery.slice(0, 10));
+  if (Number.isNaN(base.getTime())) return "";
+  const monthMatch = node.match(/(\d+)\s*月/);
+  const dayMatch = node.match(/(\d+)\s*天/);
+  if (monthMatch) base.setMonth(base.getMonth() + parseInt(monthMatch[1], 10));
+  else if (dayMatch) base.setDate(base.getDate() + parseInt(dayMatch[1], 10));
+  else return "";
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
+};
+const followUpRowFilled = (row: HealthArchiveFollowUpRow) =>
+  [row.method, row.recovery, row.adherence, row.diet, row.review, row.feedback, row.visitor].some(value =>
+    String(value || "").trim()
+  );
+const followUpRowState = (row: HealthArchiveFollowUpRow): { state: string; text: string } => {
+  if (followUpRowFilled(row)) return { state: "done", text: "已完成" };
+  const due = followUpDueDate(row.timeNode, (form.surgeryDate || "").slice(0, 10));
+  if (!due) return { state: "unknown", text: "待定" };
+  const diff = Math.round((new Date(due).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
+  if (diff < 0) return { state: "overdue", text: `超期${-diff}天` };
+  if (diff === 0) return { state: "today", text: "今日应随访" };
+  return { state: "pending", text: `剩${diff}天` };
+};
+const followUpRowClass = ({ row }: { row: HealthArchiveFollowUpRow }) => ({
+  "fu-row-overdue": followUpRowState(row).state === "overdue"
+});
+const followUpMonitor = computed(() => {
+  const surgery = (form.surgeryDate || "").slice(0, 10);
+  let done = 0;
+  let todayDue = 0;
+  let overdue = 0;
+  let pending = 0;
+  for (const row of form.followUpRows) {
+    const state = followUpRowState(row).state;
+    if (state === "done") done += 1;
+    else if (state === "today") todayDue += 1;
+    else if (state === "overdue") overdue += 1;
+    else if (state === "pending") pending += 1;
+  }
+  return { done, today: todayDue, overdue, pending, total: form.followUpRows.length, unknown: !surgery };
+});
 const archiveMetaText = computed(() => {
   const parts = [`档案编号 ${draftArchiveNo.value || "自动生成"}`];
   if (draftRevision.value) parts.push(`已保存 v${draftRevision.value}`);
@@ -1642,5 +1710,62 @@ watch(
 .ha-fade-enter-from,
 .ha-fade-leave-to {
   opacity: 0;
+}
+
+// 随访监控增量
+.followup-monitor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 6px 10px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+  b {
+    font-variant-numeric: tabular-nums;
+    color: var(--el-color-primary);
+  }
+  &.has-overdue {
+    background: var(--el-color-danger-light-9);
+    .monitor-overdue {
+      font-weight: 600;
+      color: var(--el-color-danger);
+      b {
+        color: var(--el-color-danger);
+      }
+    }
+  }
+  .monitor-hint {
+    color: var(--el-text-color-placeholder);
+  }
+}
+.fu-time-cell {
+  display: grid;
+  gap: 2px;
+  .fu-state {
+    font-size: 11px;
+    &.is-done {
+      color: var(--el-color-success);
+    }
+    &.is-overdue {
+      font-weight: 600;
+      color: var(--el-color-danger);
+    }
+    &.is-today {
+      font-weight: 600;
+      color: var(--el-color-warning);
+    }
+    &.is-pending {
+      color: var(--el-text-color-placeholder);
+    }
+    &.is-unknown {
+      color: var(--el-text-color-placeholder);
+    }
+  }
+}
+:deep(.el-table) .fu-row-overdue {
+  background: var(--el-color-danger-light-9);
 }
 </style>

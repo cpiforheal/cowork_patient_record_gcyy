@@ -205,13 +205,7 @@
             </el-button>
           </span>
         </el-tooltip>
-        <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核" placement="top">
-          <span>
-            <el-button type="warning" plain :disabled="!reviewConfirmed" @click="$emit('openHealthArchive')">
-              健康管理档案
-            </el-button>
-          </span>
-        </el-tooltip>
+        <el-button type="warning" plain @click="$emit('openHealthArchive')"> 健康管理档案 </el-button>
         <el-tooltip :disabled="reviewConfirmed" content="请先完成最终医生复核后生成门诊病历" placement="top">
           <span>
             <el-button type="danger" plain :disabled="!reviewConfirmed" @click="$emit('openOutpatientRecord')">

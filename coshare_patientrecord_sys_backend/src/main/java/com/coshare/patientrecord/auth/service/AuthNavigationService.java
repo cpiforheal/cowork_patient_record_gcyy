@@ -30,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.08.23.1";
+    public static final String VERSION = "2026.09.09.1";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -383,7 +383,8 @@ public class AuthNavigationService {
             page("/patients/list", "patientList", "/patients/list/index", "患者档案查询", "Search", false, false, false),
             pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/list"),
             page("/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled", false, false, false),
-            page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false)
+            page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false),
+            page("/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook", false, false, false)
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "Operation",
             page("/policy-brief", "policyBrief", "/policyBrief/index", "医政早报", "Reading", false, false, false),
@@ -484,6 +485,7 @@ public class AuthNavigationService {
         Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record");
         Set<String> preAi = paths("/pre-ai/encounters");
+        Set<String> healthArchive = paths("/health-archive");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
         Set<String> inventoryStaff = paths(
@@ -548,7 +550,7 @@ public class AuthNavigationService {
         result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         result.put("ecg", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
-        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
+        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive), diagnosticButtons));
 
         result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
@@ -562,7 +564,7 @@ public class AuthNavigationService {
             "tcmPharmacyDisplayMenu=display:read,announcement:play"
         )));
 
-        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff), mergePermissions(permissions(
+        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive), mergePermissions(permissions(
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "patientsOverview=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",

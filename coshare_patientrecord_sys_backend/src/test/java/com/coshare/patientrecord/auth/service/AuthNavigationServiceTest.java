@@ -203,13 +203,13 @@ class AuthNavigationServiceTest {
         assertThat(patient.meta().icon()).isEqualTo("UserFilled");
         assertThat(patient.redirect()).isEqualTo("/pre-ai/encounters");
         assertThat(visibleChildren(patient).stream().map(NavigationMenu::path)).containsExactly(
-            "/pre-ai/encounters", "/patients/overview", "/patients/list", "/workbench/upload", "/workbench/lab-report"
+            "/pre-ai/encounters", "/patients/overview", "/patients/list", "/workbench/upload", "/workbench/lab-report", "/health-archive"
         );
         assertThat(visibleChildren(patient).stream().map(item -> item.meta().title())).containsExactly(
-            "登记与事实采集", "患者概览", "患者档案查询", "患者资料上传", "检验报告填写"
+            "登记与事实采集", "患者概览", "患者档案查询", "患者资料上传", "检验报告填写", "健康管理档案"
         );
         assertThat(visibleChildren(patient).stream().map(item -> item.meta().icon())).containsExactly(
-            "EditPen", "Connection", "Search", "UploadFilled", "Memo"
+            "EditPen", "Connection", "Search", "UploadFilled", "Memo", "Notebook"
         );
         NavigationMenu detail = findMenu(patient.children(), "/patients/detail/:id");
         assertThat(detail.meta().isHide()).isTrue();

@@ -230,29 +230,24 @@
         </div>
         <template #footer>
           <el-button @click="courseDialogVisible = false">关闭</el-button>
-          <el-button type="warning" plain :disabled="!coursePatient?.encounterId" @click="openHealthArchive(true)">
+          <el-button
+            type="primary"
+            :disabled="!coursePatient?.encounterId"
+            @click="router.push({ path: '/health-archive', query: { encounterId: coursePatient?.encounterId || '' } })"
+          >
             健康管理档案
-          </el-button>
-          <el-button type="primary" :disabled="!coursePatient?.encounterId" @click="openHealthArchive(false)">
-            进入完整档案
           </el-button>
         </template>
       </el-dialog>
 
       <!-- 四级弹窗：健康管理档案只读预览（复用右侧合并文档预览态） -->
-      <HealthArchiveDialog
-        v-model="healthArchiveVisible"
-        :preview-only="healthArchivePreviewOnly"
-        :encounter-id="coursePatient?.encounterId || ''"
-        :encounter-patient-name="coursePatient?.name"
-        :workspace="courseWorkspace || undefined"
-      />
     </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { ArrowRight, Location } from "@element-plus/icons-vue";
 import { BarChart, EffectScatterChart, MapChart, PieChart } from "echarts/charts";
@@ -276,7 +271,6 @@ import {
 import { useGlobalStore } from "@/stores/modules/global";
 import gushiCountyGeo from "@/assets/geo/gushi-county.json";
 import AttachmentPreviewGallery from "@/views/preAi/encounters/components/AttachmentPreviewGallery.vue";
-import HealthArchiveDialog from "@/views/preAi/encounters/components/HealthArchiveDialog.vue";
 import type { PreAiWorkspace } from "@/api/modules/clinic";
 
 use([
@@ -404,6 +398,7 @@ const TOWNSHIP_COORDS: Record<string, [number, number]> = {
 };
 
 const globalStore = useGlobalStore();
+const router = useRouter();
 const isDark = computed(() => globalStore.isDark);
 
 const patients = ref<BillingPatientInfo[]>([]);
@@ -437,13 +432,6 @@ const courseOverview = ref<PreAiEncounterOverview | null>(null);
 const courseError = ref("");
 const courseAttachments = ref<PreAiAttachment[]>([]);
 const courseWorkspace = ref<PreAiWorkspace | null>(null);
-const healthArchiveVisible = ref(false);
-const healthArchivePreviewOnly = ref(true);
-const openHealthArchive = (previewOnly: boolean) => {
-  if (!coursePatient.value?.encounterId) return;
-  healthArchivePreviewOnly.value = previewOnly;
-  healthArchiveVisible.value = true;
-};
 
 const classifyAddress = (
   raw: string
