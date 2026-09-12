@@ -15,7 +15,16 @@
     </header>
 
     <!-- 3D 病历夹：患者病历像实体病历夹竖着摞起，鼠标横移聚焦 -->
-    <div ref="stageRef" class="deck-stage" @mousemove="onStageMove" @mouseleave="onStageLeave">
+    <div
+      ref="stageRef"
+      class="deck-stage"
+      :class="{ 'is-dragging': dragging }"
+      @mousedown="onDragStart"
+      @mousemove="onDragMove"
+      @mouseup="onDragEnd"
+      @mouseleave="onDragEnd"
+      @wheel.prevent="onWheel"
+    >
       <div class="deck-scene">
         <div
           v-for="card in deckCards"
@@ -23,6 +32,7 @@
           class="deck-card"
           :class="{ 'is-focus': card.isFocus }"
           :style="card.style"
+          @mouseenter="onCardHover(card)"
           @click="onCardClick(card)"
         >
           <div class="deck-band">
@@ -32,13 +42,14 @@
           <div class="deck-body">
             <div class="deck-name">{{ card.patient.patientName || "待补姓名" }}</div>
             <div class="deck-complaint">主诉：{{ truncate(complaintOf(card.patient), 26) || "—" }}</div>
+            <div class="deck-phone">📱 {{ card.patient.phone || "手机号未登记" }}</div>
             <div class="deck-diseases">
               <span v-for="disease in diseasesOf(card.patient)" :key="disease" class="deck-disease">{{ disease }}</span>
             </div>
             <div class="deck-date">🗓 {{ visitDate(card.patient) || "—" }}</div>
           </div>
           <div class="deck-tab">第 {{ card.patient.visitCount }} 次</div>
-          <div v-if="card.isFocus" class="deck-focus-pill">点击进入档案</div>
+          <div v-if="card.isFocus" class="deck-focus-pill">点击进入健康档案</div>
         </div>
         <div v-if="!deckCards.length && !loading" class="deck-empty">暂无患者病历</div>
       </div>
@@ -149,7 +160,7 @@ interface DeckCard {
 const deckCards = computed<DeckCard[]>(() => {
   const total = list.value.length;
   if (!total) return [];
-  const focus = focusFloat.value;
+  const focus = dragging.value ? focusFloat.value : focusIdx.value;
   const start = Math.max(0, Math.floor(focus) - 3);
   const end = Math.min(total, Math.floor(focus) + 5);
   const cards: DeckCard[] = [];
@@ -179,6 +190,10 @@ const followFocus = (index: number) => {
   focusFloat.value = Math.max(0, Math.min(index, list.value.length - 1));
 };
 const onCardClick = (card: DeckCard) => {
+  if (dragMoved) {
+    dragMoved = false;
+    return;
+  }
   if (card.isFocus) {
     openArchive(card.patient);
     return;
@@ -186,14 +201,42 @@ const onCardClick = (card: DeckCard) => {
   followFocus(card.index);
 };
 const step = (dir: number) => followFocus(focusedIdx.value + dir);
-const onStageMove = (event: MouseEvent) => {
-  const rect = stageRef.value?.getBoundingClientRect();
-  if (!rect || !rect.width || list.value.length < 2) return;
-  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-  focusFloat.value = Math.max(0, Math.min(list.value.length - 1, Math.round(ratio * (list.value.length - 1))));
+// 拖拽滑动：按住横向拖动，整摞病历夹随拖拽量平滑滑动，松手吸附到最近一份
+const dragging = ref(false);
+let dragStartX = 0;
+let dragStartFocus = 0;
+let dragMoved = false;
+let wheelAcc = 0;
+const onDragStart = (event: MouseEvent) => {
+  if (event.button !== 0) return;
+  dragging.value = true;
+  dragMoved = false;
+  dragStartX = event.clientX;
+  dragStartFocus = focusFloat.value;
 };
-const onStageLeave = () => {
-  focusFloat.value = focusedIdx.value;
+const onDragMove = (event: MouseEvent) => {
+  if (!dragging.value) return;
+  const dx = event.clientX - dragStartX;
+  if (Math.abs(dx) > 8) dragMoved = true;
+  focusFloat.value = Math.max(0, Math.min(list.value.length - 1, dragStartFocus - dx / CARD_GAP));
+};
+const onDragEnd = () => {
+  if (!dragging.value) return;
+  dragging.value = false;
+  focusIdx.value = Math.max(0, Math.min(Math.round(focusFloat.value), list.value.length - 1));
+};
+const onCardHover = (card: DeckCard) => {
+  if (dragging.value || dragMoved) return;
+  followFocus(card.index);
+};
+const onWheel = (event: WheelEvent) => {
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  event.preventDefault();
+  wheelAcc += event.deltaY;
+  if (Math.abs(wheelAcc) >= 60) {
+    step(wheelAcc > 0 ? 1 : -1);
+    wheelAcc = 0;
+  }
 };
 
 // ---------- 档案弹窗 ----------
@@ -276,6 +319,16 @@ onMounted(() => {
   transform: rotateY(-10deg) rotateX(4deg) translateZ(0);
   perspective: 1400px;
   transform-style: preserve-3d;
+}
+.deck-stage.is-dragging {
+  cursor: grabbing;
+}
+.deck-stage.is-dragging .deck-card {
+  transition: none;
+}
+.deck-phone {
+  font-size: 12px;
+  color: var(--el-color-primary);
 }
 .deck-card {
   position: absolute;
