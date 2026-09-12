@@ -1,84 +1,74 @@
 <template>
   <div class="health-archive-page">
+    <!-- Animate Grid 动效背景 -->
+    <div class="hap-grid-bg" aria-hidden="true">
+      <AnimatedGridPattern :size="44" :num-squares="40" />
+    </div>
+
     <header class="hap-head">
       <div class="hap-title">
         <strong>住院 · 门诊患者健康档案</strong>
-        <small>入院确认为住院即由护理部维护跟进 · 门诊患者同步建档 · 鼠标横移聚焦病历夹，点击进入维护</small>
+        <small>入院确认为住院即由护理部维护跟进 · 门诊患者同步建档 · 按来访时间筛选 · 点击卡片进入档案维护</small>
       </div>
       <div class="hap-actions">
-        <el-input v-model="keyword" placeholder="按姓名或病例编号搜索" clearable :prefix-icon="Search" style="width: 220px" />
+        <el-input v-model="keyword" placeholder="按姓名或病例编号搜索" clearable :prefix-icon="Search" style="width: 200px" />
         <el-segmented v-model="careFilter" :options="careFilterOptions" />
+        <el-segmented v-model="daysFilter" :options="daysFilterOptions" />
         <el-button :loading="loading" @click="loadCases">
           <el-icon style="margin-right: 4px"><Refresh /></el-icon>刷新
         </el-button>
       </div>
     </header>
 
-    <!-- 3D 病历夹：患者病历像实体病历夹竖着摞起，鼠标横移聚焦 -->
-    <div
-      ref="stageRef"
-      class="deck-stage"
-      :class="{ 'is-dragging': dragging }"
-      @mousedown="onDragStart"
-      @mousemove="onDragMove"
-      @mouseup="onDragEnd"
-      @mouseleave="onDragEnd"
-      @wheel.prevent="onWheel"
-    >
-      <div class="deck-scene">
-        <div
-          v-for="card in deckCards"
-          :key="card.key"
-          class="deck-card"
-          :class="{ 'is-focus': card.isFocus }"
-          :style="card.style"
-          @mouseenter="onCardHover(card)"
-          @click="onCardClick(card)"
-        >
-          <div class="deck-band">
-            <span>{{ card.patient.latestEncounter?.caseToken || "—" }}</span>
-            <span>{{ card.patient.visitCount }} 次</span>
-          </div>
-          <div class="deck-body">
-            <div class="deck-name">{{ card.patient.patientName || "待补姓名" }}</div>
-            <div class="deck-complaint">主诉：{{ truncate(complaintOf(card.patient), 26) || "—" }}</div>
-            <div class="deck-phone">📱 {{ card.patient.phone || "手机号未登记" }}</div>
-            <div class="deck-diseases">
-              <span v-for="disease in diseasesOf(card.patient)" :key="disease" class="deck-disease">{{ disease }}</span>
+    <div v-loading="loading" class="hap-grid">
+      <el-empty
+        v-if="!loading && !filteredCases.length"
+        description="当前筛选条件下暂无患者，可放宽时间或就诊类型"
+        :image-size="72"
+      />
+      <FlipCard
+        v-for="(item, index) in filteredCases"
+        :key="`${item.id}-${careFilter}-${daysFilter}`"
+        class="hap-card"
+        :style="{ '--stagger-index': Math.min(index, 12) }"
+        @click="openArchive(item)"
+      >
+        <template #front>
+          <div class="hap-front">
+            <header class="hap-front-head">
+              <strong class="hap-name">{{ item.patientName || "待补姓名" }}</strong>
+              <el-tag size="small" :type="careTagType(item)" effect="dark">{{ careLabel(item) }}</el-tag>
+              <el-tag size="small" effect="plain" round>{{ item.visitCount }} 次来访</el-tag>
+            </header>
+            <div class="hap-front-lines">
+              <span class="hap-line hap-phone">📞 {{ item.patient?.phone || "手机号未登记" }}</span>
             </div>
-            <div class="deck-date">🗓 {{ visitDate(card.patient) || "—" }}</div>
+            <div class="hap-front-date">🗓 接诊日期 {{ visitDate(item) || "—" }}</div>
+            <footer class="hap-front-foot">
+              <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
+              <span class="hap-entry"
+                >进入健康档案 <el-icon><ArrowRight /></el-icon
+              ></span>
+            </footer>
+            <small class="hap-front-hint">hover 翻面查看主诉与病种</small>
           </div>
-          <div class="deck-tab">第 {{ card.patient.visitCount }} 次</div>
-          <div v-if="card.isFocus" class="deck-focus-pill">点击进入健康档案</div>
-        </div>
-        <div v-if="!deckCards.length && !loading" class="deck-empty">暂无患者病历</div>
-      </div>
-      <button type="button" class="deck-arrow deck-arrow-left" @click="step(-1)">‹</button>
-      <button type="button" class="deck-arrow deck-arrow-right" @click="step(1)">›</button>
-      <div class="deck-progress" v-if="list.length">{{ focusIdx + 1 }} / {{ list.length }}</div>
-    </div>
-
-    <!-- 聚焦患者信息条 -->
-    <div class="focus-bar">
-      <template v-if="focusedPatient">
-        <div class="focus-info">
-          <strong class="focus-name">{{ focusedPatient.patientName || "待补姓名" }}</strong>
-          <span class="focus-care">{{ careLabelOf(focusedPatient) }}患者</span>
-          <span class="focus-line">📞 {{ focusedPatient.patient?.phone || "手机号未登记" }}</span>
-          <span class="focus-line hap-address">📍 {{ focusedPatient.patient?.address || "住址未登记" }}</span>
-          <span class="focus-line">🗓 接诊日期 {{ visitDate(focusedPatient) || "—" }}</span>
-        </div>
-        <div class="focus-tags">
-          <span v-for="disease in diseasesOf(focusedPatient)" :key="disease" class="hap-tag-disease">{{ disease }}</span>
-        </div>
-        <div class="focus-spacer"></div>
-        <el-button type="primary" :disabled="!focusedPatient.latestEncounter" @click="openArchive(focusedPatient)">
-          进入健康档案
-        </el-button>
-      </template>
-      <template v-else>
-        <span class="focus-empty">当前筛选条件下没有患者病历</span>
-      </template>
+        </template>
+        <template #back>
+          <div class="hap-back">
+            <div class="hap-back-facts">
+              <p><label>登记主诉</label>{{ truncate(complaintOf(item), 60) || "—" }}</p>
+              <p><label>病种方向</label>{{ diseaseDirectionOf(item) || "—" }}</p>
+              <p><label>接诊日期</label>{{ visitDate(item) || "—" }}</p>
+            </div>
+            <div class="hap-back-actions">
+              <el-button type="primary" :disabled="!item.latestEncounter" @click.stop="openArchive(item)">
+                进入健康管理档案
+              </el-button>
+            </div>
+            <small class="hap-back-note">打开后可维护档案内容、保存草稿并生成合并文档</small>
+          </div>
+        </template>
+      </FlipCard>
     </div>
 
     <HealthArchiveDialog v-model="archiveVisible" :encounter-id="activeEncounterId" :encounter-patient-name="activePatientName" />
@@ -88,7 +78,9 @@
 <script setup lang="ts" name="healthArchive">
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Refresh, Search } from "@element-plus/icons-vue";
+import { ArrowRight, Refresh, Search } from "@element-plus/icons-vue";
+import AnimatedGridPattern from "@/components/inspira/AnimatedGridPattern.vue";
+import FlipCard from "@/components/inspira/FlipCard.vue";
 import HealthArchiveDialog from "@/views/preAi/encounters/components/HealthArchiveDialog.vue";
 import { getPreAiPatientCasesApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
 
@@ -97,16 +89,61 @@ const loading = ref(false);
 const keyword = ref("");
 const careFilter = ref("全部");
 const careFilterOptions = ["全部", "住院", "门诊"];
+const daysFilter = ref("全部");
+const daysFilterOptions = ["全部", "近7天", "近30天", "近90天"];
 
 const archiveVisible = ref(false);
 const activeEncounterId = ref("");
 const activePatientName = ref("");
 
-// ---------- 数据与筛选 ----------
-const list = computed(() => {
+const careLabelOf = (item: PreAiPatientCase) => {
+  const careType = String(
+    item.latestEncounter?.normalizedCareType || item.latestEncounter?.inventoryCareType || item.latestEncounter?.route || ""
+  );
+  return careType.includes("inpatient") ? "住院" : "门诊";
+};
+const careTagType = (item: PreAiPatientCase): "warning" | "success" => (careLabelOf(item) === "住院" ? "warning" : "success");
+const diseasesOf = (item: PreAiPatientCase) => {
+  const diseases = item.patient?.clinicalTemplateDiseases;
+  return Array.isArray(diseases) ? diseases.map(String).filter(Boolean) : [];
+};
+const complaintOf = (item: PreAiPatientCase) =>
+  String(
+    item.patient?.registrationChiefComplaint || item.patient?.registrationSymptoms || item.patient?.chiefComplaint || ""
+  ).trim();
+const diseaseDirectionOf = (item: PreAiPatientCase) => {
+  const directions = Array.isArray(item.patient?.diseaseDirections)
+    ? item.patient.diseaseDirections.map(String).filter(Boolean).slice(0, 2).join(" / ")
+    : String(item.patient?.diseaseDirection || item.patient?.inspectionDiseaseDirections || "").trim();
+  return directions || diseasesOf(item).slice(0, 2).join(" / ");
+};
+const visitDate = (item: PreAiPatientCase) =>
+  String(item.patient?.visitDate || item.latestEncounter?.visitDate || "")
+    .replace("T", " ")
+    .slice(0, 16);
+const truncate = (value: string, maxLength = 60) => {
+  const text = String(value || "").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+};
+
+const DAYS_BY_LABEL: Record<string, number> = {
+  全部: 0,
+  近7天: 7,
+  近30天: 30,
+  近90天: 90
+};
+
+const filteredCases = computed(() => {
   const kw = keyword.value.trim().toLowerCase();
+  const days = DAYS_BY_LABEL[daysFilter.value] || 0;
+  const cutoff = days ? new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) : "";
   return cases.value.filter(item => {
     if (careFilter.value !== "全部" && careLabelOf(item) !== careFilter.value) return false;
+    if (cutoff) {
+      const dateText = String(visitDate(item)).slice(0, 10);
+      if (dateText && dateText < cutoff) return false;
+      if (!dateText && kw) return false;
+    }
     if (!kw) return true;
     return (
       String(item.patientName || "")
@@ -119,139 +156,11 @@ const list = computed(() => {
   });
 });
 
-function careLabelOf(item: PreAiPatientCase) {
-  const careType = String(
-    item.latestEncounter?.normalizedCareType || item.latestEncounter?.inventoryCareType || item.latestEncounter?.route || ""
-  );
-  return careType.includes("inpatient") ? "住院" : "门诊";
-}
-const complaintOf = (item: PreAiPatientCase) =>
-  String(
-    item.patient?.registrationChiefComplaint || item.patient?.registrationSymptoms || item.patient?.chiefComplaint || ""
-  ).trim();
-const visitDate = (item: PreAiPatientCase) =>
-  String(item.patient?.visitDate || item.latestEncounter?.visitDate || "")
-    .replace("T", " ")
-    .slice(0, 16);
-const truncate = (value: string, maxLength = 26) => {
-  const text = String(value || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
-};
-
-// ---------- 3D 病历夹 ----------
-const stageRef = ref<HTMLElement | null>(null);
-const focusFloat = ref(0);
-const focusIdx = ref(0);
-const focusedPatient = computed(() => list.value[focusIdx.value]);
-
-const CARD_GAP = 158;
-const DECK_TILT = -12;
-
-interface DeckCard {
-  key: string;
-  index: number;
-  patient: PreAiPatientCase;
-  offset: number;
-  isFocus: boolean;
-  style: Record<string, string>;
-}
-const deckCards = computed<DeckCard[]>(() => {
-  const total = list.value.length;
-  if (!total) return [];
-  const focus = dragging.value ? focusFloat.value : focusIdx.value;
-  const start = Math.max(0, Math.floor(focus) - 3);
-  const end = Math.min(total, Math.floor(focus) + 5);
-  const cards: DeckCard[] = [];
-  for (let i = start; i < end; i++) {
-    const item = list.value[i];
-    const offset = i - focus;
-    const abs = Math.abs(offset);
-    if (abs > 2.6) continue;
-    cards.push({
-      key: item.id || `idx-${i}`,
-      index: i,
-      patient: item,
-      offset,
-      isFocus: abs < 0.5,
-      style: {
-        left: `calc(50% + ${Math.round(offset * CARD_GAP - 116)}px)`,
-        zIndex: String(100 - Math.round(abs * 10)),
-        transform: `rotateX(5deg) rotateY(${DECK_TILT}deg) translateZ(${-Math.round(abs * 80)}px)`,
-        filter: `brightness(${Math.max(0.5, 1 - abs * 0.15)})`,
-        opacity: String(Math.max(0, 1 - abs * 0.22))
-      }
-    });
-  }
-  return cards;
-});
-const followFocus = (index: number) => {
-  focusIdx.value = Math.max(0, Math.min(index, list.value.length - 1));
-  focusFloat.value = focusIdx.value;
-};
-const onCardClick = (card: DeckCard) => {
-  if (dragMoved) {
-    dragMoved = false;
-    return;
-  }
-  if (card.isFocus) {
-    openArchive(card.patient);
-    return;
-  }
-  followFocus(card.index);
-};
-const step = (dir: number) => followFocus(focusIdx.value + dir);
-// 拖拽滑动：按住横向拖动，整摞病历夹随拖拽量平滑滑动，松手吸附到最近一份
-const dragging = ref(false);
-let dragStartX = 0;
-let dragStartFocus = 0;
-let dragMoved = false;
-let wheelAcc = 0;
-const onDragStart = (event: MouseEvent) => {
-  if (event.button !== 0) return;
-  dragging.value = true;
-  dragMoved = false;
-  dragStartX = event.clientX;
-  dragStartFocus = focusFloat.value;
-};
-const onDragMove = (event: MouseEvent) => {
-  if (!dragging.value) return;
-  const dx = event.clientX - dragStartX;
-  if (Math.abs(dx) > 8) dragMoved = true;
-  focusFloat.value = Math.max(0, Math.min(list.value.length - 1, dragStartFocus - dx / CARD_GAP));
-};
-const onDragEnd = () => {
-  if (!dragging.value) return;
-  dragging.value = false;
-  focusIdx.value = Math.max(0, Math.min(Math.round(focusFloat.value), list.value.length - 1));
-  focusFloat.value = focusIdx.value;
-};
-const onCardHover = (card: DeckCard) => {
-  if (dragging.value || dragMoved) return;
-  followFocus(card.index);
-};
-const onWheel = (event: WheelEvent) => {
-  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-  event.preventDefault();
-  wheelAcc += event.deltaY;
-  if (Math.abs(wheelAcc) >= 60) {
-    step(wheelAcc > 0 ? 1 : -1);
-    wheelAcc = 0;
-  }
-};
-
-// ---------- 档案弹窗 ----------
-const openArchive = (patient: PreAiPatientCase) => {
-  if (!patient.latestEncounter) return;
-  activeEncounterId.value = patient.latestEncounter.id;
-  activePatientName.value = patient.patientName || "";
+const openArchive = (item: PreAiPatientCase) => {
+  if (!item.latestEncounter) return;
+  activeEncounterId.value = item.latestEncounter.id;
+  activePatientName.value = item.patientName || "";
   archiveVisible.value = true;
-};
-
-const diseasesOf = (item: PreAiPatientCase) => {
-  const diseases = item.patient?.clinicalTemplateDiseases;
-  return Array.isArray(diseases) ? diseases.map(String).filter(Boolean) : [];
 };
 
 const loadCases = async () => {
@@ -259,8 +168,6 @@ const loadCases = async () => {
   try {
     const { data } = await getPreAiPatientCasesApi();
     cases.value = data.list || [];
-    focusIdx.value = 0;
-    focusFloat.value = 0;
   } catch (error) {
     ElMessage.error((error as Error).message || "患者列表加载失败");
   } finally {
@@ -275,8 +182,27 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .health-archive-page {
+  position: relative;
   display: grid;
   gap: 14px;
+  min-height: calc(100vh - 160px);
+}
+.hap-grid-bg {
+  position: absolute;
+  inset: -24px;
+  z-index: 0;
+  color: var(--el-color-primary);
+  pointer-events: none;
+  opacity: 0.55;
+  :deep(.animated-grid) {
+    width: 100%;
+    height: 100%;
+  }
+}
+.hap-head,
+.hap-grid {
+  position: relative;
+  z-index: 1;
 }
 .hap-head {
   display: flex;
@@ -302,234 +228,148 @@ onMounted(() => {
     align-items: center;
   }
 }
-
-// 3D 病历夹舞台：transform 使其成为 3D 子元素的包含块，防止内容逃逸裁剪
-.deck-stage {
-  position: relative;
-  height: 460px;
-  overflow: hidden;
-  cursor: ew-resize;
-  background:
-    radial-gradient(900px 320px at 50% 0%, color-mix(in srgb, var(--el-color-primary) 7%, transparent), transparent 72%),
-    var(--el-fill-color-extra-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 16px;
-  transform: translateZ(0);
-}
-.deck-scene {
-  position: absolute;
-  inset: 0;
-  transform: rotateY(-10deg) rotateX(4deg) translateZ(0);
-  perspective: 1400px;
-  transform-style: preserve-3d;
-}
-.deck-stage.is-dragging {
-  cursor: grabbing;
-}
-.deck-stage.is-dragging .deck-card {
-  transition: none;
-}
-.deck-phone {
-  font-size: 12px;
-  color: var(--el-color-primary);
-}
-.deck-card {
-  position: absolute;
-  top: 34px;
-  width: 232px;
-  height: 356px;
-  overflow: hidden;
-  cursor: pointer;
-  background: linear-gradient(180deg, #ffffff 0%, #eef2f7 100%);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 14px;
-  box-shadow: 0 24px 48px rgb(15 23 42 / 22%);
-  transition:
-    left 0.45s cubic-bezier(0.4, 0.2, 0.2, 1),
-    transform 0.45s cubic-bezier(0.4, 0.2, 0.2, 1),
-    filter 0.4s ease,
-    opacity 0.4s ease;
-  &.is-focus {
-    border-color: var(--el-color-primary);
-    box-shadow:
-      0 26px 56px rgb(15 23 42 / 26%),
-      0 0 0 2px color-mix(in srgb, var(--el-color-primary) 45%, transparent);
-  }
-}
-.deck-band {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 12px;
-  font-size: 11px;
-  color: #ffffff;
-  white-space: nowrap;
-  background: linear-gradient(90deg, var(--el-color-primary), var(--el-color-primary-dark-2, #2e7d32));
-}
-.deck-body {
+.hap-grid {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 14px;
   align-content: start;
-  padding: 14px;
+  min-height: 300px;
 }
-.deck-name {
-  overflow: hidden;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.deck-complaint {
-  display: -webkit-box;
-  min-height: 38px;
-  overflow: hidden;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--el-text-color-secondary);
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.deck-diseases {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  .deck-disease {
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #92400e;
-    background: #fef3c7;
-    border-radius: 999px;
-  }
-}
-.deck-date {
-  font-size: 12px;
-  color: var(--el-color-success);
-}
-.deck-tab {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  padding: 3px 9px;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color);
-  border-radius: 999px;
-}
-.deck-focus-pill {
-  position: absolute;
-  bottom: 14px;
-  left: 14px;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #ffffff;
-  background: var(--el-color-primary);
-  border-radius: 999px;
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--el-color-primary) 40%, transparent);
-}
-.deck-empty {
-  padding: 80px 0;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-  text-align: center;
-}
-.deck-arrow {
-  position: absolute;
-  top: 50%;
-  z-index: 200;
-  width: 38px;
-  height: 38px;
-  font-size: 20px;
-  line-height: 1;
-  color: var(--el-text-color-primary);
+.hap-card {
+  height: 250px;
   cursor: pointer;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 50%;
-  box-shadow: 0 6px 18px rgb(15 23 42 / 12%);
-  transform: translateY(-50%);
-  &:hover {
-    color: var(--el-color-primary);
-    border-color: var(--el-color-primary);
-  }
-}
-.deck-arrow-left {
-  left: 14px;
-}
-.deck-arrow-right {
-  right: 14px;
-}
-.deck-progress {
-  position: absolute;
-  right: 16px;
-  bottom: 12px;
-  z-index: 200;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--el-text-color-secondary);
+  border-radius: 16px;
+  animation: hap-card-in 0.45s cubic-bezier(0.4, 0.2, 0.2, 1) both;
+  animation-delay: calc(var(--stagger-index, 0) * 45ms);
 }
 
-// 聚焦患者信息条
-.focus-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  padding: 14px 18px;
+@keyframes hap-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hap-card :deep(.flip-card-face) {
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 14px;
+  border-left: 4px solid transparent;
+  border-radius: 16px;
   box-shadow: 0 10px 24px rgb(15 23 42 / 6%);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
-.focus-info {
+.hap-card:hover :deep(.flip-card-face) {
+  border-color: var(--el-color-primary-light-3);
+  box-shadow: 0 14px 30px rgb(0 150 136 / 15%);
+}
+.hap-front {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  height: 100%;
+  padding: 16px;
+  cursor: pointer;
+}
+.hap-front-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: 8px;
   align-items: center;
-  .focus-name {
-    font-size: 17px;
-    font-weight: 700;
-    color: var(--el-text-color-primary);
-  }
-  .focus-care {
-    padding: 2px 10px;
-    font-size: 12px;
-    color: var(--el-color-success);
-    background: var(--el-color-success-light-9);
-    border-radius: 999px;
-  }
-  .focus-line {
-    font-size: 13px;
-    color: var(--el-text-color-regular);
-  }
-  .hap-address {
-    max-width: 260px;
+  .hap-name {
     overflow: hidden;
+    font-size: 18px;
+    color: var(--el-text-color-primary);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
-.focus-tags {
+.hap-front-lines {
+  display: grid;
+  gap: 6px;
+}
+.hap-line {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hap-phone {
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+.hap-front-date {
+  font-size: 13px;
+  color: var(--el-color-success);
+}
+.hap-front-foot {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  .hap-tag-disease {
-    padding: 3px 10px;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  .hap-entry {
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    align-items: center;
     font-size: 12px;
     font-weight: 600;
-    color: #92400e;
-    background: #fef3c7;
-    border-radius: 999px;
+    color: var(--el-text-color-secondary);
+    transition:
+      color var(--motion-control, 180ms) var(--ease-out, ease),
+      gap var(--motion-control, 180ms) var(--ease-out, ease);
   }
 }
-.focus-spacer {
-  flex: 1 1 auto;
+.hap-front-hint {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
 }
-.focus-empty {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
+.hap-back {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
+  border-radius: inherit;
+}
+.hap-back-facts {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--el-text-color-primary);
+  }
+  label {
+    margin-right: 8px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+.hap-back-actions {
+  display: flex;
+  :deep(.el-button) {
+    width: 100%;
+  }
+}
+.hap-back-note {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hap-card {
+    animation: none;
+  }
 }
 </style>
