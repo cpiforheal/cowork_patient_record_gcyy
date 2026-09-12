@@ -55,7 +55,7 @@
       </div>
       <button type="button" class="deck-arrow deck-arrow-left" @click="step(-1)">‹</button>
       <button type="button" class="deck-arrow deck-arrow-right" @click="step(1)">›</button>
-      <div class="deck-progress" v-if="list.length">{{ focusedIdx + 1 }} / {{ list.length }}</div>
+      <div class="deck-progress" v-if="list.length">{{ focusIdx + 1 }} / {{ list.length }}</div>
     </div>
 
     <!-- 聚焦患者信息条 -->
@@ -143,8 +143,8 @@ const truncate = (value: string, maxLength = 26) => {
 // ---------- 3D 病历夹 ----------
 const stageRef = ref<HTMLElement | null>(null);
 const focusFloat = ref(0);
-const focusedIdx = computed(() => Math.max(0, Math.min(Math.round(focusFloat.value), list.value.length - 1)));
-const focusedPatient = computed(() => list.value[focusedIdx.value]);
+const focusIdx = ref(0);
+const focusedPatient = computed(() => list.value[focusIdx.value]);
 
 const CARD_GAP = 158;
 const DECK_TILT = -12;
@@ -187,7 +187,8 @@ const deckCards = computed<DeckCard[]>(() => {
   return cards;
 });
 const followFocus = (index: number) => {
-  focusFloat.value = Math.max(0, Math.min(index, list.value.length - 1));
+  focusIdx.value = Math.max(0, Math.min(index, list.value.length - 1));
+  focusFloat.value = focusIdx.value;
 };
 const onCardClick = (card: DeckCard) => {
   if (dragMoved) {
@@ -200,7 +201,7 @@ const onCardClick = (card: DeckCard) => {
   }
   followFocus(card.index);
 };
-const step = (dir: number) => followFocus(focusedIdx.value + dir);
+const step = (dir: number) => followFocus(focusIdx.value + dir);
 // 拖拽滑动：按住横向拖动，整摞病历夹随拖拽量平滑滑动，松手吸附到最近一份
 const dragging = ref(false);
 let dragStartX = 0;
@@ -224,6 +225,7 @@ const onDragEnd = () => {
   if (!dragging.value) return;
   dragging.value = false;
   focusIdx.value = Math.max(0, Math.min(Math.round(focusFloat.value), list.value.length - 1));
+  focusFloat.value = focusIdx.value;
 };
 const onCardHover = (card: DeckCard) => {
   if (dragging.value || dragMoved) return;
@@ -257,6 +259,7 @@ const loadCases = async () => {
   try {
     const { data } = await getPreAiPatientCasesApi();
     cases.value = data.list || [];
+    focusIdx.value = 0;
     focusFloat.value = 0;
   } catch (error) {
     ElMessage.error((error as Error).message || "患者列表加载失败");
