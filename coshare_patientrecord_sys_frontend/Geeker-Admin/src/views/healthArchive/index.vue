@@ -1,6 +1,6 @@
 <template>
   <div class="health-archive-page">
-    <!-- Animate Grid 动效背景 -->
+    <!-- Animate Grid 动效网格背景 -->
     <div class="hap-grid-bg" aria-hidden="true">
       <AnimatedGridPattern :size="44" :num-squares="40" />
     </div>
@@ -11,7 +11,13 @@
         <small>入院确认为住院即由护理部维护跟进 · 门诊患者同步建档 · 按来访时间筛选 · 点击卡片进入档案维护</small>
       </div>
       <div class="hap-actions">
-        <el-input v-model="keyword" placeholder="按姓名或病例编号搜索" clearable :prefix-icon="Search" style="width: 200px" />
+        <el-input
+          v-model="keyword"
+          placeholder="按姓名或病例编号搜索"
+          clearable
+          :prefix-icon="Search"
+          style="width: 200px"
+        />
         <el-segmented v-model="careFilter" :options="careFilterOptions" />
         <el-segmented v-model="daysFilter" :options="daysFilterOptions" />
         <el-button :loading="loading" @click="loadCases">
@@ -21,11 +27,7 @@
     </header>
 
     <div v-loading="loading" class="hap-grid">
-      <el-empty
-        v-if="!loading && !filteredCases.length"
-        description="当前筛选条件下暂无患者，可放宽时间或就诊类型"
-        :image-size="72"
-      />
+      <el-empty v-if="!loading && !filteredCases.length" description="当前筛选条件下暂无患者，可放宽时间或就诊类型" :image-size="72" />
       <FlipCard
         v-for="(item, index) in filteredCases"
         :key="`${item.id}-${careFilter}-${daysFilter}`"
@@ -46,9 +48,7 @@
             <div class="hap-front-date">🗓 接诊日期 {{ visitDate(item) || "—" }}</div>
             <footer class="hap-front-foot">
               <span>{{ item.latestEncounter?.caseToken || "尚无子病历" }}</span>
-              <span class="hap-entry"
-                >进入健康档案 <el-icon><ArrowRight /></el-icon
-              ></span>
+              <span class="hap-entry">进入健康档案 <el-icon><ArrowRight /></el-icon></span>
             </footer>
             <small class="hap-front-hint">hover 翻面查看主诉与病种</small>
           </div>
@@ -71,7 +71,11 @@
       </FlipCard>
     </div>
 
-    <HealthArchiveDialog v-model="archiveVisible" :encounter-id="activeEncounterId" :encounter-patient-name="activePatientName" />
+    <HealthArchiveDialog
+      v-model="archiveVisible"
+      :encounter-id="activeEncounterId"
+      :encounter-patient-name="activePatientName"
+    />
   </div>
 </template>
 
@@ -96,13 +100,14 @@ const archiveVisible = ref(false);
 const activeEncounterId = ref("");
 const activePatientName = ref("");
 
-const careLabelOf = (item: PreAiPatientCase) => {
+const careLabel = (item: PreAiPatientCase) => {
   const careType = String(
     item.latestEncounter?.normalizedCareType || item.latestEncounter?.inventoryCareType || item.latestEncounter?.route || ""
   );
   return careType.includes("inpatient") ? "住院" : "门诊";
 };
-const careTagType = (item: PreAiPatientCase): "warning" | "success" => (careLabelOf(item) === "住院" ? "warning" : "success");
+const careTagType = (item: PreAiPatientCase): "warning" | "success" =>
+  careLabel(item) === "住院" ? "warning" : "success";
 const diseasesOf = (item: PreAiPatientCase) => {
   const diseases = item.patient?.clinicalTemplateDiseases;
   return Array.isArray(diseases) ? diseases.map(String).filter(Boolean) : [];
@@ -126,6 +131,11 @@ const truncate = (value: string, maxLength = 60) => {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 };
 
+const CARE_KEY_BY_LABEL: Record<string, string> = {
+  全部: "",
+  住院: "住院",
+  门诊: "门诊"
+};
 const DAYS_BY_LABEL: Record<string, number> = {
   全部: 0,
   近7天: 7,
@@ -138,11 +148,10 @@ const filteredCases = computed(() => {
   const days = DAYS_BY_LABEL[daysFilter.value] || 0;
   const cutoff = days ? new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) : "";
   return cases.value.filter(item => {
-    if (careFilter.value !== "全部" && careLabelOf(item) !== careFilter.value) return false;
+    if (careFilter.value !== "全部" && careLabel(item) !== careFilter.value) return false;
     if (cutoff) {
       const dateText = String(visitDate(item)).slice(0, 10);
       if (dateText && dateText < cutoff) return false;
-      if (!dateText && kw) return false;
     }
     if (!kw) return true;
     return (
@@ -192,8 +201,8 @@ onMounted(() => {
   inset: -24px;
   z-index: 0;
   color: var(--el-color-primary);
+  opacity: 0.35;
   pointer-events: none;
-  opacity: 0.55;
   :deep(.animated-grid) {
     width: 100%;
     height: 100%;
@@ -232,17 +241,16 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
   gap: 14px;
-  align-content: start;
   min-height: 300px;
+  align-content: start;
 }
 .hap-card {
   height: 250px;
-  cursor: pointer;
   border-radius: 16px;
+  cursor: pointer;
   animation: hap-card-in 0.45s cubic-bezier(0.4, 0.2, 0.2, 1) both;
   animation-delay: calc(var(--stagger-index, 0) * 45ms);
 }
-
 @keyframes hap-card-in {
   from {
     opacity: 0;
@@ -254,10 +262,10 @@ onMounted(() => {
   }
 }
 .hap-card :deep(.flip-card-face) {
-  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-left: 4px solid transparent;
   border-radius: 16px;
+  background: var(--el-bg-color);
   box-shadow: 0 10px 24px rgb(15 23 42 / 6%);
   transition:
     border-color 0.2s ease,
@@ -337,8 +345,8 @@ onMounted(() => {
   height: 100%;
   padding: 16px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
   border-radius: inherit;
+  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
 }
 .hap-back-facts {
   display: grid;
@@ -366,7 +374,6 @@ onMounted(() => {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
 }
-
 @media (prefers-reduced-motion: reduce) {
   .hap-card {
     animation: none;
