@@ -65,7 +65,7 @@
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" type="primary" plain :disabled="Boolean(row.lastContactAt)" @click="markContacted(row)">
+          <el-button v-if="canOperateFollowUp" size="small" type="primary" plain :disabled="Boolean(row.lastContactAt)" @click="markContacted(row)">
             {{ row.lastContactAt ? "已联系" : "标记已联系" }}
           </el-button>
         </template>
@@ -93,7 +93,8 @@ import {
 
 const userStore = useUserStore();
 const role = computed(() => userStore.userInfo.role || "");
-const visible = computed(() => ["doctor", "admin", "inspection"].includes(role.value));
+const visible = computed(() => ["doctor", "admin", "inspection", "nurse", "nursing"].includes(role.value));
+const canOperateFollowUp = computed(() => ["doctor", "nurse", "admin"].includes(role.value));
 
 const summary = ref<RecallSummary | null>(null);
 const loading = ref(false);

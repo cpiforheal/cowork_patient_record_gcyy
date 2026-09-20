@@ -251,7 +251,7 @@ public class PatientArchiveQueryService {
     }
 
     private boolean hasFullHistoryAccess(SessionUser user) {
-        return user != null && Set.of("admin", "doctor").contains(RoleCatalog.canonicalize(user.role()));
+        return user != null && Set.of("admin", "doctor", "nurse", "nursing").contains(RoleCatalog.canonicalize(user.role()));
     }
 
     private boolean usesDepartmentScopedArchiveAccess(SessionUser user) {

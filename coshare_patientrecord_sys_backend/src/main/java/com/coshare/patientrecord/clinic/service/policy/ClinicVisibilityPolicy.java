@@ -107,7 +107,7 @@ public class ClinicVisibilityPolicy {
     }
 
     public ObjectNode filterDbForUser(ObjectNode db, SessionUser user) {
-        if (user != null && "admin".equals(user.role())) {
+        if (user != null && Set.of("admin", "nurse", "nursing").contains(user.role())) {
             return db;
         }
 

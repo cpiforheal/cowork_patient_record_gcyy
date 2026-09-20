@@ -1328,7 +1328,7 @@ const loadFollowUpReminder = async () => {
   try {
     const { data } = await loadRecallSummaryApi();
     followUpSummary.value = { overdue: data.overdue || [], dueSoon: data.dueSoon || [] };
-    const sessionKey = `follow-up-reminder:${new Date().toISOString().slice(0, 10)}`;
+    const sessionKey = `follow-up-reminder:${currentRole.value}:${new Date().toISOString().slice(0, 10)}`;
     if (sessionStorage.getItem(sessionKey) || !followUpReminderRows.value.length) return;
     sessionStorage.setItem(sessionKey, "1");
     const { critical, today, tomorrow } = followUpReminderCounts.value;
