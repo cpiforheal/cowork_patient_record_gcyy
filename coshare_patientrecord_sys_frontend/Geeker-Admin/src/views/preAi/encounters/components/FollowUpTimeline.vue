@@ -20,43 +20,78 @@
           :hollow="visit.seq !== maxSeq"
           placement="top"
         >
-          <article class="fu-card" :class="{ 'is-latest': visit.seq === maxSeq }">
+          <article class="fu-card" :class="{ 'is-latest': visit.seq === maxSeq, 'is-editing': editingId === visit.id }">
             <div class="fu-card-head">
               <span class="fu-badge">第 {{ visit.seq }} 次</span>
               <strong class="fu-reason">{{ visit.reason }}</strong>
               <el-tag v-if="visit.nextReviewDate" type="success" effect="light" size="small">
                 下次复查：{{ visit.nextReviewDate }}
               </el-tag>
+              <el-tag v-if="visit.updatedAt" type="info" effect="plain" size="small">
+                已校准 · {{ visit.updatedBy }}
+              </el-tag>
             </div>
-            <p v-if="visit.conditionNote" class="fu-note">{{ visit.conditionNote }}</p>
-            <div v-if="visit.images.length" class="fu-images">
-              <el-image
-                v-for="image in visit.images"
-                :key="image.id"
-                class="fu-image"
-                :src="imageUrls[image.id]"
-                :preview-src-list="previewList(visit)"
-                :initial-index="visit.images.indexOf(image)"
-                fit="cover"
-                lazy
-              >
-                <template #error>
-                  <div class="fu-image-fallback">{{ image.fileName }}</div>
-                </template>
-              </el-image>
+            <!-- 医生岗行内编辑：校准复诊内容描述，创建时间由系统精确记录不可改 -->
+            <div v-if="editingId === visit.id" class="fu-edit-form">
+              <div class="fu-edit-tip">🕒 创建时间 {{ visit.createdAt }} 由系统精确记录，不可修改；此处仅校准内容描述</div>
+              <label class="fu-label">复诊原因（必填）</label>
+              <el-select v-model="editForm.reason" filterable allow-create placeholder="选择常用原因或直接输入">
+                <el-option v-for="item in REASONS" :key="item" :label="item" :value="item" />
+              </el-select>
+              <label class="fu-label">病情描述</label>
+              <el-input
+                v-model="editForm.conditionNote"
+                type="textarea"
+                :rows="4"
+                placeholder="本次复诊查体所见、创面情况、处理措施等"
+              />
+              <label class="fu-label">下次安排复查时间</label>
+              <el-date-picker
+                v-model="editForm.nextReviewDate"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="选择或留空"
+                style="width: 100%"
+              />
+              <div class="fu-form-actions">
+                <el-button @click="cancelEdit">取消</el-button>
+                <el-button type="primary" :loading="savingEdit" @click="submitEdit(visit)">保存校准</el-button>
+              </div>
             </div>
-            <div class="fu-card-foot">
-              <small>{{ visit.createdBy }} · {{ visit.createdByRole || "检查室" }}</small>
-              <el-button
-                v-if="canManage && visit.images.length"
-                size="small"
-                type="danger"
-                plain
-                @click="removeLastImage(visit)"
-              >
-                删除末张图片
-              </el-button>
-            </div>
+            <template v-else>
+              <p v-if="visit.conditionNote" class="fu-note">{{ visit.conditionNote }}</p>
+              <div v-if="visit.images.length" class="fu-images">
+                <el-image
+                  v-for="image in visit.images"
+                  :key="image.id"
+                  class="fu-image"
+                  :src="imageUrls[image.id]"
+                  :preview-src-list="previewList(visit)"
+                  :initial-index="visit.images.indexOf(image)"
+                  fit="cover"
+                  lazy
+                >
+                  <template #error>
+                    <div class="fu-image-fallback">{{ image.fileName }}</div>
+                  </template>
+                </el-image>
+              </div>
+              <div class="fu-card-foot">
+                <small>{{ visit.createdBy }} · {{ visit.createdByRole || "检查室" }}</small>
+                <div class="fu-card-actions">
+                  <el-button v-if="canManage && visit.images.length" size="small" type="danger" plain @click="removeLastImage(visit)">
+                    删除末张图片
+                  </el-button>
+                  <el-tooltip
+                    v-if="canEdit"
+                    content="医生岗校准：修正复诊原因、病情描述或下次复查安排（创建时间不变）"
+                    placement="top"
+                  >
+                    <el-button size="small" type="primary" plain @click="startEdit(visit)">编辑校准</el-button>
+                  </el-tooltip>
+                </div>
+              </div>
+            </template>
           </article>
         </el-timeline-item>
       </el-timeline>
@@ -120,18 +155,25 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
+import { useUserStore } from "@/stores/modules/user";
 import {
   addFollowUpVisitImageApi,
   createFollowUpVisitApi,
   fetchFollowUpImageApi,
   loadFollowUpVisitsApi,
   removeFollowUpVisitImageApi,
+  updateFollowUpVisitApi,
   type FollowUpVisit
 } from "@/api/modules/clinic/followUp";
 
 const REASONS = ["术后复查", "换药", "拆线", "不适随诊", "复查结果解读", "其他"];
 
 const props = defineProps<{ patientCaseId: string; encounterId?: string; canManage: boolean }>();
+
+const userStore = useUserStore();
+const currentRole = computed(() => userStore.userInfo.role || "");
+// 编辑校准仅医生岗与管理员（后端同权限二次校验）
+const canEdit = computed(() => props.canManage && ["doctor", "admin"].includes(currentRole.value));
 
 const visits = ref<FollowUpVisit[]>([]);
 const loading = ref(false);
@@ -140,6 +182,44 @@ const createOpen = ref(false);
 const imageUrls = ref<Record<string, string>>({});
 const imageFileList = ref<{ name: string; raw: File }[]>([]);
 const createForm = reactive({ reason: "", conditionNote: "", nextReviewDate: "" });
+
+// 编辑校准状态
+const editingId = ref("");
+const savingEdit = ref(false);
+const editForm = reactive({ reason: "", conditionNote: "", nextReviewDate: "" });
+const startEdit = (visit: FollowUpVisit) => {
+  editingId.value = visit.id;
+  editForm.reason = visit.reason;
+  editForm.conditionNote = visit.conditionNote || "";
+  editForm.nextReviewDate = visit.nextReviewDate || "";
+};
+const cancelEdit = () => {
+  editingId.value = "";
+  editForm.reason = "";
+  editForm.conditionNote = "";
+  editForm.nextReviewDate = "";
+};
+const submitEdit = async (visit: FollowUpVisit) => {
+  if (!editForm.reason.trim()) {
+    ElMessage.warning("请填写复诊原因");
+    return;
+  }
+  savingEdit.value = true;
+  try {
+    await updateFollowUpVisitApi(visit.id, {
+      reason: editForm.reason.trim(),
+      conditionNote: editForm.conditionNote.trim(),
+      nextReviewDate: editForm.nextReviewDate || ""
+    });
+    ElMessage.success(`第 ${visit.seq} 次复诊记录已校准`);
+    cancelEdit();
+    await load();
+  } catch (error: any) {
+    ElMessage.error(error?.message || "复诊记录校准失败");
+  } finally {
+    savingEdit.value = false;
+  }
+};
 
 const maxSeq = computed(() => visits.value.reduce((max, visit) => Math.max(max, visit.seq), 0));
 
@@ -355,6 +435,30 @@ watch(
   small {
     color: var(--el-text-color-secondary);
   }
+}
+.fu-card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.fu-card.is-editing {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 4px 14px rgb(0 150 136 / 12%);
+}
+.fu-edit-form {
+  display: grid;
+  padding: 12px 14px;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 10px;
+}
+.fu-edit-tip {
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
 }
 .fu-create {
   margin-top: 14px;

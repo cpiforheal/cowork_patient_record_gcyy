@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +48,37 @@ public class FollowUpVisitController {
         SessionUser user = currentUser();
         return ApiResult.of(200, "复诊记录已创建", followUpVisitService.create(
             safe(request.patientCaseId()), objectMapper.valueToTree(request), user));
+    }
+
+    @GetMapping("/clinic-api/follow-up/recall/summary")
+    public ApiResult<Map<String, Object>> recallSummary() {
+        return ApiResult.success(followUpVisitService.recallSummary(currentUser()));
+    }
+
+    @GetMapping("/clinic-api/follow-up/dashboard/summary")
+    public ApiResult<Map<String, Object>> dashboardSummary() {
+        return ApiResult.success(followUpVisitService.dashboardSummary(currentUser()));
+    }
+
+    @GetMapping("/clinic-api/follow-up/statistics")
+    public ApiResult<Map<String, Object>> statistics(
+        @RequestParam(required = false) String from,
+        @RequestParam(required = false) String to,
+        @RequestParam(required = false, defaultValue = "due") String basis
+    ) {
+        return ApiResult.success(followUpVisitService.statistics(safe(from), safe(to), safe(basis), currentUser()));
+    }
+
+    @PostMapping("/clinic-api/follow-up/recall/visits/{id}/contact")
+    public ApiResult<Map<String, Object>> markContacted(@PathVariable String id) {
+        return ApiResult.of(200, "已标记联系", followUpVisitService.markContacted(safe(id), currentUser()));
+    }
+
+    @PutMapping("/clinic-api/follow-up/visits/{id}")
+    public ApiResult<Map<String, Object>> update(@PathVariable String id, @RequestBody UpdateRequest request) {
+        SessionUser user = currentUser();
+        return ApiResult.of(200, "复诊记录已更新", followUpVisitService.update(
+            safe(id), objectMapper.valueToTree(request), user));
     }
 
     @PostMapping("/clinic-api/follow-up/visits/{id}/images")
@@ -95,6 +127,8 @@ public class FollowUpVisitController {
         String nextReviewDate,
         java.util.List<Map<String, Object>> images
     ) {}
+
+    public record UpdateRequest(String reason, String conditionNote, String nextReviewDate) {}
 
     public record ImageRequest(String fileName, String dataUrl) {}
 }

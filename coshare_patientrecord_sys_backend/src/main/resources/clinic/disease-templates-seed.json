@@ -1,0 +1,87 @@
+[
+  {
+    "id": "mixed-hemorrhoid",
+    "disease": "混合痔",
+    "label": "混合痔",
+    "chiefComplaint": "间断便血伴肿物脱出{duration}{aggravationPhrase}",
+    "presentIllness": "患者自诉{duration}前无明显诱因出现便时滴血，色鲜红，无痛，便后即止，数天后自行缓解，后间断发作，进行性加重，出现肛门肿物脱出，初起便后可自行回纳，{aggravationClause}自购药物局部应用效不佳。今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、饮食、大小便可，体重未见明显变化，未见恶寒发热表现。",
+    "inspectionConclusion": "截石位检查：肛缘赘皮增生，屏气用腹压可见其缓慢增大，色青紫，质柔软；镜检示内痔黏膜隆起糜烂，退镜时黏膜可脱出肛外。",
+    "slots": [
+      { "key": "duration", "label": "病程时长", "kind": "select", "options": ["3天", "1周", "2周", "3周", "1月", "3月", "半年", "1年", "2年", "3年", "4年", "5年"], "default": "3年" },
+      { "key": "aggravation", "label": "近期加重", "kind": "select", "options": ["3天", "1周", "2周", "1月", "无加重"], "default": "2周" }
+    ],
+    "symptoms": ["便血", "肿物脱出", "肛门坠胀", "便不尽感"],
+    "visual": ["肛缘赘皮增生", "屏气用腹压可见肿物缓慢增大", "色青紫，质柔软"],
+    "digital": ["触及颗粒状硬结"],
+    "anoscopy": ["内痔粘膜隆起糜烂", "退镜时粘膜可脱出肛外", "直肠黏膜松弛、层叠状"]
+  },
+  {
+    "id": "internal-hemorrhoid",
+    "disease": "内痔",
+    "label": "内痔",
+    "chiefComplaint": "间断便血伴肛门坠胀、便不尽感{duration}{aggravationPhrase}",
+    "presentIllness": "患者自诉{duration}前无明显诱因出现便时出血，滴下状，色鲜红，无痛，便后即止，数天后自行好转，后间断发作，饮食辛辣刺激或饮酒、劳累后症状明显，{aggravationClause}未予系统检查与治疗。今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、二便可，体重未见明显变化，未见恶寒发热表现。",
+    "inspectionConclusion": "镜检示齿线上黏膜充血隆起，局部糜烂。",
+    "slots": [
+      { "key": "duration", "label": "病程时长", "kind": "select", "options": ["3天", "1周", "2周", "3周", "1月", "3月", "半年", "1年", "2年", "3年", "4年", "5年"], "default": "1年" },
+      { "key": "aggravation", "label": "近期加重", "kind": "select", "options": ["3天", "1周", "2周", "1月", "无加重"], "default": "1月" }
+    ],
+    "symptoms": ["便血", "肛门坠胀", "便不尽感"],
+    "visual": ["蹲位或努挣时肛内肿物脱出"],
+    "digital": ["触及痔核"],
+    "anoscopy": ["齿线上黏膜充血隆起", "局部糜烂"]
+  },
+  {
+    "id": "anal-fissure",
+    "disease": "肛裂",
+    "label": "肛裂",
+    "chiefComplaint": "便时肛门疼痛伴便血{duration}{aggravationPhrase}",
+    "presentIllness": "患者自诉{duration}前无明显诱因出现便时手纸沾染血迹，后间断发作，进行性加重，出现肛缘赘皮增生，便时增大，便后缩小，{aggravationClause}伴有排便习惯改变，便次少，2-3天排便一次，时常干燥。今来院就诊，门诊检查后，以“{diagnosis}”收入院。患者近期精神、睡眠、饮食可，体重未见明显变化。",
+    "inspectionConclusion": "视诊截石位肛缘赘皮增生，{fissure}点肛管可见裂口，指诊肛门括约肌紧张，镜检示内痔痔核隆起。",
+    "slots": [
+      { "key": "duration", "label": "病程时长", "kind": "select", "options": ["3天", "1周", "2周", "3周", "1月", "3月", "半年", "1年", "2年", "3年", "4年", "5年"], "default": "1年" },
+      { "key": "aggravation", "label": "近期加重", "kind": "select", "options": ["3天", "1周", "2周", "1月", "无加重"], "default": "1周" },
+      { "key": "fissure", "label": "裂口点位", "kind": "multi", "options": ["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"], "default": ["6点"] }
+    ],
+    "symptoms": ["肛周疼痛", "便血", "排便异常", "肛周瘙痒"],
+    "visual": ["肛缘赘皮增生", "肛管可见裂口"],
+    "digital": ["肛门括约肌紧张"],
+    "anoscopy": ["内痔痔核隆起", "肛隐窝潮红凹陷"]
+  },
+  {
+    "id": "anal-fistula",
+    "disease": "肛瘘",
+    "label": "肛瘘",
+    "chiefComplaint": "肛周肿包反复疼痛、溢脓{duration}{aggravationPhrase}",
+    "presentIllness": "患者自诉{duration}前因腹泻肛周突起肿块，疼痛呈持续性，后自行破溃，脓出痛减。后间断脓性分泌物，时多时少，肛门潮湿不洁；平素时有间断便血，手纸沾染血迹或滴血，无痛；反复发作，{aggravationClause}为求进一步诊疗今来院就诊。患者近期精神、睡眠、饮食、小便可，便次频、便稀，2-3次/日，体重未见明显变化，未见恶寒发热表现。门诊检查后以“{diagnosis}”收入院。",
+    "inspectionConclusion": "截石位{fistula}点距肛门约{distance}处瘘口，皮下可触及索状硬结分别止于对应齿线处，肛门镜检可见齿线上黏膜充血隆起。",
+    "slots": [
+      { "key": "duration", "label": "病程时长", "kind": "select", "options": ["3天", "1周", "2周", "3周", "1月", "3月", "半年", "1年", "2年", "3年", "4年", "5年"], "default": "2年" },
+      { "key": "aggravation", "label": "近期加重", "kind": "select", "options": ["3天", "1周", "2周", "1月", "无加重"], "default": "1周" },
+      { "key": "fistula", "label": "瘘口点位", "kind": "multi", "options": ["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"], "default": ["9点"] },
+      { "key": "distance", "label": "瘘口距肛门", "kind": "select", "options": ["2cm", "3cm", "4cm", "5cm"], "default": "4cm" }
+    ],
+    "symptoms": ["肛周肿块", "肛周疼痛", "溢脓", "肛周潮湿", "便血"],
+    "visual": ["肛周可见外口", "外口增生凸起", "少量黄稠脓性分泌物附着"],
+    "digital": ["触及索状硬结止于齿线处"],
+    "anoscopy": ["齿线上黏膜充血隆起"]
+  },
+  {
+    "id": "perianal-abscess",
+    "disease": "肛周脓肿",
+    "label": "肛周脓肿",
+    "chiefComplaint": "肛周肿痛{duration}{aggravationPhrase}",
+    "presentIllness": "患者自诉{duration}前无明显诱因出现肛周突起肿包，触痛明显，未见出血、溢脓，自用药物无效，{aggravationClause}为求进一步诊疗今来院就诊，门诊检查后以“{diagnosis}”收入院。患者近期精神、睡眠、饮食、大小便可，体重未见明显变化，未见恶寒发热表现。",
+    "inspectionConclusion": "截石位{lump}点肛周肿块，触之疼痛明显，{fluctuation}点可触及波动感，镜检可见{fluctuation}点肛隐窝潮红凹陷明显，齿线上黏膜充血隆起，局部糜烂。",
+    "slots": [
+      { "key": "duration", "label": "病程时长", "kind": "select", "options": ["3天", "1周", "2周", "3周", "1月", "3月", "半年", "1年", "2年", "3年", "4年", "5年"], "default": "3周" },
+      { "key": "aggravation", "label": "近期加重", "kind": "select", "options": ["3天", "1周", "2周", "1月", "无加重"], "default": "3天" },
+      { "key": "lump", "label": "肿块点位", "kind": "multi", "options": ["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"], "default": ["9点", "12点"] },
+      { "key": "fluctuation", "label": "波动感点位", "kind": "multi", "options": ["1点", "2点", "3点", "4点", "5点", "6点", "7点", "8点", "9点", "10点", "11点", "12点"], "default": ["12点"] }
+    ],
+    "symptoms": ["肛周肿块", "肛周疼痛"],
+    "visual": ["局部红肿隆起", "触痛明显"],
+    "digital": ["触及波动感"],
+    "anoscopy": ["肛隐窝潮红凹陷", "齿线上黏膜充血隆起"]
+  }
+]

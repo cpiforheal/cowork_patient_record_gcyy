@@ -1575,7 +1575,7 @@ export const auxiliaryTaskFields: Record<PreAiAuxiliaryTaskType, PreAiFieldConfi
 
 export const stageByCode = (code: PreAiStageCode) => preAiStages.find(stage => stage.code === code)!;
 
-const historyIntakeFieldKeys = new Set([
+export const historyIntakeFieldKeys = new Set([
   "allergyHistory",
   "allergyHistoryNote",
   "personalHistory",
@@ -1590,6 +1590,31 @@ const historyIntakeFieldKeys = new Set([
 ]);
 
 export const isHistoryIntakeKey = (key: string) => historyIntakeFieldKeys.has(key);
+
+export const historyIntakeFieldLabels: Record<string, string> = {
+  allergyHistory: "过敏史",
+  allergyHistoryNote: "过敏史补充",
+  personalHistory: "个人史",
+  chronicDiseaseItems: "慢性病史",
+  surgicalHistoryItems: "手术史",
+  traumaHistory: "外伤史",
+  transfusionHistory: "输血史",
+  vaccinationHistory: "预防接种史",
+  medicationHistory: "用药史",
+  maritalHistory: "婚育史",
+  familyHistory: "家族史"
+};
+
+const hasHistoryValue = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(item => hasHistoryValue(item));
+  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).some(item => hasHistoryValue(item));
+  return Boolean(String(value ?? "").trim());
+};
+
+export const getMissingHistoryFields = (form: Record<string, unknown>) =>
+  Array.from(historyIntakeFieldKeys)
+    .filter(key => !hasHistoryValue(form[key]))
+    .map(key => ({ key, label: historyIntakeFieldLabels[key] || key }));
 
 export const stageStatusLabel: Record<string, string> = {
   DRAFT: "待填写",

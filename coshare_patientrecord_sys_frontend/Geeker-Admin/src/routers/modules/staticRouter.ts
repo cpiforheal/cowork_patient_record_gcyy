@@ -66,7 +66,52 @@ export const staticRouter: RouteRecordRaw[] = [
           isKeepAlive: false
         }
       },
-      ...inventorySystemRoutes
+      ...inventorySystemRoutes,
+      {
+        // 病种模板库：静态注册，避免后端导航会话缓存导致的 404（数据权限由接口层二次校验）
+        path: "/pre-ai/template-manage",
+        name: "diseaseTemplateManage",
+        component: () => import("@/views/preAi/templateManage/index.vue"),
+        meta: {
+          icon: "Files",
+          title: "病种模板库",
+          isLink: "",
+          isHide: false,
+          isFull: false,
+          isAffix: false,
+          isKeepAlive: true
+        }
+      },
+      {
+        // 随访话术模板库：静态注册（同病种模板库惯例），编辑权 nurse/nursing/doctor/admin
+        path: "/pre-ai/script-manage",
+        name: "followUpScriptManage",
+        component: () => import("@/views/preAi/scriptManage/index.vue"),
+        meta: {
+          icon: "ChatLineSquare",
+          title: "随访话术模板库",
+          isLink: "",
+          isHide: false,
+          isFull: false,
+          isAffix: false,
+          isKeepAlive: true
+        }
+      },
+      {
+        // 随访工作台独立页：首页板块的全展开形态；后端导航同步下发（isHide 对齐为可见）
+        path: "/follow-up-dashboard",
+        name: "followUpDashboard",
+        component: () => import("@/views/home/components/FollowUpDashboardPage.vue"),
+        meta: {
+          icon: "DataLine",
+          title: "随访工作台",
+          isLink: "",
+          isHide: false,
+          isFull: false,
+          isAffix: false,
+          isKeepAlive: true
+        }
+      }
     ]
   }
 ];

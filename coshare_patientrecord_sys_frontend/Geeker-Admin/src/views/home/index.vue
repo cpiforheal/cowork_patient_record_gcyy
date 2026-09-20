@@ -119,7 +119,49 @@
                 @select-month="selectCalendarMonth"
                 @select-date="selectCalendarDate"
               />
+              <FollowUpRecallPanel />
             </div>
+          </section>
+
+          <!-- 年龄分布（数据看板下方模块：复用 7/14/30 时间筛选 + 参考样式折线图） -->
+          <section class="board-card dashboard-fold">
+            <button type="button" class="fold-head" @click="ageOpen = !ageOpen">
+              <el-icon><User /></el-icon>
+              <strong>年龄分布</strong>
+              <small>来访患者病历年龄字段 · 分段趋势</small>
+              <span class="fold-spacer"></span>
+              <el-icon class="fold-arrow" :class="{ open: ageOpen }"><ArrowDown /></el-icon>
+            </button>
+            <div v-if="ageOpen" class="fold-body">
+              <div class="trend-toolbar">
+                <el-segmented v-model="ageRange" :options="ageRangeOptions" size="small" />
+                <div class="summary-chips">
+                  <span class="chip"
+                    >窗口合计 <b>{{ ageDistributionTotal }}</b> 人</span
+                  >
+                </div>
+              </div>
+              <AgeDistributionCurve :labels="ageLabels" :dates="ageDates" :series="ageSeries" />
+            </div>
+          </section>
+
+          <!-- 随访工作台（可折叠，默认收起 · 医生/管理员/检查室/护理） -->
+          <section v-if="isAdmin || isFollowUpRole" class="board-card dashboard-fold todo-fold">
+            <button type="button" class="fold-head" @click="followUpOpen = !followUpOpen">
+              <el-icon><Bell /></el-icon>
+              <strong>随访工作台</strong>
+              <small>待随访闭环 · 话术模板 · 最近动态</small>
+              <span class="fold-spacer"></span>
+              <el-button
+                :icon="TopRight"
+                link
+                size="small"
+                @click.stop="router.push('/follow-up-dashboard')"
+                >独立页</el-button
+              >
+              <el-icon class="fold-arrow" :class="{ open: followUpOpen }"><ArrowDown /></el-icon>
+            </button>
+            <FollowUpDashboardPanel v-if="followUpOpen" @open-script-manage="router.push('/pre-ai/script-manage')" />
           </section>
 
           <!-- 我的待办（可折叠，默认收起） -->
@@ -204,8 +246,8 @@
 <script setup lang="ts" name="home">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
-import { ArrowDown, ArrowRight, List, Reading, Refresh, Setting, TrendCharts } from "@element-plus/icons-vue";
+import { ElMessage, ElNotification } from "element-plus";
+import { ArrowDown, ArrowRight, Bell, List, Reading, Refresh, Setting, TopRight, TrendCharts, User } from "@element-plus/icons-vue";
 import {
   chooseBackupDirectoryApi,
   createMaintenanceSnapshotApi,
@@ -232,7 +274,10 @@ import { useUserStore } from "@/stores/modules/user";
 import { useAuthStore } from "@/stores/modules/auth";
 import { classifyPatientStatus } from "@/utils/patientStatusClassifier";
 import CalendarHeatmap from "./components/CalendarHeatmap.vue";
+import FollowUpRecallPanel from "./components/FollowUpRecallPanel.vue";
+import FollowUpDashboardPanel from "./components/FollowUpDashboardPanel.vue";
 import DailyPatientCurve from "./components/DailyPatientCurve.vue";
+import AgeDistributionCurve, { type AgeSeriesItem } from "./components/AgeDistributionCurve.vue";
 import HomeTaskPanel from "./components/HomeTaskPanel.vue";
 import MiniBarChart from "./components/MiniBarChart.vue";
 import ShortcutPanel from "./components/ShortcutPanel.vue";
@@ -243,6 +288,7 @@ import BlurFade from "@/components/inspira/BlurFade.vue";
 import BorderBeam from "@/components/inspira/BorderBeam.vue";
 import NumberTicker from "@/components/inspira/NumberTicker.vue";
 import { useHomeDashboard } from "./composables/useHomeDashboard";
+import { loadRecallSummaryApi, type RecallRow } from "@/api/modules/clinic/followUp";
 
 interface HomeTask {
   id: string;
@@ -358,7 +404,16 @@ const headerDateText = computed(() => {
 });
 const dashboardOpen = ref(true);
 const todoOpen = ref(false);
+const followUpOpen = ref(false);
 const maintenanceOpen = ref(false);
+const isFollowUpRole = computed(() => ["doctor", "inspection", "nurse", "nursing"].includes(currentRole.value));
+const followUpSummary = ref<{ overdue: RecallRow[]; dueSoon: RecallRow[] }>({ overdue: [], dueSoon: [] });
+const followUpReminderRows = computed(() => [...followUpSummary.value.overdue, ...followUpSummary.value.dueSoon]);
+const followUpReminderCounts = computed(() => ({
+  critical: followUpReminderRows.value.filter(row => row.priority === "CRITICAL" || row.overdueDays >= 7).length,
+  today: followUpReminderRows.value.filter(row => row.priority === "TODAY" || row.overdueDays === 0).length,
+  tomorrow: followUpReminderRows.value.filter(row => row.priority === "TOMORROW" || row.overdueDays === -1).length
+}));
 
 // 严格按后端下发的菜单权限决定加载哪块工作面板——绝不调用本岗位无权的接口。
 const menuPaths = computed(() => new Set(authStore.flatMenuListGet.map(item => item.path)));
@@ -378,6 +433,18 @@ const primaryTodoCards = computed<StatCard[]>(() => {
       path: "/patients/overview"
     }
   ];
+  if (isAdmin.value || isFollowUpRole.value) {
+    const { critical, today, tomorrow } = followUpReminderCounts.value;
+    cards.unshift({
+      id: "follow-up-today",
+      label: "今日待随访",
+      count: followUpReminderRows.value.length,
+      desc: `严重逾期 ${critical} · 今日 ${today} · 明日 ${tomorrow}`,
+      tone: critical ? "danger" : today ? "warning" : "info",
+      path: "/follow-up-dashboard",
+      urgent: critical > 0
+    });
+  }
   if (menuPaths.value.has("/audit/review")) {
     cards.push(
       {
@@ -1016,6 +1083,86 @@ const trendSummary = computed(() => {
 
 const trendTitle = computed(() => `近 ${trendRange.value} 日就诊收录`);
 
+// ---------- 年龄分布（数据看板下方模块）：病历年龄字段 × 就诊日期，5 段分组折线 ----------
+const ageOpen = ref(true);
+const ageRange = ref(7);
+const ageRangeOptions = [
+  { label: "近 7 日", value: 7 },
+  { label: "近 14 天", value: 14 },
+  { label: "近一个月", value: 30 },
+  { label: "全部", value: 0 }
+];
+// 窗口日期序列：range>0 为近 N 天；range=0 为“全部”（从最早来访日期起逐日展开）
+const ageWindowDateTexts = (range: number) => {
+  const texts: string[] = [];
+  if (range > 0) {
+    for (let offset = range - 1; offset >= 0; offset--) {
+      const date = new Date();
+      date.setDate(date.getDate() - offset);
+      texts.push(toDateText(date));
+    }
+    return texts;
+  }
+  let minDateText = toDateText(new Date());
+  for (const key of patientsByEncounterDate.value.keys()) {
+    if (key < minDateText) minDateText = key;
+  }
+  const cursor = new Date(minDateText);
+  const end = new Date();
+  while (cursor <= end) {
+    texts.push(toDateText(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return texts;
+};
+const AGE_BANDS = [
+  { name: "≤30 岁", min: 0, max: 30 },
+  { name: "31-40 岁", min: 31, max: 40 },
+  { name: "41-50 岁", min: 41, max: 50 },
+  { name: "51-60 岁", min: 51, max: 60 },
+  { name: ">60 岁", min: 61, max: 200 }
+];
+// 病历年龄字段速查：与病种分布同构，按患者 id/姓名映射到前置病历的年龄
+const ageKeyMap = computed(() => {
+  const map = new Map<string, number>();
+  preAiCases.value.forEach(cases => {
+    const age = Number.parseInt(String(cases.patient?.age ?? ""), 10);
+    if (!Number.isFinite(age) || age <= 0 || age > 120) return;
+    if (cases.sourcePatientId) map.set(cases.sourcePatientId, age);
+    if (cases.patientName) map.set(cases.patientName, age);
+  });
+  return map;
+});
+const ageOfPatient = (patient: PatientRow): number | null =>
+  ageKeyMap.value.get(patient.id) ?? ageKeyMap.value.get(patient.name) ?? null;
+const ageLabels = computed(() => {
+  const dates = ageWindowDateTexts(ageRange.value);
+  const today = toDateText(new Date());
+  return dates.map(dateText => {
+    if (dateText === today) return "今天";
+    const date = new Date(dateText);
+    return `${date.getMonth() + 1}月${date.getDate()}日`;
+  });
+});
+const ageDates = computed(() => ageWindowDateTexts(ageRange.value));
+const ageSeries = computed<AgeSeriesItem[]>(() => {
+  const series = AGE_BANDS.map(band => ({ name: band.name, data: [] as number[] }));
+  if (!preAiCases.value.length) return series;
+  ageDates.value.forEach(dateText => {
+    const rows = patientsByEncounterDate.value.get(dateText) || [];
+    const counts = AGE_BANDS.map(() => 0);
+    rows.forEach(patient => {
+      const age = ageOfPatient(patient);
+      if (age === null) return;
+      const bandIndex = AGE_BANDS.findIndex(band => age >= band.min && age <= band.max);
+      if (bandIndex >= 0) counts[bandIndex] += 1;
+    });
+    counts.forEach((value, index) => series[index].data.push(value));
+  });
+  return series;
+});
+const ageDistributionTotal = computed(() => ageSeries.value.reduce((sum, item) => sum + item.data.reduce((a, b) => a + b, 0), 0));
+
 const pharmacyChartItems = computed(() => {
   const counts = tcmCounts.value;
   if (!counts) return [];
@@ -1168,12 +1315,34 @@ const loadMaintenanceDashboard = async (options: { fullMaintenanceScan?: boolean
 const reloadAll = async () => {
   const jobs: Promise<unknown>[] = [];
   if (showPatientBoard.value) jobs.push(loadPrimaryDashboard());
+  if (isAdmin.value || isFollowUpRole.value) jobs.push(loadFollowUpReminder());
   if (showPharmacyBoard.value) jobs.push(loadPharmacyBoard());
   if (isAdmin.value) {
     jobs.push(loadMaintenanceDashboard());
     jobs.push(loadPolicyBriefLatest());
   }
   await Promise.allSettled(jobs);
+};
+
+const loadFollowUpReminder = async () => {
+  try {
+    const { data } = await loadRecallSummaryApi();
+    followUpSummary.value = { overdue: data.overdue || [], dueSoon: data.dueSoon || [] };
+    const sessionKey = `follow-up-reminder:${new Date().toISOString().slice(0, 10)}`;
+    if (sessionStorage.getItem(sessionKey) || !followUpReminderRows.value.length) return;
+    sessionStorage.setItem(sessionKey, "1");
+    const { critical, today, tomorrow } = followUpReminderCounts.value;
+    const topRows = followUpReminderRows.value.slice().sort((a, b) => b.overdueDays - a.overdueDays).slice(0, 3);
+    ElNotification({
+      title: "今日待随访",
+      message: `${critical ? `严重逾期 ${critical} 项，` : ""}今日 ${today} 项，明日 ${tomorrow} 项${topRows.length ? `：${topRows.map(row => row.name || "待补姓名").join("、")}` : ""}`,
+      type: critical ? "error" : today ? "warning" : "info",
+      duration: 7000,
+      onClick: () => router.push("/follow-up-dashboard")
+    });
+  } catch {
+    // 提醒失败不阻断首页其他待办。
+  }
 };
 
 // 医政早报首页卡：最新一日概览（失败静默，不打扰待办主视图）

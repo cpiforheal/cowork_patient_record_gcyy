@@ -294,6 +294,7 @@
                   </el-tag>
                   <span>{{ routeLabel(workspace.encounter.route) }}</span>
                   <span>{{ treatmentPathLabel(workspace.encounter.treatmentPath) }}</span>
+                  <el-button size="small" type="primary" plain @click="openHealthArchiveDrawer">健康档案</el-button>
                 </div>
               </div>
             </section>
@@ -698,6 +699,14 @@
                         </el-button>
                       </section>
 
+                      <el-alert
+                        v-if="selectedStageCode === 'RECEPTION' && missingReceptionHistory.length"
+                        class="history-intake-alert"
+                        type="warning"
+                        :closable="false"
+                        show-icon
+                        :title="`当前有 ${missingReceptionHistory.length} 项病史未记录：${missingReceptionHistory.map(item => item.label).join('、')}`"
+                      />
                       <el-form
                         v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
                         label-position="top"
@@ -707,7 +716,6 @@
                           <el-form-item
                             v-for="field in stageFormFields"
                             :key="field.key"
-                            :label="field.label"
                             :required="field.required"
                             v-show="!isSecondaryStageField(field) || compactStageFieldsExpanded"
                             :class="{
@@ -717,6 +725,16 @@
                               'history-intake-field': isHistoryIntakeKey(field.key) && selectedStageCode === 'INSPECTION'
                             }"
                           >
+                            <template #label>
+                              <span>{{ field.label }}</span>
+                              <el-tag
+                                v-if="selectedStageCode === 'RECEPTION' && missingReceptionHistoryKeys.has(field.key)"
+                                size="small"
+                                type="warning"
+                                effect="plain"
+                                class="history-suggest-tag"
+                              >建议补录</el-tag>
+                            </template>
                             <StructuredField
                               v-if="['measurement', 'repeatable', 'template-text'].includes(field.kind)"
                               v-model="stageForms[selectedStageCode][field.key]"
@@ -992,7 +1010,13 @@
                         </div>
                       </section>
 
-                      <FollowUpTimeline
+                      <HealthArchiveDialog
+      v-model="archiveDrawerVisible"
+      :encounter-id="selectedEncounterId"
+      :encounter-patient-name="workspace?.encounter?.patient?.patientName"
+      preview-only
+    />
+        <FollowUpTimeline
                         v-if="selectedStageCode === 'INSPECTION' && inspectionView === 'CURRENT'"
                         :patient-case-id="workspace?.encounter?.patientCaseId"
                         :encounter-id="selectedEncounterId"
@@ -1024,6 +1048,13 @@
                           :loading="actionLoading"
                           @click="terminateReception"
                           >患者离院（不治疗）</el-button
+                        >
+                        <el-button
+                          v-if="canResumeCancelledReception"
+                          type="success"
+                          :loading="actionLoading"
+                          @click="resumeCancelledReception"
+                          >患者折返，恢复继续</el-button
                         >
                         <el-button
                           v-if="canPhysicianConfirmSelectedSurgery"
@@ -1896,6 +1927,7 @@ import {
   savePreAiAdmissionProfileApi,
   savePreAiStageApi,
   terminatePreAiReceptionApi,
+  resumePreAiReceptionApi,
   uploadPreAiAttachmentApi,
   voidPreAiAttachmentApi,
   type PatientRow,
@@ -1936,11 +1968,13 @@ import CreatableSelect from "./components/CreatableSelect.vue";
 import RegistrationFormFields from "./components/RegistrationFormFields.vue";
 import ClinicalTemplateToolbar from "./components/ClinicalTemplateToolbar.vue";
 import EncounterHistoryPanel from "./components/EncounterHistoryPanel.vue";
+import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
 import AttachmentPreviewGallery from "./components/AttachmentPreviewGallery.vue";
 import { getLocalPrintAgentStatus, printQueueTicketLocally } from "../../clinicQueue/printAgent";
 import {
   auxiliaryTaskLabel,
   encounterStatusLabel,
+  getMissingHistoryFields,
   isHistoryIntakeKey,
   preAiStages,
   stageByCode,
@@ -1966,7 +2000,9 @@ import {
   clinicalTemplateById,
   clinicalTemplateIdsForDiseases,
   inferTemplateIdsBySymptoms,
+  loadDiseaseTemplates,
   mergeClinicalTemplateSlots,
+  GENERIC_TEMPLATE_ID,
   type ClinicalTemplateMode
 } from "./utils/clinicalTemplateCatalog";
 
@@ -2464,6 +2500,7 @@ const clinicalTemplateIds = (code: PreAiStageCode) => {
 };
 
 const manualTemplateTouched = reactive(new Set<PreAiStageCode>());
+let genericPromptOpen = false;
 const autoMatchedTemplateLabel = ref("");
 let hydrationQuiet = false;
 
@@ -2560,6 +2597,10 @@ const confirmClinicalTemplateApply = async (mode: ClinicalTemplateMode) => {
 };
 
 const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTemplateMode, ids: string[]) => {
+  if (ids.includes(GENERIC_TEMPLATE_ID)) {
+    ElMessage.info("通用路径为自由书写，不适用模板文本；请直接在病历文本区输入内容");
+    return false;
+  }
   if (!ids.length || !(await confirmClinicalTemplateApply(mode))) return false;
   Object.assign(stageForms[code], applyClinicalTemplate(code, stageForms[code], ids, mode));
   if (code === "INSPECTION" && mode !== "fill") {
@@ -2581,8 +2622,56 @@ const applyStageClinicalTemplate = async (code: PreAiStageCode, mode: ClinicalTe
 
 // 检查室试点：选择病种即按默认变量生成检查记录全文（textarea 可直接修改）
 const onClinicalTemplateSelection = async (code: PreAiStageCode, ids: string[]) => {
-  if (code !== "INSPECTION") return;
   const previous = [...clinicalTemplateIds(code)];
+  // 通用路径：其他/未分型 → 自由书写，记录病种名后计入候选模板孵化（检查室/接诊室通用）
+  if (ids.includes(GENERIC_TEMPLATE_ID)) {
+    if (genericPromptOpen) return; // 防重复弹窗
+    genericPromptOpen = true;
+    // 在 el-select 的事件周期内同步弹对话框会被下拉收起逻辑吞掉，必须下一拍再弹
+    window.setTimeout(async () => {
+      let genericName = "";
+      try {
+        const { value } = await ElMessageBox.prompt(
+          "该患者不属于预置病种，请输入本次病种名称（将按自由文本书写病历，保存后自动计入候选模板观察区）",
+          "其他/未分型 · 通用路径",
+          { confirmButtonText: "进入通用路径", cancelButtonText: "取消", inputPlaceholder: "如：藏毛窦、肛门尖锐湿疣…" }
+        );
+        genericName = String(value || "").trim();
+      } catch {
+        // 取消：回滚下拉到选择前的状态，避免选中态与元数据不一致
+        setClinicalTemplateIds(code, previous);
+        return;
+      } finally {
+        genericPromptOpen = false;
+      }
+      if (!genericName) {
+        setClinicalTemplateIds(code, previous);
+        return;
+      }
+      setClinicalTemplateIds(code, [GENERIC_TEMPLATE_ID]);
+      stageForms[code].clinicalTemplateDiseases = [genericName];
+      stageForms[code].clinicalTemplateVersion = "generic-v1";
+      stageForms[code].clinicalTemplateAppliedAt = new Date().toISOString();
+      delete stageForms[code].clinicalTemplateSlots;
+      // 检查室必填校验兜底：检查方向与模板路径同样自动写入，避免保存被"检查方向"卡住
+      if (code === "INSPECTION" && !String(stageForms.INSPECTION.examinationDirection || "").trim()) {
+        stageForms.INSPECTION.examinationDirection = "肛肠";
+      }
+      ElMessage.success(`已进入通用路径（${genericName}），病历内容请自由书写`);
+      // 引导跳转：滚动并聚焦该阶段的自由书写文本区
+      void nextTick();
+      window.setTimeout(() => {
+        const pane = document.querySelector(".stage-panel");
+        const textarea = pane?.querySelector("textarea") as HTMLTextAreaElement | null;
+        if (textarea) {
+          textarea.scrollIntoView({ behavior: "smooth", block: "center" });
+          textarea.focus();
+        }
+      }, 260);
+    }, 120);
+    return;
+  }
+  if (code !== "INSPECTION") return;
   setClinicalTemplateIds(code, ids);
   const narrative = String(stageForms.INSPECTION.inspectionNarrative || "").trim();
   const applied = await applyStageClinicalTemplate("INSPECTION", narrative ? "overwrite" : "fill", ids);
@@ -2861,6 +2950,11 @@ const openPatientArchiveDetail = (item: PreAiPatientCase) => {
   }
   patientDrawerOpen.value = false;
   openPatientDetail(patientId);
+};
+// 健康档案只读抽屉（previewOnly 模式）：写主档案时随手查看档案，不打断编辑流程
+const archiveDrawerVisible = ref(false);
+const openHealthArchiveDrawer = () => {
+  archiveDrawerVisible.value = true;
 };
 const openPatientHealthArchive = (item: PreAiPatientCase) => {
   if (!item.latestEncounter) return;
@@ -3185,6 +3279,10 @@ const stageFormFields = computed(() => {
     return visibleStageFields.value.filter(field => !nursingVitalFieldKeys.has(field.key));
   return visibleStageFields.value;
 });
+const missingReceptionHistory = computed(() =>
+  selectedStageCode.value === "RECEPTION" ? getMissingHistoryFields(stageForms.RECEPTION as Record<string, unknown>) : []
+);
+const missingReceptionHistoryKeys = computed(() => new Set(missingReceptionHistory.value.map(item => item.key)));
 
 // 护理部四测：强调区录入字段与轮次记录（vitalSignRounds 随阶段草稿持久化，仅系统留存）
 const nursingVitalFieldKeys = new Set(["measuredAt", "systolicBp", "diastolicBp", "temperature", "pulse", "respiration"]);
@@ -3338,6 +3436,36 @@ const canTerminateReception = computed(
     canEditSelectedStage.value &&
     ["admin", "inspection", "reception", "doctor", "tcm"].includes(currentRole.value)
 );
+// 患者折返恢复：离院未治疗（CANCELLED）且接诊未完成交接时，允许恢复继续
+const canResumeCancelledReception = computed(
+  () =>
+    workspace.value?.encounter.status === "CANCELLED" &&
+    selectedStageCode.value === "RECEPTION" &&
+    stageSubmission("RECEPTION")?.status !== "COMPLETED" &&
+    ["admin", "inspection", "reception", "doctor"].includes(currentRole.value)
+);
+
+const resumeCancelledReception = async () => {
+  try {
+    const { value } = await ElMessageBox.confirm(
+      "患者已折返：将恢复该病历继续流转，排队号码保持不变，既有检查与接诊内容全部保留。",
+      "患者折返恢复",
+      { confirmButtonText: "确认恢复", cancelButtonText: "取消", type: "warning" }
+    );
+    void value;
+    await runAction(async () => {
+      const { data } = await resumePreAiReceptionApi(
+        selectedEncounterId.value,
+        stageSubmission("RECEPTION")?.version ?? 0
+      );
+      hydrateWorkspace(data);
+      await loadEncounterList();
+      ElMessage.success("病历已恢复继续，接诊排队已重新激活");
+    });
+  } catch (error: any) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(error.message || "恢复失败");
+  }
+};
 const canReturnSelectedStage = computed(
   () =>
     canReview.value &&
@@ -3572,7 +3700,7 @@ const loadEncounterList = async () => {
       await selectEncounter(requestedEncounterId);
     }
     const requestedStage = String(route.query.stage || "").trim() as PreAiStageCode;
-    if (requestedEncounterId && ["INSPECTION", "RECEPTION"].includes(requestedStage) && workspace.value) {
+    if (requestedEncounterId && ["REGISTRATION", "INSPECTION", "RECEPTION", "NURSING", "TCM", "DOCTOR", "SURGERY", "REVIEW"].includes(requestedStage) && workspace.value) {
       await selectStage(requestedStage);
     }
   } catch (error: any) {
@@ -4344,8 +4472,19 @@ const persistNursingHistoryFromStage = async () => {
   }
 };
 
-const saveSelectedStage = async () =>
-  runAction(async () => {
+const saveSelectedStage = async () => {
+  if (selectedStageCode.value === "RECEPTION" && missingReceptionHistory.value.length) {
+    try {
+      await ElMessageBox.confirm(
+        `以下病史尚未记录：${missingReceptionHistory.value.map(item => item.label).join("、")}。可继续提交，后续可在随访或档案中补录。`,
+        "建议补录病史",
+        { confirmButtonText: "继续提交", cancelButtonText: "返回补录", type: "warning" }
+      );
+    } catch {
+      return;
+    }
+  }
+  await runAction(async () => {
     if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
       await persistReceptionHistoryFromStage(selectedStageCode.value);
     if (selectedStageCode.value === "NURSING") await persistNursingHistoryFromStage();
@@ -4359,6 +4498,7 @@ const saveSelectedStage = async () =>
     hydrateWorkspace(data);
     ElMessage.success("阶段草稿已保存");
   });
+};
 
 const correctSelectedStage = async () => {
   try {
@@ -5280,6 +5420,7 @@ onMounted(() => {
     historyResizeObserver.observe(workspaceShellRef.value);
   }
   void loadEncounterList();
+  void loadDiseaseTemplates();
   scheduleTopContextCompaction();
   scheduleWorkflowContextCompaction();
   window.addEventListener("clinic-queue-updated", refreshEncounterListAfterQueueUpdate);

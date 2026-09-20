@@ -39,7 +39,7 @@ public class AuthNavigationService {
     private static final Map<String, Set<String>> STAGE_EDITORS = Map.of(
         "REGISTRATION", Set.of("frontdesk"),
         "INSPECTION", Set.of("inspection", "reception"),
-        "RECEPTION", Set.of("reception", "inspection"),
+        "RECEPTION", Set.of("reception", "inspection", "frontdesk"),
         "NURSING", Set.of("nurse", "nursing"),
         "TCM", Set.of("tcm"),
         "DOCTOR", Set.of("doctor"),
@@ -384,7 +384,10 @@ public class AuthNavigationService {
             pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/list"),
             page("/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled", false, false, false),
             page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false),
-            page("/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook", false, false, false)
+            page("/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook", false, false, false),
+            page("/follow-up-dashboard", "followUpDashboard", "/home/components/FollowUpDashboardPage", "随访工作台", "DataLine", false, false, false),
+            page("/pre-ai/template-manage", "diseaseTemplateManage", "/preAi/templateManage/index", "病种模板库", "Files", false, false, false),
+            page("/pre-ai/script-manage", "followUpScriptManage", "/preAi/scriptManage/index", "随访话术模板库", "ChatLineSquare", false, false, false)
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "Operation",
             page("/policy-brief", "policyBrief", "/policyBrief/index", "医政早报", "Reading", false, false, false),
@@ -484,8 +487,8 @@ public class AuthNavigationService {
 
         Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record");
-        Set<String> preAi = paths("/pre-ai/encounters");
-        Set<String> healthArchive = paths("/health-archive");
+        Set<String> preAi = paths("/pre-ai/encounters", "/pre-ai/template-manage", "/pre-ai/script-manage");
+        Set<String> healthArchive = paths("/health-archive", "/follow-up-dashboard");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
         Set<String> inventoryStaff = paths(
@@ -531,11 +534,12 @@ public class AuthNavigationService {
             "patientDetail=field:read,field:edit,document:read,document:upload,document:download",
             "clinicQueueWorkbench=queue:read,queue:issue,queue:intervene,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         ), inventoryStaffButtons)));
-        result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff), mergePermissions(permissions(
+        result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff, healthArchive), mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
             "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload",
-            "clinicQueueWorkbench=queue:read,inspection:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
+            "clinicQueueWorkbench=queue:read,inspection:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play",
+            "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote"
         ), inventoryStaffButtons)));
         result.put("reception", role(union(patientFlow, preAi, clinicQueue), permissions(
             "home=view", "patientsOverview=patient:read,field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read",
@@ -550,7 +554,13 @@ public class AuthNavigationService {
         result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         result.put("ecg", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
-        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive), diagnosticButtons));
+        Map<String, List<String>> nursingButtons = mergePermissions(diagnosticButtons, permissions(
+            "followUpDashboard=followup:read,followup:contact",
+            "healthArchive=patient:read,field:read",
+            "preAiEncounters=patient:read,field:read"
+        ));
+        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive), nursingButtons));
+        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive), nursingButtons));
 
         result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
@@ -568,7 +578,8 @@ public class AuthNavigationService {
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "patientsOverview=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",
-            "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
+            "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play",
+            "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote"
         ), inventoryStaffButtons)));
         result.put("quality", role(union(patientFlow, inventoryQuality, paths(
             "/workbench/lab-report", "/templates/record", "/documents/recycle", "/audit/review", "/audit/log"
