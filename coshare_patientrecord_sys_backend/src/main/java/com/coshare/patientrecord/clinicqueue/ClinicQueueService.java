@@ -318,6 +318,54 @@ public class ClinicQueueService {
         if (!tickets.isEmpty()) publishUpdateAfterCommit();
     }
 
+    /**
+     * 患者折返恢复：把离院终止时关闭的排队票与任务重新激活，号码保持不变。
+     * 检查已完成则接诊任务直接进入 WAITING；未完成则恢复原阶段任务状态。
+     */
+    @Transactional
+    public void resumeEncounterReception(String encounterId, String reason, SessionUser user) {
+        requireRole(user, Set.of("admin", "inspection", "reception", "doctor"), "当前岗位无权办理患者折返恢复");
+        List<ObjectNode> tickets = jdbcTemplate.query(
+            "SELECT * FROM clinic_queue_tickets WHERE encounter_id = ? FOR UPDATE",
+            (rs, rowNum) -> readTicket(rs), safe(encounterId)
+        );
+        for (ObjectNode ticket : tickets) {
+            String ticketId = text(ticket, "id");
+            List<ObjectNode> tasks = jdbcTemplate.query(
+                "SELECT * FROM clinic_queue_tasks WHERE ticket_id = ? ORDER BY updated_at DESC FOR UPDATE",
+                (rs, rowNum) -> readTask(rs), ticketId
+            );
+            boolean inspectionDone = tasks.stream()
+                .anyMatch(task -> "INSPECTION".equals(text(task, "stageCode")) && "COMPLETED".equals(text(task, "status")));
+            int resumed = 0;
+            ObjectNode firstTask = tasks.isEmpty() ? null : tasks.get(0);
+            for (ObjectNode task : tasks) {
+                if (!"CANCELLED".equals(text(task, "status"))) continue;
+                String stage = text(task, "stageCode");
+                String nextStatus;
+                if ("RECEPTION".equals(stage)) {
+                    nextStatus = "WAITING";
+                } else if ("INSPECTION".equals(stage)) {
+                    nextStatus = inspectionDone ? "INACTIVE" : "WAITING";
+                } else {
+                    continue;
+                }
+                resumed += jdbcTemplate.update(
+                    "UPDATE clinic_queue_tasks SET status = ?, exception_reason = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ?",
+                    nextStatus, reason.isBlank() ? "患者折返，恢复候诊" : reason, user.name(), now(), text(task, "id"));
+            }
+            if (resumed > 0 || "LEFT".equals(text(ticket, "overallStatus")) || "CANCELLED".equals(text(ticket, "overallStatus"))) {
+                jdbcTemplate.update(
+                    "UPDATE clinic_queue_tickets SET overall_status = ?, version = version + 1, updated_at = ? WHERE id = ?",
+                    inspectionDone ? "WAITING_RECEPTION" : "WAITING_INSPECTION", now(), ticketId);
+                audit(ticketId, firstTask == null ? "" : text(firstTask, "id"),
+                    firstTask == null ? "" : text(firstTask, "roomCode"), "TICKET_ISSUED", "", "WAITING", user,
+                    reason.isBlank() ? "患者折返，排队恢复（号码不变）" : "患者折返，排队恢复（号码不变）：" + reason);
+            }
+        }
+        if (!tickets.isEmpty()) publishUpdateAfterCommit();
+    }
+
     @Transactional
     public Map<String, Object> roomAction(String roomCode, String action, ActionRequest request, SessionUser user) {
         requireRole(user, ROOM_CONTROL_ROLES, "当前岗位无权控制房间状态");

@@ -105,8 +105,12 @@ public class HealthArchiveDocxRenderer {
             appended.add(para(doc, "患者是否理解", understood.isBlank() ? "□是 □否" : ("☑" + understood), "", ""));
 
             appended.add(heading(doc, "六、分级随访", 24, true));
-            appended.add(table(doc, List.of("随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人"),
-                rowsOf(form.path("followUpRows"), 8)));
+            appended.add(para(doc, "下次复诊预约", blankToDash(text(form, "nextVisitDate")),
+                "转介绍意向", blankToDash(text(form, "referralIntention"))));
+            appended.add(para(doc, "触达渠道", blankToDash(text(form, "reachChannel")),
+                "触达确认", blankToDash(text(form, "reachConfirmed"))));
+            appended.add(table(doc, List.of("随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人", "实际随访日期", "结果状态"),
+                rowsOf(form.path("followUpRows"), 10)));
 
             appended.add(heading(doc, "七、方案调整记录与签字", 24, true));
             appended.add(para(doc, "方案调整记录", text(form, "adjustmentRecord"), "", ""));

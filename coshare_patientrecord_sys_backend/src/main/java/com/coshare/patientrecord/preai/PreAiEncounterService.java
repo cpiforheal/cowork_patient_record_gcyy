@@ -1062,6 +1062,46 @@ public class PreAiEncounterService {
         return toMap(workspace(encounterId, user));
     }
 
+    /**
+     * 患者折返恢复：离院未治疗（CANCELLED）的病历原地恢复为进行中，保留既有检查与接诊内容继续流转。
+     * 仅限接诊尚未完成交接的终止病历；恢复后重新生成接诊排队任务，阶段版本顺延保留审计痕迹。
+     */
+    @Transactional
+    public Map<String, Object> resumeCancelledReception(String encounterId, ResumeCancelledReceptionRequest request, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        // 折返恢复是唯一允许对 CANCELLED 病历写入的入口：跳过 requireStageEditor 内部的活动状态守卫，
+        // 仅校验岗位编辑权（等价于 requireStageEditor 去掉 requireActiveEncounter）。
+        boolean policyAllowed = user != null && navigationService.canEditStage(user.role(), "RECEPTION");
+        if (!policyAllowed) throw forbidden("当前岗位无权维护" + stageLabel("RECEPTION"));
+        if (!"CANCELLED".equals(text(encounter, "status"))) {
+            throw conflict("仅已办理离院（未治疗）的病历可以恢复继续");
+        }
+        ObjectNode reception = loadStage(encounterId, "RECEPTION");
+        if ("COMPLETED".equals(text(reception, "status"))) {
+            throw conflict("该病历接诊已完成交接，不能按折返恢复");
+        }
+        String reason = safe(request == null ? "" : request.reason());
+        // 先把阶段行恢复为 DRAFT（在仍有版本行可命中时完成版本顺延），再解除病历终止状态
+        if (request != null && request.data() != null) {
+            ObjectNode data = sanitizeStageData("RECEPTION", request.data());
+            updateStageVersioned(encounterId, "RECEPTION", "DRAFT", data, "患者折返恢复：更新接诊信息", user, "", request.expectedVersion());
+        } else {
+            updateStageVersioned(encounterId, "RECEPTION", "DRAFT", safeObject(reception.path("data")), "患者折返恢复", user, "", reception.path("version").asInt(0));
+        }
+        jdbcTemplate.update("UPDATE pre_ai_encounters SET status = 'IN_PROGRESS', current_stage = 'RECEPTION', updated_at = ? WHERE id = ?", now(), encounterId);
+        jdbcTemplate.update(
+            "UPDATE pre_ai_care_encounters SET status = 'ACTIVE', ended_at = NULL WHERE clinical_encounter_id = ? AND status = 'CANCELLED'",
+            encounterId);
+        clinicQueueService.resumeEncounterReception(encounterId, reason, user);
+        audit(encounterId, "encounter.resume", "RECEPTION", user,
+            reason.isBlank() ? "患者折返，离院病历恢复继续" : "患者折返，离院病历恢复继续：" + reason);
+        refreshProgress(encounterId);
+        return toMap(workspace(encounterId, user));
+    }
+
+    public record ResumeCancelledReceptionRequest(Map<String, Object> data, Integer expectedVersion, String reason) {}
+
     @Transactional
     public Map<String, Object> confirmSurgery(String encounterId, VersionRequest request, SessionUser user) {
         requireEncounterAccess(encounterId, user);
@@ -3639,6 +3679,20 @@ public class PreAiEncounterService {
         tcm.put("concurrentSyndrome", display(tcmStage.path("concurrentSyndrome")));
         tcm.put("treatmentPrinciple", text(tcmStage, "treatmentPrinciple"));
 
+        // 病史全景（接诊 RECEPTION 与登记 patient_json 两级回退），供随访等场景完整参照
+        ObjectNode history = result.putObject("history");
+        history.put("pastHistory", firstNonBlank(text(reception, "pastHistory"), text(patientJson, "registrationPastHistory"), text(patientJson, "registrationIllnessHistory")));
+        history.put("chronicDiseaseItems", firstNonBlank(display(reception.path("chronicDiseaseItems")), display(patientJson.path("chronicDiseaseItems"))));
+        history.put("surgicalHistory", firstNonBlank(text(reception, "surgicalHistory"), display(patientJson.path("surgicalHistoryItems"))));
+        history.put("allergyHistory", firstNonBlank(display(reception.path("allergyHistory")), text(reception, "allergyHistoryNote"), display(patientJson.path("allergyHistory")), text(patientJson, "allergyHistoryNote")));
+        history.put("personalHistory", firstNonBlank(text(reception, "personalHistory"), display(patientJson.path("personalHistory")), text(patientJson, "registrationPersonalHistory")));
+        history.put("familyHistory", firstNonBlank(text(reception, "familyHistory"), display(patientJson.path("familyHistory"))));
+        history.put("traumaHistory", firstNonBlank(display(reception.path("traumaHistory")), display(patientJson.path("traumaHistory"))));
+        history.put("transfusionHistory", firstNonBlank(display(reception.path("transfusionHistory")), display(patientJson.path("transfusionHistory"))));
+        history.put("vaccinationHistory", firstNonBlank(display(reception.path("vaccinationHistory")), display(patientJson.path("vaccinationHistory"))));
+        history.put("medicationHistory", firstNonBlank(display(reception.path("medicationHistory")), display(patientJson.path("medicationHistory"))));
+        history.put("physicalExam", text(reception, "physicalExam"));
+
         ObjectNode auxiliary = result.putObject("auxiliary");
         ArrayNode tasks = auxiliary.putArray("tasks");
         jdbcTemplate.query(
@@ -3694,6 +3748,11 @@ public class PreAiEncounterService {
     private void audit(String encounterId, String action, String stage, SessionUser user, String detail) {
         jdbcTemplate.update("INSERT INTO pre_ai_audit_logs (id, encounter_id, action, stage_code, operator, operator_role, operator_id, operator_username, operator_department, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             "preaudit-" + UUID.randomUUID(), encounterId, action, safe(stage), user.name(), user.role(), user.id(), user.username(), user.department(), safe(detail), now());
+    }
+
+    /** 供病种模板孵化等相邻服务复用的审计入口。 */
+    public void auditExternal(String action, SessionUser user, String detail) {
+        audit("", action, "", user, detail);
     }
 
     private void auditCorrection(String encounterId, String stage, SessionUser user, String reason, ObjectNode before, ObjectNode after) {

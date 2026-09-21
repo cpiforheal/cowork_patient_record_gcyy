@@ -1,5 +1,6 @@
 package com.coshare.patientrecord.preai;
 
+import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.security.AuthPermission;
 
@@ -33,9 +34,16 @@ import org.springframework.web.multipart.MultipartFile;
 public class PreAiEncounterController {
 
     private final PreAiEncounterService service;
+    private final ClinicDiseaseTemplateService diseaseTemplateService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
-    public PreAiEncounterController(PreAiEncounterService service) {
+    public PreAiEncounterController(PreAiEncounterService service,
+                                    ClinicDiseaseTemplateService diseaseTemplateService,
+                                    com.fasterxml.jackson.databind.ObjectMapper objectMapper)
+    {
         this.service = service;
+        this.diseaseTemplateService = diseaseTemplateService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping
@@ -155,7 +163,10 @@ public class PreAiEncounterController {
         @PathVariable String stageCode,
         @RequestBody PreAiEncounterService.StageSaveRequest request
     ) {
-        return ApiResult.of(200, "阶段草稿已保存", service.saveStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
+        SessionUser user = AuthPermission.currentUserOrThrow();
+        Map<String, Object> result = service.saveStage(encounterId, stageCode, request, user);
+        diseaseTemplateService.registerGenericUsage(encounterId, objectMapper.valueToTree(request == null ? null : request.data()), stageCode, user);
+        return ApiResult.of(200, "阶段草稿已保存", result);
     }
 
     @PostMapping("/{encounterId}/stages/{stageCode}/complete")
@@ -164,7 +175,10 @@ public class PreAiEncounterController {
         @PathVariable String stageCode,
         @RequestBody(required = false) PreAiEncounterService.StageSaveRequest request
     ) {
-        return ApiResult.of(200, "阶段已完成并交接", service.completeStage(encounterId, stageCode, request, AuthPermission.currentUserOrThrow()));
+        SessionUser user = AuthPermission.currentUserOrThrow();
+        Map<String, Object> result = service.completeStage(encounterId, stageCode, request, user);
+        diseaseTemplateService.registerGenericUsage(encounterId, objectMapper.valueToTree(request == null ? null : request.data()), stageCode, user);
+        return ApiResult.of(200, "阶段已完成并交接", result);
     }
 
     @PostMapping("/{encounterId}/reception/terminate")
@@ -173,6 +187,14 @@ public class PreAiEncounterController {
         @RequestBody PreAiEncounterService.EncounterTerminationRequest request
     ) {
         return ApiResult.of(200, "患者已离院，后续流程已终止", service.terminateReception(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/reception/resume")
+    public ApiResult<Map<String, Object>> resumeCancelledReception(
+        @PathVariable String encounterId,
+        @RequestBody(required = false) PreAiEncounterService.ResumeCancelledReceptionRequest request
+    ) {
+        return ApiResult.of(200, "患者折返，病历已恢复继续", service.resumeCancelledReception(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
     @PostMapping("/{encounterId}/stages/SURGERY/physician-confirm")

@@ -1,7 +1,10 @@
+import { computed, ref } from "vue";
+import { clinicFetch, clinicJsonHeaders, parseClinicApiResponse } from "@/api/modules/clinic/http";
 import type { PreAiStageCode } from "@/api/modules/clinic";
 
 export type ClinicalTemplateMode = "fill" | "append" | "overwrite" | "render";
-export type ClinicalDisease = "肛瘘" | "肛周脓肿" | "混合痔" | "肛裂" | "内痔";
+/** 病种名：预置 5 种之外可由模板库/通用路径扩展 */
+export type ClinicalDisease = string;
 
 export const CLINICAL_TEMPLATE_VERSION = "anorectal-v2.0";
 
@@ -43,7 +46,8 @@ const slot = (key: string, label: string, options: string[], def: string | strin
 const durationSlot = (def: string) => slot("duration", "病程时长", DURATION_OPTIONS, def);
 const aggravationSlot = (def: string) => slot("aggravation", "近期加重", AGGRAVATION_OPTIONS, def);
 
-export const clinicalTemplates: ClinicalTemplate[] = [
+// 模板源：内置 5 个预置模板为兜底，接诊工作台挂载时从模板库接口热加载（失败回退内置）
+const bundledTemplates: ClinicalTemplate[] = [
   {
     id: "mixed-hemorrhoid",
     disease: "混合痔",
@@ -134,8 +138,38 @@ export const clinicalTemplates: ClinicalTemplate[] = [
   }
 ];
 
-export const clinicalTemplateOptions = clinicalTemplates.map(item => ({ label: item.label, value: item.id }));
-export const clinicalTemplateById = (id: string) => clinicalTemplates.find(item => item.id === id);
+/** 通用路径模板 ID：其他/未分型就诊走自由文本，不入预置模板 */
+export const GENERIC_TEMPLATE_ID = "generic-untyped";
+
+/** 热更新的模板源（默认内置兜底，挂载时被模板库接口数据替换） */
+export const diseaseTemplateSource = ref<ClinicalTemplate[]>(bundledTemplates);
+export const templatesFromLibrary = ref(false);
+export const loadDiseaseTemplates = async () => {
+  try {
+    const result = await clinicFetch("/disease-templates", { headers: clinicJsonHeaders() });
+    const data = await parseClinicApiResponse<{ id: string; disease: string; label: string; version: string; payload: any }[]>(result);
+    const mapped = (data || [])
+      .map(item => ({ ...(item.payload || {}), id: item.id, disease: item.disease, label: item.label || item.disease }))
+      .filter(item => item.id && item.disease) as ClinicalTemplate[];
+    if (mapped.length) {
+      diseaseTemplateSource.value = mapped;
+      templatesFromLibrary.value = true;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const clinicalTemplates = diseaseTemplateSource;
+export const clinicalTemplateOptions = computed(() => [
+  ...diseaseTemplateSource.value.map(item => ({ label: item.label, value: item.id })),
+  { label: "其他/未分型（通用路径）", value: GENERIC_TEMPLATE_ID }
+]);
+export const clinicalTemplateById = (id: string) =>
+  id === GENERIC_TEMPLATE_ID
+    ? undefined
+    : diseaseTemplateSource.value.find(item => item.id === id);
 
 export const inferTemplateIdsBySymptoms = (symptoms: unknown): string[] => {
   const picked = (Array.isArray(symptoms) ? symptoms : symptoms ? [symptoms] : [])
@@ -143,7 +177,7 @@ export const inferTemplateIdsBySymptoms = (symptoms: unknown): string[] => {
     .filter(Boolean);
   if (picked.length < 2) return [];
   let best: { id: string; score: number; size: number } | null = null;
-  for (const item of clinicalTemplates) {
+  for (const item of diseaseTemplateSource.value) {
     const score = picked.filter(value => item.symptoms.includes(value)).length;
     if (score < 2) continue;
     if (!best || score > best.score || (score === best.score && item.symptoms.length < best.size)) {
@@ -154,7 +188,7 @@ export const inferTemplateIdsBySymptoms = (symptoms: unknown): string[] => {
 };
 export const clinicalTemplateIdsForDiseases = (diseases: unknown) => {
   const values = Array.isArray(diseases) ? diseases : diseases ? [diseases] : [];
-  return values.map(value => clinicalTemplates.find(item => item.disease === String(value))?.id).filter(Boolean) as string[];
+  return values.map(value => diseaseTemplateSource.value.find(item => item.disease === String(value))?.id).filter(Boolean) as string[];
 };
 
 export const clinicalTemplateSlotDefaults = (id: string): Record<string, string | string[]> => {

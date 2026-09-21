@@ -77,6 +77,12 @@ public class HealthArchiveController {
             .body(download.resource());
     }
 
+    @GetMapping("/clinic-api/health-archive/emotion-map")
+    public ApiResult<Map<String, Object>> emotionMap() {
+        currentUser();
+        return ApiResult.success(healthArchiveService.emotionMap());
+    }
+
     private SessionUser currentUser() {
         return com.coshare.patientrecord.security.AuthPermission.currentUserOrThrow();
     }

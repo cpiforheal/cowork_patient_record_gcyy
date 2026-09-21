@@ -4,7 +4,7 @@
       <div>
         <strong>来访患者住址分布</strong>
         <small
-          >数据来源：患者收费信息 · 固始县周边乡镇对照 · 总样本 {{ patients.length }} 人 · 本地样本
+          >数据来源：前置病历 + 患者收费信息（全库去重合并） · 固始县周边乡镇对照 · 总样本 {{ analysisRecords.length }} 人 · 本地样本
           {{ localSampleCount }} 人</small
         >
       </div>
@@ -22,7 +22,7 @@
     </header>
 
     <div v-if="loading" class="analysis-loading" v-loading="true" element-loading-text="住址分布加载中…" />
-    <el-empty v-else-if="!patients.length" description="暂无患者收费信息，无法分析住址分布" :image-size="56" />
+    <el-empty v-else-if="!analysisRecords.length" description="暂无患者住址数据，无法分析住址分布" :image-size="56" />
     <template v-else>
       <!-- 迁移地图：近似乡镇分块（hover 凸起强调） + 涟漪散点 + 迁移光线 -->
       <div class="chart-block map-block">
@@ -402,9 +402,66 @@ const router = useRouter();
 const isDark = computed(() => globalStore.isDark);
 
 const patients = ref<BillingPatientInfo[]>([]);
+const caseMapById = ref(new Map<string, PreAiPatientCase>());
 const loading = ref(false);
 const mapLoading = ref(false);
 const mapRegistered = ref(false);
+
+// ---------- 统一分析人口：前置病历（病历数据权威来源）+ 患者收费信息，按姓名去重合并 ----------
+interface AnalysisPerson {
+  key: string;
+  name: string;
+  address: string;
+  phone: string;
+  gender: string;
+  age: string;
+  visitDate: string;
+  visitCount: number;
+  caseId: string;
+  patientId: string;
+  encounterId: string;
+  source: "preai" | "billing";
+}
+const analysisRecords = computed<AnalysisPerson[]>(() => {
+  const records = new Map<string, AnalysisPerson>();
+  caseMapById.value.forEach(cases => {
+    const key = `preai:${cases.id}`;
+    records.set(key, {
+      key,
+      name: cases.patientName || "未命名",
+      address: String(cases.patient?.address || ""),
+      phone: String(cases.patient?.phone || ""),
+      gender: cases.gender || "",
+      age: cases.age || "",
+      visitDate: String(cases.patient?.visitDate || cases.latestEncounter?.visitDate || ""),
+      visitCount: cases.visitCount || 0,
+      caseId: cases.id,
+      patientId: cases.sourcePatientId || "",
+      encounterId: cases.latestEncounter?.id || "",
+      source: "preai"
+    });
+  });
+  const preaiNames = new Set([...records.values()].map(record => record.name));
+  patients.value.forEach(patient => {
+    if (preaiNames.has(patient.patientName)) return;
+    const key = `billing:${patient.id}`;
+    records.set(key, {
+      key,
+      name: patient.patientName || "未命名",
+      address: String(patient.address || ""),
+      phone: String(patient.phone || ""),
+      gender: "",
+      age: "",
+      visitDate: String(patient.updatedAt || ""),
+      visitCount: 0,
+      caseId: "",
+      patientId: patient.id,
+      encounterId: "",
+      source: "billing"
+    });
+  });
+  return [...records.values()];
+});
 
 // ---------- 乡镇下钻：二级患者卡片悬浮窗 + 三级病程弹窗 + 四级健康档案预览 ----------
 interface TownshipPatientCard {
@@ -420,7 +477,6 @@ interface TownshipPatientCard {
   visitDate: string;
   township: string;
 }
-const caseMapById = ref(new Map<string, PreAiPatientCase>());
 const townshipDialogVisible = ref(false);
 const townshipDialogTitle = ref("");
 const townshipDialogSubtitle = ref("");
@@ -460,8 +516,8 @@ const distribution = computed(() => {
   let gushiOther = 0;
   let outside = 0;
   let unknown = 0;
-  patients.value.forEach(patient => {
-    const result = classifyAddress(patient.address);
+  analysisRecords.value.forEach(person => {
+    const result = classifyAddress(person.address);
     if (result.bucket === "township") townshipCounts.set(result.township, (townshipCounts.get(result.township) || 0) + 1);
     else if (result.bucket === "urban") urban += 1;
     else if (result.bucket === "gushi-other") gushiOther += 1;
@@ -479,7 +535,7 @@ const coverageCount = computed(() => townshipRanking.value.length);
 const topTownship = computed(() => townshipRanking.value[0]);
 const localSampleCount = computed(() => distribution.value.urban + distribution.value.townshipTotal);
 const localRatioText = computed(() => {
-  const total = patients.value.length;
+  const total = analysisRecords.value.length;
   if (!total) return "—";
   return `${Math.round((localSampleCount.value / total) * 100)}%`;
 });
@@ -545,7 +601,7 @@ const donutOption = computed<EChartsOption>(() => {
     tooltip: {
       trigger: "item",
       formatter: (params: any) =>
-        `${params.name}：${params.value} 人（${params.percent}%）<br/>总样本：${patients.value.length} 人`,
+        `${params.name}：${params.value} 人（${params.percent}%）<br/>总样本：${analysisRecords.value.length} 人`,
       confine: true,
       backgroundColor: palette.tooltipBg,
       borderColor: palette.tooltipBorder,
@@ -616,12 +672,12 @@ const barOption = computed<EChartsOption>(() => {
   // 粒度对齐全量病历患者：全部乡镇逐行展示，不再合并"其他乡镇"
   const rows = townshipRanking.value.map(row => ({ name: row.name, count: row.count }));
   const palette = chartPalette.value;
-  const hasScrollableRows = rows.length > 12;
-  const zoomEnd = Math.min(100, Math.round((12 / Math.max(rows.length, 1)) * 100));
   const rowColors = greedyBarColors(
     rows.map(row => row.name),
     palette.barTones
   );
+  const hasScrollableRows = rows.length > 12;
+  const zoomEnd = Math.min(100, Math.round((12 / Math.max(rows.length, 1)) * 100));
   return {
     tooltip: {
       trigger: "axis",
@@ -671,13 +727,14 @@ const barOption = computed<EChartsOption>(() => {
           name: row.name,
           value: row.count,
           itemStyle: {
-            borderRadius: [0, 3, 3, 0],
+            borderRadius: [0, 5, 5, 0],
+            // 高饱和积极多色：相邻柱不同族，第一视觉即可区分条目
             color: rowColors[index]
           }
         })),
-        barWidth: 14,
-        barMaxWidth: 18,
-        barCategoryGap: "60%",
+        barWidth: 16,
+        barMaxWidth: 20,
+        barCategoryGap: "135%",
         label: { show: true, position: "right", color: palette.text, fontSize: 12 },
         animationEasing: "cubicOut",
         animationEasingUpdate: "cubicOut",
@@ -938,7 +995,11 @@ const loadPatients = async () => {
       getPreAiPatientCasesApi().catch(() => ({ data: { list: [] as PreAiPatientCase[] } }))
     ]);
     patients.value = data.patients || [];
-    caseMapById.value = new Map((casesResult.data.list || []).map(item => [item.id, item]));
+    const caseEntries = (casesResult.data.list || []).flatMap(item => [
+      [item.id, item] as [string, PreAiPatientCase],
+      ...(item.sourcePatientId ? [[item.sourcePatientId, item] as [string, PreAiPatientCase]] : [])
+    ]);
+    caseMapById.value = new Map(caseEntries);
     resetDonutCenter();
   } catch (error) {
     ElMessage.error((error as Error).message || "患者收费信息加载失败");
@@ -951,22 +1012,21 @@ const loadPatients = async () => {
 const onBarClick = (params: any) => {
   const rowName = String(params?.name || "");
   if (!rowName) return;
-  const cards: TownshipPatientCard[] = patients.value
-    .map(patient => {
-      const classified = classifyAddress(patient.address);
-      const caseInfo = caseMapById.value.get(patient.id);
+  const cards: TownshipPatientCard[] = analysisRecords.value
+    .map(person => {
+      const classified = classifyAddress(person.address);
       return {
-        caseId: patient.id,
+        caseId: person.caseId,
         classified,
-        patientId: caseInfo?.sourcePatientId || "",
-        encounterId: caseInfo?.latestEncounter?.id || "",
-        visitDate: caseInfo?.latestEncounter?.visitDate || patient.updatedAt,
-        name: patient.patientName,
-        phone: patient.phone,
-        address: patient.address,
-        gender: caseInfo?.gender || "",
-        age: caseInfo?.age || "",
-        visitCount: caseInfo?.visitCount || 0
+        patientId: person.patientId,
+        encounterId: person.encounterId,
+        visitDate: person.visitDate,
+        name: person.name,
+        phone: person.phone,
+        address: person.address,
+        gender: person.gender,
+        age: person.age,
+        visitCount: person.visitCount
       };
     })
     .filter(card => card.classified.bucket === "township" && card.classified.township === rowName)
@@ -985,7 +1045,7 @@ const onBarClick = (params: any) => {
     }))
     .sort((a, b) => (a.visitDate < b.visitDate ? 1 : -1));
   townshipDialogTitle.value = `${rowName} · 来访患者`;
-  townshipDialogSubtitle.value = `共 ${cards.length} 位患者 · 数据来源：患者收费信息（全部病历患者）`;
+  townshipDialogSubtitle.value = `共 ${cards.length} 位患者 · 数据来源：前置病历 + 患者收费信息（全库去重合并）`;
   townshipPatients.value = cards;
   townshipDialogVisible.value = true;
 };

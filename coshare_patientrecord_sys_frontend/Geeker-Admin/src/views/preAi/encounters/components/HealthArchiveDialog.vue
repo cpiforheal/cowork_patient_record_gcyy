@@ -82,14 +82,14 @@
               <label>中医诊断（带出·可修正）</label><el-input v-model="basic.tcmDx" :disabled="!editable" />
             </div>
           </div>
-          <label class="ha-line-label">客源渠道</label>
+          <label class="ha-line-label">客源渠道 <el-tag v-if="syncedKeys.sourceChannel" size="small" type="primary" effect="plain">带出</el-tag></label>
           <el-select v-model="form.sourceChannel" :disabled="!editable" placeholder="选择主渠道" clearable>
             <el-option v-for="item in SOURCE_CHANNELS" :key="item" :label="item" :value="item" />
           </el-select>
           <div v-if="form.sourceChannel === '其他'" class="ha-other">
             <span>其他说明</span><el-input v-model="form.sourceChannelsOther" :disabled="!editable" />
           </div>
-          <label class="ha-line-label">就诊动因</label>
+          <label class="ha-line-label">就诊动因 <el-tag v-if="syncedKeys.visitMotivation" size="small" type="primary" effect="plain">带出</el-tag></label>
           <el-select v-model="form.visitMotivation" :disabled="!editable" placeholder="选择主要动因" clearable>
             <el-option v-for="item in VISIT_MOTIVATIONS" :key="item" :label="item" :value="item" />
           </el-select>
@@ -143,9 +143,9 @@
                 <el-option v-for="item in EXAM_FINDINGS" :key="item" :label="item" :value="item" />
               </el-select>
             </div>
-            <div><label>阳性体征</label><el-input v-model="form.specialExam.positiveSigns" :disabled="!editable" /></div>
+            <div><label>阳性体征 <el-tag v-if="syncedKeys.positiveSigns" size="small" type="primary" effect="plain">带出</el-tag></label><el-input v-model="form.specialExam.positiveSigns" :disabled="!editable" /></div>
           </div>
-          <label class="ha-line-label">中医体质/证型</label>
+          <label class="ha-line-label">中医体质/证型 <el-tag v-if="syncedKeys.tcmConstitution" size="small" type="primary" effect="plain">带出</el-tag></label>
           <el-select v-model="form.tcmConstitution" :disabled="!editable" multiple collapse-tags placeholder="可多选">
             <el-option v-for="item in TCM_CONSTITUTIONS" :key="item" :label="item" :value="item" />
           </el-select>
@@ -268,6 +268,38 @@
 
         <section v-show="!loading" class="ha-section">
           <h4>六、分级随访</h4>
+          <!-- 随访管理增量字段：复诊预约 / 触达确认 / 转介绍意向 -->
+          <div class="ha-grid-4 fu-manage-grid">
+            <div>
+              <label>下次复诊预约</label>
+              <el-date-picker
+                v-model="form.nextVisitDate"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="选择日期"
+                :disabled="!editable"
+                style="width: 100%"
+              />
+            </div>
+            <div>
+              <label>触达渠道</label>
+              <el-select v-model="form.reachChannel" :disabled="!editable" filterable allow-create placeholder="选择或输入">
+                <el-option v-for="item in REACH_CHANNELS" :key="item" :label="item" :value="item" />
+              </el-select>
+            </div>
+            <div>
+              <label>触达确认</label>
+              <el-select v-model="form.reachConfirmed" :disabled="!editable" placeholder="选择">
+                <el-option v-for="item in REACH_CONFIRM_OPTIONS" :key="item" :label="item" :value="item" />
+              </el-select>
+            </div>
+            <div>
+              <label>转介绍意向</label>
+              <el-select v-model="form.referralIntention" :disabled="!editable" placeholder="选择">
+                <el-option v-for="item in REFERRAL_INTENTIONS" :key="item" :label="item" :value="item" />
+              </el-select>
+            </div>
+          </div>
           <!-- 随访监控：基于手术日期推算各节点应随访日期，纯前端派生，表格结构零改动 -->
           <div v-if="followUpMonitor" class="followup-monitor" :class="{ 'has-overdue': followUpMonitor.overdue > 0 }">
             <span
@@ -336,6 +368,25 @@
               <template #default="{ row }">
                 <el-select v-model="row.visitor" :disabled="!editable" filterable allow-create placeholder="选择或输入">
                   <el-option v-for="item in VISITOR_OPTIONS" :key="item" :label="item" :value="item" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="实际随访日期" width="150">
+              <template #default="{ row }">
+                <el-date-picker
+                  v-model="row.actualDate"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  placeholder="实际执行"
+                  :disabled="!editable"
+                  style="width: 100%"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="结果状态" width="122">
+              <template #default="{ row }">
+                <el-select v-model="row.resultStatus" :disabled="!editable" placeholder="选择">
+                  <el-option v-for="item in FOLLOW_RESULT_OPTIONS" :key="item" :label="item" :value="item" />
                 </el-select>
               </template>
             </el-table-column>
@@ -637,6 +688,20 @@
                 <section class="ha-doc-card">
                   <div class="ha-doc-card-head"><span>六、分级随访</span></div>
                   <div class="ha-doc-card-body">
+                    <div class="ha-facts">
+                      <div class="ha-fact">
+                        <label>下次复诊预约</label><strong>{{ form.nextVisitDate || "—" }}</strong>
+                      </div>
+                      <div class="ha-fact">
+                        <label>触达渠道</label><strong>{{ form.reachChannel || "—" }}</strong>
+                      </div>
+                      <div class="ha-fact">
+                        <label>触达确认</label><strong>{{ form.reachConfirmed || "—" }}</strong>
+                      </div>
+                      <div class="ha-fact">
+                        <label>转介绍意向</label><strong>{{ form.referralIntention || "—" }}</strong>
+                      </div>
+                    </div>
                     <table class="ha-doc-table">
                       <thead>
                         <tr>
@@ -710,7 +775,7 @@ import {
   type HealthArchiveLoadResult,
   type HealthArchiveVersionItem
 } from "@/api/modules/clinic/healthArchive";
-import type { PreAiWorkspace } from "@/api/modules/clinic";
+import { getPreAiWorkspaceApi, type PreAiWorkspace } from "@/api/modules/clinic";
 
 // ---------- 下拉选项（均支持输入自定义值） ----------
 const GENDERS = ["男", "女"];
@@ -747,7 +812,11 @@ const REVIEW_OPTIONS = ["按期复查", "已改期", "未复查"];
 const RECOVERY_NODES = ["术后当日", "术后3天", "术后7天", "术后15天", "术后30天"];
 const FOLLOW_UP_NODES = ["术后1天", "术后3天", "术后7天", "术后15天", "术后30天", "出院3月", "出院6月"];
 const RECOVERY_HEADERS = ["时间节点", "创面/渗血", "疼痛评分", "排便情况", "水肿消退", "用药/坐浴", "提肛训练", "备注"];
-const FOLLOW_UP_HEADERS = ["随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人"];
+const FOLLOW_UP_HEADERS = ["随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人", "实际随访日期", "结果状态"];
+const FOLLOW_RESULT_OPTIONS = ["正常完成", "患者失访", "拒绝随访", "延期随访", "无应答"];
+const REACH_CHANNELS = ["电话", "微信", "短信", "家属转达", "其他"];
+const REACH_CONFIRM_OPTIONS = ["已确认可触达", "暂未确认", "无法触达"];
+const REFERRAL_INTENTIONS = ["有意向", "待观察", "暂无意向"];
 const STORAGE_WIDTH_KEY = "ha-input-pane-width";
 
 const props = defineProps<{
@@ -822,6 +891,10 @@ const form = reactive<HealthArchiveForm>({
   educationItems: [],
   patientUnderstood: "",
   followUpRows: [],
+  nextVisitDate: "",
+  reachChannel: "",
+  reachConfirmed: "",
+  referralIntention: "",
   adjustmentRecord: "",
   signFiledBy: "",
   signAttending: "",
@@ -843,11 +916,15 @@ const followUpDueDate = (node: string, surgery: string) => {
   return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
 };
 const followUpRowFilled = (row: HealthArchiveFollowUpRow) =>
-  [row.method, row.recovery, row.adherence, row.diet, row.review, row.feedback, row.visitor].some(value =>
-    String(value || "").trim()
+  [row.method, row.recovery, row.adherence, row.diet, row.review, row.feedback, row.visitor, row.actualDate, row.resultStatus].some(
+    value => String(value || "").trim()
   );
 const followUpRowState = (row: HealthArchiveFollowUpRow): { state: string; text: string } => {
-  if (followUpRowFilled(row)) return { state: "done", text: "已完成" };
+  if (followUpRowFilled(row)) {
+    // 失访/拒绝属于随访终止态，用独立标识区分于正常完成
+    if (row.resultStatus === "患者失访" || row.resultStatus === "拒绝随访") return { state: "lost", text: row.resultStatus };
+    return { state: "done", text: "已完成" };
+  }
   const due = followUpDueDate(row.timeNode, (form.surgeryDate || "").slice(0, 10));
   if (!due) return { state: "unknown", text: "待定" };
   const diff = Math.round((new Date(due).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
@@ -927,6 +1004,10 @@ watch(
     form.educationItems,
     form.patientUnderstood,
     form.followUpRows,
+    form.nextVisitDate,
+    form.reachChannel,
+    form.reachConfirmed,
+    form.referralIntention,
     form.adjustmentRecord,
     form.signFiledBy,
     form.signAttending,
@@ -976,11 +1057,11 @@ const firstText = (...values: unknown[]): string => {
   return "";
 };
 const stageDataOf = (code: string): Record<string, any> =>
-  (props.workspace?.stages || []).find(stage => stage.stageCode === code)?.data || {};
+  (effectiveWorkspace.value?.stages || []).find(stage => stage.stageCode === code)?.data || {};
 
 const preAiReference = computed(() => {
   const items: Array<{ label: string; value: string; strong?: boolean }> = [];
-  if (!props.workspace) return { items };
+  if (!effectiveWorkspace.value) return { items };
   const registration = stageDataOf("REGISTRATION");
   const reception = stageDataOf("RECEPTION");
   const inspection = stageDataOf("INSPECTION");
@@ -1045,11 +1126,120 @@ const composePastHistory = (): string => {
 
 // 空字段自动带出（仅填空值，草稿/人工已填内容一律不覆盖）
 const syncedKeys = reactive<Record<string, boolean>>({});
+// workspace 兜底：健康管理档案入口等场景父级不传 workspace，弹窗自行拉取以保证自动同步可用
+const localWorkspace = ref<PreAiWorkspace | null>(null);
+const effectiveWorkspace = computed(() => props.workspace || localWorkspace.value);
+const ensureWorkspace = async () => {
+  if (props.workspace || localWorkspace.value || !props.encounterId) return;
+  try {
+    const { data } = await getPreAiWorkspaceApi(props.encounterId);
+    localWorkspace.value = data;
+    if (!props.previewOnly) applyPreAiSync();
+  } catch {
+    // 工作台拉取失败时同步静默跳过，不影响手工填写
+  }
+};
+
 const applyPreAiSync = () => {
   Object.keys(syncedKeys).forEach(key => delete syncedKeys[key]);
-  if (!props.workspace) return;
+  if (!effectiveWorkspace.value) return;
+  const registration = stageDataOf("REGISTRATION");
+  const reception = stageDataOf("RECEPTION");
+  const inspection = stageDataOf("INSPECTION");
+  const tcm = stageDataOf("TCM");
   const doctor = stageDataOf("DOCTOR");
   const surgery = stageDataOf("SURGERY");
+
+  // ---- 一、基本信息：诊断/来源/动因/病史自动带出 ----
+  if (!basic.westernDx) {
+    // 主诊断 + 次要诊断名称合并（如 "肛周脓肿、内痔、糖尿病"）
+    const secondary = Array.isArray(doctor.secondaryDiagnosisItems)
+      ? doctor.secondaryDiagnosisItems.map((item: any) => textOf(item?.name)).filter(Boolean)
+      : [];
+    const dx = [firstText(doctor.primaryWesternDiagnosis), ...secondary].filter(Boolean).join("、");
+    if (dx) {
+      basic.westernDx = dx;
+      syncedKeys.westernDx = true;
+    }
+  }
+  if (!basic.tcmDx) {
+    const dx = [textOf(tcm.tcmDisease), textOf(tcm.primarySyndrome)].filter(Boolean).join(" ");
+    if (dx) {
+      basic.tcmDx = dx;
+      syncedKeys.tcmDx = true;
+    }
+  }
+  if (!form.sourceChannel) {
+    // 登记环节"患者来源"与档案词库存在表述差异（如 自然就诊→自主到院），先映射后兜底原值
+    const SOURCE_SYNONYMS: Record<string, string> = {
+      自然就诊: "自主到院",
+      门诊就诊: "自主到院",
+      初诊: "自主到院",
+      熟人介绍: "亲友转介绍",
+      转诊: "外院转诊"
+    };
+    const raw = textOf(registration.patientSource);
+    const source = SOURCE_SYNONYMS[raw] || (SOURCE_CHANNELS.includes(raw) ? raw : "");
+    if (source) {
+      form.sourceChannel = source;
+      syncedKeys.sourceChannel = true;
+    }
+  }
+  if (!form.visitMotivation) {
+    // 登记环节 visitPurpose 为枚举（GENERAL/SCREENING/REVIEW 等），映射到档案动因词库
+    const PURPOSE_MAP: Record<string, string> = {
+      GENERAL: "其他",
+      SCREENING: "肠道筛查(40岁以上)",
+      REVIEW: "术后复查",
+      RECHECK: "术后复查",
+      REHAB: "调理",
+      ACUTE: "急症"
+    };
+    const raw = textOf(registration.visitPurpose);
+    const motivation = PURPOSE_MAP[raw.toUpperCase()] || (VISIT_MOTIVATIONS.includes(raw) ? raw : "");
+    if (motivation) {
+      form.visitMotivation = motivation;
+      syncedKeys.visitMotivation = true;
+    }
+  }
+  if (!form.crowdCategory) {
+    // 人群分类：手术治疗路径 → A类（手术）
+    if (String(doctor.treatmentPath || "").toUpperCase() === "SURGICAL") {
+      form.crowdCategory = "A";
+      syncedKeys.crowdCategory = true;
+    }
+  }
+  if (!form.pastHistory) {
+    const composed = composePastHistory();
+    if (composed) {
+      form.pastHistory = composed;
+      syncedKeys.pastHistory = true;
+    }
+  }
+
+  // ---- 二、诊中辨证：专科检查阳性所见 / 中医体质 ----
+  if (!form.specialExam.positiveSigns) {
+    // 专科检查叙述以检查室 inspectionNarrative 为权威，接诊体格检查兜底
+    const findings = firstText(inspection.inspectionNarrative, reception.physicalExam, inspection.otherFindings);
+    if (findings) {
+      form.specialExam.positiveSigns = findings.length > 200 ? `${findings.slice(0, 200)}…` : findings;
+      syncedKeys.positiveSigns = true;
+    }
+  }
+  if (!form.tcmConstitution.length) {
+    // 词库内证型 → 多选；词库外证型（如 热毒炽盛）→ 其他证型输入框
+    const candidates = [textOf(tcm.primarySyndrome), ...textOf(tcm.concurrentSyndrome).split("、")]
+      .map(item => item.trim())
+      .filter(Boolean);
+    const matched = TCM_CONSTITUTIONS.filter(item => candidates.some(candidate => candidate.includes(item)));
+    const unmatched = candidates.filter(candidate => !TCM_CONSTITUTIONS.some(item => candidate.includes(item)));
+    if (matched.length || unmatched.length) {
+      form.tcmConstitution = matched;
+      if (unmatched.length) form.tcmConstitutionOther = unmatched.join("、");
+      syncedKeys.tcmConstitution = true;
+    }
+  }
+
   if (!form.treatmentPath) {
     const raw = String(doctor.treatmentPath || "").toUpperCase();
     if (raw === "SURGICAL") {
@@ -1067,14 +1257,16 @@ const applyPreAiSync = () => {
       syncedKeys.surgeryDate = true;
     }
   }
-  if (!form.pastHistory) {
-    const composed = composePastHistory();
-    if (composed) {
-      form.pastHistory = composed;
-      syncedKeys.pastHistory = true;
-    }
-  }
 };
+
+// 热更新：前置环节交接数据变化时自动重同步（仅填空字段，已填/已保存内容不覆盖）
+watch(
+  () => effectiveWorkspace.value,
+  () => {
+    if (props.modelValue && !props.previewOnly) applyPreAiSync();
+  },
+  { deep: false }
+);
 
 const emptyRecoveryRow = () => ({
   timeNode: "",
@@ -1094,7 +1286,9 @@ const emptyFollowUpRow = () => ({
   diet: "",
   review: "",
   feedback: "",
-  visitor: ""
+  visitor: "",
+  actualDate: "",
+  resultStatus: ""
 });
 
 const applyDraft = (payload: HealthArchiveLoadResult) => {
@@ -1140,11 +1334,16 @@ const applyDraft = (payload: HealthArchiveLoadResult) => {
   form.counselingRecord = draftForm.counselingRecord || "";
   form.educationItems = draftForm.educationItems || [];
   form.patientUnderstood = draftForm.patientUnderstood || "";
+  form.nextVisitDate = draftForm.nextVisitDate || "";
+  form.reachChannel = draftForm.reachChannel || "";
+  form.reachConfirmed = draftForm.reachConfirmed || "";
+  form.referralIntention = draftForm.referralIntention || "";
   form.adjustmentRecord = draftForm.adjustmentRecord || "";
   form.signFiledBy = draftForm.signFiledBy || currentUserName.value;
   form.signAttending = draftForm.signAttending || "";
   form.signQc = draftForm.signQc || "";
   applyPreAiSync();
+  void ensureWorkspace();
   previewStamp.value += 1;
 };
 
@@ -1763,9 +1962,16 @@ watch(
     &.is-unknown {
       color: var(--el-text-color-placeholder);
     }
+    &.is-lost {
+      font-weight: 600;
+      color: var(--el-color-info);
+    }
   }
 }
 :deep(.el-table) .fu-row-overdue {
   background: var(--el-color-danger-light-9);
+}
+.fu-manage-grid {
+  margin-bottom: 10px;
 }
 </style>

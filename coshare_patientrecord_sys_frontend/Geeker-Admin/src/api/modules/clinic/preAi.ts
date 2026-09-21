@@ -404,6 +404,19 @@ export interface PreAiEncounterOverview {
     surgery: { actualPrimaryOperation: string; anesthesiaMethod: string; operationDate: string };
     tcmDetail: { disease: string; primarySyndrome: string; concurrentSyndrome: string; treatmentPrinciple: string };
   };
+  history: {
+    pastHistory: string;
+    chronicDiseaseItems: string;
+    surgicalHistory: string;
+    allergyHistory: string;
+    personalHistory: string;
+    familyHistory: string;
+    traumaHistory: string;
+    transfusionHistory: string;
+    vaccinationHistory: string;
+    medicationHistory: string;
+    physicalExam: string;
+  };
   auxiliary: {
     tasks: { taskType: string; status: string; title?: string; conclusion?: string }[];
     labReportCount: number;
@@ -588,6 +601,13 @@ export const terminatePreAiReceptionApi = (
 ) =>
   jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/reception/terminate`, "POST", {
     data,
+    expectedVersion,
+    reason
+  });
+
+/** 患者折返恢复：离院未治疗病历原地恢复继续（号码不变），原因可留空 */
+export const resumePreAiReceptionApi = (encounterId: string, expectedVersion: number, reason = "") =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/reception/resume`, "POST", {
     expectedVersion,
     reason
   });

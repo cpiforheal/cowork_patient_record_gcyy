@@ -42,7 +42,7 @@ public class HealthArchiveService {
     private static final List<String> RECOVERY_COLUMNS =
         List.of("timeNode", "wound", "pain", "bowel", "edema", "medication", "training", "remark");
     private static final List<String> FOLLOW_UP_COLUMNS =
-        List.of("timeNode", "method", "recovery", "adherence", "diet", "review", "feedback", "visitor");
+        List.of("timeNode", "method", "recovery", "adherence", "diet", "review", "feedback", "visitor", "actualDate", "resultStatus");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -222,6 +222,36 @@ public class HealthArchiveService {
     }
 
     // ---------- internals ----------
+
+    /**
+     * 患者情绪问题速查表：encounterId → 主要情绪问题列表（取自各档案草稿"四、心理疏导"）。
+     * 供健康档案入口卡面直接同步展示，草稿量小，一次全量返回。
+     */
+    public Map<String, Object> emotionMap() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            "SELECT encounter_id, form_json FROM health_archive_drafts WHERE form_json IS NOT NULL",
+            resultSet -> {
+                try {
+                    JsonNode form = json(resultSet.getString("form_json"));
+                    JsonNode issues = form.path("emotionIssues");
+                    List<String> values = new ArrayList<>();
+                    if (issues.isArray()) {
+                        issues.forEach(item -> {
+                            String value = item.asText("").trim();
+                            if (!value.isBlank()) values.add(value);
+                        });
+                    }
+                    if (!values.isEmpty()) {
+                        result.put(resultSet.getString("encounter_id"), Map.of("emotionIssues", values));
+                    }
+                } catch (Exception ignored) {
+                    // 单条草稿解析失败不影响整体
+                }
+            }
+        );
+        return result;
+    }
 
     private ObjectNode draft(String encounterId, Map<String, String> auto, SessionUser user) {
         JsonNode row = draftRow(encounterId);

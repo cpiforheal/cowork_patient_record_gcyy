@@ -33,6 +33,10 @@ export interface HealthArchiveFollowUpRow {
   review: string;
   feedback: string;
   visitor: string;
+  /** 实际随访日期（增量优化：与应随访日期区分，记录实际执行） */
+  actualDate: string;
+  /** 随访结果状态：正常完成 / 患者失访 / 拒绝随访 / 延期随访 / 无应答 */
+  resultStatus: string;
 }
 
 export interface HealthArchiveForm {
@@ -62,6 +66,14 @@ export interface HealthArchiveForm {
   educationItems: string[];
   patientUnderstood: string;
   followUpRows: HealthArchiveFollowUpRow[];
+  /** 下次复诊预约结构化日期（增量优化） */
+  nextVisitDate: string;
+  /** 患者触达渠道：电话 / 微信 / 短信 / 家属转达 / 其他 */
+  reachChannel: string;
+  /** 触达确认：已确认可触达 / 暂未确认 / 无法触达 */
+  reachConfirmed: string;
+  /** 转介绍意向：有意向 / 待观察 / 暂无意向 */
+  referralIntention: string;
   adjustmentRecord: string;
   signFiledBy: string;
   signAttending: string;
@@ -113,6 +125,17 @@ export interface HealthArchiveDocumentCreated {
   document: { id: string; version: number; fileName: string; createdAt: string; downloadUrl: string };
   aiRecordFileName: string;
 }
+
+export interface HealthArchiveEmotionBrief {
+  emotionIssues: string[];
+}
+
+/** 情绪问题速查表：encounterId → 主要情绪问题（取自各档案草稿"四、心理疏导"） */
+export const getHealthArchiveEmotionMapApi = async (signal?: AbortSignal) => {
+  const result = await clinicFetch("/health-archive/emotion-map", { headers: authHeaders(), signal });
+  const data = await parseClinicApiResponse<Record<string, HealthArchiveEmotionBrief>>(result);
+  return clinicResponse(data, "情绪问题速查表已加载");
+};
 
 export const loadHealthArchiveApi = async (encounterId: string, signal?: AbortSignal) => {
   const result = await clinicFetch(`/health-archive?encounterId=${encodeURIComponent(encounterId)}`, {
