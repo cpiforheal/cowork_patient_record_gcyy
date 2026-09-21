@@ -25,6 +25,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 复诊随访：复诊患者不经前台登记，由检查室按患者主档案直接创建（锚点 = 患者病例 patientCaseId），
@@ -34,6 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class FollowUpVisitService {
 
+    private static final Logger log = LoggerFactory.getLogger(FollowUpVisitService.class);
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Set<String> MANAGE_ROLES = Set.of("inspection", "admin", "doctor", "tcm");
     /** 复诊记录内容校准（编辑）：仅医生岗与管理员——创建时间由系统精确记录，编辑仅对齐内容描述精度 */
@@ -181,7 +184,8 @@ public class FollowUpVisitService {
         String dueSoonLimit = TIME.format(LocalDateTime.now().plusDays(3)).substring(0, 10);
         Map<String, Object[]> latestByCase = new LinkedHashMap<>();
         jdbcTemplate.query(
-            "SELECT id, patient_case_id, seq, reason, condition_note, next_review_date, created_by, created_at "
+            "SELECT id, patient_case_id, seq, reason, condition_note, next_review_date, created_by, created_at, "
+                + "arrived_at, arrived_by, arrived_encounter_id "
                 + "FROM pre_ai_follow_up_visits WHERE next_review_date IS NOT NULL AND next_review_date <> '' "
                 + "ORDER BY patient_case_id, seq ASC",
             resultSet -> {
@@ -189,20 +193,30 @@ public class FollowUpVisitService {
                 latestByCase.put(caseId, new Object[] {
                     resultSet.getString("id"), caseId, resultSet.getInt("seq"), resultSet.getString("reason"),
                     resultSet.getString("condition_note"), resultSet.getString("next_review_date").substring(0, 10),
-                    resultSet.getString("created_by"), resultSet.getString("created_at")
+                    resultSet.getString("created_by"), resultSet.getString("created_at"),
+                    safeDate(resultSet.getString("arrived_at")), resultSet.getString("arrived_by"),
+                    resultSet.getString("arrived_encounter_id")
                 });
             }
         );
         List<Map<String, Object>> overdue = new ArrayList<>();
         List<Map<String, Object>> dueSoon = new ArrayList<>();
+        List<Map<String, Object>> arrived = new ArrayList<>();
         int upcoming = 0;
         for (Object[] latest : latestByCase.values()) {
             String visitId = String.valueOf(latest[0]);
             String caseId = String.valueOf(latest[1]);
             int seq = (Integer) latest[2];
             String dueDate = String.valueOf(latest[5]);
+            String arrivedAt = String.valueOf(latest[8] == null ? "" : latest[8]);
+            // A2：已确认回院的节点不再作为"待召回"，单独归入 arrived 列表供核对与撤销
+            if (!arrivedAt.isBlank()) {
+                Map<String, Object> row = buildRecallRow(visitId, caseId, seq, latest[3], latest[4], dueDate, latest[6], today, arrivedAt, latest[9], latest[10]);
+                arrived.add(row);
+                continue;
+            }
             if (hasActivityAfter(caseId, dueDate)) continue; // 已复查，无需召回
-            Map<String, Object> row = buildRecallRow(visitId, caseId, seq, latest[3], latest[4], dueDate, latest[6], today);
+            Map<String, Object> row = buildRecallRow(visitId, caseId, seq, latest[3], latest[4], dueDate, latest[6], today, "", null, null);
             if (dueDate.compareTo(today) < 0) {
                 overdue.add(row);
             } else if (dueDate.compareTo(dueSoonLimit) <= 0) {
@@ -212,9 +226,11 @@ public class FollowUpVisitService {
             }
         }
         overdue.sort((a, b) -> String.valueOf(a.get("dueDate")).compareTo(String.valueOf(b.get("dueDate"))));
+        arrived.sort((a, b) -> String.valueOf(b.get("arrivedAt")).compareTo(String.valueOf(a.get("arrivedAt"))));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("overdue", overdue);
         result.put("dueSoon", dueSoon);
+        result.put("arrived", arrived);
         result.put("upcomingCount", upcoming);
         result.put("generatedAt", TIME.format(LocalDateTime.now()));
         audit("", "followup.recall.query", user, "复查召回看板查询：逾期 " + overdue.size() + " 人");
@@ -248,21 +264,42 @@ public class FollowUpVisitService {
         return result;
     }
 
+    /**
+     * 随访运营统计（A3 口径重构）。
+     *
+     * 关键语义拆分：联系上了 ≠ 随访完成 ≠ 患者回院。
+     *   reachRate      触达率   = 已接通 ÷ 应随访
+     *   completionRate 完成率   = 已随访 ÷ 应随访
+     *   arrivalRate    回院率   = 已回院 ÷ 应随访      ← 依从性主指标
+     *   onTimeArrivalRate 按时回院率 = 按时回院 ÷ 应随访
+     * 四者分母一致，因此可横向比较、可解释。
+     *
+     * basis 支持三种归集口径：due（节点到期月）/ contact（实际联系月）/ arrival（实际回院月）。
+     */
     public Map<String, Object> statistics(String from, String to, String basis, SessionUser user) {
         requireRecallRole(user);
         LocalDate start = parseDate(from, LocalDate.now().withDayOfMonth(1));
         LocalDate end = parseDate(to, start.withDayOfMonth(start.lengthOfMonth()));
-        boolean byContact = "contact".equalsIgnoreCase(basis);
+        String requested = basis == null ? "due" : basis.trim().toLowerCase();
+        // 必须 effectively final：下方 RowCallbackHandler lambda 会捕获它
+        final String mode = Set.of("due", "contact", "arrival").contains(requested) ? requested : "due";
+
         List<Map<String, Object>> rows = new ArrayList<>();
         jdbcTemplate.query(
-            "SELECT v.id, v.patient_case_id, v.seq, v.next_review_date, v.created_by, v.created_by_role, "
-                + "v.created_at, v.updated_at, v.updated_by, v.updated_by_role, e.owning_department_name_snapshot "
+            "SELECT v.id, v.patient_case_id, v.seq, v.next_review_date, v.arrived_at, "
+                + "v.created_by, v.created_by_role, v.created_at, v.updated_at, v.updated_by, v.updated_by_role, "
+                + "e.owning_department_name_snapshot "
                 + "FROM pre_ai_follow_up_visits v LEFT JOIN pre_ai_encounters e ON e.id = v.encounter_id "
                 + "WHERE v.next_review_date IS NOT NULL AND v.next_review_date <> '' ORDER BY v.next_review_date DESC",
             rs -> {
                 String due = safeDate(rs.getString("next_review_date"));
                 String contacted = lastRecallContact(rs.getString("id"));
-                String bucket = byContact ? (contacted == null ? "" : contacted.substring(0, 10)) : due;
+                String arrived = safeDate(rs.getString("arrived_at"));
+                String bucket = switch (mode) {
+                    case "contact" -> contacted == null ? "" : contacted.substring(0, 10);
+                    case "arrival" -> arrived;
+                    default -> due;
+                };
                 if (bucket.length() < 7) return;
                 String month = bucket.substring(0, 7);
                 String fromMonth = start.toString().substring(0, 7);
@@ -274,39 +311,65 @@ public class FollowUpVisitService {
                 row.put("seq", rs.getInt("seq"));
                 row.put("dueDate", due);
                 row.put("contactedAt", contacted);
+                row.put("arrivedAt", arrived);
                 row.put("createdBy", safe(rs.getString("created_by")));
                 row.put("createdByRole", safe(rs.getString("created_by_role")));
                 row.put("operator", safe(rs.getString("updated_by")));
                 row.put("operatorRole", safe(rs.getString("updated_by_role")));
                 row.put("department", safe(rs.getString("owning_department_name_snapshot")));
                 row.put("node", "复查节点 " + rs.getInt("seq"));
-                row.put("onTime", contacted != null && contacted.substring(0, 10).compareTo(due) <= 0);
+                // 注意：safeDate(null) 返回空串而非 null，因此这里必须判 isBlank，
+                // 否则"未回院"会被当成已回院，回院率恒为 100%（已在 9848 上实测复现）。
+                boolean hasArrived = !arrived.isBlank();
+                boolean hasContact = contacted != null && !contacted.isBlank();
+                // 触达：有联系记录即算触达
+                row.put("reached", hasContact);
+                // 完成：已回院视为完成（回院是随访的最终目的）
+                row.put("completed", hasArrived);
+                row.put("onTime", hasArrived && arrived.compareTo(due) <= 0);
                 rows.add(row);
             }
         );
-        int completed = (int) rows.stream().filter(row -> row.get("contactedAt") != null).count();
+
+        String today = LocalDate.now().toString();
+        int total = rows.size();
+        int reached = (int) rows.stream().filter(row -> Boolean.TRUE.equals(row.get("reached"))).count();
+        int completed = (int) rows.stream().filter(row -> Boolean.TRUE.equals(row.get("completed"))).count();
         int onTime = (int) rows.stream().filter(row -> Boolean.TRUE.equals(row.get("onTime"))).count();
+
         Map<String, Map<String, Object>> months = new LinkedHashMap<>();
         Map<String, Map<String, Object>> departments = new LinkedHashMap<>();
         Map<String, Map<String, Object>> operators = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
-            String key = byContact && row.get("contactedAt") != null
-                ? String.valueOf(row.get("contactedAt")).substring(0, 7)
-                : String.valueOf(row.get("dueDate")).substring(0, 7);
+            String key = switch (mode) {
+                case "contact" -> row.get("contactedAt") == null ? "" : String.valueOf(row.get("contactedAt")).substring(0, 7);
+                case "arrival" -> String.valueOf(row.get("arrivedAt")).substring(0, 7);
+                default -> String.valueOf(row.get("dueDate")).substring(0, 7);
+            };
+            if (key.length() < 7) key = String.valueOf(row.get("dueDate")).substring(0, 7);
             accumulate(months, key, row);
             accumulate(departments, blankFallback(row.get("department"), "未归属科室"), row);
             accumulate(operators, blankFallback(row.get("operator"), blankFallback(row.get("createdBy"), "未记录人员")), row);
         }
+
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("basis", byContact ? "contact" : "due");
+        result.put("basis", mode);
         result.put("from", start.toString());
         result.put("to", end.toString());
-        result.put("total", rows.size());
-        result.put("completed", completed);
-        result.put("onTime", onTime);
-        result.put("overduePending", rows.stream().filter(row -> row.get("contactedAt") == null && String.valueOf(row.get("dueDate")).compareTo(LocalDate.now().toString()) < 0).count());
-        result.put("completionRate", percent(completed, rows.size()));
-        result.put("onTimeRate", percent(onTime, completed));
+        // —— 分母统一为应随访节点数 total，四个率因此可比 ——
+        // 刻意不再输出旧的 completionRate/onTimeRate：它们把"打过电话"当作完成，
+        // 会误导考核。新口径下"完成"只认患者回院这一客观事实。
+        result.put("total", total);
+        result.put("reached", reached);
+        result.put("arrived", completed);
+        result.put("arrivedOnTime", onTime);
+        result.put("notArrived", rows.stream()
+            .filter(row -> String.valueOf(row.get("arrivedAt") == null ? "" : row.get("arrivedAt")).isBlank()
+                && String.valueOf(row.get("dueDate")).compareTo(today) < 0)
+            .count());
+        result.put("reachRate", percent(reached, total));
+        result.put("arrivalRate", percent(completed, total));
+        result.put("onTimeArrivalRate", percent(onTime, total));
         result.put("trend", new ArrayList<>(months.values()));
         result.put("departments", new ArrayList<>(departments.values()));
         result.put("operators", new ArrayList<>(operators.values()));
@@ -331,6 +394,52 @@ public class FollowUpVisitService {
         return result;
     }
 
+    /**
+     * 回院确认（A2）：记录"患者实际回院"这一客观事实，是依从性统计的唯一来源。
+     * 与 markContacted 的区别：markContacted 只表示"打过电话"，本方法表示"人来了"。
+     * 幂等：重复确认只更新到达日期，不重复计数。
+     */
+    public Map<String, Object> markArrived(String visitId, String arrivedDate, String encounterId, SessionUser user) {
+        Map<String, String> visit = loadVisit(visitId);
+        requireRecallRole(user);
+        String date = arrivedDate == null || arrivedDate.isBlank()
+            ? LocalDate.now().toString()
+            : safeDate(arrivedDate.trim());
+        try {
+            LocalDate.parse(date);
+        } catch (Exception error) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "回院日期格式不正确，应为 yyyy-MM-dd");
+        }
+        jdbcTemplate.update(
+            "UPDATE pre_ai_follow_up_visits SET arrived_at = ?, arrived_by = ?, arrived_encounter_id = ?, "
+                + "updated_by = ?, updated_by_role = ?, updated_at = ? WHERE id = ?",
+            date, user.name(), encounterId == null ? "" : encounterId.trim(), user.name(), user.role(),
+            TIME.format(LocalDateTime.now()), visitId);
+        audit(visit.get("patientCaseId"), "followup.recall.arrived", user,
+            "复查召回已回院 recall:" + visitId + " 第 " + visit.get("seq") + " 次复诊记录，回院日期 " + date);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("visitId", visitId);
+        result.put("arrivedAt", date);
+        result.put("arrivedBy", user.name());
+        return result;
+    }
+
+    /** 撤销回院确认：误点纠正入口，保留审计。 */
+    public Map<String, Object> undoArrived(String visitId, SessionUser user) {
+        Map<String, String> visit = loadVisit(visitId);
+        requireRecallRole(user);
+        jdbcTemplate.update(
+            "UPDATE pre_ai_follow_up_visits SET arrived_at = NULL, arrived_by = NULL, arrived_encounter_id = NULL, "
+                + "updated_by = ?, updated_by_role = ?, updated_at = ? WHERE id = ?",
+            user.name(), user.role(), TIME.format(LocalDateTime.now()), visitId);
+        audit(visit.get("patientCaseId"), "followup.recall.arrived.undo", user,
+            "撤销回院确认 recall:" + visitId + " 第 " + visit.get("seq") + " 次复诊记录");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("visitId", visitId);
+        result.put("arrivedAt", null);
+        return result;
+    }
+
     private boolean hasActivityAfter(String patientCaseId, String dueDate) {
         Integer laterVisits = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM pre_ai_follow_up_visits WHERE patient_case_id = ? AND created_at > ?",
@@ -344,7 +453,8 @@ public class FollowUpVisitService {
     }
 
     private Map<String, Object> buildRecallRow(String visitId, String caseId, int seq, Object reason, Object note,
-                                               String dueDate, Object createdBy, String today) {
+                                               String dueDate, Object createdBy, String today,
+                                               String arrivedAt, Object arrivedBy, Object arrivedEncounterId) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("visitId", visitId);
         row.put("patientCaseId", caseId);
@@ -361,7 +471,13 @@ public class FollowUpVisitService {
         row.put("age", "");
         row.put("gender", "");
         row.put("surgery", "");
-        row.put("lastContactAt", lastRecallContact(visitId));
+        String lastContact = lastRecallContact(visitId);
+        row.put("lastContactAt", lastContact);
+        row.put("reached", lastContact != null);
+        // A2：回院事实（为空表示尚未确认回院）
+        row.put("arrivedAt", arrivedAt == null ? "" : arrivedAt);
+        row.put("arrivedBy", arrivedBy == null ? "" : String.valueOf(arrivedBy));
+        row.put("arrivedEncounterId", arrivedEncounterId == null ? "" : String.valueOf(arrivedEncounterId));
         row.put("priority", dueDate.compareTo(today) < 0 && Math.abs((int) java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(dueDate), java.time.LocalDate.parse(today))) >= 7 ? "CRITICAL" : dueDate.equals(today) ? "TODAY" : dueDate.equals(java.time.LocalDate.parse(today).plusDays(1).toString()) ? "TOMORROW" : "UPCOMING");
         row.put("node", "复查节点 " + seq);
         row.put("department", "未归属科室");
@@ -413,7 +529,9 @@ public class FollowUpVisitService {
                 "SELECT MAX(created_at) FROM pre_ai_audit_logs WHERE action = 'followup.recall.contact' "
                     + "AND detail LIKE ?",
                 String.class, "%recall:" + visitId + "%");
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            // 医疗考核数据不可静默降级为 null（会被误判为"从未联系"并低估完成率），必须留痕。
+            log.warn("查询复查召回联系时间失败，visitId={}，该节点的完成状态将不可信", visitId, error);
             return null;
         }
     }
@@ -437,11 +555,28 @@ public class FollowUpVisitService {
     private void accumulate(Map<String, Map<String, Object>> target, String key, Map<String, Object> row) {
         Map<String, Object> item = target.computeIfAbsent(key, ignored -> {
             Map<String, Object> value = new LinkedHashMap<>();
-            value.put("label", key); value.put("total", 0); value.put("completed", 0); value.put("onTime", 0); return value;
+            value.put("label", key);
+            value.put("total", 0);
+            value.put("reached", 0);
+            value.put("arrived", 0);
+            value.put("arrivedOnTime", 0);
+            // 兼容旧前端字段名，避免分组表格空白
+            value.put("completed", 0);
+            value.put("onTime", 0);
+            return value;
         });
         item.put("total", ((Integer) item.get("total")) + 1);
-        if (row.get("contactedAt") != null) item.put("completed", ((Integer) item.get("completed")) + 1);
-        if (Boolean.TRUE.equals(row.get("onTime"))) item.put("onTime", ((Integer) item.get("onTime")) + 1);
+        if (Boolean.TRUE.equals(row.get("reached"))) {
+            item.put("reached", ((Integer) item.get("reached")) + 1);
+        }
+        if (Boolean.TRUE.equals(row.get("completed"))) {
+            item.put("arrived", ((Integer) item.get("arrived")) + 1);
+            item.put("completed", ((Integer) item.get("completed")) + 1);
+        }
+        if (Boolean.TRUE.equals(row.get("onTime"))) {
+            item.put("arrivedOnTime", ((Integer) item.get("arrivedOnTime")) + 1);
+            item.put("onTime", ((Integer) item.get("onTime")) + 1);
+        }
     }
 
     // ---------- internals ----------

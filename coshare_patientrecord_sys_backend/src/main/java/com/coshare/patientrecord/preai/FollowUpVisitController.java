@@ -74,6 +74,20 @@ public class FollowUpVisitController {
         return ApiResult.of(200, "已标记联系", followUpVisitService.markContacted(safe(id), currentUser()));
     }
 
+    /** 回院确认（A2）：记录患者实际回院，是依从性统计的事实来源。 */
+    @PostMapping("/clinic-api/follow-up/recall/visits/{id}/arrived")
+    public ApiResult<Map<String, Object>> markArrived(@PathVariable String id, @RequestBody(required = false) ArrivedRequest request) {
+        String date = request == null ? "" : safe(request.arrivedAt());
+        String encounterId = request == null ? "" : safe(request.encounterId());
+        return ApiResult.of(200, "已确认回院", followUpVisitService.markArrived(safe(id), date, encounterId, currentUser()));
+    }
+
+    /** 撤销回院确认：误点纠正入口。 */
+    @DeleteMapping("/clinic-api/follow-up/recall/visits/{id}/arrived")
+    public ApiResult<Map<String, Object>> undoArrived(@PathVariable String id) {
+        return ApiResult.of(200, "已撤销回院确认", followUpVisitService.undoArrived(safe(id), currentUser()));
+    }
+
     @PutMapping("/clinic-api/follow-up/visits/{id}")
     public ApiResult<Map<String, Object>> update(@PathVariable String id, @RequestBody UpdateRequest request) {
         SessionUser user = currentUser();
@@ -131,4 +145,7 @@ public class FollowUpVisitController {
     public record UpdateRequest(String reason, String conditionNote, String nextReviewDate) {}
 
     public record ImageRequest(String fileName, String dataUrl) {}
+
+    /** 回院确认请求：日期留空表示按今天；encounterId 可选，用于关联本次就诊。 */
+    public record ArrivedRequest(String arrivedAt, String encounterId) {}
 }

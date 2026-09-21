@@ -43,28 +43,45 @@
       <header class="fud-statistics-head">
         <div>
           <strong>随访运营统计</strong>
-          <small>按复查节点或实际联系月份查看履约情况</small>
+          <small>按复查节点 / 实际联系 / 实际回院月份查看。四个率共用"应随访"作分母，可横向比较</small>
         </div>
         <div class="fud-statistics-filters">
-          <el-segmented v-model="statisticsBasis" :options="[{ label: '节点到期月份', value: 'due' }, { label: '实际联系月份', value: 'contact' }]" size="small" />
+          <el-segmented
+            v-model="statisticsBasis"
+            :options="[
+              { label: '节点到期月份', value: 'due' },
+              { label: '实际联系月份', value: 'contact' },
+              { label: '实际回院月份', value: 'arrival' }
+            ]"
+            size="small"
+          />
           <el-date-picker v-model="statisticsMonth" type="month" value-format="YYYY-MM" size="small" />
         </div>
       </header>
       <div class="fud-statistics-metrics">
         <span>应随访 <b>{{ statistics?.total || 0 }}</b></span>
-        <span>已完成 <b>{{ statistics?.completed || 0 }}</b></span>
-        <span>完成率 <b>{{ statistics?.completionRate || 0 }}%</b></span>
-        <span>按时率 <b>{{ statistics?.onTimeRate || 0 }}%</b></span>
-        <span class="is-danger">逾期未完成 <b>{{ statistics?.overduePending || 0 }}</b></span>
+        <span>已触达 <b>{{ statistics?.reached || 0 }}</b></span>
+        <span>已回院 <b>{{ statistics?.arrived || 0 }}</b></span>
+        <span>触达率 <b>{{ statistics?.reachRate || 0 }}%</b></span>
+        <span class="is-primary">回院率 <b>{{ statistics?.arrivalRate || 0 }}%</b></span>
+        <span>按时回院率 <b>{{ statistics?.onTimeArrivalRate || 0 }}%</b></span>
+        <span class="is-danger">逾期未回院 <b>{{ statistics?.notArrived || 0 }}</b></span>
       </div>
+      <p class="fud-statistics-note">
+        回院率 = 已回院 ÷ 应随访，是复诊依从性的主指标；触达率只反映"是否联系上"，不等于随访完成。
+      </p>
       <div v-if="statistics" class="fud-statistics-grid">
         <div>
           <small>科室</small>
-          <p v-for="item in statistics.departments.slice(0, 6)" :key="item.label">{{ item.label }} <b>{{ item.completed }}/{{ item.total }}</b></p>
+          <p v-for="item in statistics.departments.slice(0, 6)" :key="item.label">
+            {{ item.label }} <b>{{ item.arrived ?? item.completed ?? 0 }}/{{ item.total }}</b>
+          </p>
         </div>
         <div>
           <small>护理人员 / 操作人</small>
-          <p v-for="item in statistics.operators.slice(0, 6)" :key="item.label">{{ item.label }} <b>{{ item.completed }}/{{ item.total }}</b></p>
+          <p v-for="item in statistics.operators.slice(0, 6)" :key="item.label">
+            {{ item.label }} <b>{{ item.arrived ?? item.completed ?? 0 }}/{{ item.total }}</b>
+          </p>
         </div>
       </div>
     </section>
@@ -125,13 +142,24 @@
             <label>应复查</label>
             <span class="fud-time-value" :class="urgencyClass(row)">{{ row.dueDate }}</span>
             <span class="fud-time-relative">{{ dueDateRelative(row) }}</span>
-            <template v-if="row.lastContactAt"> · <span class="fud-time-value is-contacted">已联系 {{ row.lastContactAt.slice(0, 10) }}</span></template>
+            <template v-if="row.arrivedAt"> · <span class="fud-time-value is-arrived">已回院 {{ row.arrivedAt }}</span></template>
+            <template v-else-if="row.lastContactAt"> · <span class="fud-time-value is-contacted">已联系 {{ row.lastContactAt.slice(0, 10) }}</span></template>
           </p>
         </div>
         <div class="fud-card-actions">
           <el-button size="small" type="primary" plain @click="openScript(row)">查看话术</el-button>
           <el-button v-if="canOperateFollowUp" size="small" type="warning" plain :disabled="Boolean(row.lastContactAt)" @click="markContacted(row)">
             {{ row.lastContactAt ? "已联系" : "标记已联系" }}
+          </el-button>
+          <!-- A2：回院确认是依从性统计的事实来源，与"标记已联系"并列且可撤销 -->
+          <el-button
+            v-if="canOperateFollowUp"
+            size="small"
+            :type="row.arrivedAt ? 'info' : 'success'"
+            plain
+            @click="row.arrivedAt ? undoArrived(row) : markArrived(row)"
+          >
+            {{ row.arrivedAt ? "撤销回院" : "确认已回院" }}
           </el-button>
           <el-button size="small" type="success" plain @click="openArchive(row)">进档案</el-button>
         </div>
@@ -173,7 +201,9 @@ import {
   loadFollowUpStatisticsApi,
   loadFollowUpVisitsApi,
   loadRecallSummaryApi,
+  markRecallArrivedApi,
   markRecallContactedApi,
+  undoRecallArrivedApi,
   type FollowUpStatistics,
   type FollowUpVisit,
   type RecallRow
@@ -213,7 +243,7 @@ const generatedAt = ref("");
 const scriptTemplateCount = ref(0);
 const todayContacts = ref(0);
 const statistics = ref<FollowUpStatistics | null>(null);
-const statisticsBasis = ref<"due" | "contact">("due");
+const statisticsBasis = ref<"due" | "contact" | "arrival">("due");
 const statisticsMonth = ref(new Date().toISOString().slice(0, 7));
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -402,6 +432,42 @@ const openArchive = (row: DashboardRow) => {
   void router.push({ path: "/health-archive", query: { patientCaseId: row.patientCaseId } });
 };
 
+/**
+ * A2 回院确认：写"患者实际回院"这一客观事实，是回院率（依从性主指标）的唯一来源。
+ * 与 markContacted 的区别在于——标记已联系只说明"打过电话"，本操作说明"人来了"。
+ */
+const markArrived = async (row: DashboardRow) => {
+  try {
+    const result = await markRecallArrivedApi(row.visitId);
+    const arrivedAt = (result?.data as { arrivedAt?: string } | undefined)?.arrivedAt || new Date().toISOString().slice(0, 10);
+    row.arrivedAt = arrivedAt;
+    const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+    recentActions.value = [
+      { action: "followup.recall.arrived", operator: userStore.userInfo.name || "", detail: `复查召回已回院 ${row.name}（${row.reason || ""}）`, createdAt: now },
+      ...recentActions.value
+    ];
+    ElMessage.success(`已确认 ${row.name} 回院，回院率已更新`);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "回院确认失败");
+  }
+};
+
+/** 撤销回院确认：误点纠正，保留审计。 */
+const undoArrived = async (row: DashboardRow) => {
+  try {
+    await undoRecallArrivedApi(row.visitId);
+    row.arrivedAt = "";
+    const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+    recentActions.value = [
+      { action: "followup.recall.arrived.undo", operator: userStore.userInfo.name || "", detail: `撤销回院确认 ${row.name}`, createdAt: now },
+      ...recentActions.value
+    ];
+    ElMessage.success(`已撤销 ${row.name} 的回院确认`);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "撤销失败");
+  }
+};
+
 const openScriptManage = () => {
   void router.push("/pre-ai/script-manage");
 };
@@ -480,6 +546,18 @@ onBeforeUnmount(() => {
 
 .fud-statistics-metrics .is-danger b {
   color: var(--el-color-danger);
+}
+
+/* A3：回院率是依从性主指标，视觉上突出，避免被其他数字淹没 */
+.fud-statistics-metrics .is-primary b {
+  color: var(--el-color-primary);
+}
+
+.fud-statistics-note {
+  margin: 8px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .fud-statistics-grid {
@@ -709,6 +787,11 @@ onBeforeUnmount(() => {
     &.is-contacted {
       color: var(--el-color-success);
       font-weight: 400;
+    }
+    /* A2：已回院是完成态，用更明确的成功色加粗，与"仅联系过"区分 */
+    &.is-arrived {
+      color: var(--el-color-success);
+      font-weight: 700;
     }
   }
 

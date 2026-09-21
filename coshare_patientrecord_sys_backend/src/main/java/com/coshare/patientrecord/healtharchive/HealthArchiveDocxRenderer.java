@@ -109,8 +109,10 @@ public class HealthArchiveDocxRenderer {
                 "转介绍意向", blankToDash(text(form, "referralIntention"))));
             appended.add(para(doc, "触达渠道", blankToDash(text(form, "reachChannel")),
                 "触达确认", blankToDash(text(form, "reachConfirmed"))));
-            appended.add(table(doc, List.of("随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人", "实际随访日期", "结果状态"),
-                rowsOf(form.path("followUpRows"), 10)));
+            // 列顺序必须与 HealthArchiveService.FOLLOW_UP_COLUMNS 的前 13 列一致。
+            // 旧列 resultStatus 已被规范化的 followUpResult 取代，故不再出现在文档中。
+            appended.add(table(doc, List.of("随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人", "实际随访日期", "接触状态", "完成结果", "回院日期"),
+                rowsOf(form.path("followUpRows"), 13)));
 
             appended.add(heading(doc, "七、方案调整记录与签字", 24, true));
             appended.add(para(doc, "方案调整记录", text(form, "adjustmentRecord"), "", ""));

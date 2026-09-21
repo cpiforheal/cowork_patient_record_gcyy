@@ -41,8 +41,12 @@ public class HealthArchiveService {
         List.of("术后1天", "术后3天", "术后7天", "术后15天", "术后30天", "出院3月", "出院6月");
     private static final List<String> RECOVERY_COLUMNS =
         List.of("timeNode", "wound", "pain", "bowel", "edema", "medication", "training", "remark");
+    // 追加列必须放在末尾：tableRows 按列顺序做位置映射，在中间插入会错位既有数据。
+    // contactStatus/followUpResult 拆分（A1）：联系上了 != 随访完成，两者分别记录。
+    // arrivedAt/arrivedEncounterId（A2）：回院事实，用于回院率统计。
     private static final List<String> FOLLOW_UP_COLUMNS =
-        List.of("timeNode", "method", "recovery", "adherence", "diet", "review", "feedback", "visitor", "actualDate", "resultStatus");
+        List.of("timeNode", "method", "recovery", "adherence", "diet", "review", "feedback", "visitor", "actualDate", "resultStatus",
+            "contactStatus", "followUpResult", "arrivedAt", "arrivedEncounterId");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;

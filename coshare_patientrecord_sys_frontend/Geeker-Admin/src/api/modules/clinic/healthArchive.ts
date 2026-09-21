@@ -37,6 +37,14 @@ export interface HealthArchiveFollowUpRow {
   actualDate: string;
   /** 随访结果状态：正常完成 / 患者失访 / 拒绝随访 / 延期随访 / 无应答 */
   resultStatus: string;
+  /** 接触状态：已接通 / 未接通 / 无人接听（"联系上了"与"随访完成"是两件事，分开记录） */
+  contactStatus: string;
+  /** 随访完成判定：只有此项为完成态才算完成；非完成态含 患者失访 / 拒绝随访 / 无应答 / 延期随访 / 未随访 */
+  followUpResult: string;
+  /** 回院确认：患者实际回院日期，留空表示未回院。依从性统计以此为准 */
+  arrivedAt: string;
+  /** 回院对应就诊 ID（可选） */
+  arrivedEncounterId: string;
 }
 
 export interface HealthArchiveForm {

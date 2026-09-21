@@ -303,8 +303,14 @@
           <!-- 随访监控：基于手术日期推算各节点应随访日期，纯前端派生，表格结构零改动 -->
           <div v-if="followUpMonitor" class="followup-monitor" :class="{ 'has-overdue': followUpMonitor.overdue > 0 }">
             <span
-              >随访进度：已完成 <b>{{ followUpMonitor.done }}</b
+              >随访完成：已完成 <b>{{ followUpMonitor.done }}</b
               >/{{ followUpMonitor.total }}</span
+            >
+            <span v-if="followUpMonitor.arrived > 0"
+              >已回院 <b>{{ followUpMonitor.arrived }}</b></span
+            >
+            <span v-if="followUpMonitor.lost > 0" class="monitor-lost"
+              >失访/拒绝 <b>{{ followUpMonitor.lost }}</b></span
             >
             <span v-if="followUpMonitor.today > 0"
               >今日应随访 <b>{{ followUpMonitor.today }}</b></span
@@ -383,7 +389,34 @@
                 />
               </template>
             </el-table-column>
-            <el-table-column label="结果状态" width="122">
+            <el-table-column label="接触状态" width="118">
+              <template #default="{ row }">
+                <el-select v-model="row.contactStatus" :disabled="!editable" placeholder="接通情况">
+                  <el-option v-for="item in CONTACT_STATUS_OPTIONS" :key="item" :label="item" :value="item" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="完成结果" width="122">
+              <template #default="{ row }">
+                <el-select v-model="row.followUpResult" :disabled="!editable" placeholder="是否完成">
+                  <el-option v-for="item in FOLLOW_RESULT_OPTIONS" :key="item" :label="item" :value="item" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="是否回院" width="150">
+              <template #default="{ row }">
+                <el-date-picker
+                  v-model="row.arrivedAt"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  placeholder="未回院"
+                  :disabled="!editable"
+                  clearable
+                  style="width: 100%"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="结果状态（旧）" width="122">
               <template #default="{ row }">
                 <el-select v-model="row.resultStatus" :disabled="!editable" placeholder="选择">
                   <el-option v-for="item in FOLLOW_RESULT_OPTIONS" :key="item" :label="item" :value="item" />
@@ -812,7 +845,25 @@ const REVIEW_OPTIONS = ["按期复查", "已改期", "未复查"];
 const RECOVERY_NODES = ["术后当日", "术后3天", "术后7天", "术后15天", "术后30天"];
 const FOLLOW_UP_NODES = ["术后1天", "术后3天", "术后7天", "术后15天", "术后30天", "出院3月", "出院6月"];
 const RECOVERY_HEADERS = ["时间节点", "创面/渗血", "疼痛评分", "排便情况", "水肿消退", "用药/坐浴", "提肛训练", "备注"];
-const FOLLOW_UP_HEADERS = ["随访时间", "随访方式", "创面/恢复", "用药依从", "饮食忌口", "按期复查", "患者反馈", "随访人", "实际随访日期", "结果状态"];
+// 顺序与后端 HealthArchiveService.FOLLOW_UP_COLUMNS 保持一致：
+// 追加的 4 列（接触状态/完成结果/回院日期/回院就诊ID）必须在末尾，
+// 否则既有的按位置映射会把历史数据错位挂到别的列上。
+const FOLLOW_UP_HEADERS = [
+  "随访时间",
+  "随访方式",
+  "创面/恢复",
+  "用药依从",
+  "饮食忌口",
+  "按期复查",
+  "患者反馈",
+  "随访人",
+  "实际随访日期",
+  "结果状态（旧）",
+  "接触状态",
+  "完成结果",
+  "回院日期",
+  "回院就诊ID"
+];
 const FOLLOW_RESULT_OPTIONS = ["正常完成", "患者失访", "拒绝随访", "延期随访", "无应答"];
 const REACH_CHANNELS = ["电话", "微信", "短信", "家属转达", "其他"];
 const REACH_CONFIRM_OPTIONS = ["已确认可触达", "暂未确认", "无法触达"];
@@ -904,30 +955,72 @@ const form = reactive<HealthArchiveForm>({
 const selectedVersion = computed(() => aiVersions.value.find(item => item.id === selectedRecordId.value) || null);
 const draftMeta = computed(() => Boolean(draftStatus.value));
 // 随访监控：手术日期 + 节点偏移 → 应随访日期；行内任一内容列已填即视为已完成
+// A6：日期计算修正。
+// 旧实现用 base.setMonth(+N) 会月末溢出（8月31日+1月 → 10月1日，应为9月30日），
+// 且用 toISOString() 取"今天"是 UTC，在东八区凌晨会算出前一天。两处都会改变按时/逾期判定。
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const toLocalDate = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const todayLocal = () => toLocalDate(new Date());
+
+/** 加 N 个月并夹紧到目标月最后一天（避免月末溢出）。 */
+const addMonthsClamped = (base: Date, months: number) => {
+  const year = base.getFullYear();
+  const month = base.getMonth() + months;
+  const targetYear = year + Math.floor(month / 12);
+  const targetMonth = ((month % 12) + 12) % 12;
+  const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  return new Date(targetYear, targetMonth, Math.min(base.getDate(), lastDay));
+};
+
 const followUpDueDate = (node: string, surgery: string) => {
   if (!surgery) return "";
-  const base = new Date(surgery.slice(0, 10));
+  // 时分归零，按本地时间构造，避免 UTC 解析偏移
+  const parts = surgery.slice(0, 10).split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return "";
+  const base = new Date(parts[0], parts[1] - 1, parts[2]);
   if (Number.isNaN(base.getTime())) return "";
   const monthMatch = node.match(/(\d+)\s*月/);
   const dayMatch = node.match(/(\d+)\s*天/);
-  if (monthMatch) base.setMonth(base.getMonth() + parseInt(monthMatch[1], 10));
-  else if (dayMatch) base.setDate(base.getDate() + parseInt(dayMatch[1], 10));
-  else return "";
-  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
+  if (monthMatch) return toLocalDate(addMonthsClamped(base, parseInt(monthMatch[1], 10)));
+  if (dayMatch) {
+    const shifted = new Date(base.getFullYear(), base.getMonth(), base.getDate() + parseInt(dayMatch[1], 10));
+    return toLocalDate(shifted);
+  }
+  return "";
+};
+// A1：完成判定只认 followUpResult。
+// 旧实现用"任意一列非空即完成"，导致护士只填一个"随访方式=电话未接通"也算完成，
+// 患者随即掉出召回清单——这是完成率虚高的根因，必须修掉。
+// FOLLOW_RESULT_OPTIONS 已在文件上方定义，这里复用，不再重复声明。
+const CONTACT_STATUS_OPTIONS = ["已接通", "未接通", "无人接听"];
+const FOLLOW_RESULT_DONE = "正常完成";
+// 终止态：不再需要继续催访，单独成池统计，不再出现在待随访清单
+const FOLLOW_RESULT_TERMINAL = ["患者失访", "拒绝随访"];
+
+const rowText = (row: HealthArchiveFollowUpRow, key: keyof HealthArchiveFollowUpRow) => String(row[key] ?? "").trim();
+
+/** 完成判定：只看 followUpResult 是否为完成态。兼容旧数据：旧行只有 resultStatus 时回落读它。 */
+const followUpResultOf = (row: HealthArchiveFollowUpRow): string => {
+  const value = rowText(row, "followUpResult") || rowText(row, "resultStatus");
+  return value;
 };
 const followUpRowFilled = (row: HealthArchiveFollowUpRow) =>
-  [row.method, row.recovery, row.adherence, row.diet, row.review, row.feedback, row.visitor, row.actualDate, row.resultStatus].some(
-    value => String(value || "").trim()
-  );
+  followUpResultOf(row) !== "" && followUpResultOf(row) !== "未随访";
+const followUpRowCompleted = (row: HealthArchiveFollowUpRow) => followUpResultOf(row) === FOLLOW_RESULT_DONE;
+const followUpRowTerminal = (row: HealthArchiveFollowUpRow) => FOLLOW_RESULT_TERMINAL.includes(followUpResultOf(row));
+const followUpRowArrived = (row: HealthArchiveFollowUpRow) => rowText(row, "arrivedAt") !== "";
 const followUpRowState = (row: HealthArchiveFollowUpRow): { state: string; text: string } => {
-  if (followUpRowFilled(row)) {
-    // 失访/拒绝属于随访终止态，用独立标识区分于正常完成
-    if (row.resultStatus === "患者失访" || row.resultStatus === "拒绝随访") return { state: "lost", text: row.resultStatus };
-    return { state: "done", text: "已完成" };
+  const result = followUpResultOf(row);
+  if (followUpRowArrived(row)) return { state: "arrived", text: "已回院" };
+  if (followUpRowCompleted(row)) return { state: "done", text: "已完成" };
+  // 失访/拒绝属于随访终止态，用独立标识区分于正常完成
+  if (row.resultStatus === "患者失访" || row.resultStatus === "拒绝随访" || followUpRowTerminal(row)) {
+    return { state: "lost", text: result || row.resultStatus };
   }
   const due = followUpDueDate(row.timeNode, (form.surgeryDate || "").slice(0, 10));
   if (!due) return { state: "unknown", text: "待定" };
-  const diff = Math.round((new Date(due).getTime() - new Date(new Date().toISOString().slice(0, 10)).getTime()) / 86400000);
+  // 用 UTC 归一化只做"天数差"，避免夏令时/时区把差值算成 0.96 天而错判
+  const diff = Math.round((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${todayLocal()}T00:00:00Z`)) / 86400000);
   if (diff < 0) return { state: "overdue", text: `超期${-diff}天` };
   if (diff === 0) return { state: "today", text: "今日应随访" };
   return { state: "pending", text: `剩${diff}天` };
@@ -941,14 +1034,18 @@ const followUpMonitor = computed(() => {
   let todayDue = 0;
   let overdue = 0;
   let pending = 0;
+  let arrived = 0;
+  let lost = 0;
   for (const row of form.followUpRows) {
     const state = followUpRowState(row).state;
-    if (state === "done") done += 1;
+    if (state === "arrived") arrived += 1;
+    if (followUpRowTerminal(row)) lost += 1;
+    if (state === "done" || state === "arrived") done += 1;
     else if (state === "today") todayDue += 1;
     else if (state === "overdue") overdue += 1;
     else if (state === "pending") pending += 1;
   }
-  return { done, today: todayDue, overdue, pending, total: form.followUpRows.length, unknown: !surgery };
+  return { done, today: todayDue, overdue, pending, arrived, lost, total: form.followUpRows.length, unknown: !surgery };
 });
 const archiveMetaText = computed(() => {
   const parts = [`档案编号 ${draftArchiveNo.value || "自动生成"}`];
@@ -1288,7 +1385,13 @@ const emptyFollowUpRow = () => ({
   feedback: "",
   visitor: "",
   actualDate: "",
-  resultStatus: ""
+  resultStatus: "",
+  // A1：接触状态与完成结果分离
+  contactStatus: "",
+  followUpResult: "",
+  // A2：回院事实
+  arrivedAt: "",
+  arrivedEncounterId: ""
 });
 
 const applyDraft = (payload: HealthArchiveLoadResult) => {
@@ -1318,15 +1421,21 @@ const applyDraft = (payload: HealthArchiveLoadResult) => {
   form.treatmentPath = draftForm.treatmentPath || "";
   form.surgeryDate = draftForm.surgeryDate || "";
   form.interventions = draftForm.interventions || [];
-  form.recoveryRows = RECOVERY_NODES.map((node, index) => ({
+  // A8：按 timeNode 匹配已保存行，而不是按下标。
+  // 按下标合并时，一旦节点列表顺序调整，历史数据会静默挂到错误的节点上。
+  const savedByNode = (rows: any[] | undefined, node: string) =>
+    (rows || []).find(item => String(item?.timeNode ?? "").trim() === node) || {};
+  const savedRecovery = Array.isArray(draftForm.recoveryRows) ? draftForm.recoveryRows : [];
+  const savedFollowUp = Array.isArray(draftForm.followUpRows) ? draftForm.followUpRows : [];
+  form.recoveryRows = RECOVERY_NODES.map(node => ({
     ...emptyRecoveryRow(),
     timeNode: node,
-    ...(draftForm.recoveryRows?.[index] || {})
+    ...savedByNode(savedRecovery, node)
   })) as HealthArchiveForm["recoveryRows"];
-  form.followUpRows = FOLLOW_UP_NODES.map((node, index) => ({
+  form.followUpRows = FOLLOW_UP_NODES.map(node => ({
     ...emptyFollowUpRow(),
     timeNode: node,
-    ...(draftForm.followUpRows?.[index] || {})
+    ...savedByNode(savedFollowUp, node)
   })) as HealthArchiveForm["followUpRows"];
   form.emotionIssues = draftForm.emotionIssues || [];
   form.emotionOther = draftForm.emotionOther || "";
@@ -1939,6 +2048,12 @@ watch(
   .monitor-hint {
     color: var(--el-text-color-placeholder);
   }
+  /* A1：失访/拒绝对考核是负向信号，用 info 色单列，不与"逾期"混淆 */
+  .monitor-lost {
+    b {
+      color: var(--el-color-info);
+    }
+  }
 }
 .fu-time-cell {
   display: grid;
@@ -1946,6 +2061,11 @@ watch(
   .fu-state {
     font-size: 11px;
     &.is-done {
+      color: var(--el-color-success);
+    }
+    /* A2：已回院是依从性达成态，加粗突出，与"仅完成沟通"区分 */
+    &.is-arrived {
+      font-weight: 600;
       color: var(--el-color-success);
     }
     &.is-overdue {
