@@ -10,16 +10,29 @@
       flex-direction: column;
       height: 100%;
       transition: width 0.3s ease;
+
+      /* 中间导航列表独立滚动：剩余高度全部给它，底部用户区不参与滚动 */
       .el-scrollbar {
-        height: calc(100% - 55px);
+        flex: 1;
+        min-height: 0;
+
         .el-menu {
           width: 100%;
           overflow-x: hidden;
           border-right: none;
         }
       }
+
+      /* 底部固定用户区（Sticky Footer） */
+      .aside-footer {
+        flex: none;
+        margin-top: auto;
+        border-top: 1px solid var(--el-border-color-lighter);
+      }
+
       .logo {
         box-sizing: border-box;
+        flex: none;
         height: 55px;
         .logo-img {
           width: 28px;

@@ -24,6 +24,8 @@ declare namespace Menu {
     isFull: boolean;
     isAffix: boolean;
     isKeepAlive: boolean;
+    /** 侧边栏分组小标题：同 section 的条目并列渲染在同一小标题下 */
+    section?: string | null;
   }
 }
 
