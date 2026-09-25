@@ -3639,18 +3639,76 @@ const templateSourceHash = (field: PreAiFieldConfig) => {
 };
 const markStageDirty = (code: PreAiStageCode) => {
   stageDirty[code] = true;
+  persistStageDirty();
 };
 const clearStageDirty = (code: PreAiStageCode) => {
   stageDirty[code] = false;
+  persistStageDirty();
+};
+
+/**
+ * 脏标记持久化：原先是纯内存状态，F5 或切换页面即丢失，
+ * 之后第一次 hydrate 就会覆盖未提交内容。按就诊号存 sessionStorage，
+ * 让"有未提交填写"这一事实在整段会话内都有效。
+ */
+const stageDirtyStorageKey = () => `preaiStageDirty:${workspace.value?.encounter.id || ""}`;
+const persistStageDirty = () => {
+  if (typeof sessionStorage === "undefined") return;
+  const key = stageDirtyStorageKey();
+  if (!workspace.value?.encounter.id) return;
+  try {
+    const dirtyCodes = (Object.keys(stageDirty) as PreAiStageCode[]).filter(code => stageDirty[code]);
+    if (dirtyCodes.length) sessionStorage.setItem(key, JSON.stringify(dirtyCodes));
+    else sessionStorage.removeItem(key);
+  } catch {
+    // 存储不可用时静默降级为纯内存标记，不影响功能
+  }
+};
+const restoreStageDirty = () => {
+  if (typeof sessionStorage === "undefined") return;
+  if (!workspace.value?.encounter.id) return;
+  try {
+    const raw = sessionStorage.getItem(stageDirtyStorageKey());
+    if (!raw) return;
+    const codes = JSON.parse(raw) as PreAiStageCode[];
+    if (Array.isArray(codes)) codes.forEach(code => {
+      if (code in stageDirty) stageDirty[code] = true;
+    });
+  } catch {
+    // 解析失败按无脏标记处理
+  }
 };
 const clearAllStageDirty = () => {
   (Object.keys(stageDirty) as PreAiStageCode[]).forEach(code => clearStageDirty(code));
-};
-const hasUnsavedStageDrafts = computed(() => Object.values(stageDirty).some(Boolean));
+};const hasUnsavedStageDrafts = computed(() => Object.values(stageDirty).some(Boolean));
 const hasUnsavedDrafts = computed(() => hasUnsavedStageDrafts.value || auxiliaryTasksDirty.value);
 const patchStageForm = (code: PreAiStageCode, value: Record<string, any>) => {
   Object.assign(stageForms[code], value);
   markStageDirty(code);
+};
+
+/** 判断表单值是否为空（空串/空数组/空对象/null 均视为空）。 */
+const isBlankFormValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length === 0;
+  return !String(value).trim();
+};
+
+/**
+ * 保守合并后端阶段数据到本地表单：
+ *  - 后端未下发的键：保留本地值（避免"整表清空"误删当前岗位的填写）
+ *  - 后端为空而本地非空：保留本地值（避免上游刷新把正在填的内容抹掉）
+ *  - 其余情况：以后端为准（后端是已保存数据的权威来源）
+ */
+const mergeStageForm = (code: PreAiStageCode, incoming: Record<string, any>) => {
+  const local = stageForms[code];
+  Object.keys(incoming).forEach(key => {
+    const next = incoming[key];
+    const current = local[key];
+    if (isBlankFormValue(next) && !isBlankFormValue(current)) return;
+    local[key] = next;
+  });
 };
 const applyQuickTemplate = (fieldKey: string, value: string) => {
   stageForms[selectedStageCode.value][fieldKey] = value;
@@ -3842,6 +3900,8 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   syncWorkspaceImageContext(value);
   syncTimelineContext(value);
   workspace.value = value;
+  // 先恢复本会话内持久化的脏标记，避免刷新后把未提交填写当成"干净"而被合并覆盖
+  restoreStageDirty();
   hydrationQuiet = true;
   manualTemplateTouched.clear();
   autoMatchedTemplateLabel.value = "";
@@ -3885,8 +3945,11 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
       }
     });
     if (!stageDirty[stage.stageCode]) {
-      Object.keys(stageForms[stage.stageCode]).forEach(key => delete stageForms[stage.stageCode][key]);
-      Object.assign(stageForms[stage.stageCode], normalized);
+      // 保守合并，取代原先的"整表清空再覆盖"。
+      // 原实现在非脏状态下会先删掉本地全部键再写入后端值，一旦脏标记漏置
+      // （F5、切换就诊、其他阶段改动触发刷新等）就会静默吞掉当前岗位刚填的内容。
+      // 这里只做逐键安全覆盖：后端未下发的键保留本地值；后端为空时不覆盖本地已有内容。
+      mergeStageForm(stage.stageCode, normalized);
     }
   });
   if (!stageDirty.REGISTRATION) {
