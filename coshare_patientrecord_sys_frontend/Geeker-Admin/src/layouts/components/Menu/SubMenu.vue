@@ -7,7 +7,8 @@
         </el-icon>
         <span class="sle">{{ subItem.meta.title }}</span>
       </template>
-      <SubMenu :menu-list="subItem.children" />
+      <SectionSubMenu v-if="hasSections" :menu-list="subItem.children" />
+      <SubMenu v-else :menu-list="subItem.children" />
     </el-sub-menu>
     <el-menu-item v-else :index="subItem.path" @click="handleClickMenu(subItem)">
       <el-icon v-if="subItem.meta.icon">
@@ -21,10 +22,19 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { resolveMenuIcon } from "@/plugins/elementIcons";
+import SectionSubMenu from "@/layouts/components/Menu/SectionSubMenu.vue";
 
-defineProps<{ menuList: Menu.MenuOptions[] }>();
+const props = defineProps<{ menuList: Menu.MenuOptions[] }>();
+
+/**
+ * 当前层级是否声明了分组（section）。
+ * 有分组的层级交给 SectionSubMenu 递归渲染小标题，从而支持"顶层分组 → 子级分组"
+ * 这种两跳结构（患者就诊的 section 在它的子级上，不是顶层）。
+ */
+const hasSections = computed(() => props.menuList.some(item => String(item.meta?.section || "").trim()));
 
 const router = useRouter();
 const handleClickMenu = (subItem: Menu.MenuOptions) => {
