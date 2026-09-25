@@ -6,13 +6,14 @@
     :unique-opened="accordion"
     :collapse-transition="false"
   >
+    <!-- 分组标题用 el-menu-item(disabled) 承载：el-menu 只认菜单项/子菜单，
+         放自定义 <li> 会被丢弃，必须用组件自身的子项类型。 -->
     <template v-for="group in groups" :key="group.key">
-      <!-- 分组小标题：参考图的分组留白 + 小号灰字标题，让层级一眼可辨 -->
-      <li v-if="group.title" class="nav-section-title">
+      <el-menu-item class="nav-section-item" disabled>
         <span class="nav-section-text">{{ group.title }}</span>
-      </li>
+      </el-menu-item>
       <SubMenu :menu-list="group.items" />
-      <li v-if="group.title" class="nav-section-gap" aria-hidden="true"></li>
+      <el-menu-item class="nav-section-gap" disabled />
     </template>
     <SubMenu :menu-list="plainMenus" />
   </el-menu>
@@ -59,37 +60,39 @@ const plainMenus = computed(() => props.menuList.filter(item => !String(item.met
 </script>
 
 <style lang="scss" scoped>
-.nav-section-title {
-  display: flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 14px 18px 4px;
-  margin: 0;
-  list-style: none;
-  overflow: hidden;
+/* 分组小标题：不可点击、无 hover 反馈，纯视觉分隔 */
+.nav-section-item {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding-left: 18px !important;
+  pointer-events: none;
 
   .nav-section-text {
     font-size: 11px;
     font-weight: 600;
     color: var(--el-text-color-placeholder);
     letter-spacing: 0.08em;
-    white-space: nowrap;
+  }
+
+  &:hover {
+    background-color: transparent !important;
   }
 }
 
-/* 组间留白 + 细分隔线，制造"分组块"的呼吸感 */
+/* 组间留白 + 细分隔线 */
 .nav-section-gap {
-  height: 1px;
-  margin: 8px 14px 10px;
-  list-style: none;
-  background: var(--el-border-color-lighter);
-}
+  height: 18px !important;
+  min-height: 18px !important;
+  padding: 0 !important;
+  pointer-events: none;
 
-/* 折叠态隐藏小标题与分隔线，只留图标 */
-:deep(.el-menu--collapse) {
-  .nav-section-title,
-  .nav-section-gap {
-    display: none;
+  &::after {
+    display: block;
+    width: calc(100% - 28px);
+    height: 1px;
+    margin: 8px auto 9px;
+    content: "";
+    background: var(--el-border-color-lighter);
   }
 }
 </style>
