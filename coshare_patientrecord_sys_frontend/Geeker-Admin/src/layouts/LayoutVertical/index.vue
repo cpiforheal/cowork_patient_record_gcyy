@@ -8,16 +8,18 @@
           <span v-show="!isCollapse" class="logo-text">{{ title }}</span>
         </div>
         <el-scrollbar>
-          <el-menu
-            :router="false"
-            :default-active="activeMenu"
-            :collapse="isCollapse"
-            :unique-opened="accordion"
-            :collapse-transition="false"
-          >
-            <SubMenu :menu-list="menuList" />
-          </el-menu>
+          <SideNav
+            :menu-list="menuList"
+            :active-menu="activeMenu"
+            :is-collapse="isCollapse"
+            :accordion="accordion"
+          />
         </el-scrollbar>
+        <!-- 底部固定用户区：不参与中间列表滚动（参考图 Sticky Footer）。
+             直接复用顶栏的 Avatar 组件，避免重复实现个人信息/改密/退出逻辑。 -->
+        <div class="aside-footer">
+          <UserFooter :collapsed="isCollapse" />
+        </div>
       </div>
     </el-aside>
     <el-container>
@@ -61,6 +63,8 @@ import Main from "@/layouts/components/Main/index.vue";
 import ToolBarLeft from "@/layouts/components/Header/ToolBarLeft.vue";
 import ToolBarRight from "@/layouts/components/Header/ToolBarRight.vue";
 import SubMenu from "@/layouts/components/Menu/SubMenu.vue";
+import SideNav from "@/layouts/components/Menu/SideNav.vue";
+import UserFooter from "@/layouts/components/Menu/UserFooter.vue";
 
 const route = useRoute();
 const router = useRouter();

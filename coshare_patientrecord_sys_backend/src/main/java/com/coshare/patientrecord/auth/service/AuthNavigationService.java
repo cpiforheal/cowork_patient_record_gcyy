@@ -376,19 +376,23 @@ public class AuthNavigationService {
         List<NavigationMenu> result = new ArrayList<>();
         result.add(page("/welcome/index", "welcome", "/welcome/index", "主页", "HomeFilled", false, false, true));
         result.add(page("/home/index", "home", "/home/index", "我的待办", "List", false, false, false));
+        // 运营总览：面向管理层的价值度量入口（来访量环比 + 随访闭环）
+        result.add(page("/ops/dashboard", "opsDashboard", "/ops/dashboard/index", "运营数据看板", "TrendCharts", false, false, false));
         result.add(page("/billing/patients", "billingPatients", "/billing/index", "患者收费信息", "Coin", false, false, false));
-        result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/pre-ai/encounters", "患者就诊", "UserFilled",
-            page("/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen", false, false, false),
-            page("/patients/overview", "patientsOverview", "/patients/overview/index", "患者概览", "Connection", false, false, false),
-            page("/patients/list", "patientList", "/patients/list/index", "患者档案查询", "Search", false, false, false),
-            pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/list"),
-            page("/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled", false, false, false),
-            page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false),
-            page("/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook", false, false, false),
-            page("/follow-up-dashboard", "followUpDashboard", "/home/components/FollowUpDashboardPage", "随访工作台", "DataLine", false, false, false),
-            page("/nursing/follow-up-monitor", "nursingFollowUpMonitor", "/nursing/followUpMonitor/index", "护理随访留痕", "Clock", false, false, false),
-            page("/pre-ai/template-manage", "diseaseTemplateManage", "/preAi/templateManage/index", "病种模板库", "Files", false, false, false),
-            page("/pre-ai/script-manage", "followUpScriptManage", "/preAi/scriptManage/index", "随访话术模板库", "ChatLineSquare", false, false, false)
+        // 患者就诊：由原先 11 个平级条目收敛为 4 个业务分组（section 由前端渲染为小标题）。
+        // 原来是"每天干的活"与"半年不动的配置"混在同一层级，用户每次都要在噪音里找目标。
+        result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/patients/archive", "患者就诊", "UserFilled",
+            sectionedPage("接诊作业", "/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen"),
+            sectionedPage("接诊作业", "/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled"),
+            sectionedPage("接诊作业", "/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo"),
+            sectionedPage("患者档案", "/patients/archive", "patientArchive", "/patients/archive/index", "患者档案", "Search"),
+            sectionedPage("健康管理", "/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook"),
+            sectionedPage("随访管理", "/follow-up-dashboard", "followUpDashboard", "/home/components/FollowUpDashboardPage", "随访工作台", "DataLine"),
+            sectionedPage("随访管理", "/nursing/follow-up-monitor", "nursingFollowUpMonitor", "/nursing/followUpMonitor/index", "护理随访留痕", "Clock"),
+            // 旧入口保留为隐藏页，保证对话链接、书签与站内深链不断（前端由 /patients/archive 内切换视图）
+            page("/patients/list", "patientList", "/patients/list/index", "患者档案查询", "Search", true, false, false),
+            page("/patients/overview", "patientsOverview", "/patients/overview/index", "患者概览", "Connection", true, false, false),
+            pageWithActiveMenu("/patients/detail/:id", "patientDetail", "/patients/detail/index", "患者档案详情", "Document", "/patients/archive")
         ));
         result.add(group("/navigation/business-workbench", "businessWorkbench", "/tcm-pharmacy/workbench", "业务工作台", "Operation",
             page("/policy-brief", "policyBrief", "/policyBrief/index", "医政早报", "Reading", false, false, false),
@@ -425,6 +429,11 @@ public class AuthNavigationService {
                 page("/templates/record", "recordTemplate", "/templates/record/index", "模板与字段权限", "DocumentCopy", false, false, false),
                 page("/system/dictManage", "dictManage", "/system/dictManage/index", "资料字典", "Collection", false, false, false)
             ),
+            // 随访配置：病种模板与话术模板属"一次配置、长期不动"，从日常作业区移出，避免与每天的活混在一层
+            group("/system/follow-up-config", "systemFollowUpConfig", "/pre-ai/template-manage", "随访配置", "Files",
+                page("/pre-ai/template-manage", "diseaseTemplateManage", "/preAi/templateManage/index", "病种模板库", "Files", false, false, false),
+                page("/pre-ai/script-manage", "followUpScriptManage", "/preAi/scriptManage/index", "随访话术模板库", "ChatLineSquare", false, false, false)
+            ),
             page("/system/roleManage", "roleManage", "/system/roleManage/index", "角色与菜单权限", "Lock", false, false, false),
             page("/system/aiConfig", "aiConfig", "/system/aiConfig/index", "AI接口配置", "Setting", false, false, false),
             page("/system/dataMaintenance", "dataMaintenance", "/system/dataMaintenance/index", "数据维护", "Tools", false, false, false),
@@ -458,6 +467,8 @@ public class AuthNavigationService {
             "patientsOverview=patient:read,field:read",
             "recordTemplate=field:read",
             "patientList=patient:read",
+            "patientArchive=patient:read",
+            "opsDashboard=ops:read",
             "patientDetail=field:read,document:read,document:download",
             "documentRecycle=document:read",
             "auditReview=audit:read",
@@ -488,10 +499,16 @@ public class AuthNavigationService {
         );
         result.put("admin", new RolePolicy(Set.of("*"), administratorButtons));
 
-        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview");
+        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview", "/patients/archive");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record");
-        Set<String> preAi = paths("/pre-ai/encounters", "/pre-ai/template-manage", "/pre-ai/script-manage");
+        Set<String> preAi = paths("/pre-ai/encounters");
+        // 病种模板库与话术模板库已归入「系统管理 → 随访配置」，
+        // 路径前缀变为 /system 之外但挂在系统分组下，需显式授予相关岗位，否则菜单会对其消失。
+        Set<String> followUpConfig = paths("/pre-ai/template-manage", "/pre-ai/script-manage");
         Set<String> healthArchive = paths("/health-archive", "/follow-up-dashboard");
+        // 护理随访留痕监控台：护理部与管理员可见
+        Set<String> nursingMonitor = paths("/nursing/follow-up-monitor");
+        Set<String> opsDashboard = paths("/ops/dashboard");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
         Set<String> inventoryStaff = paths(
@@ -552,6 +569,7 @@ public class AuthNavigationService {
         Map<String, List<String>> diagnosticButtons = mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:upload",
             "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
+            "patientArchive=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload"
         ), inventoryStaffButtons);
         result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
@@ -560,13 +578,17 @@ public class AuthNavigationService {
         Map<String, List<String>> nursingButtons = mergePermissions(diagnosticButtons, permissions(
             "followUpDashboard=followup:read,followup:contact",
             "nursingFollowUpMonitor=followup:read,followup:export",
+            "opsDashboard=ops:read",
+            "patientArchive=patient:read",
             "healthArchive=patient:read,field:read",
-            "preAiEncounters=patient:read,field:read"
+            "preAiEncounters=patient:read,field:read",
+            "diseaseTemplateManage=diseaseTemplate:read",
+            "followUpScriptManage=followupScript:read"
         ));
-        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive), nursingButtons));
-        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive), nursingButtons));
+        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, nursingMonitor, opsDashboard), nursingButtons));
+        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, nursingMonitor, opsDashboard), nursingButtons));
 
-        result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy), permissions(
+        result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy, followUpConfig), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
         )));
         result.put("tcm_pharmacy", role(union(paths("/welcome/index", "/home/index"), tcmPharmacy), permissions(
@@ -578,12 +600,14 @@ public class AuthNavigationService {
             "tcmPharmacyDisplayMenu=display:read,announcement:play"
         )));
 
-        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive), mergePermissions(permissions(
+        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive, followUpConfig), mergePermissions(permissions(
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "patientsOverview=patient:read,field:read",
+            "patientArchive=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play",
-            "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote"
+            "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote",
+            "followUpScriptManage=followupScript:read"
         ), inventoryStaffButtons)));
         result.put("quality", role(union(patientFlow, inventoryQuality, paths(
             "/workbench/lab-report", "/templates/record", "/documents/recycle", "/audit/review", "/audit/log"
@@ -672,6 +696,19 @@ public class AuthNavigationService {
         return new NavigationMenu(path, name, component, null, meta(title, icon, hidden, full, affix), null);
     }
 
+    /** 带侧边栏分组标题的页面：同 section 的条目会并列在同一小标题下渲染。 */
+    private static NavigationMenu sectionedPage(
+        String section,
+        String path,
+        String name,
+        String component,
+        String title,
+        String icon
+    ) {
+        NavigationMeta meta = new NavigationMeta(icon, title, null, "", false, false, false, true, section);
+        return new NavigationMenu(path, name, component, null, meta, null);
+    }
+
     private static NavigationMenu pageWithActiveMenu(
         String path,
         String name,
@@ -680,7 +717,7 @@ public class AuthNavigationService {
         String icon,
         String activeMenu
     ) {
-        NavigationMeta meta = new NavigationMeta(icon, title, activeMenu, "", true, false, false, true);
+        NavigationMeta meta = new NavigationMeta(icon, title, activeMenu, "", true, false, false, true, null);
         return new NavigationMenu(path, name, component, null, meta, null);
     }
 
@@ -693,7 +730,7 @@ public class AuthNavigationService {
     }
 
     private static NavigationMeta meta(String title, String icon, boolean hidden, boolean full, boolean affix) {
-        return new NavigationMeta(icon, title, null, "", hidden, full, affix, !full);
+        return new NavigationMeta(icon, title, null, "", hidden, full, affix, !full, null);
     }
 
     private record RolePolicy(Set<String> menuPaths, Map<String, List<String>> buttonPermissions) {
