@@ -5,7 +5,7 @@
         <img class="uf-avatar" src="@/assets/images/avatar.gif" alt="" />
         <div v-show="!collapsed" class="uf-meta">
           <strong>{{ userStore.userInfo.name || "未登录" }}</strong>
-          <small>{{ userStore.userInfo.department || "—" }}</small>
+          <small>{{ userStore.userInfo.department || "—" }} · v2 导航</small>
         </div>
       </div>
       <template #dropdown>
