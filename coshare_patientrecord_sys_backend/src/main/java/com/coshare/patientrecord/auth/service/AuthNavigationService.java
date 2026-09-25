@@ -386,6 +386,7 @@ public class AuthNavigationService {
             page("/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo", false, false, false),
             page("/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook", false, false, false),
             page("/follow-up-dashboard", "followUpDashboard", "/home/components/FollowUpDashboardPage", "随访工作台", "DataLine", false, false, false),
+            page("/nursing/follow-up-monitor", "nursingFollowUpMonitor", "/nursing/followUpMonitor/index", "护理随访留痕", "Clock", false, false, false),
             page("/pre-ai/template-manage", "diseaseTemplateManage", "/preAi/templateManage/index", "病种模板库", "Files", false, false, false),
             page("/pre-ai/script-manage", "followUpScriptManage", "/preAi/scriptManage/index", "随访话术模板库", "ChatLineSquare", false, false, false)
         ));
@@ -461,6 +462,8 @@ public class AuthNavigationService {
             "documentRecycle=document:read",
             "auditReview=audit:read",
             "auditLog=audit:read,audit:export",
+            "followUpDashboard=followup:read,followup:contact",
+            "nursingFollowUpMonitor=followup:read,followup:export",
             "accountManage=user:create,user:update,user:disable,user:resetPassword",
             "roleManage=role:read",
             "departmentManage=department:create,department:update,department:deactivate",
@@ -556,6 +559,7 @@ public class AuthNavigationService {
         result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
         Map<String, List<String>> nursingButtons = mergePermissions(diagnosticButtons, permissions(
             "followUpDashboard=followup:read,followup:contact",
+            "nursingFollowUpMonitor=followup:read,followup:export",
             "healthArchive=patient:read,field:read",
             "preAiEncounters=patient:read,field:read"
         ));
