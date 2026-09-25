@@ -335,6 +335,23 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "附件已上传", service.uploadAttachment(encounterId, metadata, file, AuthPermission.currentUserOrThrow()));
     }
 
+    /**
+     * 化验报告当前版本号（轻量）。前端保存前只需这一个数字，
+     * 原先为此拉取整个工作台 workspace（含各阶段、辅助任务、附件），
+     * 病例量大时耗时 0.3~1.6 秒，是"上传结果转圈久"的直接原因。
+     * 只做一次 COUNT/MAX 查询，不构造 workspace。
+     */
+    @GetMapping("/{encounterId}/lab-reports/version")
+    public ApiResult<Map<String, Object>> labReportVersion(
+        @PathVariable String encounterId,
+        @RequestParam String templateId,
+        @RequestParam String reportDate
+    ) {
+        return ApiResult.success(Map.of(
+            "version", service.currentLabReportVersion(encounterId, templateId, reportDate, AuthPermission.currentUserOrThrow())
+        ));
+    }
+
     @DeleteMapping("/{encounterId}/attachments/{attachmentId}")
     public ApiResult<Map<String, Object>> voidAttachment(@PathVariable String encounterId, @PathVariable String attachmentId) {
         return ApiResult.of(200, "附件引用已作废", service.voidAttachment(encounterId, attachmentId, AuthPermission.currentUserOrThrow()));

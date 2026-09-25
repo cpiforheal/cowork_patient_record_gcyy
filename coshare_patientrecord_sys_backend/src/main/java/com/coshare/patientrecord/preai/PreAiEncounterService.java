@@ -493,27 +493,123 @@ public class PreAiEncounterService {
 
     public Map<String, Object> listPatientCases(SessionUser user) {
         requireReadRole(user);
+        // 原实现是 N+1：每个病例单独查就诊，每个就诊又走 canAccessEncounter（内含 loadEncounter、
+        // 跨科授权、阶段状态、队列任务、辅助任务等 3~6 次查询），并逐个调 stageStatusMap。
+        // 病例上百时累计数千次 SQL，实测单次 1.6~4.5 秒。改为一次性批量取数后在内存判定。
+        Map<String, List<ObjectNode>> encountersByCase = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_encounters ORDER BY patient_case_id, visit_no DESC, created_at DESC",
+            (org.springframework.jdbc.core.RowCallbackHandler) resultSet -> {
+                ObjectNode encounter = readEncounter(resultSet);
+                encountersByCase.computeIfAbsent(text(encounter, "patientCaseId"), key -> new ArrayList<>()).add(encounter);
+            }
+        );
+        Map<String, ObjectNode> stageStatuses = bulkStageStatusMap();
+        Map<String, Set<String>> accessibleQueueStages = bulkAccessibleQueueStages();
+        Map<String, Set<String>> accessibleAuxTypes = bulkAccessibleAuxiliaryTypes();
+
         ArrayNode rows = objectMapper.createArrayNode();
-        jdbcTemplate.query("SELECT * FROM pre_ai_patient_cases ORDER BY updated_at DESC, created_at DESC", rs -> {
-            ObjectNode patientCase = readPatientCase(rs);
+        jdbcTemplate.query("SELECT * FROM pre_ai_patient_cases ORDER BY updated_at DESC, created_at DESC", resultSet -> {
+            ObjectNode patientCase = readPatientCase(resultSet);
             String patientCaseId = text(patientCase, "id");
-            List<ObjectNode> encounters = jdbcTemplate.query(
-                "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY visit_no DESC, created_at DESC",
-                (resultSet, rowNum) -> readEncounter(resultSet), patientCaseId
-            );
+            List<ObjectNode> encounters = new ArrayList<>(encountersByCase.getOrDefault(patientCaseId, List.of()));
             if (encounters.isEmpty()) {
                 patientCase.put("visitCount", 0);
                 patientCase.put("legacyProgressFallback", true);
                 rows.add(patientCase);
                 return;
             }
-            encounters.removeIf(encounter -> "WITHDRAWN".equals(text(encounter, "status")) || !canAccessEncounter(text(encounter, "id"), user));
+            encounters.removeIf(encounter -> "WITHDRAWN".equals(text(encounter, "status"))
+                || !hasAccessWithBulkData(encounter, stageStatuses, accessibleQueueStages, accessibleAuxTypes, user));
             if (encounters.isEmpty()) return;
             patientCase.put("visitCount", encounters.size());
-            if (!encounters.isEmpty()) patientCase.set("latestEncounter", encounterSummary(encounters.get(0)));
+            patientCase.set("latestEncounter", encounterSummary(encounters.get(0), stageStatuses));
             rows.add(patientCase);
         });
         return Map.of("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
+    }
+
+    /** 批量取阶段状态：encounterId → (stageCode → status)，替代逐个 stageStatusMap。 */
+    private Map<String, ObjectNode> bulkStageStatusMap() {
+        Map<String, ObjectNode> result = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            "SELECT encounter_id, stage_code, status FROM pre_ai_stage_submissions",
+            (org.springframework.jdbc.core.RowCallbackHandler) resultSet -> result
+                .computeIfAbsent(resultSet.getString("encounter_id"), key -> objectMapper.createObjectNode())
+                .put(resultSet.getString("stage_code"), resultSet.getString("status"))
+        );
+        return result;
+    }
+
+    /** 批量取"有待办队列任务且本岗位可编辑"的 encounterId → 阶段集合。 */
+    private Map<String, Set<String>> bulkAccessibleQueueStages() {
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            """
+            SELECT DISTINCT q.encounter_id, t.stage_code
+            FROM clinic_queue_tickets q
+            JOIN clinic_queue_tasks t ON t.ticket_id = q.id
+            WHERE t.status NOT IN ('CANCELLED', 'INACTIVE')
+            """,
+            (org.springframework.jdbc.core.RowCallbackHandler) resultSet -> result
+                .computeIfAbsent(resultSet.getString("encounter_id"), key -> new LinkedHashSet<>())
+                .add(resultSet.getString("stage_code"))
+        );
+        return result;
+    }
+
+    /** 批量取"有待处理辅助任务"的 encounterId → 任务类型集合。 */
+    private Map<String, Set<String>> bulkAccessibleAuxiliaryTypes() {
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            "SELECT DISTINCT encounter_id, task_type FROM pre_ai_auxiliary_tasks WHERE status IN ('DRAFT', 'RETURNED')",
+            (org.springframework.jdbc.core.RowCallbackHandler) resultSet -> result
+                .computeIfAbsent(resultSet.getString("encounter_id"), key -> new LinkedHashSet<>())
+                .add(resultSet.getString("task_type"))
+        );
+        return result;
+    }
+
+    /**
+     * 与 canAccessEncounter 等价的访问判定，但使用批量预取数据，避免逐就诊查库。
+     * 语义与 canAccessEncounter 保持一致：全量操作岗（含 tcm）直接放行。
+     */
+    private boolean hasAccessWithBulkData(ObjectNode encounter,
+                                          Map<String, ObjectNode> stageStatuses,
+                                          Map<String, Set<String>> accessibleQueueStages,
+                                          Map<String, Set<String>> accessibleAuxTypes,
+                                          SessionUser user) {
+        if (user == null) return false;
+        String encounterId = text(encounter, "id");
+        if (safe(encounterId).isBlank()) return false;
+        String role = RoleCatalog.canonicalize(user.role());
+        if ("quality".equals(role) || hasFullPreAiOperationAccess(user)) return true;
+        if (!READ_ROLES.contains(role)) return false;
+        if (!safe(user.activeDepartmentId()).isBlank()
+            && safe(user.activeDepartmentId()).equals(text(encounter, "owningDepartmentId"))) {
+            return true;
+        }
+        Integer grantCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_encounter_department_grants WHERE encounter_id = ? AND account_id = ? AND status = 'ACTIVE'",
+            Integer.class, safe(encounterId), safe(user.id()));
+        return (grantCount != null && grantCount > 0)
+            || canEditCurrentStageWithBulk(encounter, stageStatuses.getOrDefault(encounterId, objectMapper.createObjectNode()), user)
+            || hasAssignedDuty(encounter, user, DUTY_CODES)
+            || accessibleQueueStages.getOrDefault(encounterId, Set.of()).stream()
+                .anyMatch(stage -> navigationService.canEditStage(user.role(), stage))
+            || accessibleAuxTypes.getOrDefault(encounterId, Set.of()).stream()
+                .anyMatch(taskType -> navigationService.canEditAuxiliary(user.role(), taskType));
+    }
+
+    private boolean canEditCurrentStageWithBulk(ObjectNode encounter, ObjectNode statuses, SessionUser user) {
+        String currentStage = "REVIEW";
+        for (String stage : effectiveStageOrder(encounter)) {
+            if (!Set.of("COMPLETED", "SKIPPED").contains(text(statuses, stage, "DRAFT"))) {
+                currentStage = stage;
+                break;
+            }
+        }
+        return !currentStage.isBlank() && navigationService.canEditStage(user.role(), currentStage);
     }
 
     public Map<String, Object> encounterHistory(String patientCaseId, SessionUser user) {
@@ -1371,6 +1467,20 @@ public class PreAiEncounterService {
         );
         audit(encounterId, "attachment.upload", stage, user, "上传本阶段附件");
         return toMap(workspace(encounterId, user));
+    }
+
+    /**
+     * 化验报告当前版本号（轻量查询）。
+     * 前端保存前只需该数字；原先前端为此拉取整个 workspace，病例量大时耗时 0.3~1.6 秒。
+     * 保存时的权威版本仍由 saveLabReport 以 FOR UPDATE 自行取得，本方法不改变并发语义。
+     */
+    public int currentLabReportVersion(String encounterId, String templateId, String reportDate, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        List<Integer> versions = jdbcTemplate.queryForList(
+            "SELECT version FROM pre_ai_lab_reports WHERE encounter_id = ? AND template_id = ? AND report_date = ? "
+                + "ORDER BY version DESC LIMIT 1",
+            Integer.class, safe(encounterId), safe(templateId), safe(reportDate));
+        return versions.isEmpty() || versions.get(0) == null ? 0 : versions.get(0);
     }
 
     @Transactional
@@ -3405,15 +3515,30 @@ public class PreAiEncounterService {
         return row;
     }
 
+    /**
+     * 批量预取阶段状态时的摘要构造：避免每个就诊再查一次 stageStatusMap。
+     * 语义与 encounterSummary(encounter) 一致，仅换用外部已取好的状态数据。
+     */
+    private ObjectNode encounterSummary(ObjectNode encounter, Map<String, ObjectNode> preloadedStatuses) {
+        ObjectNode summary = encounter.deepCopy();
+        summary.set("stageStatuses", preloadedStatuses
+            .getOrDefault(text(summary, "id"), objectMapper.createObjectNode()).deepCopy());
+        return finishEncounterSummary(summary);
+    }
+
     private ObjectNode encounterSummary(ObjectNode encounter) {
         ObjectNode summary = encounter.deepCopy();
+        summary.set("stageStatuses", stageStatusMap(text(summary, "id")));
+        return finishEncounterSummary(summary);
+    }
+
+    private ObjectNode finishEncounterSummary(ObjectNode summary) {
         JsonNode patient = summary.path("patient");
         summary.put("patientName", text(patient, "patientName"));
         summary.put("gender", text(patient, "gender"));
         summary.put("age", text(patient, "age"));
         summary.put("visitDate", text(patient, "visitDate"));
         summary.remove(List.of("patient", "visitMeta", "legacyReference"));
-        summary.set("stageStatuses", stageStatusMap(text(summary, "id")));
         enrichEncounterWorkflow(summary);
         return summary;
     }

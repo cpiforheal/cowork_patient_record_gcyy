@@ -449,6 +449,26 @@ export const getPreAiPatientCasesApi = async () => {
   return clinicResponse(await parseClinicApiResponse<{ list: PreAiPatientCase[] }>(result));
 };
 
+/**
+ * 化验报告当前版本号（轻量接口）。
+ * 保存化验报告前只需一个版本号，原先为此拉取整个工作台 workspace（含各阶段、辅助任务、
+ * 附件等），实测 0.3~1.6 秒，是"上传结果转圈久"的直接原因。改用本接口。
+ */
+export const getPreAiLabReportVersionApi = async (
+  encounterId: string,
+  templateId: string,
+  reportDate: string,
+  signal?: AbortSignal
+) => {
+  const query = new URLSearchParams({ templateId, reportDate });
+  const result = await clinicFetch(
+    `/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports/version?${query.toString()}`,
+    { headers: authHeaders(), signal }
+  );
+  const data = await parseClinicApiResponse<{ version: number }>(result);
+  return clinicResponse(data);
+};
+
 let dutyUserOptionsCache: PreAiDutyUserOption[] | undefined;
 let dutyUserOptionsRequest: Promise<PreAiDutyUserOption[]> | undefined;
 

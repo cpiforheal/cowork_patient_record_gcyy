@@ -218,6 +218,7 @@ import {
   getPatientListApi,
   getPreAiEncountersApi,
   getPreAiWorkspaceApi,
+  getPreAiLabReportVersionApi,
   savePreAiLabReportApi,
   savePatientRecordApi,
   uploadDocumentsApi,
@@ -619,10 +620,15 @@ const saveToArchive = async () => {
     }
     if (selectedPatient.value.preAiEncounterId) {
       const encounterId = selectedPatient.value.preAiEncounterId;
-      const { data: workspace } = await getPreAiWorkspaceApi(encounterId);
-      const expectedVersion = workspace.labReports
-        .filter(report => report.templateId === activeTemplate.value.id && report.reportDate === reportDate.value)
-        .reduce((version, report) => Math.max(version, report.version), 0);
+      // 只为拿版本号，改用轻量接口；原先前端为此拉取整个工作台 workspace，
+      // 在病例量大时耗时 0.3~1.6 秒，是"上传结果转圈久"的直接原因。
+      // 服务端保存时仍会以 FOR UPDATE 自行取权威版本并做冲突校验，语义不变。
+      const { data: versionInfo } = await getPreAiLabReportVersionApi(
+        encounterId,
+        activeTemplate.value.id,
+        reportDate.value
+      );
+      const expectedVersion = Number(versionInfo?.version || 0);
       const metrics = activeTemplate.value.metrics
         .map(metric => ({
           key: metric.key,
