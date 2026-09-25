@@ -1,11 +1,11 @@
 <template>
   <!-- 带分组的菜单层级：按 section 输出小标题，条目之间保持扁平（不追加缩进层级） -->
   <template v-for="group in groups" :key="group.key">
-    <el-menu-item class="nav-section-item" disabled>
+    <el-menu-item :index="`section-${group.key}`" class="nav-section-item" disabled>
       <span class="nav-section-text">{{ group.title }}</span>
     </el-menu-item>
     <SubMenu :menu-list="group.items" />
-    <el-menu-item class="nav-section-gap" disabled />
+    <el-menu-item :index="`gap-${group.key}`" class="nav-section-gap" disabled />
   </template>
   <SubMenu :menu-list="plainMenus" />
 </template>

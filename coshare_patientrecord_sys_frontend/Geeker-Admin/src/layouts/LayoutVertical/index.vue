@@ -38,9 +38,12 @@
           <img class="logo-img" src="@/assets/images/logo.jpg" alt="" />
           <strong>{{ title }}</strong>
         </div>
-        <el-menu :router="false" :default-active="activeMenu" :unique-opened="accordion">
-          <SubMenu :menu-list="menuList" />
-        </el-menu>
+        <SideNav
+          :menu-list="menuList"
+          :active-menu="activeMenu"
+          :is-collapse="false"
+          :accordion="accordion"
+        />
       </nav>
     </el-drawer>
     <nav v-if="mobileShortcuts.length" class="mobile-shortcuts" aria-label="常用快捷入口">
@@ -62,7 +65,6 @@ import { useGlobalStore } from "@/stores/modules/global";
 import Main from "@/layouts/components/Main/index.vue";
 import ToolBarLeft from "@/layouts/components/Header/ToolBarLeft.vue";
 import ToolBarRight from "@/layouts/components/Header/ToolBarRight.vue";
-import SubMenu from "@/layouts/components/Menu/SubMenu.vue";
 import SideNav from "@/layouts/components/Menu/SideNav.vue";
 import UserFooter from "@/layouts/components/Menu/UserFooter.vue";
 

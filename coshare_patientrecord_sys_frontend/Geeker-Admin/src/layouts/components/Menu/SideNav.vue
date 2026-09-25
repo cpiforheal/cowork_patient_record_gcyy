@@ -1,14 +1,6 @@
 <template>
   <div class="sidenav-root">
-    <el-menu
-      :router="false"
-      :default-active="activeMenu"
-      :collapse="isCollapse"
-      :unique-opened="accordion"
-      :collapse-transition="false"
-    >
-      <SubMenu :menu-list="menuList" />
-    </el-menu>
+    <SubMenu :menu-list="menuList" />
   </div>
 </template>
 
