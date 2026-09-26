@@ -1,7 +1,6 @@
 import { authHeaders } from "../authToken";
 import { clinicFetch, clinicResponse, parseClinicApiResponse } from "./http";
 
-/** 环比指标：previous 为 0 时 deltaRate 为 null（前端显示"—"而不是 Infinity） */
 export interface OpsMetric {
   current: number;
   previous: number;
@@ -65,12 +64,93 @@ export interface OpsDashboardResult {
   monthlyPatients: OpsPatientPoint[];
 }
 
-/** 运营数据看板：面向管理层的只读聚合，全部为计数类指标，不含患者隐私字段 */
+export type AddressAnalysisLevel = "COUNTY" | "TOWNSHIP" | "VILLAGE" | "PATIENT";
+
+export interface AddressAnalysisNode {
+  key: string;
+  label: string;
+  level: AddressAnalysisLevel | "PATIENT";
+  patientCount: number;
+  visitCount: number;
+  share: number;
+  hasChildren: boolean;
+}
+
+export interface AddressExamSummary {
+  reports?: number;
+  abnormal?: number;
+  critical?: number;
+}
+
+export interface AddressPatientCard {
+  id: string;
+  name: string;
+  gender: string;
+  age: string;
+  phone: string;
+  address: string;
+  county: string;
+  township: string;
+  village: string;
+  visitCount: number;
+  latestVisitDate: string;
+  encounterId: string;
+  examSummary: Record<string, AddressExamSummary>;
+}
+
+export interface AddressAnalysisResult {
+  generatedAt: string;
+  from: string;
+  to: string;
+  level: AddressAnalysisLevel;
+  parentKey: string;
+  metric: "patients" | "visits";
+  breadcrumb: Array<{ key: string; label: string; level: string }>;
+  summary: { patientCount: number; visitCount: number; unidentifiedCount: number };
+  nodes: AddressAnalysisNode[];
+  total: number;
+  page: number;
+  pageSize: number;
+  patients?: AddressPatientCard[];
+  patientTotal?: number;
+}
+
 export const loadOpsDashboardApi = async (months = 12, signal?: AbortSignal) => {
   const result = await clinicFetch(`/ops/dashboard?months=${encodeURIComponent(String(months))}`, {
     headers: authHeaders(),
     signal
   });
   const data = await parseClinicApiResponse<OpsDashboardResult>(result);
-  return clinicResponse(data, "运营数据已加载");
+  return clinicResponse(data, "Operations dashboard loaded");
+};
+
+export const loadAddressAnalysisApi = async (
+  params: {
+    from: string;
+    to: string;
+    parentKey?: string;
+    level?: AddressAnalysisLevel;
+    metric?: "patients" | "visits";
+    keyword?: string;
+    page?: number;
+    pageSize?: number;
+  },
+  signal?: AbortSignal
+) => {
+  const query = new URLSearchParams({
+    from: params.from,
+    to: params.to,
+    parentKey: params.parentKey || "",
+    level: params.level || "COUNTY",
+    metric: params.metric || "visits",
+    keyword: params.keyword || "",
+    page: String(params.page || 1),
+    pageSize: String(params.pageSize || 50)
+  });
+  const result = await clinicFetch(`/ops/dashboard/address-analysis?${query.toString()}`, {
+    headers: authHeaders(),
+    signal
+  });
+  const data = await parseClinicApiResponse<AddressAnalysisResult>(result);
+  return clinicResponse(data, "Address analysis loaded");
 };

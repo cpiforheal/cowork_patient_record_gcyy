@@ -30,4 +30,20 @@ public class OpsDashboardController {
     ) {
         return ApiResult.success(opsDashboardService.dashboard(months, AuthPermission.currentUserOrThrow()));
     }
+
+    @GetMapping("/clinic-api/ops/dashboard/address-analysis")
+    public ApiResult<Map<String, Object>> addressAnalysis(
+        @RequestParam(required = false, defaultValue = "") String from,
+        @RequestParam(required = false, defaultValue = "") String to,
+        @RequestParam(required = false, defaultValue = "") String parentKey,
+        @RequestParam(required = false, defaultValue = "COUNTY") String level,
+        @RequestParam(required = false, defaultValue = "visits") String metric,
+        @RequestParam(required = false, defaultValue = "") String keyword,
+        @RequestParam(required = false, defaultValue = "1") int page,
+        @RequestParam(required = false, defaultValue = "50") int pageSize
+    ) {
+        return ApiResult.success(opsDashboardService.addressAnalysis(
+            from, to, parentKey, level, metric, keyword, page, pageSize, AuthPermission.currentUserOrThrow()
+        ));
+    }
 }

@@ -595,10 +595,11 @@ public class AuthNavigationService {
             "tcmPharmacyDisplayMenu=display:read,announcement:play"
         )));
 
-        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive, followUpConfig), mergePermissions(permissions(
+        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive, followUpConfig, opsDashboard), mergePermissions(permissions(
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "patientsOverview=patient:read,field:read",
             "patientArchive=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
+            "opsDashboard=ops:read",
             "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play",
             "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote",

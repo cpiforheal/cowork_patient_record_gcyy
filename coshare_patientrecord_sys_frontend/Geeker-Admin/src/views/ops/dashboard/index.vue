@@ -127,7 +127,9 @@
         <VChart class="ops-chart" :option="departmentOption" autoresize />
       </div>
       <el-empty v-else description="暂无科室数据" :image-size="70" />
-    </section>
+     </section>
+
+    <AddressDrilldownPanel />
   </div>
 </template>
 
@@ -142,6 +144,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
 import type { EChartsOption } from "echarts";
 import { loadOpsDashboardApi, type OpsDashboardResult } from "@/api/modules/clinic/opsDashboard";
+import AddressDrilldownPanel from "./AddressDrilldownPanel.vue";
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent]);
 
