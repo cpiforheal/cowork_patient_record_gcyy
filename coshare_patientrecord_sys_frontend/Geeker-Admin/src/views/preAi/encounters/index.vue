@@ -248,6 +248,7 @@
             :status-type="stageStatusType"
             :is-active="isWorkflowCardActive"
             :is-current="isCurrentWorkflowCard"
+            :is-pending="isPendingWorkflowCard"
             @select="selectWorkflowCard"
             @restore="restoreWorkflowContext"
             @interact="scheduleWorkflowContextCompaction"
@@ -3591,11 +3592,14 @@ const isWorkflowCardActive = (card: WorkflowCard) =>
   workflowSelected.value &&
   ((card.kind === "AUX" && selectedPanel.value === "AUX") ||
     (card.kind === "STAGE" && selectedPanel.value === "STAGE" && selectedStageCode.value === card.stageCode));
+// “当前环节”只表示病历实际流转到的岗位节点，与选中态分离
 const isCurrentWorkflowCard = (card: WorkflowCard) => {
   if (!workspace.value) return false;
-  if (card.kind === "STAGE") return workspace.value.encounter.currentStage === card.stageCode;
-  return Boolean(labTask.value?.requiredBeforeExport && labTask.value.status !== "COMPLETED");
+  return card.kind === "STAGE" && workspace.value.encounter.currentStage === card.stageCode;
 };
+// 辅助检查未完成时的“待处理”提示，属于阻塞项而不是当前环节
+const isPendingWorkflowCard = (card: WorkflowCard) =>
+  card.kind === "AUX" && Boolean(labTask.value?.requiredBeforeExport && labTask.value.status !== "COMPLETED");
 const generatedTemplateText = (field: PreAiFieldConfig, form: Record<string, any>) => {
   switch (field.templateGenerator) {
     case "chiefComplaint":

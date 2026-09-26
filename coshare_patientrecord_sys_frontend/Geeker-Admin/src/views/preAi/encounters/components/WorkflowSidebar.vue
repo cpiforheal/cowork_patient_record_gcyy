@@ -35,7 +35,7 @@
         <small v-if="!compact">按岗位节点切换填写区</small>
       </div>
       <button v-if="compact" type="button" class="workflow-restore" @click="$emit('restore')">展开流转信息</button>
-      <span v-else>当前岗位已加重标识</span>
+      <span v-else>蓝环为已选中，左侧色条为当前环节</span>
     </div>
 
     <el-scrollbar class="workflow-scrollbar">
@@ -46,17 +46,21 @@
             class="workflow-card"
             :class="{
               active: isActive(card),
-              mine: card.editable,
               current: isCurrent(card),
+              pending: isPending(card),
+              mine: card.editable,
               skipped: statusOf(card) === 'SKIPPED'
             }"
+            :aria-pressed="isActive(card)"
+            :aria-current="isCurrent(card) ? 'step' : undefined"
+            :title="`${card.order}. ${card.title} · ${card.owner}`"
             @click="$emit('select', card)"
           >
             <span class="workflow-order">{{ card.order }}</span>
             <div class="workflow-card-main">
               <strong>{{ card.title }}</strong>
               <small>{{ card.owner }}</small>
-              <em v-if="card.editable">当前岗位可办理</em>
+              <em v-if="cardFlag(card)">{{ cardFlag(card) }}</em>
             </div>
             <el-tag size="small" :type="statusType(statusOf(card))">
               {{ statusLabel(card) }}
@@ -94,10 +98,19 @@ const props = defineProps<{
   statusType: (status: PreAiStageStatus) => "success" | "warning" | "info";
   isActive: (card: WorkflowCard) => boolean;
   isCurrent: (card: WorkflowCard) => boolean;
+  isPending: (card: WorkflowCard) => boolean;
 }>();
 
 const completedCount = computed(() => props.cards.filter(card => ["COMPLETED", "SKIPPED"].includes(props.statusOf(card))).length);
 const returnedCount = computed(() => props.cards.filter(card => props.statusOf(card) === "RETURNED").length);
+
+// 卡片左下角只展示“语义状态”，选中反馈交给蓝环，避免两种高亮互相干扰
+const cardFlag = (card: WorkflowCard) => {
+  if (props.isCurrent(card)) return "当前环节";
+  if (props.isPending(card)) return "待补化验";
+  if (card.editable) return "当前岗位可办理";
+  return "";
+};
 
 defineEmits<{
   select: [card: WorkflowCard];
@@ -290,12 +303,14 @@ defineEmits<{
   border-radius: 12px;
   background: var(--el-bg-color);
   cursor: pointer;
+  will-change: transform;
   transition:
     min-height 0.24s var(--ease-standard),
     padding 0.24s var(--ease-standard),
-    border-color 0.2s var(--ease-standard),
-    box-shadow 0.2s var(--ease-standard),
-    background-color 0.2s var(--ease-standard);
+    border-color 0.18s var(--ease-standard),
+    box-shadow 0.18s var(--ease-standard),
+    background-color 0.18s var(--ease-standard),
+    transform 0.16s var(--ease-standard);
 }
 .workflow-sidebar.compact .workflow-card {
   min-height: 72px;
@@ -303,38 +318,52 @@ defineEmits<{
   gap: 6px 8px;
   padding: 9px 10px;
 }
-.workflow-card:hover,
-.workflow-card.active {
-  border-color: var(--el-color-primary-light-3);
-  background: color-mix(in srgb, var(--el-color-primary) 8%, var(--el-bg-color));
-  box-shadow: 0 8px 20px rgb(64 158 255 / 14%);
+/* 悬停：轻微抬起 + 浅色提示，不再复用“已选中”的强填充 */
+.workflow-card:hover {
+  border-color: var(--el-color-primary-light-5);
+  background: color-mix(in srgb, var(--el-color-primary) 4%, var(--el-bg-color));
+  box-shadow: 0 6px 16px rgb(64 158 255 / 10%);
+  transform: translateY(-2px);
+}
+/* 按下：真实点击回弹 */
+.workflow-card:active {
+  transform: translateY(0) scale(0.978);
+  box-shadow: 0 2px 6px rgb(64 158 255 / 12%);
+  transition-duration: 0.06s;
 }
 .workflow-card:focus-visible {
   outline: 2px solid var(--el-color-primary-light-3);
   outline-offset: 2px;
 }
+/* 已选中：场上唯一带蓝环与实心序号的卡片 */
 .workflow-card.active {
-  outline: 2px solid color-mix(in srgb, var(--el-color-primary) 20%, transparent);
-  outline-offset: 1px;
-}
-.workflow-card.current {
   border-color: var(--el-color-primary);
-  background: color-mix(in srgb, var(--el-color-primary) 24%, var(--el-bg-color));
-  box-shadow: 0 12px 28px rgb(0 150 136 / 16%);
+  background: color-mix(in srgb, var(--el-color-primary) 12%, var(--el-bg-color));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 16%, transparent),
+    0 10px 24px rgb(64 158 255 / 18%);
 }
-.workflow-card.current::after {
+/* 当前环节：左侧色条 + 文字标签，不再整块加重 */
+.workflow-card.current {
+  border-color: var(--el-color-primary-light-5);
+  background: color-mix(in srgb, var(--el-color-primary) 6%, var(--el-bg-color));
+}
+/* 待补辅助检查：琥珀色阻塞提示，区别于“当前环节”与“已选中” */
+.workflow-card.pending {
+  border-color: var(--el-color-warning-light-5);
+  background: color-mix(in srgb, var(--el-color-warning) 7%, var(--el-bg-color));
+}
+.workflow-card.current::before,
+.workflow-card.pending::before {
   position: absolute;
-  inset: 0 0 auto;
-  height: 4px;
+  inset: 0 auto 0 0;
+  width: 3px;
   content: "";
-  border-radius: 12px 12px 0 0;
+  border-radius: 12px 0 0 12px;
   background: var(--el-color-primary);
 }
-.workflow-card.mine .workflow-order,
-.workflow-card.current .workflow-order {
-  color: white;
-  background: var(--el-color-primary);
-  box-shadow: 0 8px 18px rgb(0 150 136 / 24%);
+.workflow-card.pending::before {
+  background: var(--el-color-warning);
 }
 .workflow-card.skipped {
   opacity: 0.58;
@@ -351,11 +380,32 @@ defineEmits<{
   transition:
     width 0.24s var(--ease-standard),
     height 0.24s var(--ease-standard),
-    box-shadow 0.24s var(--ease-standard);
+    color 0.18s var(--ease-standard),
+    background-color 0.18s var(--ease-standard),
+    box-shadow 0.18s var(--ease-standard),
+    transform 0.18s var(--ease-standard);
 }
 .workflow-sidebar.compact .workflow-order {
   width: 28px;
   height: 28px;
+}
+/* 可办理：只做描边提示，实心圆保留给“已选中” */
+.workflow-card.mine .workflow-order {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-8);
+  box-shadow: inset 0 0 0 1.5px var(--el-color-primary-light-5);
+}
+.workflow-card.active .workflow-order {
+  color: white;
+  background: var(--el-color-primary);
+  box-shadow: 0 6px 14px rgb(0 150 136 / 22%);
+}
+.workflow-card:hover .workflow-order {
+  transform: scale(1.06);
+}
+.workflow-card.active:hover .workflow-order,
+.workflow-card:active .workflow-order {
+  transform: scale(1);
 }
 .workflow-card-main {
   min-width: 0;
@@ -377,9 +427,22 @@ defineEmits<{
   display: none;
 }
 .workflow-card-main em {
+  justify-self: start;
+  max-width: 100%;
+  padding: 0 6px;
   color: var(--el-color-primary);
   font-style: normal;
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 17px;
+  border-radius: 999px;
+  background: var(--el-color-primary-light-9);
+}
+.workflow-card.current .workflow-card-main em {
+  background: var(--el-color-primary-light-8);
+}
+.workflow-card.pending .workflow-card-main em {
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
 }
 .workflow-card :deep(.el-tag) {
   grid-column: 2;
@@ -397,6 +460,11 @@ defineEmits<{
   .workflow-card,
   .workflow-order {
     transition: none;
+  }
+  .workflow-card:hover,
+  .workflow-card:active,
+  .workflow-card:hover .workflow-order {
+    transform: none;
   }
 }
 @media (max-width: 920px) {
