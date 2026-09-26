@@ -258,6 +258,7 @@ public class OpsDashboardService {
         String[] parts = parentKey.split("/", -1);
         if (parts.length > 0 && !parts[0].isBlank()) rows.add(Map.of("key", parts[0], "label", parts[0].replace("county:", ""), "level", "TOWNSHIP"));
         if (parts.length > 1 && !parts[1].isBlank()) rows.add(Map.of("key", parentKey, "label", parts[1].replace("township:", ""), "level", "VILLAGE"));
+        if (parts.length > 2 && !parts[2].isBlank()) rows.add(Map.of("key", parentKey, "label", parts[2].replace("village:", ""), "level", "PATIENT"));
         return rows;
     }
 
