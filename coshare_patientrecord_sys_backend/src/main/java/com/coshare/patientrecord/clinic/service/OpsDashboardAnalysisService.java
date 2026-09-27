@@ -93,8 +93,12 @@ public class OpsDashboardAnalysisService {
     private int followUpCount(boolean overdue) {
         String today = LocalDate.now().toString();
         String sql = overdue
-            ? "SELECT COUNT(*) FROM pre_ai_follow_up_visits WHERE next_review_date IS NOT NULL AND next_review_date <> '' AND next_review_date < ? AND (arrived_at IS NULL OR arrived_at = '')"
-            : "SELECT COUNT(*) FROM pre_ai_follow_up_visits WHERE next_review_date = ? AND (arrived_at IS NULL OR arrived_at = '')";
+            ? "SELECT COUNT(*) FROM pre_ai_follow_up_visits v WHERE v.next_review_date IS NOT NULL AND v.next_review_date <> '' AND v.next_review_date < ? "
+                + "AND NOT EXISTS (SELECT 1 FROM pre_ai_audit_logs a WHERE a.action = 'followup.recall.contact' "
+                + "AND a.detail LIKE CONCAT('%recall:', v.id, '%'))"
+            : "SELECT COUNT(*) FROM pre_ai_follow_up_visits v WHERE v.next_review_date = ? "
+                + "AND NOT EXISTS (SELECT 1 FROM pre_ai_audit_logs a WHERE a.action = 'followup.recall.contact' "
+                + "AND a.detail LIKE CONCAT('%recall:', v.id, '%'))";
         Integer value = jdbcTemplate.queryForObject(sql, Integer.class, today);
         return value == null ? 0 : value;
     }
@@ -136,4 +140,5 @@ public class OpsDashboardAnalysisService {
         private Map<String, Object> toMap(String department, int total) { return Map.of("department", department, "visits", visits, "uniquePatients", patients.size(), "share", total <= 0 ? 0 : Math.round(visits * 1000f / total) / 10.0); }
     }
 }
+
 
