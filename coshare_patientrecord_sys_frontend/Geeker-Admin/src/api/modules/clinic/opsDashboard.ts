@@ -1,103 +1,28 @@
 import { authHeaders } from "../authToken";
 import { clinicFetch, clinicResponse, parseClinicApiResponse } from "./http";
 
-export interface OpsMetric {
-  current: number;
-  previous: number;
-  delta: number;
-  deltaRate: number | null;
-}
-
-export interface OpsDashboardKpi {
-  visitsThisMonth: OpsMetric;
-  visitsLastMonth: number;
-  followUpDue: number;
-  followUpArrived: number;
-  followUpOverdue: number;
-  followUpArrivalRate: number;
-  patientCases: number;
-  newCasesThisMonth: number;
-}
-
-export interface OpsTrendPoint {
-  month: string;
-  visits: number;
-}
-
-export interface OpsPatientPoint {
-  month: string;
-  patients: number;
-}
-
-export interface OpsStatusSlice {
-  status: string;
-  label: string;
-  count: number;
-}
-
-export interface OpsFollowUp {
-  dueTotal: number;
-  notScheduled: number;
-  reached: number;
-  arrived: number;
-  overdue: number;
-  dueToday: number;
-  upcoming: number;
-  reachRate: number;
-  arrivalRate: number;
-}
-
-export interface OpsDepartment {
-  department: string;
-  count: number;
-}
-
-export interface OpsDashboardResult {
-  generatedAt: string;
-  from: string;
-  to: string;
-  kpi: OpsDashboardKpi;
-  trend: OpsTrendPoint[];
-  statusDistribution: OpsStatusSlice[];
-  followUp: OpsFollowUp;
-  departments: OpsDepartment[];
-  monthlyPatients: OpsPatientPoint[];
+export interface OpsDashboardAnalysisResult {
+  period: { from: string; to: string; generatedAt: string };
+  kpi: { visits: number; uniquePatients: number; newPatients: number; overdueFollowUps: number };
+  trend: Array<{ period: string; visits: number; uniquePatients: number }>;
+  attention: { overdueFollowUps: number; dueTodayFollowUps: number; unidentifiedAddresses: number };
+  departments: Array<{ department: string; visits: number; uniquePatients: number; share: number }>;
+  view: string;
 }
 
 export type AddressAnalysisLevel = "COUNTY" | "TOWNSHIP" | "VILLAGE" | "PATIENT";
-
-export interface AddressAnalysisNode {
-  key: string;
-  label: string;
-  level: AddressAnalysisLevel | "PATIENT";
-  patientCount: number;
-  visitCount: number;
-  share: number;
-  hasChildren: boolean;
-}
-
-export interface AddressExamSummary {
-  reports?: number;
-  abnormal?: number;
-  critical?: number;
-}
-
+export interface AddressAnalysisNode { key: string; label: string; level: AddressAnalysisLevel; patientCount: number; visitCount: number; share: number; hasChildren: boolean; }
 export interface AddressPatientCard {
   id: string;
   name: string;
-  gender: string;
   age: string;
-  phone: string;
-  address: string;
-  county: string;
   township: string;
-  village: string;
   visitCount: number;
   latestVisitDate: string;
   encounterId: string;
-  examSummary: Record<string, AddressExamSummary>;
+  phone?: string;
+  address?: string;
 }
-
 export interface AddressAnalysisResult {
   generatedAt: string;
   from: string;
@@ -111,30 +36,31 @@ export interface AddressAnalysisResult {
   total: number;
   page: number;
   pageSize: number;
+  patientAccess?: boolean;
   patients?: AddressPatientCard[];
   patientTotal?: number;
 }
 
-export const loadOpsDashboardApi = async (months = 12, signal?: AbortSignal) => {
-  const result = await clinicFetch(`/ops/dashboard?months=${encodeURIComponent(String(months))}`, {
-    headers: authHeaders(),
-    signal
-  });
-  const data = await parseClinicApiResponse<OpsDashboardResult>(result);
-  return clinicResponse(data, "Operations dashboard loaded");
+export const loadOpsDashboardApi = async (params: {
+  from?: string;
+  to?: string;
+  granularity?: "day" | "week" | "month";
+  view?: string;
+  months?: number;
+} = {}, signal?: AbortSignal) => {
+  const query = new URLSearchParams();
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
+  query.set("granularity", params.granularity || "day");
+  query.set("view", params.view || "overview");
+  query.set("months", String(params.months || 1));
+  const result = await clinicFetch(`/ops/dashboard?${query.toString()}`, { headers: authHeaders(), signal });
+  const data = await parseClinicApiResponse<OpsDashboardAnalysisResult>(result);
+  return clinicResponse(data, "运营概览已加载");
 };
 
 export const loadAddressAnalysisApi = async (
-  params: {
-    from: string;
-    to: string;
-    parentKey?: string;
-    level?: AddressAnalysisLevel;
-    metric?: "patients" | "visits";
-    keyword?: string;
-    page?: number;
-    pageSize?: number;
-  },
+  params: { from: string; to: string; parentKey?: string; level?: AddressAnalysisLevel; metric?: "patients" | "visits"; keyword?: string; page?: number; pageSize?: number },
   signal?: AbortSignal
 ) => {
   const query = new URLSearchParams({
@@ -147,10 +73,8 @@ export const loadAddressAnalysisApi = async (
     page: String(params.page || 1),
     pageSize: String(params.pageSize || 50)
   });
-  const result = await clinicFetch(`/ops/dashboard/address-analysis?${query.toString()}`, {
-    headers: authHeaders(),
-    signal
-  });
+  const result = await clinicFetch(`/ops/dashboard/address-analysis?${query.toString()}`, { headers: authHeaders(), signal });
   const data = await parseClinicApiResponse<AddressAnalysisResult>(result);
-  return clinicResponse(data, "Address analysis loaded");
+  return clinicResponse(data, "人群分析已加载");
 };
+

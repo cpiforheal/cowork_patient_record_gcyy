@@ -1,8 +1,13 @@
 package com.coshare.patientrecord.clinic.controller;
 
 import com.coshare.patientrecord.clinic.service.OpsDashboardService;
+import com.coshare.patientrecord.clinic.service.OpsDashboardAnalysisService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.security.AuthPermission;
+import com.coshare.patientrecord.auth.service.RoleCatalog;
+import java.util.Set;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,15 +24,24 @@ import org.springframework.web.bind.annotation.RestController;
 public class OpsDashboardController {
 
     private final OpsDashboardService opsDashboardService;
+    private final OpsDashboardAnalysisService analysisService;
 
-    public OpsDashboardController(OpsDashboardService opsDashboardService) {
+    public OpsDashboardController(OpsDashboardService opsDashboardService, OpsDashboardAnalysisService analysisService) {
         this.opsDashboardService = opsDashboardService;
+        this.analysisService = analysisService;
     }
 
     @GetMapping("/clinic-api/ops/dashboard")
     public ApiResult<Map<String, Object>> dashboard(
-        @RequestParam(required = false, defaultValue = "12") int months
+        @RequestParam(required = false, defaultValue = "12") int months,
+        @RequestParam(required = false, defaultValue = "") String from,
+        @RequestParam(required = false, defaultValue = "") String to,
+        @RequestParam(required = false, defaultValue = "day") String granularity,
+        @RequestParam(required = false, defaultValue = "overview") String view
     ) {
+        if (!from.isBlank() || !to.isBlank() || !"overview".equalsIgnoreCase(view) || !"day".equalsIgnoreCase(granularity)) {
+            return ApiResult.success(analysisService.dashboard(from, to, granularity, view, months, AuthPermission.currentUserOrThrow()));
+        }
         return ApiResult.success(opsDashboardService.dashboard(months, AuthPermission.currentUserOrThrow()));
     }
 
@@ -42,8 +56,13 @@ public class OpsDashboardController {
         @RequestParam(required = false, defaultValue = "1") int page,
         @RequestParam(required = false, defaultValue = "50") int pageSize
     ) {
+        var user = AuthPermission.currentUserOrThrow();
+        if ("PATIENT".equalsIgnoreCase(level) && !Set.of("admin", "nurse", "nursing").contains(RoleCatalog.canonicalize(user.role()))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "patient cards are not available for this role");
+        }
         return ApiResult.success(opsDashboardService.addressAnalysis(
-            from, to, parentKey, level, metric, keyword, page, pageSize, AuthPermission.currentUserOrThrow()
+            from, to, parentKey, level, metric, keyword, page, pageSize, user
         ));
     }
 }
+

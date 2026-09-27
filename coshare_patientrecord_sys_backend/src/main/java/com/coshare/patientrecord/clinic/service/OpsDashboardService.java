@@ -420,9 +420,6 @@ public class OpsDashboardService {
             row.put("visitCount", visitCount);
             row.put("latestVisitDate", latestVisitDate.equals(LocalDate.MIN) ? "" : latestVisitDate.toString());
             row.put("encounterId", latestEncounterId);
-            Map<String, Object> summary = new LinkedHashMap<>();
-            exams.values().forEach(exam -> summary.putAll(exam.toMap()));
-            row.put("examSummary", summary);
             return row;
         }
     }
@@ -741,3 +738,4 @@ public class OpsDashboardService {
         };
     }
 }
+

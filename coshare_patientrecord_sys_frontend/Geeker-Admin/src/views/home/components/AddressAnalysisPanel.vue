@@ -87,7 +87,7 @@ const load = async () => {
   }
 };
 
-const openDashboard = () => router.push("/ops/dashboard");
+const openDashboard = () => router.push({ path: "/ops/dashboard", query: { view: "population" } });
 
 onMounted(() => void load());
 </script>
@@ -195,3 +195,4 @@ onMounted(() => void load());
   }
 }
 </style>
+
