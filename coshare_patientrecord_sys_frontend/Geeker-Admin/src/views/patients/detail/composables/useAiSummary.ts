@@ -3,6 +3,7 @@ import { computed, ref, unref, type ComputedRef } from "vue";
 import { ElMessage } from "element-plus";
 
 import { generateRecordAiSummaryApi, speakAiSummaryApi, type AiRecordSummary } from "@/api/modules/clinic";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 type UseAiSummaryOptions = {
   patientId: ComputedRef<string>;
@@ -240,9 +241,11 @@ export const useAiSummary = ({ patientId, fieldValues }: UseAiSummaryOptions) =>
   const copy = async () => {
     if (!summary.value) return;
 
-    await navigator.clipboard.writeText(formatText());
-
-    ElMessage.success("AI总结已复制");
+    if (await copyTextToClipboard(formatText())) {
+      ElMessage.success("AI总结已复制");
+    } else {
+      ElMessage.warning("复制失败，请手动选择文本复制");
+    }
   };
 
   return {

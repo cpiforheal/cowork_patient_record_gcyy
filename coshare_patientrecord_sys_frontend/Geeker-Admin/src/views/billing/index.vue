@@ -80,6 +80,7 @@ import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { CopyDocument, Search } from "@element-plus/icons-vue";
 import { getBillingPatientsApi, type BillingPatientInfo } from "@/api/modules/clinic/billing";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 const keyword = ref("");
 const patients = ref<BillingPatientInfo[]>([]);
@@ -104,10 +105,9 @@ const onSearch = () => {
 };
 
 const copyText = async (text: string, label: string) => {
-  try {
-    await navigator.clipboard.writeText(text);
+  if (await copyTextToClipboard(text)) {
     ElMessage.success(`${label}已复制`);
-  } catch {
+  } else {
     ElMessage.warning("复制失败，请手动选择文本复制");
   }
 };

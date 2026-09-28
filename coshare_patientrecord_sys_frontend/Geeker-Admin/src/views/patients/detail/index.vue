@@ -1605,6 +1605,7 @@ import {
 import { useUserStore } from "@/stores/modules/user";
 
 import { traceAsync } from "@/utils/performanceTrace";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 import medicalLogoUrl from "@/assets/images/logo.jpg";
 
@@ -4114,9 +4115,11 @@ const buildRecordText = () => {
 };
 
 const copyRecord = async () => {
-  await navigator.clipboard.writeText(buildRecordText());
-
-  ElMessage.success("健康档案文本已复制");
+  if (await copyTextToClipboard(buildRecordText())) {
+    ElMessage.success("健康档案文本已复制");
+  } else {
+    ElMessage.warning("复制失败，请手动选择文本复制");
+  }
 };
 
 const medicalRecordStatusLabel = (status: GeneratedMedicalRecord["status"]) => {

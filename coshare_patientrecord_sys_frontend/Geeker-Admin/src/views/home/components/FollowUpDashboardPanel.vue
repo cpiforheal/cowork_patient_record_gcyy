@@ -179,6 +179,7 @@ import {
   type RecallRow
 } from "@/api/modules/clinic/followUp";
 import { loadFollowUpScriptTemplates, followUpScriptSource } from "@/utils/followUpScript";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { getEncounterOverviewApi, getPreAiEncounterHistoryApi } from "@/api/modules/clinic";
 import { clinicFetch, parseClinicApiResponse } from "@/api/modules/clinic/http";
 import { authHeaders } from "@/api/modules/authToken";
@@ -407,10 +408,9 @@ const openScriptManage = () => {
 };
 
 const copyPhone = async (row: DashboardRow) => {
-  try {
-    await navigator.clipboard.writeText(row.phone || "");
+  if (await copyTextToClipboard(row.phone || "")) {
     ElMessage.success("电话已复制");
-  } catch {
+  } else {
     ElMessage.warning("复制失败，请手动记录");
   }
 };

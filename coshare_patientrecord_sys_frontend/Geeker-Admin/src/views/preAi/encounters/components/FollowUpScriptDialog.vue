@@ -264,6 +264,7 @@ import { ElMessage } from "element-plus";
 import { getEncounterOverviewApi, getPreAiWorkspaceApi, type PreAiEncounterOverview } from "@/api/modules/clinic";
 import { fetchFollowUpImageApi, type FollowUpVisit } from "@/api/modules/clinic/followUp";
 import { loadFollowUpScriptTemplates, renderFollowUpScript, type FollowUpScriptTemplate } from "@/utils/followUpScript";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 defineEmits<{
   "update:visible": [visible: boolean];
@@ -388,10 +389,9 @@ const progressPercent = computed(() =>
 );
 
 const copySection = async (body: string) => {
-  try {
-    await navigator.clipboard.writeText(body);
+  if (await copyTextToClipboard(body)) {
     ElMessage.success("当前沟通节点已复制");
-  } catch {
+  } else {
     ElMessage.warning("复制失败，请手动选择文本复制");
   }
 };
@@ -404,10 +404,9 @@ const completeSection = (index: number) => {
 };
 
 const copyScript = async () => {
-  try {
-    await navigator.clipboard.writeText(scriptPlainText.value);
+  if (await copyTextToClipboard(scriptPlainText.value)) {
     ElMessage.success("话术已复制，可直接粘贴到通话备忘");
-  } catch {
+  } else {
     ElMessage.warning("复制失败，请手动选择文本复制");
   }
 };

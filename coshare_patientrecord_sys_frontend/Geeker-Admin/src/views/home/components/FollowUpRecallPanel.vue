@@ -84,6 +84,7 @@ import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/modules/user";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import {
   loadRecallSummaryApi,
   markRecallContactedApi,
@@ -117,10 +118,9 @@ const load = async () => {
 };
 
 const copyPhone = async (phone: string) => {
-  try {
-    await navigator.clipboard.writeText(phone);
+  if (await copyTextToClipboard(phone)) {
     ElMessage.success(`已复制 ${phone}`);
-  } catch {
+  } else {
     ElMessage.warning("复制失败，请手动记录");
   }
 };

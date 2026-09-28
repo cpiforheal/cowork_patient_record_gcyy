@@ -3,6 +3,7 @@ import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import { ElMessage } from "element-plus";
 
 import type { RecordSection } from "@/config/fieldPermissions";
+import { copyTextToClipboard } from "@/utils/clipboard";
 
 export type AutoSaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 
@@ -73,11 +74,9 @@ export const useArchiveAutosave = ({
   const copySaveError = async () => {
     if (!lastSaveError.value) return;
 
-    try {
-      await navigator.clipboard.writeText(lastSaveError.value);
-
+    if (await copyTextToClipboard(lastSaveError.value)) {
       ElMessage.success("错误信息已复制");
-    } catch {
+    } else {
       ElMessage.warning("复制失败，请手动选择错误信息");
     }
   };

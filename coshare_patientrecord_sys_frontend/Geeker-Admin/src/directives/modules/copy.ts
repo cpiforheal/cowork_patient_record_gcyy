@@ -6,6 +6,7 @@
 
 import type { Directive, DirectiveBinding } from "vue";
 import { ElMessage } from "element-plus";
+import { copyTextToClipboard } from "@/utils/clipboard";
 interface ElType extends HTMLElement {
   copyData: string | number;
 }
@@ -24,7 +25,9 @@ const copy: Directive = {
 
 async function handleClick(this: any) {
   try {
-    await navigator.clipboard.writeText(this.copyData);
+    if (!(await copyTextToClipboard(String(this.copyData ?? "")))) {
+      throw new Error("浏览器未允许复制");
+    }
     ElMessage({
       type: "success",
       message: "复制成功"
