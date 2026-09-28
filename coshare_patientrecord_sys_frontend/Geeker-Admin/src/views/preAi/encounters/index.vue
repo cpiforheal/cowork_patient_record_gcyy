@@ -1953,6 +1953,7 @@ import {
   type PreAiWorkspace
 } from "@/api/modules/clinic";
 import WorkflowSidebar, { type WorkflowCard } from "./components/WorkflowSidebar.vue";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import MedicalRecordPreview from "./components/MedicalRecordPreview.vue";
 import LabReportPanel from "./components/LabReportPanel.vue";
 import DoctorReviewPanel from "./components/DoctorReviewPanel.vue";
@@ -3714,6 +3715,20 @@ const mergeStageForm = (code: PreAiStageCode, incoming: Record<string, any>) => 
     local[key] = next;
   });
 };
+
+/**
+ * 清空全部岗位表单，只允许在"切换病例"时调用。
+ *
+ * stageForms 是组件级共享状态，切换病例时组件不会重新挂载。若不清空：
+ *  mergeStageForm 的"后端未下发 / 后端为空则保留本地值"策略会把上一病例的
+ *  填写留在表单里，而 cleanStageForm 又是整表从本地取值提交，
+ *  于是两个病例会互相串写（手术史、病种模板等表现最明显）。
+ */
+const resetAllStageForms = () => {
+  (Object.keys(stageForms) as PreAiStageCode[]).forEach(code => {
+    Object.keys(stageForms[code]).forEach(key => delete stageForms[code][key]);
+  });
+};
 const applyQuickTemplate = (fieldKey: string, value: string) => {
   stageForms[selectedStageCode.value][fieldKey] = value;
   markStageDirty(selectedStageCode.value);
@@ -3895,6 +3910,8 @@ const hydrateWorkspace = (value: PreAiWorkspace) => {
   const switchedEncounter = workspace.value?.encounter.id !== value.encounter.id;
   if (switchedEncounter) {
     clearAllStageDirty();
+    // 换病例必须先清空本地表单，否则上一病例的值会被保守合并保留下来并随载荷写进新病例
+    resetAllStageForms();
     auxiliaryTasksDirty.value = false;
   }
   const keepInspectionImagesVisible =
@@ -5222,23 +5239,9 @@ const copyInpatientAiResult = async () => {
   const content = inpatientAiResultContent.value;
   if (!content) return;
 
-  try {
-    if (navigator.clipboard && globalThis.isSecureContext) {
-      await navigator.clipboard.writeText(content);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = content;
-      textarea.setAttribute("readonly", "");
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      const copied = document.execCommand("copy");
-      textarea.remove();
-      if (!copied) throw new Error("浏览器未允许复制");
-    }
+  if (await copyTextToClipboard(content)) {
     ElMessage.success("目标病历内容已复制");
-  } catch {
+  } else {
     ElMessage.warning("自动复制失败，请在文本框内全选并复制");
   }
 };
