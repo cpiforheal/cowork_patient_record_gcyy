@@ -377,7 +377,7 @@ public class AuthNavigationService {
         result.add(page("/welcome/index", "welcome", "/welcome/index", "主页", "HomeFilled", false, false, true));
         result.add(page("/home/index", "home", "/home/index", "我的待办", "List", false, false, false));
         // 运营总览：面向管理层的价值度量入口（来访量环比 + 随访闭环）
-        result.add(page("/ops/dashboard", "opsDashboard", "/ops/dashboard/index", "运营数据看板", "TrendCharts", false, false, false));
+        result.add(page("/ops/dashboard", "opsDashboard", "/ops/dashboard/index", "患者与诊疗分析", "TrendCharts", false, false, false));
         result.add(page("/billing/patients", "billingPatients", "/billing/index", "患者收费信息", "Coin", false, false, false));
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/patients/archive", "患者就诊", "UserFilled",
             // 随访监控台（/nursing/follow-up-monitor）仍在 staging 验证，本次不上生产
