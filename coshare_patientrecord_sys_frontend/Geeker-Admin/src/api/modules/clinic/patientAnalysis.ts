@@ -33,17 +33,13 @@ export interface AnalysisRow {
   unknownCount?: number;
   x?: string;
   y?: string;
-  normal?: number;
-  abnormal?: number;
-  critical?: number;
-  unmarked?: number;
   filters: Record<string, string[]>;
 }
 
 export interface AnalysisChartData {
   id: string;
   title: string;
-  kind: "bar" | "matrix" | "trend" | "stack";
+  kind: "bar" | "matrix" | "trend" | "donut";
   unit: string;
   note: string;
   rows: AnalysisRow[];
@@ -51,6 +47,8 @@ export interface AnalysisChartData {
   series?: [string, string];
   denominator?: number;
   regionDepth?: number;
+  centerLabel?: string;
+  centerValue?: number;
 }
 
 export interface AnalysisResult {
@@ -58,7 +56,6 @@ export interface AnalysisResult {
   summary: {
     visits: number;
     patients: number;
-    reports: number;
     nodes: number;
     contacts: number;
     contactedNodes: number;
@@ -76,6 +73,7 @@ export interface AnalysisFacetResult {
 export interface AnalysisDetail {
   id: string;
   encounterId: string;
+  patientCaseId?: string;
   name: string;
   date: string;
   gender: string;
@@ -83,6 +81,10 @@ export interface AnalysisDetail {
   region: string;
   diagnosis: string[];
   operations: string[];
+  complaintTags: string[];
+  recheck: boolean;
+  recheckBasis: string;
+  patientSource: string;
   examTypes: string[];
   status: string;
   stageStatuses: Record<string, string>;
@@ -90,9 +92,6 @@ export interface AnalysisDetail {
   node?: string;
   dueDate?: string;
   firstContactAt?: string;
-  labMetric?: string;
-  labValue?: string;
-  severity?: string;
 }
 
 export interface AnalysisDetailResult {

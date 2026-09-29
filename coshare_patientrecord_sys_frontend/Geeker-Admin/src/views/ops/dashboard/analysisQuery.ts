@@ -5,16 +5,14 @@ export const dimensions = [
   "diagnosis",
   "operation",
   "primaryOperation",
-  "examType",
   "status",
   "tcmDisease",
   "syndrome",
-  "labKey",
-  "severity",
+  "complaint",
   "contactState",
   "delayBand"
 ] as const;
-export type AnalysisView = "overview" | "population" | "clinical" | "exams" | "followup";
+export type AnalysisView = "overview" | "population" | "clinical" | "complaints" | "followup";
 export type AnalysisDimension = (typeof dimensions)[number];
 export interface AnalysisQuery {
   from: string;
@@ -59,7 +57,7 @@ export function readAnalysisQuery(route: QueryValues): AnalysisQuery {
     if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) query[key] = value;
   }
   const view = first(route.view);
-  if (["overview", "population", "clinical", "exams", "followup"].includes(view)) query.view = view as AnalysisView;
+  if (["overview", "population", "clinical", "complaints", "followup"].includes(view)) query.view = view as AnalysisView;
   const granularity = first(route.granularity);
   if (["day", "week", "month"].includes(granularity)) query.granularity = granularity as AnalysisQuery["granularity"];
   query.metric = first(route.metric) === "patients" ? "patients" : "visits";

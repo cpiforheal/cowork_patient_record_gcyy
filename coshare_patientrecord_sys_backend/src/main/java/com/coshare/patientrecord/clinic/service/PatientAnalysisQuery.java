@@ -15,8 +15,8 @@ public record PatientAnalysisQuery(
     Integer ageMin, Integer ageMax, Map<String, List<String>> filters, int page, int pageSize, String sort
 ) {
     public static final List<String> DIMENSIONS = List.of(
-        "gender", "ageBand", "region", "diagnosis", "operation", "primaryOperation", "examType", "status",
-        "tcmDisease", "syndrome", "labKey", "severity", "contactState", "delayBand"
+        "gender", "ageBand", "region", "diagnosis", "operation", "primaryOperation", "status",
+        "tcmDisease", "syndrome", "complaint", "contactState", "delayBand"
     );
     private static final Set<String> FOLLOW_UP_FILTERS = Set.of("contactState", "delayBand", "unscheduled");
 
@@ -26,7 +26,7 @@ public record PatientAnalysisQuery(
         if (from.isAfter(to) || ChronoUnit.DAYS.between(from, to) > 3660) {
             throw badRequest("日期范围无效，最长支持十年");
         }
-        String view = option(params, "view", "overview", Set.of("overview", "population", "clinical", "exams", "followup"));
+        String view = option(params, "view", "overview", Set.of("overview", "population", "clinical", "complaints", "followup"));
         String granularity = option(params, "granularity", "week", Set.of("day", "week", "month"));
         if ("day".equals(granularity) && ChronoUnit.DAYS.between(from, to) > 730) {
             throw badRequest("日粒度最多查询两年，请切换周或月");

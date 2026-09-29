@@ -362,7 +362,7 @@
 </template>
 
 <script setup lang="ts" name="healthArchive">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Refresh, Search } from "@element-plus/icons-vue";
@@ -929,23 +929,38 @@ const loadCases = async () => {
   }
 };
 
+// 消费深链：看板/随访工作台推送 /health-archive?patientCaseId=xxx 或 ?encounterId=xxx 自动打开对应患者。
+// 页面被 keep-alive 缓存，onMounted 只跑一次；故 onActivated 时也要消费，否则再次跳转会被静默忽略。
+let lastDeepLink = "";
+const consumeDeepLink = async () => {
+  const requestedCase = String(route.query.patientCaseId || "").trim();
+  const requested = String(route.query.encounterId || "").trim();
+  if (!requestedCase && !requested) return;
+  const signature = `${requestedCase}|${requested}`;
+  if (signature === lastDeepLink) return;
+  if (!cases.value.length) await loadCases();
+  // cases 列表只带最新一次就诊；调用方须优先携带 patientCaseId，encounterId 仅兜底
+  const owner =
+    cases.value.find(item => item.id === requestedCase) ||
+    cases.value.find(item => requested && item.latestEncounter?.id === requested);
+  lastDeepLink = signature;
+  if (owner) {
+    openDetail(owner);
+  } else {
+    ElMessage.warning("未在当前授权的患者列表中找到该就诊，请人工检索确认");
+  }
+};
+
 onMounted(async () => {
   await loadCases();
   void loadEmotionMap();
-  // 消费深链：主档案工作台/地图分析推送的 /health-archive?encounterId=xxx 自动打开对应患者弹窗
-  const requested = String(route.query.encounterId || "").trim();
-  if (requested) {
-    const owner = cases.value.find(item => item.latestEncounter?.id === requested);
-    if (owner) openDetail(owner);
-  }
-  // 随访工作台深链：/health-archive?patientCaseId=xxx 直接定位患者卡片
-  const requestedCase = String(route.query.patientCaseId || "").trim();
-  if (requestedCase) {
-    const owner = cases.value.find(item => item.id === requestedCase);
-    if (owner) openDetail(owner);
-  }
+  void consumeDeepLink();
   void loadRecallLamps();
   window.addEventListener("clinic-queue-updated", refreshOnQueueUpdate);
+});
+
+onActivated(() => {
+  void consumeDeepLink();
 });
 
 onBeforeUnmount(() => {

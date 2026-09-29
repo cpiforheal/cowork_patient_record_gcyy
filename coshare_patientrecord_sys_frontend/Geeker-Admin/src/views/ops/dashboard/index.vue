@@ -131,7 +131,7 @@
       <template v-if="result">
         <section class="sample-band" aria-label="当前样本">
           <div class="sample-primary">
-            <span>匹配患者</span><strong>{{ number(result.summary.patients) }}</strong
+            <span>匹配患者</span><strong>{{ number(patientCount) }}</strong
             ><small>按病例标识去重</small>
           </div>
           <div class="sample-stat">
@@ -145,9 +145,6 @@
               <span>区间联系留痕</span><strong>{{ number(result.summary.contacts) }}<small>次</small></strong>
             </div>
           </template>
-          <div v-else class="sample-stat">
-            <span>关联有效检验报告</span><strong>{{ number(result.summary.reports) }}<small>份</small></strong>
-          </div>
           <div class="sample-context">
             <span>{{ result.meta.from }} 至 {{ result.meta.to }}</span
             ><small
@@ -162,16 +159,23 @@
               ><el-icon><InfoFilled /></el-icon>字段覆盖</span
             ></el-tooltip
           >
-          <span>年龄未记录 {{ result.meta.missing.agePatients }} 位</span
-          ><span>地址层级不完整 {{ result.meta.missing.regionPatients }} 位</span
-          ><span>主诊断未记录 {{ result.meta.missing.diagnosisVisits }} 人次</span
-          ><span v-if="result.meta.missing.fallbackDates">日期回退 {{ result.meta.missing.fallbackDates }} 人次</span>
+          <span :class="{ 'is-alert': result.meta.missing.agePatients > 0 }">年龄未记录 {{ result.meta.missing.agePatients }} 位</span
+          ><span :class="{ 'is-alert': result.meta.missing.regionPatients > 0 }"
+            >地址层级不完整 {{ result.meta.missing.regionPatients }} 位</span
+          ><span :class="{ 'is-alert': result.meta.missing.diagnosisVisits > 0 }"
+            >主诊断未记录 {{ result.meta.missing.diagnosisVisits }} 人次</span
+          ><span v-if="result.meta.missing.fallbackDates" :class="{ 'is-alert': true }"
+            >日期回退 {{ result.meta.missing.fallbackDates }} 人次</span
+          >
         </div>
         <div v-if="query.view === 'followup'" class="followup-context">
           <span>仅服务器联系留痕，截至 {{ result.meta.to }}；不包含浏览器本地通话记录。</span>
-          <el-button link :disabled="stale" @click="toggleUnscheduled">{{
-            query.unscheduled ? "返回有日期记录" : `未排期节点 ${result.summary.unscheduledNodes} 个`
-          }}</el-button
+          <el-button
+            link
+            :class="{ 'is-danger': result.summary.unscheduledNodes > 0 }"
+            :disabled="stale"
+            @click="toggleUnscheduled"
+            >{{ query.unscheduled ? "返回有日期记录" : `未排期节点 ${result.summary.unscheduledNodes} 个` }}</el-button
           ><small>未排期数量不受日期过滤</small>
         </div>
         <div v-if="query.view === 'clinical'" class="clinical-mode">
@@ -200,7 +204,7 @@
             :chart="chart"
             :main="index === 0"
             :disabled="stale"
-            :class="{ 'full-width': chart.kind === 'matrix' || chart.kind === 'trend' || chart.id === 'labMarkers' }"
+            :class="{ 'full-width': chart.kind === 'matrix' || chart.kind === 'trend' || chart.kind === 'donut' }"
             @select="onChartSelect"
           />
         </div>
@@ -235,25 +239,16 @@
           <el-table-column prop="region" label="地区" width="180" show-overflow-tooltip />
           <el-table-column v-if="query.view === 'followup'" prop="node" label="节点" width="70" />
           <el-table-column v-if="query.view === 'followup'" prop="firstContactAt" label="首次联系留痕" width="170" />
-          <el-table-column
-            v-if="query.filters.labKey?.length || query.filters.severity?.length"
-            prop="labMetric"
-            label="检验项目"
-            width="180"
-            show-overflow-tooltip
-          />
-          <el-table-column
-            v-if="query.filters.labKey?.length || query.filters.severity?.length"
-            prop="labValue"
-            label="原始值"
-            width="90"
-          />
-          <el-table-column
-            v-if="query.filters.labKey?.length || query.filters.severity?.length"
-            prop="severity"
-            label="保存标记"
-            width="95"
-          />
+          <el-table-column label="主诉标签" width="150" show-overflow-tooltip
+            ><template #default="{ row }">{{ row.complaintTags.join("、") || "未记录" }}</template></el-table-column
+          >
+          <el-table-column label="复查" width="140" show-overflow-tooltip
+            ><template #default="{ row }"
+              ><el-tag v-if="row.recheck" size="small" type="warning" effect="plain">复查</el-tag
+              ><span v-else>—</span><small v-if="row.recheckBasis"> {{ row.recheckBasis }}</small></template
+            ></el-table-column
+          >
+          <el-table-column prop="patientSource" label="来诊途径" width="100" show-overflow-tooltip />
           <el-table-column label="主诊断" width="150" show-overflow-tooltip
             ><template #default="{ row }">{{ row.diagnosis.join("、") }}</template></el-table-column
           >
@@ -264,15 +259,22 @@
           <el-table-column label="岗位记录状态" width="180" show-overflow-tooltip
             ><template #default="{ row }">{{ stageLabel(row.stageStatuses) }}</template></el-table-column
           >
-          <el-table-column label="档案" width="65" fixed="right"
+          <el-table-column label="操作" width="96" fixed="right"
             ><template #default="{ row }"
+              ><el-tooltip content="基础检查摘要"
+                ><el-button
+                  link
+                  :icon="Document"
+                  aria-label="查看基础检查摘要"
+                  :disabled="detailsLoading"
+                  @click="openSummary(row)" /></el-tooltip
               ><el-tooltip content="打开患者档案"
                 ><el-button
                   link
                   :icon="TopRight"
                   aria-label="打开患者档案"
                   :disabled="detailsLoading"
-                  @click="openArchive(row.encounterId)" /></el-tooltip></template
+                  @click="openArchive(row)" /></el-tooltip></template
           ></el-table-column>
         </el-table>
       </div>
@@ -285,6 +287,7 @@
         @current-change="loadDetails"
       />
     </el-drawer>
+    <PatientExamSummaryDrawer v-model="summaryVisible" :encounter-id="summaryEncounterId" :fallback-name="summaryName" />
   </div>
 </template>
 
@@ -292,11 +295,11 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
+  ChatDotRound,
   DataAnalysis,
   Document,
   Filter,
   FirstAidKit,
-  Histogram,
   InfoFilled,
   Loading,
   Location,
@@ -315,6 +318,8 @@ import {
   type AnalysisResult
 } from "@/api/modules/clinic/patientAnalysis";
 import AnalysisChart from "./AnalysisChart.vue";
+import { useCountUp } from "./useCountUp";
+import PatientExamSummaryDrawer from "@/components/PatientExamSummaryDrawer.vue";
 import {
   analysisRoute,
   applyChartFilters,
@@ -334,13 +339,14 @@ const facets = ref<AnalysisFacetResult>();
 const advanced = ref(false);
 const clinicalMode = ref("western");
 const stale = computed(() => loading.value || !!error.value);
+const patientCount = useCountUp(() => result.value?.summary.patients ?? 0);
 let requestSequence = 0;
 let controller: AbortController | undefined;
 const views: Array<{ key: AnalysisView; label: string; icon: typeof DataAnalysis }> = [
   { key: "overview", label: "数据概览", icon: DataAnalysis },
   { key: "population", label: "人群画像", icon: Location },
   { key: "clinical", label: "诊疗分布", icon: FirstAidKit },
-  { key: "exams", label: "检查检验", icon: Histogram },
+  { key: "complaints", label: "主诉分析", icon: ChatDotRound },
   { key: "followup", label: "随访记录", icon: Calendar }
 ];
 const granularities = [
@@ -361,7 +367,7 @@ const fields: Array<{ key: AnalysisDimension; label: string }> = [
   { key: "region", label: "地区" },
   { key: "diagnosis", label: "主诊断" },
   { key: "operation", label: "实际术式" },
-  { key: "examType", label: "检查类型" },
+  { key: "complaint", label: "主诉" },
   { key: "status", label: "病历状态" },
   { key: "tcmDisease", label: "中医病名" },
   { key: "syndrome", label: "中医证型" }
@@ -370,8 +376,6 @@ const dimensionLabels: Record<string, string> = {
   ...Object.fromEntries(fields.map(field => [field.key, field.label])),
   ageBand: "年龄段",
   primaryOperation: "实际主术式",
-  labKey: "检验项目",
-  severity: "保存标记",
   contactState: "联系留痕",
   delayBand: "首次联系间隔"
 };
@@ -478,6 +482,8 @@ function onChartSelect(filters: Record<string, string[]>) {
     return;
   }
   query.value = applyChartFilters(query.value, filters);
+  // 主诉图的每一行都是叶级（无更深维度），点击即落到患者明细
+  if (query.value.view === "complaints" && !filters.from && !filters.to && result.value?.detailsAllowed) openDetails();
   commit();
 }
 async function load() {
@@ -548,10 +554,20 @@ async function loadDetails() {
     if (sequence === detailSequence) detailsLoading.value = false;
   }
 }
-function openArchive(encounterId: unknown) {
-  if (typeof encounterId !== "string" || !encounterId) return;
+function openArchive(row: { encounterId?: unknown; patientCaseId?: unknown }) {
+  if (typeof row.encounterId !== "string" || !row.encounterId) return;
   detailsVisible.value = false;
-  void router.push({ path: "/health-archive", query: { encounterId } });
+  const caseId = typeof row.patientCaseId === "string" && row.patientCaseId ? row.patientCaseId : undefined;
+  void router.push({ path: "/health-archive", query: { encounterId: row.encounterId, ...(caseId ? { patientCaseId: caseId } : {}) } });
+}
+const summaryVisible = ref(false);
+const summaryEncounterId = ref("");
+const summaryName = ref("");
+function openSummary(row: { encounterId?: unknown; name?: unknown }) {
+  if (typeof row.encounterId !== "string" || !row.encounterId) return;
+  summaryEncounterId.value = row.encounterId;
+  summaryName.value = typeof row.name === "string" ? row.name : "";
+  summaryVisible.value = true;
 }
 function stageLabel(statuses: Record<string, string>) {
   const labels: Record<string, string> = {
@@ -735,6 +751,7 @@ onBeforeUnmount(() => {
 }
 .analysis-tabs button {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   gap: 7px;
@@ -742,16 +759,44 @@ onBeforeUnmount(() => {
   padding: 16px 2px 14px;
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
   font: inherit;
   font-size: 13px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
+  transition: color 0.18s ease-out;
+}
+.analysis-tabs button .el-icon {
+  transition: transform 0.18s ease-out;
+}
+.analysis-tabs button:hover {
+  color: #247b91;
+}
+.analysis-tabs button:hover .el-icon {
+  transform: translateY(-1px);
 }
 .analysis-tabs button.active {
   color: #247b91;
-  border-bottom-color: #247b91;
   font-weight: 600;
+}
+.analysis-tabs button.active .el-icon {
+  transform: translateY(-1px);
+}
+.analysis-tabs button::after {
+  content: "";
+  display: block;
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: #247b91;
+  border-radius: 2px;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.22s ease-out;
+}
+.analysis-tabs button.active::after {
+  transform: scaleX(1);
 }
 .analysis-tabs button:focus-visible {
   outline: 2px solid #247b91;
@@ -845,6 +890,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   color: #6e8578;
+}
+.quality-line .is-alert {
+  color: #b94d45;
+  font-weight: 600;
+}
+.followup-context .el-button.is-danger {
+  color: #b94d45;
+  font-weight: 600;
 }
 .analysis-grid {
   display: grid;

@@ -45,9 +45,7 @@ public class PatientAnalysisService {
     private static final Map<String, String> EXAM_LABELS = Map.of(
         "LAB", "检验报告", "ECG", "心电图", "IMAGING", "影像检查", "VITAL_SIGNS", "生命体征", "COLONOSCOPY", "肠镜"
     );
-    private static final Map<String, String> SEVERITY_LABELS = Map.of(
-        "NORMAL", "正常标记", "ABNORMAL", "异常标记", "CRITICAL", "危急标记", UNKNOWN, "未标记"
-    );
+    static final String RECHECK = "复查", FIRST_VISIT = "首诊";
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
 
@@ -75,7 +73,7 @@ public class PatientAnalysisService {
     Data load(PatientAnalysisQuery query) {
         Map<String, Visit> visits = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbc.queryForList(
-            "SELECT id, patient_case_id, source_patient_id, patient_json, created_at, status "
+            "SELECT id, patient_case_id, source_patient_id, patient_json, created_at, status, visit_no "
                 + "FROM pre_ai_encounters WHERE status NOT IN ('CANCELLED', 'WITHDRAWN')"
         )) {
             JsonNode patient = json(row.get("patient_json"));
@@ -83,6 +81,7 @@ public class PatientAnalysisService {
             LocalDate date = recorded == null ? parseDate(string(row.get("created_at"))) : recorded;
             Visit visit = new Visit(string(row.get("id")), patientKey(row), date, patient, string(row.get("status")));
             visit.dateFallback = recorded == null;
+            if (row.get("visit_no") instanceof Number number) visit.visitNo = number.intValue();
             visits.put(visit.id, visit);
         }
         // Snapshot selection precedes clinical filters; follow-up dates do not constrain original encounter dates.
@@ -111,33 +110,6 @@ public class PatientAnalysisService {
             String type = string(row.get("task_type"));
             if (EXAM_LABELS.containsKey(type) && !"LAB".equals(type)) visits.get(string(row.get("encounter_id"))).examTypes.add(type);
         }
-        boolean metricsNeeded = "exams".equals(query.view()) || query.filters().containsKey("labKey") || query.filters().containsKey("severity");
-        List<Report> reports = new ArrayList<>();
-        String metricColumn = metricsNeeded ? ", metrics_json" : "";
-        for (Map<String, Object> row : batch(
-            "SELECT id, encounter_id, template_id, template_name, report_date" + metricColumn
-                + " FROM pre_ai_lab_reports WHERE status = 'ACTIVE' AND encounter_id IN (%s)", ids
-        )) {
-            Visit visit = visits.get(string(row.get("encounter_id")));
-            visit.examTypes.add("LAB");
-            List<LabMetric> metrics = new ArrayList<>();
-            if (metricsNeeded) {
-                JsonNode root = json(row.get("metrics_json"));
-                JsonNode items = root.isArray() ? root : root.path("items");
-                for (JsonNode item : items) {
-                    String unit = text(item, "unit");
-                    String key = text(item, "key");
-                    if (key.isBlank()) key = text(item, "name");
-                    String metricKey = string(row.get("template_id")) + "\u001f" + key + "\u001f" + unit;
-                    String label = string(row.get("template_name")) + " / " + fallback(text(item, "name"), key)
-                        + (unit.isBlank() ? "" : " (" + unit + ")");
-                    metrics.add(new LabMetric(metricKey, label, severity(item), text(item, "value"), unit));
-                }
-            }
-            Report report = new Report(string(row.get("id")), visit.id, parseDate(string(row.get("report_date"))), metrics);
-            reports.add(report);
-            visit.reports.add(report);
-        }
         List<Node> nodes = new ArrayList<>();
         List<Contact> contacts = new ArrayList<>();
         if ("followup".equals(query.view())) {
@@ -158,7 +130,7 @@ public class PatientAnalysisService {
                 }
             }
         }
-        return new Data(new ArrayList<>(visits.values()), reports, nodes, contacts);
+        return new Data(new ArrayList<>(visits.values()), nodes, contacts);
     }
 
     private List<Map<String, Object>> batch(String sql, List<String> ids) {
@@ -181,7 +153,7 @@ public class PatientAnalysisService {
         switch (query.view()) {
             case "population" -> {
                 charts.add(bar(query, visits, "age", "年龄分布", "ageBand", v -> List.of(v.snapshot.ageBand), Function.identity()));
-                charts.add(bar(query, visits, "gender", "性别构成", "gender", v -> List.of(v.snapshot.gender), Function.identity()));
+                charts.add(donut(query, visits, "gender", "性别构成", "gender", v -> List.of(v.snapshot.gender), Function.identity()));
                 charts.add(regionChart(query, visits));
                 charts.add(matrix(query, visits, "ageDiagnosis", "年龄段与主诊断", "ageBand", v -> List.of(v.snapshot.ageBand),
                     "diagnosis", Visit::primary, "同一病例在不同诊断中可能重复出现"));
@@ -194,12 +166,11 @@ public class PatientAnalysisService {
                 charts.add(bar(query, visits, "tcm", "中医病名", "tcmDisease", v -> v.diagnosis("TCM_DISEASE"), Function.identity()));
                 charts.add(bar(query, visits, "syndrome", "中医证型", "syndrome", v -> v.diagnosis("PRIMARY_SYNDROME"), Function.identity()));
             }
-            case "exams" -> {
-                List<Report> reports = matchingReports(query, visits);
-                charts.add(barWithMetric(query, visits, "exams", "检查类型覆盖患者", "examType",
-                    v -> orUnknown(v.examTypes), v -> EXAM_LABELS.getOrDefault(v, v), "patients"));
-                charts.add(reportTrend(query, visits, reports));
-                charts.add(labChart(query, visits, reports));
+            case "complaints" -> {
+                charts.add(recheckComposition(query, visits));
+                charts.add(bar(query, visits, "complaintTags", "主诉症状标签分布", "complaint",
+                    v -> orUnknown(v.complaintTags), Function.identity()));
+                charts.add(recheckTrend(query, visits));
             }
             case "followup" -> {
                 charts.add(followTrend(query, selection));
@@ -207,7 +178,7 @@ public class PatientAnalysisService {
             }
             default -> {
                 charts.add(visitTrend(query, visits));
-                charts.add(bar(query, visits, "status", "当前病历状态", "status", v -> List.of(v.status), v -> STATUS_LABELS.getOrDefault(v, v)));
+                charts.add(donut(query, visits, "status", "当前病历状态", "status", v -> List.of(v.status), v -> STATUS_LABELS.getOrDefault(v, v)));
                 charts.add(bar(query, visits, "diagnosis", "西医主诊断", "diagnosis", Visit::primary, Function.identity()));
             }
         }
@@ -219,7 +190,6 @@ public class PatientAnalysisService {
         Selection selection = select(query, data, false);
         Map<String, Set<String>> options = new LinkedHashMap<>();
         for (String dimension : PatientAnalysisQuery.DIMENSIONS) options.put(dimension, new LinkedHashSet<>());
-        Map<String, String> labLabels = new HashMap<>();
         for (Visit visit : selection.visits) {
             options.get("gender").add(visit.snapshot.gender);
             options.get("ageBand").add(visit.snapshot.ageBand);
@@ -227,21 +197,15 @@ public class PatientAnalysisService {
             options.get("diagnosis").addAll(visit.primary());
             options.get("operation").addAll(orUnknown(visit.operations));
             options.get("primaryOperation").add(visit.primaryOperation);
-            options.get("examType").addAll(orUnknown(visit.examTypes));
             options.get("status").add(visit.status);
+            options.get("complaint").addAll(visit.complaintValues());
             options.get("tcmDisease").addAll(visit.diagnosis("TCM_DISEASE"));
             options.get("syndrome").addAll(visit.diagnosis("PRIMARY_SYNDROME"));
-            for (Report report : visit.reports) for (LabMetric metric : report.metrics) labLabels.put(metric.key, metric.label);
         }
-        options.get("labKey").addAll(labLabels.keySet());
-        options.get("severity").addAll(SEVERITY_LABELS.keySet());
         Map<String, Object> facets = new LinkedHashMap<>();
         options.forEach((key, values) -> facets.put(key, values.stream().sorted().map(value -> Map.of(
             "value", value, "label", switch (key) {
                 case "status" -> STATUS_LABELS.getOrDefault(value, value);
-                case "examType" -> EXAM_LABELS.getOrDefault(value, value);
-                case "labKey" -> labLabels.getOrDefault(value, value);
-                case "severity" -> SEVERITY_LABELS.getOrDefault(value, value);
                 default -> value;
             }
         )).toList()));
@@ -271,17 +235,6 @@ public class PatientAnalysisService {
                     rows.add(row);
                 }
             }
-        } else if ("exams".equals(query.view()) && (query.filters().containsKey("labKey") || query.filters().containsKey("severity"))) {
-            for (Report report : matchingReports(query, selection.visits)) {
-                for (LabMetric metric : report.metrics) {
-                    if (!metricMatches(query, metric)) continue;
-                    Map<String, Object> row = detail(selection.byId.get(report.encounterId), report.id + ":" + metric.key, dateText(report.date));
-                    row.put("labMetric", metric.label);
-                    row.put("labValue", metric.value);
-                    row.put("severity", SEVERITY_LABELS.getOrDefault(metric.severity, metric.severity));
-                    rows.add(row);
-                }
-            }
         } else {
             List<Visit> detailVisits = selection.visits;
             if ("patients".equals(query.metric())) {
@@ -297,10 +250,6 @@ public class PatientAnalysisService {
         int from = (int) Math.min((long) (query.page() - 1) * query.pageSize(), rows.size());
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> meta = metadata(query, selection);
-        if ("exams".equals(query.view()) && (query.filters().containsKey("labKey") || query.filters().containsKey("severity"))) {
-            meta.put("unit", "项次");
-            meta.put("sampleSize", rows.size());
-        }
         result.put("meta", meta);
         result.put("rows", rows.subList(from, Math.min(from + query.pageSize(), rows.size())));
         result.put("total", rows.size());
@@ -313,6 +262,7 @@ public class PatientAnalysisService {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("id", id);
         row.put("encounterId", visit.id);
+        row.put("patientCaseId", visit.patientKey.startsWith("case:") ? visit.patientKey.substring(5) : "");
         row.put("name", maskedName(fallback(text(visit.patient, "patientName"), text(visit.patient, "name"))));
         row.put("date", date);
         row.put("gender", visit.snapshot.gender);
@@ -320,6 +270,10 @@ public class PatientAnalysisService {
         row.put("region", String.join(" / ", visit.snapshot.region));
         row.put("diagnosis", visit.primary());
         row.put("operations", orUnknown(visit.operations));
+        row.put("complaintTags", List.copyOf(visit.complaintTags));
+        row.put("recheck", visit.recheck());
+        row.put("recheckBasis", String.join("、", visit.recheckBases));
+        row.put("patientSource", visit.patientSource);
         row.put("examTypes", visit.examTypes.stream().map(v -> EXAM_LABELS.getOrDefault(v, v)).toList());
         row.put("status", STATUS_LABELS.getOrDefault(visit.status, visit.status));
         row.put("stageStatuses", visit.stageStatuses);
@@ -380,10 +334,9 @@ public class PatientAnalysisService {
         if (!q.acceptsAny("region", s.regionPaths()) || !q.accepts("status", v.status)) return false;
         if (!q.acceptsAny("diagnosis", v.primary()) || !q.acceptsAny("operation", orUnknown(v.operations))) return false;
         if (!q.accepts("primaryOperation", v.primaryOperation)) return false;
-        if (!q.acceptsAny("examType", orUnknown(v.examTypes))) return false;
+        if (!q.acceptsAny("complaint", v.complaintValues())) return false;
         if (!q.acceptsAny("tcmDisease", v.diagnosis("TCM_DISEASE")) || !q.acceptsAny("syndrome", v.diagnosis("PRIMARY_SYNDROME"))) return false;
-        return (!q.filters().containsKey("labKey") && !q.filters().containsKey("severity"))
-            || v.reports.stream().flatMap(r -> r.metrics.stream()).anyMatch(m -> metricMatches(q, m));
+        return true;
     }
 
     private Map<String, Object> metadata(PatientAnalysisQuery q, Selection selection) {
@@ -419,7 +372,6 @@ public class PatientAnalysisService {
     private Map<String, Object> summary(Selection selection) {
         return Map.of(
             "visits", selection.visits.size(), "patients", count(selection.visits, "patients"),
-            "reports", selection.visits.stream().mapToInt(v -> v.reports.size()).sum(),
             "nodes", selection.nodes.size(), "contacts", selection.contacts.size(),
             "contactedNodes", selection.nodes.stream().filter(n -> selection.firstContacts.containsKey(n.id)).count(),
             "unscheduledNodes", selection.unscheduled
@@ -429,6 +381,16 @@ public class PatientAnalysisService {
     private Map<String, Object> bar(PatientAnalysisQuery q, List<Visit> visits, String id, String title,
                                     String dimension, Function<Visit, List<String>> values, Function<String, String> labels) {
         return barWithMetric(q, visits, id, title, dimension, values, labels, q.metric());
+    }
+
+    /** 构成类图表复用 bar 的分组与筛选结构，仅把渲染形态交给前端环状图。 */
+    private Map<String, Object> donut(PatientAnalysisQuery q, List<Visit> visits, String id, String title,
+                                      String dimension, Function<Visit, List<String>> values, Function<String, String> labels) {
+        Map<String, Object> chart = bar(q, visits, id, title, dimension, values, labels);
+        chart.put("kind", "donut");
+        chart.put("centerValue", count(visits, q.metric()));
+        chart.put("centerLabel", "patients".equals(q.metric()) ? "去重患者" : "来访人次");
+        return chart;
     }
 
     private Map<String, Object> barWithMetric(PatientAnalysisQuery q, List<Visit> visits, String id, String title,
@@ -529,72 +491,40 @@ public class PatientAnalysisService {
         return chart;
     }
 
-    private Map<String, Object> reportTrend(PatientAnalysisQuery q, List<Visit> visits, List<Report> reports) {
-        Map<LocalDate, Counter> buckets = emptyBuckets(q);
-        Map<LocalDate, Set<String>> reportIds = new LinkedHashMap<>();
-        buckets.keySet().forEach(k -> reportIds.put(k, new HashSet<>()));
-        Map<String, Visit> byId = new HashMap<>();
-        visits.forEach(v -> byId.put(v.id, v));
-        for (Report report : reports) {
-            // The global date basis remains encounter date, including report counts.
-            Visit visit = byId.get(report.encounterId);
-            LocalDate key = bucket(visit.date, q.granularity());
-            reportIds.get(key).add(report.id);
-            buckets.get(key).add(visit);
+    private Map<String, Object> recheckComposition(PatientAnalysisQuery q, List<Visit> visits) {
+        Map<String, Counter> groups = new LinkedHashMap<>();
+        List.of(RECHECK, FIRST_VISIT, UNKNOWN).forEach(key -> groups.put(key, new Counter()));
+        for (Visit visit : visits) {
+            if (visit.recheck()) groups.get(RECHECK).add(visit);
+            else if (visit.complaintTags.isEmpty()) groups.get(UNKNOWN).add(visit);
+            else groups.get(FIRST_VISIT).add(visit);
         }
         List<Map<String, Object>> rows = new ArrayList<>();
-        buckets.forEach((date, counter) -> {
-            Map<String, Object> row = trendRow(q, date);
-            row.put("primary", reportIds.get(date).size());
-            row.put("secondary", counter.patients.size());
-            rows.add(row);
+        groups.forEach((key, counter) -> {
+            if (counter.visits.isEmpty()) return;
+            rows.add(countRow(key, counter, q.metric(), count(visits, q.metric()), Map.of("complaint", List.of(key)), UNKNOWN.equals(key)));
         });
-        Map<String, Object> chart = chart("reports", "检验报告与覆盖患者", "trend", "份 / 位患者", rows, "按原就诊日期归组，统计其关联有效报告，不是报告出具日期趋势");
-        chart.put("series", List.of("有效报告", "覆盖患者"));
+        Map<String, Object> chart = chart("recheckComposition", "复查与首诊构成", "donut",
+            "patients".equals(q.metric()) ? "位患者" : "人次", rows,
+            "复查口径：主诉含复查/复诊、或复诊就诊序号、或来诊途径登记复诊，任一命中即计为复查");
+        chart.put("centerLabel", "复查患者");
+        chart.put("centerValue", groups.get(RECHECK).patients.size());
         return chart;
     }
 
-    private Map<String, Object> labChart(PatientAnalysisQuery q, List<Visit> visits, List<Report> reports) {
-        Map<String, int[]> counts = new LinkedHashMap<>();
-        Map<String, String> labels = new HashMap<>();
-        for (Report report : reports) for (LabMetric metric : report.metrics) {
-            if (!metricMatches(q, metric)) continue;
-            labels.put(metric.key, metric.label);
-            int[] values = counts.computeIfAbsent(metric.key, ignored -> new int[4]);
-            values[switch (metric.severity) { case "NORMAL" -> 0; case "ABNORMAL" -> 1; case "CRITICAL" -> 2; default -> 3; }]++;
-        }
+    private Map<String, Object> recheckTrend(PatientAnalysisQuery q, List<Visit> visits) {
+        Map<LocalDate, Counter> buckets = emptyBuckets(q);
+        visits.forEach(v -> { if (v.recheck()) buckets.get(bucket(v.date, q.granularity())).add(v); });
         List<Map<String, Object>> rows = new ArrayList<>();
-        counts.entrySet().stream().sorted(Comparator.<Map.Entry<String, int[]>>comparingInt(e -> java.util.Arrays.stream(e.getValue()).sum()).reversed()
-            .thenComparing(Map.Entry::getKey)).forEach(entry -> {
-                int[] c = entry.getValue();
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("label", labels.get(entry.getKey()));
-                row.put("normal", c[0]); row.put("abnormal", c[1]); row.put("critical", c[2]); row.put("unmarked", c[3]);
-                row.put("value", java.util.Arrays.stream(c).sum());
-                row.put("denominator", java.util.Arrays.stream(c).sum());
-                row.put("unknownCount", c[3]);
-                row.put("filters", Map.of("labKey", List.of(entry.getKey())));
-                rows.add(row);
-            });
-        List<Map<String, Object>> visible = new ArrayList<>(rows.stream().limit(10).toList());
-        if (rows.size() > 10) {
-            Map<String, Object> others = new LinkedHashMap<>();
-            others.put("label", "其他 (" + (rows.size() - 10) + ")");
-            for (String key : List.of("normal", "abnormal", "critical", "unmarked", "value", "denominator", "unknownCount")) {
-                others.put(key, rows.subList(10, rows.size()).stream().mapToInt(row -> ((Number) row.get(key)).intValue()).sum());
-            }
-            List<String> keys = new ArrayList<>();
-            for (Map<String, Object> row : rows.subList(10, rows.size())) {
-                @SuppressWarnings("unchecked")
-                Map<String, List<String>> filters = (Map<String, List<String>>) row.get("filters");
-                keys.addAll(filters.get("labKey"));
-            }
-            others.put("filters", Map.of("labKey", keys));
-            visible.add(others);
-        }
-        Map<String, Object> chart = chart("labMarkers", "检验项目标记分布", "stack", "项次", visible,
-            "正常、异常、危急均来自已保存标记；未标记不代表正常。项目按模板、项目键及单位区分");
-        chart.put("tableRows", rows);
+        buckets.forEach((date, counter) -> {
+            Map<String, Object> row = trendRow(q, date);
+            row.put("primary", counter.visits.size());
+            row.put("secondary", counter.patients.size());
+            rows.add(row);
+        });
+        Map<String, Object> chart = chart("recheckTrend", "复查患者趋势", "trend", "人次 / 位患者", rows,
+            "仅统计命中复查口径的患者；患者在各时间段内独立去重");
+        chart.put("series", List.of("复查人次", "复查患者"));
         return chart;
     }
 
@@ -698,15 +628,6 @@ public class PatientAnalysisService {
         return switch (granularity) { case "month" -> date.plusMonths(1); case "week" -> date.plusWeeks(1); default -> date.plusDays(1); };
     }
 
-    private List<Report> matchingReports(PatientAnalysisQuery q, List<Visit> visits) {
-        return visits.stream().flatMap(v -> v.reports.stream())
-            .filter(r -> !q.filters().containsKey("labKey") && !q.filters().containsKey("severity") || r.metrics.stream().anyMatch(m -> metricMatches(q, m))).toList();
-    }
-
-    private boolean metricMatches(PatientAnalysisQuery q, LabMetric metric) {
-        return q.accepts("labKey", metric.key) && q.accepts("severity", metric.severity);
-    }
-
     private static Map<String, Node> indexNodes(List<Node> nodes) {
         Map<String, Node> result = new HashMap<>();
         nodes.forEach(n -> result.put(n.id, n));
@@ -718,14 +639,6 @@ public class PatientAnalysisService {
         if (first == null) return "无联系留痕";
         long days = ChronoUnit.DAYS.between(due, first.toLocalDate());
         return days < 0 ? "提前" : days == 0 ? "当日" : days <= 3 ? "晚1-3天" : days <= 7 ? "晚4-7天" : "晚8天及以上";
-    }
-
-    static String severity(JsonNode metric) {
-        if (metric.path("critical").asBoolean(false) || "CRITICAL".equals(text(metric, "severity"))) return "CRITICAL";
-        String severity = text(metric, "severity");
-        if (Set.of("NORMAL", "ABNORMAL").contains(severity)) return severity;
-        if (metric.has("abnormal") && metric.path("abnormal").isBoolean()) return metric.path("abnormal").asBoolean() ? "ABNORMAL" : "NORMAL";
-        return UNKNOWN;
     }
 
     static Snapshot snapshot(Visit visit) {
@@ -806,12 +719,16 @@ public class PatientAnalysisService {
         final LocalDate date;
         final JsonNode patient;
         boolean dateFallback;
+        int visitNo = 1;
+        String patientSource = UNKNOWN;
+        String complaintText = "";
+        final Set<String> complaintTags = new LinkedHashSet<>();
+        final Set<String> recheckBases = new LinkedHashSet<>();
         Snapshot snapshot;
         final Map<String, JsonNode> stages = new HashMap<>();
         final Map<String, String> stageStatuses = new LinkedHashMap<>();
         final Map<String, Set<String>> diagnoses = new HashMap<>();
         final Set<String> operations = new LinkedHashSet<>(), examTypes = new LinkedHashSet<>();
-        final List<Report> reports = new ArrayList<>();
         String primaryOperation = UNKNOWN;
 
         Visit(String id, String patientKey, LocalDate date, JsonNode patient, String status) {
@@ -819,6 +736,15 @@ public class PatientAnalysisService {
         }
         List<String> primary() { return diagnosis("WESTERN_PRIMARY"); }
         List<String> diagnosis(String type) { return orUnknown(diagnoses.getOrDefault(type, Set.of())); }
+        boolean recheck() { return !recheckBases.isEmpty(); }
+        List<String> complaintValues() {
+            if (!complaintTags.isEmpty()) {
+                List<String> values = new ArrayList<>(complaintTags);
+                values.add(recheck() ? RECHECK : FIRST_VISIT);
+                return values;
+            }
+            return List.of(recheck() ? RECHECK : UNKNOWN);
+        }
         void finishFields() {
             fallbackDiagnosis("WESTERN_PRIMARY", "DOCTOR", "primaryWesternDiagnosis");
             fallbackDiagnosis("TCM_DISEASE", "TCM", "tcmDisease");
@@ -832,6 +758,22 @@ public class PatientAnalysisService {
                     if (!value.isBlank()) operations.add(value);
                 }
             }
+            JsonNode reception = stages.get("RECEPTION");
+            collectTags(complaintTags, patient.path("registrationSymptoms"));
+            collectTags(complaintTags, reception == null ? null : reception.path("chiefComplaint"));
+            complaintText = fallback(text(reception, "chiefComplaintText"), text(patient, "registrationChiefComplaint"));
+            patientSource = fallback(text(patient, "patientSource"), UNKNOWN);
+            // Recheck is a union of three independent bases; each match is kept so details can show why.
+            if (complaintText.contains("复查") || complaintText.contains("复诊")) recheckBases.add("主诉记载复查");
+            if (visitNo > 1) recheckBases.add("复诊就诊序号");
+            if (patientSource.contains("复诊")) recheckBases.add("来诊途径复诊");
+        }
+        private static void collectTags(Set<String> target, JsonNode array) {
+            if (array == null || !array.isArray()) return;
+            for (JsonNode item : array) {
+                String value = item.isTextual() ? item.asText().trim() : text(item, "name");
+                if (!value.isBlank()) target.add(value);
+            }
         }
         private void fallbackDiagnosis(String type, String stage, String field) {
             if (!diagnoses.getOrDefault(type, Set.of()).isEmpty()) return;
@@ -844,11 +786,9 @@ public class PatientAnalysisService {
             return List.of(region.get(0), String.join(" / ", region.subList(0, 2)), String.join(" / ", region));
         }
     }
-    record LabMetric(String key, String label, String severity, String value, String unit) {}
-    record Report(String id, String encounterId, LocalDate date, List<LabMetric> metrics) {}
     record Node(String id, String encounterId, LocalDate due, String seq) {}
     record Contact(String id, String nodeId, LocalDateTime time) {}
-    record Data(List<Visit> visits, List<Report> reports, List<Node> nodes, List<Contact> contacts) {}
+    record Data(List<Visit> visits, List<Node> nodes, List<Contact> contacts) {}
     private record Selection(List<Visit> visits, Map<String, Visit> byId, List<Node> nodes, List<Contact> contacts,
                              Map<String, LocalDateTime> firstContacts, int unscheduled) {}
     private static final class Counter {

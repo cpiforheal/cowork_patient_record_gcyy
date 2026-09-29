@@ -43,7 +43,11 @@ const resetAndLoad = () => { level.value = "COUNTY"; parentKey.value = ""; keywo
 const onChartClick = (params: any) => { const row = rows.value.find(item => item.key === params?.data?.key || item.label === params?.name); if (!row || !row.hasChildren) return; level.value = row.level; parentKey.value = row.key; keyword.value = ""; void load(); };
 const go = (item: { key: string; level: string }) => { level.value = item.level as AddressAnalysisLevel; parentKey.value = item.key; keyword.value = ""; void load(); };
 const openPatient = (patient: AddressPatientCard) => { selectedPatient.value = patient; drawerVisible.value = true; };
-const openArchive = () => { if (selectedPatient.value?.encounterId) router.push({ path: "/health-archive", query: { encounterId: selectedPatient.value.encounterId } }); };
+const openArchive = () => {
+  if (!selectedPatient.value?.encounterId) return;
+  const caseId = selectedPatient.value.patientCaseId;
+  router.push({ path: "/health-archive", query: { encounterId: selectedPatient.value.encounterId, ...(caseId ? { patientCaseId: caseId } : {}) } });
+};
 onMounted(() => void load());
 </script>
 

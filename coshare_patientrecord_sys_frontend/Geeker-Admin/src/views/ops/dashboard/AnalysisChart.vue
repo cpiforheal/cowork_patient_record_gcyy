@@ -34,12 +34,6 @@
               <th>{{ chart.series?.[0] }}</th>
               <th>{{ chart.series?.[1] }}</th>
             </template>
-            <template v-else-if="chart.kind === 'stack'">
-              <th>正常</th>
-              <th>异常</th>
-              <th>危急</th>
-              <th>未标记</th>
-            </template>
             <template v-else
               ><th>数量</th>
               <th>分母</th>
@@ -59,13 +53,6 @@
               ><td>{{ row.primary }}</td>
               <td>{{ row.secondary }}</td></template
             >
-            <template v-else-if="chart.kind === 'stack'">
-              <td v-for="(key, stateIndex) in stackKeys" :key="key">
-                <button type="button" class="table-filter" :disabled="disabled" @click="select(row, stateIndex)">
-                  {{ row[key] }}
-                </button>
-              </td>
-            </template>
             <template v-else
               ><td>{{ row.value }}</td>
               <td>{{ row.denominator }}</td>
@@ -79,6 +66,16 @@
         </tbody>
       </table>
     </div>
+    <!-- 下钻把行列都收敛到单个组合时，单格热力图会撑满整卡；降级为大数字卡 -->
+    <div v-else-if="matrixSingle" class="matrix-single">
+      <div class="matrix-single-value">
+        <strong>{{ number(matrixSingle.value) }}</strong
+        ><span>{{ chart.unit }}</span>
+      </div>
+      <p class="matrix-single-label">{{ matrixSingle.x }} / {{ matrixSingle.y }}</p>
+      <p class="matrix-single-meta">分母 {{ matrixSingle.denominator }} · 占比 {{ matrixSingle.share }}%</p>
+      <small>放宽任一筛选条件可回到矩阵视图，或切换右上角数据表</small>
+    </div>
     <div v-else ref="chartContainer" class="chart-canvas" :style="{ height: `${chartHeight}px` }">
       <VChart v-if="chart.rows.length" :option="option" :update-options="{ notMerge: true }" autoresize @click="onChartClick" />
       <el-empty v-else description="没有匹配记录" :image-size="64" />
@@ -91,7 +88,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { DataAnalysis, Grid, InfoFilled } from "@element-plus/icons-vue";
-import { BarChart, HeatmapChart, LineChart } from "echarts/charts";
+import { BarChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
@@ -99,41 +96,62 @@ import type { EChartsOption } from "echarts";
 import VChart from "vue-echarts";
 import type { AnalysisChartData, AnalysisRow } from "@/api/modules/clinic/patientAnalysis";
 
-use([CanvasRenderer, BarChart, LineChart, HeatmapChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent]);
+use([CanvasRenderer, BarChart, LineChart, PieChart, HeatmapChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent]);
 const props = defineProps<{ chart: AnalysisChartData; main?: boolean; disabled?: boolean }>();
 const emit = defineEmits<{ select: [filters: Record<string, string[]>] }>();
 const table = ref(false);
 const chartContainer = ref<HTMLElement>();
 const narrow = ref(false);
+const containerWidth = ref(0);
 let observer: ResizeObserver | undefined;
 onMounted(() => {
   if (chartContainer.value) {
-    observer = new ResizeObserver(entries => (narrow.value = entries[0].contentRect.width < 480));
+    observer = new ResizeObserver(entries => {
+      narrow.value = entries[0].contentRect.width < 480;
+      containerWidth.value = entries[0].contentRect.width;
+    });
     observer.observe(chartContainer.value);
   }
 });
 onBeforeUnmount(() => observer?.disconnect());
 const tableRows = computed(() => props.chart.tableRows || props.chart.rows);
-const stackKeys = ["normal", "abnormal", "critical", "unmarked"] as const;
-const stackStates = ["NORMAL", "ABNORMAL", "CRITICAL", "未记录"];
 const chartHeight = computed(() => {
-  if (props.chart.kind === "matrix") return Math.max(340, new Set(props.chart.rows.map(r => r.y)).size * 29 + 100);
-  if (props.chart.kind === "bar" || props.chart.kind === "stack")
-    return Math.max(255, Math.min(430, props.chart.rows.length * 29 + 55));
+  if (props.chart.kind === "matrix") {
+    const ys = new Set(props.chart.rows.map(r => r.y)).size;
+    return Math.max(280, Math.min(460, ys * 46 + 150));
+  }
+  if (props.chart.kind === "bar") return Math.max(255, Math.min(430, props.chart.rows.length * 29 + 55));
+  if (props.chart.kind === "donut") return props.main ? 340 : 300;
   return props.main ? 320 : 285;
 });
+const matrixSingle = computed(() => {
+  if (props.chart.kind !== "matrix" || props.chart.rows.length !== 1) return undefined;
+  const row = props.chart.rows[0];
+  return { value: row.value || 0, x: row.x || "", y: row.y || "", denominator: row.denominator || 0, share: row.share || 0 };
+});
+function number(value: number) {
+  return value.toLocaleString("zh-CN");
+}
 
-function select(row: AnalysisRow, seriesIndex?: number) {
+function select(row: AnalysisRow) {
   if (props.disabled) return;
-  const filters = { ...row.filters };
-  if (props.chart.kind === "stack" && seriesIndex !== undefined) filters.severity = [stackStates[seriesIndex]];
-  emit("select", filters);
+  emit("select", { ...row.filters });
 }
 
-function onChartClick(event: { data?: unknown; seriesIndex?: number }) {
+function onChartClick(event: { data?: unknown }) {
   const index = event.data && typeof event.data === "object" ? (event.data as { rowIndex?: number }).rowIndex : undefined;
-  if (index !== undefined && props.chart.rows[index]) select(props.chart.rows[index], event.seriesIndex);
+  if (index !== undefined && props.chart.rows[index]) select(props.chart.rows[index]);
 }
+
+// 图表动画统一节奏；系统声明减少动效时降级为无动画
+const reducedMotion = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+const motion = {
+  animation: !reducedMotion,
+  animationDuration: 420,
+  animationDurationUpdate: 600,
+  animationEasing: "cubicOut" as const,
+  animationEasingUpdate: "cubicInOut" as const
+};
 
 const option = computed<EChartsOption>(() => {
   const chart = props.chart;
@@ -141,67 +159,95 @@ const option = computed<EChartsOption>(() => {
   const textColor = "#53636b";
   const lineColor = "#e9eeec";
   const base: EChartsOption = {
-    animation: false,
+    ...motion,
     textStyle: { fontFamily: "inherit", color: textColor, fontSize: 11 },
     color: ["#247b91", "#67a382", "#b99742", "#b4bebc"],
     tooltip: {
-      renderMode: "richText",
       confine: true,
       trigger: chart.kind === "trend" ? "axis" : "item",
       formatter: (input: unknown) => {
-        const items = (Array.isArray(input) ? input : [input]) as Array<{
-          data?: { rowIndex?: number };
-          seriesName?: string;
-          value?: unknown;
-        }>;
+        const items = (Array.isArray(input) ? input : [input]) as Array<{ data?: { rowIndex?: number } }>;
         const row = rows[items[0]?.data?.rowIndex ?? -1];
         if (!row) return "";
         if (chart.kind === "trend")
           return `${row.label}\n${chart.series?.[0]}  ${row.primary}\n${chart.series?.[1]}  ${row.secondary}`;
-        if (chart.kind === "stack")
-          return `${row.label}\n正常 ${row.normal}  异常 ${row.abnormal}\n危急 ${row.critical}  未标记 ${row.unmarked}\n分母 ${row.denominator} 项次`;
         return `${chart.kind === "matrix" ? `${row.x} / ${row.y}` : row.label}\n${row.value} ${chart.unit}\n分母 ${row.denominator} · 占比 ${row.share}%\n未知 ${row.unknownCount}`;
       }
     }
   };
   if (chart.kind === "trend") {
+    // 折线样式对齐首页 DailyPatientCurve：平滑 + 圆头 + 淡色面积
     return {
       ...base,
       grid: { left: 42, right: 18, top: 38, bottom: 34 },
-      legend: { top: 0, right: 4, itemWidth: 12, itemHeight: 8, textStyle: { color: textColor, fontSize: 11 } },
+      legend: { top: 0, right: 4, icon: "circle", itemWidth: 10, itemHeight: 10, textStyle: { color: textColor, fontSize: 11 } },
       xAxis: {
         type: "category",
         data: rows.map(r => r.label),
+        boundaryGap: false,
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: lineColor } },
+        axisLine: { show: false },
         axisLabel: { formatter: (label: string) => label.slice(2), hideOverlap: true }
       },
       yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: lineColor, type: "dashed" } } },
+      series: (["primary", "secondary"] as const).map((key, seriesIndex) => ({
+        type: "line" as const,
+        name: chart.series?.[seriesIndex],
+        smooth: 0.42,
+        showSymbol: false,
+        symbol: "circle" as const,
+        symbolSize: 8,
+        lineStyle: { width: 3, cap: "round" as const },
+        itemStyle: { color: seriesIndex === 0 ? "#1683ff" : "#67a382", borderColor: "#fff", borderWidth: 2 },
+        areaStyle: seriesIndex === 0 ? { color: "rgba(22,131,255,0.05)" } : undefined,
+        emphasis: { focus: "series" as const },
+        data: rows.map((r, i) => ({ value: r[key], rowIndex: i }))
+      }))
+    };
+  }
+  if (chart.kind === "donut") {
+    return {
+      ...base,
+      legend: { bottom: 0, icon: "circle", itemWidth: 10, itemHeight: 10, textStyle: { color: textColor, fontSize: 11 } },
       series: [
         {
-          type: "bar",
-          name: chart.series?.[0],
-          barMaxWidth: 25,
-          itemStyle: { borderRadius: [3, 3, 0, 0] },
-          data: rows.map((r, i) => ({ value: r.primary, rowIndex: i }))
-        },
-        {
-          type: "line",
-          name: chart.series?.[1],
-          symbol: "circle",
-          symbolSize: 5,
-          lineStyle: { width: 2 },
-          data: rows.map((r, i) => ({ value: r.secondary, rowIndex: i }))
+          type: "pie",
+          radius: ["46%", "70%"],
+          center: ["50%", "44%"],
+          padAngle: 2,
+          itemStyle: { borderRadius: 8, borderColor: "#fff", borderWidth: 2 },
+          label: { show: false },
+          emphasis: { scale: true, scaleSize: 6 },
+          animationType: "expansion",
+          animationDelay: (index: number) => index * 55,
+          data: rows.map((row, index) => ({
+            value: row.value || 0,
+            name: row.label,
+            rowIndex: index,
+            itemStyle: { color: ["#b99742", "#247b91", "#b4bebc"][index % 3] }
+          }))
         }
+      ],
+      graphic: [
+        {
+          type: "text",
+          left: "center",
+          top: "37%",
+          style: { text: number(chart.centerValue ?? 0), fontSize: 30, fontWeight: 700, fill: "#b99742", textAlign: "center" }
+        },
+        { type: "text", left: "center", top: "52%", style: { text: chart.centerLabel || "", fontSize: 11, fill: textColor } }
       ]
     };
   }
   if (chart.kind === "matrix") {
     const xs = [...new Set(rows.map(r => r.x || ""))];
     const ys = [...new Set(rows.map(r => r.y || ""))];
+    const leftWidth = narrow.value ? 85 : 125;
+    // 单元格宽度封顶：列少时网格不再被拉伸到整卡宽
+    const gridWidth = Math.max(140, Math.min(containerWidth.value - leftWidth - 90 || 620, xs.length * 96 + 30));
     return {
       ...base,
-      grid: { left: narrow.value ? 85 : 125, right: 12, top: 14, bottom: 80 },
+      grid: { left: leftWidth, width: gridWidth, top: 14, bottom: 80 },
       xAxis: {
         type: "category",
         data: xs,
@@ -236,47 +282,25 @@ const option = computed<EChartsOption>(() => {
             value: [xs.indexOf(row.x || ""), ys.indexOf(row.y || ""), row.value || 0],
             rowIndex: index
           })),
-          label: { show: xs.length <= 8, fontSize: 10 },
+          label: { show: xs.length * ys.length <= 24, fontSize: 10 },
           itemStyle: { borderColor: "#ffffff", borderWidth: 3 },
           emphasis: { itemStyle: { borderColor: "#a3b8ae" } }
         }
       ]
     };
   }
-  const horizontal: EChartsOption = {
+  return {
     ...base,
-    grid: {
-      left: narrow.value ? 108 : chart.kind === "stack" ? 185 : 145,
-      right: 38,
-      top: chart.kind === "stack" ? 38 : 12,
-      bottom: 26
-    },
+    grid: { left: narrow.value ? 108 : 145, right: 38, top: 12, bottom: 26 },
     xAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: lineColor, type: "dashed" } } },
     yAxis: {
       type: "category",
       data: rows.map(r => r.label),
       inverse: true,
-      axisLabel: { width: narrow.value ? 98 : chart.kind === "stack" ? 173 : 132, overflow: "truncate" },
+      axisLabel: { width: narrow.value ? 98 : 132, overflow: "truncate" },
       axisLine: { show: false },
       axisTick: { show: false }
-    }
-  };
-  if (chart.kind === "stack") {
-    return {
-      ...horizontal,
-      color: ["#67a382", "#c39b43", "#b76864", "#b4bebc"],
-      legend: { top: 0, itemWidth: 10, itemHeight: 8, textStyle: { fontSize: 10 } },
-      series: stackKeys.map((key, seriesIndex) => ({
-        type: "bar",
-        stack: "total",
-        name: ["正常", "异常", "危急", "未标记"][seriesIndex],
-        barMaxWidth: 17,
-        data: rows.map((r, index) => ({ value: r[key] || 0, rowIndex: index }))
-      }))
-    };
-  }
-  return {
-    ...horizontal,
+    },
     series: [
       {
         type: "bar",
@@ -301,6 +325,16 @@ const option = computed<EChartsOption>(() => {
   min-width: 0;
   padding: 20px 0 12px;
   border-top: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  transition: background-color 0.18s ease-out;
+}
+.analysis-chart:hover {
+  background: rgba(36, 123, 145, 0.035);
+}
+@media (prefers-reduced-motion: reduce) {
+  .analysis-chart {
+    transition: none;
+  }
 }
 .chart-heading,
 .chart-title,
@@ -368,6 +402,49 @@ const option = computed<EChartsOption>(() => {
 .chart-canvas {
   min-width: 0;
   width: 100%;
+}
+.matrix-single {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-height: 280px;
+  padding: 28px 16px;
+  border: 1px dashed var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f7fbfa, #fff);
+}
+.matrix-single-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.matrix-single-value strong {
+  font-size: 44px;
+  font-weight: 700;
+  color: #247b91;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.matrix-single-value span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.matrix-single-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.matrix-single-meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.matrix-single small {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
 }
 .chart-footnote {
   margin: 10px 0 0;

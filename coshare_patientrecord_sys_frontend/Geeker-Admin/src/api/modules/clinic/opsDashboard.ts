@@ -20,6 +20,7 @@ export interface AddressPatientCard {
   visitCount: number;
   latestVisitDate: string;
   encounterId: string;
+  patientCaseId?: string;
   phone?: string;
   address?: string;
 }

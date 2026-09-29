@@ -420,6 +420,7 @@ public class OpsDashboardService {
             row.put("visitCount", visitCount);
             row.put("latestVisitDate", latestVisitDate.equals(LocalDate.MIN) ? "" : latestVisitDate.toString());
             row.put("encounterId", latestEncounterId);
+            row.put("patientCaseId", id.startsWith("encounter:") ? "" : id);
             return row;
         }
     }

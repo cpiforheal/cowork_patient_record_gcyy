@@ -7,6 +7,7 @@ import static org.mockito.Mockito.*;
 import com.coshare.patientrecord.auth.dto.SessionUser;
 import com.coshare.patientrecord.clinic.service.PatientAnalysisService.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,8 +32,6 @@ class PatientAnalysisServiceTest {
         Visit b = visit("b", "p1", "2026-09-03", "男", 43, "甲病");
         Visit cancelled = new Visit("c", "p2", LocalDate.parse("2026-09-02"), mapper.createObjectNode(), "CANCELLED");
         Visit withdrawn = new Visit("w", "p3", LocalDate.parse("2026-09-02"), mapper.createObjectNode(), "WITHDRAWN");
-        a.reports.add(new Report("r1", "a", a.date, List.of()));
-        a.reports.add(new Report("r2", "a", a.date, List.of()));
         Data data = data(a, b, cancelled, withdrawn);
         Map<String, Object> result = service.analyze(query("granularity", "day"), data, true);
         assertEquals(2, map(result.get("summary")).get("visits"));
@@ -87,29 +86,63 @@ class PatientAnalysisServiceTest {
     }
 
     @Test
-    void matchesLabKeyAndSeverityOnSameMetricAndPreservesUnknown() {
+    void classifiesRecheckByUnionOfThreeBasesAndFiltersByComplaint() {
+        Visit text = visit("a", "p1", "2026-09-01", "男", 40, "甲病");
+        text.stages.put("RECEPTION", mapper.createObjectNode().put("chiefComplaintText", "术后复查，切口愈合良好"));
+        text.finishFields();
+        Visit numbered = visit("b", "p2", "2026-09-02", "女", 50, "乙病");
+        numbered.visitNo = 2;
+        numbered.finishFields();
+        Visit source = visit("c", "p3", "2026-09-03", "男", 60, "丙病");
+        ((ObjectNode) source.patient).put("patientSource", "复诊");
+        source.finishFields();
+        Visit tagged = visit("d", "p4", "2026-09-03", "女", 30, "丁病");
+        ((ObjectNode) tagged.patient).putArray("registrationSymptoms").add("便血");
+        tagged.finishFields();
+        Visit plain = visit("e", "p5", "2026-09-03", "男", 70, "戊病");
+        Data data = data(text, numbered, source, tagged, plain);
+
+        Map<String, Object> donut = chart(service.analyze(query("view", "complaints"), data, true), "recheckComposition");
+        assertEquals("donut", donut.get("kind"));
+        assertEquals(3, donut.get("centerValue"));
+        assertEquals(3, rows(donut).stream().filter(row -> "复查".equals(row.get("label"))).findFirst().orElseThrow().get("value"));
+        LinkedMultiValueMap<String, String> recheck = params("view", "complaints", "complaint", "复查");
+        assertEquals(3, service.detailResult(PatientAnalysisQuery.parse(recheck), data).get("total"));
+        assertEquals(1, service.detailResult(PatientAnalysisQuery.parse(params("view", "complaints", "complaint", "便血")), data).get("total"));
+        assertEquals(1, service.detailResult(PatientAnalysisQuery.parse(params("view", "complaints", "complaint", "未记录")), data).get("total"));
+
+        Map<String, Object> details = service.detailResult(PatientAnalysisQuery.parse(recheck), data);
+        Map<String, Object> first = rows(details).get(0);
+        assertFalse(first.get("recheckBasis").toString().isBlank());
+        // patientKey "p1" carries no "case:" prefix, so no case id can be exposed.
+        assertEquals("", first.get("patientCaseId"));
+        Visit caseVisit = visit("f", "case:p9", "2026-09-03", "男", 65, "己病");
+        caseVisit.visitNo = 3;
+        caseVisit.finishFields();
+        assertEquals("p9", rows(service.detailResult(query(), data(caseVisit))).get(0).get("patientCaseId"));
+    }
+
+    @Test
+    void complaintTagsMergeRegistrationAndReceptionWithoutDuplication() {
         Visit visit = visit("a", "p1", "2026-09-01", "男", 40, "甲病");
-        Report report = new Report("r1", "a", visit.date, List.of(
-            new LabMetric("panel:A:mg", "A (mg)", "NORMAL", "1", "mg"),
-            new LabMetric("panel:B:mmol", "B (mmol)", "CRITICAL", "2", "mmol"),
-            new LabMetric("panel:C:mg", "C (mg)", "未记录", "3", "mg")
-        ));
-        visit.reports.add(report);
-        Data data = data(visit);
-        assertEquals(0, service.detailResult(query("view", "exams", "labKey", "panel:A:mg", "severity", "CRITICAL"), data).get("total"));
-        Map<String, Object> details = service.detailResult(query("view", "exams", "labKey", "panel:C:mg"), data);
-        assertEquals(1, details.get("total"));
-        assertEquals("项次", map(details.get("meta")).get("unit"));
-        assertEquals("未标记", rows(details).get(0).get("severity"));
-        assertEquals("未记录", PatientAnalysisService.severity(mapper.createObjectNode().put("value", "999")));
-        assertEquals("NORMAL", PatientAnalysisService.severity(mapper.createObjectNode().put("abnormal", false)));
-        assertEquals("CRITICAL", PatientAnalysisService.severity(mapper.createObjectNode().put("critical", true)));
+        ((ObjectNode) visit.patient).putArray("registrationSymptoms").add("便血").add("肿物脱出");
+        visit.stages.put("RECEPTION", mapper.createObjectNode()
+            .<ObjectNode>set("chiefComplaint", mapper.createArrayNode().add("便血").add("肛周瘙痒"))
+            .put("chiefComplaintText", "便血伴肛周瘙痒"));
+        visit.finishFields();
+        assertEquals(new LinkedHashSet<>(List.of("便血", "肿物脱出", "肛周瘙痒")), visit.complaintTags);
+        assertEquals("便血伴肛周瘙痒", visit.complaintText);
+        Map<String, Object> tags = chart(service.analyze(query("view", "complaints"), data(visit), true), "complaintTags");
+        assertEquals(3, rows(tags).size());
+        LinkedMultiValueMap<String, String> filters = params("view", "complaints");
+        filters.add("complaint", "便血");
+        assertEquals(1, service.detailResult(PatientAnalysisQuery.parse(filters), data(visit)).get("total"));
     }
 
     @Test
     void followsNodeDatesNotOriginalEncounterAndUsesFirstContact() {
         Visit original = visit("a", "p1", "2026-01-01", "男", 40, "甲病");
-        Data data = new Data(List.of(original), List.of(),
+        Data data = new Data(List.of(original),
             List.of(new Node("n1", "a", LocalDate.parse("2026-09-02"), "1"), new Node("n2", "a", null, "2")),
             List.of(new Contact("c1", "n1", LocalDateTime.parse("2026-09-01T09:00:00")),
                 new Contact("c2", "n1", LocalDateTime.parse("2026-09-03T09:00:00"))));
@@ -128,7 +161,7 @@ class PatientAnalysisServiceTest {
     @Test
     void excludesContactsAfterEndAndDoesNotExpandDateRangeToMonth() {
         Visit visit = visit("a", "p", "2026-01-01", "男", 40, "甲病");
-        Data data = new Data(List.of(visit), List.of(),
+        Data data = new Data(List.of(visit),
             List.of(new Node("n1", "a", LocalDate.parse("2026-09-03"), "1"), new Node("n2", "a", LocalDate.parse("2026-09-20"), "2")),
             List.of(new Contact("c1", "n1", LocalDateTime.parse("2026-09-04T09:00:00"))));
         Map<String, Object> result = service.analyze(query("view", "followup"), data, true);
@@ -171,7 +204,7 @@ class PatientAnalysisServiceTest {
         Visit b = visit("b", "p2", "2026-09-02", "女", 60, "乙病");
         b.primaryOperation = "辅助B"; b.operations.add("辅助B");
         Data data = data(a, b);
-        for (String view : List.of("overview", "population", "clinical")) {
+        for (String view : List.of("overview", "population", "clinical", "complaints")) {
             Map<String, Object> result = service.analyze(query("view", view), data, true);
             for (Map<String, Object> chart : charts(result)) {
                 if ("trend".equals(chart.get("kind"))) continue;
@@ -189,7 +222,7 @@ class PatientAnalysisServiceTest {
         List<Visit> visits = new ArrayList<>();
         for (int i = 0; i < 15; i++) visits.add(visit("a" + i, "p" + i, "2026-09-01", "男", 40, "病种" + i));
         visits.add(visit("unknown", "u", "2026-09-02", "女", 50, ""));
-        Data data = new Data(visits, List.of(), List.of(), List.of());
+        Data data = new Data(visits, List.of(), List.of());
         Map<String, Object> chart = chart(service.analyze(query(), data, true), "diagnosis");
         assertEquals(12, rows(chart).size());
         assertEquals(16, list(chart.get("tableRows")).size());
@@ -235,7 +268,7 @@ class PatientAnalysisServiceTest {
         visit.finishFields();
         return visit;
     }
-    Data data(Visit... visits) { return new Data(List.of(visits), List.of(), List.of(), List.of()); }
+    Data data(Visit... visits) { return new Data(List.of(visits), List.of(), List.of()); }
     static PatientAnalysisQuery query(String... pairs) { return PatientAnalysisQuery.parse(params(pairs)); }
     static LinkedMultiValueMap<String, String> params(String... pairs) {
         LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<>();
