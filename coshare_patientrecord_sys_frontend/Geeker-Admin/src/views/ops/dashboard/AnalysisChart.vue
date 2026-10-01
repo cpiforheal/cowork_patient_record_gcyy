@@ -18,6 +18,16 @@
       </div>
       <div class="chart-tools">
         <span class="chart-unit">{{ chart.unit }}</span>
+        <button
+          v-if="chart.kind === 'matrix' && !table && !matrixSingle && chart.rows.length"
+          type="button"
+          class="chart-normalize"
+          :aria-pressed="normalize"
+          :title="normalize ? '当前显示行内占比，点击切回数量' : '当前显示数量，点击切换为行内占比'"
+          @click="normalize = !normalize"
+        >
+          {{ normalize ? "行内占比" : "数量" }}
+        </button>
         <div class="chart-mode" role="group" aria-label="图表或数据表" :class="{ 'is-table': table }">
           <span class="chart-mode-thumb" aria-hidden="true" />
           <button type="button" :aria-pressed="!table" aria-label="图表视图" title="图表" @click="table = false">
@@ -37,8 +47,7 @@
             <tr>
               <th>{{ chart.kind === "trend" ? "时间段" : "分类" }}</th>
               <template v-if="chart.kind === 'trend'">
-                <th>{{ chart.series?.[0] }}</th>
-                <th>{{ chart.series?.[1] }}</th>
+                <th v-for="name in seriesNames" :key="name">{{ name }}</th>
               </template>
               <template v-else>
                 <th>数量</th>
@@ -56,8 +65,7 @@
                 </button>
               </th>
               <template v-if="chart.kind === 'trend'">
-                <td>{{ number(row.primary ?? 0) }}</td>
-                <td>{{ number(row.secondary ?? 0) }}</td>
+                <td v-for="(name, seriesIndex) in seriesNames" :key="name">{{ number(seriesValue(row, seriesIndex)) }}</td>
               </template>
               <template v-else>
                 <td class="strong">{{ number(row.value ?? 0) }}</td>
@@ -118,7 +126,7 @@ import type { EChartsOption } from "echarts";
 import VChart from "vue-echarts";
 import type { AnalysisChartData, AnalysisRow } from "@/api/modules/clinic/patientAnalysis";
 import { useGlobalStore } from "@/stores/modules/global";
-import { analysisPalette, categoricalGradient, chartMotion, escapeHtml, isUnknownLabel } from "./analysisTheme";
+import { analysisPalette, categoricalGradient, chartMotion, delayColor, escapeHtml, isUnknownLabel } from "./analysisTheme";
 
 use([
   CanvasRenderer,
@@ -134,10 +142,19 @@ use([
   VisualMapComponent
 ]);
 
-const props = defineProps<{ chart: AnalysisChartData; main?: boolean; disabled?: boolean; index?: number }>();
+const props = defineProps<{
+  chart: AnalysisChartData;
+  main?: boolean;
+  disabled?: boolean;
+  index?: number;
+  /** 上一周期同口径的趋势行，按序号与当前对齐，只用于虚线对比 */
+  previous?: AnalysisRow[];
+}>();
 const emit = defineEmits<{ select: [filters: Record<string, string[]>] }>();
 const { isDark } = storeToRefs(useGlobalStore());
 const table = ref(false);
+// 矩阵行内占比：消除各行样本量差异，便于比较构成
+const normalize = ref(false);
 const root = ref<HTMLElement>();
 const containerWidth = ref(0);
 const narrow = computed(() => containerWidth.value > 0 && containerWidth.value < 480);
@@ -151,6 +168,17 @@ onMounted(() => {
 onBeforeUnmount(() => observer?.disconnect());
 
 const tableRows = computed(() => props.chart.tableRows || props.chart.rows);
+// 多系列趋势用 values[]；旧的双系列口径回退到 primary/secondary
+const multiSeries = computed(() => props.chart.rows.some(row => Array.isArray(row.values)));
+const seriesNames = computed(() => {
+  const names = props.chart.series || [];
+  return multiSeries.value ? names : [names[0] || "", names[1] || ""];
+});
+function seriesValue(row: AnalysisRow, index: number) {
+  if (multiSeries.value) return row.values?.[index] ?? 0;
+  return (index === 0 ? row.primary : row.secondary) ?? 0;
+}
+const previousRows = computed(() => (props.chart.kind === "trend" && props.previous?.length ? props.previous : undefined));
 // 每张卡片一个主题色：顶部色条、单位徽标随卡片序号轮换
 const accentColor = computed(() => {
   const p = analysisPalette(isDark.value);
@@ -165,6 +193,7 @@ const chartHeight = computed(() => {
   if (kind === "matrix") return Math.max(280, Math.min(460, new Set(rows.map(r => r.y)).size * 44 + 140));
   if (kind === "bar") return Math.max(240, Math.min(440, rows.length * 32 + 40));
   if (kind === "donut") return 300;
+  if (kind === "stack") return 150;
   return props.main ? 320 : 280;
 });
 const matrixSingle = computed(() => {
@@ -189,13 +218,22 @@ function tooltipHtml(row: AnalysisRow) {
   const p = analysisPalette(isDark.value);
   const title = escapeHtml(chart.kind === "matrix" ? `${row.x} / ${row.y}` : row.label);
   if (chart.kind === "trend") {
-    const line = (color: string, name: unknown, value: unknown) =>
-      `<div class="pa-tt-row"><i style="background:${color}"></i><span>${escapeHtml(name)}</span><b>${escapeHtml(number(Number(value) || 0))}</b></div>`;
-    return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>${line(p.brand, chart.series?.[0], row.primary)}${line(
-      p.accent,
-      chart.series?.[1],
-      row.secondary
-    )}</div>`;
+    const line = (color: string, name: unknown, value: unknown, dashed = false) =>
+      `<div class="pa-tt-row"><i style="background:${color}${dashed ? ";opacity:.55" : ""}"></i><span>${escapeHtml(name)}</span><b>${escapeHtml(number(Number(value) || 0))}</b></div>`;
+    const colors = trendColors(p);
+    const lines = seriesNames.value.map((name, i) => line(colors[i], name, seriesValue(row, i))).join("");
+    const rowIndex = chart.rows.indexOf(row);
+    const prior = previousRows.value?.[rowIndex];
+    const priorLine = prior ? line(p.textMuted, `上期（${prior.label}）`, prior.primary, true) : "";
+    return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>${lines}${priorLine}</div>`;
+  }
+  if (chart.kind === "matrix" && normalize.value) {
+    const total = chart.rows.filter(r => r.y === row.y).reduce((sum, r) => sum + (r.value || 0), 0);
+    const rowShare = total ? Math.round(((row.value || 0) / total) * 1000) / 10 : 0;
+    return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>
+    <div class="pa-tt-value"><b>${rowShare}%</b><span>占「${escapeHtml(row.y)}」行</span></div>
+    <div class="pa-tt-meta">${escapeHtml(number(row.value ?? 0))} / ${escapeHtml(number(total))} ${escapeHtml(chart.unit)}</div>
+    <div class="pa-tt-hint">点击下钻</div></div>`;
   }
   const share = Math.min(100, Math.max(0, row.share ?? 0));
   return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>
@@ -203,6 +241,11 @@ function tooltipHtml(row: AnalysisRow) {
     <div class="pa-tt-bar"><i style="width:${share}%;background:linear-gradient(90deg,${p.categorical[1]},${p.brand})"></i></div>
     <div class="pa-tt-meta">分母 ${escapeHtml(number(row.denominator ?? 0))}${row.unknownCount ? ` · 未知 ${escapeHtml(row.unknownCount)}` : ""}</div>
     <div class="pa-tt-hint">点击下钻</div></div>`;
+}
+
+// 两条线沿用品牌色 + 琥珀；多条线使用分类色
+function trendColors(p: ReturnType<typeof analysisPalette>) {
+  return multiSeries.value ? p.categorical : [p.brand, p.accent];
 }
 
 const option = computed<EChartsOption>(() => {
@@ -234,8 +277,54 @@ const option = computed<EChartsOption>(() => {
   };
 
   if (chart.kind === "trend") {
-    const colors = [p.brand, p.accent];
+    const colors = trendColors(p);
     const soft = [p.brandSoft, p.accentSoft];
+    const filled = !multiSeries.value;
+    const lines = seriesNames.value.map((name, seriesIndex) => ({
+      type: "line" as const,
+      name,
+      smooth: 0.35,
+      showSymbol: false,
+      symbol: "circle" as const,
+      symbolSize: 8,
+      lineStyle: { width: seriesIndex === 0 ? 2.5 : 2, cap: "round" as const, color: colors[seriesIndex % colors.length] },
+      itemStyle: { color: colors[seriesIndex % colors.length], borderColor: p.surface, borderWidth: 2 },
+      ...(filled
+        ? {
+            areaStyle: {
+              color: {
+                type: "linear" as const,
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color: soft[seriesIndex] },
+                  { offset: 1, color: "rgba(255,255,255,0)" }
+                ]
+              }
+            }
+          }
+        : {}),
+      emphasis: { focus: "series" as const },
+      data: rows.map((r, i) => ({ value: seriesValue(r, seriesIndex), rowIndex: i }))
+    }));
+    const prior = previousRows.value;
+    if (prior) {
+      lines.push({
+        type: "line" as const,
+        name: `上期${seriesNames.value[0] || ""}`,
+        smooth: 0.35,
+        showSymbol: false,
+        symbol: "circle" as const,
+        symbolSize: 6,
+        lineStyle: { width: 1.5, cap: "round" as const, color: p.textMuted, type: "dashed" } as never,
+        itemStyle: { color: p.textMuted, borderColor: p.surface, borderWidth: 2 },
+        emphasis: { focus: "series" as const },
+        // 按序号对齐；上期桶数不足时留空
+        data: rows.map((_, i) => ({ value: prior[i]?.primary ?? (null as unknown as number), rowIndex: i }))
+      });
+    }
     return {
       ...base,
       grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
@@ -262,30 +351,59 @@ const option = computed<EChartsOption>(() => {
         axisLabel,
         splitLine: { lineStyle: { color: p.grid } }
       },
-      series: (["primary", "secondary"] as const).map((key, seriesIndex) => ({
-        type: "line" as const,
-        name: chart.series?.[seriesIndex],
-        smooth: 0.35,
-        showSymbol: false,
-        symbol: "circle" as const,
-        symbolSize: 8,
-        lineStyle: { width: seriesIndex === 0 ? 2.5 : 2, cap: "round" as const, color: colors[seriesIndex] },
-        itemStyle: { color: colors[seriesIndex], borderColor: p.surface, borderWidth: 2 },
-        areaStyle: {
-          color: {
-            type: "linear" as const,
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: soft[seriesIndex] },
-              { offset: 1, color: "rgba(255,255,255,0)" }
-            ]
-          }
+      series: lines
+    };
+  }
+
+  // 100% 堆叠条：状态构成一眼看清，每段可点击下钻
+  if (chart.kind === "stack") {
+    const total = rows.reduce((sum, row) => sum + (row.value || 0), 0) || 1;
+    const visible = rows.map((row, index) => ({ row, index })).filter(({ row }) => (row.value || 0) > 0);
+    const byName = new Map(rows.map(row => [row.label, row]));
+    return {
+      ...base,
+      grid: { left: 4, right: 4, top: 8, height: 34 },
+      legend: {
+        bottom: 0,
+        left: 0,
+        icon: "circle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 16,
+        textStyle: { color: p.text, fontSize: 12 },
+        formatter: (name: string) => {
+          const row = byName.get(name);
+          return `${name} ${number(row?.value ?? 0)} · ${row?.share ?? 0}%`;
+        }
+      },
+      xAxis: { type: "value", max: 100, show: false },
+      yAxis: { type: "category", data: [""], show: false },
+      series: visible.map(({ row, index }, order) => ({
+        type: "bar" as const,
+        name: row.label,
+        stack: "all",
+        barWidth: 30,
+        itemStyle: {
+          color: isUnknownLabel(row.label) ? p.unknown : p.categorical[index % p.categorical.length],
+          borderColor: p.surface,
+          borderWidth: 2,
+          borderRadius: [
+            order === 0 ? 8 : 0,
+            order === visible.length - 1 ? 8 : 0,
+            order === visible.length - 1 ? 8 : 0,
+            order === 0 ? 8 : 0
+          ]
+        },
+        label: {
+          show: (row.value || 0) / total >= 0.12,
+          color: "#ffffff",
+          fontSize: 12,
+          fontWeight: 600,
+          formatter: () => `${row.share ?? 0}%`
         },
         emphasis: { focus: "series" as const },
-        data: rows.map((r, i) => ({ value: r[key], rowIndex: i }))
+        blur: { itemStyle: { opacity: 0.35 } },
+        data: [{ value: ((row.value || 0) / total) * 100, rowIndex: index }]
       }))
     };
   }
@@ -320,7 +438,8 @@ const option = computed<EChartsOption>(() => {
           itemStyle: { borderRadius: 6, borderColor: p.surface, borderWidth: 2 },
           label: { show: false },
           labelLine: { show: false },
-          emphasis: { scale: true, scaleSize: 4 },
+          emphasis: { scale: true, scaleSize: 4, focus: "self" },
+          blur: { itemStyle: { opacity: 0.35 } },
           animationType: "expansion",
           data: rows.map((row, index) => ({
             value: row.value || 0,
@@ -363,6 +482,13 @@ const option = computed<EChartsOption>(() => {
   if (chart.kind === "matrix") {
     const xs = [...new Set(rows.map(r => r.x || ""))];
     const ys = [...new Set(rows.map(r => r.y || ""))];
+    const rowTotals = new Map<string, number>();
+    rows.forEach(r => rowTotals.set(r.y || "", (rowTotals.get(r.y || "") || 0) + (r.value || 0)));
+    const cell = (row: AnalysisRow) => {
+      if (!normalize.value) return row.value || 0;
+      const total = rowTotals.get(row.y || "") || 0;
+      return total ? Math.round(((row.value || 0) / total) * 1000) / 10 : 0;
+    };
     const leftWidth = narrow.value ? 88 : 128;
     // 单元格宽度封顶：列少时网格不再被拉伸到整卡宽
     const available = containerWidth.value ? containerWidth.value - leftWidth - 56 : 620;
@@ -394,7 +520,8 @@ const option = computed<EChartsOption>(() => {
       },
       visualMap: {
         min: 0,
-        max: Math.max(1, ...rows.map(r => r.value || 0)),
+        max: normalize.value ? 100 : Math.max(1, ...rows.map(r => r.value || 0)),
+        formatter: (value: unknown) => (normalize.value ? `${Math.round(Number(value))}%` : String(Math.round(Number(value)))),
         calculable: false,
         orient: "horizontal",
         left: leftWidth,
@@ -408,7 +535,7 @@ const option = computed<EChartsOption>(() => {
         {
           type: "heatmap",
           data: rows.map((row, index) => ({
-            value: [xs.indexOf(row.x || ""), ys.indexOf(row.y || ""), row.value || 0],
+            value: [xs.indexOf(row.x || ""), ys.indexOf(row.y || ""), cell(row)],
             rowIndex: index
           })),
           label: {
@@ -417,7 +544,11 @@ const option = computed<EChartsOption>(() => {
             fontWeight: 600,
             color: p.text,
             textBorderColor: p.surface,
-            textBorderWidth: 2
+            textBorderWidth: 2,
+            formatter: ({ value }: { value: unknown }) => {
+              const v = Array.isArray(value) ? Number(value[2]) : 0;
+              return normalize.value ? `${v}%` : number(v);
+            }
           },
           itemStyle: { borderColor: p.surface, borderWidth: 3, borderRadius: 6 },
           emphasis: { itemStyle: { borderColor: p.brand, borderWidth: 2 } }
@@ -426,7 +557,14 @@ const option = computed<EChartsOption>(() => {
     };
   }
 
-  // 横向条形：每个分类一种渐变色，含未知的类别弱化为浅蓝灰
+  // 横向条形：每个分类一种渐变色，含未知的类别弱化为灰绿；
+  // 有序分组（环节、星期）用单一品牌色，间隔分布用语义色
+  const barColor = (row: AnalysisRow, index: number) => {
+    if ((row.unknownCount || 0) > 0 || isUnknownLabel(row.label)) return p.unknown;
+    if (chart.id === "delay") return delayColor(p, row.label) ?? categoricalGradient(p, index);
+    if (chart.ordered) return categoricalGradient(p, 0);
+    return categoricalGradient(p, index);
+  };
   return {
     ...base,
     grid: { left: 8, right: 48, top: 4, bottom: 4, containLabel: true },
@@ -448,10 +586,7 @@ const option = computed<EChartsOption>(() => {
         data: rows.map((row, index) => ({
           value: row.value || 0,
           rowIndex: index,
-          itemStyle: {
-            color: (row.unknownCount || 0) > 0 || isUnknownLabel(row.label) ? p.unknown : categoricalGradient(p, index),
-            borderRadius: 7
-          }
+          itemStyle: { color: barColor(row, index), borderRadius: 7 }
         })),
         label: {
           show: true,
@@ -462,7 +597,8 @@ const option = computed<EChartsOption>(() => {
           fontWeight: 500,
           formatter: ({ value }: { value: unknown }) => number(Number(value) || 0)
         },
-        emphasis: { itemStyle: { shadowBlur: 12, shadowColor: p.brandSoft } }
+        emphasis: { focus: "self" as const, itemStyle: { shadowBlur: 12, shadowColor: p.brandSoft } },
+        blur: { itemStyle: { opacity: 0.4 } }
       }
     ]
   };
@@ -479,10 +615,46 @@ const option = computed<EChartsOption>(() => {
   overflow: hidden;
   transition:
     opacity 200ms ease,
-    box-shadow 150ms ease,
-    border-color 150ms ease;
-  animation: pa-card-enter 420ms var(--pa-ease) both;
+    translate 180ms var(--pa-ease),
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+
+  /* backwards：入场结束后不再锁定 transform，悬停位移用独立的 translate 属性 */
+  animation: pa-card-enter 420ms var(--pa-ease) backwards;
   animation-delay: calc(var(--pa-enter-index, 0) * 40ms);
+}
+
+@media (hover: hover) {
+  .analysis-chart:hover {
+    border-color: color-mix(in srgb, var(--pa-brand) 32%, var(--pa-border));
+    box-shadow: var(--pa-shadow-hover);
+    translate: 0 -2px;
+  }
+}
+.chart-normalize {
+  height: 26px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--pa-text-2);
+  cursor: pointer;
+  background: var(--pa-subtle);
+  border: 0;
+  border-radius: 8px;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.chart-normalize[aria-pressed="true"] {
+  color: var(--pa-brand);
+  background: var(--pa-brand-soft);
+}
+.chart-normalize:active {
+  transform: scale(0.97);
+}
+.chart-normalize:focus-visible {
+  outline: 2px solid var(--pa-brand);
+  outline-offset: 2px;
 }
 .analysis-chart::before {
   position: absolute;
@@ -815,11 +987,15 @@ const option = computed<EChartsOption>(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .analysis-chart,
+  .analysis-chart:hover,
   .chart-mode-thumb,
   .pa-swap-enter-active,
   .pa-swap-leave-active {
     transition: none;
     animation: none;
+  }
+  .analysis-chart:hover {
+    translate: none;
   }
 }
 

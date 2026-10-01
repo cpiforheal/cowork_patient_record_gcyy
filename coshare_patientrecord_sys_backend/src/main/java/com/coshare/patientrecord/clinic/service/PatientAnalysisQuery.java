@@ -16,7 +16,8 @@ public record PatientAnalysisQuery(
 ) {
     public static final List<String> DIMENSIONS = List.of(
         "gender", "ageBand", "region", "diagnosis", "operation", "primaryOperation", "status",
-        "tcmDisease", "syndrome", "complaint", "contactState", "delayBand"
+        "tcmDisease", "syndrome", "complaint", "contactState", "delayBand",
+        "patientSource", "examType", "weekday", "stage"
     );
     private static final Set<String> FOLLOW_UP_FILTERS = Set.of("contactState", "delayBand", "unscheduled");
 

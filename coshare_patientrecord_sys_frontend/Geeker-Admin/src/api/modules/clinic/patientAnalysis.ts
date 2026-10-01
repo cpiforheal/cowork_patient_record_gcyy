@@ -26,6 +26,8 @@ export interface AnalysisRow {
   value?: number;
   primary?: number;
   secondary?: number;
+  /** 多系列趋势（如主要诊断走势），与 chart.series 一一对应 */
+  values?: number[];
   visits?: number;
   patients?: number;
   denominator?: number;
@@ -39,12 +41,14 @@ export interface AnalysisRow {
 export interface AnalysisChartData {
   id: string;
   title: string;
-  kind: "bar" | "matrix" | "trend" | "donut";
+  kind: "bar" | "matrix" | "trend" | "donut" | "stack";
   unit: string;
   note: string;
   rows: AnalysisRow[];
   tableRows?: AnalysisRow[];
-  series?: [string, string];
+  series?: string[];
+  /** 行顺序有业务含义（环节、星期、状态），前端不得重排 */
+  ordered?: boolean;
   denominator?: number;
   regionDepth?: number;
   centerLabel?: string;
@@ -60,9 +64,20 @@ export interface AnalysisResult {
     contacts: number;
     contactedNodes: number;
     unscheduledNodes: number;
+    /** 新字段：旧后端不返回，前端需降级 */
+    overdueNodes?: number;
+    returnRates?: AnalysisReturnRate[];
   };
   detailsAllowed: boolean;
   charts: AnalysisChartData[];
+}
+
+export interface AnalysisReturnRate {
+  days: number;
+  eligible: number;
+  returned: number;
+  pending: number;
+  rate: number;
 }
 
 export interface AnalysisFacetResult {

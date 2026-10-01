@@ -45,6 +45,13 @@ public class PatientAnalysisService {
     private static final Map<String, String> EXAM_LABELS = Map.of(
         "LAB", "检验报告", "ECG", "心电图", "IMAGING", "影像检查", "VITAL_SIGNS", "生命体征", "COLONOSCOPY", "肠镜"
     );
+    static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "NURSING", "TCM", "DOCTOR", "SURGERY", "REVIEW");
+    private static final Map<String, String> STAGE_LABELS = Map.of(
+        "REGISTRATION", "前台登记", "INSPECTION", "检查室", "RECEPTION", "接诊评估", "NURSING", "护理记录",
+        "TCM", "中医辨证", "DOCTOR", "医生诊疗", "SURGERY", "手术记录", "REVIEW", "医生复核"
+    );
+    static final List<String> WEEKDAYS = List.of("周一", "周二", "周三", "周四", "周五", "周六", "周日");
+    private static final List<String> STATUS_ORDER = List.of("IN_PROGRESS", "PENDING_REVIEW", "REVIEWED", "EXPORTED");
     static final String RECHECK = "复查", FIRST_VISIT = "首诊";
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -83,6 +90,11 @@ public class PatientAnalysisService {
             visit.dateFallback = recorded == null;
             if (row.get("visit_no") instanceof Number number) visit.visitNo = number.intValue();
             visits.put(visit.id, visit);
+        }
+        // Full per-patient visit dates, captured before range filtering, feed the 30/90-day return rate.
+        Map<String, List<LocalDate>> history = new HashMap<>();
+        for (Visit visit : visits.values()) {
+            if (visit.date != null) history.computeIfAbsent(visit.patientKey, ignored -> new ArrayList<>()).add(visit.date);
         }
         // Snapshot selection precedes clinical filters; follow-up dates do not constrain original encounter dates.
         if (!"followup".equals(query.view())) {
@@ -130,7 +142,7 @@ public class PatientAnalysisService {
                 }
             }
         }
-        return new Data(new ArrayList<>(visits.values()), nodes, contacts);
+        return new Data(new ArrayList<>(visits.values()), nodes, contacts, history);
     }
 
     private List<Map<String, Object>> batch(String sql, List<String> ids) {
@@ -147,7 +159,7 @@ public class PatientAnalysisService {
         List<Visit> visits = selection.visits;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("meta", metadata(query, selection));
-        result.put("summary", summary(selection));
+        result.put("summary", summary(query, selection, data));
         result.put("detailsAllowed", detailAccess);
         List<Map<String, Object>> charts = new ArrayList<>();
         switch (query.view()) {
@@ -157,6 +169,8 @@ public class PatientAnalysisService {
                 charts.add(regionChart(query, visits));
                 charts.add(matrix(query, visits, "ageDiagnosis", "年龄段与主诊断", "ageBand", v -> List.of(v.snapshot.ageBand),
                     "diagnosis", Visit::primary, "同一病例在不同诊断中可能重复出现"));
+                charts.add(matrix(query, visits, "ageGender", "年龄段与性别", "gender", v -> List.of(v.snapshot.gender),
+                    "ageBand", v -> List.of(v.snapshot.ageBand), "按患者最近一次来访的登记信息", true));
             }
             case "clinical" -> {
                 charts.add(bar(query, visits, "diagnosis", "西医主诊断", "diagnosis", Visit::primary, Function.identity()));
@@ -165,6 +179,10 @@ public class PatientAnalysisService {
                     "primaryOperation", v -> List.of(v.primaryOperation), "已保存字段，非治疗效果或因果关系"));
                 charts.add(bar(query, visits, "tcm", "中医病名", "tcmDisease", v -> v.diagnosis("TCM_DISEASE"), Function.identity()));
                 charts.add(bar(query, visits, "syndrome", "中医证型", "syndrome", v -> v.diagnosis("PRIMARY_SYNDROME"), Function.identity()));
+                charts.add(bar(query, visits, "examType", "已完成检查项目", "examType", v -> orUnknown(v.examTypes),
+                    v -> EXAM_LABELS.getOrDefault(v, v)));
+                Map<String, Object> diagnosisTrend = diagnosisTrend(query, visits);
+                if (diagnosisTrend != null) charts.add(diagnosisTrend);
             }
             case "complaints" -> {
                 charts.add(recheckComposition(query, visits));
@@ -178,8 +196,18 @@ public class PatientAnalysisService {
             }
             default -> {
                 charts.add(visitTrend(query, visits));
-                charts.add(donut(query, visits, "status", "当前病历状态", "status", v -> List.of(v.status), v -> STATUS_LABELS.getOrDefault(v, v)));
+                Map<String, Object> status = ordered(query, visits, "status", "当前病历状态", "status", v -> List.of(v.status),
+                    v -> STATUS_LABELS.getOrDefault(v, v), STATUS_ORDER, "按病历当前状态，从进行中到已导出");
+                status.put("kind", "stack");
+                charts.add(status);
+                charts.add(recheckComposition(query, visits));
                 charts.add(bar(query, visits, "diagnosis", "西医主诊断", "diagnosis", Visit::primary, Function.identity()));
+                charts.add(bar(query, visits, "patientSource", "来诊途径", "patientSource", v -> List.of(v.patientSource), Function.identity()));
+                charts.add(ordered(query, visits, "stageFunnel", "诊疗环节完成情况", "stage", Visit::completedStages,
+                    v -> STAGE_LABELS.getOrDefault(v, UNKNOWN.equals(v) ? "无已完成环节" : v), STAGE_ORDER,
+                    "占比 = 该环节已完成的来访 / 全部来访；草稿、退回、跳过不计入；不是工作评价"));
+                charts.add(ordered(query, visits, "weekday", "来访星期分布", "weekday", v -> List.of(v.weekday()),
+                    Function.identity(), WEEKDAYS, "按来访日期的星期统计"));
             }
         }
         result.put("charts", charts);
@@ -201,11 +229,17 @@ public class PatientAnalysisService {
             options.get("complaint").addAll(visit.complaintValues());
             options.get("tcmDisease").addAll(visit.diagnosis("TCM_DISEASE"));
             options.get("syndrome").addAll(visit.diagnosis("PRIMARY_SYNDROME"));
+            options.get("patientSource").add(visit.patientSource);
+            options.get("examType").addAll(orUnknown(visit.examTypes));
+            options.get("weekday").add(visit.weekday());
+            options.get("stage").addAll(visit.completedStages());
         }
         Map<String, Object> facets = new LinkedHashMap<>();
         options.forEach((key, values) -> facets.put(key, values.stream().sorted().map(value -> Map.of(
             "value", value, "label", switch (key) {
                 case "status" -> STATUS_LABELS.getOrDefault(value, value);
+                case "examType" -> EXAM_LABELS.getOrDefault(value, value);
+                case "stage" -> STAGE_LABELS.getOrDefault(value, value);
                 default -> value;
             }
         )).toList()));
@@ -336,6 +370,8 @@ public class PatientAnalysisService {
         if (!q.accepts("primaryOperation", v.primaryOperation)) return false;
         if (!q.acceptsAny("complaint", v.complaintValues())) return false;
         if (!q.acceptsAny("tcmDisease", v.diagnosis("TCM_DISEASE")) || !q.acceptsAny("syndrome", v.diagnosis("PRIMARY_SYNDROME"))) return false;
+        if (!q.accepts("patientSource", v.patientSource) || !q.acceptsAny("examType", orUnknown(v.examTypes))) return false;
+        if (!q.accepts("weekday", v.weekday()) || !q.acceptsAny("stage", v.completedStages())) return false;
         return true;
     }
 
@@ -369,13 +405,104 @@ public class PatientAnalysisService {
         return meta;
     }
 
-    private Map<String, Object> summary(Selection selection) {
-        return Map.of(
-            "visits", selection.visits.size(), "patients", count(selection.visits, "patients"),
-            "nodes", selection.nodes.size(), "contacts", selection.contacts.size(),
-            "contactedNodes", selection.nodes.stream().filter(n -> selection.firstContacts.containsKey(n.id)).count(),
-            "unscheduledNodes", selection.unscheduled
-        );
+    private Map<String, Object> summary(PatientAnalysisQuery q, Selection selection, Data data) {
+        LocalDate today = LocalDate.now();
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("visits", selection.visits.size());
+        summary.put("patients", count(selection.visits, "patients"));
+        summary.put("nodes", selection.nodes.size());
+        summary.put("contacts", selection.contacts.size());
+        summary.put("contactedNodes", selection.nodes.stream().filter(n -> selection.firstContacts.containsKey(n.id)).count());
+        summary.put("unscheduledNodes", selection.unscheduled);
+        // Past due with no server-side contact record; a record gap, not proof that no work happened.
+        summary.put("overdueNodes", selection.nodes.stream()
+            .filter(n -> n.due != null && n.due.isBefore(today) && !selection.firstContacts.containsKey(n.id)).count());
+        if (!"followup".equals(q.view())) summary.put("returnRates", returnRates(selection.visits, data, today));
+        return summary;
+    }
+
+    /** 以患者在所选范围内的首次来访为起点，统计 N 天内是否再次来访；观察期未满 N 天的患者不进入分母。 */
+    private List<Map<String, Object>> returnRates(List<Visit> visits, Data data, LocalDate today) {
+        Map<String, List<LocalDate>> history = data.history();
+        if (history.isEmpty()) {
+            history = new HashMap<>();
+            for (Visit visit : data.visits()) {
+                if (visit.date != null && !Set.of("CANCELLED", "WITHDRAWN").contains(visit.status)) {
+                    history.computeIfAbsent(visit.patientKey, ignored -> new ArrayList<>()).add(visit.date);
+                }
+            }
+        }
+        Map<String, LocalDate> index = new HashMap<>();
+        for (Visit visit : visits) {
+            if (visit.date != null) index.merge(visit.patientKey, visit.date, (a, b) -> a.isBefore(b) ? a : b);
+        }
+        List<Map<String, Object>> rates = new ArrayList<>();
+        for (int days : List.of(30, 90)) {
+            int eligible = 0, returned = 0;
+            for (Map.Entry<String, LocalDate> entry : index.entrySet()) {
+                LocalDate start = entry.getValue();
+                if (start.plusDays(days).isAfter(today)) continue;
+                eligible++;
+                LocalDate end = start.plusDays(days);
+                if (history.getOrDefault(entry.getKey(), List.of()).stream().anyMatch(d -> d.isAfter(start) && !d.isAfter(end))) returned++;
+            }
+            Map<String, Object> rate = new LinkedHashMap<>();
+            rate.put("days", days);
+            rate.put("eligible", eligible);
+            rate.put("returned", returned);
+            rate.put("pending", index.size() - eligible);
+            rate.put("rate", percent(returned, eligible));
+            rates.add(rate);
+        }
+        return rates;
+    }
+
+    /** 固定顺序的分组（状态、环节、星期），保留全部分组且不按数量重排。 */
+    private Map<String, Object> ordered(PatientAnalysisQuery q, List<Visit> visits, String id, String title, String dimension,
+        Function<Visit, List<String>> values, Function<String, String> labels, List<String> order, String note) {
+        Map<String, Counter> groups = groups(visits, values);
+        int denominator = count(visits, q.metric());
+        List<String> keys = new ArrayList<>(order.stream().filter(groups::containsKey).toList());
+        groups.keySet().stream().filter(k -> !keys.contains(k)).sorted().forEach(keys::add);
+        List<Map<String, Object>> rows = keys.stream().map(key -> countRow(labels.apply(key), groups.get(key), q.metric(),
+            denominator, Map.of(dimension, List.of(key)), UNKNOWN.equals(key))).toList();
+        Map<String, Object> chart = chart(id, title, "bar", "patients".equals(q.metric()) ? "位患者" : "人次", rows, note);
+        chart.put("tableRows", rows);
+        chart.put("denominator", denominator);
+        chart.put("ordered", true);
+        return chart;
+    }
+
+    /** 前五位主诊断按时间段的人次走势；未记录不参与排名。 */
+    private Map<String, Object> diagnosisTrend(PatientAnalysisQuery q, List<Visit> visits) {
+        Map<String, Counter> groups = groups(visits, Visit::primary);
+        groups.remove(UNKNOWN);
+        List<String> top = orderedKeys(groups, q.metric()).stream().limit(5).toList();
+        if (top.isEmpty()) return null;
+        Map<LocalDate, Map<String, Counter>> buckets = new LinkedHashMap<>();
+        emptyBuckets(q).keySet().forEach(date -> {
+            Map<String, Counter> perDiagnosis = new LinkedHashMap<>();
+            top.forEach(d -> perDiagnosis.put(d, new Counter()));
+            buckets.put(date, perDiagnosis);
+        });
+        for (Visit visit : visits) {
+            Map<String, Counter> bucket = buckets.get(bucket(visit.date, q.granularity()));
+            if (bucket == null) continue;
+            for (String diagnosis : visit.primary()) if (bucket.containsKey(diagnosis)) bucket.get(diagnosis).add(visit);
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        buckets.forEach((date, perDiagnosis) -> {
+            Map<String, Object> row = trendRow(q, date);
+            List<Integer> values = top.stream().map(d -> perDiagnosis.get(d).value(q.metric())).toList();
+            row.put("values", values);
+            row.put("primary", values.get(0));
+            row.put("secondary", values.size() > 1 ? values.get(1) : 0);
+            rows.add(row);
+        });
+        Map<String, Object> chart = chart("diagnosisTrend", "主要诊断走势", "trend", "patients".equals(q.metric()) ? "位患者" : "人次", rows,
+            "所选范围内前五位西医主诊断；多诊断来访可能同时计入多条线");
+        chart.put("series", top);
+        return chart;
     }
 
     private Map<String, Object> bar(PatientAnalysisQuery q, List<Visit> visits, String id, String title,
@@ -434,8 +561,16 @@ public class PatientAnalysisService {
 
     private Map<String, Object> matrix(PatientAnalysisQuery q, List<Visit> visits, String id, String title,
         String xDimension, Function<Visit, List<String>> xs, String yDimension, Function<Visit, List<String>> ys, String note) {
+        return matrix(q, visits, id, title, xDimension, xs, yDimension, ys, note, false);
+    }
+
+    private Map<String, Object> matrix(PatientAnalysisQuery q, List<Visit> visits, String id, String title,
+        String xDimension, Function<Visit, List<String>> xs, String yDimension, Function<Visit, List<String>> ys, String note,
+        boolean naturalY) {
         List<String> xKeys = orderedKeys(groups(visits, xs), q.metric());
         List<String> yKeys = orderedKeys(groups(visits, ys), q.metric());
+        // Ordinal axes (age bands) read better in natural order; unknown stays last.
+        if (naturalY) yKeys = yKeys.stream().sorted(Comparator.<String, Boolean>comparing(UNKNOWN::equals).thenComparing(Function.identity())).toList();
         List<List<String>> xBuckets = matrixBuckets(xKeys), yBuckets = matrixBuckets(yKeys);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (List<String> xb : xBuckets) for (List<String> yb : yBuckets) {
@@ -737,6 +872,11 @@ public class PatientAnalysisService {
         List<String> primary() { return diagnosis("WESTERN_PRIMARY"); }
         List<String> diagnosis(String type) { return orUnknown(diagnoses.getOrDefault(type, Set.of())); }
         boolean recheck() { return !recheckBases.isEmpty(); }
+        String weekday() { return date == null ? UNKNOWN : WEEKDAYS.get(date.getDayOfWeek().getValue() - 1); }
+        List<String> completedStages() {
+            List<String> values = STAGE_ORDER.stream().filter(s -> "COMPLETED".equals(stageStatuses.get(s))).toList();
+            return values.isEmpty() ? List.of(UNKNOWN) : values;
+        }
         List<String> complaintValues() {
             if (!complaintTags.isEmpty()) {
                 List<String> values = new ArrayList<>(complaintTags);
@@ -788,7 +928,9 @@ public class PatientAnalysisService {
     }
     record Node(String id, String encounterId, LocalDate due, String seq) {}
     record Contact(String id, String nodeId, LocalDateTime time) {}
-    record Data(List<Visit> visits, List<Node> nodes, List<Contact> contacts) {}
+    record Data(List<Visit> visits, List<Node> nodes, List<Contact> contacts, Map<String, List<LocalDate>> history) {
+        Data(List<Visit> visits, List<Node> nodes, List<Contact> contacts) { this(visits, nodes, contacts, Map.of()); }
+    }
     private record Selection(List<Visit> visits, Map<String, Visit> byId, List<Node> nodes, List<Contact> contacts,
                              Map<String, LocalDateTime> firstContacts, int unscheduled) {}
     private static final class Counter {

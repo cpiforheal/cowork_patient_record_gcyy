@@ -260,6 +260,57 @@ class PatientAnalysisServiceTest {
         assertEquals(List.of("2026-09-03"), filters(rows(trend).get(0)).get("to"));
     }
 
+    @Test
+    void stageFunnelWeekdayAndStatusKeepFixedOrderAndDrillExactly() {
+        Visit a = visit("a", "p1", "2026-09-01", "男", 40, "甲病");
+        a.stageStatuses.put("DOCTOR", "COMPLETED");
+        a.stageStatuses.put("REGISTRATION", "COMPLETED");
+        Visit b = visit("b", "p2", "2026-09-02", "女", 60, "乙病");
+        b.stageStatuses.put("REGISTRATION", "COMPLETED");
+        b.stageStatuses.put("SURGERY", "DRAFT");
+        Visit c = visit("c", "p3", "2026-09-03", "女", 30, "乙病");
+        Data data = data(a, b, c);
+        Map<String, Object> overview = service.analyze(query(), data, true);
+        Map<String, Object> funnel = chart(overview, "stageFunnel");
+        assertEquals(Boolean.TRUE, funnel.get("ordered"));
+        assertEquals(List.of("前台登记", "医生诊疗", "无已完成环节"), rows(funnel).stream().map(r -> r.get("label")).toList());
+        assertEquals(List.of(2, 1, 1), rows(funnel).stream().map(r -> r.get("value")).toList());
+        assertEquals(List.of("周二", "周三", "周四"), rows(chart(overview, "weekday")).stream().map(r -> r.get("label")).toList());
+        assertEquals("stack", chart(overview, "status").get("kind"));
+        assertEquals(1, service.detailResult(query("stage", "DOCTOR"), data).get("total"));
+        assertEquals(1, service.detailResult(query("weekday", "周三"), data).get("total"));
+    }
+
+    @Test
+    void returnRateUsesFullHistoryAndExcludesPatientsStillInObservation() {
+        Visit first = visit("a", "p1", "2026-01-02", "男", 40, "甲病");
+        Visit back = visit("b", "p1", "2026-01-20", "男", 40, "甲病");
+        Visit once = visit("c", "p2", "2026-01-03", "女", 50, "乙病");
+        LinkedMultiValueMap<String, String> params = params();
+        params.set("from", "2026-01-01"); params.set("to", "2026-01-10");
+        Map<String, Object> summary = map(service.analyze(PatientAnalysisQuery.parse(params), data(first, back, once), true).get("summary"));
+        List<Map<String, Object>> rates = list(summary.get("returnRates"));
+        assertEquals(30, rates.get(0).get("days"));
+        assertEquals(2, rates.get(0).get("eligible"));
+        assertEquals(1, rates.get(0).get("returned"));
+        assertEquals(50.0, rates.get(0).get("rate"));
+        Visit recent = visit("d", "p3", LocalDate.now().toString(), "女", 50, "乙病");
+        LinkedMultiValueMap<String, String> today = params();
+        today.set("from", LocalDate.now().toString()); today.set("to", LocalDate.now().toString());
+        Map<String, Object> pending = list(map(service.analyze(PatientAnalysisQuery.parse(today), data(recent), true).get("summary")).get("returnRates")).get(0);
+        assertEquals(0, pending.get("eligible"));
+        assertEquals(1, pending.get("pending"));
+    }
+
+    @Test
+    void overdueNodesCountPastDueWithoutContactRecord() {
+        Visit original = visit("a", "p1", "2026-01-01", "男", 40, "甲病");
+        Data data = new Data(List.of(original),
+            List.of(new Node("n1", "a", LocalDate.parse("2026-09-02"), "1"), new Node("n2", "a", LocalDate.parse("2026-09-03"), "2")),
+            List.of(new Contact("c1", "n2", LocalDateTime.parse("2026-09-03T09:00:00"))));
+        assertEquals(1L, map(service.analyze(query("view", "followup"), data, true).get("summary")).get("overdueNodes"));
+    }
+
     Visit visit(String id, String patient, String date, String gender, int age, String diagnosis) {
         Visit visit = new Visit(id, patient, LocalDate.parse(date), mapper.createObjectNode()
             .put("patientName", "演示患者" + id).put("gender", gender).put("age", age + "岁")

@@ -168,23 +168,54 @@
     <main class="pa-main" :aria-busy="loading">
       <template v-if="result">
         <section class="pa-kpis" :class="{ 'is-busy': stale }" aria-label="当前样本">
-          <div class="pa-card pa-kpi is-primary tone-indigo" :style="{ '--pa-enter-index': 0 }">
+          <div class="pa-card pa-kpi is-primary tone-teal" :style="{ '--pa-enter-index': 0 }">
             <span class="pa-kpi-label">匹配患者</span>
             <strong>{{ number(patientCount) }}</strong>
-            <small>按病例标识去重</small>
+            <small class="pa-kpi-foot">
+              <span
+                v-if="deltas.patients"
+                class="pa-delta"
+                :class="`is-${deltas.patients.dir}`"
+                :title="`上期 ${deltas.patients.range}：${number(deltas.patients.prev)} 位`"
+                >{{ deltas.patients.text }}</span
+              >
+              <span v-else>按病例标识去重</span>
+            </small>
+            <svg v-if="sparks.patients" class="pa-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+              <polyline :points="sparks.patients" />
+            </svg>
           </div>
-          <div class="pa-card pa-kpi tone-cyan" :style="{ '--pa-enter-index': 1 }">
+          <div class="pa-card pa-kpi tone-sky" :style="{ '--pa-enter-index': 1 }">
             <span class="pa-kpi-label">有效来访</span>
             <strong>{{ number(visitCount) }}<em>人次</em></strong>
-            <small v-if="patientCount"
-              >人均 {{ (result.summary.visits / Math.max(1, result.summary.patients)).toFixed(1) }} 次</small
-            >
+            <small class="pa-kpi-foot">
+              <span
+                v-if="deltas.visits"
+                class="pa-delta"
+                :class="`is-${deltas.visits.dir}`"
+                :title="`上期 ${deltas.visits.range}：${number(deltas.visits.prev)} 人次`"
+                >{{ deltas.visits.text }}</span
+              >
+              <span v-if="patientCount"
+                >人均 {{ (result.summary.visits / Math.max(1, result.summary.patients)).toFixed(1) }} 次</span
+              >
+            </small>
+            <svg v-if="sparks.visits" class="pa-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+              <polyline :points="sparks.visits" />
+            </svg>
           </div>
           <template v-if="query.view === 'followup'">
-            <div class="pa-card pa-kpi tone-emerald" :style="{ '--pa-enter-index': 2 }">
+            <div class="pa-card pa-kpi tone-grass" :style="{ '--pa-enter-index': 2 }">
               <span class="pa-kpi-label">随访节点</span>
               <strong>{{ number(nodeCount) }}<em>个</em></strong>
-              <small>已联系 {{ number(result.summary.contactedNodes) }} 个</small>
+              <small
+                >已联系 {{ number(result.summary.contactedNodes) }} 个<template v-if="result.summary.overdueNodes !== undefined">
+                  ·
+                  <b class="pa-overdue" :class="{ 'is-alert': result.summary.overdueNodes > 0 }"
+                    >已过期未联系 {{ number(result.summary.overdueNodes) }} 个</b
+                  ></template
+                ></small
+              >
             </div>
             <div class="pa-card pa-kpi tone-amber" :style="{ '--pa-enter-index': 3 }">
               <span class="pa-kpi-label">区间联系留痕</span>
@@ -192,18 +223,39 @@
               <small>仅服务器留痕</small>
             </div>
           </template>
-          <div v-else class="pa-card pa-kpi tone-emerald" :style="{ '--pa-enter-index': 2 }">
-            <span class="pa-kpi-label">统计区间</span>
-            <strong>{{ dayCount }}<em>天</em></strong>
-            <small>{{ result.meta.from.slice(5) }} → {{ result.meta.to.slice(5) }} · {{ granularityLabel }}</small>
-          </div>
+          <template v-else>
+            <div v-if="returnRate30" class="pa-card pa-kpi tone-coral" :style="{ '--pa-enter-index': 2 }">
+              <span class="pa-kpi-label"
+                >30 天回访率
+                <el-tooltip
+                  content="以区间内首次来访为起点，30 天内再次来访的患者占比；起点未满 30 天的患者不计入分母"
+                  placement="top"
+                >
+                  <el-icon class="pa-kpi-help" tabindex="0" aria-label="口径说明"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </span>
+              <strong v-if="returnRate30.eligible">{{ returnRate30.rate }}<em>%</em></strong>
+              <strong v-else class="is-muted">—</strong>
+              <small
+                >{{
+                  returnRate30.eligible ? `${number(returnRate30.returned)} / ${number(returnRate30.eligible)} 位` : "观察期未满"
+                }}<template v-if="returnRate90?.eligible"> · 90 天 {{ returnRate90.rate }}%</template
+                ><template v-if="returnRate30.pending"> · {{ number(returnRate30.pending) }} 位观察中</template></small
+              >
+            </div>
+            <div class="pa-card pa-kpi tone-grass" :style="{ '--pa-enter-index': 3 }">
+              <span class="pa-kpi-label">统计区间</span>
+              <strong>{{ dayCount }}<em>天</em></strong>
+              <small>{{ result.meta.from.slice(5) }} → {{ result.meta.to.slice(5) }} · {{ granularityLabel }}</small>
+            </div>
+          </template>
           <el-popover placement="bottom-end" :width="280" trigger="click" popper-class="pa-quality-popper">
             <template #reference>
               <button
                 type="button"
-                class="pa-card pa-kpi pa-quality tone-rose"
+                class="pa-card pa-kpi pa-quality tone-amber"
                 :class="{ 'has-issue': qualityIssues }"
-                :style="{ '--pa-enter-index': 4 }"
+                :style="{ '--pa-enter-index': 5 }"
                 aria-haspopup="dialog"
               >
                 <span class="pa-kpi-label"
@@ -273,7 +325,8 @@
             :key="chart.id"
             :chart="chart"
             :main="index === 0"
-            :index="index + 2"
+            :index="index + 3"
+            :previous="chart.id === 'visits' ? previousTrend : undefined"
             :disabled="stale"
             :class="{ 'is-wide': isWide(index) }"
             @select="onChartSelect"
@@ -414,7 +467,8 @@ import {
   loadPatientAnalysisFacets,
   type AnalysisDetailResult,
   type AnalysisFacetResult,
-  type AnalysisResult
+  type AnalysisResult,
+  type AnalysisRow
 } from "@/api/modules/clinic/patientAnalysis";
 import AnalysisChart from "./AnalysisChart.vue";
 import { useCountUp } from "./useCountUp";
@@ -423,7 +477,9 @@ import {
   analysisRoute,
   applyChartFilters,
   defaultAnalysisQuery,
+  formatDate,
   readAnalysisQuery,
+  type AnalysisQuery,
   type AnalysisDimension,
   type AnalysisView
 } from "./analysisQuery";
@@ -434,6 +490,8 @@ const query = ref(readAnalysisQuery(route.query));
 const loading = ref(false);
 const error = ref("");
 const result = ref<AnalysisResult>();
+/** 上一等长周期（同筛选口径）；只用于环比与虚线对比，失败时静默缺省 */
+const previous = ref<{ result: AnalysisResult; from: string; to: string }>();
 const facets = ref<AnalysisFacetResult>();
 const advanced = ref(false);
 const clinicalMode = ref("western");
@@ -453,6 +511,58 @@ const qualityItems = computed(() => {
     { label: "日期回退", value: missing.fallbackDates, unit: "人次" }
   ];
 });
+/** 同筛选、向前平移一个区间长度；未排期节点不受日期影响，不做对比 */
+function previousQuery(current: AnalysisQuery): AnalysisQuery | undefined {
+  if (current.unscheduled) return undefined;
+  const from = new Date(`${current.from}T00:00:00`);
+  const to = new Date(`${current.to}T00:00:00`);
+  const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+  if (!Number.isFinite(days) || days < 1) return undefined;
+  const shift = (date: Date) => {
+    const next = new Date(date);
+    next.setDate(next.getDate() - days);
+    return formatDate(next);
+  };
+  return { ...current, filters: { ...current.filters }, from: shift(from), to: shift(to) };
+}
+type Delta = { dir: "up" | "down" | "flat"; text: string; prev: number; range: string };
+function delta(now: number, prev: number, range: string): Delta | undefined {
+  if (!prev && !now) return undefined;
+  if (!prev) return { dir: "up", text: "较上期 新增", prev, range };
+  const pct = Math.round(((now - prev) / prev) * 1000) / 10;
+  const dir = pct > 0 ? "up" : pct < 0 ? "down" : "flat";
+  return { dir, text: `较上期 ${dir === "up" ? "↑" : dir === "down" ? "↓" : ""}${Math.abs(pct)}%`, prev, range };
+}
+const deltas = computed(() => {
+  const now = result.value?.summary;
+  const prior = previous.value;
+  if (!now || !prior || query.value.view === "followup") return {};
+  const range = `${prior.from.slice(5)} → ${prior.to.slice(5)}`;
+  return {
+    patients: delta(now.patients, prior.result.summary.patients, range),
+    visits: delta(now.visits, prior.result.summary.visits, range)
+  };
+});
+/** KPI 微趋势：取概览趋势图的两条序列，归一化到 100×28 的 viewBox */
+function sparkPoints(values: number[]) {
+  if (values.length < 2) return undefined;
+  const max = Math.max(1, ...values);
+  const step = 100 / (values.length - 1);
+  return values.map((v, i) => `${(i * step).toFixed(1)},${(26 - (v / max) * 24).toFixed(1)}`).join(" ");
+}
+const sparks = computed(() => {
+  const trend = result.value?.charts.find(chart => chart.id === "visits");
+  if (!trend) return {};
+  return {
+    visits: sparkPoints(trend.rows.map(row => row.primary ?? 0)),
+    patients: sparkPoints(trend.rows.map(row => row.secondary ?? 0))
+  };
+});
+const previousTrend = computed<AnalysisRow[] | undefined>(
+  () => previous.value?.result.charts.find(chart => chart.id === "visits")?.rows
+);
+const returnRate30 = computed(() => result.value?.summary.returnRates?.find(rate => rate.days === 30));
+const returnRate90 = computed(() => result.value?.summary.returnRates?.find(rate => rate.days === 90));
 const qualityIssues = computed(() => qualityItems.value.filter(item => item.value > 0).length);
 const dayCount = computed(() => {
   if (!result.value) return 0;
@@ -463,11 +573,12 @@ const dayCount = computed(() => {
 function isWide(index: number) {
   const list = visibleCharts.value;
   const kind = list[index]?.kind;
-  if (kind === "trend" || kind === "matrix") return true;
+  if (kind === "trend" || kind === "matrix" || kind === "stack") return true;
   let run = 0;
-  for (let i = index; i >= 0 && list[i].kind !== "trend" && list[i].kind !== "matrix"; i--) run++;
+  const full = (k?: string) => k === "trend" || k === "matrix" || k === "stack";
+  for (let i = index; i >= 0 && !full(list[i].kind); i--) run++;
   const next = list[index + 1];
-  const runEnds = !next || next.kind === "trend" || next.kind === "matrix";
+  const runEnds = !next || full(next.kind);
   return runEnds && run % 2 === 1;
 }
 // 视图切换：共享滑块，定位到当前 tab
@@ -518,6 +629,10 @@ const fields: Array<{ key: AnalysisDimension; label: string }> = [
   { key: "operation", label: "实际术式" },
   { key: "complaint", label: "主诉" },
   { key: "status", label: "病历状态" },
+  { key: "patientSource", label: "来诊途径" },
+  { key: "examType", label: "检查项目" },
+  { key: "stage", label: "已完成环节" },
+  { key: "weekday", label: "星期" },
   { key: "tcmDisease", label: "中医病名" },
   { key: "syndrome", label: "中医证型" }
 ];
@@ -646,13 +761,17 @@ async function load() {
   cancelDetails();
   try {
     const snapshot = readAnalysisQuery(analysisRoute(query.value));
-    const [next, nextFacets] = await Promise.all([
+    const prevSnapshot = previousQuery(snapshot);
+    // 上期请求共享取消信号；失败只是不显示对比，不影响主结果
+    const [next, nextFacets, prior] = await Promise.all([
       loadPatientAnalysis(snapshot, signal),
-      loadPatientAnalysisFacets(snapshot, signal)
+      loadPatientAnalysisFacets(snapshot, signal),
+      prevSnapshot ? loadPatientAnalysis(prevSnapshot, signal).catch(() => undefined) : Promise.resolve(undefined)
     ]);
     if (sequence !== requestSequence) return;
     result.value = next;
     facets.value = nextFacets;
+    previous.value = prior && prevSnapshot ? { result: prior, from: prevSnapshot.from, to: prevSnapshot.to } : undefined;
   } catch (caught) {
     if (sequence !== requestSequence || signal.aborted) return;
     error.value = caught instanceof Error ? caught.message : "分析数据加载失败";
@@ -757,24 +876,24 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 /* ── 设计 token：只作用于本页，子组件通过 CSS 变量继承 ── */
 .patient-analysis {
-  --pa-bg: #f3f5ff;
+  --pa-bg: #f3f7f6;
   --pa-surface: #ffffff;
-  --pa-subtle: #eef2ff;
-  --pa-subtle-strong: #e0e7ff;
-  --pa-border: #e4e8fb;
-  --pa-border-strong: #c7d2fe;
+  --pa-subtle: #edf6f4;
+  --pa-subtle-strong: #d9efea;
+  --pa-border: #e1ece9;
+  --pa-border-strong: #b5dcd4;
   --pa-text: #1e293b;
   --pa-text-2: #475569;
   --pa-text-3: #64748b;
-  --pa-brand: #4f46e5;
-  --pa-brand-2: #06b6d4;
-  --pa-brand-soft: rgb(79 70 229 / 10%);
-  --pa-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+  --pa-brand: #0f766e;
+  --pa-brand-2: #14b8a6;
+  --pa-brand-soft: rgb(15 118 110 / 10%);
+  --pa-gradient: linear-gradient(135deg, #0f766e 0%, #14b8a6 55%, #06b6d4 100%);
   --pa-danger: #e11d48;
   --pa-danger-soft: rgb(225 29 72 / 8%);
   --pa-warn: #d97706;
-  --pa-shadow: 0 1px 3px rgb(79 70 229 / 6%), 0 1px 2px rgb(16 24 40 / 4%);
-  --pa-shadow-hover: 0 8px 24px rgb(79 70 229 / 14%);
+  --pa-shadow: 0 1px 3px rgb(15 118 110 / 6%), 0 1px 2px rgb(16 24 40 / 4%);
+  --pa-shadow-hover: 0 10px 26px rgb(15 118 110 / 14%), 0 2px 6px rgb(16 24 40 / 5%);
   --pa-radius: 12px;
   --pa-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --el-color-primary: var(--pa-brand);
@@ -786,22 +905,23 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
   color: var(--pa-text);
   background:
-    radial-gradient(1200px 420px at 0% -10%, rgb(99 102 241 / 12%), transparent 60%),
+    radial-gradient(1200px 420px at 0% -10%, rgb(20 184 166 / 12%), transparent 60%),
     radial-gradient(900px 380px at 100% 0%, rgb(6 182 212 / 12%), transparent 60%), var(--pa-bg);
 }
 :global(html.dark) .patient-analysis {
-  --pa-bg: #11162a;
-  --pa-surface: #1a2035;
-  --pa-subtle: #232b47;
-  --pa-subtle-strong: #2c3558;
-  --pa-border: #2a3350;
-  --pa-border-strong: #3d4876;
+  --pa-bg: #0e1a19;
+  --pa-surface: #152523;
+  --pa-subtle: #1d3331;
+  --pa-subtle-strong: #25403d;
+  --pa-border: #24403c;
+  --pa-border-strong: #346059;
   --pa-text: #e2e8f0;
   --pa-text-2: #cbd5e1;
   --pa-text-3: #94a3b8;
-  --pa-brand: #818cf8;
+  --pa-brand: #2dd4bf;
   --pa-brand-2: #22d3ee;
-  --pa-brand-soft: rgb(129 140 248 / 16%);
+  --pa-brand-soft: rgb(45 212 191 / 16%);
+  --pa-gradient: linear-gradient(135deg, #14b8a6 0%, #2dd4bf 55%, #22d3ee 100%);
   --pa-danger: #fb7185;
   --pa-danger-soft: rgb(251 113 133 / 12%);
   --pa-shadow: 0 1px 2px rgb(0 0 0 / 30%);
@@ -816,8 +936,9 @@ onBeforeUnmount(() => {
   border-radius: var(--pa-radius);
   box-shadow: var(--pa-shadow);
   transition:
-    box-shadow 150ms ease,
-    border-color 150ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    translate 180ms var(--pa-ease),
     opacity 200ms ease;
 }
 
@@ -825,6 +946,15 @@ onBeforeUnmount(() => {
   .patient-analysis :deep(.pa-card:hover) {
     border-color: var(--pa-border-strong);
     box-shadow: var(--pa-shadow-hover);
+  }
+  .patient-analysis .pa-kpi:hover {
+    translate: 0 -2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patient-analysis .pa-kpi:hover {
+    translate: none;
   }
 }
 
@@ -968,7 +1098,7 @@ onBeforeUnmount(() => {
   left: 0;
   background: var(--pa-gradient);
   border-radius: 9px;
-  box-shadow: 0 4px 12px rgb(99 102 241 / 30%);
+  box-shadow: 0 4px 12px rgb(15 118 110 / 28%);
   opacity: 0;
 }
 .pa-tabs-thumb.is-ready {
@@ -994,8 +1124,12 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   transition: color 150ms ease;
 }
-.pa-tabs button:hover {
-  color: var(--pa-text);
+
+@media (hover: hover) {
+  .pa-tabs button:not(.active):hover {
+    color: var(--pa-brand);
+    background: var(--pa-brand-soft);
+  }
 }
 .pa-tabs button.active {
   color: #ffffff;
@@ -1287,7 +1421,7 @@ onBeforeUnmount(() => {
   font: inherit;
   color: inherit;
   text-align: left;
-  animation: pa-enter 420ms var(--pa-ease) both;
+  animation: pa-enter 420ms var(--pa-ease) backwards;
   animation-delay: calc(var(--pa-enter-index, 0) * 40ms);
 }
 .pa-kpi-label {
@@ -1334,6 +1468,7 @@ onBeforeUnmount(() => {
   width: 4px;
   content: "";
   background: linear-gradient(180deg, var(--tone), var(--tone-2));
+  transition: width 180ms var(--pa-ease);
 }
 .pa-kpi.is-primary strong {
   background: linear-gradient(90deg, var(--tone), var(--tone-2));
@@ -1343,45 +1478,108 @@ onBeforeUnmount(() => {
 .pa-kpi.is-primary strong em {
   -webkit-text-fill-color: var(--pa-text-3);
 }
-.tone-indigo {
-  --tone: #4f46e5;
-  --tone-2: #8b5cf6;
+.tone-teal {
+  --tone: #0f766e;
+  --tone-2: #14b8a6;
 }
-.tone-cyan {
-  --tone: #0891b2;
-  --tone-2: #06b6d4;
+.tone-sky {
+  --tone: #0284c7;
+  --tone-2: #38bdf8;
 }
-.tone-emerald {
-  --tone: #059669;
-  --tone-2: #34d399;
+.tone-grass {
+  --tone: #4d7c0f;
+  --tone-2: #84cc16;
+}
+.tone-coral {
+  --tone: #e2553f;
+  --tone-2: #fb923c;
 }
 .tone-amber {
   --tone: #d97706;
   --tone-2: #fbbf24;
 }
-.tone-rose {
-  --tone: #e11d48;
-  --tone-2: #f472b6;
+:global(html.dark) .tone-teal {
+  --tone: #2dd4bf;
+  --tone-2: #99f6e4;
 }
-:global(html.dark) .tone-indigo {
-  --tone: #818cf8;
-  --tone-2: #c4b5fd;
+:global(html.dark) .tone-sky {
+  --tone: #38bdf8;
+  --tone-2: #7dd3fc;
 }
-:global(html.dark) .tone-cyan {
-  --tone: #22d3ee;
-  --tone-2: #67e8f9;
+:global(html.dark) .tone-grass {
+  --tone: #a3e635;
+  --tone-2: #d9f99d;
 }
-:global(html.dark) .tone-emerald {
-  --tone: #34d399;
-  --tone-2: #6ee7b7;
+:global(html.dark) .tone-coral {
+  --tone: #fb8a7a;
+  --tone-2: #fdba74;
 }
 :global(html.dark) .tone-amber {
   --tone: #fbbf24;
   --tone-2: #fde68a;
 }
-:global(html.dark) .tone-rose {
-  --tone: #fb7185;
-  --tone-2: #f9a8d4;
+
+/* KPI 细节：环比、微趋势、悬停色条加宽 */
+@media (hover: hover) {
+  .pa-kpi:hover::before {
+    width: 6px;
+  }
+}
+.pa-kpi strong.is-muted {
+  color: var(--pa-text-3);
+}
+.pa-kpi-help {
+  font-size: 13px;
+  color: var(--pa-text-3);
+  cursor: help;
+}
+.pa-kpi-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+.pa-delta {
+  padding: 1px 6px;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+/* 环比只表示变化方向，不做好坏评价：上升用品牌色、下降用中性色 */
+.pa-delta.is-up {
+  color: var(--pa-brand);
+  background: var(--pa-brand-soft);
+}
+.pa-delta.is-down {
+  color: var(--pa-text-2);
+  background: var(--pa-subtle-strong);
+}
+.pa-delta.is-flat {
+  color: var(--pa-text-3);
+  background: var(--pa-subtle);
+}
+.pa-spark {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  width: 84px;
+  height: 26px;
+  pointer-events: none;
+  opacity: 0.85;
+}
+.pa-spark polyline {
+  fill: none;
+  stroke: var(--tone);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+.pa-overdue {
+  font-weight: 500;
+}
+.pa-overdue.is-alert {
+  color: var(--pa-danger);
 }
 .pa-quality {
   cursor: pointer;

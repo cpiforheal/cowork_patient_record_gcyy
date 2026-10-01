@@ -10,7 +10,11 @@ export const dimensions = [
   "syndrome",
   "complaint",
   "contactState",
-  "delayBand"
+  "delayBand",
+  "patientSource",
+  "examType",
+  "weekday",
+  "stage"
 ] as const;
 export type AnalysisView = "overview" | "population" | "clinical" | "complaints" | "followup";
 export type AnalysisDimension = (typeof dimensions)[number];
