@@ -382,6 +382,8 @@ public class AuthNavigationService {
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/patients/archive", "患者就诊", "UserFilled",
             // 随访监控台（/nursing/follow-up-monitor）仍在 staging 验证，本次不上生产
             sectionedPage("接诊作业", "/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen"),
+            // 复查预约登记：检查室轮岗共享的复查登记表（行=日期，格=患者），交接班核对实到
+            sectionedPage("接诊作业", "/patients/recheck-schedule", "recheckSchedule", "/patients/recheckSchedule/index", "复查预约登记", "Calendar"),
             sectionedPage("接诊作业", "/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled"),
             sectionedPage("接诊作业", "/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo"),
             sectionedPage("患者档案", "/patients/archive", "patientArchive", "/patients/archive/index", "患者档案", "Search"),
@@ -467,6 +469,7 @@ public class AuthNavigationService {
             "patientList=patient:read",
             "patientArchive=patient:read",
             "opsDashboard=ops:read",
+            "recheckSchedule=recheck:read,recheck:edit",
             "patientDetail=field:read,document:read,document:download",
             "documentRecycle=document:read",
             "auditReview=audit:read",
@@ -505,6 +508,10 @@ public class AuthNavigationService {
         // 护理随访留痕监控台：护理部与管理员可见
         // 护理随访监控台（/nursing/follow-up-monitor）仍在 staging 验证，本分支暂不授予
         Set<String> opsDashboard = paths("/ops/dashboard");
+        // 复查预约登记：检查/医护可写，前台/导诊只读（写权限在 RecheckScheduleService 硬闸门）
+        Set<String> recheckSchedule = paths("/patients/recheck-schedule");
+        Map<String, List<String>> recheckRead = permissions("recheckSchedule=recheck:read");
+        Map<String, List<String>> recheckEdit = permissions("recheckSchedule=recheck:read,recheck:edit");
         Set<String> clinicQueue = paths("/tcm-pharmacy/clinic-queue/workbench", "/tcm-pharmacy/clinic-queue/display");
         Set<String> tcmPharmacy = paths("/tcm-pharmacy/workbench", "/tcm-pharmacy/display");
         Set<String> inventoryStaff = paths(
@@ -544,33 +551,33 @@ public class AuthNavigationService {
             "inventoryTrace=inventory:read,inventory:export"
         );
 
-        result.put("frontdesk", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff), mergePermissions(permissions(
+        result.put("frontdesk", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff, recheckSchedule), mergePermissions(recheckRead, permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
             "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:create,patient:read,patient:update",
             "patientDetail=field:read,field:edit,document:read,document:upload,document:download",
             "clinicQueueWorkbench=queue:read,queue:issue,queue:intervene,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         ), inventoryStaffButtons)));
-        result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff, healthArchive), mergePermissions(permissions(
+        result.put("inspection", role(union(patientFlow, materials, preAi, clinicQueue, inventoryStaff, healthArchive, recheckSchedule), mergePermissions(recheckEdit, permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:read",
             "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload",
             "clinicQueueWorkbench=queue:read,inspection:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play",
             "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote"
         ), inventoryStaffButtons)));
-        result.put("reception", role(union(patientFlow, preAi, clinicQueue), permissions(
+        result.put("reception", role(union(patientFlow, preAi, clinicQueue, recheckSchedule), mergePermissions(recheckRead, permissions(
             "home=view", "patientsOverview=patient:read,field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
-        )));
+        ))));
 
         Map<String, List<String>> diagnosticButtons = mergePermissions(permissions(
             "home=view", "workbenchUpload=patient:search,document:upload", "workbenchLabReport=patient:search,field:read,document:upload",
             "patientsOverview=patient:read,field:read", "recordTemplate=field:read", "patientList=patient:read",
             "patientArchive=patient:read",
             "patientDetail=field:read,field:edit,document:read,document:upload"
-        ), inventoryStaffButtons);
-        result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
-        result.put("ecg", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
-        result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff), diagnosticButtons));
+        ), inventoryStaffButtons, recheckEdit);
+        result.put("lab", role(union(patientFlow, materials, preAi, inventoryStaff, recheckSchedule), diagnosticButtons));
+        result.put("ecg", role(union(patientFlow, materials, preAi, inventoryStaff, recheckSchedule), diagnosticButtons));
+        result.put("ultrasound", role(union(patientFlow, materials, preAi, inventoryStaff, recheckSchedule), diagnosticButtons));
         Map<String, List<String>> nursingButtons = mergePermissions(diagnosticButtons, permissions(
             "followUpDashboard=followup:read,followup:contact",
             "opsDashboard=ops:read",
@@ -580,8 +587,8 @@ public class AuthNavigationService {
             "diseaseTemplateManage=diseaseTemplate:read",
             "followUpScriptManage=followupScript:read"
         ));
-        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, opsDashboard), nursingButtons));
-        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, opsDashboard), nursingButtons));
+        result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, opsDashboard, recheckSchedule), nursingButtons));
+        result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, opsDashboard, recheckSchedule), nursingButtons));
 
         result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy, followUpConfig), permissions(
             "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
@@ -595,7 +602,7 @@ public class AuthNavigationService {
             "tcmPharmacyDisplayMenu=display:read,announcement:play"
         )));
 
-        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive, followUpConfig, opsDashboard), mergePermissions(permissions(
+        result.put("doctor", role(union(patientFlow, preAi, paths("/workbench/lab-report", "/templates/record"), tcmPharmacy, clinicQueue, inventoryStaff, healthArchive, followUpConfig, opsDashboard, recheckSchedule), mergePermissions(recheckEdit, permissions(
             "home=view", "workbenchLabReport=patient:search,field:edit,document:upload", "patientsOverview=patient:read,field:read",
             "patientArchive=patient:read,field:read",
             "recordTemplate=field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read,document:download",
