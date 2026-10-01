@@ -1,265 +1,385 @@
 <template>
-  <section class="analysis-chart" :class="{ 'is-main': main }" :aria-label="chart.title">
+  <section
+    ref="root"
+    class="pa-card analysis-chart"
+    :class="{ 'is-main': main, 'is-busy': disabled }"
+    :style="{ '--pa-enter-index': index }"
+    :aria-label="chart.title"
+    :aria-busy="disabled"
+  >
     <header class="chart-heading">
       <div class="chart-title">
         <h3>{{ chart.title }}</h3>
-        <el-tooltip :content="chart.note" placement="top" :show-after="300">
-          <button class="chart-icon definition-icon" type="button" :aria-label="chart.note">
+        <el-tooltip :content="chart.note" placement="top" :show-after="250">
+          <button class="chart-info" type="button" :aria-label="`口径说明：${chart.note}`">
             <el-icon><InfoFilled /></el-icon>
           </button>
         </el-tooltip>
       </div>
       <div class="chart-tools">
         <span class="chart-unit">{{ chart.unit }}</span>
-        <div class="chart-mode" role="group" aria-label="图表或数据表">
-          <el-tooltip content="图表" :show-after="300">
-            <button class="chart-icon" type="button" :aria-pressed="!table" aria-label="图表" @click="table = false">
-              <el-icon><DataAnalysis /></el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip content="数据表" :show-after="300">
-            <button class="chart-icon" type="button" :aria-pressed="table" aria-label="数据表" @click="table = true">
-              <el-icon><Grid /></el-icon>
-            </button>
-          </el-tooltip>
+        <div class="chart-mode" role="group" aria-label="图表或数据表" :class="{ 'is-table': table }">
+          <span class="chart-mode-thumb" aria-hidden="true" />
+          <button type="button" :aria-pressed="!table" aria-label="图表视图" title="图表" @click="table = false">
+            <el-icon><DataAnalysis /></el-icon>
+          </button>
+          <button type="button" :aria-pressed="table" aria-label="数据表视图" title="数据表" @click="table = true">
+            <el-icon><Grid /></el-icon>
+          </button>
         </div>
       </div>
     </header>
-    <div v-if="table" class="chart-table-scroll" tabindex="0" :aria-label="`${chart.title}数据表`">
-      <table class="chart-table">
-        <thead>
-          <tr>
-            <th>{{ chart.kind === "trend" ? "时间段" : "分类" }}</th>
-            <template v-if="chart.kind === 'trend'">
-              <th>{{ chart.series?.[0] }}</th>
-              <th>{{ chart.series?.[1] }}</th>
-            </template>
-            <template v-else
-              ><th>数量</th>
-              <th>分母</th>
-              <th>占比</th>
-              <th>未知</th></template
-            >
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, index) in tableRows" :key="index">
-            <th>
-              <button type="button" class="table-filter" :disabled="disabled" @click="select(row)">
-                {{ chart.kind === "matrix" ? `${row.x} / ${row.y}` : row.label }}
-              </button>
-            </th>
-            <template v-if="chart.kind === 'trend'"
-              ><td>{{ row.primary }}</td>
-              <td>{{ row.secondary }}</td></template
-            >
-            <template v-else
-              ><td>{{ row.value }}</td>
-              <td>{{ row.denominator }}</td>
-              <td>{{ row.share }}%</td>
-              <td>{{ row.unknownCount }}</td></template
-            >
-          </tr>
-          <tr v-if="!tableRows.length">
-            <td colspan="5" class="no-rows">没有匹配记录</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <!-- 下钻把行列都收敛到单个组合时，单格热力图会撑满整卡；降级为大数字卡 -->
-    <div v-else-if="matrixSingle" class="matrix-single">
-      <div class="matrix-single-value">
-        <strong>{{ number(matrixSingle.value) }}</strong
-        ><span>{{ chart.unit }}</span>
+
+    <Transition name="pa-swap" mode="out-in">
+      <div v-if="table" key="table" class="chart-table-scroll" tabindex="0" :aria-label="`${chart.title}数据表`">
+        <table class="chart-table">
+          <thead>
+            <tr>
+              <th>{{ chart.kind === "trend" ? "时间段" : "分类" }}</th>
+              <template v-if="chart.kind === 'trend'">
+                <th>{{ chart.series?.[0] }}</th>
+                <th>{{ chart.series?.[1] }}</th>
+              </template>
+              <template v-else>
+                <th>数量</th>
+                <th>分母</th>
+                <th class="share-col">占比</th>
+                <th>未知</th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, rowIndex) in tableRows" :key="rowIndex">
+              <th>
+                <button type="button" class="table-filter" :disabled="disabled" @click="select(row)">
+                  {{ chart.kind === "matrix" ? `${row.x} / ${row.y}` : row.label }}
+                </button>
+              </th>
+              <template v-if="chart.kind === 'trend'">
+                <td>{{ number(row.primary ?? 0) }}</td>
+                <td>{{ number(row.secondary ?? 0) }}</td>
+              </template>
+              <template v-else>
+                <td class="strong">{{ number(row.value ?? 0) }}</td>
+                <td>{{ number(row.denominator ?? 0) }}</td>
+                <td class="share-col">
+                  <span class="share-cell"
+                    ><i><b :style="{ width: `${Math.min(100, row.share ?? 0)}%` }" /></i>{{ row.share ?? 0 }}%</span
+                  >
+                </td>
+                <td :class="{ muted: !row.unknownCount }">{{ row.unknownCount ?? 0 }}</td>
+              </template>
+            </tr>
+            <tr v-if="!tableRows.length">
+              <td colspan="5" class="no-rows">没有匹配记录</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <p class="matrix-single-label">{{ matrixSingle.x }} / {{ matrixSingle.y }}</p>
-      <p class="matrix-single-meta">分母 {{ matrixSingle.denominator }} · 占比 {{ matrixSingle.share }}%</p>
-      <small>放宽任一筛选条件可回到矩阵视图，或切换右上角数据表</small>
-    </div>
-    <div v-else ref="chartContainer" class="chart-canvas" :style="{ height: `${chartHeight}px` }">
-      <VChart v-if="chart.rows.length" :option="option" :update-options="{ notMerge: true }" autoresize @click="onChartClick" />
-      <el-empty v-else description="没有匹配记录" :image-size="64" />
-    </div>
-    <footer v-if="chart.kind === 'trend'" class="chart-footnote">{{ chart.note }}</footer>
-    <footer v-else-if="chart.kind === 'matrix'" class="chart-footnote">行列均按当前样本聚合 · {{ chart.note }}</footer>
+
+      <!-- 下钻把行列都收敛到单个组合时，单格热力图会撑满整卡；降级为大数字卡 -->
+      <div v-else-if="matrixSingle" key="single" class="matrix-single">
+        <div class="matrix-single-value">
+          <strong>{{ number(matrixSingle.value) }}</strong
+          ><span>{{ chart.unit }}</span>
+        </div>
+        <p class="matrix-single-label">{{ matrixSingle.x }} / {{ matrixSingle.y }}</p>
+        <p class="matrix-single-meta">分母 {{ number(matrixSingle.denominator) }} · 占比 {{ matrixSingle.share }}%</p>
+        <small>放宽任一筛选条件可回到矩阵视图，或切换到数据表</small>
+      </div>
+
+      <div v-else key="chart" class="chart-canvas" :style="{ height: `${chartHeight}px` }">
+        <VChart v-if="chart.rows.length" :option="option" autoresize @click="onChartClick" />
+        <div v-else class="chart-empty">
+          <span class="chart-empty-mark" aria-hidden="true" />
+          <strong>没有匹配记录</strong>
+          <small>试着放宽日期范围或移除部分筛选条件</small>
+        </div>
+      </div>
+    </Transition>
+
+    <footer v-if="chart.kind === 'trend' || chart.kind === 'matrix'" class="chart-footnote">
+      {{ chart.kind === "matrix" ? `行列均按当前样本聚合 · ${chart.note}` : chart.note }}
+    </footer>
+    <footer v-else-if="chart.rows.length && !table" class="chart-footnote is-hint">点击图形可下钻筛选</footer>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
 import { DataAnalysis, Grid, InfoFilled } from "@element-plus/icons-vue";
 import { BarChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
-import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { GraphicComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import type { EChartsOption } from "echarts";
 import VChart from "vue-echarts";
 import type { AnalysisChartData, AnalysisRow } from "@/api/modules/clinic/patientAnalysis";
+import { useGlobalStore } from "@/stores/modules/global";
+import { analysisPalette, chartMotion, escapeHtml, rampColor } from "./analysisTheme";
 
-use([CanvasRenderer, BarChart, LineChart, PieChart, HeatmapChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent]);
-const props = defineProps<{ chart: AnalysisChartData; main?: boolean; disabled?: boolean }>();
+use([
+  CanvasRenderer,
+  BarChart,
+  LineChart,
+  PieChart,
+  HeatmapChart,
+  GraphicComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  VisualMapComponent
+]);
+
+const props = defineProps<{ chart: AnalysisChartData; main?: boolean; disabled?: boolean; index?: number }>();
 const emit = defineEmits<{ select: [filters: Record<string, string[]>] }>();
+const { isDark } = storeToRefs(useGlobalStore());
 const table = ref(false);
-const chartContainer = ref<HTMLElement>();
-const narrow = ref(false);
+const root = ref<HTMLElement>();
 const containerWidth = ref(0);
+const narrow = computed(() => containerWidth.value > 0 && containerWidth.value < 480);
 let observer: ResizeObserver | undefined;
+// 观察卡片根节点：图表/表格切换会替换内部节点，观察根节点才不会失效
 onMounted(() => {
-  if (chartContainer.value) {
-    observer = new ResizeObserver(entries => {
-      narrow.value = entries[0].contentRect.width < 480;
-      containerWidth.value = entries[0].contentRect.width;
-    });
-    observer.observe(chartContainer.value);
-  }
+  if (!root.value) return;
+  observer = new ResizeObserver(entries => (containerWidth.value = entries[0].contentRect.width));
+  observer.observe(root.value);
 });
 onBeforeUnmount(() => observer?.disconnect());
+
 const tableRows = computed(() => props.chart.tableRows || props.chart.rows);
 const chartHeight = computed(() => {
-  if (props.chart.kind === "matrix") {
-    const ys = new Set(props.chart.rows.map(r => r.y)).size;
-    return Math.max(280, Math.min(460, ys * 46 + 150));
-  }
-  if (props.chart.kind === "bar") return Math.max(255, Math.min(430, props.chart.rows.length * 29 + 55));
-  if (props.chart.kind === "donut") return props.main ? 340 : 300;
-  return props.main ? 320 : 285;
+  const { kind, rows } = props.chart;
+  if (kind === "matrix") return Math.max(280, Math.min(460, new Set(rows.map(r => r.y)).size * 44 + 140));
+  if (kind === "bar") return Math.max(240, Math.min(440, rows.length * 32 + 40));
+  if (kind === "donut") return 300;
+  return props.main ? 320 : 280;
 });
 const matrixSingle = computed(() => {
   if (props.chart.kind !== "matrix" || props.chart.rows.length !== 1) return undefined;
   const row = props.chart.rows[0];
   return { value: row.value || 0, x: row.x || "", y: row.y || "", denominator: row.denominator || 0, share: row.share || 0 };
 });
-function number(value: number) {
-  return value.toLocaleString("zh-CN");
-}
+const number = (value: number) => value.toLocaleString("zh-CN");
 
 function select(row: AnalysisRow) {
   if (props.disabled) return;
   emit("select", { ...row.filters });
 }
-
 function onChartClick(event: { data?: unknown }) {
   const index = event.data && typeof event.data === "object" ? (event.data as { rowIndex?: number }).rowIndex : undefined;
   if (index !== undefined && props.chart.rows[index]) select(props.chart.rows[index]);
 }
 
-// 图表动画统一节奏；系统声明减少动效时降级为无动画
-const reducedMotion = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-const motion = {
-  animation: !reducedMotion,
-  animationDuration: 420,
-  animationDurationUpdate: 600,
-  animationEasing: "cubicOut" as const,
-  animationEasingUpdate: "cubicInOut" as const
-};
+/** 结构化 tooltip：标题 + 主数值 + 占比条 + 次要信息 */
+function tooltipHtml(row: AnalysisRow) {
+  const chart = props.chart;
+  const p = analysisPalette(isDark.value);
+  const title = escapeHtml(chart.kind === "matrix" ? `${row.x} / ${row.y}` : row.label);
+  if (chart.kind === "trend") {
+    const line = (color: string, name: unknown, value: unknown) =>
+      `<div class="pa-tt-row"><i style="background:${color}"></i><span>${escapeHtml(name)}</span><b>${escapeHtml(number(Number(value) || 0))}</b></div>`;
+    return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>${line(p.brand, chart.series?.[0], row.primary)}${line(
+      p.categorical[2],
+      chart.series?.[1],
+      row.secondary
+    )}</div>`;
+  }
+  const share = Math.min(100, Math.max(0, row.share ?? 0));
+  return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>
+    <div class="pa-tt-value"><b>${escapeHtml(number(row.value ?? 0))}</b><span>${escapeHtml(chart.unit)}</span><em>${share}%</em></div>
+    <div class="pa-tt-bar"><i style="width:${share}%;background:${p.brand}"></i></div>
+    <div class="pa-tt-meta">分母 ${escapeHtml(number(row.denominator ?? 0))}${row.unknownCount ? ` · 未知 ${escapeHtml(row.unknownCount)}` : ""}</div>
+    <div class="pa-tt-hint">点击下钻</div></div>`;
+}
 
 const option = computed<EChartsOption>(() => {
   const chart = props.chart;
   const rows = chart.rows;
-  const textColor = "#53636b";
-  const lineColor = "#e9eeec";
+  const p = analysisPalette(isDark.value);
+  const axisLabel = { color: p.textMuted, fontSize: 12 };
   const base: EChartsOption = {
-    ...motion,
-    textStyle: { fontFamily: "inherit", color: textColor, fontSize: 11 },
-    color: ["#247b91", "#67a382", "#b99742", "#b4bebc"],
+    ...chartMotion(),
+    textStyle: { fontFamily: "inherit", color: p.text, fontSize: 12 },
+    color: p.categorical,
     tooltip: {
       confine: true,
       trigger: chart.kind === "trend" ? "axis" : "item",
+      renderMode: "html",
+      backgroundColor: p.tooltipBg,
+      borderColor: p.tooltipBorder,
+      borderWidth: 1,
+      padding: [10, 12],
+      textStyle: { color: p.text, fontSize: 12 },
+      extraCssText: `border-radius:10px;box-shadow:${p.tooltipShadow};backdrop-filter:blur(6px);`,
+      axisPointer: { type: "line", lineStyle: { color: p.textMuted, type: "dashed", width: 1 } },
       formatter: (input: unknown) => {
         const items = (Array.isArray(input) ? input : [input]) as Array<{ data?: { rowIndex?: number } }>;
         const row = rows[items[0]?.data?.rowIndex ?? -1];
-        if (!row) return "";
-        if (chart.kind === "trend")
-          return `${row.label}\n${chart.series?.[0]}  ${row.primary}\n${chart.series?.[1]}  ${row.secondary}`;
-        return `${chart.kind === "matrix" ? `${row.x} / ${row.y}` : row.label}\n${row.value} ${chart.unit}\n分母 ${row.denominator} · 占比 ${row.share}%\n未知 ${row.unknownCount}`;
+        return row ? tooltipHtml(row) : "";
       }
     }
   };
+
   if (chart.kind === "trend") {
-    // 折线样式对齐首页 DailyPatientCurve：平滑 + 圆头 + 淡色面积
+    const colors = [p.brand, p.categorical[2]];
     return {
       ...base,
-      grid: { left: 42, right: 18, top: 38, bottom: 34 },
-      legend: { top: 0, right: 4, icon: "circle", itemWidth: 10, itemHeight: 10, textStyle: { color: textColor, fontSize: 11 } },
+      grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
+      legend: {
+        top: 0,
+        right: 0,
+        icon: "roundRect",
+        itemWidth: 12,
+        itemHeight: 4,
+        itemGap: 18,
+        textStyle: { color: p.textMuted, fontSize: 12 }
+      },
       xAxis: {
         type: "category",
         data: rows.map(r => r.label),
         boundaryGap: false,
         axisTick: { show: false },
-        axisLine: { show: false },
-        axisLabel: { formatter: (label: string) => label.slice(2), hideOverlap: true }
+        axisLine: { lineStyle: { color: p.grid } },
+        axisLabel: { ...axisLabel, formatter: (label: string) => label.slice(5) || label, hideOverlap: true, margin: 12 }
       },
-      yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: lineColor, type: "dashed" } } },
+      yAxis: {
+        type: "value",
+        minInterval: 1,
+        axisLabel,
+        splitLine: { lineStyle: { color: p.grid } }
+      },
       series: (["primary", "secondary"] as const).map((key, seriesIndex) => ({
         type: "line" as const,
         name: chart.series?.[seriesIndex],
-        smooth: 0.42,
+        smooth: 0.35,
         showSymbol: false,
         symbol: "circle" as const,
         symbolSize: 8,
-        lineStyle: { width: 3, cap: "round" as const },
-        itemStyle: { color: seriesIndex === 0 ? "#1683ff" : "#67a382", borderColor: "#fff", borderWidth: 2 },
-        areaStyle: seriesIndex === 0 ? { color: "rgba(22,131,255,0.05)" } : undefined,
+        lineStyle: { width: seriesIndex === 0 ? 2.5 : 2, cap: "round" as const, color: colors[seriesIndex] },
+        itemStyle: { color: colors[seriesIndex], borderColor: p.surface, borderWidth: 2 },
+        areaStyle:
+          seriesIndex === 0
+            ? {
+                color: {
+                  type: "linear" as const,
+                  x: 0,
+                  y: 0,
+                  x2: 0,
+                  y2: 1,
+                  colorStops: [
+                    { offset: 0, color: p.brandSoft },
+                    { offset: 1, color: "rgba(0,0,0,0)" }
+                  ]
+                }
+              }
+            : undefined,
         emphasis: { focus: "series" as const },
         data: rows.map((r, i) => ({ value: r[key], rowIndex: i }))
       }))
     };
   }
+
   if (chart.kind === "donut") {
+    const wide = containerWidth.value >= 520;
+    const total = rows.reduce((sum, row) => sum + (row.value || 0), 0);
+    const byName = new Map(rows.map(row => [row.label, row]));
+    const center: [string, string] = wide ? ["32%", "50%"] : ["50%", "42%"];
     return {
       ...base,
-      legend: { bottom: 0, icon: "circle", itemWidth: 10, itemHeight: 10, textStyle: { color: textColor, fontSize: 11 } },
+      legend: {
+        ...(wide ? { orient: "vertical", right: "6%", top: "middle" } : { bottom: 0, left: "center" }),
+        icon: "circle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 14,
+        textStyle: { color: p.text, fontSize: 12 },
+        formatter: (name: string) => {
+          const row = byName.get(name);
+          const share = total > 0 && row ? Math.round(((row.value || 0) / total) * 1000) / 10 : 0;
+          return wide ? `${name}    ${number(row?.value ?? 0)} · ${share}%` : name;
+        }
+      },
       series: [
         {
           type: "pie",
-          radius: ["46%", "70%"],
-          center: ["50%", "44%"],
-          padAngle: 2,
-          itemStyle: { borderRadius: 8, borderColor: "#fff", borderWidth: 2 },
+          radius: ["58%", "78%"],
+          center,
+          padAngle: 1.5,
+          minAngle: 3,
+          itemStyle: { borderRadius: 6, borderColor: p.surface, borderWidth: 2 },
           label: { show: false },
-          emphasis: { scale: true, scaleSize: 6 },
+          labelLine: { show: false },
+          emphasis: { scale: true, scaleSize: 4 },
           animationType: "expansion",
-          animationDelay: (index: number) => index * 55,
           data: rows.map((row, index) => ({
             value: row.value || 0,
             name: row.label,
             rowIndex: index,
-            itemStyle: { color: ["#b99742", "#247b91", "#b4bebc"][index % 3] }
+            itemStyle: { color: /未知|未记录|未填/.test(row.label) ? p.unknown : p.categorical[index % p.categorical.length] }
           }))
         }
       ],
       graphic: [
         {
           type: "text",
-          left: "center",
-          top: "37%",
-          style: { text: number(chart.centerValue ?? 0), fontSize: 30, fontWeight: 700, fill: "#b99742", textAlign: "center" }
+          left: wide ? "26%" : "center",
+          top: wide ? "41%" : "33%",
+          style: {
+            text: number(chart.centerValue ?? total),
+            fontSize: 28,
+            fontWeight: 600,
+            fill: p.text,
+            align: "center",
+            width: wide ? 120 : undefined
+          } as Record<string, unknown>
         },
-        { type: "text", left: "center", top: "52%", style: { text: chart.centerLabel || "", fontSize: 11, fill: textColor } }
+        {
+          type: "text",
+          left: wide ? "26%" : "center",
+          top: wide ? "53%" : "45%",
+          style: {
+            text: chart.centerLabel || chart.unit || "",
+            fontSize: 12,
+            fill: p.textMuted,
+            align: "center",
+            width: wide ? 120 : undefined
+          } as Record<string, unknown>
+        }
       ]
     };
   }
+
   if (chart.kind === "matrix") {
     const xs = [...new Set(rows.map(r => r.x || ""))];
     const ys = [...new Set(rows.map(r => r.y || ""))];
-    const leftWidth = narrow.value ? 85 : 125;
+    const leftWidth = narrow.value ? 88 : 128;
     // 单元格宽度封顶：列少时网格不再被拉伸到整卡宽
-    const gridWidth = Math.max(140, Math.min(containerWidth.value - leftWidth - 90 || 620, xs.length * 96 + 30));
+    const available = containerWidth.value ? containerWidth.value - leftWidth - 56 : 620;
+    const gridWidth = Math.max(140, Math.min(available, xs.length * 92 + 24));
     return {
       ...base,
-      grid: { left: leftWidth, width: gridWidth, top: 14, bottom: 80 },
+      grid: { left: leftWidth, width: gridWidth, top: 8, bottom: 72 },
       xAxis: {
         type: "category",
         data: xs,
-        axisLabel: { interval: 0, rotate: xs.length > 5 ? 40 : 0, width: narrow.value ? 44 : 70, overflow: "truncate" },
+        axisLabel: {
+          ...axisLabel,
+          interval: 0,
+          rotate: xs.length > 5 ? 36 : 0,
+          width: narrow.value ? 44 : 72,
+          overflow: "truncate"
+        },
         axisTick: { show: false },
-        axisLine: { show: false }
+        axisLine: { show: false },
+        splitArea: { show: false }
       },
       yAxis: {
         type: "category",
         data: ys,
         inverse: true,
-        axisLabel: { width: narrow.value ? 76 : 115, overflow: "truncate" },
+        axisLabel: { ...axisLabel, color: p.text, width: narrow.value ? 78 : 116, overflow: "truncate" },
         axisTick: { show: false },
         axisLine: { show: false }
       },
@@ -268,12 +388,12 @@ const option = computed<EChartsOption>(() => {
         max: Math.max(1, ...rows.map(r => r.value || 0)),
         calculable: false,
         orient: "horizontal",
-        left: "center",
+        left: leftWidth,
         bottom: 0,
-        itemWidth: 9,
-        itemHeight: 95,
-        inRange: { color: ["#f1f5f2", "#c5ddd4", "#70aaa3", "#247b91"] },
-        textStyle: { fontSize: 10 }
+        itemWidth: 8,
+        itemHeight: 120,
+        inRange: { color: [p.ramp[0], p.ramp[2], p.ramp[4], p.ramp[5]] },
+        textStyle: { color: p.textMuted, fontSize: 11 }
       },
       series: [
         {
@@ -282,38 +402,52 @@ const option = computed<EChartsOption>(() => {
             value: [xs.indexOf(row.x || ""), ys.indexOf(row.y || ""), row.value || 0],
             rowIndex: index
           })),
-          label: { show: xs.length * ys.length <= 24, fontSize: 10 },
-          itemStyle: { borderColor: "#ffffff", borderWidth: 3 },
-          emphasis: { itemStyle: { borderColor: "#a3b8ae" } }
+          label: { show: xs.length * ys.length <= 30, fontSize: 11, color: p.text },
+          itemStyle: { borderColor: p.surface, borderWidth: 3, borderRadius: 6 },
+          emphasis: { itemStyle: { borderColor: p.brand, borderWidth: 2 } }
         }
       ]
     };
   }
+
+  // 横向条形：按数值深浅取色，含未知的类别用中性灰
+  const max = Math.max(0, ...rows.map(r => r.value || 0));
   return {
     ...base,
-    grid: { left: narrow.value ? 108 : 145, right: 38, top: 12, bottom: 26 },
-    xAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: lineColor, type: "dashed" } } },
+    grid: { left: 8, right: 48, top: 4, bottom: 4, containLabel: true },
+    xAxis: { type: "value", minInterval: 1, show: false },
     yAxis: {
       type: "category",
       data: rows.map(r => r.label),
       inverse: true,
-      axisLabel: { width: narrow.value ? 98 : 132, overflow: "truncate" },
+      axisLabel: { ...axisLabel, color: p.text, width: narrow.value ? 96 : 136, overflow: "truncate", margin: 14 },
       axisLine: { show: false },
       axisTick: { show: false }
     },
     series: [
       {
         type: "bar",
-        barMaxWidth: 17,
+        barWidth: 12,
+        showBackground: true,
+        backgroundStyle: { color: p.grid, borderRadius: 6 },
         data: rows.map((row, index) => ({
           value: row.value || 0,
           rowIndex: index,
           itemStyle: {
-            color: (row.unknownCount || 0) > 0 ? "#b4bebc" : ["#247b91", "#67a382", "#b99742"][index % 3],
-            borderRadius: [0, 3, 3, 0]
+            color: (row.unknownCount || 0) > 0 ? p.unknown : rampColor(p, row.value || 0, max),
+            borderRadius: 6
           }
         })),
-        label: { show: true, position: "right", color: textColor, fontSize: 11 }
+        label: {
+          show: true,
+          position: "right",
+          distance: 8,
+          color: p.text,
+          fontSize: 12,
+          fontWeight: 500,
+          formatter: ({ value }: { value: unknown }) => number(Number(value) || 0)
+        },
+        emphasis: { itemStyle: { color: p.brand } }
       }
     ]
   };
@@ -322,191 +456,422 @@ const option = computed<EChartsOption>(() => {
 
 <style scoped lang="scss">
 .analysis-chart {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: 20px 0 12px;
-  border-top: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  transition: background-color 0.18s ease-out;
+  padding: 18px 20px 14px;
+  transition:
+    opacity 200ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+  animation: pa-card-enter 420ms var(--pa-ease) both;
+  animation-delay: calc(var(--pa-enter-index, 0) * 40ms);
 }
-.analysis-chart:hover {
-  background: rgba(36, 123, 145, 0.035);
+.analysis-chart.is-busy {
+  pointer-events: none;
+  opacity: 0.6;
 }
-@media (prefers-reduced-motion: reduce) {
-  .analysis-chart {
-    transition: none;
+
+@keyframes pa-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 .chart-heading,
 .chart-title,
-.chart-tools,
-.chart-mode {
+.chart-tools {
   display: flex;
   align-items: center;
 }
 .chart-heading {
-  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
 }
 .chart-title {
+  gap: 4px;
   min-width: 0;
-  gap: 6px;
 }
 .chart-title h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
+  color: var(--pa-text);
   overflow-wrap: anywhere;
 }
-.chart-tools {
-  gap: 8px;
-  flex-shrink: 0;
+.is-main .chart-title h3 {
+  font-size: 16px;
 }
-.chart-unit {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-}
-.chart-mode {
-  gap: 2px;
-}
-.chart-icon {
+.chart-info {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  color: var(--el-text-color-secondary);
-  border: 0;
-  border-radius: 4px;
+  color: var(--pa-text-3);
+  cursor: help;
   background: transparent;
-  cursor: pointer;
+  border: 0;
+  border-radius: 6px;
+  transition: color 150ms ease;
+}
+.chart-info:hover {
+  color: var(--pa-brand);
+}
+.chart-tools {
   flex-shrink: 0;
+  gap: 10px;
 }
-.chart-icon[aria-pressed="true"] {
-  color: #247b91;
-  background: #ecf4f2;
+.chart-unit {
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--pa-text-3);
+  background: var(--pa-subtle);
+  border-radius: 999px;
 }
-.chart-icon:focus-visible,
-.table-filter:focus-visible {
-  outline: 2px solid #247b91;
+
+/* 图表 / 数据表 切换：共享滑块 */
+.chart-mode {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 28px 28px;
+  padding: 2px;
+  background: var(--pa-subtle);
+  border-radius: 8px;
+}
+.chart-mode-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 28px;
+  height: 26px;
+  background: var(--pa-surface);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 10%);
+  transition: transform 220ms var(--pa-ease);
+}
+.chart-mode.is-table .chart-mode-thumb {
+  transform: translateX(28px);
+}
+.chart-mode button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 26px;
+  padding: 0;
+  color: var(--pa-text-3);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  transition: color 150ms ease;
+}
+.chart-mode button[aria-pressed="true"] {
+  color: var(--pa-brand);
+}
+.chart-mode button:active {
+  transform: scale(0.96);
+}
+.chart-info:focus-visible,
+.chart-mode button:focus-visible,
+.table-filter:focus-visible,
+.chart-table-scroll:focus-visible {
+  outline: 2px solid var(--pa-brand);
   outline-offset: 2px;
 }
-.definition-icon {
-  width: 22px;
-  font-size: 12px;
-}
-.chart-icon:active {
-  transform: scale(0.97);
-}
 .chart-canvas {
-  min-width: 0;
+  flex: 1;
   width: 100%;
+  min-width: 0;
+}
+
+/* 内容切换 */
+.pa-swap-enter-active,
+.pa-swap-leave-active {
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+.pa-swap-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.pa-swap-leave-to {
+  opacity: 0;
+}
+.chart-empty {
+  display: grid;
+  gap: 6px;
+  place-content: center;
+  justify-items: center;
+  height: 100%;
+  min-height: 200px;
+  text-align: center;
+}
+.chart-empty-mark {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 6px;
+  background: repeating-linear-gradient(135deg, transparent 0 5px, var(--pa-subtle) 5px 10px);
+  border: 1.5px dashed var(--pa-border-strong);
+  border-radius: 12px;
+}
+.chart-empty strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pa-text-2);
+}
+.chart-empty small {
+  font-size: 12px;
+  color: var(--pa-text-3);
 }
 .matrix-single {
   display: grid;
+  gap: 8px;
+  place-content: center;
   justify-items: center;
-  gap: 6px;
-  min-height: 280px;
-  padding: 28px 16px;
-  border: 1px dashed var(--el-border-color-lighter);
+  min-height: 260px;
+  padding: 24px 16px;
+  background: var(--pa-subtle);
   border-radius: 10px;
-  background: linear-gradient(180deg, #f7fbfa, #fff);
 }
 .matrix-single-value {
   display: flex;
-  align-items: baseline;
   gap: 6px;
+  align-items: baseline;
 }
 .matrix-single-value strong {
-  font-size: 44px;
-  font-weight: 700;
-  color: #247b91;
+  font-size: 40px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  color: var(--pa-brand);
 }
-.matrix-single-value span {
-  color: var(--el-text-color-secondary);
+.matrix-single-value span,
+.matrix-single-meta,
+.matrix-single small {
   font-size: 12px;
+  color: var(--pa-text-3);
 }
 .matrix-single-label {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  color: var(--pa-text);
   text-align: center;
+  overflow-wrap: anywhere;
 }
 .matrix-single-meta {
   margin: 0;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
 }
-.matrix-single small {
-  color: var(--el-text-color-secondary);
-  font-size: 11px;
-}
 .chart-footnote {
-  margin: 10px 0 0;
-  color: var(--el-text-color-secondary);
-  font-size: 11px;
+  padding-top: 10px;
+  margin-top: 10px;
+  font-size: 12px;
   line-height: 1.6;
+  color: var(--pa-text-3);
   overflow-wrap: anywhere;
+  border-top: 1px dashed var(--pa-border);
 }
+.chart-footnote.is-hint {
+  padding-top: 0;
+  border-top: 0;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.analysis-chart:hover .chart-footnote.is-hint {
+  opacity: 1;
+}
+
+/* 数据表 */
 .chart-table-scroll {
+  min-height: 240px;
+  max-height: 440px;
   overflow: auto;
-  max-height: 420px;
-  min-height: 255px;
+  border-radius: 8px;
 }
 .chart-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
+  border-spacing: 0;
+  border-collapse: separate;
 }
 .chart-table th,
 .chart-table td {
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 9px 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pa-text-2);
   text-align: right;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--pa-border);
 }
 .chart-table th:first-child {
-  text-align: left;
   max-width: 240px;
-  white-space: normal;
+  text-align: left;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
-.chart-table thead {
+.chart-table thead th {
   position: sticky;
   top: 0;
-  background: var(--el-bg-color);
-  color: var(--el-text-color-secondary);
+  z-index: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pa-text-3);
+  background: var(--pa-surface);
+}
+.chart-table tbody tr {
+  transition: background-color 120ms ease;
+}
+.chart-table tbody tr:hover {
+  background: var(--pa-subtle);
+}
+.chart-table td.strong {
+  font-weight: 600;
+  color: var(--pa-text);
+}
+.chart-table td.muted {
+  color: var(--pa-text-3);
+}
+.share-cell {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 110px;
+}
+.share-cell i {
+  display: block;
+  width: 56px;
+  height: 4px;
+  overflow: hidden;
+  background: var(--pa-subtle-strong);
+  border-radius: 2px;
+}
+.share-cell b {
+  display: block;
+  height: 100%;
+  background: var(--pa-brand);
+  border-radius: inherit;
 }
 .table-filter {
   padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--pa-text);
+  text-align: inherit;
+  cursor: pointer;
   background: none;
   border: 0;
-  color: #247b91;
-  cursor: pointer;
-  font: inherit;
-  text-align: inherit;
+  transition: color 120ms ease;
+}
+.table-filter:hover {
+  color: var(--pa-brand);
 }
 .table-filter:disabled {
+  color: var(--pa-text-3);
   cursor: default;
-  color: var(--el-text-color-secondary);
 }
 .no-rows {
+  color: var(--pa-text-3);
   text-align: center !important;
-  color: var(--el-text-color-secondary);
 }
-@media (max-width: 520px) {
-  .chart-heading {
-    align-items: flex-start;
-    gap: 6px;
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-chart,
+  .chart-mode-thumb,
+  .pa-swap-enter-active,
+  .pa-swap-leave-active {
+    transition: none;
+    animation: none;
+  }
+}
+
+@media (width <= 520px) {
+  .analysis-chart {
+    padding: 16px 14px 12px;
   }
   .chart-unit {
     display: none;
   }
+}
+</style>
+
+<!-- tooltip 由 ECharts 挂到图表容器内，不受 scoped 约束，这里用非 scoped 的限定类名 -->
+<style lang="scss">
+.pa-tt {
+  min-width: 150px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pa-tt-title {
+  max-width: 260px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.pa-tt-row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+}
+.pa-tt-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.pa-tt-row b,
+.pa-tt-value b {
+  font-variant-numeric: tabular-nums;
+}
+.pa-tt-value {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.pa-tt-value b {
+  font-size: 18px;
+  font-weight: 600;
+}
+.pa-tt-value span {
+  opacity: 0.7;
+}
+.pa-tt-value em {
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 600;
+}
+.pa-tt-bar {
+  height: 4px;
+  margin: 6px 0;
+  overflow: hidden;
+  background: rgb(127 140 141 / 18%);
+  border-radius: 2px;
+}
+.pa-tt-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+.pa-tt-meta {
+  opacity: 0.72;
+}
+.pa-tt-hint {
+  padding-top: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  border-top: 1px dashed rgb(127 140 141 / 30%);
+  opacity: 0.6;
 }
 </style>

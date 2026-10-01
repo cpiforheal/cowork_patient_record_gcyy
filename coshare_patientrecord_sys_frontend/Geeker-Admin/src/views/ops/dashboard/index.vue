@@ -1,113 +1,41 @@
 <template>
   <div class="patient-analysis">
-    <header class="analysis-header">
-      <div>
+    <!-- 顶部细进度条：加载时内容保持原位，不再整页半透明 -->
+    <div
+      class="pa-progress"
+      :class="{ 'is-active': loading }"
+      role="progressbar"
+      aria-label="数据加载中"
+      :aria-hidden="!loading"
+    />
+
+    <header class="pa-header">
+      <div class="pa-title">
+        <span class="pa-eyebrow"
+          ><i class="pa-live-dot" :class="{ 'is-error': !!error }" />服务器已保存记录 · {{ basisLabel }}</span
+        >
         <h1>患者与诊疗分析</h1>
-        <div class="header-meta">
-          <span class="status-dot" />服务器已保存记录<span class="meta-separator">/</span>{{ basisLabel }}
-        </div>
       </div>
-      <div class="header-actions">
-        <span v-if="result" class="updated-time">更新于 {{ result.meta.generatedAt.slice(11) }}</span>
-        <el-tooltip content="刷新数据" :show-after="300"
-          ><el-button :icon="Refresh" :loading="loading" aria-label="刷新数据" @click="load"
-        /></el-tooltip>
-        <el-button :icon="Document" :disabled="!result?.detailsAllowed || stale" @click="openDetails">查看明细</el-button>
+      <div class="pa-header-actions">
+        <span v-if="result" class="pa-updated">更新于 {{ result.meta.generatedAt.slice(11, 16) }}</span>
+        <el-tooltip content="刷新数据" :show-after="300">
+          <button type="button" class="pa-icon-btn" :class="{ 'is-spinning': loading }" aria-label="刷新数据" @click="load">
+            <el-icon><Refresh /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-button type="primary" :icon="Document" :disabled="!result?.detailsAllowed || stale" @click="openDetails"
+          >查看明细</el-button
+        >
       </div>
     </header>
-    <section class="filter-band" aria-label="分析筛选">
-      <div class="primary-filters">
-        <div class="date-field">
-          <label>日期范围</label>
-          <el-date-picker
-            v-model="dateRange"
-            type="daterange"
-            value-format="YYYY-MM-DD"
-            range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            :clearable="false"
-            @change="commit"
-          />
-        </div>
-        <div class="filter-field">
-          <label>时间粒度</label
-          ><el-segmented v-model="query.granularity" :options="granularities" aria-label="时间粒度" @change="commit" />
-        </div>
-        <div class="filter-field">
-          <label>{{ query.view === "followup" ? "随访日期基准" : "分类统计单位" }}</label>
-          <el-segmented
-            v-if="query.view === 'followup'"
-            v-model="query.basis"
-            :options="bases"
-            aria-label="随访日期基准"
-            @change="changeBasis"
-          />
-          <el-segmented v-else v-model="query.metric" :options="metrics" aria-label="分类统计单位" @change="commit" />
-        </div>
-        <div class="filter-buttons">
-          <el-button
-            :icon="Filter"
-            :type="advanced ? 'primary' : 'default'"
-            plain
-            :aria-expanded="advanced"
-            @click="advanced = !advanced"
-            >筛选<span v-if="chips.length" class="filter-count">{{ chips.length }}</span></el-button
-          >
-          <el-tooltip content="重置全部筛选" :show-after="300"
-            ><el-button :icon="RefreshLeft" aria-label="重置全部筛选" @click="reset"
-          /></el-tooltip>
-        </div>
-      </div>
-      <div v-if="advanced" class="advanced-filters">
-        <div v-for="field in visibleFields" :key="field.key" class="filter-field">
-          <label :for="`analysis-${field.key}`">{{ field.label }}</label>
-          <el-select
-            :id="`analysis-${field.key}`"
-            :model-value="query.filters[field.key] || []"
-            multiple
-            filterable
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            :max-collapse-tags="1"
-            :placeholder="`全部${field.label}`"
-            :aria-label="field.label"
-            @update:model-value="setFilter(field.key, $event)"
-          >
-            <el-option v-for="option in options(field.key)" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
-        </div>
-        <div class="filter-field age-filter">
-          <label>年龄范围（岁）</label>
-          <div>
-            <el-input-number
-              v-model="query.ageMin"
-              :min="0"
-              :max="130"
-              :controls="false"
-              placeholder="下限"
-              aria-label="年龄下限"
-              @change="commit"
-            /><span>至</span
-            ><el-input-number
-              v-model="query.ageMax"
-              :min="0"
-              :max="130"
-              :controls="false"
-              placeholder="上限"
-              aria-label="年龄上限"
-              @change="commit"
-            />
-          </div>
-        </div>
-      </div>
-      <div v-if="chips.length" class="selected-filters" aria-label="已选条件">
-        <span class="selected-label">已选</span>
-        <el-tag v-for="chip in chips" :key="chip.id" closable effect="plain" @close="removeChip(chip)">{{ chip.label }}</el-tag>
-      </div>
-    </section>
-    <nav class="analysis-tabs" role="tablist" aria-label="分析视图">
+
+    <nav ref="tabsEl" class="pa-tabs" role="tablist" aria-label="分析视图">
+      <span
+        class="pa-tabs-thumb"
+        :class="{ 'is-ready': tabThumb.ready }"
+        :style="{ width: `${tabThumb.w}px`, transform: `translateX(${tabThumb.x}px)` }"
+        aria-hidden="true"
+      />
       <button
         v-for="view in views"
         :key="view.key"
@@ -120,65 +48,198 @@
         <el-icon><component :is="view.icon" /></el-icon>{{ view.label }}
       </button>
     </nav>
-    <div v-if="loading" class="analysis-message" role="status">
-      <el-icon class="is-loading"><Loading /></el-icon>{{ result ? "筛选结果更新中，下方为上次结果" : "正在读取分析数据" }}
-    </div>
-    <div v-else-if="error" class="analysis-message is-error" role="alert">
-      <el-icon><Warning /></el-icon><span>{{ error }}{{ result ? "；下方保留上次结果" : "" }}</span
-      ><el-button link @click="load">重试</el-button>
-    </div>
-    <main :aria-busy="loading" :class="{ 'is-stale': stale }">
+
+    <section class="pa-toolbar" aria-label="分析筛选">
+      <div class="pa-toolbar-row">
+        <div class="pa-field pa-date">
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            range-separator="→"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            :clearable="false"
+            aria-label="日期范围"
+            @change="commit"
+          />
+        </div>
+        <span class="pa-divider" aria-hidden="true" />
+        <div class="pa-field">
+          <span class="pa-field-label">粒度</span>
+          <el-segmented v-model="query.granularity" :options="granularities" aria-label="时间粒度" @change="commit" />
+        </div>
+        <div class="pa-field">
+          <span class="pa-field-label">{{ query.view === "followup" ? "日期基准" : "统计单位" }}</span>
+          <el-segmented
+            v-if="query.view === 'followup'"
+            v-model="query.basis"
+            :options="bases"
+            aria-label="随访日期基准"
+            @change="changeBasis"
+          />
+          <el-segmented v-else v-model="query.metric" :options="metrics" aria-label="分类统计单位" @change="commit" />
+        </div>
+        <div class="pa-toolbar-end">
+          <button
+            type="button"
+            class="pa-filter-btn"
+            :class="{ 'is-open': advanced, 'has-value': chips.length }"
+            :aria-expanded="advanced"
+            aria-controls="pa-advanced"
+            @click="advanced = !advanced"
+          >
+            <el-icon><Filter /></el-icon>筛选<span v-if="chips.length" class="pa-badge">{{ chips.length }}</span
+            ><el-icon class="pa-caret"><ArrowDown /></el-icon>
+          </button>
+          <el-tooltip content="重置全部筛选" :show-after="300">
+            <button type="button" class="pa-icon-btn" aria-label="重置全部筛选" @click="reset">
+              <el-icon><RefreshLeft /></el-icon>
+            </button>
+          </el-tooltip>
+        </div>
+      </div>
+
+      <div id="pa-advanced" class="pa-collapse" :class="{ 'is-open': advanced }" :inert="!advanced">
+        <div class="pa-collapse-inner">
+          <div class="pa-advanced">
+            <div v-for="field in visibleFields" :key="field.key" class="pa-adv-field">
+              <label :for="`analysis-${field.key}`">{{ field.label }}</label>
+              <el-select
+                :id="`analysis-${field.key}`"
+                :model-value="query.filters[field.key] || []"
+                multiple
+                filterable
+                clearable
+                collapse-tags
+                collapse-tags-tooltip
+                :max-collapse-tags="1"
+                :placeholder="`全部${field.label}`"
+                :aria-label="field.label"
+                @update:model-value="setFilter(field.key, $event)"
+              >
+                <el-option v-for="option in options(field.key)" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </div>
+            <div class="pa-adv-field pa-age">
+              <label>年龄范围（岁）</label>
+              <div>
+                <el-input-number
+                  v-model="query.ageMin"
+                  :min="0"
+                  :max="130"
+                  :controls="false"
+                  placeholder="下限"
+                  aria-label="年龄下限"
+                  @change="commit"
+                /><span>—</span
+                ><el-input-number
+                  v-model="query.ageMax"
+                  :min="0"
+                  :max="130"
+                  :controls="false"
+                  placeholder="上限"
+                  aria-label="年龄上限"
+                  @change="commit"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <TransitionGroup v-if="chips.length" tag="div" name="pa-chip" class="pa-chips" aria-label="已选条件">
+        <span v-for="chip in chips" :key="chip.id" class="pa-chip">
+          {{ chip.label }}
+          <button type="button" :aria-label="`移除条件 ${chip.label}`" @click="removeChip(chip)">×</button>
+        </span>
+        <button key="__clear" type="button" class="pa-chip-clear" @click="reset">清空</button>
+      </TransitionGroup>
+    </section>
+
+    <Transition name="pa-fade">
+      <div v-if="error" class="pa-alert" role="alert">
+        <el-icon><Warning /></el-icon>
+        <span>{{ error }}{{ result ? "，下方保留上次结果" : "" }}</span>
+        <button type="button" @click="load">重试</button>
+      </div>
+    </Transition>
+
+    <main class="pa-main" :aria-busy="loading">
       <template v-if="result">
-        <section class="sample-band" aria-label="当前样本">
-          <div class="sample-primary">
-            <span>匹配患者</span><strong>{{ number(patientCount) }}</strong
-            ><small>按病例标识去重</small>
+        <section class="pa-kpis" :class="{ 'is-busy': stale }" aria-label="当前样本">
+          <div class="pa-card pa-kpi is-primary" :style="{ '--pa-enter-index': 0 }">
+            <span class="pa-kpi-label">匹配患者</span>
+            <strong>{{ number(patientCount) }}</strong>
+            <small>按病例标识去重</small>
           </div>
-          <div class="sample-stat">
-            <span>有效来访</span><strong>{{ number(result.summary.visits) }}<small>人次</small></strong>
-          </div>
-          <template v-if="query.view === 'followup'">
-            <div class="sample-stat">
-              <span>随访节点</span><strong>{{ number(result.summary.nodes) }}<small>个</small></strong>
-            </div>
-            <div class="sample-stat">
-              <span>区间联系留痕</span><strong>{{ number(result.summary.contacts) }}<small>次</small></strong>
-            </div>
-          </template>
-          <div class="sample-context">
-            <span>{{ result.meta.from }} 至 {{ result.meta.to }}</span
-            ><small
-              >{{ result.meta.basis === "visit" ? "就诊日期" : result.meta.basis === "due" ? "节点到期日期" : "实际联系日期" }} ·
-              {{ granularityLabel }}</small
+          <div class="pa-card pa-kpi" :style="{ '--pa-enter-index': 1 }">
+            <span class="pa-kpi-label">有效来访</span>
+            <strong>{{ number(visitCount) }}<em>人次</em></strong>
+            <small v-if="patientCount"
+              >人均 {{ (result.summary.visits / Math.max(1, result.summary.patients)).toFixed(1) }} 次</small
             >
           </div>
+          <template v-if="query.view === 'followup'">
+            <div class="pa-card pa-kpi" :style="{ '--pa-enter-index': 2 }">
+              <span class="pa-kpi-label">随访节点</span>
+              <strong>{{ number(nodeCount) }}<em>个</em></strong>
+              <small>已联系 {{ number(result.summary.contactedNodes) }} 个</small>
+            </div>
+            <div class="pa-card pa-kpi" :style="{ '--pa-enter-index': 3 }">
+              <span class="pa-kpi-label">区间联系留痕</span>
+              <strong>{{ number(contactCount) }}<em>次</em></strong>
+              <small>仅服务器留痕</small>
+            </div>
+          </template>
+          <div v-else class="pa-card pa-kpi" :style="{ '--pa-enter-index': 2 }">
+            <span class="pa-kpi-label">统计区间</span>
+            <strong>{{ dayCount }}<em>天</em></strong>
+            <small>{{ result.meta.from.slice(5) }} → {{ result.meta.to.slice(5) }} · {{ granularityLabel }}</small>
+          </div>
+          <el-popover placement="bottom-end" :width="280" trigger="click" popper-class="pa-quality-popper">
+            <template #reference>
+              <button
+                type="button"
+                class="pa-card pa-kpi pa-quality"
+                :class="{ 'has-issue': qualityIssues }"
+                :style="{ '--pa-enter-index': 4 }"
+                aria-haspopup="dialog"
+              >
+                <span class="pa-kpi-label"
+                  >数据质量<el-icon><component :is="qualityIssues ? InfoFilled : CircleCheck" /></el-icon
+                ></span>
+                <strong>{{ qualityIssues ? `${qualityIssues} 项` : "完整" }}</strong>
+                <small>{{ qualityIssues ? "存在字段缺失，点击查看" : "关键字段均已记录" }}</small>
+              </button>
+            </template>
+            <div class="pa-quality-pop">
+              <p class="pa-quality-title">字段覆盖</p>
+              <ul>
+                <li v-for="item in qualityItems" :key="item.label" :class="{ 'is-alert': item.value > 0 }">
+                  <span>{{ item.label }}</span
+                  ><b>{{ item.value }} {{ item.unit }}</b>
+                </li>
+              </ul>
+              <p class="pa-quality-note">未知值保留在统计中；患者去重不使用姓名或手机号，不等同于跨系统自然人去重。</p>
+            </div>
+          </el-popover>
         </section>
-        <div class="quality-line">
-          <el-tooltip content="未知值保留在统计中；患者去重不使用姓名或手机号，不等同于跨系统自然人去重。" placement="top"
-            ><span class="quality-label"
-              ><el-icon><InfoFilled /></el-icon>字段覆盖</span
-            ></el-tooltip
-          >
-          <span :class="{ 'is-alert': result.meta.missing.agePatients > 0 }">年龄未记录 {{ result.meta.missing.agePatients }} 位</span
-          ><span :class="{ 'is-alert': result.meta.missing.regionPatients > 0 }"
-            >地址层级不完整 {{ result.meta.missing.regionPatients }} 位</span
-          ><span :class="{ 'is-alert': result.meta.missing.diagnosisVisits > 0 }"
-            >主诊断未记录 {{ result.meta.missing.diagnosisVisits }} 人次</span
-          ><span v-if="result.meta.missing.fallbackDates" :class="{ 'is-alert': true }"
-            >日期回退 {{ result.meta.missing.fallbackDates }} 人次</span
-          >
-        </div>
-        <div v-if="query.view === 'followup'" class="followup-context">
-          <span>仅服务器联系留痕，截至 {{ result.meta.to }}；不包含浏览器本地通话记录。</span>
-          <el-button
-            link
-            :class="{ 'is-danger': result.summary.unscheduledNodes > 0 }"
+
+        <div v-if="query.view === 'followup'" class="pa-subbar">
+          <span class="pa-subbar-text">仅服务器联系留痕，截至 {{ result.meta.to }}；不含浏览器本地通话记录</span>
+          <button
+            type="button"
+            class="pa-pill"
+            :class="{ 'is-danger': !query.unscheduled && result.summary.unscheduledNodes > 0, 'is-active': query.unscheduled }"
             :disabled="stale"
             @click="toggleUnscheduled"
-            >{{ query.unscheduled ? "返回有日期记录" : `未排期节点 ${result.summary.unscheduledNodes} 个` }}</el-button
-          ><small>未排期数量不受日期过滤</small>
+          >
+            {{ query.unscheduled ? "← 返回有日期记录" : `未排期节点 ${result.summary.unscheduledNodes} 个` }}
+          </button>
+          <small>未排期数量不受日期过滤</small>
         </div>
-        <div v-if="query.view === 'clinical'" class="clinical-mode">
+        <div v-if="query.view === 'clinical'" class="pa-subbar">
           <el-segmented
             v-model="clinicalMode"
             :options="[
@@ -186,35 +247,69 @@
               { label: '中医病名与证型', value: 'tcm' }
             ]"
             aria-label="诊疗分类"
-          /><span>已保存字段 · 不以拟行术式代替实际术式</span>
+          />
+          <span class="pa-subbar-text">已保存字段 · 不以拟行术式代替实际术式</span>
         </div>
-        <nav v-if="query.view === 'population' && regionBreadcrumbs.length" class="region-breadcrumbs" aria-label="地区路径">
+        <nav v-if="query.view === 'population' && regionBreadcrumbs.length" class="pa-crumbs" aria-label="地区路径">
           <button type="button" :disabled="stale" @click="setFilter('region', [])">全部地区</button>
-          <template v-for="crumb in regionBreadcrumbs" :key="crumb.path"
-            ><span>/</span
-            ><button type="button" :disabled="stale" @click="setFilter('region', [crumb.path])">
-              {{ crumb.label }}
-            </button></template
-          >
+          <TransitionGroup name="pa-chip">
+            <span v-for="(crumb, crumbIndex) in regionBreadcrumbs" :key="crumb.path" class="pa-crumb">
+              <i aria-hidden="true">›</i>
+              <button
+                type="button"
+                :disabled="stale"
+                :aria-current="crumbIndex === regionBreadcrumbs.length - 1 ? 'location' : undefined"
+                @click="setFilter('region', [crumb.path])"
+              >
+                {{ crumb.label }}
+              </button>
+            </span>
+          </TransitionGroup>
         </nav>
-        <div v-if="visibleCharts.length" class="analysis-grid" :class="`view-${query.view}`">
+
+        <div v-if="visibleCharts.length" :key="`${query.view}-${clinicalMode}`" class="pa-grid">
           <AnalysisChart
             v-for="(chart, index) in visibleCharts"
             :key="chart.id"
             :chart="chart"
             :main="index === 0"
+            :index="index + 2"
             :disabled="stale"
-            :class="{ 'full-width': chart.kind === 'matrix' || chart.kind === 'trend' || chart.kind === 'donut' }"
+            :class="{ 'is-wide': isWide(index) }"
             @select="onChartSelect"
           />
         </div>
-        <el-empty v-else description="没有匹配记录" :image-size="70" />
+        <div v-else class="pa-card pa-empty">
+          <span class="pa-empty-mark" aria-hidden="true" />
+          <strong>没有匹配记录</strong>
+          <small>当前条件下没有可统计的数据，可以放宽日期或清空筛选</small>
+          <el-button v-if="chips.length" size="small" @click="reset">清空筛选</el-button>
+        </div>
       </template>
-      <div v-else-if="loading" class="initial-loading"><el-skeleton :rows="8" animated /></div>
+
+      <div v-else-if="loading" class="pa-skeleton" aria-hidden="true">
+        <div class="pa-kpis">
+          <div v-for="n in 4" :key="n" class="pa-card pa-sk-kpi"><i /><b /><i /></div>
+        </div>
+        <div class="pa-grid">
+          <div class="pa-card pa-sk-chart is-wide"><i /><b /></div>
+          <div class="pa-card pa-sk-chart"><i /><b /></div>
+          <div class="pa-card pa-sk-chart"><i /><b /></div>
+        </div>
+      </div>
     </main>
-    <el-drawer v-model="detailsVisible" title="筛选结果明细" size="min(1080px, 96vw)" destroy-on-close @closed="cancelDetails">
-      <div class="detail-toolbar">
-        <span>{{ details?.total ?? 0 }} 条 · {{ details?.meta.unit || result?.meta.unit }}</span
+
+    <el-drawer
+      v-model="detailsVisible"
+      title="筛选结果明细"
+      size="min(1080px, 96vw)"
+      class="pa-drawer"
+      destroy-on-close
+      @closed="cancelDetails"
+    >
+      <div class="pa-detail-toolbar">
+        <span
+          ><b>{{ number(details?.total ?? 0) }}</b> 条 · {{ details?.meta.unit || result?.meta.unit }}</span
         ><el-segmented
           v-model="detailSort"
           :options="[
@@ -225,12 +320,15 @@
           @change="reloadDetails"
         />
       </div>
-      <p class="detail-privacy">姓名掩码展示，完整资料仅在获授权的患者档案中查看。</p>
-      <div v-if="detailError" class="analysis-message is-error" role="alert">
-        {{ detailError }}<el-button link @click="loadDetails">重试</el-button>
+      <p class="pa-detail-privacy">
+        <el-icon><InfoFilled /></el-icon>姓名掩码展示，完整资料仅在获授权的患者档案中查看。
+      </p>
+      <div v-if="detailError" class="pa-alert" role="alert">
+        <el-icon><Warning /></el-icon><span>{{ detailError }}</span
+        ><button type="button" @click="loadDetails">重试</button>
       </div>
-      <div v-loading="detailsLoading" class="details-table-wrap">
-        <el-table :data="details?.rows || []" height="min(62vh, 650px)" border>
+      <div v-loading="detailsLoading" class="pa-details-table">
+        <el-table :data="details?.rows || []" height="min(62vh, 650px)">
           <el-table-column prop="name" label="患者" width="90" fixed />
           <el-table-column prop="date" label="日期" width="155" />
           <el-table-column label="性别 / 年龄" width="110"
@@ -244,8 +342,8 @@
           >
           <el-table-column label="复查" width="140" show-overflow-tooltip
             ><template #default="{ row }"
-              ><el-tag v-if="row.recheck" size="small" type="warning" effect="plain">复查</el-tag
-              ><span v-else>—</span><small v-if="row.recheckBasis"> {{ row.recheckBasis }}</small></template
+              ><el-tag v-if="row.recheck" size="small" type="warning" effect="light" round>复查</el-tag
+              ><span v-else class="pa-muted">—</span><small v-if="row.recheckBasis"> {{ row.recheckBasis }}</small></template
             ></el-table-column
           >
           <el-table-column prop="patientSource" label="来诊途径" width="100" show-overflow-tooltip />
@@ -292,7 +390,7 @@
 </template>
 
 <script setup lang="ts" name="opsDashboard">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ChatDotRound,
@@ -301,13 +399,14 @@ import {
   Filter,
   FirstAidKit,
   InfoFilled,
-  Loading,
   Location,
   Refresh,
   RefreshLeft,
   TopRight,
   Warning,
-  Calendar
+  Calendar,
+  CircleCheck,
+  ArrowDown
 } from "@element-plus/icons-vue";
 import {
   loadPatientAnalysis,
@@ -340,6 +439,56 @@ const advanced = ref(false);
 const clinicalMode = ref("western");
 const stale = computed(() => loading.value || !!error.value);
 const patientCount = useCountUp(() => result.value?.summary.patients ?? 0);
+const visitCount = useCountUp(() => result.value?.summary.visits ?? 0);
+const nodeCount = useCountUp(() => result.value?.summary.nodes ?? 0);
+const contactCount = useCountUp(() => result.value?.summary.contacts ?? 0);
+/** 字段覆盖：收进“数据质量”卡片的 popover，只在有缺失时提示 */
+const qualityItems = computed(() => {
+  const missing = result.value?.meta.missing;
+  if (!missing) return [];
+  return [
+    { label: "年龄未记录", value: missing.agePatients, unit: "位" },
+    { label: "地址层级不完整", value: missing.regionPatients, unit: "位" },
+    { label: "主诊断未记录", value: missing.diagnosisVisits, unit: "人次" },
+    { label: "日期回退", value: missing.fallbackDates, unit: "人次" }
+  ];
+});
+const qualityIssues = computed(() => qualityItems.value.filter(item => item.value > 0).length);
+const dayCount = computed(() => {
+  if (!result.value) return 0;
+  const ms = new Date(result.value.meta.to).getTime() - new Date(result.value.meta.from).getTime();
+  return Number.isFinite(ms) ? Math.round(ms / 86400000) + 1 : 0;
+});
+/** 卡片布局：趋势/矩阵通栏；半宽卡落单时最后一张补成通栏，避免右侧留白 */
+function isWide(index: number) {
+  const list = visibleCharts.value;
+  const kind = list[index]?.kind;
+  if (kind === "trend" || kind === "matrix") return true;
+  let run = 0;
+  for (let i = index; i >= 0 && list[i].kind !== "trend" && list[i].kind !== "matrix"; i--) run++;
+  const next = list[index + 1];
+  const runEnds = !next || next.kind === "trend" || next.kind === "matrix";
+  return runEnds && run % 2 === 1;
+}
+// 视图切换：共享滑块，定位到当前 tab
+const tabsEl = ref<HTMLElement>();
+const tabThumb = ref({ x: 0, w: 0, ready: false });
+function syncThumb() {
+  const el = tabsEl.value?.querySelector<HTMLElement>("button.active");
+  if (el) tabThumb.value = { x: el.offsetLeft, w: el.offsetWidth, ready: true };
+}
+let tabsObserver: ResizeObserver | undefined;
+onMounted(() => {
+  void nextTick(syncThumb);
+  if (tabsEl.value) {
+    tabsObserver = new ResizeObserver(syncThumb);
+    tabsObserver.observe(tabsEl.value);
+  }
+});
+watch(
+  () => query.value.view,
+  () => void nextTick(syncThumb)
+);
 let requestSequence = 0;
 let controller: AbortController | undefined;
 const views: Array<{ key: AnalysisView; label: string; icon: typeof DataAnalysis }> = [
@@ -558,7 +707,10 @@ function openArchive(row: { encounterId?: unknown; patientCaseId?: unknown }) {
   if (typeof row.encounterId !== "string" || !row.encounterId) return;
   detailsVisible.value = false;
   const caseId = typeof row.patientCaseId === "string" && row.patientCaseId ? row.patientCaseId : undefined;
-  void router.push({ path: "/health-archive", query: { encounterId: row.encounterId, ...(caseId ? { patientCaseId: caseId } : {}) } });
+  void router.push({
+    path: "/health-archive",
+    query: { encounterId: row.encounterId, ...(caseId ? { patientCaseId: caseId } : {}) }
+  });
 }
 const summaryVisible = ref(false);
 const summaryEncounterId = ref("");
@@ -595,6 +747,7 @@ watch(
   { immediate: true }
 );
 onBeforeUnmount(() => {
+  tabsObserver?.disconnect();
   controller?.abort();
   requestSequence++;
   cancelDetails();
@@ -602,448 +755,919 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
+/* ── 设计 token：只作用于本页，子组件通过 CSS 变量继承 ── */
 .patient-analysis {
-  max-width: 1520px;
-  margin: 0 auto;
-  padding: 22px 28px 36px;
-  color: var(--el-text-color-primary);
-  background: var(--el-bg-color);
-  letter-spacing: 0;
+  --pa-bg: #f5f7f8;
+  --pa-surface: #ffffff;
+  --pa-subtle: #f1f4f5;
+  --pa-subtle-strong: #e6ebed;
+  --pa-border: #e8ecee;
+  --pa-border-strong: #d3dadd;
+  --pa-text: #1f2a30;
+  --pa-text-2: #4a565d;
+  --pa-text-3: #7a868d;
+  --pa-brand: #1f7a8c;
+  --pa-brand-soft: rgb(31 122 140 / 10%);
+  --pa-danger: #c2410c;
+  --pa-danger-soft: rgb(194 65 12 / 8%);
+  --pa-warn: #b7791f;
+  --pa-shadow: 0 1px 2px rgb(16 24 40 / 4%);
+  --pa-shadow-hover: 0 4px 16px rgb(16 24 40 / 7%);
+  --pa-radius: 12px;
+  --pa-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --el-color-primary: var(--pa-brand);
+
+  position: relative;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 20px 24px 32px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pa-text);
+  background: var(--pa-bg);
 }
-.analysis-header,
-.header-actions,
-.header-meta,
-.primary-filters,
-.filter-buttons,
-.selected-filters,
-.sample-band,
-.quality-line,
-.followup-context,
-.clinical-mode,
-.detail-toolbar {
+:global(html.dark) .patient-analysis {
+  --pa-bg: #141a1d;
+  --pa-surface: #1d2326;
+  --pa-subtle: #242b2f;
+  --pa-subtle-strong: #2e363b;
+  --pa-border: #2a3236;
+  --pa-border-strong: #3a4449;
+  --pa-text: #e4e9eb;
+  --pa-text-2: #b6c0c4;
+  --pa-text-3: #8b979d;
+  --pa-brand: #4fb3c4;
+  --pa-brand-soft: rgb(79 179 196 / 14%);
+  --pa-danger: #f08a5d;
+  --pa-danger-soft: rgb(240 138 93 / 12%);
+  --pa-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+  --pa-shadow-hover: 0 6px 20px rgb(0 0 0 / 35%);
+}
+
+/* 通用卡片（子组件也使用） */
+.patient-analysis :deep(.pa-card) {
+  box-sizing: border-box;
+  background: var(--pa-surface);
+  border: 1px solid var(--pa-border);
+  border-radius: var(--pa-radius);
+  box-shadow: var(--pa-shadow);
+  transition:
+    box-shadow 150ms ease,
+    border-color 150ms ease,
+    opacity 200ms ease;
+}
+
+@media (hover: hover) {
+  .patient-analysis :deep(.pa-card:hover) {
+    border-color: var(--pa-border-strong);
+    box-shadow: var(--pa-shadow-hover);
+  }
+}
+
+/* ── 顶部进度条 ── */
+.pa-progress {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 5;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.pa-progress::after {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  content: "";
+  background: linear-gradient(90deg, transparent, var(--pa-brand), transparent);
+  animation: pa-progress 1.1s var(--pa-ease) infinite;
+}
+.pa-progress.is-active {
+  opacity: 1;
+}
+
+@keyframes pa-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* ── 页头 ── */
+.pa-header {
   display: flex;
-  align-items: center;
-}
-.analysis-header {
-  justify-content: space-between;
   gap: 16px;
-  padding-bottom: 24px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 16px;
 }
-.analysis-header h1 {
-  margin: 0 0 9px;
-  font-size: 23px;
-  font-weight: 650;
-  line-height: 1.4;
-}
-.header-meta {
-  gap: 8px;
-  color: var(--el-text-color-secondary);
+.pa-eyebrow {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   font-size: 12px;
-  flex-wrap: wrap;
+  color: var(--pa-text-3);
 }
-.status-dot {
+.pa-live-dot {
   width: 6px;
   height: 6px;
-  background: #67a382;
+  background: #2f9e6e;
   border-radius: 50%;
+  box-shadow: 0 0 0 3px rgb(47 158 110 / 15%);
 }
-.meta-separator {
-  color: var(--el-border-color);
+.pa-live-dot.is-error {
+  background: var(--pa-danger);
+  box-shadow: 0 0 0 3px var(--pa-danger-soft);
 }
-.header-actions {
+.pa-title h1 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--pa-text);
+  letter-spacing: 0.01em;
+}
+.pa-header-actions {
+  display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  align-items: center;
 }
-.header-actions :deep(.el-button + .el-button),
-.filter-buttons :deep(.el-button + .el-button) {
-  margin-left: 0;
+.pa-updated {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--pa-text-3);
 }
-.updated-time {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  margin-right: 6px;
-}
-.filter-band {
-  padding: 18px;
-  background: var(--el-fill-color-lighter);
-  border-top: 1px solid var(--el-border-color-lighter);
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.primary-filters {
-  gap: 18px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-}
-.date-field,
-.filter-field {
+.pa-icon-btn {
   display: grid;
-  gap: 7px;
-  min-width: 0;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 15px;
+  color: var(--pa-text-2);
+  cursor: pointer;
+  background: var(--pa-surface);
+  border: 1px solid var(--pa-border);
+  border-radius: 8px;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease,
+    transform 100ms ease;
 }
-.date-field {
-  flex: 1 1 305px;
-  max-width: 370px;
+.pa-icon-btn:hover {
+  color: var(--pa-brand);
+  border-color: var(--pa-border-strong);
 }
-.date-field :deep(.el-date-editor) {
-  width: 100%;
+.pa-icon-btn:active {
+  transform: scale(0.96);
+}
+.pa-icon-btn.is-spinning .el-icon {
+  animation: pa-spin 0.9s linear infinite;
+}
+
+@keyframes pa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 视图 tab：药丸分段 + 共享滑块 ── */
+.pa-tabs {
+  position: relative;
+  display: inline-flex;
   max-width: 100%;
-  box-sizing: border-box;
+  padding: 3px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--pa-subtle-strong);
+  border-radius: 10px;
 }
-.filter-field label,
-.date-field label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  line-height: 1.5;
+.pa-tabs::-webkit-scrollbar {
+  display: none;
 }
-.filter-buttons {
+.pa-tabs-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  background: var(--pa-surface);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 8%),
+    0 1px 1px rgb(16 24 40 / 4%);
+  opacity: 0;
+}
+.pa-tabs-thumb.is-ready {
+  opacity: 1;
+  transition:
+    transform 220ms var(--pa-ease),
+    width 220ms var(--pa-ease);
+}
+.pa-tabs button {
+  position: relative;
+  display: inline-flex;
   gap: 6px;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pa-text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  transition: color 150ms ease;
+}
+.pa-tabs button:hover {
+  color: var(--pa-text);
+}
+.pa-tabs button.active {
+  color: var(--pa-brand);
+}
+.pa-tabs button:active {
+  transform: scale(0.97);
+}
+
+/* ── 粘性工具条 ── */
+.pa-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 10px 12px;
+  margin: 0 -8px 16px;
+  background: color-mix(in srgb, var(--pa-surface) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border: 1px solid var(--pa-border);
+  border-radius: var(--pa-radius);
+  box-shadow: var(--pa-shadow);
+}
+.pa-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+}
+.pa-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pa-field-label {
+  font-size: 12px;
+  color: var(--pa-text-3);
+  white-space: nowrap;
+}
+.pa-date :deep(.el-date-editor) {
+  width: 252px;
+
+  --el-input-border-radius: 8px;
+}
+.pa-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--pa-border);
+}
+.pa-toolbar :deep(.el-segmented) {
+  --el-segmented-item-selected-color: var(--pa-brand);
+  --el-segmented-item-selected-bg-color: var(--pa-surface);
+  --el-segmented-bg-color: var(--pa-subtle);
+  --el-segmented-item-hover-bg-color: transparent;
+  --el-border-radius-base: 7px;
+
+  padding: 2px;
+  font-size: 13px;
+}
+.pa-toolbar :deep(.el-segmented__item-selected) {
+  box-shadow: 0 1px 2px rgb(16 24 40 / 10%);
+}
+.pa-toolbar-end {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   margin-left: auto;
 }
-.filter-count {
-  margin-left: 7px;
-  font-variant-numeric: tabular-nums;
-}
-.advanced-filters {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 15px 16px;
-  padding-top: 20px;
-  margin-top: 18px;
-  border-top: 1px solid var(--el-border-color-lighter);
-}
-.age-filter > div {
-  display: flex;
+.pa-filter-btn {
+  display: inline-flex;
+  gap: 6px;
   align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
+  height: 32px;
+  padding: 0 10px 0 12px;
+  font-size: 13px;
+  color: var(--pa-text-2);
+  cursor: pointer;
+  background: var(--pa-surface);
+  border: 1px solid var(--pa-border);
+  border-radius: 8px;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease;
 }
-.age-filter :deep(.el-input-number) {
-  width: 100%;
+.pa-filter-btn:hover,
+.pa-filter-btn.is-open {
+  color: var(--pa-brand);
+  border-color: color-mix(in srgb, var(--pa-brand) 40%, var(--pa-border));
+}
+.pa-filter-btn.has-value {
+  color: var(--pa-brand);
+  background: var(--pa-brand-soft);
+}
+.pa-caret {
+  font-size: 12px;
+  transition: transform 200ms var(--pa-ease);
+}
+.pa-filter-btn.is-open .pa-caret {
+  transform: rotate(180deg);
+}
+.pa-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #ffffff;
+  text-align: center;
+  background: var(--pa-brand);
+  border-radius: 9px;
+}
+
+/* 高级筛选：grid-rows 0fr→1fr 高度过渡 */
+.pa-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms var(--pa-ease),
+    opacity 180ms ease;
+}
+.pa-collapse.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.pa-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.pa-advanced {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px 16px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px dashed var(--pa-border);
+}
+.pa-adv-field {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
-.selected-filters {
+.pa-adv-field label {
+  font-size: 12px;
+  color: var(--pa-text-3);
+}
+.pa-adv-field :deep(.el-select) {
+  width: 100%;
+}
+.pa-age > div {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pa-age span {
+  color: var(--pa-text-3);
+}
+.pa-age :deep(.el-input-number) {
+  width: 100%;
+}
+
+/* 已选条件 chips */
+.pa-chips {
+  display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 15px;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
 }
-.selected-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  margin-right: 3px;
+.pa-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  font-size: 12px;
+  color: var(--pa-brand);
+  background: var(--pa-brand-soft);
+  border-radius: 13px;
 }
-.selected-filters :deep(.el-tag) {
-  max-width: 100%;
-  height: auto;
-  min-height: 25px;
-  padding: 3px 7px;
+.pa-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  transition: background-color 120ms ease;
 }
-.selected-filters :deep(.el-tag__content) {
-  white-space: normal;
+.pa-chip button:hover {
+  background: color-mix(in srgb, var(--pa-brand) 18%, transparent);
+}
+.pa-chip-clear {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--pa-text-3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+.pa-chip-clear:hover {
+  color: var(--pa-danger);
+}
+.pa-chip-enter-active,
+.pa-chip-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms var(--pa-ease);
+}
+.pa-chip-enter-from,
+.pa-chip-leave-to {
+  opacity: 0;
+  transform: scale(0.92);
+}
+.pa-chip-leave-active {
+  position: absolute;
+}
+.pa-chip-move {
+  transition: transform 200ms var(--pa-ease);
+}
+
+/* ── 错误条 ── */
+.pa-alert {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--pa-danger);
+  background: var(--pa-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--pa-danger) 22%, transparent);
+  border-radius: 10px;
+}
+.pa-alert span {
+  flex: 1;
+  min-width: 0;
+}
+.pa-alert button {
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pa-danger);
+  cursor: pointer;
+  background: var(--pa-surface);
+  border: 1px solid color-mix(in srgb, var(--pa-danger) 30%, transparent);
+  border-radius: 6px;
+}
+.pa-fade-enter-active,
+.pa-fade-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 180ms var(--pa-ease);
+}
+.pa-fade-enter-from,
+.pa-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ── KPI ── */
+.pa-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+  transition: opacity 200ms ease;
+}
+.pa-kpis.is-busy {
+  opacity: 0.6;
+}
+.pa-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 18px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  animation: pa-enter 420ms var(--pa-ease) both;
+  animation-delay: calc(var(--pa-enter-index, 0) * 40ms);
+}
+.pa-kpi-label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--pa-text-2);
+}
+.pa-kpi strong {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--pa-text);
+  letter-spacing: -0.01em;
+}
+.pa-kpi strong em {
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--pa-text-3);
+}
+.pa-kpi small {
+  font-size: 12px;
+  color: var(--pa-text-3);
   overflow-wrap: anywhere;
 }
-.analysis-tabs {
-  display: flex;
-  gap: 24px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  padding-top: 10px;
-  overflow-x: auto;
+.pa-kpi.is-primary::before {
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  left: 0;
+  width: 3px;
+  content: "";
+  background: var(--pa-brand);
+  border-radius: 0 3px 3px 0;
 }
-.analysis-tabs button {
-  display: inline-flex;
-  position: relative;
+.pa-kpi.is-primary strong {
+  color: var(--pa-brand);
+}
+.pa-quality {
+  cursor: pointer;
+}
+.pa-quality .pa-kpi-label .el-icon {
+  color: #2f9e6e;
+}
+.pa-quality.has-issue .pa-kpi-label .el-icon,
+.pa-quality.has-issue strong {
+  color: var(--pa-warn);
+}
+.pa-quality:focus-visible {
+  outline: 2px solid var(--pa-brand);
+  outline-offset: 2px;
+}
+
+@keyframes pa-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── 视图上下文条 ── */
+.pa-subbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  flex-shrink: 0;
-  padding: 16px 2px 14px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--pa-text-3);
+}
+.pa-subbar-text {
+  color: var(--pa-text-2);
+}
+.pa-subbar :deep(.el-segmented) {
+  --el-segmented-item-selected-color: var(--pa-brand);
+  --el-segmented-item-selected-bg-color: var(--pa-surface);
+  --el-segmented-bg-color: var(--pa-subtle-strong);
+
+  padding: 2px;
+}
+.pa-pill {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pa-text-2);
+  cursor: pointer;
+  background: var(--pa-surface);
+  border: 1px solid var(--pa-border);
+  border-radius: 13px;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+.pa-pill.is-danger {
+  color: var(--pa-danger);
+  background: var(--pa-danger-soft);
+  border-color: transparent;
+}
+.pa-pill.is-active {
+  color: var(--pa-brand);
+  background: var(--pa-brand-soft);
+  border-color: transparent;
+}
+.pa-pill:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.pa-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.pa-crumbs button {
+  padding: 3px 8px;
+  font: inherit;
+  color: var(--pa-text-2);
+  cursor: pointer;
   background: none;
   border: 0;
-  font: inherit;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  cursor: pointer;
-  transition: color 0.18s ease-out;
+  border-radius: 6px;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
 }
-.analysis-tabs button .el-icon {
-  transition: transform 0.18s ease-out;
+.pa-crumbs button:hover:not(:disabled) {
+  color: var(--pa-brand);
+  background: var(--pa-brand-soft);
 }
-.analysis-tabs button:hover {
-  color: #247b91;
-}
-.analysis-tabs button:hover .el-icon {
-  transform: translateY(-1px);
-}
-.analysis-tabs button.active {
-  color: #247b91;
+.pa-crumbs button[aria-current] {
   font-weight: 600;
+  color: var(--pa-text);
 }
-.analysis-tabs button.active .el-icon {
-  transform: translateY(-1px);
-}
-.analysis-tabs button::after {
-  content: "";
-  display: block;
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  background: #247b91;
-  border-radius: 2px;
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.22s ease-out;
-}
-.analysis-tabs button.active::after {
-  transform: scaleX(1);
-}
-.analysis-tabs button:focus-visible {
-  outline: 2px solid #247b91;
-  outline-offset: -3px;
-}
-.analysis-message {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 0;
-  color: #247b91;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.analysis-message.is-error {
-  color: #a9584d;
-}
-.is-stale {
-  opacity: 0.5;
-  pointer-events: none;
-}
-.sample-band {
-  gap: 32px;
-  padding: 25px 0 20px;
-  align-items: stretch;
-  flex-wrap: wrap;
-}
-.sample-primary {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 5px 14px;
-  padding-right: 30px;
-  border-right: 1px solid var(--el-border-color-lighter);
-}
-.sample-primary > span,
-.sample-stat > span {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-}
-.sample-primary strong {
-  font-size: 34px;
-  font-weight: 600;
-  line-height: 1.1;
-  grid-row: span 2;
-  color: #247b91;
-  font-variant-numeric: tabular-nums;
-}
-.sample-primary small {
-  font-size: 10px;
-  color: var(--el-text-color-placeholder);
-}
-.sample-stat {
-  display: grid;
-  gap: 8px;
-}
-.sample-stat strong {
-  font-size: 23px;
-  line-height: 1;
-  font-weight: 550;
-  font-variant-numeric: tabular-nums;
-}
-.sample-stat small {
-  margin-left: 6px;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--el-text-color-secondary);
-}
-.sample-context {
-  margin-left: auto;
-  display: grid;
-  align-content: center;
-  gap: 7px;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  text-align: right;
-}
-.sample-context small {
-  color: var(--el-text-color-placeholder);
-  font-size: 11px;
-}
-.quality-line {
-  gap: 18px;
-  flex-wrap: wrap;
-  padding-bottom: 19px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--el-text-color-secondary);
-}
-.quality-label {
+.pa-crumb {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  color: #6e8578;
 }
-.quality-line .is-alert {
-  color: #b94d45;
-  font-weight: 600;
+.pa-crumb i {
+  font-style: normal;
+  color: var(--pa-text-3);
 }
-.followup-context .el-button.is-danger {
-  color: #b94d45;
-  font-weight: 600;
-}
-.analysis-grid {
+
+/* ── 图表网格 ── */
+.pa-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 34px;
+  gap: 16px;
 }
-.full-width {
+.pa-grid > .is-wide {
   grid-column: 1 / -1;
 }
-.followup-context {
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 12px 0 20px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-}
-.followup-context small {
-  font-size: 11px;
-}
-.clinical-mode {
-  gap: 14px;
-  padding-bottom: 20px;
-  flex-wrap: wrap;
-}
-.clinical-mode > span {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-}
-.region-breadcrumbs {
-  display: flex;
-  align-items: center;
+
+/* ── 空状态 / 骨架 ── */
+.pa-empty {
+  display: grid;
   gap: 8px;
-  flex-wrap: wrap;
-  padding: 0 0 15px;
+  justify-items: center;
+  padding: 56px 24px;
+  text-align: center;
+}
+.pa-empty-mark {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--pa-subtle) 6px 12px);
+  border: 1.5px dashed var(--pa-border-strong);
+  border-radius: 14px;
+}
+.pa-empty strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pa-text-2);
+}
+.pa-empty small {
   font-size: 12px;
-  color: var(--el-text-color-placeholder);
+  color: var(--pa-text-3);
 }
-.region-breadcrumbs button {
-  background: none;
-  border: 0;
-  padding: 3px 0;
-  color: #247b91;
-  font: inherit;
-  cursor: pointer;
+.pa-skeleton {
+  animation: pa-enter 200ms ease 300ms both;
 }
-.initial-loading {
-  padding: 38px 0;
+.pa-sk-kpi,
+.pa-sk-chart {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
 }
-.detail-toolbar {
-  justify-content: space-between;
+.pa-sk-kpi {
+  height: 112px;
+}
+.pa-sk-chart {
+  grid-template-rows: auto 1fr;
+  height: 320px;
+}
+.pa-skeleton i,
+.pa-skeleton b {
+  display: block;
+  background: linear-gradient(90deg, var(--pa-subtle) 0%, var(--pa-subtle-strong) 50%, var(--pa-subtle) 100%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: pa-shimmer 1.4s ease-in-out infinite;
+}
+.pa-sk-kpi i {
+  width: 40%;
+  height: 12px;
+}
+.pa-sk-kpi b {
+  width: 60%;
+  height: 28px;
+}
+.pa-sk-chart i {
+  width: 30%;
+  height: 14px;
+}
+.pa-sk-chart b {
+  height: 100%;
+}
+
+@keyframes pa-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* ── 明细抽屉 ── */
+.pa-detail-toolbar {
+  display: flex;
   gap: 12px;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--pa-text-2);
+}
+.pa-detail-toolbar b {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pa-text);
+}
+.pa-detail-privacy {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--pa-text-2);
+  background: var(--pa-subtle);
+  border-radius: 8px;
+}
+.pa-details-table {
+  overflow: hidden;
+  border: 1px solid var(--pa-border);
+  border-radius: 10px;
+}
+.pa-details-table :deep(.el-table) {
+  --el-table-header-bg-color: var(--pa-subtle);
+  --el-table-header-text-color: var(--pa-text-2);
+  --el-table-row-hover-bg-color: var(--pa-brand-soft);
+
   font-size: 13px;
 }
-.detail-privacy {
-  margin: 14px 0;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  line-height: 1.6;
+.pa-details-table :deep(.el-table th.el-table__cell) {
+  font-weight: 500;
 }
-.details-table-wrap {
-  overflow: auto;
+.pa-muted {
+  color: var(--pa-text-3);
 }
-:deep(.el-pagination) {
+.pa-drawer :deep(.el-pagination) {
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 12px;
 }
-@media (max-width: 1050px) {
-  .patient-analysis {
-    padding: 20px;
-  }
-  .advanced-filters {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .sample-context {
-    display: none;
-  }
-  .sample-band {
-    gap: 24px;
+:deep(.el-drawer__body) .el-pagination {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* ── 响应式：办公 PC 为主，兼顾 1366 与窄屏 ── */
+@media (width <= 1280px) {
+  .pa-date :deep(.el-date-editor) {
+    width: 232px;
   }
 }
-@media (max-width: 760px) {
-  .analysis-header {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    padding-bottom: 18px;
-  }
-  .analysis-grid {
+
+@media (width <= 1100px) {
+  .pa-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .advanced-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .analysis-tabs {
-    gap: 18px;
-  }
-  .sample-band {
-    gap: 20px;
-  }
-}
-@media (max-width: 480px) {
-  .patient-analysis {
-    padding: 16px 12px 26px;
-  }
-  .analysis-header h1 {
-    font-size: 21px;
-  }
-  .updated-time {
+  .pa-divider {
     display: none;
   }
-  .filter-band {
-    padding: 12px;
+}
+
+@media (width <= 720px) {
+  .patient-analysis {
+    padding: 16px 12px 24px;
   }
-  .primary-filters {
-    gap: 14px 10px;
+  .pa-header {
+    flex-direction: column;
+    align-items: stretch;
   }
-  .date-field {
-    flex-basis: 100%;
-    max-width: none;
+  .pa-toolbar {
+    position: static;
+    margin: 0 0 16px;
   }
-  .filter-buttons {
+  .pa-toolbar-end {
     margin-left: 0;
   }
-  .advanced-filters {
-    grid-template-columns: minmax(0, 1fr);
+  .pa-date,
+  .pa-date :deep(.el-date-editor) {
+    width: 100%;
   }
-  .sample-band {
-    display: grid;
+  .pa-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 22px 18px;
+    gap: 12px;
   }
-  .sample-primary {
-    grid-column: 1 / -1;
-    justify-content: start;
-    padding-right: 0;
-    border-right: 0;
+  .pa-kpi strong {
+    font-size: 22px;
   }
-  .sample-primary strong {
-    margin-left: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-progress::after,
+  .pa-kpi,
+  .pa-skeleton,
+  .pa-skeleton i,
+  .pa-skeleton b,
+  .pa-icon-btn.is-spinning .el-icon {
+    animation: none;
   }
-  .quality-line {
-    gap: 8px 14px;
+  .pa-tabs-thumb.is-ready,
+  .pa-collapse,
+  .pa-caret,
+  .pa-chip-enter-active,
+  .pa-chip-leave-active,
+  .pa-chip-move,
+  .pa-fade-enter-active,
+  .pa-fade-leave-active {
+    transition: none;
   }
-  .analysis-tabs button {
-    font-size: 12px;
-  }
+}
+</style>
+
+<!-- popover 挂在 body 下，需非 scoped -->
+<style lang="scss">
+.pa-quality-popper.el-popover {
+  padding: 14px 16px;
+  border-radius: 12px;
+}
+.pa-quality-pop {
+  font-size: 12px;
+}
+.pa-quality-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.pa-quality-pop ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.pa-quality-pop li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-regular);
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+.pa-quality-pop li.is-alert b {
+  color: #b7791f;
+}
+.pa-quality-note {
+  margin: 10px 0 0;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 </style>
