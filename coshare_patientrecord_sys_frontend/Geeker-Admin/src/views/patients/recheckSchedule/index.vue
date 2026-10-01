@@ -1,161 +1,209 @@
 <template>
-  <div class="recheck-page">
+  <div class="rk">
     <header class="rk-head">
-      <div>
-        <h2>复查预约登记</h2>
-        <p>
-          检查室共享登记表：按日期登记次日及之后的复查患者，到/未到由当班人工标记，交接班时核对。改期会在新日期生成登记，原日期记为"改期"。
-        </p>
-      </div>
-      <el-button v-if="canEdit" type="primary" @click="openCreate()">登记复查</el-button>
+      <h2>复查预约登记</h2>
+      <el-radio-group v-model="mode" size="small">
+        <el-radio-button value="recent">近期</el-radio-button>
+        <el-radio-button value="history">历史回看</el-radio-button>
+      </el-radio-group>
     </header>
 
-    <section class="rk-summary" aria-label="交接摘要">
-      <div v-for="card in summaryCards" :key="card.label" class="rk-card" :class="card.tone">
-        <span class="rk-card-label">{{ card.label }}</span>
-        <strong class="rk-card-value">{{ card.value }}</strong>
-        <span class="rk-card-sub">{{ card.sub }}</span>
+    <!-- 登记：常驻一行，回车即提交，适合连续录入 -->
+    <form v-if="canEdit" class="rk-add" aria-label="登记复查" @submit.prevent="submitCreate">
+      <div class="rk-add-date">
+        <span class="rk-label">复查日期</span>
+        <button
+          v-for="quick in QUICK_OFFSETS"
+          :key="quick.days"
+          type="button"
+          class="rk-quick"
+          :class="{ on: draft.planDate === offsetDate(quick.days) }"
+          @click="draft.planDate = offsetDate(quick.days)"
+        >
+          {{ quick.label }}
+        </button>
+        <el-date-picker
+          v-model="draft.planDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          :clearable="false"
+          aria-label="复查日期"
+          style="width: 140px"
+        />
+        <span class="rk-add-hint">登记到 {{ dateTitle(draft.planDate, today) }}</span>
       </div>
-    </section>
-
-    <section class="rk-toolbar">
-      <el-button-group>
-        <el-button @click="shift(-7)">上一周</el-button>
-        <el-button @click="resetRange">今天起</el-button>
-        <el-button @click="shift(7)">下一周</el-button>
-      </el-button-group>
-      <el-date-picker
-        v-model="range"
-        type="daterange"
-        value-format="YYYY-MM-DD"
-        range-separator="至"
-        :clearable="false"
-        style="width: 260px"
-        @change="load"
-      />
-      <el-switch v-model="onlyFilled" active-text="只看有登记的日期" />
-      <el-input v-model="keyword" placeholder="按姓名/电话查找" clearable style="width: 180px" />
-      <el-button :loading="loading" @click="load">刷新</el-button>
-    </section>
-
-    <section v-loading="loading" class="rk-table" role="table" aria-label="复查登记表">
-      <div class="rk-row rk-row-head" role="row">
-        <div role="columnheader">日期</div>
-        <div role="columnheader">计划 / 已到 / 未到 / 待到</div>
-        <div role="columnheader">患者</div>
+      <div class="rk-add-fields">
+        <el-input ref="nameInput" v-model="draft.patientName" placeholder="患者姓名" maxlength="50" aria-label="患者姓名" />
+        <el-input v-model="draft.phone" placeholder="电话（选填）" maxlength="30" aria-label="电话" />
+        <el-input v-model="draft.note" placeholder="复查内容 / 备注（选填）" maxlength="200" aria-label="备注" />
+        <el-button type="primary" native-type="submit" :loading="saving">登记</el-button>
       </div>
-      <div v-if="!visibleDays.length" class="rk-empty">所选范围内没有登记</div>
-      <div v-for="day in visibleDays" :key="day.date" class="rk-row" :class="`is-${day.relation}`" role="row">
-        <div class="rk-date" role="cell">
-          <strong>{{ day.date.slice(5) }}</strong>
-          <span>{{ day.weekday }}</span>
-          <el-tag v-if="day.relation === 'today'" size="small" effect="dark" type="success">今天</el-tag>
-          <el-tag v-else-if="day.date === tomorrow" size="small" type="success">明天</el-tag>
-        </div>
-        <div class="rk-stats" role="cell">
-          <span class="n-plan" title="计划">{{ day.stats.planned }}</span>
-          <span class="n-arrived" title="已到">{{ day.stats.arrived }}</span>
-          <span class="n-absent" title="未到">{{ day.stats.absent }}</span>
-          <span class="n-pending" title="待到">{{ day.stats.pending }}</span>
-          <span v-if="day.stats.rescheduled" class="rk-extra">改期 {{ day.stats.rescheduled }}</span>
-          <span v-if="day.stats.unconfirmed" class="rk-warn">{{ day.stats.unconfirmed }} 人未确认</span>
-        </div>
-        <div class="rk-chips" role="cell">
-          <el-dropdown
-            v-for="entry in filterEntries(day.entries)"
-            :key="entry.id"
-            trigger="click"
-            :disabled="!canEdit || entry.status === 'RESCHEDULED'"
-            @command="(cmd: string) => onCommand(cmd, entry)"
-          >
-            <button type="button" class="rk-chip" :class="`s-${entry.status.toLowerCase()}`" :title="chipTitle(entry)">
-              <span class="rk-dot" aria-hidden="true" />
-              {{ entry.patientName }}
-              <small>{{ STATUS_LABEL[entry.status] }}</small>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="ARRIVED" :disabled="day.relation === 'future' || entry.status === 'ARRIVED'"
-                  >标记已到</el-dropdown-item
-                >
-                <el-dropdown-item command="ABSENT" :disabled="day.relation === 'future' || entry.status === 'ABSENT'"
-                  >标记未到…</el-dropdown-item
-                >
-                <el-dropdown-item v-if="entry.status === 'ARRIVED' || entry.status === 'ABSENT'" command="PLANNED"
-                  >撤回为待到</el-dropdown-item
-                >
-                <el-dropdown-item command="reschedule" :disabled="entry.status === 'ARRIVED'" divided>改期…</el-dropdown-item>
-                <el-dropdown-item command="edit">编辑信息…</el-dropdown-item>
-                <el-dropdown-item command="cancel" divided>撤销登记</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <button
-            v-if="canEdit"
-            type="button"
-            class="rk-add"
-            :aria-label="`登记 ${day.date} 的复查`"
-            @click="openCreate(day.date)"
-          >
-            + 登记
-          </button>
-        </div>
-      </div>
-    </section>
+    </form>
 
-    <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑登记' : '登记复查'" width="480px" destroy-on-close>
-      <el-form label-width="80px" @submit.prevent>
-        <el-form-item label="复查日期" required>
-          <el-date-picker
-            v-model="form.planDate"
-            type="date"
-            value-format="YYYY-MM-DD"
-            :disabled="formMode === 'edit' && editing?.status !== 'PLANNED'"
-            style="width: 100%"
+    <!-- 近期：今天 → 待补标 → 接下来（只列有登记的日期） -->
+    <div v-if="mode === 'recent'" v-loading="loading" class="rk-body">
+      <section class="rk-block rk-today" aria-label="今天">
+        <h3>
+          <span>今天 {{ dateTitle(today, today) }}</span>
+          <span class="rk-count">
+            预计 <b>{{ todayDay?.stats.planned ?? 0 }}</b> 人 · 已到 <b class="c-ok">{{ todayDay?.stats.arrived ?? 0 }}</b> · 没来
+            <b class="c-no">{{ todayDay?.stats.absent ?? 0 }}</b> · 待到 <b>{{ todayDay?.stats.pending ?? 0 }}</b>
+          </span>
+        </h3>
+        <ul v-if="todayEntries.length" class="rk-list">
+          <EntryRow v-for="e in todayEntries" :key="e.id" :entry="e" :can-edit="canEdit" markable @mark="mark" @action="act" />
+        </ul>
+        <p v-else class="rk-empty">今天没有登记复查的患者</p>
+      </section>
+
+      <section v-if="pendingPast.length" class="rk-block rk-pending" aria-label="待补标">
+        <h3>
+          <span>以前的还没标到/没来</span>
+          <span class="rk-count">{{ pendingPast.length }} 人，请核对后补标</span>
+        </h3>
+        <ul class="rk-list">
+          <EntryRow
+            v-for="e in pendingPast"
+            :key="e.id"
+            :entry="e"
+            :can-edit="canEdit"
+            markable
+            show-date
+            @mark="mark"
+            @action="act"
           />
+        </ul>
+      </section>
+
+      <section class="rk-block" aria-label="接下来">
+        <h3>
+          <span>接下来</span>
+          <span class="rk-count">未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人</span>
+        </h3>
+        <template v-if="upcoming.length">
+          <div v-for="day in upcoming" :key="day.date" class="rk-day">
+            <div class="rk-day-title">
+              {{ dateTitle(day.date, today) }}<span>{{ day.stats.planned }} 人</span>
+            </div>
+            <ul class="rk-list">
+              <EntryRow
+                v-for="e in visible(day.entries)"
+                :key="e.id"
+                :entry="e"
+                :can-edit="canEdit"
+                :markable="false"
+                @action="act"
+              />
+            </ul>
+          </div>
+        </template>
+        <p v-else class="rk-empty">暂无后续复查登记</p>
+      </section>
+    </div>
+
+    <!-- 历史回看：按日期倒序，每天一行汇总 + 名单 -->
+    <div v-else v-loading="loading" class="rk-body">
+      <div class="rk-hist-bar">
+        <el-date-picker
+          v-model="histRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          range-separator="至"
+          :clearable="false"
+          style="width: 260px"
+          @change="loadHistory"
+        />
+        <span v-if="history" class="rk-count">
+          预计 <b>{{ history.total.planned }}</b> 人 · 已到 <b class="c-ok">{{ history.total.arrived }}</b> · 没来
+          <b class="c-no">{{ history.total.absent }}</b>
+          <template v-if="history.total.arrivalRate != null"> · 到诊率 {{ history.total.arrivalRate }}%</template>
+        </span>
+      </div>
+      <section class="rk-block">
+        <template v-if="historyDays.length">
+          <div v-for="day in historyDays" :key="day.date" class="rk-day">
+            <div class="rk-day-title">
+              {{ dateTitle(day.date, today) }}
+              <span>
+                预计 {{ day.stats.planned }} · 到 <b class="c-ok">{{ day.stats.arrived }}</b> · 没来
+                <b class="c-no">{{ day.stats.absent }}</b>
+                <template v-if="day.stats.pending"> · 未标 {{ day.stats.pending }}</template>
+              </span>
+            </div>
+            <ul class="rk-list">
+              <EntryRow
+                v-for="e in day.entries"
+                :key="e.id"
+                :entry="e"
+                :can-edit="canEdit"
+                :markable="day.relation !== 'future'"
+                @mark="mark"
+                @action="act"
+              />
+            </ul>
+          </div>
+        </template>
+        <p v-else class="rk-empty">这段时间没有登记</p>
+      </section>
+    </div>
+
+    <!-- 改期 -->
+    <el-dialog v-model="resched.visible" title="改期" width="440px" destroy-on-close>
+      <p class="rk-dialog-tip">
+        {{ resched.entry?.patientName }}，原定 {{ resched.entry && dateTitle(resched.entry.planDate, today) }}
+      </p>
+      <div class="rk-add-date">
+        <button
+          v-for="quick in QUICK_OFFSETS"
+          :key="quick.days"
+          type="button"
+          class="rk-quick"
+          :class="{ on: resched.newDate === offsetDate(quick.days) }"
+          @click="resched.newDate = offsetDate(quick.days)"
+        >
+          {{ quick.label }}
+        </button>
+      </div>
+      <el-form label-width="64px" style="margin-top: 12px" @submit.prevent>
+        <el-form-item label="新日期">
+          <el-date-picker v-model="resched.newDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="患者姓名" required>
-          <el-input
-            v-model="form.patientName"
-            maxlength="200"
-            :placeholder="formMode === 'create' ? '多名患者可用 、或空格分隔批量登记' : ''"
-          />
-        </el-form-item>
-        <el-form-item label="联系电话">
-          <el-input v-model="form.phone" maxlength="30" placeholder="选填；同名患者用电话区分" :disabled="isBatch" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.note" maxlength="200" placeholder="如：术后复查、换药、看报告" />
+        <el-form-item label="原因">
+          <el-input v-model="resched.reason" maxlength="200" placeholder="选填，如：患者来电改约" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveForm">保存</el-button>
+        <el-button @click="resched.visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitReschedule">改到 {{ resched.newDate.slice(5) }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="rescheduleVisible" title="改期" width="420px" destroy-on-close>
-      <p class="rk-dialog-tip">
-        {{ editing?.patientName }}：原定 {{ editing?.planDate }}，改期后原日期记为"改期"，不计入计划人数。
-      </p>
-      <el-form label-width="80px" @submit.prevent>
-        <el-form-item label="新日期" required>
-          <el-date-picker v-model="rescheduleForm.newDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+    <!-- 修改信息 -->
+    <el-dialog v-model="edit.visible" title="修改登记" width="440px" destroy-on-close>
+      <el-form label-width="64px" @submit.prevent>
+        <el-form-item label="日期">
+          <el-date-picker
+            v-model="edit.planDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :disabled="edit.entry?.status !== 'PLANNED'"
+            style="width: 100%"
+          />
         </el-form-item>
-        <el-form-item label="原因">
-          <el-input v-model="rescheduleForm.reason" maxlength="200" placeholder="如：患者来电改约、发热暂缓" />
-        </el-form-item>
+        <el-form-item label="姓名"><el-input v-model="edit.patientName" maxlength="50" /></el-form-item>
+        <el-form-item label="电话"><el-input v-model="edit.phone" maxlength="30" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="edit.note" maxlength="200" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="rescheduleVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveReschedule">确认改期</el-button>
+        <el-button @click="edit.visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts" name="recheckSchedule">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import dayjs from "dayjs";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -166,37 +214,45 @@ import {
   rescheduleRecheckApi,
   updateRecheckApi,
   type RecheckBoard,
-  type RecheckEntry,
-  type RecheckStatus
+  type RecheckEntry
 } from "@/api/modules/clinic/recheckSchedule";
+import EntryRow, { type RowAction } from "./EntryRow.vue";
+import { QUICK_OFFSETS, dateTitle, fmt } from "./dates";
 
-const STATUS_LABEL: Record<RecheckStatus, string> = {
-  PLANNED: "待到",
-  ARRIVED: "已到",
-  ABSENT: "未到",
-  RESCHEDULED: "已改期",
-  CANCELLED: "已撤销"
-};
+/** 近期视图的加载窗口：往前 30 天找漏标，往后 60 天看预约（后端单次上限 92 天） */
+const PAST_DAYS = 30;
+const FUTURE_DAYS = 60;
 
-const defaultRange = (): [string, string] => [
-  dayjs().subtract(1, "day").format("YYYY-MM-DD"),
-  dayjs().add(14, "day").format("YYYY-MM-DD")
-];
-
-const range = ref<[string, string]>(defaultRange());
-const board = ref<RecheckBoard | null>(null);
+const mode = ref<"recent" | "history">("recent");
 const loading = ref(false);
 const saving = ref(false);
-const onlyFilled = ref(false);
-const keyword = ref("");
+const board = ref<RecheckBoard | null>(null);
+const history = ref<RecheckBoard | null>(null);
+const histRange = ref<[string, string]>([fmt(dayjs().subtract(30, "day")), fmt(dayjs())]);
 
-const canEdit = computed(() => board.value?.canEdit === true);
-const tomorrow = computed(() => dayjs(board.value?.today).add(1, "day").format("YYYY-MM-DD"));
+const today = computed(() => board.value?.today ?? fmt(dayjs()));
+const canEdit = computed(() => (board.value ?? history.value)?.canEdit === true);
+const offsetDate = (days: number) => fmt(dayjs(today.value).add(days, "day"));
 
-const load = async () => {
+/** 已改期的条目排到当天最后，其余保持登记顺序（标记后不跳位） */
+const visible = (entries: RecheckEntry[]) => [
+  ...entries.filter(e => e.status !== "RESCHEDULED"),
+  ...entries.filter(e => e.status === "RESCHEDULED")
+];
+
+const todayDay = computed(() => board.value?.days.find(d => d.date === today.value));
+const todayEntries = computed(() => visible(todayDay.value?.entries ?? []));
+const pendingPast = computed(() =>
+  (board.value?.days ?? []).filter(d => d.relation === "past").flatMap(d => d.entries.filter(e => e.status === "PLANNED"))
+);
+const upcoming = computed(() => (board.value?.days ?? []).filter(d => d.relation === "future" && d.entries.length > 0));
+const upcomingTotal = computed(() => upcoming.value.reduce((sum, d) => sum + d.stats.planned, 0));
+const historyDays = computed(() => [...(history.value?.days ?? [])].reverse().filter(d => d.entries.length > 0));
+
+const loadRecent = async () => {
   loading.value = true;
   try {
-    board.value = await getRecheckBoardApi(range.value[0], range.value[1]);
+    board.value = await getRecheckBoardApi(fmt(dayjs().subtract(PAST_DAYS, "day")), fmt(dayjs().add(FUTURE_DAYS, "day")));
   } catch (error: any) {
     ElMessage.error(error?.message || "加载失败");
   } finally {
@@ -204,447 +260,295 @@ const load = async () => {
   }
 };
 
-const shift = (days: number) => {
-  range.value = [
-    dayjs(range.value[0]).add(days, "day").format("YYYY-MM-DD"),
-    dayjs(range.value[1]).add(days, "day").format("YYYY-MM-DD")
-  ];
-  void load();
+const loadHistory = async () => {
+  loading.value = true;
+  try {
+    history.value = await getRecheckBoardApi(histRange.value[0], histRange.value[1]);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "加载失败");
+  } finally {
+    loading.value = false;
+  }
 };
 
-const resetRange = () => {
-  range.value = defaultRange();
-  void load();
-};
+const reload = () => (mode.value === "recent" ? loadRecent() : loadHistory());
 
-const matches = (entry: RecheckEntry) => {
-  const key = keyword.value.trim();
-  return !key || entry.patientName.includes(key) || entry.phone.includes(key);
-};
-
-const filterEntries = (entries: RecheckEntry[]) => entries.filter(matches);
-
-const visibleDays = computed(() => {
-  const days = board.value?.days ?? [];
-  if (!onlyFilled.value && !keyword.value.trim()) return days;
-  return days.filter(day => filterEntries(day.entries).length > 0);
+watch(mode, value => {
+  if (value === "history" && !history.value) void loadHistory();
+  if (value === "recent") void loadRecent();
 });
 
-const dayOf = (date: string) => board.value?.days.find(day => day.date === date);
-
-const summaryCards = computed(() => {
-  const today = board.value ? dayOf(board.value.today) : undefined;
-  const next = dayOf(tomorrow.value);
-  return [
-    {
-      label: "今日复查",
-      value: today ? `${today.stats.arrived} / ${today.stats.planned}` : "—",
-      sub: today ? `已到 / 计划，未到 ${today.stats.absent}，待到 ${today.stats.pending}` : "不在当前范围",
-      tone: "tone-brand"
-    },
-    {
-      label: "明日计划",
-      value: next ? String(next.stats.planned) : "—",
-      sub: next ? "人（交接时提醒接班同事）" : "不在当前范围",
-      tone: ""
-    },
-    {
-      label: "范围内到诊",
-      value: board.value?.total.arrivalRate == null ? "—" : `${board.value.total.arrivalRate}%`,
-      sub: board.value
-        ? `已确认 ${board.value.total.arrived + board.value.total.absent} 人中已到 ${board.value.total.arrived}`
-        : "",
-      tone: ""
-    },
-    {
-      label: "过去待确认",
-      value: String(board.value?.unconfirmedPast ?? 0),
-      sub: "已过日期仍是待到，请补标到/未到",
-      tone: (board.value?.unconfirmedPast ?? 0) > 0 ? "tone-warn" : ""
-    }
-  ];
-});
-
-const chipTitle = (entry: RecheckEntry) =>
-  [
-    entry.phone && `电话：${entry.phone}`,
-    entry.note && `备注：${entry.note}`,
-    entry.statusNote && `${entry.status === "RESCHEDULED" ? "改期原因" : "未到原因"}：${entry.statusNote}`,
-    entry.rescheduledTo && `已改至 ${entry.rescheduledTo}`,
-    entry.sourceId && "由其他日期改期而来",
-    `登记：${entry.createdBy || "—"} ${entry.createdAt || ""}`,
-    entry.updatedAt !== entry.createdAt && `最近：${entry.updatedBy || "—"} ${entry.updatedAt || ""}`
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-// ---------- 登记 / 编辑 ----------
-
-const formVisible = ref(false);
-const formMode = ref<"create" | "edit">("create");
-const editing = ref<RecheckEntry | null>(null);
-const form = reactive({ planDate: "", patientName: "", phone: "", note: "" });
-
-const splitNames = (text: string) =>
-  text
-    .split(/[、，,;；\s]+/)
-    .map(name => name.trim())
-    .filter(Boolean);
-
-const isBatch = computed(() => formMode.value === "create" && splitNames(form.patientName).length > 1);
-
-const openCreate = (date?: string) => {
-  formMode.value = "create";
-  editing.value = null;
-  Object.assign(form, { planDate: date || tomorrow.value, patientName: "", phone: "", note: "" });
-  formVisible.value = true;
-};
-
-const openEdit = (entry: RecheckEntry) => {
-  formMode.value = "edit";
-  editing.value = entry;
-  Object.assign(form, { planDate: entry.planDate, patientName: entry.patientName, phone: entry.phone, note: entry.note });
-  formVisible.value = true;
-};
-
-const saveForm = async () => {
-  if (!form.planDate) return ElMessage.warning("请选择复查日期");
-  const names = formMode.value === "create" ? splitNames(form.patientName) : [form.patientName.trim()];
-  if (!names.length || !names[0]) return ElMessage.warning("请填写患者姓名");
+/** 统一执行写操作：成功提示 + 刷新；用户取消弹窗时静默 */
+const run = async (task: () => Promise<unknown>, success: string) => {
   saving.value = true;
   try {
-    if (formMode.value === "edit" && editing.value) {
-      await updateRecheckApi(editing.value.id, { ...form, patientName: names[0] });
-      ElMessage.success("已更新");
-    } else {
-      // 批量登记逐条提交：重复的单条失败不影响其余
-      const failures: string[] = [];
-      for (const name of names) {
-        try {
-          await createRecheckApi({
-            planDate: form.planDate,
-            patientName: name,
-            phone: isBatch.value ? "" : form.phone,
-            note: form.note
-          });
-        } catch (error: any) {
-          failures.push(error?.message || name);
-        }
-      }
-      if (failures.length) ElMessage.warning(`已登记 ${names.length - failures.length} 人；未成功：${failures.join("；")}`);
-      else ElMessage.success(`已登记 ${names.length} 人`);
-    }
-    formVisible.value = false;
-    await load();
+    await task();
+    ElMessage.success(success);
+    await reload();
+    return true;
   } catch (error: any) {
-    ElMessage.error(error?.message || "保存失败");
+    if (error !== "cancel" && error !== "close") ElMessage.error(error?.message || "操作失败");
+    return false;
   } finally {
     saving.value = false;
   }
 };
 
-// ---------- 状态 / 改期 / 撤销 ----------
+// ---------- 登记 ----------
 
-const rescheduleVisible = ref(false);
-const rescheduleForm = reactive({ newDate: "", reason: "" });
+const nameInput = ref<{ focus: () => void } | null>(null);
+const draft = reactive({ planDate: fmt(dayjs().add(1, "day")), patientName: "", phone: "", note: "" });
 
-const saveReschedule = async () => {
-  if (!editing.value) return;
-  if (!rescheduleForm.newDate) return ElMessage.warning("请选择新日期");
-  saving.value = true;
-  try {
-    await rescheduleRecheckApi(editing.value.id, rescheduleForm.newDate, rescheduleForm.reason.trim());
-    ElMessage.success(`已改期至 ${rescheduleForm.newDate}`);
-    rescheduleVisible.value = false;
-    await load();
-  } catch (error: any) {
-    ElMessage.error(error?.message || "改期失败");
-  } finally {
-    saving.value = false;
+const submitCreate = async () => {
+  const name = draft.patientName.trim();
+  if (!name) return ElMessage.warning("请填写患者姓名");
+  const planDate = draft.planDate;
+  const ok = await run(
+    () => createRecheckApi({ planDate, patientName: name, phone: draft.phone.trim(), note: draft.note.trim() }),
+    `已登记：${name}，${dateTitle(planDate, today.value)}`
+  );
+  if (ok) {
+    // 保留日期，方便同一天连续登记多人
+    Object.assign(draft, { patientName: "", phone: "", note: "" });
+    await nextTick();
+    nameInput.value?.focus();
   }
 };
 
-const onCommand = async (command: string, entry: RecheckEntry) => {
-  try {
-    if (command === "edit") return openEdit(entry);
-    if (command === "reschedule") {
-      editing.value = entry;
-      Object.assign(rescheduleForm, { newDate: dayjs(entry.planDate).add(7, "day").format("YYYY-MM-DD"), reason: "" });
-      rescheduleVisible.value = true;
-      return;
-    }
-    if (command === "cancel") {
-      await ElMessageBox.confirm(
-        `撤销 ${entry.planDate} ${entry.patientName} 的登记？撤销后不计入统计（用于登记错误）。`,
-        "撤销登记",
-        {
-          type: "warning",
-          confirmButtonText: "撤销",
-          cancelButtonText: "取消"
-        }
-      );
-      await cancelRecheckApi(entry.id);
-      ElMessage.success("已撤销");
-    } else if (command === "ABSENT") {
-      const { value } = await ElMessageBox.prompt(`${entry.patientName} 未到的原因（选填）`, "标记未到", {
-        inputPlaceholder: "如：电话未接通、患者临时有事",
-        inputValidator: text => (text || "").length <= 200 || "不超过 200 字",
-        confirmButtonText: "标记未到",
-        cancelButtonText: "取消"
+// ---------- 标记 / 改期 / 修改 / 撤销 ----------
+
+const mark = (entry: RecheckEntry, status: "ARRIVED" | "ABSENT" | "PLANNED") => {
+  const text = status === "ARRIVED" ? "已到" : status === "ABSENT" ? "没来" : "已撤回为待到";
+  void run(() => markRecheckApi(entry.id, status), `${entry.patientName}：${text}`);
+};
+
+const resched = reactive({ visible: false, entry: null as RecheckEntry | null, newDate: "", reason: "" });
+const edit = reactive({ visible: false, entry: null as RecheckEntry | null, planDate: "", patientName: "", phone: "", note: "" });
+
+const act = (entry: RecheckEntry, action: RowAction) => {
+  if (action === "reschedule") {
+    Object.assign(resched, { visible: true, entry, newDate: fmt(dayjs(entry.planDate).add(7, "day")), reason: "" });
+  } else if (action === "edit") {
+    Object.assign(edit, {
+      visible: true,
+      entry,
+      planDate: entry.planDate,
+      patientName: entry.patientName,
+      phone: entry.phone,
+      note: entry.note
+    });
+  } else {
+    void run(async () => {
+      await ElMessageBox.confirm(`撤销 ${entry.patientName}（${entry.planDate}）这条登记？撤销后不计入统计。`, "撤销登记", {
+        type: "warning",
+        confirmButtonText: "撤销",
+        cancelButtonText: "不撤销"
       });
-      await markRecheckApi(entry.id, "ABSENT", (value || "").trim());
-    } else {
-      await markRecheckApi(entry.id, command as "ARRIVED" | "PLANNED");
-    }
-    await load();
-  } catch (error: any) {
-    if (error === "cancel" || error === "close") return;
-    ElMessage.error(error?.message || "操作失败");
+      await cancelRecheckApi(entry.id);
+    }, "已撤销");
   }
+};
+
+const submitReschedule = async () => {
+  const entry = resched.entry;
+  if (!entry || !resched.newDate) return ElMessage.warning("请选择新日期");
+  const ok = await run(
+    () => rescheduleRecheckApi(entry.id, resched.newDate, resched.reason.trim()),
+    `${entry.patientName} 已改到 ${dateTitle(resched.newDate, today.value)}`
+  );
+  if (ok) resched.visible = false;
+};
+
+const submitEdit = async () => {
+  const entry = edit.entry;
+  if (!entry) return;
+  if (!edit.patientName.trim()) return ElMessage.warning("请填写患者姓名");
+  const ok = await run(
+    () =>
+      updateRecheckApi(entry.id, {
+        planDate: edit.planDate,
+        patientName: edit.patientName.trim(),
+        phone: edit.phone.trim(),
+        note: edit.note.trim()
+      }),
+    "已保存"
+  );
+  if (ok) edit.visible = false;
 };
 
 onMounted(() => {
-  void load();
+  void loadRecent();
 });
 </script>
 
 <style scoped lang="scss">
-.recheck-page {
-  --rk-brand: #0f766e;
-  --rk-arrived: #15803d;
-  --rk-absent: #b45309;
-  --rk-pending: #475569;
+.rk {
+  --brand: #0f766e;
 
   display: flex;
   flex-direction: column;
   gap: 14px;
+  max-width: 1080px;
   padding: 16px;
 }
 .rk-head {
   display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   h2 {
-    margin: 0 0 6px;
+    margin: 0;
     font-size: 18px;
   }
-  p {
-    max-width: 760px;
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.6;
-    color: var(--el-text-color-secondary);
-  }
 }
-.rk-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-.rk-card {
+.rk-add {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
   padding: 12px 14px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
+  background: color-mix(in srgb, var(--brand) 5%, var(--el-bg-color));
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
   border-radius: 10px;
-  &.tone-brand {
-    background: color-mix(in srgb, var(--rk-brand) 7%, var(--el-bg-color));
-    border-color: color-mix(in srgb, var(--rk-brand) 25%, transparent);
-  }
-  &.tone-warn {
-    background: color-mix(in srgb, var(--rk-absent) 8%, var(--el-bg-color));
-    border-color: color-mix(in srgb, var(--rk-absent) 30%, transparent);
-  }
 }
-.rk-card-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.rk-card-value {
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-  color: var(--el-text-color-primary);
-}
-.rk-card-sub {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.rk-toolbar {
+.rk-add-date {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
   align-items: center;
 }
-.rk-table {
+.rk-label {
+  margin-right: 4px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.rk-quick {
+  height: 28px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 14px;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+  &.on {
+    color: #ffffff;
+    background: var(--brand);
+    border-color: var(--brand);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+}
+.rk-add-hint {
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+}
+.rk-add-fields {
+  display: grid;
+  grid-template-columns: 160px 160px minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.rk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rk-block {
   overflow: hidden;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
-}
-.rk-row {
-  display: grid;
-  grid-template-columns: 120px 210px 1fr;
-  align-items: start;
-  border-top: 1px solid var(--el-border-color-lighter);
-  > div {
-    padding: 10px 12px;
-  }
-  &.is-today {
-    background: color-mix(in srgb, var(--rk-brand) 5%, transparent);
-    box-shadow: inset 3px 0 0 var(--rk-brand);
-  }
-  &.is-past .rk-date {
-    color: var(--el-text-color-secondary);
-  }
-}
-.rk-row-head {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-  border-top: none;
-}
-.rk-empty {
-  padding: 32px;
-  color: var(--el-text-color-secondary);
-  text-align: center;
-  border-top: 1px solid var(--el-border-color-lighter);
-}
-.rk-date {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  strong {
+  h3 {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 10px 14px;
+    margin: 0;
     font-size: 15px;
-    font-variant-numeric: tabular-nums;
+    background: var(--el-fill-color-light);
   }
+}
+.rk-today {
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+  h3 {
+    font-size: 16px;
+    color: var(--brand);
+    background: color-mix(in srgb, var(--brand) 8%, var(--el-bg-color));
+  }
+}
+.rk-pending {
+  border-color: color-mix(in srgb, #b45309 35%, transparent);
+  h3 {
+    color: #b45309;
+    background: color-mix(in srgb, #b45309 7%, var(--el-bg-color));
+  }
+}
+.rk-count {
+  font-size: 13px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-regular);
+  b {
+    font-size: 15px;
+  }
+}
+.c-ok {
+  color: #15803d;
+}
+.c-no {
+  color: #b45309;
+}
+.rk-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.rk-day + .rk-day {
+  border-top: 1px solid var(--el-border-color-light);
+}
+.rk-day-title {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 14px 2px;
+  font-size: 14px;
+  font-weight: 600;
   span {
     font-size: 12px;
+    font-weight: 400;
+    color: var(--el-text-color-secondary);
   }
 }
-.rk-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  font-variant-numeric: tabular-nums;
-  > span[title] {
-    min-width: 28px;
-    padding: 1px 6px;
-    font-size: 13px;
-    text-align: center;
-    border-radius: 6px;
-  }
-  .n-plan {
-    font-weight: 600;
-    color: var(--rk-brand);
-    background: color-mix(in srgb, var(--rk-brand) 10%, transparent);
-  }
-  .n-arrived {
-    color: var(--rk-arrived);
-    background: color-mix(in srgb, var(--rk-arrived) 10%, transparent);
-  }
-  .n-absent {
-    color: var(--rk-absent);
-    background: color-mix(in srgb, var(--rk-absent) 10%, transparent);
-  }
-  .n-pending {
-    color: var(--rk-pending);
-    background: color-mix(in srgb, var(--rk-pending) 10%, transparent);
-  }
-}
-.rk-extra {
-  font-size: 12px;
+.rk-empty {
+  padding: 18px 14px;
+  margin: 0;
+  font-size: 13px;
   color: var(--el-text-color-secondary);
 }
-.rk-warn {
-  font-size: 12px;
-  color: var(--rk-absent);
-}
-.rk-chips {
+.rk-hist-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 14px;
   align-items: center;
-}
-.rk-chip,
-.rk-add {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  height: 28px;
-  padding: 0 10px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  border-radius: 14px;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease;
-  &:focus-visible {
-    outline: 2px solid var(--rk-brand);
-    outline-offset: 2px;
-  }
-}
-.rk-chip {
-  --chip: var(--rk-pending);
-
-  color: var(--el-text-color-primary);
-  background: color-mix(in srgb, var(--chip) 8%, var(--el-bg-color));
-  border: 1px solid color-mix(in srgb, var(--chip) 30%, transparent);
-  small {
-    font-size: 11px;
-    color: var(--chip);
-  }
-  &.s-arrived {
-    --chip: var(--rk-arrived);
-  }
-  &.s-absent {
-    --chip: var(--rk-absent);
-  }
-  &.s-rescheduled {
-    --chip: #94a3b8;
-
-    color: var(--el-text-color-secondary);
-    text-decoration: line-through;
-    cursor: default;
-  }
-}
-.rk-dot {
-  width: 7px;
-  height: 7px;
-  background: var(--chip);
-  border-radius: 50%;
-}
-.rk-add {
-  color: var(--rk-brand);
-  background: transparent;
-  border: 1px dashed color-mix(in srgb, var(--rk-brand) 45%, transparent);
-
-  @media (hover: hover) {
-    &:hover {
-      background: color-mix(in srgb, var(--rk-brand) 8%, transparent);
-    }
-  }
 }
 .rk-dialog-tip {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
 }
 
 @media (width <= 760px) {
-  .rk-row {
+  .rk-add-fields {
     grid-template-columns: 1fr;
-    > div {
-      padding: 6px 12px;
-    }
-  }
-  .rk-row-head {
-    display: none;
   }
 }
 </style>
