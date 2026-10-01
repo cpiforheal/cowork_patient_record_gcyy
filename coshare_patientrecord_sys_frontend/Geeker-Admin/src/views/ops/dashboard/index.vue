@@ -168,12 +168,12 @@
     <main class="pa-main" :aria-busy="loading">
       <template v-if="result">
         <section class="pa-kpis" :class="{ 'is-busy': stale }" aria-label="当前样本">
-          <div class="pa-card pa-kpi is-primary" :style="{ '--pa-enter-index': 0 }">
+          <div class="pa-card pa-kpi is-primary tone-indigo" :style="{ '--pa-enter-index': 0 }">
             <span class="pa-kpi-label">匹配患者</span>
             <strong>{{ number(patientCount) }}</strong>
             <small>按病例标识去重</small>
           </div>
-          <div class="pa-card pa-kpi" :style="{ '--pa-enter-index': 1 }">
+          <div class="pa-card pa-kpi tone-cyan" :style="{ '--pa-enter-index': 1 }">
             <span class="pa-kpi-label">有效来访</span>
             <strong>{{ number(visitCount) }}<em>人次</em></strong>
             <small v-if="patientCount"
@@ -181,18 +181,18 @@
             >
           </div>
           <template v-if="query.view === 'followup'">
-            <div class="pa-card pa-kpi" :style="{ '--pa-enter-index': 2 }">
+            <div class="pa-card pa-kpi tone-emerald" :style="{ '--pa-enter-index': 2 }">
               <span class="pa-kpi-label">随访节点</span>
               <strong>{{ number(nodeCount) }}<em>个</em></strong>
               <small>已联系 {{ number(result.summary.contactedNodes) }} 个</small>
             </div>
-            <div class="pa-card pa-kpi" :style="{ '--pa-enter-index': 3 }">
+            <div class="pa-card pa-kpi tone-amber" :style="{ '--pa-enter-index': 3 }">
               <span class="pa-kpi-label">区间联系留痕</span>
               <strong>{{ number(contactCount) }}<em>次</em></strong>
               <small>仅服务器留痕</small>
             </div>
           </template>
-          <div v-else class="pa-card pa-kpi" :style="{ '--pa-enter-index': 2 }">
+          <div v-else class="pa-card pa-kpi tone-emerald" :style="{ '--pa-enter-index': 2 }">
             <span class="pa-kpi-label">统计区间</span>
             <strong>{{ dayCount }}<em>天</em></strong>
             <small>{{ result.meta.from.slice(5) }} → {{ result.meta.to.slice(5) }} · {{ granularityLabel }}</small>
@@ -201,7 +201,7 @@
             <template #reference>
               <button
                 type="button"
-                class="pa-card pa-kpi pa-quality"
+                class="pa-card pa-kpi pa-quality tone-rose"
                 :class="{ 'has-issue': qualityIssues }"
                 :style="{ '--pa-enter-index': 4 }"
                 aria-haspopup="dialog"
@@ -757,22 +757,24 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 /* ── 设计 token：只作用于本页，子组件通过 CSS 变量继承 ── */
 .patient-analysis {
-  --pa-bg: #f5f7f8;
+  --pa-bg: #f3f5ff;
   --pa-surface: #ffffff;
-  --pa-subtle: #f1f4f5;
-  --pa-subtle-strong: #e6ebed;
-  --pa-border: #e8ecee;
-  --pa-border-strong: #d3dadd;
-  --pa-text: #1f2a30;
-  --pa-text-2: #4a565d;
-  --pa-text-3: #7a868d;
-  --pa-brand: #1f7a8c;
-  --pa-brand-soft: rgb(31 122 140 / 10%);
-  --pa-danger: #c2410c;
-  --pa-danger-soft: rgb(194 65 12 / 8%);
-  --pa-warn: #b7791f;
-  --pa-shadow: 0 1px 2px rgb(16 24 40 / 4%);
-  --pa-shadow-hover: 0 4px 16px rgb(16 24 40 / 7%);
+  --pa-subtle: #eef2ff;
+  --pa-subtle-strong: #e0e7ff;
+  --pa-border: #e4e8fb;
+  --pa-border-strong: #c7d2fe;
+  --pa-text: #1e293b;
+  --pa-text-2: #475569;
+  --pa-text-3: #64748b;
+  --pa-brand: #4f46e5;
+  --pa-brand-2: #06b6d4;
+  --pa-brand-soft: rgb(79 70 229 / 10%);
+  --pa-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+  --pa-danger: #e11d48;
+  --pa-danger-soft: rgb(225 29 72 / 8%);
+  --pa-warn: #d97706;
+  --pa-shadow: 0 1px 3px rgb(79 70 229 / 6%), 0 1px 2px rgb(16 24 40 / 4%);
+  --pa-shadow-hover: 0 8px 24px rgb(79 70 229 / 14%);
   --pa-radius: 12px;
   --pa-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --el-color-primary: var(--pa-brand);
@@ -783,22 +785,25 @@ onBeforeUnmount(() => {
   padding: 20px 24px 32px;
   font-variant-numeric: tabular-nums;
   color: var(--pa-text);
-  background: var(--pa-bg);
+  background:
+    radial-gradient(1200px 420px at 0% -10%, rgb(99 102 241 / 12%), transparent 60%),
+    radial-gradient(900px 380px at 100% 0%, rgb(6 182 212 / 12%), transparent 60%), var(--pa-bg);
 }
 :global(html.dark) .patient-analysis {
-  --pa-bg: #141a1d;
-  --pa-surface: #1d2326;
-  --pa-subtle: #242b2f;
-  --pa-subtle-strong: #2e363b;
-  --pa-border: #2a3236;
-  --pa-border-strong: #3a4449;
-  --pa-text: #e4e9eb;
-  --pa-text-2: #b6c0c4;
-  --pa-text-3: #8b979d;
-  --pa-brand: #4fb3c4;
-  --pa-brand-soft: rgb(79 179 196 / 14%);
-  --pa-danger: #f08a5d;
-  --pa-danger-soft: rgb(240 138 93 / 12%);
+  --pa-bg: #11162a;
+  --pa-surface: #1a2035;
+  --pa-subtle: #232b47;
+  --pa-subtle-strong: #2c3558;
+  --pa-border: #2a3350;
+  --pa-border-strong: #3d4876;
+  --pa-text: #e2e8f0;
+  --pa-text-2: #cbd5e1;
+  --pa-text-3: #94a3b8;
+  --pa-brand: #818cf8;
+  --pa-brand-2: #22d3ee;
+  --pa-brand-soft: rgb(129 140 248 / 16%);
+  --pa-danger: #fb7185;
+  --pa-danger-soft: rgb(251 113 133 / 12%);
   --pa-shadow: 0 1px 2px rgb(0 0 0 / 30%);
   --pa-shadow-hover: 0 6px 20px rgb(0 0 0 / 35%);
 }
@@ -885,11 +890,14 @@ onBeforeUnmount(() => {
 }
 .pa-title h1 {
   margin: 4px 0 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   line-height: 1.4;
-  color: var(--pa-text);
+  color: var(--pa-brand);
   letter-spacing: 0.01em;
+  background: var(--pa-gradient);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .pa-header-actions {
   display: flex;
@@ -945,8 +953,10 @@ onBeforeUnmount(() => {
   margin-bottom: 12px;
   overflow-x: auto;
   scrollbar-width: none;
-  background: var(--pa-subtle-strong);
-  border-radius: 10px;
+  background: var(--pa-surface);
+  border: 1px solid var(--pa-border);
+  border-radius: 12px;
+  box-shadow: var(--pa-shadow);
 }
 .pa-tabs::-webkit-scrollbar {
   display: none;
@@ -956,11 +966,9 @@ onBeforeUnmount(() => {
   top: 3px;
   bottom: 3px;
   left: 0;
-  background: var(--pa-surface);
-  border-radius: 8px;
-  box-shadow:
-    0 1px 2px rgb(16 24 40 / 8%),
-    0 1px 1px rgb(16 24 40 / 4%);
+  background: var(--pa-gradient);
+  border-radius: 9px;
+  box-shadow: 0 4px 12px rgb(99 102 241 / 30%);
   opacity: 0;
 }
 .pa-tabs-thumb.is-ready {
@@ -990,7 +998,7 @@ onBeforeUnmount(() => {
   color: var(--pa-text);
 }
 .pa-tabs button.active {
-  color: var(--pa-brand);
+  color: #ffffff;
 }
 .pa-tabs button:active {
   transform: scale(0.97);
@@ -1266,12 +1274,16 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 .pa-kpi {
+  --tone: var(--pa-brand);
+  --tone-2: var(--pa-brand-2);
+
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding: 16px 18px;
+  padding: 16px 18px 16px 20px;
+  overflow: hidden;
   font: inherit;
   color: inherit;
   text-align: left;
@@ -1292,7 +1304,7 @@ onBeforeUnmount(() => {
   font-size: 28px;
   font-weight: 600;
   line-height: 1.15;
-  color: var(--pa-text);
+  color: var(--tone);
   letter-spacing: -0.01em;
 }
 .pa-kpi strong em {
@@ -1306,24 +1318,80 @@ onBeforeUnmount(() => {
   color: var(--pa-text-3);
   overflow-wrap: anywhere;
 }
-.pa-kpi.is-primary::before {
+
+/* 每张 KPI 卡一个色调：左侧色条 + 浅色渐变底 + 彩色数字 */
+.patient-analysis .pa-kpi.pa-card {
+  background:
+    radial-gradient(160px 120px at 100% 0%, color-mix(in srgb, var(--tone) 16%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--tone) 6%, var(--pa-surface)), var(--pa-surface));
+  border-color: color-mix(in srgb, var(--tone) 22%, var(--pa-border));
+}
+.pa-kpi::before {
   position: absolute;
-  top: 16px;
-  bottom: 16px;
+  top: 0;
+  bottom: 0;
   left: 0;
-  width: 3px;
+  width: 4px;
   content: "";
-  background: var(--pa-brand);
-  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--tone), var(--tone-2));
 }
 .pa-kpi.is-primary strong {
-  color: var(--pa-brand);
+  background: linear-gradient(90deg, var(--tone), var(--tone-2));
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.pa-kpi.is-primary strong em {
+  -webkit-text-fill-color: var(--pa-text-3);
+}
+.tone-indigo {
+  --tone: #4f46e5;
+  --tone-2: #8b5cf6;
+}
+.tone-cyan {
+  --tone: #0891b2;
+  --tone-2: #06b6d4;
+}
+.tone-emerald {
+  --tone: #059669;
+  --tone-2: #34d399;
+}
+.tone-amber {
+  --tone: #d97706;
+  --tone-2: #fbbf24;
+}
+.tone-rose {
+  --tone: #e11d48;
+  --tone-2: #f472b6;
+}
+:global(html.dark) .tone-indigo {
+  --tone: #818cf8;
+  --tone-2: #c4b5fd;
+}
+:global(html.dark) .tone-cyan {
+  --tone: #22d3ee;
+  --tone-2: #67e8f9;
+}
+:global(html.dark) .tone-emerald {
+  --tone: #34d399;
+  --tone-2: #6ee7b7;
+}
+:global(html.dark) .tone-amber {
+  --tone: #fbbf24;
+  --tone-2: #fde68a;
+}
+:global(html.dark) .tone-rose {
+  --tone: #fb7185;
+  --tone-2: #f9a8d4;
 }
 .pa-quality {
   cursor: pointer;
 }
+.pa-quality:not(.has-issue) {
+  --tone: #059669;
+  --tone-2: #10b981;
+}
 .pa-quality .pa-kpi-label .el-icon {
-  color: #2f9e6e;
+  color: var(--tone);
 }
 .pa-quality.has-issue .pa-kpi-label .el-icon,
 .pa-quality.has-issue strong {

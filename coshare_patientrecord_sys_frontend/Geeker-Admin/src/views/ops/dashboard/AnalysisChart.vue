@@ -3,7 +3,7 @@
     ref="root"
     class="pa-card analysis-chart"
     :class="{ 'is-main': main, 'is-busy': disabled }"
-    :style="{ '--pa-enter-index': index }"
+    :style="{ '--pa-enter-index': index, '--pa-accent': accentColor, '--pa-accent-2': accentColor2 }"
     :aria-label="chart.title"
     :aria-busy="disabled"
   >
@@ -112,15 +112,17 @@ import { DataAnalysis, Grid, InfoFilled } from "@element-plus/icons-vue";
 import { BarChart, HeatmapChart, LineChart, PieChart } from "echarts/charts";
 import { GraphicComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { use } from "echarts/core";
+import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 import type { EChartsOption } from "echarts";
 import VChart from "vue-echarts";
 import type { AnalysisChartData, AnalysisRow } from "@/api/modules/clinic/patientAnalysis";
 import { useGlobalStore } from "@/stores/modules/global";
-import { analysisPalette, chartMotion, escapeHtml, rampColor } from "./analysisTheme";
+import { analysisPalette, categoricalGradient, chartMotion, escapeHtml, isUnknownLabel } from "./analysisTheme";
 
 use([
   CanvasRenderer,
+  LegacyGridContainLabel,
   BarChart,
   LineChart,
   PieChart,
@@ -149,6 +151,15 @@ onMounted(() => {
 onBeforeUnmount(() => observer?.disconnect());
 
 const tableRows = computed(() => props.chart.tableRows || props.chart.rows);
+// 每张卡片一个主题色：顶部色条、单位徽标随卡片序号轮换
+const accentColor = computed(() => {
+  const p = analysisPalette(isDark.value);
+  return p.categorical[(props.index ?? 0) % p.categorical.length];
+});
+const accentColor2 = computed(() => {
+  const p = analysisPalette(isDark.value);
+  return p.categorical[((props.index ?? 0) + 1) % p.categorical.length];
+});
 const chartHeight = computed(() => {
   const { kind, rows } = props.chart;
   if (kind === "matrix") return Math.max(280, Math.min(460, new Set(rows.map(r => r.y)).size * 44 + 140));
@@ -181,7 +192,7 @@ function tooltipHtml(row: AnalysisRow) {
     const line = (color: string, name: unknown, value: unknown) =>
       `<div class="pa-tt-row"><i style="background:${color}"></i><span>${escapeHtml(name)}</span><b>${escapeHtml(number(Number(value) || 0))}</b></div>`;
     return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>${line(p.brand, chart.series?.[0], row.primary)}${line(
-      p.categorical[2],
+      p.accent,
       chart.series?.[1],
       row.secondary
     )}</div>`;
@@ -189,7 +200,7 @@ function tooltipHtml(row: AnalysisRow) {
   const share = Math.min(100, Math.max(0, row.share ?? 0));
   return `<div class="pa-tt"><div class="pa-tt-title">${title}</div>
     <div class="pa-tt-value"><b>${escapeHtml(number(row.value ?? 0))}</b><span>${escapeHtml(chart.unit)}</span><em>${share}%</em></div>
-    <div class="pa-tt-bar"><i style="width:${share}%;background:${p.brand}"></i></div>
+    <div class="pa-tt-bar"><i style="width:${share}%;background:linear-gradient(90deg,${p.categorical[1]},${p.brand})"></i></div>
     <div class="pa-tt-meta">分母 ${escapeHtml(number(row.denominator ?? 0))}${row.unknownCount ? ` · 未知 ${escapeHtml(row.unknownCount)}` : ""}</div>
     <div class="pa-tt-hint">点击下钻</div></div>`;
 }
@@ -223,7 +234,8 @@ const option = computed<EChartsOption>(() => {
   };
 
   if (chart.kind === "trend") {
-    const colors = [p.brand, p.categorical[2]];
+    const colors = [p.brand, p.accent];
+    const soft = [p.brandSoft, p.accentSoft];
     return {
       ...base,
       grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
@@ -259,22 +271,19 @@ const option = computed<EChartsOption>(() => {
         symbolSize: 8,
         lineStyle: { width: seriesIndex === 0 ? 2.5 : 2, cap: "round" as const, color: colors[seriesIndex] },
         itemStyle: { color: colors[seriesIndex], borderColor: p.surface, borderWidth: 2 },
-        areaStyle:
-          seriesIndex === 0
-            ? {
-                color: {
-                  type: "linear" as const,
-                  x: 0,
-                  y: 0,
-                  x2: 0,
-                  y2: 1,
-                  colorStops: [
-                    { offset: 0, color: p.brandSoft },
-                    { offset: 1, color: "rgba(0,0,0,0)" }
-                  ]
-                }
-              }
-            : undefined,
+        areaStyle: {
+          color: {
+            type: "linear" as const,
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: soft[seriesIndex] },
+              { offset: 1, color: "rgba(255,255,255,0)" }
+            ]
+          }
+        },
         emphasis: { focus: "series" as const },
         data: rows.map((r, i) => ({ value: r[key], rowIndex: i }))
       }))
@@ -317,7 +326,7 @@ const option = computed<EChartsOption>(() => {
             value: row.value || 0,
             name: row.label,
             rowIndex: index,
-            itemStyle: { color: /未知|未记录|未填/.test(row.label) ? p.unknown : p.categorical[index % p.categorical.length] }
+            itemStyle: { color: isUnknownLabel(row.label) ? p.unknown : p.categorical[index % p.categorical.length] }
           }))
         }
       ],
@@ -402,7 +411,14 @@ const option = computed<EChartsOption>(() => {
             value: [xs.indexOf(row.x || ""), ys.indexOf(row.y || ""), row.value || 0],
             rowIndex: index
           })),
-          label: { show: xs.length * ys.length <= 30, fontSize: 11, color: p.text },
+          label: {
+            show: xs.length * ys.length <= 30,
+            fontSize: 11,
+            fontWeight: 600,
+            color: p.text,
+            textBorderColor: p.surface,
+            textBorderWidth: 2
+          },
           itemStyle: { borderColor: p.surface, borderWidth: 3, borderRadius: 6 },
           emphasis: { itemStyle: { borderColor: p.brand, borderWidth: 2 } }
         }
@@ -410,8 +426,7 @@ const option = computed<EChartsOption>(() => {
     };
   }
 
-  // 横向条形：按数值深浅取色，含未知的类别用中性灰
-  const max = Math.max(0, ...rows.map(r => r.value || 0));
+  // 横向条形：每个分类一种渐变色，含未知的类别弱化为浅蓝灰
   return {
     ...base,
     grid: { left: 8, right: 48, top: 4, bottom: 4, containLabel: true },
@@ -427,15 +442,15 @@ const option = computed<EChartsOption>(() => {
     series: [
       {
         type: "bar",
-        barWidth: 12,
+        barWidth: 14,
         showBackground: true,
-        backgroundStyle: { color: p.grid, borderRadius: 6 },
+        backgroundStyle: { color: p.track, borderRadius: 7 },
         data: rows.map((row, index) => ({
           value: row.value || 0,
           rowIndex: index,
           itemStyle: {
-            color: (row.unknownCount || 0) > 0 ? p.unknown : rampColor(p, row.value || 0, max),
-            borderRadius: 6
+            color: (row.unknownCount || 0) > 0 || isUnknownLabel(row.label) ? p.unknown : categoricalGradient(p, index),
+            borderRadius: 7
           }
         })),
         label: {
@@ -447,7 +462,7 @@ const option = computed<EChartsOption>(() => {
           fontWeight: 500,
           formatter: ({ value }: { value: unknown }) => number(Number(value) || 0)
         },
-        emphasis: { itemStyle: { color: p.brand } }
+        emphasis: { itemStyle: { shadowBlur: 12, shadowColor: p.brandSoft } }
       }
     ]
   };
@@ -456,16 +471,27 @@ const option = computed<EChartsOption>(() => {
 
 <style scoped lang="scss">
 .analysis-chart {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   padding: 18px 20px 14px;
+  overflow: hidden;
   transition:
     opacity 200ms ease,
     box-shadow 150ms ease,
     border-color 150ms ease;
   animation: pa-card-enter 420ms var(--pa-ease) both;
   animation-delay: calc(var(--pa-enter-index, 0) * 40ms);
+}
+.analysis-chart::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  content: "";
+  background: linear-gradient(90deg, var(--pa-accent), var(--pa-accent-2));
 }
 .analysis-chart.is-busy {
   pointer-events: none;
@@ -531,8 +557,9 @@ const option = computed<EChartsOption>(() => {
 .chart-unit {
   padding: 2px 8px;
   font-size: 12px;
-  color: var(--pa-text-3);
-  background: var(--pa-subtle);
+  font-weight: 500;
+  color: var(--pa-accent);
+  background: color-mix(in srgb, var(--pa-accent) 12%, transparent);
   border-radius: 999px;
 }
 
@@ -585,8 +612,10 @@ const option = computed<EChartsOption>(() => {
   outline: 2px solid var(--pa-brand);
   outline-offset: 2px;
 }
+
+/* 不能用 flex: 1——列方向 flex 下 basis 0 会覆盖内联高度，图表容器被压成 0 高 */
 .chart-canvas {
-  flex: 1;
+  flex: none;
   width: 100%;
   min-width: 0;
 }
