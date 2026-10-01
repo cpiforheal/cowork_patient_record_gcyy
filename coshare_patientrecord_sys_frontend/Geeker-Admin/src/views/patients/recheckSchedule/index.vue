@@ -8,143 +8,138 @@
       </el-radio-group>
     </header>
 
-    <!-- 登记：常驻一行，回车即提交，适合连续录入 -->
-    <form v-if="canEdit" class="rk-add" aria-label="登记复查" @submit.prevent="submitCreate">
-      <div class="rk-add-date">
-        <span class="rk-label">复查日期</span>
-        <button
-          v-for="quick in QUICK_OFFSETS"
-          :key="quick.days"
-          type="button"
-          class="rk-quick"
-          :class="{ on: draft.planDate === offsetDate(quick.days) }"
-          @click="draft.planDate = offsetDate(quick.days)"
-        >
-          {{ quick.label }}
-        </button>
-        <el-date-picker
-          v-model="draft.planDate"
-          type="date"
-          value-format="YYYY-MM-DD"
-          :clearable="false"
-          aria-label="复查日期"
-          style="width: 140px"
-        />
-        <span class="rk-add-hint">登记到 {{ dateTitle(draft.planDate, today) }}</span>
-      </div>
-      <div class="rk-add-fields">
-        <el-input ref="nameInput" v-model="draft.patientName" placeholder="患者姓名" maxlength="50" aria-label="患者姓名" />
-        <el-input v-model="draft.phone" placeholder="电话（选填）" maxlength="30" aria-label="电话" />
-        <el-input v-model="draft.note" placeholder="复查内容 / 备注（选填）" maxlength="200" aria-label="备注" />
-        <el-button type="primary" native-type="submit" :loading="saving">登记</el-button>
-      </div>
-    </form>
+    <div class="rk-layout">
+      <div class="rk-main">
+        <!-- 登记：多行表格，每行独立日期，支持粘贴多个姓名 -->
+        <EntryForm v-if="canEdit" ref="entryForm" :today="today" :counts="counts" @saved="reload" />
 
-    <!-- 近期：今天 → 待补标 → 接下来（只列有登记的日期） -->
-    <div v-if="mode === 'recent'" v-loading="loading" class="rk-body">
-      <section class="rk-block rk-today" aria-label="今天">
-        <h3>
-          <span>今天 {{ dateTitle(today, today) }}</span>
-          <span class="rk-count">
-            预计 <b>{{ todayDay?.stats.planned ?? 0 }}</b> 人 · 已到 <b class="c-ok">{{ todayDay?.stats.arrived ?? 0 }}</b> · 没来
-            <b class="c-no">{{ todayDay?.stats.absent ?? 0 }}</b> · 待到 <b>{{ todayDay?.stats.pending ?? 0 }}</b>
-          </span>
-        </h3>
-        <ul v-if="todayEntries.length" class="rk-list">
-          <EntryRow v-for="e in todayEntries" :key="e.id" :entry="e" :can-edit="canEdit" markable @mark="mark" @action="act" />
-        </ul>
-        <p v-else class="rk-empty">今天没有登记复查的患者</p>
-      </section>
-
-      <section v-if="pendingPast.length" class="rk-block rk-pending" aria-label="待补标">
-        <h3>
-          <span>以前的还没标到/没来</span>
-          <span class="rk-count">{{ pendingPast.length }} 人，请核对后补标</span>
-        </h3>
-        <ul class="rk-list">
-          <EntryRow
-            v-for="e in pendingPast"
-            :key="e.id"
-            :entry="e"
-            :can-edit="canEdit"
-            markable
-            show-date
-            @mark="mark"
-            @action="act"
-          />
-        </ul>
-      </section>
-
-      <section class="rk-block" aria-label="接下来">
-        <h3>
-          <span>接下来</span>
-          <span class="rk-count">未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人</span>
-        </h3>
-        <template v-if="upcoming.length">
-          <div v-for="day in upcoming" :key="day.date" class="rk-day">
-            <div class="rk-day-title">
-              {{ dateTitle(day.date, today) }}<span>{{ day.stats.planned }} 人</span>
-            </div>
-            <ul class="rk-list">
-              <EntryRow
-                v-for="e in visible(day.entries)"
-                :key="e.id"
-                :entry="e"
-                :can-edit="canEdit"
-                :markable="false"
-                @action="act"
-              />
-            </ul>
-          </div>
-        </template>
-        <p v-else class="rk-empty">暂无后续复查登记</p>
-      </section>
-    </div>
-
-    <!-- 历史回看：按日期倒序，每天一行汇总 + 名单 -->
-    <div v-else v-loading="loading" class="rk-body">
-      <div class="rk-hist-bar">
-        <el-date-picker
-          v-model="histRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          range-separator="至"
-          :clearable="false"
-          style="width: 260px"
-          @change="loadHistory"
-        />
-        <span v-if="history" class="rk-count">
-          预计 <b>{{ history.total.planned }}</b> 人 · 已到 <b class="c-ok">{{ history.total.arrived }}</b> · 没来
-          <b class="c-no">{{ history.total.absent }}</b>
-          <template v-if="history.total.arrivalRate != null"> · 到诊率 {{ history.total.arrivalRate }}%</template>
-        </span>
-      </div>
-      <section class="rk-block">
-        <template v-if="historyDays.length">
-          <div v-for="day in historyDays" :key="day.date" class="rk-day">
-            <div class="rk-day-title">
-              {{ dateTitle(day.date, today) }}
-              <span>
-                预计 {{ day.stats.planned }} · 到 <b class="c-ok">{{ day.stats.arrived }}</b> · 没来
-                <b class="c-no">{{ day.stats.absent }}</b>
-                <template v-if="day.stats.pending"> · 未标 {{ day.stats.pending }}</template>
+        <!-- 近期：今天 → 待补标 → 接下来（只列有登记的日期） -->
+        <div v-if="mode === 'recent'" v-loading="loading" class="rk-body">
+          <section class="rk-block rk-today" aria-label="今天">
+            <h3>
+              <span>今天 {{ dateTitle(today, today) }}</span>
+              <span class="rk-count">
+                预计 <b>{{ todayDay?.stats.planned ?? 0 }}</b> 人 · 已到 <b class="c-ok">{{ todayDay?.stats.arrived ?? 0 }}</b> ·
+                没来 <b class="c-no">{{ todayDay?.stats.absent ?? 0 }}</b> · 待到 <b>{{ todayDay?.stats.pending ?? 0 }}</b>
               </span>
-            </div>
-            <ul class="rk-list">
+            </h3>
+            <ul v-if="todayEntries.length" class="rk-list">
               <EntryRow
-                v-for="e in day.entries"
+                v-for="e in todayEntries"
                 :key="e.id"
                 :entry="e"
                 :can-edit="canEdit"
-                :markable="day.relation !== 'future'"
+                markable
                 @mark="mark"
                 @action="act"
               />
             </ul>
+            <p v-else class="rk-empty">今天没有登记复查的患者</p>
+          </section>
+
+          <section v-if="pendingPast.length" class="rk-block rk-pending" aria-label="待补标">
+            <h3>
+              <span>以前的还没标到/没来</span>
+              <span class="rk-count">{{ pendingPast.length }} 人，请核对后补标</span>
+            </h3>
+            <ul class="rk-list">
+              <EntryRow
+                v-for="e in pendingPast"
+                :key="e.id"
+                :entry="e"
+                :can-edit="canEdit"
+                markable
+                show-date
+                @mark="mark"
+                @action="act"
+              />
+            </ul>
+          </section>
+
+          <section class="rk-block" aria-label="接下来">
+            <h3>
+              <span>接下来</span>
+              <span class="rk-count">未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人</span>
+            </h3>
+            <template v-if="upcoming.length">
+              <div v-for="day in upcoming" :key="day.date" class="rk-day">
+                <div class="rk-day-title">
+                  {{ dateTitle(day.date, today) }}<span>{{ day.stats.planned }} 人</span>
+                </div>
+                <ul class="rk-list">
+                  <EntryRow
+                    v-for="e in visible(day.entries)"
+                    :key="e.id"
+                    :entry="e"
+                    :can-edit="canEdit"
+                    :markable="false"
+                    @action="act"
+                  />
+                </ul>
+              </div>
+            </template>
+            <p v-else class="rk-empty">暂无后续复查登记</p>
+          </section>
+        </div>
+
+        <!-- 历史回看：按日期倒序，每天一行汇总 + 名单 -->
+        <div v-else v-loading="loading" class="rk-body">
+          <div class="rk-hist-bar">
+            <el-date-picker
+              v-model="histRange"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              range-separator="至"
+              :clearable="false"
+              style="width: 260px"
+              @change="loadHistory"
+            />
+            <span v-if="history" class="rk-count">
+              预计 <b>{{ history.total.planned }}</b> 人 · 已到 <b class="c-ok">{{ history.total.arrived }}</b> · 没来
+              <b class="c-no">{{ history.total.absent }}</b>
+              <template v-if="history.total.arrivalRate != null"> · 到诊率 {{ history.total.arrivalRate }}%</template>
+            </span>
           </div>
-        </template>
-        <p v-else class="rk-empty">这段时间没有登记</p>
-      </section>
+          <section class="rk-block">
+            <template v-if="historyDays.length">
+              <div v-for="day in historyDays" :key="day.date" class="rk-day">
+                <div class="rk-day-title">
+                  {{ dateTitle(day.date, today) }}
+                  <span>
+                    预计 {{ day.stats.planned }} · 到 <b class="c-ok">{{ day.stats.arrived }}</b> · 没来
+                    <b class="c-no">{{ day.stats.absent }}</b>
+                    <template v-if="day.stats.pending"> · 未标 {{ day.stats.pending }}</template>
+                  </span>
+                </div>
+                <ul class="rk-list">
+                  <EntryRow
+                    v-for="e in day.entries"
+                    :key="e.id"
+                    :entry="e"
+                    :can-edit="canEdit"
+                    :markable="day.relation !== 'future'"
+                    @mark="mark"
+                    @action="act"
+                  />
+                </ul>
+              </div>
+            </template>
+            <p v-else class="rk-empty">这段时间没有登记</p>
+          </section>
+        </div>
+      </div>
+
+      <!-- 右侧：月历概览，悬停看当天名单，点击看明细 -->
+      <aside class="rk-aside">
+        <MiniCalendar
+          v-model:month="calMonth"
+          :today="today"
+          :days="calBoard?.days ?? []"
+          :can-edit="canEdit"
+          :loading="calLoading"
+          @register="registerOn"
+        />
+      </aside>
     </div>
 
     <!-- 改期 -->
@@ -166,7 +161,7 @@
       </div>
       <el-form label-width="64px" style="margin-top: 12px" @submit.prevent>
         <el-form-item label="新日期">
-          <el-date-picker v-model="resched.newDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          <PlanDatePicker v-model="resched.newDate" :today="today" :counts="counts" width="160px" />
         </el-form-item>
         <el-form-item label="原因">
           <el-input v-model="resched.reason" maxlength="200" placeholder="选填，如：患者来电改约" />
@@ -182,13 +177,14 @@
     <el-dialog v-model="edit.visible" title="修改登记" width="440px" destroy-on-close>
       <el-form label-width="64px" @submit.prevent>
         <el-form-item label="日期">
-          <el-date-picker
+          <PlanDatePicker
+            v-if="edit.entry?.status === 'PLANNED'"
             v-model="edit.planDate"
-            type="date"
-            value-format="YYYY-MM-DD"
-            :disabled="edit.entry?.status !== 'PLANNED'"
-            style="width: 100%"
+            :today="today"
+            :counts="counts"
+            width="160px"
           />
+          <span v-else>{{ dateTitle(edit.planDate, today) }}（已标记，日期不可改）</span>
         </el-form-item>
         <el-form-item label="姓名"><el-input v-model="edit.patientName" maxlength="50" /></el-form-item>
         <el-form-item label="电话"><el-input v-model="edit.phone" maxlength="30" /></el-form-item>
@@ -203,12 +199,11 @@
 </template>
 
 <script setup lang="ts" name="recheckSchedule">
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import dayjs from "dayjs";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   cancelRecheckApi,
-  createRecheckApi,
   getRecheckBoardApi,
   markRecheckApi,
   rescheduleRecheckApi,
@@ -217,7 +212,10 @@ import {
   type RecheckEntry
 } from "@/api/modules/clinic/recheckSchedule";
 import EntryRow, { type RowAction } from "./EntryRow.vue";
-import { QUICK_OFFSETS, dateTitle, fmt } from "./dates";
+import EntryForm from "./EntryForm.vue";
+import MiniCalendar from "./MiniCalendar.vue";
+import PlanDatePicker from "./PlanDatePicker.vue";
+import { QUICK_OFFSETS, dateTitle, fmt, monthGrid } from "./dates";
 
 /** 近期视图的加载窗口：往前 30 天找漏标，往后 60 天看预约（后端单次上限 92 天） */
 const PAST_DAYS = 30;
@@ -271,10 +269,44 @@ const loadHistory = async () => {
   }
 };
 
-const reload = () => (mode.value === "recent" ? loadRecent() : loadHistory());
+// ---------- 右侧月历 ----------
+
+const calMonth = ref(dayjs().startOf("month").format("YYYY-MM-DD"));
+const calBoard = ref<RecheckBoard | null>(null);
+const calLoading = ref(false);
+
+const loadCalendar = async () => {
+  const grid = monthGrid(calMonth.value);
+  calLoading.value = true;
+  try {
+    calBoard.value = await getRecheckBoardApi(grid[0], grid[grid.length - 1]);
+  } catch (error: any) {
+    ElMessage.error(error?.message || "日历加载失败");
+  } finally {
+    calLoading.value = false;
+  }
+};
+watch(calMonth, () => void loadCalendar());
+
+/** 日期 → 有效登记人数（已改期走的不算），供日期选择器角标 */
+const counts = computed(() => {
+  const map: Record<string, number> = {};
+  for (const src of [board.value, history.value, calBoard.value]) {
+    for (const day of src?.days ?? []) map[day.date] = day.entries.filter(e => e.status !== "RESCHEDULED").length;
+  }
+  return map;
+});
+
+const entryForm = ref<InstanceType<typeof EntryForm> | null>(null);
+const registerOn = (date: string) => {
+  entryForm.value?.addForDate(date);
+  entryForm.value?.$el?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+};
+
+const reload = () => Promise.all([mode.value === "recent" ? loadRecent() : loadHistory(), loadCalendar()]);
 
 watch(mode, value => {
-  if (value === "history" && !history.value) void loadHistory();
+  if (value === "history") void loadHistory();
   if (value === "recent") void loadRecent();
 });
 
@@ -291,27 +323,6 @@ const run = async (task: () => Promise<unknown>, success: string) => {
     return false;
   } finally {
     saving.value = false;
-  }
-};
-
-// ---------- 登记 ----------
-
-const nameInput = ref<{ focus: () => void } | null>(null);
-const draft = reactive({ planDate: fmt(dayjs().add(1, "day")), patientName: "", phone: "", note: "" });
-
-const submitCreate = async () => {
-  const name = draft.patientName.trim();
-  if (!name) return ElMessage.warning("请填写患者姓名");
-  const planDate = draft.planDate;
-  const ok = await run(
-    () => createRecheckApi({ planDate, patientName: name, phone: draft.phone.trim(), note: draft.note.trim() }),
-    `已登记：${name}，${dateTitle(planDate, today.value)}`
-  );
-  if (ok) {
-    // 保留日期，方便同一天连续登记多人
-    Object.assign(draft, { patientName: "", phone: "", note: "" });
-    await nextTick();
-    nameInput.value?.focus();
   }
 };
 
@@ -378,6 +389,7 @@ const submitEdit = async () => {
 
 onMounted(() => {
   void loadRecent();
+  void loadCalendar();
 });
 </script>
 
@@ -388,8 +400,24 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 1080px;
+  max-width: 1440px;
   padding: 16px;
+}
+.rk-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+.rk-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.rk-aside {
+  position: sticky;
+  top: 12px;
 }
 .rk-head {
   display: flex;
@@ -400,25 +428,11 @@ onMounted(() => {
     font-size: 18px;
   }
 }
-.rk-add {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  background: color-mix(in srgb, var(--brand) 5%, var(--el-bg-color));
-  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
-  border-radius: 10px;
-}
 .rk-add-date {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-}
-.rk-label {
-  margin-right: 4px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
 }
 .rk-quick {
   height: 28px;
@@ -443,17 +457,6 @@ onMounted(() => {
     outline: 2px solid var(--brand);
     outline-offset: 2px;
   }
-}
-.rk-add-hint {
-  margin-left: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--brand);
-}
-.rk-add-fields {
-  display: grid;
-  grid-template-columns: 160px 160px minmax(0, 1fr) auto;
-  gap: 8px;
 }
 .rk-body {
   display: flex;
@@ -546,9 +549,13 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-@media (width <= 760px) {
-  .rk-add-fields {
-    grid-template-columns: 1fr;
+@media (width <= 1180px) {
+  .rk-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rk-aside {
+    position: static;
+    order: -1;
   }
 }
 </style>
