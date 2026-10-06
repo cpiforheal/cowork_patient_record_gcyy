@@ -83,28 +83,40 @@
           </section>
 
           <section class="rk-block" aria-label="接下来">
-            <h3>
+            <button
+              type="button"
+              class="rk-fold-head"
+              :aria-expanded="upcomingOpen"
+              @click="upcomingOpen = !upcomingOpen"
+            >
               <span>接下来</span>
-              <span class="rk-count">未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人</span>
-            </h3>
-            <template v-if="upcoming.length">
-              <div v-for="day in upcoming" :key="day.date" class="rk-day">
-                <div class="rk-day-title">
-                  {{ dateTitle(day.date, today) }}<span>{{ day.stats.planned }} 人</span>
+              <span class="rk-count">
+                未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人<template v-if="!upcomingOpen && nextUpcoming"
+                  > · 最近 {{ dateTitle(nextUpcoming.date, today) }} {{ nextUpcoming.stats.planned }} 人</template
+                >
+              </span>
+              <el-icon class="rk-fold-arrow" :class="{ open: upcomingOpen }"><ArrowDown /></el-icon>
+            </button>
+            <template v-if="upcomingOpen">
+              <div v-if="upcoming.length">
+                <div v-for="day in upcoming" :key="day.date" class="rk-day">
+                  <div class="rk-day-title">
+                    {{ dateTitle(day.date, today) }}<span>{{ day.stats.planned }} 人</span>
+                  </div>
+                  <ul class="rk-list">
+                    <EntryRow
+                      v-for="e in visible(day.entries)"
+                      :key="e.id"
+                      :entry="e"
+                      :can-edit="canEdit"
+                      :markable="false"
+                      @action="act"
+                    />
+                  </ul>
                 </div>
-                <ul class="rk-list">
-                  <EntryRow
-                    v-for="e in visible(day.entries)"
-                    :key="e.id"
-                    :entry="e"
-                    :can-edit="canEdit"
-                    :markable="false"
-                    @action="act"
-                  />
-                </ul>
               </div>
+              <p v-else class="rk-empty">暂无后续复查登记</p>
             </template>
-            <p v-else class="rk-empty">暂无后续复查登记</p>
           </section>
         </div>
 
@@ -155,7 +167,7 @@
         </div>
       </div>
 
-      <!-- 右侧：月历概览，悬停看当天名单，点击看明细 -->
+      <!-- 右侧：月历概览，悬停看当天名单，点击看明细；下方每日应到预约折线 -->
       <aside class="rk-aside">
         <MiniCalendar
           v-model:month="calMonth"
@@ -165,6 +177,7 @@
           :loading="calLoading"
           @register="registerOn"
         />
+        <DueTrendChart :days="calBoard?.days ?? []" :today="today" />
       </aside>
     </div>
 
@@ -238,6 +251,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import dayjs from "dayjs";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { ArrowDown } from "@element-plus/icons-vue";
 import {
   cancelRecheckApi,
   getRecheckBoardApi,
@@ -251,6 +265,7 @@ import EntryRow, { type RowAction } from "./EntryRow.vue";
 import EntryForm from "./EntryForm.vue";
 import MiniCalendar from "./MiniCalendar.vue";
 import PlanDatePicker from "./PlanDatePicker.vue";
+import DueTrendChart from "./DueTrendChart.vue";
 import { RESCHEDULE_OFFSETS, dateTitle, fmt, monthGrid } from "./dates";
 
 /** 近期视图的加载窗口：往前 30 天找漏标，往后 60 天看预约（后端单次上限 92 天） */
@@ -290,6 +305,9 @@ const scrollToBlock = (target: "today" | "pending") => {
 };
 const upcoming = computed(() => (board.value?.days ?? []).filter(d => d.relation === "future" && d.entries.length > 0));
 const upcomingTotal = computed(() => upcoming.value.reduce((sum, d) => sum + d.stats.planned, 0));
+// 今天之后的板块默认折叠，避免预约人数增多后页面无限拉长
+const upcomingOpen = ref(false);
+const nextUpcoming = computed(() => upcoming.value[0]);
 const historyDays = computed(() => [...(history.value?.days ?? [])].reverse().filter(d => d.entries.length > 0));
 
 const loadRecent = async () => {
@@ -480,6 +498,54 @@ onMounted(() => {
 .rk-aside {
   position: sticky;
   top: 12px;
+  display: grid;
+  gap: 10px;
+}
+// 可折叠区块的摘要头：整行可点，箭头指示展开方向，观感对齐 h3 区块头
+.rk-fold-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 15px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border: 0;
+
+  .rk-fold-arrow {
+    flex-shrink: 0;
+    align-self: center;
+    color: var(--el-text-color-secondary);
+    transition: transform var(--motion-control, 180ms) var(--ease-out, ease);
+
+    &.open {
+      transform: rotate(180deg);
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      background: color-mix(in srgb, #0f766e 7%, var(--el-fill-color-light));
+
+      .rk-count {
+        color: #0f766e;
+      }
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid #0f766e;
+    outline-offset: -2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rk-fold-arrow {
+    transition: none;
+  }
 }
 .rk-head {
   display: flex;
