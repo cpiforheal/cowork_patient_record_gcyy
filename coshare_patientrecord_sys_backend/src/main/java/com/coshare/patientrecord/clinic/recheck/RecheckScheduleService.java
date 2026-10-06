@@ -39,8 +39,8 @@ public class RecheckScheduleService {
     static final String RESCHEDULED = "RESCHEDULED";
     static final String CANCELLED = "CANCELLED";
 
-    /** 写入角色：检查室为主，医护与管理员可协助；前台/导诊只读。 */
-    static final Set<String> EDIT_ROLES = Set.of("inspection", "lab", "ecg", "ultrasound", "doctor", "nurse", "nursing", "admin");
+    /** 写入角色：检查室为主，医护与管理员可协助；接诊岗可代登记与编辑（2026-10-04 放开）；前台/导诊只读。 */
+    static final Set<String> EDIT_ROLES = Set.of("inspection", "lab", "ecg", "ultrasound", "doctor", "nurse", "nursing", "admin", "reception");
     static final int MAX_RANGE_DAYS = 92;
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");

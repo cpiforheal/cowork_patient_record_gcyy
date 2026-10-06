@@ -35,9 +35,9 @@ import org.springframework.web.server.ResponseStatusException;
 public class FollowUpVisitService {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final Set<String> MANAGE_ROLES = Set.of("inspection", "admin", "doctor", "tcm");
-    /** 复诊记录内容校准（编辑）：仅医生岗与管理员——创建时间由系统精确记录，编辑仅对齐内容描述精度 */
-    private static final Set<String> EDIT_ROLES = Set.of("doctor", "admin");
+    private static final Set<String> MANAGE_ROLES = Set.of("inspection", "admin", "doctor", "tcm", "reception");
+    /** 复诊记录内容校准（编辑）：医生岗、管理员与接诊岗（2026-10-04 放开，接诊可填写并编辑复诊记录） */
+    private static final Set<String> EDIT_ROLES = Set.of("doctor", "admin", "reception");
     private static final Set<String> VIEW_ROLES =
         Set.of("admin", "quality", "reception", "inspection", "tcm", "doctor", "nurse", "nursing", "lab", "ecg", "ultrasound");
 

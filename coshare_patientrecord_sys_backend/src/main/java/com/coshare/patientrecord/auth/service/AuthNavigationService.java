@@ -508,7 +508,7 @@ public class AuthNavigationService {
         // 护理随访留痕监控台：护理部与管理员可见
         // 护理随访监控台（/nursing/follow-up-monitor）仍在 staging 验证，本分支暂不授予
         Set<String> opsDashboard = paths("/ops/dashboard");
-        // 复查预约登记：检查/医护可写，前台/导诊只读（写权限在 RecheckScheduleService 硬闸门）
+        // 复查预约登记：检查/医护/接诊可写，前台(导诊)只读（写权限在 RecheckScheduleService 硬闸门）
         Set<String> recheckSchedule = paths("/patients/recheck-schedule");
         Map<String, List<String>> recheckRead = permissions("recheckSchedule=recheck:read");
         Map<String, List<String>> recheckEdit = permissions("recheckSchedule=recheck:read,recheck:edit");
@@ -564,7 +564,7 @@ public class AuthNavigationService {
             "clinicQueueWorkbench=queue:read,inspection:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play",
             "diseaseTemplateManage=diseaseTemplate:read,diseaseTemplate:create,diseaseTemplate:update,diseaseTemplate:promote"
         ), inventoryStaffButtons)));
-        result.put("reception", role(union(patientFlow, preAi, clinicQueue, recheckSchedule), mergePermissions(recheckRead, permissions(
+        result.put("reception", role(union(patientFlow, preAi, clinicQueue, recheckSchedule), mergePermissions(recheckEdit, permissions(
             "home=view", "patientsOverview=patient:read,field:read", "patientList=patient:read", "patientDetail=field:read,field:edit,document:read",
             "clinicQueueWorkbench=queue:read,reception:operate,room:control,audit:read", "clinicQueueDisplayMenu=display:read,announcement:play"
         ))));
