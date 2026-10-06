@@ -63,6 +63,11 @@
           <span class="archive-direct-arrow">›</span>
         </button>
       </div>
+
+      <!-- 质量安全每日一条（全员）：核心制度条款轮转 + 打卡 + 每月小测 + 制度库 -->
+      <div class="welcome-policy-entry">
+        <CorePolicyDailyCard />
+      </div>
     </section>
 
     <el-dialog
@@ -124,6 +129,7 @@ import { Search } from "@element-plus/icons-vue";
 import { getPreAiPatientCasesApi, type PreAiPatientCase } from "@/api/modules/clinic/preAi";
 import { ElMessage } from "element-plus";
 import { roleLabel } from "@/config/fieldPermissions";
+import CorePolicyDailyCard from "@/views/home/components/CorePolicyDailyCard.vue";
 import { getHomeSummaryApi, type HomeSummary } from "@/api/modules/clinic/homeSummary";
 
 const router = useRouter();
@@ -835,6 +841,12 @@ onBeforeUnmount(() => {
   margin-top: 18px;
   display: flex;
   justify-content: center;
+}
+
+// 每日一条卡在欢迎页的宽度约束（卡片壳样式由组件自带）
+.welcome-policy-entry {
+  width: min(640px, 94vw);
+  margin-top: 10px;
 }
 .archive-direct-btn {
   display: inline-flex;

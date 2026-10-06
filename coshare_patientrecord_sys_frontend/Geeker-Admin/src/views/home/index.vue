@@ -13,6 +13,9 @@
       <el-button circle :icon="Refresh" :loading="dashboardLoading" title="刷新待办" @click="reloadAll" />
     </header>
 
+    <!-- 质量安全每日一条（全员）：核心制度条款轮转 + 打卡 + 每月小测 + 制度库 -->
+    <CorePolicyDailyCard />
+
     <template v-if="showPatientBoard">
       <!-- 真待办聚合：可执行的大数字入口卡 -->
       <section v-loading="dashboardLoading" class="todo-grid">
@@ -287,6 +290,7 @@ import AnimatedShinyText from "@/components/inspira/AnimatedShinyText.vue";
 import BlurFade from "@/components/inspira/BlurFade.vue";
 import BorderBeam from "@/components/inspira/BorderBeam.vue";
 import NumberTicker from "@/components/inspira/NumberTicker.vue";
+import CorePolicyDailyCard from "./components/CorePolicyDailyCard.vue";
 import { useHomeDashboard } from "./composables/useHomeDashboard";
 import { loadRecallSummaryApi, type RecallRow } from "@/api/modules/clinic/followUp";
 
