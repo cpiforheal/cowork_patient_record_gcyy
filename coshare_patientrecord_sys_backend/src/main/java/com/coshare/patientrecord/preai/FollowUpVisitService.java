@@ -90,7 +90,49 @@ public class FollowUpVisitService {
             }
         }
         audit(patientCaseId, "followup.create", user, "创建第 " + seq + " 次复诊记录：" + truncate(reason, 80));
+        linkRecheckSchedule(visitId, patientCaseId, nextReviewDate, reason, user, now);
         return visitWithImages(visitId);
+    }
+
+    /**
+     * 复诊带出复查预约：填写了复诊日期的复诊记录自动生成一条复查登记（source_id 回指复诊记录），
+     * 由复查预约登记看板统一跟进。同日同名已有有效登记时静默跳过；联动失败不影响复诊登记本身。
+     */
+    private void linkRecheckSchedule(String visitId, String patientCaseId, String nextReviewDate, String reason,
+                                     SessionUser user, String now) {
+        String reviewDate = nextReviewDate.length() > 10 ? nextReviewDate.substring(0, 10) : nextReviewDate;
+        if (reviewDate.isBlank()) return;
+        try {
+            LocalDate.parse(reviewDate);
+        } catch (RuntimeException ignored) {
+            return;
+        }
+        try {
+            List<String> jsons = jdbcTemplate.queryForList(
+                "SELECT patient_json FROM pre_ai_patient_cases WHERE id = ?", String.class, patientCaseId);
+            if (jsons.isEmpty()) return;
+            JsonNode patient = objectMapper.readTree(jsons.get(0));
+            String name = patient.path("patientName").asText("");
+            if (name.isBlank()) name = patient.path("name").asText("");
+            if (name.isBlank()) return;
+            String phone = patient.path("phone").asText("");
+            Integer duplicate = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM clinic_recheck_schedule "
+                    + "WHERE plan_date = ? AND patient_name = ? AND status NOT IN ('CANCELLED', 'RESCHEDULED')",
+                Integer.class, reviewDate, name);
+            if (duplicate != null && duplicate > 0) return;
+            jdbcTemplate.update("""
+                INSERT INTO clinic_recheck_schedule (
+                  id, plan_date, patient_name, phone, note, status, status_note, source_id, rescheduled_to,
+                  created_by, created_at, updated_by, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'PLANNED', '', ?, '', ?, ?, ?, ?)
+                """,
+                "crs-" + UUID.randomUUID(), reviewDate, name, phone,
+                truncate("复诊带出 · " + reason, 200), visitId, user.name(), now, user.name(), now);
+            audit(patientCaseId, "followup.recheck.linked", user, "复诊带出复查预约：" + reviewDate + " " + truncate(reason, 60));
+        } catch (Exception ignored) {
+            // 带出失败不应阻塞复诊登记；复查登记可由岗位手工补录
+        }
     }
 
     public Map<String, Object> list(String patientCaseId, SessionUser user) {
