@@ -45,10 +45,21 @@ export const monthGrid = (month: string) => {
   return Array.from({ length: 42 }, (_, i) => fmt(start.add(i, "day")));
 };
 
-/** 复查常用间隔，供登记 / 改期快捷选择 */
+/** 复查常用间隔，供登记快捷选择（登记只会约未来的日子） */
 export const QUICK_OFFSETS = [
   { label: "明天", days: 1 },
   { label: "后天", days: 2 },
+  { label: "1 周后", days: 7 },
+  { label: "2 周后", days: 14 },
+  { label: "1 个月后", days: 30 }
+];
+
+/** 改期快捷选项：支持"患者提前到来"把日期改到今天或提前（后端允许任意日期） */
+export const RESCHEDULE_OFFSETS = [
+  { label: "改到今天", days: 0 },
+  { label: "提前 1 天", days: -1 },
+  { label: "提前 2 天", days: -2 },
+  { label: "明天", days: 1 },
   { label: "1 周后", days: 7 },
   { label: "2 周后", days: 14 },
   { label: "1 个月后", days: 30 }

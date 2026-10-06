@@ -8,6 +8,32 @@
       </el-radio-group>
     </header>
 
+    <!-- 汇总条：今日待到 / 逾期未补标 / 未来预约 / 到院率 -->
+    <nav v-if="mode === 'recent'" class="rk-metrics" aria-label="复查汇总">
+      <button type="button" class="rk-metric" @click="scrollToBlock('today')">
+        <span>今日待到</span>
+        <strong :class="{ 'is-warn': todayPending > 0 }">{{ todayPending }}</strong>
+      </button>
+      <button
+        type="button"
+        class="rk-metric"
+        :class="{ 'is-alert': pendingPast.length > 0 }"
+        :disabled="!pendingPast.length"
+        @click="scrollToBlock('pending')"
+      >
+        <span>逾期未补标</span>
+        <strong>{{ pendingPast.length }}</strong>
+      </button>
+      <div class="rk-metric">
+        <span>未来 {{ FUTURE_DAYS }} 天预约</span>
+        <strong>{{ upcomingTotal }}</strong>
+      </div>
+      <div class="rk-metric">
+        <span>区间到院率</span>
+        <strong>{{ board?.total.arrivalRate != null ? `${board.total.arrivalRate}%` : "—" }}</strong>
+      </div>
+    </nav>
+
     <div class="rk-layout">
       <div class="rk-main">
         <!-- 登记：多行表格，每行独立日期，支持粘贴多个姓名 -->
@@ -15,7 +41,7 @@
 
         <!-- 近期：今天 → 待补标 → 接下来（只列有登记的日期） -->
         <div v-if="mode === 'recent'" v-loading="loading" class="rk-body">
-          <section class="rk-block rk-today" aria-label="今天">
+          <section ref="todayBlockEl" class="rk-block rk-today" aria-label="今天">
             <h3>
               <span>今天 {{ dateTitle(today, today) }}</span>
               <span class="rk-count">
@@ -37,7 +63,7 @@
             <p v-else class="rk-empty">今天没有登记复查的患者</p>
           </section>
 
-          <section v-if="pendingPast.length" class="rk-block rk-pending" aria-label="待补标">
+          <section v-if="pendingPast.length" ref="pendingBlockEl" class="rk-block rk-pending" aria-label="待补标">
             <h3>
               <span>以前的还没标到/没来</span>
               <span class="rk-count">{{ pendingPast.length }} 人，请核对后补标</span>
@@ -149,24 +175,34 @@
       </p>
       <div class="rk-add-date">
         <button
-          v-for="quick in QUICK_OFFSETS"
+          v-for="quick in RESCHEDULE_OFFSETS"
           :key="quick.days"
           type="button"
           class="rk-quick"
           :class="{ on: resched.newDate === offsetDate(quick.days) }"
-          @click="resched.newDate = offsetDate(quick.days)"
+          @click="setReschedDate(offsetDate(quick.days))"
         >
           {{ quick.label }}
         </button>
       </div>
       <el-form label-width="64px" style="margin-top: 12px" @submit.prevent>
         <el-form-item label="新日期">
-          <PlanDatePicker v-model="resched.newDate" :today="today" :counts="counts" width="160px" />
+          <PlanDatePicker
+            :model-value="resched.newDate"
+            :today="today"
+            :counts="counts"
+            width="160px"
+            aria-label="改期后日期"
+            @update:model-value="setReschedDate"
+          />
         </el-form-item>
         <el-form-item label="原因">
           <el-input v-model="resched.reason" maxlength="200" placeholder="选填，如：患者来电改约" />
         </el-form-item>
       </el-form>
+      <el-checkbox v-model="resched.earlyArrival" @change="onEarlyArrivalChange">
+        患者已提前到院：改到今天并自动标记到院
+      </el-checkbox>
       <template #footer>
         <el-button @click="resched.visible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitReschedule">改到 {{ resched.newDate.slice(5) }}</el-button>
@@ -215,7 +251,7 @@ import EntryRow, { type RowAction } from "./EntryRow.vue";
 import EntryForm from "./EntryForm.vue";
 import MiniCalendar from "./MiniCalendar.vue";
 import PlanDatePicker from "./PlanDatePicker.vue";
-import { QUICK_OFFSETS, dateTitle, fmt, monthGrid } from "./dates";
+import { RESCHEDULE_OFFSETS, dateTitle, fmt, monthGrid } from "./dates";
 
 /** 近期视图的加载窗口：往前 30 天找漏标，往后 60 天看预约（后端单次上限 92 天） */
 const PAST_DAYS = 30;
@@ -240,9 +276,18 @@ const visible = (entries: RecheckEntry[]) => [
 
 const todayDay = computed(() => board.value?.days.find(d => d.date === today.value));
 const todayEntries = computed(() => visible(todayDay.value?.entries ?? []));
+const todayPending = computed(() => todayDay.value?.stats.pending ?? 0);
 const pendingPast = computed(() =>
   (board.value?.days ?? []).filter(d => d.relation === "past").flatMap(d => d.entries.filter(e => e.status === "PLANNED"))
 );
+
+/** 汇总条点击滚动定位 */
+const todayBlockEl = ref<HTMLElement | null>(null);
+const pendingBlockEl = ref<HTMLElement | null>(null);
+const scrollToBlock = (target: "today" | "pending") => {
+  const el = target === "today" ? todayBlockEl.value : pendingBlockEl.value;
+  el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+};
 const upcoming = computed(() => (board.value?.days ?? []).filter(d => d.relation === "future" && d.entries.length > 0));
 const upcomingTotal = computed(() => upcoming.value.reduce((sum, d) => sum + d.stats.planned, 0));
 const historyDays = computed(() => [...(history.value?.days ?? [])].reverse().filter(d => d.entries.length > 0));
@@ -333,12 +378,21 @@ const mark = (entry: RecheckEntry, status: "ARRIVED" | "ABSENT" | "PLANNED") => 
   void run(() => markRecheckApi(entry.id, status), `${entry.patientName}：${text}`);
 };
 
-const resched = reactive({ visible: false, entry: null as RecheckEntry | null, newDate: "", reason: "" });
+const resched = reactive({ visible: false, entry: null as RecheckEntry | null, newDate: "", reason: "", earlyArrival: false });
 const edit = reactive({ visible: false, entry: null as RecheckEntry | null, planDate: "", patientName: "", phone: "", note: "" });
+
+/** 改期日期统一入口：勾选"提前到院"后手动改到其他日期时自动取消勾选 */
+const setReschedDate = (value: string) => {
+  resched.newDate = value;
+  if (resched.earlyArrival && value !== today.value) resched.earlyArrival = false;
+};
+const onEarlyArrivalChange = (value: unknown) => {
+  if (value === true) resched.newDate = today.value;
+};
 
 const act = (entry: RecheckEntry, action: RowAction) => {
   if (action === "reschedule") {
-    Object.assign(resched, { visible: true, entry, newDate: fmt(dayjs(entry.planDate).add(7, "day")), reason: "" });
+    Object.assign(resched, { visible: true, entry, newDate: fmt(dayjs(entry.planDate).add(7, "day")), reason: "", earlyArrival: false });
   } else if (action === "edit") {
     Object.assign(edit, {
       visible: true,
@@ -363,10 +417,18 @@ const act = (entry: RecheckEntry, action: RowAction) => {
 const submitReschedule = async () => {
   const entry = resched.entry;
   if (!entry || !resched.newDate) return ElMessage.warning("请选择新日期");
+  if (resched.newDate === entry.planDate) return ElMessage.warning("新日期与原日期相同，无需改期");
   const ok = await run(
     () => rescheduleRecheckApi(entry.id, resched.newDate, resched.reason.trim()),
     `${entry.patientName} 已改到 ${dateTitle(resched.newDate, today.value)}`
   );
+  // 提前到院：改期刷新后按 sourceId 找到带出的新条目，自动标记到院
+  if (ok && resched.earlyArrival) {
+    const moved = (board.value?.days ?? [])
+      .flatMap(d => d.entries)
+      .find(e => e.sourceId === entry.id && e.status === "PLANNED");
+    if (moved) await run(() => markRecheckApi(moved.id, "ARRIVED"), `${moved.patientName} 已标记到院`);
+  }
   if (ok) resched.visible = false;
 };
 
@@ -426,6 +488,77 @@ onMounted(() => {
   h2 {
     margin: 0;
     font-size: 18px;
+  }
+}
+// 汇总条：今日待到 / 逾期未补标 / 未来预约 / 到院率
+.rk-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.rk-metric {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 130px;
+  padding: 10px 14px;
+  text-align: left;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  transition:
+    border-color var(--motion-control, 180ms) var(--ease-out, ease),
+    box-shadow var(--motion-control, 180ms) var(--ease-out, ease),
+    transform var(--motion-control, 180ms) var(--ease-out, ease);
+
+  span {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+
+  strong {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--el-text-color-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  strong.is-warn {
+    color: #b45309;
+  }
+
+  &.is-alert {
+    border-color: color-mix(in srgb, #b45309 45%, var(--el-border-color-lighter));
+
+    strong {
+      color: #b45309;
+    }
+  }
+
+  &:not(:disabled) {
+    cursor: pointer;
+
+    @media (hover: hover) and (pointer: fine) {
+      &:hover {
+        border-color: color-mix(in srgb, #0f766e 40%, var(--el-border-color-lighter));
+        box-shadow: 0 8px 20px color-mix(in srgb, #0f766e 10%, transparent);
+        transform: translateY(-1px);
+      }
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rk-metric {
+    transition: none;
   }
 }
 .rk-add-date {
