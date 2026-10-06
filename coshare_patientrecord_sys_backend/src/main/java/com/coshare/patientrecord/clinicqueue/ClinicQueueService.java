@@ -716,7 +716,11 @@ public class ClinicQueueService {
         String stage = text(task, "stageCode");
         String current = text(task, "status");
         if ("COMPLETED".equals(current)) return;
-        if (!Set.of("WAITING", "CALLED", "ARRIVED", "IN_SERVICE", "INTERRUPTED", "ON_HOLD", "MISSED").contains(current)) {
+        // SKIPPED：登记时选择胃肠镜直达，检查任务被跳过——前台退回修改后检查室仍需重做并完成；
+        // INACTIVE：患者折返恢复时检查已完成，任务停用——检查阶段被退回重做后同样需要完成；
+        // TEMPORARILY_AWAY：患者暂离但临床阶段已完成。三类状态均应允许完成，否则岗位被卡死。
+        if (!Set.of("WAITING", "CALLED", "ARRIVED", "IN_SERVICE", "INTERRUPTED", "ON_HOLD", "MISSED",
+            "SKIPPED", "INACTIVE", "TEMPORARILY_AWAY").contains(current)) {
             throw conflict("当前排队任务不可完成");
         }
         updateTask(task, "COMPLETED", user, reason, "completed_at = ?", now());
