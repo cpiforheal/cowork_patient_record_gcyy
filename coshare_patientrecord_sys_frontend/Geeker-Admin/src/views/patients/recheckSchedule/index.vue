@@ -33,6 +33,14 @@
         <strong>{{ board?.total.arrivalRate != null ? `${board.total.arrivalRate}%` : "—" }}</strong>
       </div>
     </nav>
+    <el-alert
+      v-if="board?.deduplicatedCount"
+      class="rk-dedup-notice"
+      type="info"
+      :closable="false"
+      show-icon
+      :title="`本次统计已合并 ${board.deduplicatedCount} 条重复登记，原始记录未删除。`"
+    />
 
     <div class="rk-layout">
       <div class="rk-main">
@@ -83,16 +91,11 @@
           </section>
 
           <section class="rk-block" aria-label="接下来">
-            <button
-              type="button"
-              class="rk-fold-head"
-              :aria-expanded="upcomingOpen"
-              @click="upcomingOpen = !upcomingOpen"
-            >
+            <button type="button" class="rk-fold-head" :aria-expanded="upcomingOpen" @click="upcomingOpen = !upcomingOpen">
               <span>接下来</span>
               <span class="rk-count">
-                未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人<template v-if="!upcomingOpen && nextUpcoming"
-                  > · 最近 {{ dateTitle(nextUpcoming.date, today) }} {{ nextUpcoming.stats.planned }} 人</template
+                未来 {{ FUTURE_DAYS }} 天共 {{ upcomingTotal }} 人<template v-if="!upcomingOpen && nextUpcoming">
+                  · 最近 {{ dateTitle(nextUpcoming.date, today) }} {{ nextUpcoming.stats.planned }} 人</template
                 >
               </span>
               <el-icon class="rk-fold-arrow" :class="{ open: upcomingOpen }"><ArrowDown /></el-icon>
@@ -410,7 +413,13 @@ const onEarlyArrivalChange = (value: unknown) => {
 
 const act = (entry: RecheckEntry, action: RowAction) => {
   if (action === "reschedule") {
-    Object.assign(resched, { visible: true, entry, newDate: fmt(dayjs(entry.planDate).add(7, "day")), reason: "", earlyArrival: false });
+    Object.assign(resched, {
+      visible: true,
+      entry,
+      newDate: fmt(dayjs(entry.planDate).add(7, "day")),
+      reason: "",
+      earlyArrival: false
+    });
   } else if (action === "edit") {
     Object.assign(edit, {
       visible: true,
@@ -442,9 +451,7 @@ const submitReschedule = async () => {
   );
   // 提前到院：改期刷新后按 sourceId 找到带出的新条目，自动标记到院
   if (ok && resched.earlyArrival) {
-    const moved = (board.value?.days ?? [])
-      .flatMap(d => d.entries)
-      .find(e => e.sourceId === entry.id && e.status === "PLANNED");
+    const moved = (board.value?.days ?? []).flatMap(d => d.entries).find(e => e.sourceId === entry.id && e.status === "PLANNED");
     if (moved) await run(() => markRecheckApi(moved.id, "ARRIVED"), `${moved.patientName} 已标记到院`);
   }
   if (ok) resched.visible = false;
@@ -621,6 +628,9 @@ onMounted(() => {
   &:disabled {
     cursor: default;
   }
+}
+.rk-dedup-notice {
+  margin-top: 12px;
 }
 @media (prefers-reduced-motion: reduce) {
   .rk-metric {

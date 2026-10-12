@@ -75,8 +75,9 @@ public class RecheckScheduleService {
 
     /** 纯函数：按天分组 + 统计，便于单测。 */
     static Map<String, Object> buildBoard(LocalDate from, LocalDate to, LocalDate today, List<Entry> entries) {
+        List<Entry> visibleEntries = deduplicateEntries(entries);
         Map<String, List<Entry>> byDate = new LinkedHashMap<>();
-        for (Entry entry : entries) byDate.computeIfAbsent(entry.planDate(), key -> new ArrayList<>()).add(entry);
+        for (Entry entry : visibleEntries) byDate.computeIfAbsent(entry.planDate(), key -> new ArrayList<>()).add(entry);
 
         List<Map<String, Object>> days = new ArrayList<>();
         Stats total = new Stats();
@@ -98,11 +99,60 @@ public class RecheckScheduleService {
         result.put("today", today.toString());
         result.put("days", days);
         result.put("total", total.toMap(false));
+        result.put("deduplicatedCount", entries.size() - visibleEntries.size());
         // 过去日期仍是"待到"的条目：交接时需补标到/未到
-        result.put("unconfirmedPast", entries.stream()
+        result.put("unconfirmedPast", visibleEntries.stream()
             .filter(entry -> PLANNED.equals(entry.status()) && LocalDate.parse(entry.planDate()).isBefore(today))
             .count());
         return result;
+    }
+
+    /**
+     * 兼容历史重复登记：复诊带出记录有 sourceId，手动登记通常没有；电话缺失时只在这两类记录之间按姓名合并。
+     * 不合并两个不同电话的同名患者，避免为修复重复而吞掉真实预约。
+     */
+    static List<Entry> deduplicateEntries(List<Entry> entries) {
+        List<Entry> result = new ArrayList<>();
+        for (Entry entry : entries) {
+            if (RESCHEDULED.equals(entry.status()) || CANCELLED.equals(entry.status())) {
+                result.add(entry);
+                continue;
+            }
+            int duplicateIndex = -1;
+            for (int i = 0; i < result.size(); i++) {
+                if (samePatient(entry, result.get(i))) {
+                    duplicateIndex = i;
+                    break;
+                }
+            }
+            if (duplicateIndex < 0) {
+                result.add(entry);
+            } else if (duplicatePriority(entry) > duplicatePriority(result.get(duplicateIndex))) {
+                result.set(duplicateIndex, entry);
+            }
+        }
+        return result;
+    }
+
+    static boolean samePatient(Entry left, Entry right) {
+        if (!left.planDate().equals(right.planDate())) return false;
+        String leftName = nz(left.patientName()).trim().replaceAll("\\s+", " ");
+        String rightName = nz(right.patientName()).trim().replaceAll("\\s+", " ");
+        if (leftName.isBlank() || !leftName.equals(rightName)) return false;
+        String leftPhone = normalizePhone(left.phone());
+        String rightPhone = normalizePhone(right.phone());
+        if (!leftPhone.isBlank() && leftPhone.equals(rightPhone)) return true;
+        return (leftPhone.isBlank() || rightPhone.isBlank())
+            && (!nz(left.sourceId()).isBlank() || !nz(right.sourceId()).isBlank());
+    }
+
+    private static int duplicatePriority(Entry entry) {
+        int status = switch (entry.status()) {
+            case ARRIVED, ABSENT -> 3;
+            case PLANNED -> 1;
+            default -> 0;
+        };
+        return status * 2 + (nz(entry.sourceId()).isBlank() ? 0 : 1);
     }
 
     // ---------- 写操作 ----------
@@ -243,13 +293,16 @@ public class RecheckScheduleService {
 
     // ---------- internals ----------
 
-    /** 同日同名同电话的有效登记视为重复（同名不同电话允许，避免误挡同名患者）。 */
+    /** 同日同人的有效登记视为重复；电话缺失时仅与复诊带出记录按姓名兼容匹配。 */
     private void ensureNoDuplicate(String planDate, String name, String phone, String excludeId) {
-        Integer count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM clinic_recheck_schedule WHERE plan_date = ? AND patient_name = ? AND phone = ? "
-                + "AND status NOT IN (?, ?) AND id <> ?",
-            Integer.class, planDate, name, phone, CANCELLED, RESCHEDULED, excludeId == null ? "" : excludeId);
-        if (count != null && count > 0) {
+        List<Entry> candidates = jdbcTemplate.query(
+            "SELECT " + COLUMNS + " FROM clinic_recheck_schedule WHERE plan_date = ? AND status NOT IN (?, ?)",
+            (rs, rowNum) -> mapEntry(rs), planDate, CANCELLED, RESCHEDULED);
+        Entry incoming = new Entry("", planDate, name, phone, "", PLANNED, "", "", null, "", "", "", "");
+        boolean duplicate = candidates.stream()
+            .filter(entry -> excludeId == null || !excludeId.equals(entry.id()))
+            .anyMatch(entry -> samePatient(incoming, entry));
+        if (duplicate) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, planDate + " 已登记过 " + name + (phone.isEmpty() ? "" : "（" + phone + "）"));
         }
     }

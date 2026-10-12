@@ -45,6 +45,7 @@ export interface RecheckBoard {
   days: RecheckDay[];
   total: RecheckStats;
   unconfirmedPast: number;
+  deduplicatedCount: number;
   canEdit: boolean;
 }
 

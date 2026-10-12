@@ -51,6 +51,28 @@ class RecheckScheduleServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void deduplicatesManualAndFollowUpRowsWithoutMergingDifferentPhones() {
+        List<Entry> entries = List.of(
+            entry("auto", "2026-10-02", "张三", "13800001111", "PLANNED", "fuv-1"),
+            entry("manual", "2026-10-02", "张三", "", "PLANNED", null),
+            entry("other", "2026-10-02", "张三", "13900002222", "PLANNED", null),
+            entry("manual-two", "2026-10-02", "李四", "", "PLANNED", null),
+            entry("manual-three", "2026-10-02", "李四", "", "PLANNED", null)
+        );
+
+        List<Entry> deduplicated = RecheckScheduleService.deduplicateEntries(entries);
+
+        assertThat(deduplicated).extracting(Entry::id).containsExactly("auto", "other", "manual-two", "manual-three");
+        Map<String, Object> board = RecheckScheduleService.buildBoard(
+            TODAY, TODAY.plusDays(1), TODAY, entries);
+        assertThat(board.get("deduplicatedCount")).isEqualTo(1);
+        List<Map<String, Object>> days = (List<Map<String, Object>>) board.get("days");
+        Map<String, Object> stats = (Map<String, Object>) days.get(1).get("stats");
+        assertThat(stats.get("planned")).isEqualTo(4L);
+    }
+
+    @Test
     void transitionsGuardFutureDatesAndClosedEntries() {
         RecheckScheduleService.checkTransition("PLANNED", "ARRIVED", TODAY, TODAY);
         RecheckScheduleService.checkTransition("ARRIVED", "ABSENT", TODAY.minusDays(3), TODAY);
@@ -83,6 +105,10 @@ class RecheckScheduleServiceTest {
 
     private static Entry entry(String id, String date, String status) {
         return new Entry(id, date, "患者" + id, "", "", status, "", null, null, "u", "", "u", "");
+    }
+
+    private static Entry entry(String id, String date, String name, String phone, String status, String sourceId) {
+        return new Entry(id, date, name, phone, "", status, "", sourceId, null, "u", "", "u", "");
     }
 
     private static SessionUser user(String role) {
