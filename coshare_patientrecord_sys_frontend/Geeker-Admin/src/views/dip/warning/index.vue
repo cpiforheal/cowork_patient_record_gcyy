@@ -1,227 +1,271 @@
 <template>
-  <div class="dip-warning">
-    <header class="dw-head">
-      <div class="dw-head-main">
+  <div class="dip">
+    <header class="dip-head">
+      <div class="dip-head-main">
         <h2>DIP 费用预警</h2>
         <p>
-          按 DIP 病组预估费用监控在院患者费用水位：达到 <b class="t-warn">85%</b> 预警、<b class="t-danger">95%</b> 超限需停止计费。
+          病组由医生确定的<span class="dip-em">主诊断</span>匹配本标准费用表得出；当前费用取自 HIS（系统无法直连，由截图识别或人工录入）。
+          水位 ≥ <b class="is-warn">85%</b> 预警，≥ <b class="is-danger">95%</b> 需停止计费办理出院。
         </p>
       </div>
-      <div class="dw-head-actions">
-        <el-button :icon="Upload" @click="openOcrDialog">上传 HIS 费用截图</el-button>
-        <el-button :icon="EditPen" @click="openFeeDialog()">手动录入费用</el-button>
-        <el-button :icon="Refresh" @click="reloadDemo">刷新</el-button>
+      <div class="dip-head-actions">
+        <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
+        <el-button :icon="EditPen" type="primary" @click="openFeeDialog()">录入当前费用</el-button>
       </div>
     </header>
 
-    <nav class="dw-metrics" aria-label="费用预警汇总">
-      <div class="dw-metric">
+    <!-- 超限告警横幅：页面最显眼的预警强调 -->
+    <section v-if="dangerRows.length" class="dip-alarm">
+      <div class="dip-alarm-main">
+        <span class="dip-alarm-count">{{ dangerRows.length }}</span>
+        <div class="dip-alarm-text">
+          <strong>位患者已达 95% 超限线，应停止计费并办理出院</strong>
+          <span>
+            合计已超阈值
+            <b>{{ money(overrunAmount) }}</b>
+            <template v-if="dangerRows[0]">· 最高 {{ dangerRows[0].patientName }} {{ dangerRows[0].ratio.toFixed(1) }}%</template>
+          </span>
+        </div>
+      </div>
+      <el-button class="dip-alarm-btn" @click="focusDanger">只看超限患者</el-button>
+    </section>
+
+    <section class="dip-metrics">
+      <article class="dip-metric">
         <span>在院患者</span>
-        <strong>{{ rows.length }}</strong>
-      </div>
-      <div class="dw-metric">
-        <span>正常（&lt;85%）</span>
-        <strong class="t-ok">{{ summary.normal }}</strong>
-      </div>
-      <div class="dw-metric" :class="{ 'is-warn': summary.warning > 0 }">
-        <span>预警（85%~95%）</span>
-        <strong class="t-warn">{{ summary.warning }}</strong>
-      </div>
-      <div class="dw-metric" :class="{ 'is-danger': summary.danger > 0 }">
-        <span>超限（≥95%）</span>
-        <strong class="t-danger">{{ summary.danger }}</strong>
-      </div>
-      <div class="dw-metric">
-        <span>测算超支金额</span>
-        <strong :class="summary.overrunAmount > 0 ? 't-danger' : 't-ok'">
-          {{ summary.overrunAmount > 0 ? `¥${summary.overrunAmount.toFixed(2)}` : "¥0.00" }}
-        </strong>
-      </div>
-    </nav>
+        <strong>{{ summary.total }}</strong>
+      </article>
+      <article class="dip-metric is-ok">
+        <span>正常 &lt;85%</span>
+        <strong>{{ summary.normal }}</strong>
+      </article>
+      <article class="dip-metric is-warn" :class="{ 'is-hot': summary.warning > 0 }">
+        <span>预警 85%~95%</span>
+        <strong>{{ summary.warning }}</strong>
+      </article>
+      <article class="dip-metric is-danger" :class="{ 'is-critical': summary.danger > 0 }">
+        <span>超限 ≥95%</span>
+        <strong>{{ summary.danger }}</strong>
+      </article>
+      <article class="dip-metric is-pending">
+        <span>待录费用</span>
+        <strong>{{ pendingCount }}</strong>
+      </article>
+      <article class="dip-metric is-unmatched">
+        <span>病组未匹配</span>
+        <strong>{{ unmatchedCount }}</strong>
+      </article>
+    </section>
 
     <el-alert
-      class="dw-demo-notice"
-      type="info"
+      v-if="summary.unmatched"
+      class="dip-coverage"
+      type="warning"
       :closable="false"
       show-icon
-      title="当前为演示数据"
-      description="页面费用水位已按真实 DIP 病组映射表（24 个病组）与 HIS 截图费用计算，可作为功能预览；“上传 HIS 截图”暂未接入真实 OCR 服务。"
-    />
+      :title="`有 ${summary.unmatched} 位患者的主诊断不在标准病组表内，无法预估费用`"
+    >
+      <div class="dip-coverage-list">
+        未覆盖主诊断：
+        <el-tag v-for="item in unmatchedDiagnoses" :key="item.diagnosis" size="small" type="warning" effect="plain">
+          {{ item.diagnosis }}（{{ item.count }}）
+        </el-tag>
+      </div>
+    </el-alert>
 
-    <section class="dw-toolbar">
-      <el-input
-        v-model="keyword"
-        class="dw-search"
-        placeholder="搜索姓名 / 住院号 / DIP 病组"
-        clearable
-        :prefix-icon="Search"
-      />
+    <section class="dip-toolbar">
+      <el-input v-model="keyword" class="dip-search" placeholder="搜索姓名 / 主诊断 / 病组" clearable :prefix-icon="Search" />
       <el-radio-group v-model="levelFilter" size="small">
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="danger">超限</el-radio-button>
         <el-radio-button value="warning">预警</el-radio-button>
-        <el-radio-button value="normal">正常</el-radio-button>
+        <el-radio-button value="pending">待录费用</el-radio-button>
+        <el-radio-button value="unmatched">未匹配</el-radio-button>
       </el-radio-group>
-      <el-select v-model="sortBy" class="dw-sort" size="default" placeholder="排序">
-        <el-option label="按费用水位降序" value="ratioDesc" />
-        <el-option label="按当前费用降序" value="feeDesc" />
-        <el-option label="按入院日期降序" value="dateDesc" />
-      </el-select>
+      <div class="dip-toolbar-right">
+        <el-switch v-model="toggleDemo" inline-prompt active-text="演示水位" inactive-text="真实数据" />
+        <span class="dip-toolbar-hint">演示水位仅在前端预览，不写入数据库</span>
+      </div>
     </section>
 
-    <el-table :data="visibleRows" class="dw-table" row-key="admissionNo" :row-class-name="rowClass" stripe>
-      <el-table-column prop="admissionNo" label="住院号" width="118" />
-      <el-table-column prop="name" label="姓名" width="86" />
-      <el-table-column prop="diagnosis" label="诊断" width="100" />
-      <el-table-column label="DIP 病组" min-width="230">
+    <el-table
+      v-loading="loading"
+      :data="visibleRows"
+      row-key="patientId"
+      class="dip-table"
+      :row-class-name="rowClass"
+      :default-sort="{ prop: 'ratio', order: 'descending' }"
+      empty-text="暂无患者数据"
+    >
+      <el-table-column label="患者" width="132">
         <template #default="{ row }">
-          <div class="dw-group">
-            <span class="dw-group-code">{{ row.dipCode }}</span>
-            <span class="dw-group-name">{{ row.dipName }}</span>
+          <div class="dip-patient">
+            <strong>{{ row.patientName }}</strong>
+            <small>{{ row.doctor || "未指定医生" }}</small>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="预估费用" width="106" align="right">
-        <template #default="{ row }">{{ money(row.estimatedFee) }}</template>
-      </el-table-column>
-      <el-table-column label="当前费用" width="106" align="right">
+
+      <el-table-column label="主诊断 / 匹配病组" min-width="248">
         <template #default="{ row }">
-          <b>{{ money(row.currentFee) }}</b>
+          <div class="dip-diag">
+            <el-tag size="small" effect="dark" type="info">{{ row.diagnosis || "—" }}</el-tag>
+            <template v-if="row.matched">
+              <span class="dip-group-code">{{ row.groupCode }}</span>
+              <span class="dip-group-name">{{ row.groupName }}</span>
+            </template>
+            <span v-else class="dip-group-none">标准病组表未覆盖此主诊断</span>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="费用水位" width="220">
+
+      <el-table-column label="预估费用" width="112" align="right">
         <template #default="{ row }">
-          <div class="dw-waterline">
-            <div class="dw-bar">
-              <div class="dw-bar-fill" :class="`is-${row.level}`" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
-              <i class="dw-bar-mark" style="left: 85%" />
-              <i class="dw-bar-mark is-super" style="left: 95%" />
+          <span class="dip-num">{{ row.matched ? money(row.estimatedFee) : "—" }}</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="当前费用" width="118" align="right">
+        <template #default="{ row }">
+          <span v-if="row.displayFee !== null" class="dip-num is-strong">{{ money(row.displayFee) }}</span>
+          <span v-else class="dip-none">待录入</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="预警阈值 85% / 95%" width="168" align="right">
+        <template #default="{ row }">
+          <template v-if="row.matched">
+            <div class="dip-threshold" :class="{ 'is-cross-warn': row.ratio >= 85, 'is-cross-danger': row.ratio >= 95 }">
+              <b>{{ money(row.threshold85) }}</b>
+              <i>/</i>
+              <b>{{ money(row.threshold95) }}</b>
             </div>
-            <span class="dw-ratio" :class="`t-${row.level}`">{{ row.ratio.toFixed(1) }}%</span>
+          </template>
+          <span v-else class="dip-none">—</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="费用水位" width="260">
+        <template #default="{ row }">
+          <div v-if="row.matched" class="dip-waterline">
+            <div class="dip-bar">
+              <span class="dip-bar-zone is-ok" style="width: 85%" />
+              <span class="dip-bar-zone is-warn" style="width: 10%" />
+              <span class="dip-bar-zone is-danger" style="width: 5%" />
+              <span
+                v-if="row.displayFee !== null"
+                class="dip-bar-fill"
+                :class="`is-${row.level}`"
+                :style="{ width: `${clamp(row.ratio)}%` }"
+              />
+              <span class="dip-bar-tick is-warn" style="left: 85%" />
+              <span class="dip-bar-tick is-danger" style="left: 95%" />
+            </div>
+            <div class="dip-bar-legend">
+              <span class="is-warn">85%</span>
+              <span class="is-danger">95%</span>
+            </div>
+            <div class="dip-ratio" :class="`is-${row.level}`">
+              <template v-if="row.displayFee !== null">
+                <b>{{ row.ratio.toFixed(1) }}%</b>
+                <em v-if="row.overTo95 > 0">超阈值 {{ money(row.overTo95) }}</em>
+                <em v-else-if="row.restTo95 !== null">距 95% 还差 {{ money(Math.max(row.restTo95, 0)) }}</em>
+              </template>
+              <em v-else>尚未录入费用</em>
+            </div>
           </div>
+          <span v-else class="dip-none">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="阈值（85% / 95%）" width="150" align="right">
+
+      <el-table-column label="状态" width="104">
         <template #default="{ row }">
-          <span class="dw-threshold">{{ money(row.threshold85) }} / {{ money(row.threshold95) }}</span>
+          <el-tag :type="statusTagType(row.level)" effect="dark" size="small" class="dip-status">
+            {{ statusText(row.level) }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="92">
+
+      <el-table-column label="费用更新" width="150">
         <template #default="{ row }">
-          <el-tag :type="tagType(row.level)" effect="light" size="small">{{ levelText(row.level) }}</el-tag>
+          <span class="dip-updated">
+            {{ row.demoFee ? "演示预览" : row.feeUpdatedAt || "—" }}
+            <small v-if="!row.demoFee && row.feeSource">{{ row.feeSource === "SCREENSHOT" ? "截图识别" : "手工录入" }}</small>
+          </span>
         </template>
       </el-table-column>
-      <el-table-column prop="updatedAt" label="费用更新时间" width="150" />
-      <el-table-column label="操作" width="132" fixed="right">
+
+      <el-table-column label="操作" width="128" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
           <el-button link type="primary" @click="openFeeDialog(row)">录费用</el-button>
+          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
         </template>
       </el-table-column>
-      <template #empty>
-        <el-empty description="没有匹配的患者" :image-size="70" />
-      </template>
     </el-table>
 
-    <!-- 手动录入：当前唯一稳定的人工收敛入口 -->
-    <el-dialog v-model="feeDialogVisible" title="录入当前费用" width="460px">
-      <el-form v-if="feeTarget" label-width="96px">
+    <!-- 录入当前费用 -->
+    <el-dialog v-model="feeDialogVisible" title="录入 HIS 当前费用" width="470px">
+      <el-form v-if="feeTarget" label-width="104px">
         <el-form-item label="患者">
-          <span>{{ feeTarget.name }}（{{ feeTarget.admissionNo }}）</span>
+          <span>{{ feeTarget.patientName }} · {{ feeTarget.diagnosis }}</span>
         </el-form-item>
-        <el-form-item label="DIP 病组">
-          <span class="dw-group-name">{{ feeTarget.dipName }}</span>
+        <el-form-item label="匹配病组">
+          <span v-if="feeTarget.matched">{{ feeTarget.groupCode }} {{ feeTarget.groupName }}</span>
+          <span v-else class="dip-none">该主诊断未匹配到病组，需先维护映射表</span>
         </el-form-item>
         <el-form-item label="当前费用">
           <el-input-number v-model="feeInput" :min="0" :precision="2" :step="100" controls-position="right" />
         </el-form-item>
-        <el-form-item label="录入后水位">
-          <b :class="`t-${previewLevel}`">{{ previewRatio.toFixed(1) }}%</b>
-          <span class="dw-hint">（85% = {{ money(feeTarget.threshold85) }}，95% = {{ money(feeTarget.threshold95) }}）</span>
+        <el-form-item v-if="feeTarget.matched" label="录入后水位">
+          <div class="dip-fee-preview" :class="`is-${previewLevel}`">
+            <b>{{ previewRatio.toFixed(1) }}%</b>
+            <span>85% = {{ money(feeTarget.threshold85) }} / 95% = {{ money(feeTarget.threshold95) }}</span>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="feeDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitFee">保存</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!feeTarget?.matched" @click="submitFee">保存</el-button>
       </template>
     </el-dialog>
 
-    <!-- HIS 截图识别：演示解析流程与人工确认环节 -->
-    <el-dialog v-model="ocrDialogVisible" title="上传 HIS 费用截图" width="640px">
-      <el-upload
-        drag
-        :auto-upload="false"
-        :show-file-list="false"
-        accept="image/png,image/jpeg"
-        :on-change="handleOcrFile"
-      >
-        <div class="dw-upload">
-          <el-icon><Upload /></el-icon>
-          <p>把 HIS 住院患者费用列表截图拖到这里，或点击选择文件</p>
-          <small>支持 PNG / JPG。识别结果会进入人工确认，确认后才写入费用。</small>
+    <!-- 费用水位详情 -->
+    <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.patientName} · 费用水位` : '费用水位'" size="440px">
+      <div v-if="detailTarget" class="dip-detail">
+        <div class="dip-detail-hero" :class="`is-${detailTarget.level}`">
+          <span class="dip-detail-ratio">{{ detailTarget.displayFee === null ? "—" : `${detailTarget.ratio.toFixed(1)}%` }}</span>
+          <span class="dip-detail-label">{{ statusText(detailTarget.level) }}</span>
         </div>
-      </el-upload>
-      <el-alert
-        class="dw-ocr-notice"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="OCR 服务尚未接通"
-        description="本演示用“载入示例识别结果”模拟识别输出；接入真实 OCR 后，这里会回填截图中的住院号与未结算费用并自动匹配病组。"
-      />
-      <div class="dw-ocr-actions">
-        <el-button type="primary" plain @click="loadSampleOcr">载入示例识别结果</el-button>
-      </div>
-      <el-table v-if="ocrRows.length" :data="ocrRows" size="small" class="dw-ocr-table" max-height="240">
-        <el-table-column prop="admissionNo" label="住院号" width="120" />
-        <el-table-column prop="name" label="姓名" width="90" />
-        <el-table-column prop="currentFee" label="识别费用" width="110" align="right">
-          <template #default="{ row }">{{ money(row.currentFee) }}</template>
-        </el-table-column>
-        <el-table-column prop="matched" label="匹配" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.matched ? 'success' : 'info'" size="small">{{ row.matched ? "已匹配" : "未匹配" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="识别后水位">
-          <template #default="{ row }">
-            <span v-if="row.matched" :class="`t-${row.level}`">{{ row.ratio.toFixed(1) }}%</span>
-            <span v-else>—</span>
-          </template>
-        </el-table-column>
-      </el-table>
-      <template #footer>
-        <el-button @click="ocrDialogVisible = false">关闭</el-button>
-        <el-button type="primary" :disabled="!ocrRows.length" @click="applyOcrRows">确认写入费用</el-button>
-      </template>
-    </el-dialog>
 
-    <!-- 患者费用水位详情 -->
-    <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="420px">
-      <div v-if="detailTarget" class="dw-detail">
         <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="住院号">{{ detailTarget.admissionNo }}</el-descriptions-item>
-          <el-descriptions-item label="诊断">{{ detailTarget.diagnosis }}</el-descriptions-item>
-          <el-descriptions-item label="DIP 病组">{{ detailTarget.dipCode }}</el-descriptions-item>
-          <el-descriptions-item label="病组名称">{{ detailTarget.dipName }}</el-descriptions-item>
-          <el-descriptions-item label="预估费用">{{ money(detailTarget.estimatedFee) }}</el-descriptions-item>
-          <el-descriptions-item label="当前费用">{{ money(detailTarget.currentFee) }}</el-descriptions-item>
-          <el-descriptions-item label="85% 阈值">{{ money(detailTarget.threshold85) }}</el-descriptions-item>
-          <el-descriptions-item label="95% 阈值">{{ money(detailTarget.threshold95) }}</el-descriptions-item>
-          <el-descriptions-item label="剩余可用额度">{{ money(detailTarget.remainTo95) }}</el-descriptions-item>
+          <el-descriptions-item label="主诊断">{{ detailTarget.diagnosis }}</el-descriptions-item>
+          <el-descriptions-item label="病组">
+            <template v-if="detailTarget.matched">{{ detailTarget.groupCode }} · {{ detailTarget.groupName }}</template>
+            <span v-else class="dip-none">未匹配</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="预估费用">{{ detailTarget.matched ? money(detailTarget.estimatedFee) : "—" }}</el-descriptions-item>
+          <el-descriptions-item label="当前费用">
+            {{ detailTarget.displayFee === null ? "待录入" : money(detailTarget.displayFee) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="85% 阈值">{{ detailTarget.matched ? money(detailTarget.threshold85) : "—" }}</el-descriptions-item>
+          <el-descriptions-item label="95% 阈值">{{ detailTarget.matched ? money(detailTarget.threshold95) : "—" }}</el-descriptions-item>
         </el-descriptions>
 
-        <div class="dw-detail-bar">
-          <div class="dw-bar is-tall">
-            <div
-              class="dw-bar-fill"
+        <div v-if="detailTarget.matched" class="dip-detail-bar">
+          <div class="dip-bar is-tall">
+            <span class="dip-bar-zone is-ok" style="width: 85%" />
+            <span class="dip-bar-zone is-warn" style="width: 10%" />
+            <span class="dip-bar-zone is-danger" style="width: 5%" />
+            <span
+              v-if="detailTarget.displayFee !== null"
+              class="dip-bar-fill"
               :class="`is-${detailTarget.level}`"
-              :style="{ width: `${Math.min(detailTarget.ratio, 100)}%` }"
+              :style="{ width: `${clamp(detailTarget.ratio)}%` }"
             />
-            <i class="dw-bar-mark" style="left: 85%" />
-            <i class="dw-bar-mark is-super" style="left: 95%" />
+            <span class="dip-bar-tick is-warn" style="left: 85%" />
+            <span class="dip-bar-tick is-danger" style="left: 95%" />
           </div>
-          <div class="dw-detail-scale">
+          <div class="dip-detail-scale">
             <span>¥0</span>
             <span>{{ money(detailTarget.threshold85) }}</span>
             <span>{{ money(detailTarget.threshold95) }}</span>
@@ -235,7 +279,7 @@
           :closable="false"
           show-icon
           title="已达 95% 超限线"
-          description="如无特殊情况应停止计费并办理出院；继续产生费用将超出病组支付标准。"
+          description="如无特殊情况应停止计费并办理出院，继续产生费用将超出病组支付标准。"
         />
         <el-alert
           v-else-if="detailTarget.level === 'warning'"
@@ -243,8 +287,17 @@
           :closable="false"
           show-icon
           title="已达 85% 预警线"
-          description="请关注后续费用增长，提前安排出院或核对诊疗项目。"
+          description="请关注后续费用增长，提前核对诊疗项目并安排出院时间。"
         />
+        <el-alert
+          v-else-if="detailTarget.level === 'pending'"
+          type="info"
+          :closable="false"
+          show-icon
+          title="尚未录入当前费用"
+          description="从 HIS 截图或手工录入该患者未结算费用后，即可计算费用水位。"
+        />
+        <el-alert v-else-if="detailTarget.level === 'unmatched'" type="info" :closable="false" show-icon title="病组未匹配" />
         <el-alert v-else type="success" :closable="false" show-icon title="费用水位正常" />
       </div>
     </el-drawer>
@@ -252,270 +305,244 @@
 </template>
 
 <script setup lang="ts" name="dipWarning">
-import { computed, ref } from "vue";
-import { ElMessage, type UploadFile } from "element-plus";
-import { EditPen, Refresh, Search, Upload } from "@element-plus/icons-vue";
+import { computed, onMounted, ref } from "vue";
+import { ElMessage } from "element-plus";
+import { EditPen, Refresh, Search } from "@element-plus/icons-vue";
+import { getDipBoardApi, saveDipFeeApi, type DipPatientRow } from "@/api/modules/clinic/dipWarning";
 
-type Level = "normal" | "warning" | "danger";
+type Level = "normal" | "warning" | "danger" | "pending" | "unmatched";
 
-interface DipGroup {
-  code: string;
-  name: string;
-  estimatedFee: number;
-}
-
-interface PatientRow {
-  admissionNo: string;
-  name: string;
+interface ViewRow {
+  patientId: string;
+  patientName: string;
+  doctor: string;
   diagnosis: string;
-  dipCode: string;
-  dipName: string;
+  matched: boolean;
+  groupCode: string;
+  groupName: string;
   estimatedFee: number;
-  currentFee: number;
   threshold85: number;
   threshold95: number;
+  displayFee: number | null;
   ratio: number;
-  remainTo95: number;
   level: Level;
-  updatedAt: string;
+  overTo95: number;
+  restTo95: number | null;
+  feeSource: string;
+  feeUpdatedAt: string;
+  demoFee: boolean;
 }
 
-interface WaterlineRow extends PatientRow {}
-
-/** DIP 病组核心映射（来自《常用病组核心诊断、操作及费用_85_95对照》） */
-const DIP_GROUPS: DipGroup[] = [
-  { code: "K64:49.4500x004", name: "内镜下内痔套扎治疗", estimatedFee: 5062 },
-  { code: "K64:49.4600_45.2302", name: "痔切除术_电子结肠镜检查", estimatedFee: 5021 },
-  { code: "K64:49.4200", name: "痔注射", estimatedFee: 4090 },
-  { code: "K64:49.4600_49.5903", name: "痔切除术_肛门括约肌切开术", estimatedFee: 4984 },
-  { code: "K60:49.1200", name: "肛门瘘管切除术", estimatedFee: 4687 },
-  { code: "K60:49.1200_49.4600", name: "肛门瘘管切除术_痔切除术", estimatedFee: 5566 },
-  { code: "K60:49.3901_49.3906", name: "肛裂切除术_肛乳头切除术", estimatedFee: 5056 },
-  { code: "K60:49.3901_49.3906+49.4600", name: "肛裂切除术_肛乳头切除术 + 痔切除术", estimatedFee: 5420 },
-  { code: "K60:49.3901_49.5903", name: "肛裂切除术_肛门括约肌切开术", estimatedFee: 5306 },
-  { code: "K61:49.0400x008", name: "肛周脓肿根治术", estimatedFee: 4524 },
-  { code: "K61:49.0400x008_49.4500", name: "肛周脓肿根治术_痔结扎术", estimatedFee: 6130 },
-  { code: "K61:49.1200", name: "肛门瘘管切除术（脓肿）", estimatedFee: 4822 },
-  { code: "L05:86.2101", name: "藏毛囊肿切除术", estimatedFee: 4609 },
-  { code: "K64:49.4601_49.3906", name: "痔切除术伴肛门成形术_肛乳头切除术", estimatedFee: 4405 },
-  { code: "K64:BSZL", name: "痔疮保守治疗", estimatedFee: 3519 },
-  { code: "K64:SS", name: "痔疮相关手术组", estimatedFee: 4579 },
-  { code: "K60:SS", name: "裂和瘘相关手术组", estimatedFee: 3951 },
-  { code: "K60:ZLXCZ", name: "裂和瘘治疗性操作组", estimatedFee: 4922 },
-  { code: "K60:49.1200_49.7301", name: "肛门瘘管切除术_肛瘘挂线术", estimatedFee: 4771 },
-  { code: "K61:48.8101", name: "直肠周围脓肿切开引流术", estimatedFee: 4776 },
-  { code: "K61:ZLXCZ", name: "脓肿治疗性操作组", estimatedFee: 5753 },
-  { code: "K61:SS", name: "脓肿相关手术组", estimatedFee: 4934 },
-  { code: "K62:49.3906_49.4500", name: "肛乳头切除术_痔结扎术", estimatedFee: 5948 },
-  { code: "K62:49.3906_49.5903", name: "肛乳头切除术_肛门括约肌切开术", estimatedFee: 6726 }
-];
-
-const groupByCode = new Map(DIP_GROUPS.map(group => [group.code, group]));
-
-/** 演示患者：住院号与未结算费用取自 HIS 截图，病组按诊断匹配 */
-const DEMO_SEED: Array<{ admissionNo: string; name: string; diagnosis: string; dipCode: string; currentFee: number; updatedAt: string }> = [
-  { admissionNo: "0020224991", name: "黄金发", diagnosis: "混合痔", dipCode: "K64:49.4500x004", currentFee: 291.13, updatedAt: "2026-10-17 11:29" },
-  { admissionNo: "0020224990", name: "李安生", diagnosis: "肛门狭窄", dipCode: "K60:49.1200", currentFee: 755.54, updatedAt: "2026-10-16 16:44" },
-  { admissionNo: "0020224989", name: "宁若芬", diagnosis: "肛裂", dipCode: "K60:49.3901_49.3906", currentFee: 687.4, updatedAt: "2026-10-16 11:29" },
-  { admissionNo: "0020224988", name: "许若芬", diagnosis: "肛裂", dipCode: "K60:49.3901_49.3906", currentFee: 3148.55, updatedAt: "2026-10-16 09:29" },
-  { admissionNo: "0020224987", name: "万季荣", diagnosis: "混合痔", dipCode: "K64:49.4600_45.2302", currentFee: 1343.72, updatedAt: "2026-10-16 08:47" },
-  { admissionNo: "0020224986", name: "申光兴", diagnosis: "内痔", dipCode: "K64:49.4200", currentFee: 3178.62, updatedAt: "2026-10-15 11:22" },
-  { admissionNo: "0020224985", name: "朱云岩", diagnosis: "混合痔", dipCode: "K64:BSZL", currentFee: 3497.68, updatedAt: "2026-10-14 09:25" },
-  { admissionNo: "0020224984", name: "沈光英", diagnosis: "混合痔", dipCode: "K64:49.4600_49.5903", currentFee: 3727.71, updatedAt: "2026-10-14 08:21" },
-  { admissionNo: "0020224983", name: "黄芸", diagnosis: "混合痔", dipCode: "K64:SS", currentFee: 4267.83, updatedAt: "2026-10-13 11:30" },
-  { admissionNo: "0020224982", name: "李继荣", diagnosis: "混合痔", dipCode: "K64:49.4500x004", currentFee: 2993.34, updatedAt: "2026-10-13 10:39" },
-  { admissionNo: "0020224981", name: "宋惠英", diagnosis: "混合痔", dipCode: "K64:49.4500x004", currentFee: 4350.65, updatedAt: "2026-10-13 09:32" },
-  { admissionNo: "0020224980", name: "汤幸祥", diagnosis: "肛裂", dipCode: "K60:49.3901_49.5903", currentFee: 3459.62, updatedAt: "2026-10-12 09:52" },
-  { admissionNo: "0020224979", name: "唐光华", diagnosis: "肛裂", dipCode: "K60:ZLXCZ", currentFee: 3441.14, updatedAt: "2026-10-12 08:12" },
-  { admissionNo: "0020224978", name: "盛天军", diagnosis: "混合痔", dipCode: "K64:49.4600_49.5903", currentFee: 4517.32, updatedAt: "2026-10-11 09:56" },
-  { admissionNo: "0020224977", name: "周文宗", diagnosis: "肛裂", dipCode: "K60:SS", currentFee: 4343.72, updatedAt: "2026-10-11 08:14" }
-];
-
-const rows = ref<WaterlineRow[]>([]);
+const loading = ref(false);
+const saving = ref(false);
 const keyword = ref("");
 const levelFilter = ref<"all" | Level>("all");
-const sortBy = ref<"ratioDesc" | "feeDesc" | "dateDesc">("ratioDesc");
+const demoMode = ref(false);
+
+const rawRows = ref<DipPatientRow[]>([]);
+/** 演示水位：仅前端覆盖，不写库 */
+const demoFees = ref<Record<string, number>>({});
+
+const money = (value: number | null | undefined) => (value === null || value === undefined ? "—" : `¥${Number(value).toFixed(2)}`);
+const clamp = (ratio: number) => Math.max(0, Math.min(ratio, 100));
 
 const levelOf = (ratio: number): Level => (ratio >= 95 ? "danger" : ratio >= 85 ? "warning" : "normal");
 
-const buildRow = (seed: (typeof DEMO_SEED)[number], currentFee: number, updatedAt: string): WaterlineRow => {
-  const group = groupByCode.get(seed.dipCode) ?? DIP_GROUPS[0];
-  const estimatedFee = group.estimatedFee;
-  const threshold85 = Number((estimatedFee * 0.85).toFixed(2));
-  const threshold95 = Number((estimatedFee * 0.95).toFixed(2));
-  const ratio = estimatedFee > 0 ? (currentFee / estimatedFee) * 100 : 0;
-  return {
-    admissionNo: seed.admissionNo,
-    name: seed.name,
-    diagnosis: seed.diagnosis,
-    dipCode: group.code,
-    dipName: group.name,
-    estimatedFee,
-    currentFee,
-    threshold85,
-    threshold95,
-    ratio,
-    remainTo95: Number((threshold95 - currentFee).toFixed(2)),
-    level: levelOf(ratio),
-    updatedAt
-  };
-};
-
-const reloadDemo = () => {
-  rows.value = DEMO_SEED.map(seed => buildRow(seed, seed.currentFee, seed.updatedAt));
-  ElMessage.success("已刷新费用数据");
-};
-
-reloadDemo();
-
-const money = (value: number) => `¥${value.toFixed(2)}`;
-
-const levelText = (level: Level) => (level === "danger" ? "超限" : level === "warning" ? "预警" : "正常");
-const tagType = (level: Level) => (level === "danger" ? "danger" : level === "warning" ? "warning" : "success");
-
-const summary = computed(() => {
-  let normal = 0;
-  let warning = 0;
-  let danger = 0;
-  let overrunAmount = 0;
-  rows.value.forEach(row => {
-    if (row.level === "danger") danger += 1;
-    else if (row.level === "warning") warning += 1;
-    else normal += 1;
-    if (row.currentFee > row.threshold95) overrunAmount += row.currentFee - row.threshold95;
+const viewRows = computed<ViewRow[]>(() => {
+  const list = rawRows.value.map(row => {
+    const matched = row.matched;
+    const estimatedFee = Number(row.estimatedFee ?? 0);
+    const baseFee = row.currentFee === undefined || row.currentFee === null ? null : Number(row.currentFee);
+    const demoFee = demoFees.value[row.patientId];
+    const displayFee = demoFee !== undefined ? demoFee : baseFee;
+    const ratio = matched && estimatedFee > 0 && displayFee !== null ? (displayFee / estimatedFee) * 100 : 0;
+    const level: Level = !matched ? "unmatched" : displayFee === null ? "pending" : levelOf(ratio);
+    return {
+      patientId: row.patientId,
+      patientName: row.patientName,
+      doctor: row.doctor ?? "",
+      diagnosis: row.diagnosis ?? "",
+      matched,
+      groupCode: row.groupCode ?? "",
+      groupName: row.groupName ?? "",
+      estimatedFee,
+      threshold85: Number(row.threshold85 ?? 0),
+      threshold95: Number(row.threshold95 ?? 0),
+      displayFee,
+      ratio,
+      level,
+      overTo95: matched && displayFee !== null ? Math.max(displayFee - Number(row.threshold95 ?? 0), 0) : 0,
+      restTo95: row.restTo95 === undefined || row.restTo95 === null ? null : Number(row.restTo95),
+      feeSource: row.feeSource ?? "",
+      feeUpdatedAt: row.feeUpdatedAt ?? "",
+      demoFee: demoFee !== undefined
+    };
   });
-  return { normal, warning, danger, overrunAmount };
+  return list;
 });
+
+const dangerRows = computed(() => viewRows.value.filter(row => row.level === "danger").sort((a, b) => b.ratio - a.ratio));
+const warningRows = computed(() => viewRows.value.filter(row => row.level === "warning"));
+
+const liveSummary = computed(() => {
+  const rows = viewRows.value;
+  return {
+    total: rows.length,
+    normal: rows.filter(row => row.level === "normal").length,
+    warning: warningRows.value.length,
+    danger: dangerRows.value.length,
+    pendingFee: rows.filter(row => row.level === "pending").length,
+    unmatched: rows.filter(row => row.level === "unmatched").length
+  };
+});
+
+/** 汇总直接取实时视图（含演示水位），不依赖后端汇总，避免两者不一致 */
+const summary = liveSummary;
+
+const pendingCount = computed(() => liveSummary.value.pendingFee);
+const unmatchedCount = computed(() => liveSummary.value.unmatched);
+const overrunAmount = computed(() => dangerRows.value.reduce((sum, row) => sum + row.overTo95, 0));
+
+const unmatchedDiagnoses = computed(() => {
+  const map = new Map<string, number>();
+  viewRows.value.filter(row => !row.matched).forEach(row => map.set(row.diagnosis, (map.get(row.diagnosis) ?? 0) + 1));
+  return [...map.entries()].map(([diagnosis, count]) => ({ diagnosis, count })).sort((a, b) => b.count - a.count);
+});
+
+const rankOf = (level: Level) => (level === "danger" ? 0 : level === "warning" ? 1 : level === "normal" ? 2 : level === "pending" ? 3 : 4);
 
 const visibleRows = computed(() => {
   const key = keyword.value.trim().toLowerCase();
-  const filtered = rows.value.filter(row => {
+  const filtered = viewRows.value.filter(row => {
     if (levelFilter.value !== "all" && row.level !== levelFilter.value) return false;
     if (!key) return true;
     return (
-      row.name.toLowerCase().includes(key) ||
-      row.admissionNo.includes(key) ||
-      row.dipCode.toLowerCase().includes(key) ||
-      row.dipName.toLowerCase().includes(key)
+      row.patientName.toLowerCase().includes(key) ||
+      row.diagnosis.toLowerCase().includes(key) ||
+      row.groupCode.toLowerCase().includes(key) ||
+      row.groupName.toLowerCase().includes(key)
     );
   });
-  const sorted = [...filtered];
-  if (sortBy.value === "ratioDesc") sorted.sort((a, b) => b.ratio - a.ratio);
-  if (sortBy.value === "feeDesc") sorted.sort((a, b) => b.currentFee - a.currentFee);
-  if (sortBy.value === "dateDesc") sorted.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return sorted;
+  return [...filtered].sort((a, b) => {
+    const rank = rankOf(a.level) - rankOf(b.level);
+    if (rank !== 0) return rank;
+    return b.ratio - a.ratio;
+  });
 });
 
-const rowClass = ({ row }: { row: WaterlineRow }) => (row.level === "danger" ? "dw-row-danger" : row.level === "warning" ? "dw-row-warning" : "");
+const statusText = (level: Level) =>
+  level === "danger" ? "超限" : level === "warning" ? "预警" : level === "normal" ? "正常" : level === "pending" ? "待录费用" : "未匹配";
+const statusTagType = (level: Level) =>
+  level === "danger" ? "danger" : level === "warning" ? "warning" : level === "normal" ? "success" : "info";
 
-/* ---------------- 手动录入 ---------------- */
+const rowClass = ({ row }: { row: ViewRow }) =>
+  row.level === "danger" ? "dip-row-danger" : row.level === "warning" ? "dip-row-warning" : row.level === "pending" ? "dip-row-pending" : "";
+
+const focusDanger = () => {
+  levelFilter.value = "danger";
+};
+
+const reload = async () => {
+  loading.value = true;
+  try {
+    const board = await getDipBoardApi();
+    rawRows.value = board.patients ?? [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "费用预警数据加载失败");
+  } finally {
+    loading.value = false;
+  }
+};
+
+/** 演示水位：按固定比例生成，仅用于预览预警视觉，不写库 */
+const buildDemoFees = () => {
+  const targets = viewRows.value.filter(row => row.matched);
+  const ratios = [101.4, 97.6, 93.2, 88.5, 82.1, 74.3, 66.8, 59.2, 51.7, 44.3, 38.6, 31.5];
+  const next: Record<string, number> = {};
+  targets.forEach((row, index) => {
+    const ratio = ratios[index % ratios.length];
+    next[row.patientId] = Number(((row.estimatedFee * ratio) / 100).toFixed(2));
+  });
+  demoFees.value = next;
+};
+
+const toggleDemo = computed({
+  get: () => demoMode.value,
+  set: (value: boolean) => {
+    demoMode.value = value;
+    if (value) {
+      buildDemoFees();
+      ElMessage.success("已开启演示水位（仅前端预览，不写入数据库）");
+    } else {
+      demoFees.value = {};
+    }
+  }
+});
+
+/* ---------------- 录入费用 ---------------- */
 const feeDialogVisible = ref(false);
-const feeTarget = ref<WaterlineRow | null>(null);
+const feeTarget = ref<ViewRow | null>(null);
 const feeInput = ref(0);
 
-const openFeeDialog = (row?: WaterlineRow) => {
-  feeTarget.value = row ?? visibleRows.value[0] ?? rows.value[0] ?? null;
-  if (!feeTarget.value) {
-    ElMessage.warning("暂无可录入的患者");
+const openFeeDialog = (row?: ViewRow) => {
+  const target = row ?? visibleRows.value.find(item => item.matched) ?? viewRows.value.find(item => item.matched) ?? null;
+  if (!target) {
+    ElMessage.warning("没有可录入费用的患者");
     return;
   }
-  feeInput.value = feeTarget.value.currentFee;
+  feeTarget.value = target;
+  feeInput.value = target.displayFee ?? 0;
   feeDialogVisible.value = true;
 };
 
 const previewRatio = computed(() => {
   const target = feeTarget.value;
-  if (!target || target.estimatedFee <= 0) return 0;
+  if (!target || !target.estimatedFee) return 0;
   return (feeInput.value / target.estimatedFee) * 100;
 });
-
 const previewLevel = computed(() => levelOf(previewRatio.value));
 
-const submitFee = () => {
+const submitFee = async () => {
   const target = feeTarget.value;
   if (!target) return;
-  const index = rows.value.findIndex(row => row.admissionNo === target.admissionNo);
-  if (index < 0) return;
-  const seed = DEMO_SEED.find(item => item.admissionNo === target.admissionNo);
-  if (!seed) return;
-  const now = new Date();
-  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  rows.value[index] = buildRow(seed, feeInput.value, stamp);
-  feeDialogVisible.value = false;
-  ElMessage.success(`${target.name} 费用已更新`);
-};
-
-/* ---------------- HIS 截图识别（演示） ---------------- */
-const ocrDialogVisible = ref(false);
-const ocrRows = ref<Array<{ admissionNo: string; name: string; currentFee: number; matched: boolean; ratio: number; level: Level }>>([]);
-
-const openOcrDialog = () => {
-  ocrRows.value = [];
-  ocrDialogVisible.value = true;
-};
-
-const handleOcrFile = (file: UploadFile) => {
-  if (!file.raw) return;
-  if (!/^image\/(png|jpeg)$/.test(file.raw.type)) {
-    ElMessage.error("仅支持 PNG / JPG 截图");
-    return;
+  saving.value = true;
+  try {
+    await saveDipFeeApi({ patientId: target.patientId, currentFee: feeInput.value, source: "MANUAL" });
+    feeDialogVisible.value = false;
+    delete demoFees.value[target.patientId];
+    await reload();
+    ElMessage.success(`${target.patientName} 费用已更新`);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "费用保存失败");
+  } finally {
+    saving.value = false;
   }
-  ElMessage.info("已收到截图：OCR 服务未接通，可先“载入示例识别结果”预览流程");
-};
-
-const loadSampleOcr = () => {
-  const samples = ["0020224981", "0020224978", "0020224977"];
-  ocrRows.value = samples.map(admissionNo => {
-    const seed = DEMO_SEED.find(item => item.admissionNo === admissionNo);
-    if (!seed) return null;
-    const group = groupByCode.get(seed.dipCode) ?? DIP_GROUPS[0];
-    const ratio = (seed.currentFee / group.estimatedFee) * 100;
-    return {
-      admissionNo: seed.admissionNo,
-      name: seed.name,
-      currentFee: seed.currentFee,
-      matched: true,
-      ratio,
-      level: levelOf(ratio)
-    };
-  }).filter((item): item is NonNullable<typeof item> => Boolean(item));
-  ElMessage.success(`识别到 ${ocrRows.value.length} 条记录`);
-};
-
-const applyOcrRows = () => {
-  let applied = 0;
-  ocrRows.value.forEach(item => {
-    if (!item.matched) return;
-    const index = rows.value.findIndex(row => row.admissionNo === item.admissionNo);
-    const seed = DEMO_SEED.find(row => row.admissionNo === item.admissionNo);
-    if (index < 0 || !seed) return;
-    rows.value[index] = buildRow(seed, item.currentFee, rows.value[index].updatedAt);
-    applied += 1;
-  });
-  ocrDialogVisible.value = false;
-  ElMessage.success(`已写入 ${applied} 条费用`);
 };
 
 /* ---------------- 详情 ---------------- */
 const detailVisible = ref(false);
-const detailTarget = ref<WaterlineRow | null>(null);
-
-const openDetail = (row: WaterlineRow) => {
+const detailTarget = ref<ViewRow | null>(null);
+const openDetail = (row: ViewRow) => {
   detailTarget.value = row;
   detailVisible.value = true;
 };
+
+onMounted(reload);
 </script>
 
 <style scoped lang="scss">
-.dip-warning {
+.dip {
+  --dip-ok: var(--el-color-success);
+  --dip-warn: var(--el-color-warning);
+  --dip-danger: var(--el-color-danger);
+
   padding: 18px 20px 32px;
   display: flex;
   flex-direction: column;
   gap: 14px;
 
-  .dw-head {
+  .dip-head {
     display: flex;
-    align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
     flex-wrap: wrap;
@@ -528,25 +555,94 @@ const openDetail = (row: WaterlineRow) => {
 
     p {
       margin: 0;
+      max-width: 900px;
       font-size: 13px;
+      line-height: 1.6;
       color: var(--el-text-color-secondary);
     }
   }
 
-  .dw-head-actions {
+  .dip-head-actions {
     display: flex;
     gap: 8px;
-    flex-wrap: wrap;
+    align-items: flex-start;
   }
 
-  .dw-metrics {
+  .dip-em {
+    color: var(--el-color-primary);
+    font-weight: 600;
+  }
+
+  .is-warn {
+    color: var(--dip-warn);
+  }
+
+  .is-danger {
+    color: var(--dip-danger);
+  }
+
+  /* 超限横幅 */
+  .dip-alarm {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px;
+    border: 1px solid var(--dip-danger);
+    border-left: 6px solid var(--dip-danger);
+    border-radius: 10px;
+    background: linear-gradient(90deg, rgba(245, 108, 108, 0.16), rgba(245, 108, 108, 0.06));
+    animation: dip-alarm-in 0.4s ease-out;
   }
 
-  .dw-metric {
-    flex: 1 1 150px;
+  .dip-alarm-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .dip-alarm-count {
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--dip-danger);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dip-alarm-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    strong {
+      font-size: 15px;
+      color: var(--dip-danger);
+    }
+
+    span {
+      font-size: 12px;
+      color: var(--el-text-color-regular);
+    }
+
+    b {
+      color: var(--dip-danger);
+    }
+  }
+
+  .dip-alarm-btn {
+    border-color: var(--dip-danger);
+    color: var(--dip-danger);
+  }
+
+  /* 指标卡 */
+  .dip-metrics {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .dip-metric {
+    flex: 1 1 132px;
     padding: 10px 14px;
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 8px;
@@ -560,158 +656,416 @@ const openDetail = (row: WaterlineRow) => {
     }
 
     strong {
-      font-size: 20px;
-      font-weight: 600;
+      font-size: 22px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
     }
 
-    &.is-warn {
-      border-color: var(--el-color-warning-light-5);
+    &.is-ok strong {
+      color: var(--dip-ok);
+    }
+
+    &.is-warn strong {
+      color: var(--dip-warn);
+    }
+
+    &.is-danger strong {
+      color: var(--dip-danger);
+    }
+
+    &.is-pending strong,
+    &.is-unmatched strong {
+      color: var(--el-text-color-secondary);
+    }
+
+    &.is-hot {
+      border-color: var(--el-color-warning-light-3);
       background: var(--el-color-warning-light-9);
     }
 
-    &.is-danger {
-      border-color: var(--el-color-danger-light-5);
+    &.is-critical {
+      border-color: var(--dip-danger);
       background: var(--el-color-danger-light-9);
+      animation: dip-pulse 1.8s ease-in-out infinite;
     }
   }
 
-  .dw-toolbar {
+  .dip-coverage {
+    :deep(.el-alert__content) {
+      width: 100%;
+    }
+  }
+
+  .dip-coverage-list {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+
+  .dip-toolbar {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
   }
 
-  .dw-search {
-    width: 280px;
+  .dip-search {
+    width: 260px;
   }
 
-  .dw-sort {
-    width: 168px;
-  }
-
-  .dw-group {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.35;
-
-    .dw-group-code {
-      font-size: 12px;
-      color: var(--el-color-primary);
-    }
-
-    .dw-group-name {
-      font-size: 12px;
-      color: var(--el-text-color-regular);
-    }
-  }
-
-  .dw-threshold {
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-  }
-
-  .dw-waterline {
+  .dip-toolbar-right {
+    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
-  .dw-bar {
-    position: relative;
-    flex: 1;
-    height: 10px;
-    border-radius: 6px;
-    background: var(--el-fill-color-light);
-    overflow: hidden;
-
-    &.is-tall {
-      height: 16px;
-      border-radius: 8px;
-    }
-  }
-
-  .dw-bar-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    border-radius: inherit;
-    transition: width 0.25s ease;
-
-    &.is-normal {
-      background: var(--el-color-success);
-    }
-
-    &.is-warning {
-      background: var(--el-color-warning);
-    }
-
-    &.is-danger {
-      background: var(--el-color-danger);
-    }
-  }
-
-  .dw-bar-mark {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: rgba(0, 0, 0, 0.35);
-
-    &.is-super {
-      background: rgba(0, 0, 0, 0.55);
-    }
-  }
-
-  .dw-ratio {
-    width: 52px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    font-size: 13px;
-  }
-
-  .dw-hint {
-    margin-left: 6px;
+  .dip-toolbar-hint {
     font-size: 12px;
     color: var(--el-text-color-secondary);
   }
 
-  .dw-upload {
-    padding: 20px 0;
-    text-align: center;
+  /* 表格 */
+  .dip-patient {
+    display: flex;
+    flex-direction: column;
 
-    .el-icon {
-      font-size: 32px;
-      color: var(--el-color-primary);
-    }
-
-    p {
-      margin: 8px 0 4px;
+    strong {
       font-size: 14px;
     }
 
     small {
+      font-size: 11px;
       color: var(--el-text-color-secondary);
     }
   }
 
-  .dw-ocr-notice {
-    margin-top: 12px;
+  .dip-diag {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+
+    .dip-group-code {
+      font-size: 11px;
+      color: var(--el-color-primary);
+    }
+
+    .dip-group-name {
+      font-size: 12px;
+      color: var(--el-text-color-regular);
+    }
+
+    .dip-group-none {
+      font-size: 12px;
+      color: var(--el-text-color-placeholder);
+    }
   }
 
-  .dw-ocr-actions {
-    margin: 10px 0;
+  .dip-num {
+    font-variant-numeric: tabular-nums;
+
+    &.is-strong {
+      font-weight: 700;
+    }
   }
 
-  .dw-detail {
+  .dip-none {
+    color: var(--el-text-color-placeholder);
+    font-size: 12px;
+  }
+
+  .dip-threshold {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: var(--el-text-color-regular);
+
+    b {
+      font-weight: 600;
+    }
+
+    i {
+      color: var(--el-text-color-placeholder);
+      font-style: normal;
+    }
+
+    &.is-cross-warn b:first-child {
+      color: var(--dip-warn);
+    }
+
+    &.is-cross-danger b {
+      color: var(--dip-danger);
+    }
+
+    &.is-cross-danger b:last-child {
+      background: var(--el-color-danger-light-8);
+      border-radius: 3px;
+      padding: 0 3px;
+    }
+  }
+
+  /* 水位条 */
+  .dip-waterline {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .dip-bar {
+    position: relative;
+    display: flex;
+    height: 10px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--el-fill-color-light);
+
+    &.is-tall {
+      height: 18px;
+      border-radius: 9px;
+    }
+  }
+
+  .dip-bar-zone {
+    height: 100%;
+
+    &.is-ok {
+      background: var(--el-color-success-light-7);
+    }
+
+    &.is-warn {
+      background: var(--el-color-warning-light-7);
+    }
+
+    &.is-danger {
+      background: var(--el-color-danger-light-7);
+    }
+  }
+
+  .dip-bar-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: 6px 0 0 6px;
+    transition: width 0.3s ease;
+
+    &.is-normal {
+      background: var(--dip-ok);
+    }
+
+    &.is-warning {
+      background: var(--dip-warn);
+    }
+
+    &.is-danger {
+      background: var(--dip-danger);
+    }
+  }
+
+  .dip-bar-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+
+    &.is-warn {
+      background: var(--el-color-warning-dark-2);
+    }
+
+    &.is-danger {
+      background: var(--el-color-danger-dark-2);
+    }
+  }
+
+  .dip-bar-legend {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--el-text-color-placeholder);
+
+    span {
+      &.is-warn {
+        color: var(--dip-warn);
+      }
+
+      &.is-danger {
+        color: var(--dip-danger);
+      }
+    }
+  }
+
+  .dip-ratio {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+
+    b {
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    em {
+      font-style: normal;
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+    }
+
+    &.is-normal b {
+      color: var(--dip-ok);
+    }
+
+    &.is-warning b {
+      color: var(--dip-warn);
+    }
+
+    &.is-danger b {
+      color: var(--dip-danger);
+      font-size: 16px;
+    }
+
+    &.is-danger em {
+      color: var(--dip-danger);
+    }
+  }
+
+  .dip-status {
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  .dip-updated {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+
+    small {
+      font-size: 10px;
+      color: var(--el-text-color-placeholder);
+    }
+  }
+
+  /* 行强调 */
+  :deep(.dip-row-danger) {
+    background: var(--el-color-danger-light-9) !important;
+
+    td:first-child {
+      box-shadow: inset 4px 0 0 var(--dip-danger);
+    }
+  }
+
+  :deep(.dip-row-warning) {
+    background: var(--el-color-warning-light-9) !important;
+
+    td:first-child {
+      box-shadow: inset 4px 0 0 var(--dip-warn);
+    }
+  }
+
+  :deep(.dip-row-pending) {
+    td:first-child {
+      box-shadow: inset 4px 0 0 var(--el-border-color);
+    }
+  }
+
+  /* 录入预览 */
+  .dip-fee-preview {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+
+    b {
+      font-size: 20px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    span {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+
+    &.is-normal b {
+      color: var(--dip-ok);
+    }
+
+    &.is-warning b {
+      color: var(--dip-warn);
+    }
+
+    &.is-danger b {
+      color: var(--dip-danger);
+    }
+  }
+
+  /* 详情 */
+  .dip-detail {
     display: flex;
     flex-direction: column;
     gap: 14px;
   }
 
-  .dw-detail-bar {
-    padding: 6px 2px;
+  .dip-detail-hero {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--el-fill-color-light);
 
-    .dw-detail-scale {
+    &.is-danger {
+      background: var(--el-color-danger-light-9);
+      border-left: 5px solid var(--dip-danger);
+    }
+
+    &.is-warning {
+      background: var(--el-color-warning-light-9);
+      border-left: 5px solid var(--dip-warn);
+    }
+
+    &.is-normal {
+      background: var(--el-color-success-light-9);
+      border-left: 5px solid var(--dip-ok);
+    }
+  }
+
+  .dip-detail-ratio {
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+
+    .is-danger & {
+      color: var(--dip-danger);
+    }
+
+    .is-warning & {
+      color: var(--dip-warn);
+    }
+
+    .is-normal & {
+      color: var(--dip-ok);
+    }
+  }
+
+  .dip-detail-label {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+  }
+
+  .dip-detail-bar {
+    padding: 4px 2px;
+
+    .dip-detail-scale {
       display: flex;
       justify-content: space-between;
       margin-top: 6px;
@@ -720,25 +1074,28 @@ const openDetail = (row: WaterlineRow) => {
       font-variant-numeric: tabular-nums;
     }
   }
+}
 
-  :deep(.dw-row-danger) {
-    background: var(--el-color-danger-light-9);
+@keyframes dip-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 108, 108, 0);
   }
 
-  :deep(.dw-row-warning) {
-    background: var(--el-color-warning-light-9);
+  50% {
+    box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.16);
   }
 }
 
-.t-ok {
-  color: var(--el-color-success);
-}
+@keyframes dip-alarm-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 
-.t-warn {
-  color: var(--el-color-warning);
-}
-
-.t-danger {
-  color: var(--el-color-danger);
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
