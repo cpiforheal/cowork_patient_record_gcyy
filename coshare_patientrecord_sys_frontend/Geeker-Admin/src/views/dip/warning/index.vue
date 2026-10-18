@@ -6,113 +6,130 @@
         <p>按病组预估费用监控未结算费用 · 达 <b class="t-warn">85%</b> 预警、<b class="t-danger">95%</b> 超限</p>
       </div>
       <div class="head-side">
-        <span class="scope">{{ scopeLabel }}</span>
-        <el-button :icon="Refresh" circle size="small" :loading="loading" @click="reload" />
+        <span class="scope">可见 {{ allRows.length }} 例 · 待处理 {{ pendingCount }} 例</span>
       </div>
     </header>
 
-    <nav class="strip">
-      <button
-        v-for="item in strips"
-        :key="item.key"
-        type="button"
-        class="strip-item"
-        :class="[`is-${item.key}`, { active: filter === item.key }]"
-        @click="toggleFilter(item.key)"
-      >
-        <b>{{ item.count }}</b>
-        <span>{{ item.label }}</span>
-      </button>
+    <!-- 聚合指标：始终跟随当前筛选结果 -->
+    <nav class="metrics">
+      <div class="metric">
+        <span>当前结果</span>
+        <strong>{{ filtered.length }}</strong>
+      </div>
+      <div class="metric is-danger" :class="{ muted: stats.danger === 0 }">
+        <span>超限（≥95%）</span>
+        <strong>{{ stats.danger }}</strong>
+      </div>
+      <div class="metric is-warning" :class="{ muted: stats.warning === 0 }">
+        <span>预警（85%~95%）</span>
+        <strong>{{ stats.warning }}</strong>
+      </div>
+      <div class="metric">
+        <span>待录入 / 未匹配</span>
+        <strong>{{ stats.pending + stats.unmatched }}</strong>
+      </div>
+      <div class="metric">
+        <span>未结算合计</span>
+        <strong>{{ money(stats.feeTotal) }}</strong>
+      </div>
+      <div class="metric" :class="{ 'is-danger': stats.overrunTotal > 0 }">
+        <span>超支合计</span>
+        <strong>{{ money(stats.overrunTotal) }}</strong>
+      </div>
     </nav>
 
-    <section class="toolbar">
-      <el-input
-        v-model="keyword"
-        class="search"
-        placeholder="搜索姓名 / 住院号 / 诊断 / 病组"
-        clearable
-        :prefix-icon="Search"
-      />
-      <span v-if="filter !== 'all'" class="filter-note">
-        已筛选 {{ filterLabel }}<button type="button" @click="filter = 'all'">清除</button>
-      </span>
-    </section>
-
-    <el-table
-      v-loading="loading"
-      :data="visibleRows"
-      class="table"
+    <ProTable
+      v-if="loaded"
+      ref="proTable"
+      :columns="columns"
+      :request-api="tableRequest"
       row-key="patientId"
-      :row-class-name="rowClass"
+      :search-col="{ xs: 1, sm: 2, md: 2, lg: 3, xl: 4 }"
     >
-      <el-table-column label="患者" min-width="200">
-        <template #default="{ row }">
-          <div class="cell-patient">
-            <strong>{{ row.name }}</strong>
-            <span class="sub">{{ patientMeta(row) }}</span>
-            <span class="diag">{{ row.diagnosis || "—" }}</span>
-          </div>
-        </template>
-      </el-table-column>
+      <template #tableHeader>
+        <div class="table-hint">
+          按风险、病组大类、管床医生或关键词组合筛选；列可在右上角设置中增减。
+        </div>
+      </template>
 
-      <el-table-column label="DIP 病组" min-width="210">
-        <template #default="{ row }">
-          <div v-if="row.matched" class="cell-group">
-            <span class="group-name">{{ row.dipName }}</span>
-            <span class="sub">
-              {{ row.dipCode }}
-              <i v-if="row.groupSource === 'MANUAL'" class="tag-manual">已改选</i>
-            </span>
-          </div>
-          <div v-else class="cell-group">
-            <span class="sub is-muted">病组表未覆盖该诊断</span>
-            <button type="button" class="link" @click="openGroupDialog(row)">指定病组</button>
-          </div>
-        </template>
-      </el-table-column>
+      <!-- 患者 -->
+      <template #patient="{ row }">
+        <div class="cell-patient">
+          <strong>{{ row.name }}</strong>
+          <span class="sub">{{ patientMeta(row) }}</span>
+          <span class="diag">{{ row.diagnosis || "—" }}</span>
+        </div>
+      </template>
+
+      <!-- 风险 -->
+      <template #risk="{ row }">
+        <el-tag :type="tagType(row.level)" size="small" :effect="row.level === 'normal' ? 'plain' : 'light'">
+          {{ levelText(row.level) }}
+        </el-tag>
+      </template>
+
+      <!-- 病组 -->
+      <template #group="{ row }">
+        <div v-if="row.matched" class="cell-group">
+          <span class="group-name">{{ row.dipName }}</span>
+          <span class="sub">
+            {{ row.dipCode }}
+            <i v-if="row.groupSource === 'MANUAL'" class="tag-manual">已改选</i>
+          </span>
+        </div>
+        <div v-else class="cell-group">
+          <span class="sub is-muted">病组表未覆盖该诊断</span>
+          <button type="button" class="link" @click="openGroupDialog(row)">指定病组</button>
+        </div>
+      </template>
 
       <!-- 主视觉：费用水位 -->
-      <el-table-column label="费用水位" width="266">
-        <template #default="{ row }">
-          <div v-if="row.level === 'pending' || row.level === 'unmatched'" class="water is-pending">
-            <span class="water-none">未录入未结算费用</span>
-            <button type="button" class="link" @click="openFeeDialog(row)">录入费用</button>
+      <template #waterline="{ row }">
+        <div v-if="row.level === 'pending' || row.level === 'unmatched'" class="water is-pending">
+          <span class="water-none">未录入未结算费用</span>
+        </div>
+        <div v-else class="water" :class="`is-${row.level}`">
+          <div class="water-top">
+            <b class="fee">{{ money(row.currentFee) }}</b>
+            <span class="ratio">{{ row.ratio.toFixed(1) }}%</span>
           </div>
-          <div v-else class="water" :class="`is-${row.level}`">
-            <div class="water-top">
-              <b class="fee">{{ money(row.currentFee) }}</b>
-              <span class="ratio">{{ row.ratio.toFixed(1) }}%</span>
-            </div>
-            <div class="bar">
-              <i class="fill" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
-              <i class="tick" style="left: 85%" />
-              <i class="tick" style="left: 95%" />
-            </div>
-            <div class="water-foot">
-              <span>预估 {{ money(row.estimatedFee) }}</span>
-              <span :class="`t-${row.level}`">{{ suggestion(row) }}</span>
-            </div>
+          <div class="bar">
+            <i class="fill" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
+            <i class="tick" style="left: 85%" />
+            <i class="tick" style="left: 95%" />
           </div>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="处理" width="176" align="right">
-        <template #default="{ row }">
-          <div class="cell-action">
-            <el-tag v-if="row.level !== 'pending' && row.level !== 'unmatched'" :type="tagType(row.level)" size="small" effect="light">
-              {{ levelText(row.level) }}
-            </el-tag>
-            <el-tag v-else type="info" size="small" effect="plain">{{ levelText(row.level) }}</el-tag>
-            <el-button link type="primary" size="small" @click="openFeeDialog(row)">录费用</el-button>
-            <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
+          <div class="water-foot">
+            <span>预估 {{ money(row.estimatedFee) }}</span>
+            <span :class="`t-${row.level}`">{{ suggestion(row) }}</span>
           </div>
-        </template>
-      </el-table-column>
-
-      <template #empty>
-        <el-empty description="当前范围暂无在院患者" :image-size="70" />
+        </div>
       </template>
-    </el-table>
+
+      <!-- HIS 摘要 -->
+      <template #his="{ row }">
+        <div class="cell-his">
+          <span>{{ blank(row.bedNo) }}<template v-if="row.nursingLevel"> · {{ row.nursingLevel }}</template></span>
+          <span class="sub">押金 {{ money(row.depositBalance) }}</span>
+          <span class="sub">{{ blank(row.attendingDoctor) }}</span>
+        </div>
+      </template>
+
+      <!-- 处理 -->
+      <template #operation="{ row }">
+        <div class="cell-action">
+          <el-button
+            v-if="row.level === 'pending' || row.level === 'unmatched'"
+            link
+            type="primary"
+            size="small"
+            @click="openFeeDialog(row)"
+          >
+            录费用
+          </el-button>
+          <el-button v-else link type="primary" size="small" @click="openDetail(row)">详情</el-button>
+        </div>
+      </template>
+    </ProTable>
 
     <!-- 详情：完整 HIS 与审计信息收在这里 -->
     <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="430px">
@@ -156,7 +173,8 @@
           </el-descriptions-item>
           <el-descriptions-item label="管床医生">{{ blank(detailTarget.attendingDoctor) }}</el-descriptions-item>
           <el-descriptions-item label="费用更新">
-            {{ detailTarget.updatedAt }}<span v-if="detailTarget.feeUpdatedBy" class="sub"> · {{ detailTarget.feeUpdatedBy }}</span>
+            {{ detailTarget.updatedAt || "—"
+            }}<span v-if="detailTarget.feeUpdatedBy" class="sub"> · {{ detailTarget.feeUpdatedBy }}</span>
           </el-descriptions-item>
         </el-descriptions>
 
@@ -241,7 +259,8 @@
 <script setup lang="ts" name="dipWarning">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Refresh, Search } from "@element-plus/icons-vue";
+import ProTable from "@/components/ProTable/index.vue";
+import type { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
 import {
   getDipBoardApi,
   getDipGroupsApi,
@@ -252,7 +271,6 @@ import {
 } from "@/api/modules/clinic/dipWarning";
 
 type Level = "normal" | "warning" | "danger" | "pending" | "unmatched";
-type FilterKey = "danger" | "warning" | "normal" | "pending";
 
 interface Row {
   patientId: string;
@@ -263,6 +281,7 @@ interface Row {
   matched: boolean;
   dipCode: string;
   dipName: string;
+  categoryName: string;
   groupSource: "AUTO" | "MANUAL";
   estimatedFee: number;
   currentFee: number;
@@ -284,11 +303,10 @@ interface Row {
   attendingDoctor: string;
 }
 
-const loading = ref(false);
-const keyword = ref("");
-const filter = ref<"all" | FilterKey>("all");
-const rawRows = ref<DipPatientRow[]>([]);
-const rows = ref<Row[]>([]);
+const proTable = ref<ProTableInstance>();
+const loaded = ref(false);
+const allRows = ref<Row[]>([]);
+const filtered = ref<Row[]>([]);
 
 const money = (value: number | null | undefined) =>
   value === null || value === undefined ? "—" : `¥${Number(value).toFixed(2)}`;
@@ -301,7 +319,8 @@ const pair = (a: string | number | null | undefined, b: string | number | null |
 const levelOf = (ratio: number): Level => (ratio >= 95 ? "danger" : ratio >= 85 ? "warning" : "normal");
 const levelText = (level: Level) =>
   level === "danger" ? "超限" : level === "warning" ? "预警" : level === "pending" ? "待录入" : level === "unmatched" ? "未匹配" : "正常";
-const tagType = (level: Level) => (level === "danger" ? "danger" : level === "warning" ? "warning" : "success");
+const tagType = (level: Level) =>
+  level === "danger" ? "danger" : level === "warning" ? "warning" : level === "pending" ? "info" : "success";
 
 const toRow = (item: DipPatientRow): Row => {
   const estimatedFee = Number(item.estimatedFee ?? 0);
@@ -320,6 +339,7 @@ const toRow = (item: DipPatientRow): Row => {
     matched: item.matched,
     dipCode: item.groupCode ?? "",
     dipName: item.groupName ?? "",
+    categoryName: item.categoryName ?? "",
     groupSource: (item.groupSource as "AUTO" | "MANUAL") ?? "AUTO",
     estimatedFee,
     currentFee,
@@ -342,58 +362,120 @@ const toRow = (item: DipPatientRow): Row => {
   };
 };
 
-const reload = async () => {
-  loading.value = true;
-  try {
-    const board = await getDipBoardApi();
-    rawRows.value = board.patients ?? [];
-    rows.value = rawRows.value.map(toRow);
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "费用预警数据加载失败");
-  } finally {
-    loading.value = false;
-  }
+const levelOptions = [
+  { label: "超限", value: "danger", tagType: "danger" },
+  { label: "预警", value: "warning", tagType: "warning" },
+  { label: "待录入", value: "pending", tagType: "info" },
+  { label: "未匹配", value: "unmatched", tagType: "info" },
+  { label: "正常", value: "normal", tagType: "success" }
+];
+
+const columns = reactive<ColumnProps<Row>[]>([]);
+
+/** 保持同一数组实例，ProTable 内部持有该引用；重建时原地替换。 */
+const buildColumns = () => {
+  const categories = [...new Set(allRows.value.map(row => row.categoryName).filter(Boolean))].sort();
+  const next: ColumnProps<Row>[] = [
+    {
+      prop: "patient",
+      label: "患者",
+      minWidth: 200,
+      search: { el: "input", key: "keyword", order: 1, props: { placeholder: "姓名 / 住院号 / 诊断 / 病组" } }
+    },
+    {
+      prop: "risk",
+      label: "风险",
+      width: 96,
+      enum: levelOptions,
+      isFilterEnum: false,
+      search: { el: "select", key: "risk", order: 2, props: { placeholder: "风险状态" } }
+    },
+    {
+      prop: "group",
+      label: "DIP 病组",
+      minWidth: 200,
+      enum: categories.map(name => ({ label: name, value: name })),
+      ...(categories.length
+        ? { search: { el: "select" as const, key: "categoryName", order: 3, props: { placeholder: "病组大类" } } }
+        : {})
+    },
+    { prop: "waterline", label: "费用水位", width: 250 },
+    {
+      prop: "his",
+      label: "HIS 摘要",
+      minWidth: 150,
+      search: { el: "input", key: "attendingDoctor", order: 4, props: { placeholder: "管床医生" } }
+    },
+    { prop: "operation", label: "处理", width: 120, fixed: "right" }
+  ];
+  columns.splice(0, columns.length, ...next);
 };
 
-const scopeLabel = computed(() => {
-  const total = rows.value.length;
-  const visible = rows.value.filter(row => row.level === "danger" || row.level === "warning" || row.level === "pending").length;
-  return total ? `可见 ${total} 例 · 待处理 ${visible} 例` : "";
-});
-
-const countOf = (level: Level) => rows.value.filter(row => row.level === level).length;
-const strips = computed(() => [
-  { key: "danger" as FilterKey, label: "超限", count: countOf("danger") },
-  { key: "warning" as FilterKey, label: "预警", count: countOf("warning") },
-  { key: "pending" as FilterKey, label: "待录入", count: countOf("pending") },
-  { key: "normal" as FilterKey, label: "正常", count: countOf("normal") }
-]);
-const filterLabel = computed(() => strips.value.find(item => item.key === filter.value)?.label ?? "");
-
-const toggleFilter = (key: FilterKey) => {
-  filter.value = filter.value === key ? "all" : key;
+const matches = (row: Row, params: Record<string, any>) => {
+  const keyword = String(params.keyword ?? "").trim().toLowerCase();
+  if (keyword) {
+    const hay = [row.name, row.admissionNo, row.diagnosis, row.dipCode, row.dipName].join(" ").toLowerCase();
+    if (!hay.includes(keyword)) return false;
+  }
+  if (params.risk && row.level !== params.risk) return false;
+  if (params.categoryName && row.categoryName !== params.categoryName) return false;
+  const doctor = String(params.attendingDoctor ?? "").trim();
+  if (doctor && !row.attendingDoctor.includes(doctor)) return false;
+  return true;
 };
 
 const rankOf = (level: Level) =>
   level === "danger" ? 0 : level === "warning" ? 1 : level === "pending" ? 2 : level === "unmatched" ? 4 : 3;
 
-const visibleRows = computed(() => {
-  const key = keyword.value.trim().toLowerCase();
-  const filtered = rows.value.filter(row => {
-    if (filter.value !== "all" && row.level !== filter.value) return false;
-    if (!key) return true;
-    return [row.name, row.diagnosis, row.admissionNo, row.dipCode, row.dipName]
-      .filter(Boolean)
-      .some(value => String(value).toLowerCase().includes(key));
+const tableRequest = async (params: Record<string, any>) => {
+  const list = allRows.value
+    .filter(row => matches(row, params))
+    .sort((a, b) => {
+      const rank = rankOf(a.level) - rankOf(b.level);
+      return rank !== 0 ? rank : b.ratio - a.ratio;
+    });
+  filtered.value = list;
+  const pageNum = Number(params.pageNum ?? 1);
+  const pageSize = Number(params.pageSize ?? 10);
+  const start = (pageNum - 1) * pageSize;
+  return { data: { list: list.slice(start, start + pageSize), total: list.length } };
+};
+
+const stats = computed(() => {
+  const result = { danger: 0, warning: 0, pending: 0, unmatched: 0, feeTotal: 0, overrunTotal: 0 };
+  filtered.value.forEach(row => {
+    if (row.level === "danger") result.danger += 1;
+    else if (row.level === "warning") result.warning += 1;
+    else if (row.level === "pending") result.pending += 1;
+    else if (row.level === "unmatched") result.unmatched += 1;
+    result.feeTotal += row.currentFee;
+    if (row.level === "danger" && row.currentFee > row.threshold95) {
+      result.overrunTotal += row.currentFee - row.threshold95;
+    }
   });
-  return [...filtered].sort((a, b) => {
-    const rank = rankOf(a.level) - rankOf(b.level);
-    return rank !== 0 ? rank : b.ratio - a.ratio;
-  });
+  return result;
 });
 
-const rowClass = ({ row }: { row: Row }) =>
-  row.level === "danger" ? "row-danger" : row.level === "warning" ? "row-warning" : "";
+const pendingCount = computed(
+  () => allRows.value.filter(row => row.level !== "normal").length
+);
+
+const reload = async () => {
+  try {
+    const board = await getDipBoardApi();
+    allRows.value = (board.patients ?? []).map(toRow);
+    filtered.value = allRows.value;
+    buildColumns();
+    if (!loaded.value) {
+      // 首次挂载时 ProTable 会自动发起一次查询
+      loaded.value = true;
+      return;
+    }
+    proTable.value?.getTableList();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "费用预警数据加载失败");
+  }
+};
 
 const patientMeta = (row: Row) =>
   [row.gender, row.age === null ? "" : `${row.age}岁`, row.admissionNo ? `住院号 ${row.admissionNo}` : ""]
@@ -402,7 +484,6 @@ const patientMeta = (row: Row) =>
 
 const suggestion = (row: Row) => {
   if (row.level === "danger") return `超 ${money(row.currentFee - row.threshold95)}`;
-  if (row.level === "warning") return `余 ${money(row.threshold95 - row.currentFee)}`;
   return `余 ${money(row.threshold95 - row.currentFee)}`;
 };
 
@@ -574,12 +655,6 @@ onMounted(reload);
     }
   }
 
-  .head-side {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
   .scope {
     font-size: 12px;
     color: var(--el-text-color-secondary);
@@ -601,99 +676,50 @@ onMounted(reload);
     color: var(--ok);
   }
 
-  /* 状态条：只有异常才上色 */
-  .strip {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
+  /* 聚合指标 */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
   }
 
-  .strip-item {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 5px;
-    padding: 4px 11px;
-    border: 1px solid var(--el-border-color);
-    border-radius: 999px;
+  .metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
     background: var(--el-bg-color);
-    cursor: pointer;
-    transition: all 0.15s;
-
-    b {
-      font-size: 14px;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      color: var(--el-text-color-primary);
-    }
 
     span {
-      font-size: 12px;
+      font-size: 11.5px;
       color: var(--el-text-color-secondary);
     }
 
-    &.is-danger:not(.active) b {
+    strong {
+      font-size: 18px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    &.is-danger strong {
       color: var(--danger);
     }
 
-    &.is-warning:not(.active) b {
+    &.is-warning strong {
       color: var(--warn);
     }
 
-    &.is-danger.active {
-      border-color: var(--danger);
-      background: var(--el-color-danger-light-9);
-    }
-
-    &.is-warning.active {
-      border-color: var(--warn);
-      background: var(--el-color-warning-light-9);
-    }
-
-    &.is-pending.active,
-    &.is-normal.active {
-      border-color: var(--el-text-color-secondary);
-      background: var(--el-fill-color-light);
-    }
-
-    &:hover {
-      border-color: var(--el-color-primary-light-5);
+    &.muted {
+      opacity: 0.55;
     }
   }
 
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .search {
-    width: 260px;
-  }
-
-  .filter-note {
+  .table-hint {
     font-size: 12px;
     color: var(--el-text-color-secondary);
-
-    button {
-      margin-left: 6px;
-      border: none;
-      background: none;
-      padding: 0;
-      font-size: 12px;
-      color: var(--el-color-primary);
-      cursor: pointer;
-    }
-  }
-
-  .table {
-    :deep(.el-table__cell) {
-      padding: 8px 0;
-    }
-
-    :deep(.cell) {
-      padding: 0 10px;
-      line-height: 1.45;
-    }
   }
 
   .sub {
@@ -708,6 +734,7 @@ onMounted(reload);
   .cell-patient {
     display: flex;
     flex-direction: column;
+    text-align: left;
 
     strong {
       font-size: 14.5px;
@@ -725,11 +752,20 @@ onMounted(reload);
     display: flex;
     flex-direction: column;
     gap: 1px;
+    text-align: left;
 
     .group-name {
       font-size: 12.5px;
       color: var(--el-text-color-regular);
     }
+  }
+
+  .cell-his {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    text-align: left;
+    font-size: 12px;
   }
 
   .tag-manual {
@@ -760,10 +796,10 @@ onMounted(reload);
     display: flex;
     flex-direction: column;
     gap: 3px;
+    text-align: left;
 
     &.is-pending {
       gap: 2px;
-      align-items: flex-start;
     }
   }
 
@@ -863,23 +899,7 @@ onMounted(reload);
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 8px;
-  }
-
-  :deep(.row-danger) {
-    background: var(--el-color-danger-light-9);
-
-    td:first-child {
-      box-shadow: inset 3px 0 0 var(--danger);
-    }
-  }
-
-  :deep(.row-warning) {
-    background: var(--el-color-warning-light-9);
-
-    td:first-child {
-      box-shadow: inset 3px 0 0 var(--warn);
-    }
+    gap: 6px;
   }
 
   /* 详情 */
