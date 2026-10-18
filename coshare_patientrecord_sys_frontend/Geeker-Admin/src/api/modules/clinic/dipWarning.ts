@@ -1,18 +1,28 @@
 import { clinicFetch, clinicJsonHeaders, parseClinicApiResponse } from "./http";
 import { authHeaders } from "../authToken";
 
-/** DIP 费用预警：病组由主诊断匹配，当前费用来自 HIS（截图识别/人工录入）。 */
+/** DIP 费用预警：字段对齐 HIS 住院费用界面，费用水位在本系统内计算与着色。 */
 export type DipStatus = "NORMAL" | "WARNING" | "DANGER" | "PENDING_FEE" | "UNMATCHED";
 
 export interface DipPatientRow {
   patientId: string;
   patientName: string;
-  doctor?: string;
-  patientStatus?: string;
-  encounterId?: string;
+  gender?: string;
+  age?: number | null;
   diagnosis: string;
-  encounterUpdatedAt?: string;
   matched: boolean;
+  groupSource?: "AUTO" | "MANUAL";
+  autoGroupCode?: string | null;
+  autoGroupName?: string | null;
+  attendingDoctor?: string;
+  admissionDate?: string;
+  hospitalDays?: number | null;
+  admissionNo?: string;
+  patientType?: string;
+  bedNo?: string;
+  nursingLevel?: string;
+  depositTotal?: number | null;
+  depositBalance?: number | null;
   categoryCode?: string;
   categoryName?: string;
   groupCode?: string;
@@ -20,8 +30,8 @@ export interface DipPatientRow {
   estimatedFee?: number;
   threshold85?: number;
   threshold95?: number;
-  currentFee?: number;
-  restTo95?: number;
+  unsettledFee?: number;
+  restTo95?: number | null;
   feeSource?: string;
   feeUpdatedBy?: string;
   feeUpdatedAt?: string;
@@ -37,18 +47,35 @@ export interface DipSummary {
   pendingFee: number;
   unmatched: number;
   overrunTotal: number;
-  feeRecordedAt: string;
-}
-
-export interface DipCoverage {
-  diagnosis: string;
-  count: number;
 }
 
 export interface DipBoard {
   patients: DipPatientRow[];
   summary: DipSummary;
-  diagnosisCoverage: DipCoverage[];
+  generatedAt: string;
+}
+
+export interface DipGroupOption {
+  categoryCode: string;
+  categoryName: string;
+  groupCode: string;
+  groupName: string;
+  estimatedFee: number;
+}
+
+export interface DipFeePayload {
+  patientId: string;
+  unsettledFee: number;
+  source?: "MANUAL" | "SCREENSHOT";
+  admissionNo?: string;
+  patientType?: string;
+  bedNo?: string;
+  nursingLevel?: string;
+  depositTotal?: number | null;
+  depositBalance?: number | null;
+  admissionDate?: string;
+  attendingDoctor?: string;
+  remark?: string;
 }
 
 const BASE = "/dip/warning";
@@ -58,11 +85,25 @@ export const getDipBoardApi = async () => {
   return parseClinicApiResponse<DipBoard>(result);
 };
 
-export const saveDipFeeApi = async (body: { patientId: string; currentFee: number; source?: "MANUAL" | "SCREENSHOT" }) => {
+export const getDipGroupsApi = async () => {
+  const result = await clinicFetch(`${BASE}/groups`, { headers: authHeaders() });
+  return parseClinicApiResponse<DipGroupOption[]>(result);
+};
+
+export const saveDipFeeApi = async (body: DipFeePayload) => {
   const result = await clinicFetch(`${BASE}/fee`, {
     method: "POST",
     headers: clinicJsonHeaders(),
     body: JSON.stringify(body)
   });
-  return parseClinicApiResponse<{ patientId: string; currentFee: number; feeSource: string; updatedAt: string }>(result);
+  return parseClinicApiResponse<{ patientId: string; unsettledFee: number; updatedAt: string }>(result);
+};
+
+export const saveDipGroupApi = async (body: { patientId: string; groupCode: string; note?: string }) => {
+  const result = await clinicFetch(`${BASE}/group`, {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+  return parseClinicApiResponse<{ patientId: string; groupCode: string }>(result);
 };
