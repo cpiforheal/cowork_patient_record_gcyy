@@ -107,3 +107,39 @@ export const saveDipGroupApi = async (body: { patientId: string; groupCode: stri
   });
   return parseClinicApiResponse<{ patientId: string; groupCode: string }>(result);
 };
+
+/** HIS 费用截图识别结果项；仅用于预览，写入仍走 saveDipFeeApi。 */
+export interface DipOcrItem {
+  ocrAdmissionNo: string;
+  ocrName: string;
+  unsettledFee: number | null;
+  depositBalance: number | null;
+  recordedAt: string;
+  confidence: number;
+  matchStatus: "MATCHED" | "AMBIGUOUS" | "UNMATCHED";
+  matchReason: string;
+  patientId: string;
+  patientName: string;
+  diagnosis?: string;
+  groupName?: string;
+  previousFee?: number | null;
+  waterlineRatio?: number | null;
+}
+
+export interface DipOcrResult {
+  items: DipOcrItem[];
+  recognized: number;
+  matched: number;
+  pending: number;
+}
+
+export const parseDipScreenshotApi = async (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  const result = await clinicFetch(`${BASE}/ocr`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form
+  });
+  return parseClinicApiResponse<DipOcrResult>(result);
+};

@@ -7,6 +7,7 @@
       </div>
       <div class="head-side">
         <span class="scope">可见 {{ allRows.length }} 例 · 待处理 {{ pendingCount }} 例</span>
+        <el-button size="small" @click="ocrVisible = true">导入 HIS 费用截图</el-button>
       </div>
     </header>
 
@@ -130,6 +131,72 @@
         </div>
       </template>
     </ProTable>
+
+    <!-- HIS 截图导入：只识别最小字段，确认后才写入费用 -->
+    <el-dialog v-model="ocrVisible" title="导入 HIS 费用截图" width="720px">
+      <div class="ocr">
+        <el-upload
+          drag
+          :auto-upload="false"
+          :show-file-list="false"
+          accept="image/png,image/jpeg"
+          :on-change="handleOcrFile"
+        >
+          <div class="ocr-upload">
+            <p>拖入或点击选择 HIS 住院费用列表截图</p>
+            <small>仅提取住院号、姓名、未结算费用、押金余额；截图不保存到病历附件。</small>
+          </div>
+        </el-upload>
+
+        <div v-if="ocrLoading" class="ocr-status">正在识别，请稍候…</div>
+
+        <template v-if="ocrItems.length">
+          <div class="ocr-summary">
+            识别 {{ ocrRecognized }} 条 · 已匹配 {{ ocrMatched }} 条 · 需确认 {{ ocrPending }} 条
+          </div>
+          <el-table :data="ocrItems" size="small" max-height="300" @selection-change="onOcrSelection">
+            <el-table-column type="selection" width="42" :selectable="row => row.matchStatus === 'MATCHED'" />
+            <el-table-column label="识别" width="150">
+              <template #default="{ row }">
+                <div class="ocr-cell">
+                  <span>{{ row.ocrName || "—" }}</span>
+                  <span class="sub">{{ row.ocrAdmissionNo || "无住院号" }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="匹配患者" width="150">
+              <template #default="{ row }">
+                <div class="ocr-cell">
+                  <span>{{ row.patientName || "—" }}</span>
+                  <span class="sub">{{ row.matchReason }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="未结算费用" width="120" align="right">
+              <template #default="{ row }">{{ money(row.unsettledFee) }}</template>
+            </el-table-column>
+            <el-table-column label="原费用" width="110" align="right">
+              <template #default="{ row }">{{ money(row.previousFee) }}</template>
+            </el-table-column>
+            <el-table-column label="识别后水位" width="110" align="right">
+              <template #default="{ row }">
+                <span v-if="row.waterlineRatio !== null">{{ row.waterlineRatio.toFixed(1) }}%</span>
+                <span v-else class="sub">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="置信度" width="90" align="right">
+              <template #default="{ row }">{{ Math.round(row.confidence * 100) }}%</template>
+            </el-table-column>
+          </el-table>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="ocrVisible = false">关闭</el-button>
+        <el-button type="primary" :disabled="!ocrChecked.length" :loading="ocrWriting" @click="confirmOcr">
+          写入选中 {{ ocrChecked.length }} 条
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 详情：完整 HIS 与审计信息收在这里 -->
     <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="430px">
@@ -264,9 +331,11 @@ import type { ColumnProps, ProTableInstance } from "@/components/ProTable/interf
 import {
   getDipBoardApi,
   getDipGroupsApi,
+  parseDipScreenshotApi,
   saveDipFeeApi,
   saveDipGroupApi,
   type DipGroupOption,
+  type DipOcrItem,
   type DipPatientRow
 } from "@/api/modules/clinic/dipWarning";
 
@@ -619,6 +688,72 @@ const submitGroup = async () => {
     ElMessage.error(error instanceof Error ? error.message : "病组保存失败");
   } finally {
     savingGroup.value = false;
+  }
+};
+
+/* ---------- HIS 截图识别 ---------- */
+const ocrVisible = ref(false);
+const ocrLoading = ref(false);
+const ocrWriting = ref(false);
+const ocrItems = ref<DipOcrItem[]>([]);
+const ocrChecked = ref<DipOcrItem[]>([]);
+const ocrRecognized = ref(0);
+const ocrMatched = ref(0);
+const ocrPending = ref(0);
+
+const onOcrSelection = (rows: DipOcrItem[]) => {
+  ocrChecked.value = rows;
+};
+
+const handleOcrFile = async (file: { raw?: File }) => {
+  if (!file.raw) return;
+  if (!/^image\/(png|jpeg)$/.test(file.raw.type)) {
+    ElMessage.error("仅支持 PNG / JPG 截图");
+    return;
+  }
+  ocrLoading.value = true;
+  ocrItems.value = [];
+  ocrChecked.value = [];
+  try {
+    const result = await parseDipScreenshotApi(file.raw);
+    ocrItems.value = result.items;
+    ocrRecognized.value = result.recognized;
+    ocrMatched.value = result.matched;
+    ocrPending.value = result.pending;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "识别失败，请重试或手动录入");
+  } finally {
+    ocrLoading.value = false;
+  }
+};
+
+const confirmOcr = async () => {
+  if (!ocrChecked.value.length) return;
+  ocrWriting.value = true;
+  let written = 0;
+  const failed: string[] = [];
+  for (const item of ocrChecked.value) {
+    if (!item.patientId || item.unsettledFee === null) continue;
+    try {
+      await saveDipFeeApi({
+        patientId: item.patientId,
+        unsettledFee: item.unsettledFee,
+        source: "SCREENSHOT",
+        admissionNo: item.ocrAdmissionNo || undefined,
+        depositBalance: item.depositBalance
+      });
+      written += 1;
+    } catch {
+      failed.push(item.ocrName || item.patientName || item.patientId);
+    }
+  }
+  ocrWriting.value = false;
+  ocrVisible.value = false;
+  await reload();
+  if (failed.length) {
+    ElMessage.warning(`已写入 ${written} 条，${failed.length} 条失败：${failed.join("、")}`);
+  } else {
+    ElMessage.success(`已写入 ${written} 条费用`);
   }
 };
 
@@ -983,6 +1118,44 @@ onMounted(reload);
   .more {
     border-top: 1px solid var(--el-border-color-lighter);
     border-bottom: none;
+  }
+
+  .ocr {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .ocr-upload {
+    padding: 8px 0;
+
+    p {
+      margin: 0 0 4px;
+      font-size: 13px;
+      color: var(--el-text-color-regular);
+    }
+
+    small {
+      font-size: 11.5px;
+      color: var(--el-text-color-secondary);
+    }
+  }
+
+  .ocr-status {
+    font-size: 12.5px;
+    color: var(--el-color-primary);
+  }
+
+  .ocr-summary {
+    font-size: 12.5px;
+    color: var(--el-text-color-regular);
+  }
+
+  .ocr-cell {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    font-size: 12.5px;
   }
 }
 </style>

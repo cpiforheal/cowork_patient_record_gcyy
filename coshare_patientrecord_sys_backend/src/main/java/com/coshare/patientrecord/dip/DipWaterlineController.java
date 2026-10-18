@@ -2,13 +2,17 @@ package com.coshare.patientrecord.dip;
 
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.security.AuthPermission;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /** DIP 费用预警：字段对齐 HIS 住院费用界面，85%/95% 阈值只在本系统内做预警渲染。 */
 @RestController
@@ -16,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class DipWaterlineController {
 
     private final DipWaterlineService service;
+    private final DipOcrService ocrService;
 
-    public DipWaterlineController(DipWaterlineService service) {
+    public DipWaterlineController(DipWaterlineService service, DipOcrService ocrService) {
         this.service = service;
+        this.ocrService = ocrService;
     }
 
     @GetMapping("/clinic-api/dip/warning/patients")
@@ -43,5 +49,13 @@ public class DipWaterlineController {
     @PostMapping("/clinic-api/dip/warning/group")
     public ApiResult<Map<String, Object>> saveGroup(@RequestBody Map<String, Object> body) {
         return ApiResult.of(200, "已更新病组", service.saveGroupSelection(body, AuthPermission.currentUserOrThrow()));
+    }
+
+    /** HIS 费用截图识别：只返回预览，不写入费用；原始截图不落库。 */
+    @PostMapping(value = "/clinic-api/dip/warning/ocr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<Map<String, Object>> parseScreenshot(
+        @RequestParam("file") MultipartFile file
+    ) throws IOException {
+        return ApiResult.of(200, "识别完成", ocrService.parse(file, AuthPermission.currentUserOrThrow()));
     }
 }
