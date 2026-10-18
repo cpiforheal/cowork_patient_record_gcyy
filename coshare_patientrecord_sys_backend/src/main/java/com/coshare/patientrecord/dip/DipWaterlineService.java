@@ -141,24 +141,26 @@ public class DipWaterlineService {
             "SELECT patient_id, current_fee, fee_source, updated_by, updated_at, admission_no, patient_type,"
                 + " bed_no, nursing_level, deposit_total, deposit_balance, admission_date, attending_doctor, remark"
                 + " FROM dip_fee_snapshot",
-            rs -> map.put(
-                rs.getString("patient_id"),
-                new FeeSnapshot(
-                    rs.getBigDecimal("current_fee"),
-                    rs.getString("fee_source"),
-                    rs.getString("updated_by"),
-                    rs.getString("updated_at"),
-                    rs.getString("admission_no"),
-                    rs.getString("patient_type"),
-                    rs.getString("bed_no"),
-                    rs.getString("nursing_level"),
-                    rs.getBigDecimal("deposit_total"),
-                    rs.getBigDecimal("deposit_balance"),
-                    rs.getString("admission_date"),
-                    rs.getString("attending_doctor"),
-                    rs.getString("remark")
-                )
-            )
+            rs -> {
+                map.put(
+                    rs.getString("patient_id"),
+                    new FeeSnapshot(
+                        rs.getBigDecimal("current_fee"),
+                        rs.getString("fee_source"),
+                        rs.getString("updated_by"),
+                        rs.getString("updated_at"),
+                        rs.getString("admission_no"),
+                        rs.getString("patient_type"),
+                        rs.getString("bed_no"),
+                        rs.getString("nursing_level"),
+                        rs.getBigDecimal("deposit_total"),
+                        rs.getBigDecimal("deposit_balance"),
+                        rs.getString("admission_date"),
+                        rs.getString("attending_doctor"),
+                        rs.getString("remark")
+                    )
+                );
+            }
         );
         return map;
     }
@@ -167,7 +169,9 @@ public class DipWaterlineService {
         Map<String, String> map = new LinkedHashMap<>();
         jdbcTemplate.query(
             "SELECT patient_id, group_code FROM dip_group_selection",
-            rs -> map.put(rs.getString("patient_id"), rs.getString("group_code"))
+            rs -> {
+                map.put(rs.getString("patient_id"), rs.getString("group_code"));
+            }
         );
         return map;
     }
