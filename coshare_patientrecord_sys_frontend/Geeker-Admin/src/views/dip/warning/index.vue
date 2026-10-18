@@ -1,277 +1,269 @@
 <template>
-  <div class="dip-warning">
-    <header class="dw-head">
-      <div class="dw-head-main">
+  <div class="dip">
+    <header class="head">
+      <div class="head-main">
         <h2>DIP 费用预警</h2>
-        <p>
-          按 DIP 病组预估费用监控在院患者费用水位：达到 <b class="t-warn">85%</b> 预警、<b class="t-danger">95%</b> 超限需停止计费。
-        </p>
+        <p>按病组预估费用监控未结算费用 · 达 <b class="t-warn">85%</b> 预警、<b class="t-danger">95%</b> 超限</p>
       </div>
-      <div class="dw-head-actions">
-        <el-button :icon="Upload" @click="openOcrDialog">上传 HIS 费用截图</el-button>
-        <el-button :icon="EditPen" @click="openFeeDialog()">手动录入费用</el-button>
-        <el-button :icon="Refresh" @click="reloadDemo">刷新</el-button>
+      <div class="head-side">
+        <span class="scope">{{ scopeLabel }}</span>
+        <el-button :icon="Refresh" circle size="small" :loading="loading" @click="reload" />
       </div>
     </header>
 
-    <nav class="dw-metrics" aria-label="费用预警汇总">
-      <div class="dw-metric">
-        <span>在院患者</span>
-        <strong>{{ rows.length }}</strong>
-      </div>
-      <div class="dw-metric">
-        <span>正常（&lt;85%）</span>
-        <strong class="t-ok">{{ summary.normal }}</strong>
-      </div>
-      <div class="dw-metric" :class="{ 'is-warn': summary.warning > 0 }">
-        <span>预警（85%~95%）</span>
-        <strong class="t-warn">{{ summary.warning }}</strong>
-      </div>
-      <div class="dw-metric" :class="{ 'is-danger': summary.danger > 0 }">
-        <span>超限（≥95%）</span>
-        <strong class="t-danger">{{ summary.danger }}</strong>
-      </div>
-      <div class="dw-metric">
-        <span>测算超支金额</span>
-        <strong :class="summary.overrunAmount > 0 ? 't-danger' : 't-ok'">
-          {{ summary.overrunAmount > 0 ? `¥${summary.overrunAmount.toFixed(2)}` : "¥0.00" }}
-        </strong>
-      </div>
+    <nav class="strip">
+      <button
+        v-for="item in strips"
+        :key="item.key"
+        type="button"
+        class="strip-item"
+        :class="[`is-${item.key}`, { active: filter === item.key }]"
+        @click="toggleFilter(item.key)"
+      >
+        <b>{{ item.count }}</b>
+        <span>{{ item.label }}</span>
+      </button>
     </nav>
 
-    <el-alert
-      class="dw-demo-notice"
-      type="info"
-      :closable="false"
-      show-icon
-      title="数据来自本院在院患者主诊断"
-      description="病组由主诊断匹配标准病组表得出；未录入 HIS 未结算费用的患者当前费用显示为 ¥0.00，可用「手动录入费用」补齐后即参与水位计算。"
-    />
-
-    <section class="dw-toolbar">
+    <section class="toolbar">
       <el-input
         v-model="keyword"
-        class="dw-search"
-        placeholder="搜索姓名 / 住院号 / DIP 病组"
+        class="search"
+        placeholder="搜索姓名 / 住院号 / 诊断 / 病组"
         clearable
         :prefix-icon="Search"
       />
-      <el-radio-group v-model="levelFilter" size="small">
-        <el-radio-button value="all">全部</el-radio-button>
-        <el-radio-button value="danger">超限</el-radio-button>
-        <el-radio-button value="warning">预警</el-radio-button>
-        <el-radio-button value="normal">正常</el-radio-button>
-      </el-radio-group>
-      <el-select v-model="sortBy" class="dw-sort" size="default" placeholder="排序">
-        <el-option label="按费用水位降序" value="ratioDesc" />
-        <el-option label="按当前费用降序" value="feeDesc" />
-        <el-option label="按入院日期降序" value="dateDesc" />
-      </el-select>
+      <span v-if="filter !== 'all'" class="filter-note">
+        已筛选 {{ filterLabel }}<button type="button" @click="filter = 'all'">清除</button>
+      </span>
     </section>
 
-    <el-table :data="visibleRows" class="dw-table" row-key="admissionNo" :row-class-name="rowClass" stripe>
-      <el-table-column prop="admissionNo" label="住院号" width="118" />
-      <el-table-column prop="name" label="姓名" width="86" />
-      <el-table-column prop="diagnosis" label="诊断" width="100" />
-      <el-table-column label="DIP 病组" min-width="230">
+    <el-table
+      v-loading="loading"
+      :data="visibleRows"
+      class="table"
+      row-key="patientId"
+      :row-class-name="rowClass"
+    >
+      <el-table-column label="患者" min-width="200">
         <template #default="{ row }">
-          <div class="dw-group">
-            <span class="dw-group-code">{{ row.dipCode }}</span>
-            <span class="dw-group-name">{{ row.dipName }}</span>
+          <div class="cell-patient">
+            <strong>{{ row.name }}</strong>
+            <span class="sub">{{ patientMeta(row) }}</span>
+            <span class="diag">{{ row.diagnosis || "—" }}</span>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="预估费用" width="106" align="right">
-        <template #default="{ row }">{{ money(row.estimatedFee) }}</template>
-      </el-table-column>
-      <el-table-column label="当前费用" width="106" align="right">
+
+      <el-table-column label="DIP 病组" min-width="210">
         <template #default="{ row }">
-          <b>{{ money(row.currentFee) }}</b>
+          <div v-if="row.matched" class="cell-group">
+            <span class="group-name">{{ row.dipName }}</span>
+            <span class="sub">
+              {{ row.dipCode }}
+              <i v-if="row.groupSource === 'MANUAL'" class="tag-manual">已改选</i>
+            </span>
+          </div>
+          <div v-else class="cell-group">
+            <span class="sub is-muted">病组表未覆盖该诊断</span>
+            <button type="button" class="link" @click="openGroupDialog(row)">指定病组</button>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="费用水位" width="220">
+
+      <!-- 主视觉：费用水位 -->
+      <el-table-column label="费用水位" width="266">
         <template #default="{ row }">
-          <div class="dw-waterline">
-            <div class="dw-bar">
-              <div class="dw-bar-fill" :class="`is-${row.level}`" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
-              <i class="dw-bar-mark" style="left: 85%" />
-              <i class="dw-bar-mark is-super" style="left: 95%" />
+          <div v-if="row.level === 'pending' || row.level === 'unmatched'" class="water is-pending">
+            <span class="water-none">未录入未结算费用</span>
+            <button type="button" class="link" @click="openFeeDialog(row)">录入费用</button>
+          </div>
+          <div v-else class="water" :class="`is-${row.level}`">
+            <div class="water-top">
+              <b class="fee">{{ money(row.currentFee) }}</b>
+              <span class="ratio">{{ row.ratio.toFixed(1) }}%</span>
             </div>
-            <span class="dw-ratio" :class="`t-${row.level}`">{{ row.ratio.toFixed(1) }}%</span>
+            <div class="bar">
+              <i class="fill" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
+              <i class="tick" style="left: 85%" />
+              <i class="tick" style="left: 95%" />
+            </div>
+            <div class="water-foot">
+              <span>预估 {{ money(row.estimatedFee) }}</span>
+              <span :class="`t-${row.level}`">{{ suggestion(row) }}</span>
+            </div>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="阈值（85% / 95%）" width="150" align="right">
+
+      <el-table-column label="处理" width="176" align="right">
         <template #default="{ row }">
-          <span class="dw-threshold">{{ money(row.threshold85) }} / {{ money(row.threshold95) }}</span>
+          <div class="cell-action">
+            <el-tag v-if="row.level !== 'pending' && row.level !== 'unmatched'" :type="tagType(row.level)" size="small" effect="light">
+              {{ levelText(row.level) }}
+            </el-tag>
+            <el-tag v-else type="info" size="small" effect="plain">{{ levelText(row.level) }}</el-tag>
+            <el-button link type="primary" size="small" @click="openFeeDialog(row)">录费用</el-button>
+            <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="92">
-        <template #default="{ row }">
-          <el-tag :type="tagType(row.level)" effect="light" size="small">{{ levelText(row.level) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="updatedAt" label="费用更新时间" width="150" />
-      <el-table-column label="操作" width="132" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
-          <el-button link type="primary" @click="openFeeDialog(row)">录费用</el-button>
-        </template>
-      </el-table-column>
+
       <template #empty>
-        <el-empty description="没有匹配的患者" :image-size="70" />
+        <el-empty description="当前范围暂无在院患者" :image-size="70" />
       </template>
     </el-table>
 
-    <!-- 手动录入：当前唯一稳定的人工收敛入口 -->
-    <el-dialog v-model="feeDialogVisible" title="录入当前费用" width="460px">
-      <el-form v-if="feeTarget" label-width="96px">
-        <el-form-item label="患者">
-          <span>{{ feeTarget.name }}（{{ feeTarget.admissionNo }}）</span>
-        </el-form-item>
-        <el-form-item label="DIP 病组">
-          <span class="dw-group-name">{{ feeTarget.dipName }}</span>
-        </el-form-item>
-        <el-form-item label="当前费用">
-          <el-input-number v-model="feeInput" :min="0" :precision="2" :step="100" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="录入后水位">
-          <b :class="`t-${previewLevel}`">{{ previewRatio.toFixed(1) }}%</b>
-          <span class="dw-hint">（85% = {{ money(feeTarget.threshold85) }}，95% = {{ money(feeTarget.threshold95) }}）</span>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="feeDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitFee">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- HIS 截图识别：演示解析流程与人工确认环节 -->
-    <el-dialog v-model="ocrDialogVisible" title="上传 HIS 费用截图" width="640px">
-      <el-upload
-        drag
-        :auto-upload="false"
-        :show-file-list="false"
-        accept="image/png,image/jpeg"
-        :on-change="handleOcrFile"
-      >
-        <div class="dw-upload">
-          <el-icon><Upload /></el-icon>
-          <p>把 HIS 住院患者费用列表截图拖到这里，或点击选择文件</p>
-          <small>支持 PNG / JPG。识别结果会进入人工确认，确认后才写入费用。</small>
-        </div>
-      </el-upload>
-      <el-alert
-        class="dw-ocr-notice"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="OCR 服务尚未接通"
-        description="本演示用“载入示例识别结果”模拟识别输出；接入真实 OCR 后，这里会回填截图中的住院号与未结算费用并自动匹配病组。"
-      />
-      <div class="dw-ocr-actions">
-        <el-button type="primary" plain @click="loadSampleOcr">载入示例识别结果</el-button>
-      </div>
-      <el-table v-if="ocrRows.length" :data="ocrRows" size="small" class="dw-ocr-table" max-height="240">
-        <el-table-column prop="admissionNo" label="住院号" width="120" />
-        <el-table-column prop="name" label="姓名" width="90" />
-        <el-table-column prop="currentFee" label="识别费用" width="110" align="right">
-          <template #default="{ row }">{{ money(row.currentFee) }}</template>
-        </el-table-column>
-        <el-table-column prop="matched" label="匹配" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.matched ? 'success' : 'info'" size="small">{{ row.matched ? "已匹配" : "未匹配" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="识别后水位">
-          <template #default="{ row }">
-            <span v-if="row.matched" :class="`t-${row.level}`">{{ row.ratio.toFixed(1) }}%</span>
-            <span v-else>—</span>
-          </template>
-        </el-table-column>
-      </el-table>
-      <template #footer>
-        <el-button @click="ocrDialogVisible = false">关闭</el-button>
-        <el-button type="primary" :disabled="!ocrRows.length" @click="applyOcrRows">确认写入费用</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 患者费用水位详情 -->
-    <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="420px">
-      <div v-if="detailTarget" class="dw-detail">
-        <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="住院号">{{ detailTarget.admissionNo }}</el-descriptions-item>
-          <el-descriptions-item label="诊断">{{ detailTarget.diagnosis }}</el-descriptions-item>
-          <el-descriptions-item label="DIP 病组">{{ detailTarget.dipCode }}</el-descriptions-item>
-          <el-descriptions-item label="病组名称">{{ detailTarget.dipName }}</el-descriptions-item>
-          <el-descriptions-item label="预估费用">{{ money(detailTarget.estimatedFee) }}</el-descriptions-item>
-          <el-descriptions-item label="当前费用">{{ money(detailTarget.currentFee) }}</el-descriptions-item>
-          <el-descriptions-item label="85% 阈值">{{ money(detailTarget.threshold85) }}</el-descriptions-item>
-          <el-descriptions-item label="95% 阈值">{{ money(detailTarget.threshold95) }}</el-descriptions-item>
-          <el-descriptions-item label="剩余可用额度">{{ money(detailTarget.remainTo95) }}</el-descriptions-item>
-        </el-descriptions>
-
-        <div class="dw-detail-bar">
-          <div class="dw-bar is-tall">
-            <div
-              class="dw-bar-fill"
-              :class="`is-${detailTarget.level}`"
-              :style="{ width: `${Math.min(detailTarget.ratio, 100)}%` }"
-            />
-            <i class="dw-bar-mark" style="left: 85%" />
-            <i class="dw-bar-mark is-super" style="left: 95%" />
+    <!-- 详情：完整 HIS 与审计信息收在这里 -->
+    <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="430px">
+      <div v-if="detailTarget" class="detail">
+        <section class="detail-hero" :class="`is-${detailTarget.level}`">
+          <div class="hero-row">
+            <b class="hero-fee">{{ detailTarget.level === "pending" ? "待录入" : money(detailTarget.currentFee) }}</b>
+            <span v-if="detailTarget.level !== 'pending' && detailTarget.level !== 'unmatched'" class="hero-ratio">
+              {{ detailTarget.ratio.toFixed(1) }}%
+            </span>
           </div>
-          <div class="dw-detail-scale">
+          <div v-if="detailTarget.level !== 'pending' && detailTarget.level !== 'unmatched'" class="bar is-tall">
+            <i class="fill" :style="{ width: `${Math.min(detailTarget.ratio, 100)}%` }" />
+            <i class="tick" style="left: 85%" />
+            <i class="tick is-super" style="left: 95%" />
+          </div>
+          <div class="hero-scale">
             <span>¥0</span>
             <span>{{ money(detailTarget.threshold85) }}</span>
             <span>{{ money(detailTarget.threshold95) }}</span>
             <span>{{ money(detailTarget.estimatedFee) }}</span>
           </div>
-        </div>
+          <p class="hero-tip">{{ detailTip(detailTarget) }}</p>
+        </section>
 
-        <el-alert
-          v-if="detailTarget.level === 'danger'"
-          type="error"
-          :closable="false"
-          show-icon
-          title="已达 95% 超限线"
-          description="如无特殊情况应停止计费并办理出院；继续产生费用将超出病组支付标准。"
-        />
-        <el-alert
-          v-else-if="detailTarget.level === 'warning'"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="已达 85% 预警线"
-          description="请关注后续费用增长，提前安排出院或核对诊疗项目。"
-        />
-        <el-alert v-else type="success" :closable="false" show-icon title="费用水位正常" />
+        <el-descriptions :column="1" border size="small" class="detail-table">
+          <el-descriptions-item label="诊断">{{ detailTarget.diagnosis || "—" }}</el-descriptions-item>
+          <el-descriptions-item label="DIP 病组">
+            {{ detailTarget.dipName || "—" }}
+            <span class="sub"> {{ detailTarget.dipCode }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="剩余到 95%">{{ money(detailTarget.remainTo95) }}</el-descriptions-item>
+          <el-descriptions-item label="住院号">{{ blank(detailTarget.admissionNo) }}</el-descriptions-item>
+          <el-descriptions-item label="病人类型">{{ blank(detailTarget.patientType) }}</el-descriptions-item>
+          <el-descriptions-item label="床号 / 护理">{{ pair(detailTarget.bedNo, detailTarget.nursingLevel) }}</el-descriptions-item>
+          <el-descriptions-item label="押金（总额 / 余额）">
+            {{ pair(detailTarget.depositTotal, detailTarget.depositBalance) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="入院日期 / 天数">
+            {{ pair(detailTarget.admissionDate, detailTarget.hospitalDays) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="管床医生">{{ blank(detailTarget.attendingDoctor) }}</el-descriptions-item>
+          <el-descriptions-item label="费用更新">
+            {{ detailTarget.updatedAt }}<span v-if="detailTarget.feeUpdatedBy" class="sub"> · {{ detailTarget.feeUpdatedBy }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div class="detail-actions">
+          <el-button size="small" @click="openFeeDialog(detailTarget)">录入费用</el-button>
+          <el-button v-if="detailTarget.matched" size="small" @click="openGroupDialog(detailTarget)">改选病组</el-button>
+        </div>
       </div>
     </el-drawer>
+
+    <!-- 录入费用 -->
+    <el-dialog v-model="feeDialogVisible" title="录入未结算费用" width="430px">
+      <el-form v-if="feeTarget" label-width="92px">
+        <el-form-item label="患者">
+          <span>{{ feeTarget.name }}<span v-if="feeTarget.admissionNo" class="sub"> · {{ feeTarget.admissionNo }}</span></span>
+        </el-form-item>
+        <el-form-item label="未结算费用">
+          <el-input-number v-model="feeInput" :min="0" :precision="2" :step="100" controls-position="right" />
+        </el-form-item>
+        <el-form-item v-if="feeTarget.matched" label="录入后水位">
+          <b :class="`t-${previewLevel}`">{{ previewRatio.toFixed(1) }}%</b>
+          <span class="sub">（85% = {{ money(feeTarget.threshold85) }}，95% = {{ money(feeTarget.threshold95) }}）</span>
+        </el-form-item>
+        <el-collapse v-model="morePanel" class="more">
+          <el-collapse-item title="HIS 附加信息（可选）" name="more">
+            <el-form-item label="住院号">
+              <el-input v-model="feeForm.admissionNo" placeholder="HIS 住院号" />
+            </el-form-item>
+            <el-form-item label="押金余额">
+              <el-input-number v-model="feeForm.depositBalance" :precision="2" :step="100" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="病人类型">
+              <el-input v-model="feeForm.patientType" placeholder="如 国家医保（居民）" />
+            </el-form-item>
+            <el-form-item label="床号">
+              <el-input v-model="feeForm.bedNo" placeholder="HIS 床号" />
+            </el-form-item>
+            <el-form-item label="管床医生">
+              <el-input v-model="feeForm.attendingDoctor" placeholder="HIS 管床医生" />
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
+      </el-form>
+      <template #footer>
+        <el-button @click="feeDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingFee" @click="submitFee">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 改选病组 -->
+    <el-dialog v-model="groupDialogVisible" title="改选病组" width="500px">
+      <div v-if="groupTarget" class="group-dialog">
+        <p class="sub">{{ groupTarget.name }} · {{ groupTarget.diagnosis }}</p>
+        <el-select v-model="groupInput" filterable placeholder="选择病组" class="full">
+          <el-option-group v-for="group in groupOptionsGrouped" :key="group.categoryCode" :label="group.categoryName">
+            <el-option
+              v-for="option in group.options"
+              :key="option.groupCode"
+              :label="`${option.groupName} · ${option.groupCode}`"
+              :value="option.groupCode"
+            />
+          </el-option-group>
+        </el-select>
+        <p v-if="selectedGroup" class="sub">
+          预估 <b class="t-normal">{{ money(selectedGroup.estimatedFee) }}</b>
+          <template v-if="groupTarget.currentFee > 0">
+            → 改选后水位 <b :class="`t-${previewGroupLevel}`">{{ previewGroupRatio.toFixed(1) }}%</b>
+          </template>
+        </p>
+        <el-button v-if="groupTarget.groupSource === 'MANUAL'" link type="primary" size="small" @click="groupInput = ''">
+          恢复主诊断自动匹配
+        </el-button>
+      </div>
+      <template #footer>
+        <el-button @click="groupDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingGroup" @click="submitGroup">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts" name="dipWarning">
-import { computed, onMounted, ref } from "vue";
-import { ElMessage, type UploadFile } from "element-plus";
-import { EditPen, Refresh, Search, Upload } from "@element-plus/icons-vue";
-import { getDipBoardApi, saveDipFeeApi, type DipPatientRow } from "@/api/modules/clinic/dipWarning";
+import { computed, onMounted, reactive, ref } from "vue";
+import { ElMessage } from "element-plus";
+import { Refresh, Search } from "@element-plus/icons-vue";
+import {
+  getDipBoardApi,
+  getDipGroupsApi,
+  saveDipFeeApi,
+  saveDipGroupApi,
+  type DipGroupOption,
+  type DipPatientRow
+} from "@/api/modules/clinic/dipWarning";
 
-type Level = "normal" | "warning" | "danger";
+type Level = "normal" | "warning" | "danger" | "pending" | "unmatched";
+type FilterKey = "danger" | "warning" | "normal" | "pending";
 
-interface DipGroup {
-  code: string;
-  name: string;
-  estimatedFee: number;
-}
-
-interface PatientRow {
+interface Row {
   patientId: string;
-  admissionNo: string;
   name: string;
+  gender: string;
+  age: number | null;
   diagnosis: string;
+  matched: boolean;
   dipCode: string;
   dipName: string;
+  groupSource: "AUTO" | "MANUAL";
   estimatedFee: number;
   currentFee: number;
   threshold85: number;
@@ -280,428 +272,697 @@ interface PatientRow {
   remainTo95: number;
   level: Level;
   updatedAt: string;
+  feeUpdatedBy: string;
+  admissionNo: string;
+  patientType: string;
+  bedNo: string;
+  nursingLevel: string;
+  depositTotal: number | null;
+  depositBalance: number | null;
+  admissionDate: string;
+  hospitalDays: number | null;
+  attendingDoctor: string;
 }
 
-interface WaterlineRow extends PatientRow {}
-
-const rows = ref<WaterlineRow[]>([]);
+const loading = ref(false);
 const keyword = ref("");
-const levelFilter = ref<"all" | Level>("all");
-const sortBy = ref<"ratioDesc" | "feeDesc" | "dateDesc">("ratioDesc");
+const filter = ref<"all" | FilterKey>("all");
+const rawRows = ref<DipPatientRow[]>([]);
+const rows = ref<Row[]>([]);
 
+const money = (value: number | null | undefined) =>
+  value === null || value === undefined ? "—" : `¥${Number(value).toFixed(2)}`;
+const blank = (value: string | null | undefined) => (value && value.trim() ? value : "—");
+const pair = (a: string | number | null | undefined, b: string | number | null | undefined) => {
+  const left = a === null || a === undefined || a === "" ? "—" : a;
+  const right = b === null || b === undefined || b === "" ? "—" : b;
+  return `${left} / ${right}`;
+};
 const levelOf = (ratio: number): Level => (ratio >= 95 ? "danger" : ratio >= 85 ? "warning" : "normal");
+const levelText = (level: Level) =>
+  level === "danger" ? "超限" : level === "warning" ? "预警" : level === "pending" ? "待录入" : level === "unmatched" ? "未匹配" : "正常";
+const tagType = (level: Level) => (level === "danger" ? "danger" : level === "warning" ? "warning" : "success");
 
-const buildRow = (item: DipPatientRow): WaterlineRow => {
+const toRow = (item: DipPatientRow): Row => {
   const estimatedFee = Number(item.estimatedFee ?? 0);
-  const currentFee = item.unsettledFee === null || item.unsettledFee === undefined ? 0 : Number(item.unsettledFee);
+  const hasFee = item.unsettledFee !== null && item.unsettledFee !== undefined;
+  const currentFee = hasFee ? Number(item.unsettledFee) : 0;
   const threshold85 = Number(item.threshold85 ?? 0);
   const threshold95 = Number(item.threshold95 ?? 0);
-  const ratio = estimatedFee > 0 ? (currentFee / estimatedFee) * 100 : 0;
+  const ratio = estimatedFee > 0 && hasFee ? (currentFee / estimatedFee) * 100 : 0;
+  const level: Level = !item.matched ? "unmatched" : !hasFee ? "pending" : levelOf(ratio);
   return {
     patientId: item.patientId,
-    admissionNo: item.admissionNo && item.admissionNo.trim() ? item.admissionNo : "—",
     name: item.patientName,
-    diagnosis: item.diagnosis || "—",
-    dipCode: item.groupCode || "—",
-    dipName: item.groupName || "—",
+    gender: item.gender ?? "",
+    age: item.age ?? null,
+    diagnosis: item.diagnosis ?? "",
+    matched: item.matched,
+    dipCode: item.groupCode ?? "",
+    dipName: item.groupName ?? "",
+    groupSource: (item.groupSource as "AUTO" | "MANUAL") ?? "AUTO",
     estimatedFee,
     currentFee,
     threshold85,
     threshold95,
     ratio,
     remainTo95: Number((threshold95 - currentFee).toFixed(2)),
-    level: levelOf(ratio),
-    updatedAt: item.feeUpdatedAt && item.feeUpdatedAt.trim() ? item.feeUpdatedAt : "待录入"
+    level,
+    updatedAt: item.feeUpdatedAt ?? "",
+    feeUpdatedBy: item.feeUpdatedBy ?? "",
+    admissionNo: item.admissionNo ?? "",
+    patientType: item.patientType ?? "",
+    bedNo: item.bedNo ?? "",
+    nursingLevel: item.nursingLevel ?? "",
+    depositTotal: item.depositTotal ?? null,
+    depositBalance: item.depositBalance ?? null,
+    admissionDate: item.admissionDate ?? "",
+    hospitalDays: item.hospitalDays ?? null,
+    attendingDoctor: item.attendingDoctor ?? ""
   };
 };
 
-/** 只展示主诊断能匹配到病组的患者，避免无法估算费用的行混入列表 */
-const reloadDemo = async () => {
+const reload = async () => {
+  loading.value = true;
   try {
     const board = await getDipBoardApi();
-    rows.value = (board.patients ?? []).filter(item => item.matched).map(buildRow);
-    ElMessage.success(`已加载 ${rows.value.length} 位在院患者`);
+    rawRows.value = board.patients ?? [];
+    rows.value = rawRows.value.map(toRow);
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "费用预警数据加载失败");
+  } finally {
+    loading.value = false;
   }
 };
 
-onMounted(reloadDemo);
-
-const money = (value: number) => `¥${value.toFixed(2)}`;
-
-const levelText = (level: Level) => (level === "danger" ? "超限" : level === "warning" ? "预警" : "正常");
-const tagType = (level: Level) => (level === "danger" ? "danger" : level === "warning" ? "warning" : "success");
-
-const summary = computed(() => {
-  let normal = 0;
-  let warning = 0;
-  let danger = 0;
-  let overrunAmount = 0;
-  rows.value.forEach(row => {
-    if (row.level === "danger") danger += 1;
-    else if (row.level === "warning") warning += 1;
-    else normal += 1;
-    if (row.currentFee > row.threshold95) overrunAmount += row.currentFee - row.threshold95;
-  });
-  return { normal, warning, danger, overrunAmount };
+const scopeLabel = computed(() => {
+  const total = rows.value.length;
+  const visible = rows.value.filter(row => row.level === "danger" || row.level === "warning" || row.level === "pending").length;
+  return total ? `可见 ${total} 例 · 待处理 ${visible} 例` : "";
 });
+
+const countOf = (level: Level) => rows.value.filter(row => row.level === level).length;
+const strips = computed(() => [
+  { key: "danger" as FilterKey, label: "超限", count: countOf("danger") },
+  { key: "warning" as FilterKey, label: "预警", count: countOf("warning") },
+  { key: "pending" as FilterKey, label: "待录入", count: countOf("pending") },
+  { key: "normal" as FilterKey, label: "正常", count: countOf("normal") }
+]);
+const filterLabel = computed(() => strips.value.find(item => item.key === filter.value)?.label ?? "");
+
+const toggleFilter = (key: FilterKey) => {
+  filter.value = filter.value === key ? "all" : key;
+};
+
+const rankOf = (level: Level) =>
+  level === "danger" ? 0 : level === "warning" ? 1 : level === "pending" ? 2 : level === "unmatched" ? 4 : 3;
 
 const visibleRows = computed(() => {
   const key = keyword.value.trim().toLowerCase();
   const filtered = rows.value.filter(row => {
-    if (levelFilter.value !== "all" && row.level !== levelFilter.value) return false;
+    if (filter.value !== "all" && row.level !== filter.value) return false;
     if (!key) return true;
-    return (
-      row.name.toLowerCase().includes(key) ||
-      row.admissionNo.includes(key) ||
-      row.dipCode.toLowerCase().includes(key) ||
-      row.dipName.toLowerCase().includes(key)
-    );
+    return [row.name, row.diagnosis, row.admissionNo, row.dipCode, row.dipName]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(key));
   });
-  const sorted = [...filtered];
-  if (sortBy.value === "ratioDesc") sorted.sort((a, b) => b.ratio - a.ratio);
-  if (sortBy.value === "feeDesc") sorted.sort((a, b) => b.currentFee - a.currentFee);
-  if (sortBy.value === "dateDesc") sorted.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return sorted;
+  return [...filtered].sort((a, b) => {
+    const rank = rankOf(a.level) - rankOf(b.level);
+    return rank !== 0 ? rank : b.ratio - a.ratio;
+  });
 });
 
-const rowClass = ({ row }: { row: WaterlineRow }) => (row.level === "danger" ? "dw-row-danger" : row.level === "warning" ? "dw-row-warning" : "");
+const rowClass = ({ row }: { row: Row }) =>
+  row.level === "danger" ? "row-danger" : row.level === "warning" ? "row-warning" : "";
 
-/* ---------------- 手动录入 ---------------- */
+const patientMeta = (row: Row) =>
+  [row.gender, row.age === null ? "" : `${row.age}岁`, row.admissionNo ? `住院号 ${row.admissionNo}` : ""]
+    .filter(Boolean)
+    .join(" · ") || "—";
+
+const suggestion = (row: Row) => {
+  if (row.level === "danger") return `超 ${money(row.currentFee - row.threshold95)}`;
+  if (row.level === "warning") return `余 ${money(row.threshold95 - row.currentFee)}`;
+  return `余 ${money(row.threshold95 - row.currentFee)}`;
+};
+
+const detailTip = (row: Row) => {
+  if (row.level === "danger") return "已达 95% 超限线：如无特殊情况应停止计费并安排出院。";
+  if (row.level === "warning") return "已达 85% 预警线：请关注后续费用，提前核对诊疗项目。";
+  if (row.level === "pending") return "尚未录入 HIS 未结算费用，录入后才参与水位计算。";
+  if (row.level === "unmatched") return "主诊断未匹配到病组，指定病组后才能估算费用。";
+  return "费用水位正常。";
+};
+
+/* ---------- 详情 ---------- */
+const detailVisible = ref(false);
+const detailTarget = ref<Row | null>(null);
+const openDetail = (row: Row) => {
+  detailTarget.value = row;
+  detailVisible.value = true;
+};
+
+/* ---------- 录入费用 ---------- */
 const feeDialogVisible = ref(false);
-const feeTarget = ref<WaterlineRow | null>(null);
+const savingFee = ref(false);
+const feeTarget = ref<Row | null>(null);
 const feeInput = ref(0);
+const morePanel = ref<string[]>([]);
+const feeForm = reactive({
+  admissionNo: "",
+  patientType: "",
+  bedNo: "",
+  attendingDoctor: "",
+  depositBalance: null as number | null
+});
 
-const openFeeDialog = (row?: WaterlineRow) => {
-  feeTarget.value = row ?? visibleRows.value[0] ?? rows.value[0] ?? null;
-  if (!feeTarget.value) {
-    ElMessage.warning("暂无可录入的患者");
-    return;
-  }
-  feeInput.value = feeTarget.value.currentFee;
+const openFeeDialog = (row: Row) => {
+  feeTarget.value = row;
+  feeInput.value = row.currentFee;
+  feeForm.admissionNo = row.admissionNo;
+  feeForm.patientType = row.patientType;
+  feeForm.bedNo = row.bedNo;
+  feeForm.attendingDoctor = row.attendingDoctor;
+  feeForm.depositBalance = row.depositBalance;
+  morePanel.value = [];
   feeDialogVisible.value = true;
 };
 
 const previewRatio = computed(() => {
   const target = feeTarget.value;
-  if (!target || target.estimatedFee <= 0) return 0;
+  if (!target || !target.estimatedFee) return 0;
   return (feeInput.value / target.estimatedFee) * 100;
 });
-
 const previewLevel = computed(() => levelOf(previewRatio.value));
 
 const submitFee = async () => {
   const target = feeTarget.value;
   if (!target) return;
+  savingFee.value = true;
   try {
-    await saveDipFeeApi({ patientId: target.patientId, unsettledFee: feeInput.value, source: "MANUAL" });
+    await saveDipFeeApi({
+      patientId: target.patientId,
+      unsettledFee: feeInput.value,
+      source: "MANUAL",
+      admissionNo: feeForm.admissionNo,
+      patientType: feeForm.patientType,
+      bedNo: feeForm.bedNo,
+      attendingDoctor: feeForm.attendingDoctor,
+      depositBalance: feeForm.depositBalance
+    });
     feeDialogVisible.value = false;
-    await reloadDemo();
+    await reload();
     ElMessage.success(`${target.name} 费用已更新`);
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "费用保存失败");
+  } finally {
+    savingFee.value = false;
   }
 };
 
-/* ---------------- HIS 截图识别（OCR 未接通，走示例） ---------------- */
-const ocrDialogVisible = ref(false);
-const ocrRows = ref<
-  Array<{ patientId: string; admissionNo: string; name: string; currentFee: number; matched: boolean; ratio: number; level: Level }>
->([]);
+/* ---------- 改选病组 ---------- */
+const groupDialogVisible = ref(false);
+const savingGroup = ref(false);
+const groupTarget = ref<Row | null>(null);
+const groupInput = ref("");
+const groupOptions = ref<DipGroupOption[]>([]);
 
-const openOcrDialog = () => {
-  ocrRows.value = [];
-  ocrDialogVisible.value = true;
-};
-
-const handleOcrFile = (file: UploadFile) => {
-  if (!file.raw) return;
-  if (!/^image\/(png|jpeg)$/.test(file.raw.type)) {
-    ElMessage.error("仅支持 PNG / JPG 截图");
-    return;
-  }
-  ElMessage.info("已收到截图：OCR 服务未接通，可先“载入示例识别结果”预览流程");
-};
-
-/** 示例识别：取当前列表前三位已匹配患者，按 96.5% / 88.5% / 62% 折算演示识别值 */
-const loadSampleOcr = () => {
-  const factors = [0.965, 0.885, 0.62];
-  ocrRows.value = rows.value.slice(0, factors.length).map((row, index) => {
-    const currentFee = Number((row.estimatedFee * factors[index]).toFixed(2));
-    const ratio = row.estimatedFee > 0 ? (currentFee / row.estimatedFee) * 100 : 0;
-    return {
-      patientId: row.patientId,
-      admissionNo: row.admissionNo,
-      name: row.name,
-      currentFee,
-      matched: true,
-      ratio,
-      level: levelOf(ratio)
+const groupOptionsGrouped = computed(() => {
+  const map = new Map<string, { categoryCode: string; categoryName: string; options: DipGroupOption[] }>();
+  groupOptions.value.forEach(option => {
+    const entry = map.get(option.categoryCode) ?? {
+      categoryCode: option.categoryCode,
+      categoryName: option.categoryName,
+      options: []
     };
+    entry.options.push(option);
+    map.set(option.categoryCode, entry);
   });
-  ElMessage.success(`识别到 ${ocrRows.value.length} 条记录（示例值）`);
-};
+  return [...map.values()];
+});
 
-const applyOcrRows = async () => {
-  let applied = 0;
-  for (const item of ocrRows.value) {
-    if (!item.matched) continue;
-    try {
-      await saveDipFeeApi({ patientId: item.patientId, unsettledFee: item.currentFee, source: "SCREENSHOT" });
-      applied += 1;
-    } catch {
-      // 单条失败不阻断其余
-    }
+const selectedGroup = computed(
+  () => groupOptions.value.find(option => option.groupCode === groupInput.value) ?? null
+);
+
+const previewGroupRatio = computed(() => {
+  const target = groupTarget.value;
+  const option = selectedGroup.value;
+  if (!target || !option || !option.estimatedFee || target.currentFee <= 0) return 0;
+  return (target.currentFee / option.estimatedFee) * 100;
+});
+const previewGroupLevel = computed(() => levelOf(previewGroupRatio.value));
+
+const openGroupDialog = async (row: Row) => {
+  groupTarget.value = row;
+  groupInput.value = row.dipCode;
+  groupDialogVisible.value = true;
+  if (groupOptions.value.length) return;
+  try {
+    groupOptions.value = await getDipGroupsApi();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "病组加载失败");
   }
-  ocrDialogVisible.value = false;
-  await reloadDemo();
-  ElMessage.success(`已写入 ${applied} 条费用`);
 };
 
-/* ---------------- 详情 ---------------- */
-const detailVisible = ref(false);
-const detailTarget = ref<WaterlineRow | null>(null);
-
-const openDetail = (row: WaterlineRow) => {
-  detailTarget.value = row;
-  detailVisible.value = true;
+const submitGroup = async () => {
+  const target = groupTarget.value;
+  if (!target) return;
+  savingGroup.value = true;
+  try {
+    await saveDipGroupApi({ patientId: target.patientId, groupCode: groupInput.value });
+    groupDialogVisible.value = false;
+    await reload();
+    ElMessage.success(groupInput.value ? "病组已更新" : "已恢复自动匹配");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "病组保存失败");
+  } finally {
+    savingGroup.value = false;
+  }
 };
+
+onMounted(reload);
 </script>
 
 <style scoped lang="scss">
-.dip-warning {
-  padding: 18px 20px 32px;
+.dip {
+  --ok: var(--el-color-success);
+  --warn: var(--el-color-warning);
+  --danger: var(--el-color-danger);
+
+  padding: 16px 20px 28px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 
-  .dw-head {
+  .head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    flex-wrap: wrap;
 
     h2 {
-      margin: 0 0 4px;
-      font-size: 20px;
+      margin: 0 0 3px;
+      font-size: 18px;
       font-weight: 600;
     }
 
     p {
       margin: 0;
-      font-size: 13px;
+      font-size: 12.5px;
       color: var(--el-text-color-secondary);
     }
   }
 
-  .dw-head-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .dw-metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .dw-metric {
-    flex: 1 1 150px;
-    padding: 10px 14px;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 8px;
-    background: var(--el-bg-color);
-
-    span {
-      display: block;
-      font-size: 12px;
-      color: var(--el-text-color-secondary);
-      margin-bottom: 4px;
-    }
-
-    strong {
-      font-size: 20px;
-      font-weight: 600;
-    }
-
-    &.is-warn {
-      border-color: var(--el-color-warning-light-5);
-      background: var(--el-color-warning-light-9);
-    }
-
-    &.is-danger {
-      border-color: var(--el-color-danger-light-5);
-      background: var(--el-color-danger-light-9);
-    }
-  }
-
-  .dw-toolbar {
+  .head-side {
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+
+  .scope {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+
+  .t-warn {
+    color: var(--warn);
+  }
+
+  .t-danger {
+    color: var(--danger);
+  }
+
+  .t-warning {
+    color: var(--warn);
+  }
+
+  .t-normal {
+    color: var(--ok);
+  }
+
+  /* 状态条：只有异常才上色 */
+  .strip {
+    display: flex;
+    gap: 6px;
     flex-wrap: wrap;
   }
 
-  .dw-search {
-    width: 280px;
-  }
+  .strip-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 4px 11px;
+    border: 1px solid var(--el-border-color);
+    border-radius: 999px;
+    background: var(--el-bg-color);
+    cursor: pointer;
+    transition: all 0.15s;
 
-  .dw-sort {
-    width: 168px;
-  }
-
-  .dw-group {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.35;
-
-    .dw-group-code {
-      font-size: 12px;
-      color: var(--el-color-primary);
+    b {
+      font-size: 14px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--el-text-color-primary);
     }
 
-    .dw-group-name {
+    span {
       font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+
+    &.is-danger:not(.active) b {
+      color: var(--danger);
+    }
+
+    &.is-warning:not(.active) b {
+      color: var(--warn);
+    }
+
+    &.is-danger.active {
+      border-color: var(--danger);
+      background: var(--el-color-danger-light-9);
+    }
+
+    &.is-warning.active {
+      border-color: var(--warn);
+      background: var(--el-color-warning-light-9);
+    }
+
+    &.is-pending.active,
+    &.is-normal.active {
+      border-color: var(--el-text-color-secondary);
+      background: var(--el-fill-color-light);
+    }
+
+    &:hover {
+      border-color: var(--el-color-primary-light-5);
+    }
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .search {
+    width: 260px;
+  }
+
+  .filter-note {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+
+    button {
+      margin-left: 6px;
+      border: none;
+      background: none;
+      padding: 0;
+      font-size: 12px;
+      color: var(--el-color-primary);
+      cursor: pointer;
+    }
+  }
+
+  .table {
+    :deep(.el-table__cell) {
+      padding: 8px 0;
+    }
+
+    :deep(.cell) {
+      padding: 0 10px;
+      line-height: 1.45;
+    }
+  }
+
+  .sub {
+    font-size: 11.5px;
+    color: var(--el-text-color-secondary);
+
+    &.is-muted {
+      color: var(--el-text-color-placeholder);
+    }
+  }
+
+  .cell-patient {
+    display: flex;
+    flex-direction: column;
+
+    strong {
+      font-size: 14.5px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .diag {
+      font-size: 12.5px;
       color: var(--el-text-color-regular);
     }
   }
 
-  .dw-threshold {
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-  }
-
-  .dw-waterline {
+  .cell-group {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 1px;
+
+    .group-name {
+      font-size: 12.5px;
+      color: var(--el-text-color-regular);
+    }
   }
 
-  .dw-bar {
+  .tag-manual {
+    font-style: normal;
+    font-size: 10.5px;
+    padding: 0 4px;
+    margin-left: 4px;
+    border-radius: 2px;
+    color: var(--warn);
+    background: var(--el-color-warning-light-9);
+  }
+
+  .link {
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 11.5px;
+    color: var(--el-color-primary);
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  /* 主视觉：水位 */
+  .water {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+
+    &.is-pending {
+      gap: 2px;
+      align-items: flex-start;
+    }
+  }
+
+  .water-none {
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+  }
+
+  .water-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+
+    .fee {
+      font-size: 17px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    .ratio {
+      font-size: 13px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .is-normal & .fee {
+      color: var(--el-text-color-primary);
+    }
+
+    .is-normal & .ratio {
+      color: var(--el-text-color-secondary);
+    }
+
+    .is-warning & .fee,
+    .is-warning & .ratio {
+      color: var(--warn);
+    }
+
+    .is-danger & .fee {
+      color: var(--danger);
+      font-size: 18px;
+    }
+
+    .is-danger & .ratio {
+      color: var(--danger);
+    }
+  }
+
+  .bar {
     position: relative;
-    flex: 1;
-    height: 10px;
-    border-radius: 6px;
-    background: var(--el-fill-color-light);
+    height: 6px;
+    border-radius: 3px;
+    background: var(--el-fill-color-darker);
     overflow: hidden;
 
     &.is-tall {
-      height: 16px;
-      border-radius: 8px;
+      height: 10px;
+      border-radius: 5px;
+      margin-top: 8px;
     }
   }
 
-  .dw-bar-fill {
+  .fill {
     position: absolute;
     inset: 0 auto 0 0;
-    border-radius: inherit;
-    transition: width 0.25s ease;
+    background: var(--ok);
 
-    &.is-normal {
-      background: var(--el-color-success);
+    .is-warning & {
+      background: var(--warn);
     }
 
-    &.is-warning {
-      background: var(--el-color-warning);
-    }
-
-    &.is-danger {
-      background: var(--el-color-danger);
+    .is-danger & {
+      background: var(--danger);
     }
   }
 
-  .dw-bar-mark {
+  .tick {
     position: absolute;
     top: 0;
     bottom: 0;
     width: 1px;
-    background: rgba(0, 0, 0, 0.35);
-
-    &.is-super {
-      background: rgba(0, 0, 0, 0.55);
-    }
+    background: var(--el-bg-color);
+    opacity: 0.9;
   }
 
-  .dw-ratio {
-    width: 52px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    font-size: 13px;
-  }
-
-  .dw-hint {
-    margin-left: 6px;
-    font-size: 12px;
+  .water-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
     color: var(--el-text-color-secondary);
+    font-variant-numeric: tabular-nums;
   }
 
-  .dw-upload {
-    padding: 20px 0;
-    text-align: center;
+  .cell-action {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 
-    .el-icon {
-      font-size: 32px;
-      color: var(--el-color-primary);
-    }
+  :deep(.row-danger) {
+    background: var(--el-color-danger-light-9);
 
-    p {
-      margin: 8px 0 4px;
-      font-size: 14px;
-    }
-
-    small {
-      color: var(--el-text-color-secondary);
+    td:first-child {
+      box-shadow: inset 3px 0 0 var(--danger);
     }
   }
 
-  .dw-ocr-notice {
-    margin-top: 12px;
+  :deep(.row-warning) {
+    background: var(--el-color-warning-light-9);
+
+    td:first-child {
+      box-shadow: inset 3px 0 0 var(--warn);
+    }
   }
 
-  .dw-ocr-actions {
-    margin: 10px 0;
-  }
-
-  .dw-detail {
+  /* 详情 */
+  .detail {
     display: flex;
     flex-direction: column;
     gap: 14px;
   }
 
-  .dw-detail-bar {
-    padding: 6px 2px;
+  .detail-hero {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--el-fill-color-lighter);
 
-    .dw-detail-scale {
+    &.is-danger {
+      background: var(--el-color-danger-light-9);
+    }
+
+    &.is-warning {
+      background: var(--el-color-warning-light-9);
+    }
+
+    .hero-row {
       display: flex;
-      justify-content: space-between;
-      margin-top: 6px;
-      font-size: 11px;
-      color: var(--el-text-color-secondary);
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .hero-fee {
+      font-size: 24px;
+      font-weight: 700;
       font-variant-numeric: tabular-nums;
+    }
+
+    .hero-ratio {
+      font-size: 15px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    &.is-danger .hero-fee,
+    &.is-danger .hero-ratio {
+      color: var(--danger);
+    }
+
+    &.is-warning .hero-fee,
+    &.is-warning .hero-ratio {
+      color: var(--warn);
     }
   }
 
-  :deep(.dw-row-danger) {
-    background: var(--el-color-danger-light-9);
+  .hero-scale {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
   }
 
-  :deep(.dw-row-warning) {
-    background: var(--el-color-warning-light-9);
+  .hero-tip {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--el-text-color-regular);
   }
-}
 
-.t-ok {
-  color: var(--el-color-success);
-}
+  .detail-actions {
+    display: flex;
+    gap: 8px;
+  }
 
-.t-warn {
-  color: var(--el-color-warning);
-}
+  .group-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
 
-.t-danger {
-  color: var(--el-color-danger);
+  .full {
+    width: 100%;
+  }
+
+  .more {
+    border-top: 1px solid var(--el-border-color-lighter);
+    border-bottom: none;
+  }
 }
 </style>

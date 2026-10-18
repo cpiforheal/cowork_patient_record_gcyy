@@ -4020,6 +4020,45 @@ public class PreAiEncounterService {
             "住院耗材就诊已结束并恢复门诊耗材就诊；既往耗用记录保持不变，口径由病历分支直接决定");
     }
 
+    /** 供 DIP 等其他模块复用同一套病例级读取授权（科室归属 / 跨科授权 / 岗位分配 / 当前阶段）。 */
+    public boolean canReadEncounter(String encounterId, SessionUser user) {
+        if (safe(encounterId).isBlank() || user == null) return false;
+        return canAccessEncounter(encounterId, user);
+    }
+
+    /**
+     * 病例级读取范围：语义与 canAccessEncounter 一致，但不含“医生等操作岗整体放行”，
+     * 只认归属科室、跨科授权、岗位分配、当前阶段/队列/辅助任务。供 DIP 费用看板按患者归属收敛。
+     */
+    public boolean canReadEncounterScoped(String encounterId, SessionUser user) {
+        String id = safe(encounterId);
+        if (id.isBlank() || user == null) return false;
+        String role = RoleCatalog.canonicalize(user.role());
+        if ("admin".equals(role) || "quality".equals(role)) return true;
+        if (!READ_ROLES.contains(role)) return false;
+        return matchesEncounterScope(id, user);
+    }
+
+    private boolean matchesEncounterScope(String encounterId, SessionUser user) {
+        ObjectNode encounter = loadEncounter(encounterId);
+        if (encounter == null || encounter.isEmpty()) return false;
+        if (!safe(user.activeDepartmentId()).isBlank()
+            && safe(user.activeDepartmentId()).equals(text(encounter, "owningDepartmentId"))) {
+            return true;
+        }
+        Integer grantCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_encounter_department_grants WHERE encounter_id = ? AND account_id = ? AND status = 'ACTIVE'",
+            Integer.class,
+            encounterId,
+            safe(user.id())
+        );
+        return (grantCount != null && grantCount > 0)
+            || hasAssignedDuty(encounter, user, DUTY_CODES)
+            || canAccessCurrentWorkflowStage(encounter, user)
+            || hasAccessibleQueueTask(encounterId, user)
+            || hasAccessibleAuxiliaryTask(encounterId, user);
+    }
+
     private void requireEncounterAccess(String encounterId, SessionUser user) {
         requireReadRole(user);
         String role = RoleCatalog.canonicalize(user.role());

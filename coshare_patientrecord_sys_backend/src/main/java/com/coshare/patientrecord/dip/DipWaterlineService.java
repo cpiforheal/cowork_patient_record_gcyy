@@ -1,6 +1,7 @@
 package com.coshare.patientrecord.dip;
 
 import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.preai.PreAiEncounterService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -36,9 +37,11 @@ public class DipWaterlineService {
     private static final BigDecimal RATIO_DANGER = BigDecimal.valueOf(95);
 
     private final JdbcTemplate jdbcTemplate;
+    private final PreAiEncounterService preAiEncounterService;
 
-    public DipWaterlineService(JdbcTemplate jdbcTemplate) {
+    public DipWaterlineService(JdbcTemplate jdbcTemplate, PreAiEncounterService preAiEncounterService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.preAiEncounterService = preAiEncounterService;
     }
 
     public record GroupRule(
@@ -277,6 +280,8 @@ public class DipWaterlineService {
         for (Map<String, Object> row : diagnoses) {
             String patientId = (String) row.get("patientId");
             if (patientId == null || !seen.add(patientId)) continue;
+            // 医生视角只看自己科室 / 岗位分配 / 显式授权的病例；管理员与质控保持全量。
+            if (!preAiEncounterService.canReadEncounterScoped((String) row.get("encounterId"), user)) continue;
 
             String diagnosisText = (String) row.get("diagnosisText");
             GroupRule autoRule = match(diagnosisText, rules);
@@ -404,7 +409,7 @@ public class DipWaterlineService {
         if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者标识");
         BigDecimal currentFee = dec(body.get("unsettledFee"), "未结算费用");
         if (currentFee == null || currentFee.signum() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未结算费用必须为非负数");
-        ensurePatient(patientId);
+        ensurePatientAccess(patientId, user);
 
         String source = "SCREENSHOT".equalsIgnoreCase(str(body.get("source"))) ? "SCREENSHOT" : "MANUAL";
         String now = LocalDateTime.now().format(TIME);
@@ -447,7 +452,7 @@ public class DipWaterlineService {
     public Map<String, Object> saveGroupSelection(Map<String, Object> body, SessionUser user) {
         String patientId = str(body.get("patientId"));
         if (patientId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者标识");
-        ensurePatient(patientId);
+        ensurePatientAccess(patientId, user);
         String groupCode = str(body.get("groupCode"));
         String note = str(body.get("note"));
 
@@ -475,6 +480,20 @@ public class DipWaterlineService {
     private void ensurePatient(String patientId) {
         Integer exists = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM clinic_patients WHERE id = ?", Integer.class, patientId);
         if (exists == null || exists == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者不存在");
+    }
+
+    /** 写入前校验：患者存在且当前账号对该患者最新就诊有病例级读权限，避免改 patientId 越权。 */
+    private void ensurePatientAccess(String patientId, SessionUser user) {
+        ensurePatient(patientId);
+        List<String> encounterIds = jdbcTemplate.queryForList(
+            "SELECT id FROM pre_ai_encounters WHERE source_patient_id = ? AND status <> 'CANCELLED'"
+                + " ORDER BY updated_at DESC LIMIT 1",
+            String.class,
+            patientId
+        );
+        if (encounterIds.isEmpty() || !preAiEncounterService.canReadEncounterScoped(encounterIds.get(0), user)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前账号无权操作该患者病历");
+        }
     }
 
     private static String operator(SessionUser user) {
