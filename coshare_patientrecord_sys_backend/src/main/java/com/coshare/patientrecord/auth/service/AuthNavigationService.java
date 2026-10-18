@@ -386,6 +386,8 @@ public class AuthNavigationService {
             sectionedPage("接诊作业", "/patients/recheck-schedule", "recheckSchedule", "/patients/recheckSchedule/index", "复查预约登记", "Calendar"),
             sectionedPage("接诊作业", "/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled"),
             sectionedPage("接诊作业", "/workbench/lab-report", "workbenchLabReport", "/workbench/labReport/index", "检验报告填写", "Memo"),
+            // DIP 费用预警：按病组预估费用的 85%/95% 水位监控在院患者费用，收敛“何时停费出院”的判断
+            sectionedPage("接诊作业", "/dip/warning", "dipWarning", "/dip/warning/index", "DIP费用预警", "Warning"),
             sectionedPage("患者档案", "/patients/archive", "patientArchive", "/patients/archive/index", "患者档案", "Search"),
             sectionedPage("健康管理", "/health-archive", "healthArchive", "/healthArchive/index", "健康管理档案", "Notebook"),
             sectionedPage("随访管理", "/follow-up-dashboard", "followUpDashboard", "/home/components/FollowUpDashboardPage", "随访工作台", "DataLine"),
@@ -498,7 +500,7 @@ public class AuthNavigationService {
         );
         result.put("admin", new RolePolicy(Set.of("*"), administratorButtons));
 
-        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview", "/patients/archive");
+        Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview", "/patients/archive", "/dip/warning");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record");
         Set<String> preAi = paths("/pre-ai/encounters");
         // 病种模板库与话术模板库已归入「系统管理 → 随访配置」，
