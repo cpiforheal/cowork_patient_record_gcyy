@@ -185,7 +185,7 @@
               <b>{{ detailTarget.matched ? money(detailTarget.threshold95) : "—" }}</b>
             </div>
           </div>
-          <div v-if="hasWater(detailTarget)" class="bar is-tall">
+          <div v-if="hasWater(detailTarget)" class="track is-tall">
             <i class="fill" :style="{ width: `${Math.min(detailTarget.ratio, 100)}%` }" />
             <i class="tick" style="left: 85%" />
             <i class="tick is-super" style="left: 95%" />
