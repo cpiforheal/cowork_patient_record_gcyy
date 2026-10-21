@@ -28,6 +28,9 @@ export interface DipPatientRow {
   groupCode?: string;
   groupName?: string;
   estimatedFee?: number;
+  groupStandardFee?: number;
+  feeOverride?: number | null;
+  feeSourceType?: "GROUP" | "PATIENT";
   threshold85?: number;
   threshold95?: number;
   unsettledFee?: number;
@@ -35,6 +38,10 @@ export interface DipPatientRow {
   feeSource?: string;
   feeUpdatedBy?: string;
   feeUpdatedAt?: string;
+  feeVoided?: boolean;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
   status: DipStatus;
   waterline: { ratio: number; level: string } | null;
 }
@@ -106,6 +113,139 @@ export const saveDipGroupApi = async (body: { patientId: string; groupCode: stri
     body: JSON.stringify(body)
   });
   return parseClinicApiResponse<{ patientId: string; groupCode: string }>(result);
+};
+
+/** DIP 工作台新增患者（HIS 之外）。 */
+export interface DipCreatePatientPayload {
+  patientName: string;
+  diagnosis: string;
+  gender?: string;
+  age?: string;
+  admissionNo?: string;
+  admissionDate?: string;
+  attendingDoctor?: string;
+  groupCode?: string;
+  unsettledFee?: number | null;
+  depositBalance?: number | null;
+  note?: string;
+}
+
+export const createDipPatientApi = async (body: DipCreatePatientPayload) => {
+  const result = await clinicFetch(`${BASE}/patients`, {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+  return parseClinicApiResponse<{ patientId: string; encounterId: string }>(result);
+};
+
+export const voidDipFeeApi = async (body: { patientId: string; reason: string }) => {
+  const result = await clinicFetch(`${BASE}/fee/void`, {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+  return parseClinicApiResponse<{ patientId: string; recordStatus: string; voidedAt: string }>(result);
+};
+
+export const saveDipGroupFeeApi = async (body: {
+  patientId: string;
+  estimatedFeeOverride: number | null;
+  note?: string;
+}) => {
+  const result = await clinicFetch(`${BASE}/group-fee`, {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+  return parseClinicApiResponse<{ patientId: string; estimatedFeeOverride: number | null }>(result);
+};
+
+export interface DipChangeLog {
+  id: string;
+  patientId: string;
+  scope: "PATIENT_CREATE" | "FEE" | "FEE_VOID" | "GROUP" | "GROUP_FEE" | "CATALOG";
+  targetCode: string;
+  beforeValue: string;
+  afterValue: string;
+  note: string;
+  operator: string;
+  operatorRole: string;
+  createdAt: string;
+}
+
+export const getDipHistoryApi = async (patientId: string) => {
+  const result = await clinicFetch(`${BASE}/history?patientId=${encodeURIComponent(patientId)}`, {
+    headers: authHeaders()
+  });
+  return parseClinicApiResponse<DipChangeLog[]>(result);
+};
+
+/** 管理员病组目录。 */
+export interface DipCatalogGroup {
+  id: string;
+  categoryCode: string;
+  categoryName: string;
+  groupCode: string;
+  groupName: string;
+  estimatedFee: number;
+  matchKeywords: string;
+  keywordPriority: number;
+  sortNo: number;
+  status: "ACTIVE" | "DISABLED";
+  updatedAt: string;
+}
+
+export interface DipCatalogGroupPayload {
+  categoryCode: string;
+  categoryName: string;
+  groupCode: string;
+  groupName: string;
+  estimatedFee: number;
+  matchKeywords: string;
+  keywordPriority: number;
+  sortNo: number;
+}
+
+const CATALOG = "/dip/catalog/groups";
+
+export const getDipCatalogApi = async () => {
+  const result = await clinicFetch(CATALOG, { headers: authHeaders() });
+  return parseClinicApiResponse<DipCatalogGroup[]>(result);
+};
+
+export const createDipCatalogGroupApi = async (body: DipCatalogGroupPayload) => {
+  const result = await clinicFetch(CATALOG, {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+  return parseClinicApiResponse<DipCatalogGroup>(result);
+};
+
+export const updateDipCatalogGroupApi = async (groupCode: string, body: DipCatalogGroupPayload) => {
+  const result = await clinicFetch(`${CATALOG}/${encodeURIComponent(groupCode)}`, {
+    method: "PUT",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+  return parseClinicApiResponse<DipCatalogGroup>(result);
+};
+
+export const toggleDipCatalogGroupApi = async (groupCode: string, status: "ACTIVE" | "DISABLED") => {
+  const result = await clinicFetch(`${CATALOG}/${encodeURIComponent(groupCode)}/status`, {
+    method: "POST",
+    headers: clinicJsonHeaders(),
+    body: JSON.stringify({ status })
+  });
+  return parseClinicApiResponse<DipCatalogGroup>(result);
+};
+
+export const getDipCatalogHistoryApi = async (groupCode: string) => {
+  const result = await clinicFetch(`${CATALOG}/${encodeURIComponent(groupCode)}/history`, {
+    headers: authHeaders()
+  });
+  return parseClinicApiResponse<DipChangeLog[]>(result);
 };
 
 /** HIS 费用截图识别结果项；仅用于预览，写入仍走 saveDipFeeApi。 */

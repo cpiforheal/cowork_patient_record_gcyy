@@ -39,10 +39,34 @@ public class DipWaterlineController {
         return ApiResult.success(service.groupOptions());
     }
 
+    /** DIP 工作台新增患者（HIS 之外）。 */
+    @PostMapping("/clinic-api/dip/warning/patients")
+    public ApiResult<Map<String, Object>> createPatient(@RequestBody Map<String, Object> body) {
+        return ApiResult.of(200, "患者已新增", service.createPatient(body, AuthPermission.currentUserOrThrow()));
+    }
+
     /** 录入 HIS 侧的未结算费用与住院信息。 */
     @PostMapping("/clinic-api/dip/warning/fee")
     public ApiResult<Map<String, Object>> saveFee(@RequestBody Map<String, Object> body) {
         return ApiResult.of(200, "已保存费用", service.saveFee(body, AuthPermission.currentUserOrThrow()));
+    }
+
+    /** 作废当前费用记录（软作废，可重新录入）。 */
+    @PostMapping("/clinic-api/dip/warning/fee/void")
+    public ApiResult<Map<String, Object>> voidFee(@RequestBody Map<String, Object> body) {
+        return ApiResult.of(200, "费用记录已作废", service.voidFee(body, AuthPermission.currentUserOrThrow()));
+    }
+
+    /** 患者级病组费用覆盖；传空表示恢复病组目录标准费用。 */
+    @PostMapping("/clinic-api/dip/warning/group-fee")
+    public ApiResult<Map<String, Object>> saveGroupFee(@RequestBody Map<String, Object> body) {
+        return ApiResult.of(200, "病组费用已更新", service.saveGroupFeeOverride(body, AuthPermission.currentUserOrThrow()));
+    }
+
+    /** 患者变更历史：费用、病组、病组费用、作废记录。 */
+    @GetMapping("/clinic-api/dip/warning/history")
+    public ApiResult<List<Map<String, Object>>> history(@RequestParam("patientId") String patientId) {
+        return ApiResult.success(service.history(patientId, AuthPermission.currentUserOrThrow()));
     }
 
     /** 改选病组；groupCode 为空表示恢复主诊断自动匹配。 */

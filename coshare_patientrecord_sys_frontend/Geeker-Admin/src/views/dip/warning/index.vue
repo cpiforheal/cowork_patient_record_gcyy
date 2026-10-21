@@ -3,41 +3,15 @@
     <header class="head">
       <div class="head-main">
         <h2>DIP 费用预警</h2>
-        <p>按病组预估费用监控未结算费用 · 达 <b class="t-warn">85%</b> 预警、<b class="t-danger">95%</b> 超限</p>
+        <p>当前费用 / 85% 限制 / 95% 限制 · 达 95% 应停计费并安排出院</p>
       </div>
       <div class="head-side">
-        <span class="scope">可见 {{ allRows.length }} 例 · 待处理 {{ pendingCount }} 例</span>
+        <span class="scope">可见 {{ allRows.length }} 例 · 需处理 {{ pendingCount }} 例</span>
+        <el-button v-if="canCreatePatient" size="small" @click="openPatientDialog">新增患者</el-button>
         <el-button size="small" @click="ocrVisible = true">导入 HIS 费用截图</el-button>
+        <el-button v-if="isAdmin" size="small" plain @click="openCatalog">病组目录</el-button>
       </div>
     </header>
-
-    <!-- 聚合指标：始终跟随当前筛选结果 -->
-    <nav class="metrics">
-      <div class="metric">
-        <span>当前结果</span>
-        <strong>{{ filtered.length }}</strong>
-      </div>
-      <div class="metric is-danger" :class="{ muted: stats.danger === 0 }">
-        <span>超限（≥95%）</span>
-        <strong>{{ stats.danger }}</strong>
-      </div>
-      <div class="metric is-warning" :class="{ muted: stats.warning === 0 }">
-        <span>预警（85%~95%）</span>
-        <strong>{{ stats.warning }}</strong>
-      </div>
-      <div class="metric">
-        <span>待录入 / 未匹配</span>
-        <strong>{{ stats.pending + stats.unmatched }}</strong>
-      </div>
-      <div class="metric">
-        <span>未结算合计</span>
-        <strong>{{ money(stats.feeTotal) }}</strong>
-      </div>
-      <div class="metric" :class="{ 'is-danger': stats.overrunTotal > 0 }">
-        <span>超支合计</span>
-        <strong>{{ money(stats.overrunTotal) }}</strong>
-      </div>
-    </nav>
 
     <ProTable
       v-if="loaded"
@@ -47,12 +21,6 @@
       row-key="patientId"
       :search-col="{ xs: 1, sm: 2, md: 2, lg: 3, xl: 4 }"
     >
-      <template #tableHeader>
-        <div class="table-hint">
-          按风险、病组大类、管床医生或关键词组合筛选；列可在右上角设置中增减。
-        </div>
-      </template>
-
       <!-- 患者 -->
       <template #patient="{ row }">
         <div class="cell-patient">
@@ -64,9 +32,46 @@
 
       <!-- 风险 -->
       <template #risk="{ row }">
-        <el-tag :type="tagType(row.level)" size="small" :effect="row.level === 'normal' ? 'plain' : 'light'">
-          {{ levelText(row.level) }}
-        </el-tag>
+        <span class="risk" :class="`is-${row.level}`">{{ levelText(row.level) }}</span>
+      </template>
+
+      <!-- 主视觉：三个数字 -->
+      <template #waterline="{ row }">
+        <div v-if="row.level === 'pending' || row.level === 'unmatched'" class="num-cell is-empty">
+          <template v-if="row.level === 'pending'">
+            <span class="empty-title">{{ row.feeVoided ? "费用已作废" : "待录入费用" }}</span>
+            <span v-if="row.matched" class="empty-sub">病组标准 {{ money(row.groupStandardFee) }}</span>
+            <span v-if="row.feeVoided" class="empty-sub">
+              {{ blank(row.voidedBy) }} · {{ blank(row.voidedAt) }}<template v-if="row.voidReason"> · {{ row.voidReason }}</template>
+            </span>
+          </template>
+          <template v-else>
+            <span class="empty-title">未匹配病组</span>
+            <button type="button" class="link" @click="openGroupDialog(row)">指定病组</button>
+          </template>
+        </div>
+        <div v-else class="num-cell" :class="`is-${row.level}`">
+          <div class="num-main">
+            <span class="num-label">当前费用</span>
+            <b class="num-now">{{ money(row.currentFee) }}</b>
+          </div>
+          <div class="num-limits">
+            <div class="limit">
+              <span>85% 限制</span>
+              <b>{{ money(row.threshold85) }}</b>
+            </div>
+            <div class="limit">
+              <span>95% 限制</span>
+              <b>{{ money(row.threshold95) }}</b>
+            </div>
+          </div>
+          <div class="track">
+            <i class="fill" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
+            <i class="tick" style="left: 85%" />
+            <i class="tick" style="left: 95%" />
+          </div>
+          <div class="num-hint" :class="`t-${row.level}`">{{ suggestion(row) }}</div>
+        </div>
       </template>
 
       <!-- 病组 -->
@@ -76,42 +81,12 @@
           <span class="sub">
             {{ row.dipCode }}
             <i v-if="row.groupSource === 'MANUAL'" class="tag-manual">已改选</i>
+            <i v-if="row.feeSourceType === 'PATIENT'" class="tag-manual is-fee">患者费用</i>
           </span>
         </div>
         <div v-else class="cell-group">
           <span class="sub is-muted">病组表未覆盖该诊断</span>
           <button type="button" class="link" @click="openGroupDialog(row)">指定病组</button>
-        </div>
-      </template>
-
-      <!-- 主视觉：费用水位 -->
-      <template #waterline="{ row }">
-        <div v-if="row.level === 'pending' || row.level === 'unmatched'" class="water is-pending">
-          <span class="water-none">未录入未结算费用</span>
-        </div>
-        <div v-else class="water" :class="`is-${row.level}`">
-          <div class="water-top">
-            <b class="fee">{{ money(row.currentFee) }}</b>
-            <span class="ratio">{{ row.ratio.toFixed(1) }}%</span>
-          </div>
-          <div class="bar">
-            <i class="fill" :style="{ width: `${Math.min(row.ratio, 100)}%` }" />
-            <i class="tick" style="left: 85%" />
-            <i class="tick" style="left: 95%" />
-          </div>
-          <div class="water-foot">
-            <span>预估 {{ money(row.estimatedFee) }}</span>
-            <span :class="`t-${row.level}`">{{ suggestion(row) }}</span>
-          </div>
-        </div>
-      </template>
-
-      <!-- HIS 摘要 -->
-      <template #his="{ row }">
-        <div class="cell-his">
-          <span>{{ blank(row.bedNo) }}<template v-if="row.nursingLevel"> · {{ row.nursingLevel }}</template></span>
-          <span class="sub">押金 {{ money(row.depositBalance) }}</span>
-          <span class="sub">{{ blank(row.attendingDoctor) }}</span>
         </div>
       </template>
 
@@ -127,7 +102,7 @@
           >
             录费用
           </el-button>
-          <el-button v-else link type="primary" size="small" @click="openDetail(row)">详情</el-button>
+          <el-button v-else link type="primary" size="small" @click="openDetail(row)">编辑</el-button>
         </div>
       </template>
     </ProTable>
@@ -135,13 +110,7 @@
     <!-- HIS 截图导入：只识别最小字段，确认后才写入费用 -->
     <el-dialog v-model="ocrVisible" title="导入 HIS 费用截图" width="720px">
       <div class="ocr">
-        <el-upload
-          drag
-          :auto-upload="false"
-          :show-file-list="false"
-          accept="image/png,image/jpeg"
-          :on-change="handleOcrFile"
-        >
+        <el-upload drag :auto-upload="false" :show-file-list="false" accept="image/png,image/jpeg" :on-change="handleOcrFile">
           <div class="ocr-upload">
             <p>拖入或点击选择 HIS 住院费用列表截图</p>
             <small>仅提取住院号、姓名、未结算费用、押金余额；截图不保存到病历附件。</small>
@@ -198,35 +167,64 @@
       </template>
     </el-dialog>
 
-    <!-- 详情：完整 HIS 与审计信息收在这里 -->
-    <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="430px">
+    <!-- 详情：编辑与查的入口 -->
+    <el-drawer v-model="detailVisible" :title="detailTarget ? `${detailTarget.name} · 费用水位` : '费用水位'" size="440px">
       <div v-if="detailTarget" class="detail">
         <section class="detail-hero" :class="`is-${detailTarget.level}`">
-          <div class="hero-row">
-            <b class="hero-fee">{{ detailTarget.level === "pending" ? "待录入" : money(detailTarget.currentFee) }}</b>
-            <span v-if="detailTarget.level !== 'pending' && detailTarget.level !== 'unmatched'" class="hero-ratio">
-              {{ detailTarget.ratio.toFixed(1) }}%
-            </span>
+          <div class="hero-line">
+            <span class="hero-label">当前费用</span>
+            <b class="hero-now">{{ detailTarget.level === "pending" ? "待录入" : money(detailTarget.currentFee) }}</b>
           </div>
-          <div v-if="detailTarget.level !== 'pending' && detailTarget.level !== 'unmatched'" class="bar is-tall">
+          <div class="hero-limits">
+            <div class="hero-limit">
+              <span>85% 限制</span>
+              <b>{{ detailTarget.matched ? money(detailTarget.threshold85) : "—" }}</b>
+            </div>
+            <div class="hero-limit">
+              <span>95% 限制</span>
+              <b>{{ detailTarget.matched ? money(detailTarget.threshold95) : "—" }}</b>
+            </div>
+          </div>
+          <div v-if="hasWater(detailTarget)" class="bar is-tall">
             <i class="fill" :style="{ width: `${Math.min(detailTarget.ratio, 100)}%` }" />
             <i class="tick" style="left: 85%" />
             <i class="tick is-super" style="left: 95%" />
           </div>
-          <div class="hero-scale">
-            <span>¥0</span>
-            <span>{{ money(detailTarget.threshold85) }}</span>
-            <span>{{ money(detailTarget.threshold95) }}</span>
-            <span>{{ money(detailTarget.estimatedFee) }}</span>
-          </div>
-          <p class="hero-tip">{{ detailTip(detailTarget) }}</p>
+          <p class="hero-tip">
+            {{ detailTip(detailTarget) }}
+            <span v-if="hasWater(detailTarget)" class="sub">水位 {{ detailTarget.ratio.toFixed(1) }}%</span>
+          </p>
         </section>
+
+        <div class="detail-actions">
+          <el-button size="small" @click="openFeeDialog(detailTarget)">修改费用</el-button>
+          <el-button size="small" @click="openGroupDialog(detailTarget)">
+            {{ detailTarget.matched ? "改选病组" : "指定病组" }}
+          </el-button>
+          <el-button size="small" :disabled="!detailTarget.matched" @click="openGroupFeeDialog(detailTarget)">
+            调整病组费用
+          </el-button>
+          <el-button
+            v-if="!detailTarget.feeVoided && detailTarget.level !== 'pending'"
+            size="small"
+            type="danger"
+            plain
+            @click="voidFee(detailTarget)"
+          >
+            作废费用
+          </el-button>
+        </div>
 
         <el-descriptions :column="1" border size="small" class="detail-table">
           <el-descriptions-item label="诊断">{{ detailTarget.diagnosis || "—" }}</el-descriptions-item>
           <el-descriptions-item label="DIP 病组">
             {{ detailTarget.dipName || "—" }}
             <span class="sub"> {{ detailTarget.dipCode }}</span>
+            <span v-if="detailTarget.feeSourceType === 'PATIENT'" class="sub"> · 患者级费用</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="病组费用">
+            有效 {{ detailTarget.matched ? money(detailTarget.estimatedFee) : "—" }}
+            <span class="sub"> · 目录标准 {{ detailTarget.matched ? money(detailTarget.groupStandardFee) : "—" }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="剩余到 95%">{{ money(detailTarget.remainTo95) }}</el-descriptions-item>
           <el-descriptions-item label="住院号">{{ blank(detailTarget.admissionNo) }}</el-descriptions-item>
@@ -243,17 +241,38 @@
             {{ detailTarget.updatedAt || "—"
             }}<span v-if="detailTarget.feeUpdatedBy" class="sub"> · {{ detailTarget.feeUpdatedBy }}</span>
           </el-descriptions-item>
+          <el-descriptions-item v-if="detailTarget.feeVoided" label="作废记录">
+            {{ blank(detailTarget.voidedBy) }} · {{ blank(detailTarget.voidedAt) }}
+            <span v-if="detailTarget.voidReason" class="sub"> · {{ detailTarget.voidReason }}</span>
+          </el-descriptions-item>
         </el-descriptions>
 
-        <div class="detail-actions">
-          <el-button size="small" @click="openFeeDialog(detailTarget)">录入费用</el-button>
-          <el-button v-if="detailTarget.matched" size="small" @click="openGroupDialog(detailTarget)">改选病组</el-button>
-        </div>
+        <el-collapse v-model="historyOpen" class="history" @change="handleHistoryChange">
+          <el-collapse-item title="变更历史" name="history">
+            <div v-if="historyLoading" class="sub">加载中…</div>
+            <div v-else-if="historyRows.length" class="history-list">
+              <div v-for="item in historyRows" :key="item.id" class="history-item">
+                <div class="history-head">
+                  <span class="history-scope">{{ scopeText(item.scope) }}</span>
+                  <span class="sub">{{ item.createdAt }} · {{ blank(item.operator) }}</span>
+                </div>
+                <div class="history-values">
+                  <span class="sub">前</span>
+                  <b>{{ blank(item.beforeValue) }}</b>
+                  <span class="sub">后</span>
+                  <b>{{ blank(item.afterValue) }}</b>
+                </div>
+                <div v-if="item.note" class="sub">{{ item.note }}</div>
+              </div>
+            </div>
+            <div v-else class="sub">暂无变更记录</div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
     </el-drawer>
 
-    <!-- 录入费用 -->
-    <el-dialog v-model="feeDialogVisible" title="录入未结算费用" width="430px">
+    <!-- 录入 / 修改费用 -->
+    <el-dialog v-model="feeDialogVisible" :title="feeDialogTitle" width="430px">
       <el-form v-if="feeTarget" label-width="92px">
         <el-form-item label="患者">
           <span>{{ feeTarget.name }}<span v-if="feeTarget.admissionNo" class="sub"> · {{ feeTarget.admissionNo }}</span></span>
@@ -261,9 +280,11 @@
         <el-form-item label="未结算费用">
           <el-input-number v-model="feeInput" :min="0" :precision="2" :step="100" controls-position="right" />
         </el-form-item>
-        <el-form-item v-if="feeTarget.matched" label="录入后水位">
-          <b :class="`t-${previewLevel}`">{{ previewRatio.toFixed(1) }}%</b>
-          <span class="sub">（85% = {{ money(feeTarget.threshold85) }}，95% = {{ money(feeTarget.threshold95) }}）</span>
+        <el-form-item v-if="feeTarget.matched" label="录入后">
+          <b :class="`t-${previewLevel}`">{{ money(feeInput) }}</b>
+          <span class="sub">
+            85% = {{ money(feeTarget.threshold85) }}，95% = {{ money(feeTarget.threshold95) }}
+          </span>
         </el-form-item>
         <el-collapse v-model="morePanel" class="more">
           <el-collapse-item title="HIS 附加信息（可选）" name="more">
@@ -320,20 +341,208 @@
         <el-button type="primary" :loading="savingGroup" @click="submitGroup">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 调整病组费用 -->
+    <el-dialog v-model="groupFeeVisible" title="调整病组费用" width="430px">
+      <el-form v-if="groupFeeTarget" label-width="104px">
+        <el-form-item label="患者">
+          <span>{{ groupFeeTarget.name }}<span class="sub"> · {{ groupFeeTarget.dipName }}</span></span>
+        </el-form-item>
+        <el-form-item label="目录标准费用">
+          <b>{{ money(groupFeeTarget.groupStandardFee) }}</b>
+        </el-form-item>
+        <el-form-item label="患者病组费用">
+          <el-input-number v-model="groupFeeInput" :min="0.01" :precision="2" :step="100" controls-position="right" />
+        </el-form-item>
+        <p class="sub">调整后 85% / 95% 限制按该费用重算，仅对当前患者生效。</p>
+      </el-form>
+      <template #footer>
+        <el-button @click="groupFeeVisible = false">取消</el-button>
+        <el-button :loading="savingGroupFee" @click="restoreGroupFee">恢复目录标准</el-button>
+        <el-button type="primary" :loading="savingGroupFee" @click="submitGroupFee">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新增患者 -->
+    <el-dialog v-model="patientDialogVisible" title="新增患者" width="560px">
+      <el-form label-width="92px">
+        <el-form-item label="姓名" required>
+          <el-input v-model="patientForm.patientName" placeholder="患者姓名" />
+        </el-form-item>
+        <el-form-item label="西医主诊断" required>
+          <el-input v-model="patientForm.diagnosis" placeholder="决定 DIP 病组匹配，如 混合痔" />
+        </el-form-item>
+        <el-form-item label="性别">
+          <el-select v-model="patientForm.gender" clearable placeholder="选择性别" style="width: 100%">
+            <el-option label="男" value="男" />
+            <el-option label="女" value="女" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="年龄">
+          <el-input v-model="patientForm.age" placeholder="如 56" />
+        </el-form-item>
+        <el-form-item label="住院号">
+          <el-input v-model="patientForm.admissionNo" placeholder="HIS 住院号（可选）" />
+        </el-form-item>
+        <el-form-item label="入院日期">
+          <el-input v-model="patientForm.admissionDate" placeholder="YYYY-MM-DD" />
+        </el-form-item>
+        <el-form-item label="管床医生">
+          <el-input v-model="patientForm.attendingDoctor" placeholder="管床医生" />
+        </el-form-item>
+        <el-form-item label="DIP 病组">
+          <el-select v-model="patientForm.groupCode" filterable clearable placeholder="按主诊断自动匹配，可手动指定" style="width: 100%">
+            <el-option-group v-for="group in groupOptionsGrouped" :key="group.categoryCode" :label="group.categoryName">
+              <el-option
+                v-for="option in group.options"
+                :key="option.groupCode"
+                :label="`${option.groupName} · ${option.groupCode}`"
+                :value="option.groupCode"
+              />
+            </el-option-group>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="初始费用">
+          <el-input-number v-model="patientForm.unsettledFee" :min="0" :precision="2" :step="100" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="押金余额">
+          <el-input-number v-model="patientForm.depositBalance" :precision="2" :step="100" controls-position="right" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="patientDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingPatient" @click="submitPatient">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 病组目录（管理员） -->
+    <el-drawer v-model="catalogVisible" title="DIP 病组目录" size="760px">
+      <div class="catalog">
+        <div class="catalog-head">
+          <el-input v-model="catalogKeyword" placeholder="搜索病组名称 / 编码 / 大类" clearable style="width: 260px" />
+          <el-button size="small" type="primary" @click="openCatalogForm()">新增病组</el-button>
+        </div>
+        <el-table :data="catalogFiltered" size="small" v-loading="catalogLoading" max-height="560">
+          <el-table-column label="大类" min-width="130">
+            <template #default="{ row }">
+              <div class="catalog-cell">
+                <span>{{ row.categoryName }}</span>
+                <span class="sub">{{ row.categoryCode }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="病组" min-width="190">
+            <template #default="{ row }">
+              <div class="catalog-cell">
+                <span>{{ row.groupName }}</span>
+                <span class="sub">{{ row.groupCode }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="标准费用" width="110" align="right">
+            <template #default="{ row }">{{ money(row.estimatedFee) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <span class="risk" :class="row.status === 'ACTIVE' ? 'is-normal' : 'is-pending'">
+                {{ row.status === "ACTIVE" ? "启用" : "停用" }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="190" fixed="right">
+            <template #default="{ row }">
+              <div class="cell-action">
+                <el-button link type="primary" size="small" @click="openCatalogForm(row)">编辑</el-button>
+                <el-button link type="primary" size="small" @click="openCatalogHistory(row)">历史</el-button>
+                <el-button link :type="row.status === 'ACTIVE' ? 'danger' : 'success'" size="small" @click="toggleCatalog(row)">
+                  {{ row.status === "ACTIVE" ? "停用" : "启用" }}
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-drawer>
+
+    <!-- 病组新增 / 编辑 -->
+    <el-dialog v-model="catalogFormVisible" :title="catalogMode === 'create' ? '新增病组' : '编辑病组'" width="560px">
+      <el-form label-width="96px">
+        <el-form-item label="大类编码" required>
+          <el-input v-model="catalogForm.categoryCode" placeholder="如 K64" />
+        </el-form-item>
+        <el-form-item label="大类名称" required>
+          <el-input v-model="catalogForm.categoryName" placeholder="如 痔疮与肛周静脉血栓形成" />
+        </el-form-item>
+        <el-form-item label="病组编码" required>
+          <el-input v-model="catalogForm.groupCode" :disabled="catalogMode === 'edit'" placeholder="如 K64:49.4500x004" />
+        </el-form-item>
+        <el-form-item label="病组名称" required>
+          <el-input v-model="catalogForm.groupName" placeholder="如 内镜下内痔套扎治疗" />
+        </el-form-item>
+        <el-form-item label="标准费用" required>
+          <el-input-number v-model="catalogForm.estimatedFee" :min="0.01" :precision="2" :step="100" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="匹配关键词">
+          <el-input v-model="catalogForm.matchKeywords" placeholder="主诊断关键词，逗号分隔" />
+        </el-form-item>
+        <el-form-item label="关键词优先级">
+          <el-input-number v-model="catalogForm.keywordPriority" :min="0" :step="1" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="排序号">
+          <el-input-number v-model="catalogForm.sortNo" :min="0" :step="1" controls-position="right" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="catalogFormVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingCatalog" @click="submitCatalog">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 病组目录历史 -->
+    <el-dialog v-model="catalogHistoryVisible" :title="catalogHistoryTitle" width="640px">
+      <div v-if="catalogHistoryRows.length" class="history-list">
+        <div v-for="item in catalogHistoryRows" :key="item.id" class="history-item">
+          <div class="history-head">
+            <span class="history-scope">{{ scopeText(item.scope) }}</span>
+            <span class="sub">{{ item.createdAt }} · {{ blank(item.operator) }}</span>
+          </div>
+          <div class="history-values">
+            <span class="sub">前</span>
+            <b>{{ blank(item.beforeValue) }}</b>
+            <span class="sub">后</span>
+            <b>{{ blank(item.afterValue) }}</b>
+          </div>
+          <div v-if="item.note" class="sub">{{ item.note }}</div>
+        </div>
+      </div>
+      <div v-else class="sub">暂无变更记录</div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts" name="dipWarning">
 import { computed, onMounted, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import ProTable from "@/components/ProTable/index.vue";
 import type { ColumnProps, ProTableInstance } from "@/components/ProTable/interface";
+import { useUserStore } from "@/stores/modules/user";
 import {
+  createDipCatalogGroupApi,
+  createDipPatientApi,
   getDipBoardApi,
+  getDipCatalogApi,
+  getDipCatalogHistoryApi,
   getDipGroupsApi,
+  getDipHistoryApi,
   parseDipScreenshotApi,
   saveDipFeeApi,
   saveDipGroupApi,
+  saveDipGroupFeeApi,
+  toggleDipCatalogGroupApi,
+  updateDipCatalogGroupApi,
+  voidDipFeeApi,
+  type DipCatalogGroup,
+  type DipChangeLog,
   type DipGroupOption,
   type DipOcrItem,
   type DipPatientRow
@@ -353,6 +562,9 @@ interface Row {
   categoryName: string;
   groupSource: "AUTO" | "MANUAL";
   estimatedFee: number;
+  groupStandardFee: number;
+  feeOverride: number | null;
+  feeSourceType: "GROUP" | "PATIENT";
   currentFee: number;
   threshold85: number;
   threshold95: number;
@@ -370,16 +582,24 @@ interface Row {
   admissionDate: string;
   hospitalDays: number | null;
   attendingDoctor: string;
+  feeVoided: boolean;
+  voidedAt: string;
+  voidedBy: string;
+  voidReason: string;
 }
+
+const userStore = useUserStore();
+const role = computed(() => userStore.userInfo.role || "");
+const isAdmin = computed(() => role.value === "admin");
+const canCreatePatient = computed(() => ["doctor", "admin"].includes(role.value));
 
 const proTable = ref<ProTableInstance>();
 const loaded = ref(false);
 const allRows = ref<Row[]>([]);
-const filtered = ref<Row[]>([]);
 
 const money = (value: number | null | undefined) =>
   value === null || value === undefined ? "—" : `¥${Number(value).toFixed(2)}`;
-const blank = (value: string | null | undefined) => (value && value.trim() ? value : "—");
+const blank = (value: string | null | undefined) => (value && String(value).trim() ? String(value) : "—");
 const pair = (a: string | number | null | undefined, b: string | number | null | undefined) => {
   const left = a === null || a === undefined || a === "" ? "—" : a;
   const right = b === null || b === undefined || b === "" ? "—" : b;
@@ -388,12 +608,25 @@ const pair = (a: string | number | null | undefined, b: string | number | null |
 const levelOf = (ratio: number): Level => (ratio >= 95 ? "danger" : ratio >= 85 ? "warning" : "normal");
 const levelText = (level: Level) =>
   level === "danger" ? "超限" : level === "warning" ? "预警" : level === "pending" ? "待录入" : level === "unmatched" ? "未匹配" : "正常";
-const tagType = (level: Level) =>
-  level === "danger" ? "danger" : level === "warning" ? "warning" : level === "pending" ? "info" : "success";
+const hasWater = (row: Row) => row.level !== "pending" && row.level !== "unmatched";
+
+const scopeText = (scope: DipChangeLog["scope"]) =>
+  scope === "PATIENT_CREATE"
+    ? "新增患者"
+    : scope === "FEE"
+      ? "费用变更"
+      : scope === "FEE_VOID"
+        ? "费用作废"
+        : scope === "GROUP"
+          ? "病组改选"
+          : scope === "GROUP_FEE"
+            ? "病组费用"
+            : "目录维护";
 
 const toRow = (item: DipPatientRow): Row => {
   const estimatedFee = Number(item.estimatedFee ?? 0);
-  const hasFee = item.unsettledFee !== null && item.unsettledFee !== undefined;
+  const hasFee =
+    item.unsettledFee !== null && item.unsettledFee !== undefined && !item.feeVoided;
   const currentFee = hasFee ? Number(item.unsettledFee) : 0;
   const threshold85 = Number(item.threshold85 ?? 0);
   const threshold95 = Number(item.threshold95 ?? 0);
@@ -411,6 +644,9 @@ const toRow = (item: DipPatientRow): Row => {
     categoryName: item.categoryName ?? "",
     groupSource: (item.groupSource as "AUTO" | "MANUAL") ?? "AUTO",
     estimatedFee,
+    groupStandardFee: Number(item.groupStandardFee ?? item.estimatedFee ?? 0),
+    feeOverride: item.feeOverride === null || item.feeOverride === undefined ? null : Number(item.feeOverride),
+    feeSourceType: item.feeSourceType === "PATIENT" ? "PATIENT" : "GROUP",
     currentFee,
     threshold85,
     threshold95,
@@ -427,7 +663,11 @@ const toRow = (item: DipPatientRow): Row => {
     depositBalance: item.depositBalance ?? null,
     admissionDate: item.admissionDate ?? "",
     hospitalDays: item.hospitalDays ?? null,
-    attendingDoctor: item.attendingDoctor ?? ""
+    attendingDoctor: item.attendingDoctor ?? "",
+    feeVoided: Boolean(item.feeVoided),
+    voidedAt: item.voidedAt ?? "",
+    voidedBy: item.voidedBy ?? "",
+    voidReason: item.voidReason ?? ""
   };
 };
 
@@ -441,41 +681,40 @@ const levelOptions = [
 
 const columns = reactive<ColumnProps<Row>[]>([]);
 
-/** 保持同一数组实例，ProTable 内部持有该引用；重建时原地替换。 */
 const buildColumns = () => {
   const categories = [...new Set(allRows.value.map(row => row.categoryName).filter(Boolean))].sort();
   const next: ColumnProps<Row>[] = [
     {
       prop: "patient",
       label: "患者",
-      minWidth: 200,
+      minWidth: 190,
       search: { el: "input", key: "keyword", order: 1, props: { placeholder: "姓名 / 住院号 / 诊断 / 病组" } }
     },
     {
       prop: "risk",
       label: "风险",
-      width: 96,
+      width: 92,
       enum: levelOptions,
       isFilterEnum: false,
       search: { el: "select", key: "risk", order: 2, props: { placeholder: "风险状态" } }
     },
+    { prop: "waterline", label: "费用水位", minWidth: 320 },
     {
       prop: "group",
       label: "DIP 病组",
-      minWidth: 200,
+      minWidth: 210,
       enum: categories.map(name => ({ label: name, value: name })),
       ...(categories.length
         ? { search: { el: "select" as const, key: "categoryName", order: 3, props: { placeholder: "病组大类" } } }
         : {})
     },
-    { prop: "waterline", label: "费用水位", width: 250 },
     {
       prop: "his",
-      label: "HIS 摘要",
-      minWidth: 150,
+      label: "管床医生",
+      hide: true,
       search: { el: "input", key: "attendingDoctor", order: 4, props: { placeholder: "管床医生" } }
     },
-    { prop: "operation", label: "处理", width: 120, fixed: "right" }
+    { prop: "operation", label: "处理", width: 130, fixed: "right" }
   ];
   columns.splice(0, columns.length, ...next);
 };
@@ -503,40 +742,20 @@ const tableRequest = async (params: Record<string, any>) => {
       const rank = rankOf(a.level) - rankOf(b.level);
       return rank !== 0 ? rank : b.ratio - a.ratio;
     });
-  filtered.value = list;
   const pageNum = Number(params.pageNum ?? 1);
   const pageSize = Number(params.pageSize ?? 10);
   const start = (pageNum - 1) * pageSize;
   return { data: { list: list.slice(start, start + pageSize), total: list.length } };
 };
 
-const stats = computed(() => {
-  const result = { danger: 0, warning: 0, pending: 0, unmatched: 0, feeTotal: 0, overrunTotal: 0 };
-  filtered.value.forEach(row => {
-    if (row.level === "danger") result.danger += 1;
-    else if (row.level === "warning") result.warning += 1;
-    else if (row.level === "pending") result.pending += 1;
-    else if (row.level === "unmatched") result.unmatched += 1;
-    result.feeTotal += row.currentFee;
-    if (row.level === "danger" && row.currentFee > row.threshold95) {
-      result.overrunTotal += row.currentFee - row.threshold95;
-    }
-  });
-  return result;
-});
-
-const pendingCount = computed(
-  () => allRows.value.filter(row => row.level !== "normal").length
-);
+const pendingCount = computed(() => allRows.value.filter(row => row.level !== "normal").length);
 
 const reload = async () => {
   try {
     const board = await getDipBoardApi();
     allRows.value = (board.patients ?? []).map(toRow);
-    filtered.value = allRows.value;
     buildColumns();
     if (!loaded.value) {
-      // 首次挂载时 ProTable 会自动发起一次查询
       loaded.value = true;
       return;
     }
@@ -552,11 +771,12 @@ const patientMeta = (row: Row) =>
     .join(" · ") || "—";
 
 const suggestion = (row: Row) => {
-  if (row.level === "danger") return `超 ${money(row.currentFee - row.threshold95)}`;
-  return `余 ${money(row.threshold95 - row.currentFee)}`;
+  if (row.level === "danger") return `已超 95% 线 ${money(row.currentFee - row.threshold95)}`;
+  return `距 95% 线尚余 ${money(row.threshold95 - row.currentFee)}`;
 };
 
 const detailTip = (row: Row) => {
+  if (row.feeVoided) return "费用记录已作废，可重新录入后再参与水位计算。";
   if (row.level === "danger") return "已达 95% 超限线：如无特殊情况应停止计费并安排出院。";
   if (row.level === "warning") return "已达 85% 预警线：请关注后续费用，提前核对诊疗项目。";
   if (row.level === "pending") return "尚未录入 HIS 未结算费用，录入后才参与水位计算。";
@@ -567,12 +787,38 @@ const detailTip = (row: Row) => {
 /* ---------- 详情 ---------- */
 const detailVisible = ref(false);
 const detailTarget = ref<Row | null>(null);
+const historyOpen = ref<string[]>([]);
+const historyRows = ref<DipChangeLog[]>([]);
+const historyLoading = ref(false);
+const historyLoaded = ref(false);
+
 const openDetail = (row: Row) => {
   detailTarget.value = row;
+  historyOpen.value = [];
+  historyRows.value = [];
+  historyLoaded.value = false;
   detailVisible.value = true;
 };
 
-/* ---------- 录入费用 ---------- */
+const loadHistory = async (patientId: string) => {
+  historyLoading.value = true;
+  try {
+    historyRows.value = await getDipHistoryApi(patientId);
+    historyLoaded.value = true;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "变更历史加载失败");
+  } finally {
+    historyLoading.value = false;
+  }
+};
+
+const handleHistoryChange = (names: string[] | string) => {
+  const opened = Array.isArray(names) ? names.includes("history") : names === "history";
+  if (!opened || historyLoaded.value || !detailTarget.value) return;
+  loadHistory(detailTarget.value.patientId);
+};
+
+/* ---------- 费用 ---------- */
 const feeDialogVisible = ref(false);
 const savingFee = ref(false);
 const feeTarget = ref<Row | null>(null);
@@ -586,6 +832,8 @@ const feeForm = reactive({
   depositBalance: null as number | null
 });
 
+const feeDialogTitle = computed(() => (feeTarget.value && feeTarget.value.currentFee > 0 ? "修改未结算费用" : "录入未结算费用"));
+
 const openFeeDialog = (row: Row) => {
   feeTarget.value = row;
   feeInput.value = row.currentFee;
@@ -598,12 +846,7 @@ const openFeeDialog = (row: Row) => {
   feeDialogVisible.value = true;
 };
 
-const previewRatio = computed(() => {
-  const target = feeTarget.value;
-  if (!target || !target.estimatedFee) return 0;
-  return (feeInput.value / target.estimatedFee) * 100;
-});
-const previewLevel = computed(() => levelOf(previewRatio.value));
+const previewLevel = computed(() => levelOf(feeTarget.value?.estimatedFee ? (feeInput.value / feeTarget.value.estimatedFee) * 100 : 0));
 
 const submitFee = async () => {
   const target = feeTarget.value;
@@ -621,12 +864,31 @@ const submitFee = async () => {
       depositBalance: feeForm.depositBalance
     });
     feeDialogVisible.value = false;
+    detailVisible.value = false;
     await reload();
     ElMessage.success(`${target.name} 费用已更新`);
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "费用保存失败");
   } finally {
     savingFee.value = false;
+  }
+};
+
+const voidFee = async (row: Row) => {
+  try {
+    const { value } = await ElMessageBox.prompt("填写作废原因，作废后可重新录入费用。", "作废费用", {
+      inputPlaceholder: "如：HIS 重复录入 / 金额录错",
+      confirmButtonText: "作废",
+      cancelButtonText: "取消",
+      inputValidator: (input: string) => (input && input.trim() ? true : "请填写作废原因")
+    });
+    await voidDipFeeApi({ patientId: row.patientId, reason: value.trim() });
+    detailVisible.value = false;
+    await reload();
+    ElMessage.success("费用记录已作废");
+  } catch (error: any) {
+    if (error === "cancel" || error === "close") return;
+    if (error instanceof Error) ElMessage.error(error.message);
   }
 };
 
@@ -663,11 +925,8 @@ const previewGroupRatio = computed(() => {
 });
 const previewGroupLevel = computed(() => levelOf(previewGroupRatio.value));
 
-const openGroupDialog = async (row: Row) => {
-  groupTarget.value = row;
-  groupInput.value = row.dipCode;
-  groupDialogVisible.value = true;
-  if (groupOptions.value.length) return;
+const ensureGroupOptions = async (force = false) => {
+  if (groupOptions.value.length && !force) return;
   try {
     groupOptions.value = await getDipGroupsApi();
   } catch (error) {
@@ -675,19 +934,275 @@ const openGroupDialog = async (row: Row) => {
   }
 };
 
+const openGroupDialog = async (row: Row) => {
+  groupTarget.value = row;
+  groupInput.value = row.dipCode;
+  groupDialogVisible.value = true;
+  await ensureGroupOptions();
+};
+
 const submitGroup = async () => {
   const target = groupTarget.value;
   if (!target) return;
-  savingGroup.value = true;
   try {
+    if (!groupInput.value && target.groupSource === "MANUAL") {
+      const message =
+        target.feeOverride !== null
+          ? "恢复主诊断自动匹配将同时清除患者级病组费用调整，是否继续？"
+          : "恢复主诊断自动匹配？";
+      await ElMessageBox.confirm(message, "恢复自动匹配", { confirmButtonText: "继续", cancelButtonText: "取消" });
+    }
+    savingGroup.value = true;
     await saveDipGroupApi({ patientId: target.patientId, groupCode: groupInput.value });
     groupDialogVisible.value = false;
+    detailVisible.value = false;
     await reload();
     ElMessage.success(groupInput.value ? "病组已更新" : "已恢复自动匹配");
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "病组保存失败");
+  } catch (error: any) {
+    if (error === "cancel" || error === "close") return;
+    if (error instanceof Error) ElMessage.error(error.message);
   } finally {
     savingGroup.value = false;
+  }
+};
+
+/* ---------- 病组费用覆盖 ---------- */
+const groupFeeVisible = ref(false);
+const savingGroupFee = ref(false);
+const groupFeeTarget = ref<Row | null>(null);
+const groupFeeInput = ref(0);
+
+const openGroupFeeDialog = (row: Row) => {
+  groupFeeTarget.value = row;
+  groupFeeInput.value = row.feeOverride ?? row.groupStandardFee;
+  groupFeeVisible.value = true;
+};
+
+const submitGroupFee = async () => {
+  const target = groupFeeTarget.value;
+  if (!target) return;
+  savingGroupFee.value = true;
+  try {
+    await saveDipGroupFeeApi({ patientId: target.patientId, estimatedFeeOverride: groupFeeInput.value });
+    groupFeeVisible.value = false;
+    detailVisible.value = false;
+    await reload();
+    ElMessage.success("病组费用已更新");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "病组费用保存失败");
+  } finally {
+    savingGroupFee.value = false;
+  }
+};
+
+const restoreGroupFee = async () => {
+  const target = groupFeeTarget.value;
+  if (!target) return;
+  savingGroupFee.value = true;
+  try {
+    await saveDipGroupFeeApi({ patientId: target.patientId, estimatedFeeOverride: null });
+    groupFeeVisible.value = false;
+    detailVisible.value = false;
+    await reload();
+    ElMessage.success("已恢复病组目录标准费用");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "恢复失败");
+  } finally {
+    savingGroupFee.value = false;
+  }
+};
+
+/* ---------- 新增患者 ---------- */
+const patientDialogVisible = ref(false);
+const savingPatient = ref(false);
+const patientForm = reactive({
+  patientName: "",
+  diagnosis: "",
+  gender: "",
+  age: "",
+  admissionNo: "",
+  admissionDate: "",
+  attendingDoctor: "",
+  groupCode: "",
+  unsettledFee: 0 as number | null,
+  depositBalance: null as number | null
+});
+
+const openPatientDialog = async () => {
+  Object.assign(patientForm, {
+    patientName: "",
+    diagnosis: "",
+    gender: "",
+    age: "",
+    admissionNo: "",
+    admissionDate: "",
+    attendingDoctor: "",
+    groupCode: "",
+    unsettledFee: 0,
+    depositBalance: null
+  });
+  patientDialogVisible.value = true;
+  await ensureGroupOptions();
+};
+
+const submitPatient = async () => {
+  if (!patientForm.patientName.trim()) {
+    ElMessage.warning("请填写患者姓名");
+    return;
+  }
+  if (!patientForm.diagnosis.trim()) {
+    ElMessage.warning("请填写西医主诊断");
+    return;
+  }
+  savingPatient.value = true;
+  try {
+    await createDipPatientApi({
+      patientName: patientForm.patientName.trim(),
+      diagnosis: patientForm.diagnosis.trim(),
+      gender: patientForm.gender,
+      age: patientForm.age,
+      admissionNo: patientForm.admissionNo,
+      admissionDate: patientForm.admissionDate,
+      attendingDoctor: patientForm.attendingDoctor,
+      groupCode: patientForm.groupCode,
+      unsettledFee: patientForm.unsettledFee,
+      depositBalance: patientForm.depositBalance
+    });
+    patientDialogVisible.value = false;
+    await reload();
+    ElMessage.success("患者已新增");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "新增患者失败");
+  } finally {
+    savingPatient.value = false;
+  }
+};
+
+/* ---------- 病组目录 ---------- */
+const catalogVisible = ref(false);
+const catalogLoading = ref(false);
+const catalogRows = ref<DipCatalogGroup[]>([]);
+const catalogKeyword = ref("");
+const catalogFormVisible = ref(false);
+const catalogMode = ref<"create" | "edit">("create");
+const savingCatalog = ref(false);
+const catalogHistoryVisible = ref(false);
+const catalogHistoryRows = ref<DipChangeLog[]>([]);
+const catalogHistoryTitle = ref("病组变更历史");
+const catalogForm = reactive({
+  categoryCode: "",
+  categoryName: "",
+  groupCode: "",
+  groupName: "",
+  estimatedFee: 0.01,
+  matchKeywords: "",
+  keywordPriority: 0,
+  sortNo: 0
+});
+
+const catalogFiltered = computed(() => {
+  const keyword = catalogKeyword.value.trim().toLowerCase();
+  if (!keyword) return catalogRows.value;
+  return catalogRows.value.filter(row =>
+    [row.groupName, row.groupCode, row.categoryName, row.categoryCode].join(" ").toLowerCase().includes(keyword)
+  );
+});
+
+const loadCatalog = async () => {
+  catalogLoading.value = true;
+  try {
+    catalogRows.value = await getDipCatalogApi();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "病组目录加载失败");
+  } finally {
+    catalogLoading.value = false;
+  }
+};
+
+const openCatalog = async () => {
+  catalogVisible.value = true;
+  catalogKeyword.value = "";
+  await loadCatalog();
+};
+
+const openCatalogForm = (row?: DipCatalogGroup) => {
+  catalogMode.value = row ? "edit" : "create";
+  Object.assign(catalogForm, {
+    categoryCode: row?.categoryCode ?? "",
+    categoryName: row?.categoryName ?? "",
+    groupCode: row?.groupCode ?? "",
+    groupName: row?.groupName ?? "",
+    estimatedFee: row?.estimatedFee ?? 0.01,
+    matchKeywords: row?.matchKeywords ?? "",
+    keywordPriority: row?.keywordPriority ?? 0,
+    sortNo: row?.sortNo ?? 0
+  });
+  catalogFormVisible.value = true;
+};
+
+const submitCatalog = async () => {
+  if (!catalogForm.categoryCode.trim() || !catalogForm.categoryName.trim()) {
+    ElMessage.warning("请填写大类编码与名称");
+    return;
+  }
+  if (!catalogForm.groupCode.trim() || !catalogForm.groupName.trim()) {
+    ElMessage.warning("请填写病组编码与名称");
+    return;
+  }
+  savingCatalog.value = true;
+  try {
+    const payload = {
+      categoryCode: catalogForm.categoryCode.trim(),
+      categoryName: catalogForm.categoryName.trim(),
+      groupCode: catalogForm.groupCode.trim(),
+      groupName: catalogForm.groupName.trim(),
+      estimatedFee: catalogForm.estimatedFee,
+      matchKeywords: catalogForm.matchKeywords,
+      keywordPriority: catalogForm.keywordPriority,
+      sortNo: catalogForm.sortNo
+    };
+    if (catalogMode.value === "create") {
+      await createDipCatalogGroupApi(payload);
+    } else {
+      await updateDipCatalogGroupApi(payload.groupCode, payload);
+    }
+    catalogFormVisible.value = false;
+    await Promise.all([loadCatalog(), ensureGroupOptions(true), reload()]);
+    ElMessage.success("病组目录已更新");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "病组目录保存失败");
+  } finally {
+    savingCatalog.value = false;
+  }
+};
+
+const toggleCatalog = async (row: DipCatalogGroup) => {
+  const next = row.status === "ACTIVE" ? "DISABLED" : "ACTIVE";
+  try {
+    if (next === "DISABLED") {
+      await ElMessageBox.confirm(
+        "停用后该病组不再参与自动匹配；已选该组的患者将回落到主诊断匹配。",
+        "停用病组",
+        { confirmButtonText: "停用", cancelButtonText: "取消", type: "warning" }
+      );
+    }
+    await toggleDipCatalogGroupApi(row.groupCode, next);
+    await Promise.all([loadCatalog(), ensureGroupOptions(true), reload()]);
+    ElMessage.success(next === "ACTIVE" ? "病组已启用" : "病组已停用");
+  } catch (error: any) {
+    if (error === "cancel" || error === "close") return;
+    if (error instanceof Error) ElMessage.error(error.message);
+  }
+};
+
+const openCatalogHistory = async (row: DipCatalogGroup) => {
+  catalogHistoryTitle.value = `${row.groupName} · 变更历史`;
+  catalogHistoryRows.value = [];
+  catalogHistoryVisible.value = true;
+  try {
+    catalogHistoryRows.value = await getDipCatalogHistoryApi(row.groupCode);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "病组历史加载失败");
   }
 };
 
@@ -790,6 +1305,13 @@ onMounted(reload);
     }
   }
 
+  .head-side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
   .scope {
     font-size: 12px;
     color: var(--el-text-color-secondary);
@@ -799,62 +1321,17 @@ onMounted(reload);
     color: var(--warn);
   }
 
-  .t-danger {
-    color: var(--danger);
-  }
-
+  .t-danger,
   .t-warning {
     color: var(--warn);
   }
 
+  .t-danger {
+    color: var(--danger);
+  }
+
   .t-normal {
     color: var(--ok);
-  }
-
-  /* 聚合指标 */
-  .metrics {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .metric {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px 12px;
-    border: 1px solid var(--el-border-color-lighter);
-    border-radius: 8px;
-    background: var(--el-bg-color);
-
-    span {
-      font-size: 11.5px;
-      color: var(--el-text-color-secondary);
-    }
-
-    strong {
-      font-size: 18px;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      line-height: 1.2;
-    }
-
-    &.is-danger strong {
-      color: var(--danger);
-    }
-
-    &.is-warning strong {
-      color: var(--warn);
-    }
-
-    &.muted {
-      opacity: 0.55;
-    }
-  }
-
-  .table-hint {
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
   }
 
   .sub {
@@ -883,117 +1360,132 @@ onMounted(reload);
     }
   }
 
-  .cell-group {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    text-align: left;
-
-    .group-name {
-      font-size: 12.5px;
-      color: var(--el-text-color-regular);
-    }
-  }
-
-  .cell-his {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    text-align: left;
+  .risk {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+    padding: 1px 8px;
+    border-radius: 10px;
     font-size: 12px;
-  }
+    line-height: 20px;
+    background: var(--el-fill-color-light);
+    color: var(--el-text-color-regular);
 
-  .tag-manual {
-    font-style: normal;
-    font-size: 10.5px;
-    padding: 0 4px;
-    margin-left: 4px;
-    border-radius: 2px;
-    color: var(--warn);
-    background: var(--el-color-warning-light-9);
-  }
+    &.is-danger {
+      color: var(--danger);
+      background: var(--el-color-danger-light-9);
+    }
 
-  .link {
-    border: none;
-    background: none;
-    padding: 0;
-    font-size: 11.5px;
-    color: var(--el-color-primary);
-    cursor: pointer;
+    &.is-warning {
+      color: var(--warn);
+      background: var(--el-color-warning-light-9);
+    }
 
-    &:hover {
-      text-decoration: underline;
+    &.is-normal {
+      color: var(--ok);
+      background: var(--el-color-success-light-9);
+    }
+
+    &.is-pending,
+    &.is-unmatched {
+      color: var(--el-text-color-secondary);
     }
   }
 
-  /* 主视觉：水位 */
-  .water {
+  /* 主视觉：三个数字 */
+  .num-cell {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
     text-align: left;
 
-    &.is-pending {
+    &.is-empty {
       gap: 2px;
+      padding: 2px 0;
     }
   }
 
-  .water-none {
-    font-size: 12px;
-    color: var(--el-text-color-placeholder);
-  }
-
-  .water-top {
+  .num-main {
     display: flex;
     align-items: baseline;
     gap: 8px;
+  }
 
-    .fee {
-      font-size: 17px;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      line-height: 1.2;
-    }
+  .num-label {
+    font-size: 11.5px;
+    color: var(--el-text-color-secondary);
+  }
 
-    .ratio {
-      font-size: 13px;
-      font-weight: 600;
-      font-variant-numeric: tabular-nums;
-    }
+  .num-now {
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.2px;
+  }
 
-    .is-normal & .fee {
-      color: var(--el-text-color-primary);
-    }
+  .num-limits {
+    display: flex;
+    gap: 18px;
+    font-variant-numeric: tabular-nums;
 
-    .is-normal & .ratio {
-      color: var(--el-text-color-secondary);
-    }
+    .limit {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
 
-    .is-warning & .fee,
-    .is-warning & .ratio {
-      color: var(--warn);
-    }
+      span {
+        font-size: 11.5px;
+        color: var(--el-text-color-secondary);
+      }
 
-    .is-danger & .fee {
-      color: var(--danger);
-      font-size: 18px;
-    }
-
-    .is-danger & .ratio {
-      color: var(--danger);
+      b {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--el-text-color-regular);
+      }
     }
   }
 
-  .bar {
+  .is-normal .num-now {
+    color: var(--el-text-color-primary);
+  }
+
+  .is-warning .num-now {
+    color: var(--warn);
+  }
+
+  .is-danger .num-now {
+    color: var(--danger);
+  }
+
+  .num-hint {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .empty-title {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+  }
+
+  .empty-sub {
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+  }
+
+  .track {
     position: relative;
     height: 6px;
+    margin-top: 1px;
     border-radius: 3px;
     background: var(--el-fill-color-darker);
     overflow: hidden;
 
     &.is-tall {
-      height: 10px;
-      border-radius: 5px;
+      height: 8px;
+      border-radius: 4px;
       margin-top: 8px;
     }
   }
@@ -1018,16 +1510,47 @@ onMounted(reload);
     bottom: 0;
     width: 1px;
     background: var(--el-bg-color);
-    opacity: 0.9;
+    opacity: 0.95;
   }
 
-  .water-foot {
+  .cell-group {
     display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--el-text-color-secondary);
-    font-variant-numeric: tabular-nums;
+    flex-direction: column;
+    gap: 1px;
+    text-align: left;
+
+    .group-name {
+      font-size: 12.5px;
+      color: var(--el-text-color-regular);
+    }
+  }
+
+  .tag-manual {
+    font-style: normal;
+    font-size: 10.5px;
+    padding: 0 4px;
+    margin-left: 4px;
+    border-radius: 2px;
+    color: var(--warn);
+    background: var(--el-color-warning-light-9);
+
+    &.is-fee {
+      color: var(--el-color-primary);
+      background: var(--el-color-primary-light-9);
+    }
+  }
+
+  .link {
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 11.5px;
+    color: var(--el-color-primary);
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
 
   .cell-action {
@@ -1046,7 +1569,7 @@ onMounted(reload);
 
   .detail-hero {
     padding: 12px 14px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--el-fill-color-lighter);
 
     &.is-danger {
@@ -1057,52 +1580,122 @@ onMounted(reload);
       background: var(--el-color-warning-light-9);
     }
 
-    .hero-row {
+    .hero-line {
       display: flex;
       align-items: baseline;
       gap: 10px;
     }
 
-    .hero-fee {
-      font-size: 24px;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
+    .hero-label {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
     }
 
-    .hero-ratio {
-      font-size: 15px;
+    .hero-now {
+      font-size: 24px;
       font-weight: 600;
       font-variant-numeric: tabular-nums;
     }
 
-    &.is-danger .hero-fee,
-    &.is-danger .hero-ratio {
+    &.is-danger .hero-now {
       color: var(--danger);
     }
 
-    &.is-warning .hero-fee,
-    &.is-warning .hero-ratio {
+    &.is-warning .hero-now {
       color: var(--warn);
     }
-  }
 
-  .hero-scale {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 5px;
-    font-size: 11px;
-    color: var(--el-text-color-secondary);
-  }
+    .hero-limits {
+      display: flex;
+      gap: 22px;
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
 
-  .hero-tip {
-    margin: 10px 0 0;
-    font-size: 12px;
-    color: var(--el-text-color-regular);
+    .hero-limit {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+
+      span {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+
+      b {
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--el-text-color-primary);
+      }
+    }
+
+    .hero-tip {
+      margin: 10px 0 0;
+      font-size: 12px;
+      color: var(--el-text-color-regular);
+
+      .sub {
+        margin-left: 8px;
+      }
+    }
   }
 
   .detail-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .detail-table {
+    margin-top: 2px;
+  }
+
+  .history {
+    border-top: 1px solid var(--el-border-color-lighter);
+    border-bottom: none;
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .history-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--el-border-color-lighter);
+
+    &:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+  }
+
+  .history-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .history-scope {
+    font-size: 12.5px;
+    color: var(--el-text-color-primary);
+  }
+
+  .history-values {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+
+    b {
+      font-weight: 500;
+    }
   }
 
   .group-dialog {
@@ -1118,6 +1711,26 @@ onMounted(reload);
   .more {
     border-top: 1px solid var(--el-border-color-lighter);
     border-bottom: none;
+  }
+
+  .catalog {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .catalog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .catalog-cell {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    font-size: 12.5px;
   }
 
   .ocr {
