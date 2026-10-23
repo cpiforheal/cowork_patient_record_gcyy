@@ -1728,19 +1728,39 @@ public class PreAiEncounterService {
         ObjectNode encounter = loadEncounter(encounterId);
         requireActiveEncounter(encounter);
         requireReviewer(encounter, user);
+        return saveImagingNote(encounterId, normalizeReviewImagingCategory(category), request, user, true);
+    }
+
+    @Transactional
+    public Map<String, Object> saveDepartmentImagingNote(String encounterId, String category, ImagingNoteRequest request, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
         String normalizedCategory = normalizeReviewImagingCategory(category);
+        if (Set.of("REVIEWED", "EXPORTED").contains(text(encounter, "status"))) {
+            throw conflict("医生已完成最终复核，科室补充已锁定");
+        }
+        requireDepartmentImagingEditor(encounter, normalizedCategory, user);
+        return saveImagingNote(encounterId, normalizedCategory, request, user, false);
+    }
+
+    private Map<String, Object> saveImagingNote(String encounterId, String normalizedCategory, ImagingNoteRequest request, SessionUser user, boolean reviewMode) {
         String label = REVIEW_IMAGING_LABELS.getOrDefault(normalizedCategory, normalizedCategory);
         String note = safe(request == null ? "" : request.note()).trim();
         if (note.length() > 2000) throw badRequest("影像补充描述不能超过 2000 字");
         if (!note.isBlank() && !hasReviewImagingMaterial(encounterId, normalizedCategory)) {
             throw badRequest(label + "暂无活动影像资料，不能保存补充描述");
         }
+        String actionPrefix = reviewMode ? "review.imaging-note" : "imaging-note";
+        String actorLabel = reviewMode ? "医生复核" : "科室";
         if (note.isBlank()) {
             int removed = jdbcTemplate.update(
                 "DELETE FROM pre_ai_review_imaging_notes WHERE encounter_id = ? AND category = ?",
                 encounterId, normalizedCategory
             );
-            if (removed > 0) audit(encounterId, "review.imaging-note.clear", "REVIEW", user, label + "影像补充描述已清空");
+            if (removed > 0) {
+                audit(encounterId, actionPrefix + ".clear", "REVIEW", user, label + "影像补充描述已清空（" + actorLabel + "）");
+            }
         } else {
             String now = now();
             jdbcTemplate.update("""
@@ -1751,9 +1771,28 @@ public class PreAiEncounterService {
                   updated_by = VALUES(updated_by), updated_by_role = VALUES(updated_by_role)
                 """, "rin-" + UUID.randomUUID(), encounterId, normalizedCategory, note,
                 now, user.name(), user.role(), now, user.name(), user.role());
-            audit(encounterId, "review.imaging-note.save", "REVIEW", user, label + "影像补充描述已保存");
+            audit(encounterId, actionPrefix + ".save", "REVIEW", user, label + "影像补充描述已保存（" + actorLabel + "）");
         }
         return buildReviewImagingReview(encounterId);
+    }
+
+    private void requireDepartmentImagingEditor(ObjectNode encounter, String category, SessionUser user) {
+        if (hasFullPreAiOperationAccess(user)) return;
+        boolean lab = user != null && navigationService.canEditAuxiliary(user.role(), "LAB");
+        boolean registration = user != null && navigationService.canEditStage(user.role(), "REGISTRATION");
+        boolean ecg = user != null && navigationService.canEditAuxiliary(user.role(), "ECG");
+        boolean allowed = switch (category) {
+            case "ENDOSCOPY", "DR" -> lab || registration;
+            case "ECG" -> ecg || lab || registration;
+            default -> false;
+        };
+        if (!allowed) throw forbidden("当前岗位无权填写该类别影像补充");
+        if (lab && !registration && !ecg) {
+            Set<String> duties = Set.of("LAB_STAFF");
+            if (hasConfiguredDuty(encounter, duties) && !hasAssignedDuty(encounter, user, duties)) {
+                throw forbidden("本病例已指定化验岗责任人，当前账号无权填写");
+            }
+        }
     }
 
     private String normalizeReviewImagingCategory(String value) {
@@ -1836,9 +1875,11 @@ public class PreAiEncounterService {
             String taskType = task == null ? "" : text(task, "taskType");
             String modality = task == null ? "" : text(task.path("data"), "modality");
             String description = text(attachment, "description") + " " + text(attachment, "batchName");
+            String fileName = text(attachment, "fileName");
             boolean endoscopy = "COLONOSCOPY".equals(taskType) || reviewImagingContainsAny(description, "胃肠镜", "胃镜", "肠镜");
             boolean ecg = "ECG".equals(taskType)
                 || reviewImagingContainsAny(description, "心电")
+                || reviewImagingContainsAny(fileName, "心电", "ecg")
                 || ("IMAGING".equals(taskType) && reviewImagingContainsAny(modality, "心电"));
             boolean dr = !endoscopy
                 && (("IMAGING".equals(taskType) && reviewImagingContainsAny(modality, "DR", "X线", "胸片"))

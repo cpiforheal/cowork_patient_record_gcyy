@@ -300,31 +300,27 @@
               </div>
             </section>
 
-            <section v-if="registrationImageAttachments.length" class="patient-dr-strip">
+            <section v-if="drImagingAttachments.length" class="patient-dr-strip">
               <div class="patient-dr-strip__head">
                 <div>
                   <span class="section-caption">患者信息 · 优先视觉核对</span>
                   <strong>DR 影像（前台/化验岗采集）</strong>
                 </div>
-                <el-tag type="primary" effect="plain">{{ registrationImageAttachments.length }} 张</el-tag>
+                <el-tag type="primary" effect="plain">{{ drImagingAttachments.length }} 张</el-tag>
               </div>
-              <AttachmentPreviewGallery
-                :attachments="registrationImageAttachments"
-                compact
-                @download="downloadPreAiAttachmentApi"
-              />
+              <AttachmentPreviewGallery :attachments="drImagingAttachments" compact @download="downloadPreAiAttachmentApi" />
             </section>
 
-            <section v-if="endoscopyReportAttachments.length" class="patient-dr-strip">
+            <section v-if="endoscopyImagingAttachments.length" class="patient-dr-strip">
               <div class="patient-dr-strip__head">
                 <div>
                   <span class="section-caption">患者信息 · 辅助检查报告</span>
                   <strong>胃肠镜检查报告单</strong>
                 </div>
-                <el-tag type="primary" effect="plain">{{ endoscopyReportAttachments.length }} 张</el-tag>
+                <el-tag type="primary" effect="plain">{{ endoscopyImagingAttachments.length }} 张</el-tag>
               </div>
               <AttachmentPreviewGallery
-                :attachments="endoscopyReportAttachments"
+                :attachments="endoscopyImagingAttachments"
                 compact
                 @download="downloadPreAiAttachmentApi"
               />
@@ -886,18 +882,30 @@
                             <strong>DR 影像资料</strong>
                             <small>作为独立附件存储，不参与前置病历元数据生成；上传后各岗位在患者信息区优先可见。</small>
                           </div>
-                          <el-tag :type="registrationImageAttachments.length ? 'primary' : 'info'" effect="plain">
-                            {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                          <el-tag :type="drImagingAttachments.length ? 'primary' : 'info'" effect="plain">
+                            {{ drImagingAttachments.length ? `${drImagingAttachments.length} 张` : "暂无" }}
                           </el-tag>
                         </header>
                         <AttachmentPreviewGallery
-                          v-if="registrationImageAttachments.length"
-                          :attachments="registrationImageAttachments"
+                          v-if="drImagingAttachments.length"
+                          :attachments="drImagingAttachments"
                           :removable="canModifySelectedStage"
                           @download="downloadPreAiAttachmentApi"
                           @remove="removeImageAttachment"
                         />
                         <el-empty v-else :image-size="56" description="暂无 DR 影像，可在下方上传或拍照采集" />
+                        <ImagingSupplementEditor
+                          v-if="drImagingAttachments.length && workspace.imagingReview"
+                          category="DR"
+                          label="DR 影像"
+                          :note="imagingReviewCategory('DR')?.note || ''"
+                          :updated-by="imagingReviewCategory('DR')?.updatedBy"
+                          :updated-at="imagingReviewCategory('DR')?.updatedAt"
+                          :can-edit="canModifySelectedStage"
+                          :locked="departmentImagingLocked"
+                          :loading="savingDepartmentImagingCategory === 'DR'"
+                          @save="saveDepartmentImagingNote"
+                        />
                         <div v-if="canModifySelectedStage" class="upload-actions">
                           <label class="upload-button">
                             <input
@@ -1139,8 +1147,8 @@
                               <strong>DR 影像资料</strong>
                               <small>与前台岗共用影像库 · 独立存档，不进入病历内容</small>
                             </span>
-                            <span class="folder-count" :class="{ filled: registrationImageAttachments.length }">
-                              {{ registrationImageAttachments.length ? `${registrationImageAttachments.length} 张` : "暂无" }}
+                            <span class="folder-count" :class="{ filled: drImagingAttachments.length }">
+                              {{ drImagingAttachments.length ? `${drImagingAttachments.length} 张` : "暂无" }}
                             </span>
                             <el-icon class="folder-arrow" aria-hidden="true"><ArrowDown /></el-icon>
                           </div>
@@ -1166,13 +1174,25 @@
                           </div>
                           <div v-show="auxDrZoneExpanded" class="folder-body">
                             <AttachmentPreviewGallery
-                              v-if="registrationImageAttachments.length"
-                              :attachments="registrationImageAttachments"
+                              v-if="drImagingAttachments.length"
+                              :attachments="drImagingAttachments"
                               :removable="canOpenLabWorkbench"
                               @download="downloadPreAiAttachmentApi"
                               @remove="removeImageAttachment"
                             />
                             <el-empty v-else :image-size="56" description="暂无 DR 影像，可先上传或拍照采集" />
+                            <ImagingSupplementEditor
+                              v-if="drImagingAttachments.length && workspace.imagingReview"
+                              category="DR"
+                              label="DR 影像"
+                              :note="imagingReviewCategory('DR')?.note || ''"
+                              :updated-by="imagingReviewCategory('DR')?.updatedBy"
+                              :updated-at="imagingReviewCategory('DR')?.updatedAt"
+                              :can-edit="canOpenLabWorkbench"
+                              :locked="departmentImagingLocked"
+                              :loading="savingDepartmentImagingCategory === 'DR'"
+                              @save="saveDepartmentImagingNote"
+                            />
                             <el-progress
                               v-if="attachmentUpload.total"
                               :percentage="attachmentUpload.percent"
@@ -1200,8 +1220,8 @@
                               <strong>胃肠镜检查报告单</strong>
                               <small>独立附件存档，不进入病历内容 · 支持重复上传与误删恢复</small>
                             </span>
-                            <span class="folder-count" :class="{ filled: endoscopyReportAttachments.length }">
-                              {{ endoscopyReportAttachments.length ? `${endoscopyReportAttachments.length} 张` : "暂无" }}
+                            <span class="folder-count" :class="{ filled: endoscopyImagingAttachments.length }">
+                              {{ endoscopyImagingAttachments.length ? `${endoscopyImagingAttachments.length} 张` : "暂无" }}
                             </span>
                             <el-icon class="folder-arrow" aria-hidden="true"><ArrowDown /></el-icon>
                           </div>
@@ -1247,13 +1267,102 @@
                           </div>
                           <div v-show="auxEndoscopyZoneExpanded" class="folder-body">
                             <AttachmentPreviewGallery
-                              v-if="endoscopyReportAttachments.length"
-                              :attachments="endoscopyReportAttachments"
+                              v-if="endoscopyImagingAttachments.length"
+                              :attachments="endoscopyImagingAttachments"
                               :removable="canOpenLabWorkbench"
                               @download="downloadPreAiAttachmentApi"
                               @remove="removeImageAttachment"
                             />
                             <el-empty v-else :image-size="56" description="暂无胃肠镜报告，可先上传或拍照采集" />
+                            <ImagingSupplementEditor
+                              v-if="endoscopyImagingAttachments.length && workspace.imagingReview"
+                              category="ENDOSCOPY"
+                              label="胃肠镜"
+                              :note="imagingReviewCategory('ENDOSCOPY')?.note || ''"
+                              :updated-by="imagingReviewCategory('ENDOSCOPY')?.updatedBy"
+                              :updated-at="imagingReviewCategory('ENDOSCOPY')?.updatedAt"
+                              :can-edit="canOpenLabWorkbench"
+                              :locked="departmentImagingLocked"
+                              :loading="savingDepartmentImagingCategory === 'ENDOSCOPY'"
+                              @save="saveDepartmentImagingNote"
+                            />
+                            <el-progress
+                              v-if="attachmentUpload.total"
+                              :percentage="attachmentUpload.percent"
+                              :status="
+                                attachmentUpload.failed
+                                  ? 'warning'
+                                  : attachmentUpload.success === attachmentUpload.total
+                                    ? 'success'
+                                    : undefined
+                              "
+                            />
+                            <small v-if="attachmentUpload.total" class="upload-summary">
+                              共 {{ attachmentUpload.total }} 个，成功 {{ attachmentUpload.success }} 个，失败
+                              {{ attachmentUpload.failed }} 个
+                            </small>
+                          </div>
+                        </section>
+
+                        <section class="aux-folder-card" :class="{ expanded: auxEcgZoneExpanded }">
+                          <div class="folder-head" @click="auxEcgZoneExpanded = !auxEcgZoneExpanded">
+                            <span class="folder-badge" aria-hidden="true"
+                              ><el-icon><Upload /></el-icon
+                            ></span>
+                            <span class="folder-title">
+                              <strong>心电图</strong>
+                              <small>独立附件存档，不进入病历内容 · 心电图片按文件名/描述自动归入本卡</small>
+                            </span>
+                            <span class="folder-count" :class="{ filled: ecgImagingAttachments.length }">
+                              {{ ecgImagingAttachments.length ? `${ecgImagingAttachments.length} 张` : "暂无" }}
+                            </span>
+                            <el-icon class="folder-arrow" aria-hidden="true"><ArrowDown /></el-icon>
+                          </div>
+                          <div v-if="canEditEcgWorkbench" class="folder-actions">
+                            <label class="upload-button">
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*,.pdf"
+                                @change="
+                                  event => uploadAttachments(event, 'REGISTRATION', undefined, false, '心电图', '心电图')
+                                "
+                              />
+                              <el-icon><Upload /></el-icon> 选择心电图图片/PDF
+                            </label>
+                            <label class="upload-button camera-button">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                @change="
+                                  event => uploadAttachments(event, 'REGISTRATION', undefined, false, '心电图', '心电图')
+                                "
+                              />
+                              <el-icon><Camera /></el-icon> 拍照上传
+                            </label>
+                          </div>
+                          <div v-show="auxEcgZoneExpanded" class="folder-body">
+                            <AttachmentPreviewGallery
+                              v-if="ecgImagingAttachments.length"
+                              :attachments="ecgImagingAttachments"
+                              :removable="canEditEcgWorkbench"
+                              @download="downloadPreAiAttachmentApi"
+                              @remove="removeImageAttachment"
+                            />
+                            <el-empty v-else :image-size="56" description="暂无心电图资料，可先上传或拍照采集" />
+                            <ImagingSupplementEditor
+                              v-if="ecgImagingAttachments.length && workspace.imagingReview"
+                              category="ECG"
+                              label="心电图"
+                              :note="imagingReviewCategory('ECG')?.note || ''"
+                              :updated-by="imagingReviewCategory('ECG')?.updatedBy"
+                              :updated-at="imagingReviewCategory('ECG')?.updatedAt"
+                              :can-edit="canEditEcgWorkbench"
+                              :locked="departmentImagingLocked"
+                              :loading="savingDepartmentImagingCategory === 'ECG'"
+                              @save="saveDepartmentImagingNote"
+                            />
                             <el-progress
                               v-if="attachmentUpload.total"
                               :percentage="attachmentUpload.percent"
@@ -1929,6 +2038,7 @@ import {
   restorePreAiAttachmentApi,
   savePreAiReviewOverridesApi,
   savePreAiReviewImagingNoteApi,
+  savePreAiDepartmentImagingNoteApi,
   savePreAiDutyAssignmentsApi,
   savePreAiAdmissionProfileApi,
   savePreAiStageApi,
@@ -1978,6 +2088,7 @@ import ClinicalTemplateToolbar from "./components/ClinicalTemplateToolbar.vue";
 import EncounterHistoryPanel from "./components/EncounterHistoryPanel.vue";
 import HealthArchiveDialog from "./components/HealthArchiveDialog.vue";
 import AttachmentPreviewGallery from "./components/AttachmentPreviewGallery.vue";
+import ImagingSupplementEditor from "./components/ImagingSupplementEditor.vue";
 import { getLocalPrintAgentStatus, printQueueTicketLocally } from "../../clinicQueue/printAgent";
 import {
   auxiliaryTaskLabel,
@@ -2313,6 +2424,7 @@ const activeAuxTab = ref("images");
 const auxDrZoneExpanded = ref(false);
 const auxEndoscopyZoneExpanded = ref(false);
 const auxConsentZoneExpanded = ref(false);
+const auxEcgZoneExpanded = ref(false);
 const surgeryConsentTask = computed(() => workspace.value?.auxiliaryTasks.find(task => task.taskType === "SURGERY_CONSENT"));
 const surgeryConsentAttachments = computed(() => {
   const taskId = surgeryConsentTask.value?.id;
@@ -2320,7 +2432,10 @@ const surgeryConsentAttachments = computed(() => {
 });
 const auxImageTotal = computed(
   () =>
-    registrationImageAttachments.value.length + endoscopyReportAttachments.value.length + surgeryConsentAttachments.value.length
+    drImagingAttachments.value.length +
+    endoscopyImagingAttachments.value.length +
+    ecgImagingAttachments.value.length +
+    surgeryConsentAttachments.value.length
 );
 const auxLabReportCount = computed(() => workspace.value?.labReports?.length || 0);
 const auxPendingTaskCount = computed(
@@ -2339,6 +2454,7 @@ const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
 const savingImagingCategory = ref("");
+const savingDepartmentImagingCategory = ref("");
 const targetMedicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
 const templateTargetVersions = computed(() =>
   targetMedicalRecordVersions.value.filter(record => !record.model || record.model === "docx-template")
@@ -3439,6 +3555,10 @@ const canCorrectSelectedStage = computed(
     selectedStageCode.value !== "REVIEW"
 );
 const canModifySelectedStage = computed(() => canEditSelectedStage.value || canCorrectSelectedStage.value);
+const canEditEcgWorkbench = computed(
+  () =>
+    Boolean(authStore.auxiliaryPermissions.ECG?.editable) || canOpenLabWorkbench.value || canModifySelectedStage.value
+);
 const canTerminateReception = computed(
   () =>
     selectedStageCode.value === "RECEPTION" &&
@@ -3540,6 +3660,34 @@ const registrationImageAttachments = computed(
         isImageAttachment(item) &&
         !(item.description || "").includes(endoscopyReportDescription)
     ) || []
+);
+const imagingReviewCategory = (code: PreAiImagingCategory) =>
+  workspace.value?.imagingReview?.categories.find(category => category.code === code);
+const imagingAttachmentsByIds = (ids?: string[]) =>
+  (ids || [])
+    .map(id => workspace.value?.attachments.find(attachment => attachment.id === id))
+    .filter((attachment): attachment is PreAiAttachment => Boolean(attachment));
+const isEcgAttachment = (attachment: PreAiAttachment) => {
+  const task = workspace.value?.auxiliaryTasks.find(item => item.id === attachment.taskId);
+  if (task?.taskType === "ECG") return true;
+  const identity = `${attachment.fileName} ${attachment.description} ${attachment.batchName || ""}`.toLowerCase();
+  return identity.includes("心电") || identity.includes("ecg");
+};
+const drImagingAttachments = computed(() => {
+  const category = imagingReviewCategory("DR");
+  if (category) return imagingAttachmentsByIds(category.attachmentIds);
+  return registrationImageAttachments.value.filter(attachment => !isEcgAttachment(attachment));
+});
+const endoscopyImagingAttachments = computed(() => {
+  const category = imagingReviewCategory("ENDOSCOPY");
+  return category ? imagingAttachmentsByIds(category.attachmentIds) : endoscopyReportAttachments.value;
+});
+const ecgImagingAttachments = computed(() => {
+  const category = imagingReviewCategory("ECG");
+  return category ? imagingAttachmentsByIds(category.attachmentIds) : (workspace.value?.attachments || []).filter(isEcgAttachment);
+});
+const departmentImagingLocked = computed(() =>
+  ["REVIEWED", "EXPORTED"].includes(String(workspace.value?.encounter.status || ""))
 );
 const voidedAttachments = computed(() => workspace.value?.voidedAttachments || []);
 const inspectionImageAttachments = computed(
@@ -5122,6 +5270,21 @@ const saveReviewImagingNote = async (category: PreAiImagingCategory, note: strin
     });
   } finally {
     savingImagingCategory.value = "";
+  }
+};
+
+const saveDepartmentImagingNote = async (category: PreAiImagingCategory, note: string) => {
+  savingDepartmentImagingCategory.value = category;
+  try {
+    await runAction(async () => {
+      const { data } = await savePreAiDepartmentImagingNoteApi(selectedEncounterId.value, category, note);
+      if (workspace.value) {
+        workspace.value = { ...workspace.value, imagingReview: data };
+      }
+      ElMessage.success(note.trim() ? "科室影像补充已保存，已同步到医生复核" : "科室影像补充已清空");
+    });
+  } finally {
+    savingDepartmentImagingCategory.value = "";
   }
 };
 

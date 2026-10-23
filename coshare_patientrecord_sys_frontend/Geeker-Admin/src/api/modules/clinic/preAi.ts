@@ -841,6 +841,13 @@ export const savePreAiReviewImagingNoteApi = (encounterId: string, category: Pre
     { note }
   );
 
+export const savePreAiDepartmentImagingNoteApi = (encounterId: string, category: PreAiImagingCategory, note: string) =>
+  jsonRequest<PreAiImagingReview>(
+    `/pre-ai/encounters/${encodeURIComponent(encounterId)}/imaging-notes/${encodeURIComponent(category)}`,
+    "PUT",
+    { note }
+  );
+
 export const confirmPreAiReviewApi = (
   encounterId: string,
   statement = "",
