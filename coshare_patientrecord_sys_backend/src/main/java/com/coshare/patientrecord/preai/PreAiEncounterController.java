@@ -397,6 +397,16 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "医生复核修改已保存", service.saveReviewOverrides(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PutMapping("/{encounterId}/review/imaging-notes/{category}")
+    public ApiResult<Map<String, Object>> saveReviewImagingNote(
+        @PathVariable String encounterId,
+        @PathVariable String category,
+        @RequestBody(required = false) PreAiEncounterService.ImagingNoteRequest request
+    ) {
+        return ApiResult.of(200, "影像补充描述已保存",
+            service.saveReviewImagingNote(encounterId, category, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/{encounterId}/review/confirm")
     public ApiResult<Map<String, Object>> confirmReview(
         @PathVariable String encounterId,

@@ -265,6 +265,7 @@ export interface PreAiWorkspace {
   auxiliaryTasks: PreAiAuxiliaryTask[];
   labReports: LabReportSnapshot[];
   attachments: PreAiAttachment[];
+  imagingReview?: PreAiImagingReview;
   voidedAttachments?: PreAiAttachment[];
   diagnoses: Array<Record<string, any>>;
   auditLogs: PreAiAuditLog[];
@@ -325,6 +326,23 @@ export interface PreAiReviewOverride {
   rowId: string;
   label: string;
   value: string;
+}
+
+export type PreAiImagingCategory = "ENDOSCOPY" | "DR" | "ECG";
+
+export interface PreAiImagingNote {
+  code: PreAiImagingCategory;
+  label: string;
+  attachmentIds: string[];
+  conclusion?: string;
+  note: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByRole?: string;
+}
+
+export interface PreAiImagingReview {
+  categories: PreAiImagingNote[];
 }
 
 export interface PreAiReviewPreview {
@@ -815,6 +833,13 @@ export const savePreAiReviewOverridesApi = (
     data: { reviewOverrides },
     expectedVersion
   });
+
+export const savePreAiReviewImagingNoteApi = (encounterId: string, category: PreAiImagingCategory, note: string) =>
+  jsonRequest<PreAiImagingReview>(
+    `/pre-ai/encounters/${encodeURIComponent(encounterId)}/review/imaging-notes/${encodeURIComponent(category)}`,
+    "PUT",
+    { note }
+  );
 
 export const confirmPreAiReviewApi = (
   encounterId: string,

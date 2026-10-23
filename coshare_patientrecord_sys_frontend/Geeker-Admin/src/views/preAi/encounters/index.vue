@@ -1081,6 +1081,9 @@
                       v-model:critical-acknowledged="criticalAcknowledged"
                       :preview="reviewPreview"
                       :sections="maskedSections"
+                      :imaging-review="reviewPreview?.workspace?.imagingReview"
+                      :attachments="reviewPreview?.workspace?.attachments || []"
+                      :saving-imaging-category="savingImagingCategory"
                       :can-review="canReview"
                       :can-generate-target="canReview && Boolean(workspace.encounter.id)"
                       :loading="actionLoading"
@@ -1096,6 +1099,7 @@
                       @refresh="loadReviewPreview"
                       @confirm="confirmReview"
                       @save-row-override="saveReviewRowOverride"
+                      @save-imaging-note="saveReviewImagingNote"
                       @generate="generateExport"
                       @generate-target="generateTargetMedicalRecord"
                       @open-record-chat="openRecordChat"
@@ -1924,6 +1928,7 @@ import {
   returnPreAiStageApi,
   restorePreAiAttachmentApi,
   savePreAiReviewOverridesApi,
+  savePreAiReviewImagingNoteApi,
   savePreAiDutyAssignmentsApi,
   savePreAiAdmissionProfileApi,
   savePreAiStageApi,
@@ -1943,6 +1948,7 @@ import {
   type PreAiEncounterHistoryItem,
   type PreAiEncounterSummary,
   type PreAiExportVersion,
+  type PreAiImagingCategory,
   type PreAiOutpatientRecordVersion,
   type PreAiOutpatientSummary,
   type PreAiPatientCase,
@@ -2332,6 +2338,7 @@ const auxTabOptions = computed(() => [
 const reviewPreview = ref<PreAiReviewPreview>();
 const reviewStatement = ref("");
 const criticalAcknowledged = ref(false);
+const savingImagingCategory = ref("");
 const targetMedicalRecordVersions = ref<GeneratedMedicalRecord[]>([]);
 const templateTargetVersions = computed(() =>
   targetMedicalRecordVersions.value.filter(record => !record.model || record.model === "docx-template")
@@ -5099,6 +5106,24 @@ const saveReviewRowOverride = async (override: PreAiReviewOverride) =>
     await loadEncounterList();
     ElMessage.success("医生复核修改已保存，后续生成以本次修改为准");
   });
+
+const saveReviewImagingNote = async (category: PreAiImagingCategory, note: string) => {
+  savingImagingCategory.value = category;
+  try {
+    await runAction(async () => {
+      const { data } = await savePreAiReviewImagingNoteApi(selectedEncounterId.value, category, note);
+      if (reviewPreview.value) {
+        reviewPreview.value = {
+          ...reviewPreview.value,
+          workspace: { ...reviewPreview.value.workspace, imagingReview: data }
+        };
+      }
+      ElMessage.success(note.trim() ? "影像补充描述已保存" : "影像补充描述已清空");
+    });
+  } finally {
+    savingImagingCategory.value = "";
+  }
+};
 
 const confirmReview = async () =>
   runAction(async () => {

@@ -130,6 +130,17 @@
                     />
                     <el-empty v-else :image-size="56" description="该次来访暂无影像资料" />
                   </div>
+                  <div v-if="imagingNotesOf(item).length" class="hap-imaging-notes">
+                    <div class="hap-imaging-notes-head">
+                      <span class="hap-detail-caption is-sub">🩺 医师影像补充 · {{ imagingNotesOf(item).length }} 类</span>
+                      <el-tag :type="imagingNoteTag(item).type" size="small" effect="light">{{ imagingNoteTag(item).label }}</el-tag>
+                    </div>
+                    <article v-for="note in imagingNotesOf(item)" :key="note.code" class="hap-imaging-note">
+                      <strong>{{ note.label }}</strong>
+                      <p>{{ note.note }}</p>
+                      <small>{{ note.updatedBy || "医师" }} · {{ note.updatedAt || "" }}</small>
+                    </article>
+                  </div>
                 </template>
                 <el-empty v-else-if="!workspaceLoadingOf(item)" :image-size="56" description="暂无病历详情" />
               </div>
@@ -515,6 +526,23 @@ const workspaceLoadingMap = ref<Record<string, boolean>>({});
 const workspaceOf = (item: PreAiPatientCase) => {
   const encounterId = item.latestEncounter?.id;
   return (encounterId && workspaceMap.value[encounterId]) || null;
+};
+const imagingNotesOf = (item: PreAiPatientCase) =>
+  (workspaceOf(item)?.imagingReview?.categories || []).filter(category => String(category.note || "").trim());
+const imagingNoteTag = (item: PreAiPatientCase): { label: string; type: "success" | "warning" | "info" } => {
+  const workspace = workspaceOf(item);
+  if (!["REVIEWED", "EXPORTED"].includes(String(workspace?.encounter.status || ""))) {
+    return { label: "复核中", type: "warning" };
+  }
+  const reviewedAt = Date.parse(workspace?.encounter.reviewedAt || "");
+  const latestUpdatedAt = Math.max(
+    0,
+    ...imagingNotesOf(item)
+      .map(note => Date.parse(note.updatedAt || ""))
+      .filter(value => Number.isFinite(value))
+  );
+  if (reviewedAt && latestUpdatedAt > reviewedAt) return { label: "复核后补充", type: "info" };
+  return { label: "已复核", type: "success" };
 };
 const workspaceLoadingOf = (item: PreAiPatientCase) => Boolean(workspaceLoadingMap.value[item.latestEncounter?.id || ""]);
 const stageDataOf = (workspace: PreAiWorkspace | null, code: string): Record<string, any> =>
@@ -1259,6 +1287,50 @@ onBeforeUnmount(() => {
 .hap-attachments {
   display: grid;
   gap: 10px;
+}
+
+.hap-imaging-notes {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hap-imaging-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hap-imaging-note {
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+
+  strong {
+    font-size: 13px;
+  }
+
+  p {
+    margin: 6px 0 0;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  small {
+    display: block;
+    margin-top: 5px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
+
+@media print {
+  .hap-imaging-notes {
+    display: none !important;
+  }
 }
 
 // ---------- 拆步横向时间轴（codepen dRoMwo 复刻） ----------

@@ -70,6 +70,12 @@ public class PreAiEncounterService {
     private static final Logger log = LoggerFactory.getLogger(PreAiEncounterService.class);
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final List<String> STAGE_ORDER = List.of("REGISTRATION", "INSPECTION", "RECEPTION", "NURSING", "TCM", "DOCTOR", "SURGERY", "REVIEW");
+    private static final List<String> REVIEW_IMAGING_CATEGORIES = List.of("ENDOSCOPY", "DR", "ECG");
+    private static final Map<String, String> REVIEW_IMAGING_LABELS = Map.of(
+        "ENDOSCOPY", "胃肠镜",
+        "DR", "DR 影像",
+        "ECG", "心电图"
+    );
     private static final Set<String> INVENTORY_CONSUMPTION_STAGES = Set.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "nursing", "lab", "ecg", "ultrasound", "quality");
     private static final Set<String> FULL_OPERATION_ROLES = Set.of(
@@ -1716,6 +1722,196 @@ public class PreAiEncounterService {
         return reviewPreviewWithOverrides(encounterId, user, cleanOverrides);
     }
 
+    @Transactional
+    public Map<String, Object> saveReviewImagingNote(String encounterId, String category, ImagingNoteRequest request, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
+        requireReviewer(encounter, user);
+        String normalizedCategory = normalizeReviewImagingCategory(category);
+        String label = REVIEW_IMAGING_LABELS.getOrDefault(normalizedCategory, normalizedCategory);
+        String note = safe(request == null ? "" : request.note()).trim();
+        if (note.length() > 2000) throw badRequest("影像补充描述不能超过 2000 字");
+        if (!note.isBlank() && !hasReviewImagingMaterial(encounterId, normalizedCategory)) {
+            throw badRequest(label + "暂无活动影像资料，不能保存补充描述");
+        }
+        if (note.isBlank()) {
+            int removed = jdbcTemplate.update(
+                "DELETE FROM pre_ai_review_imaging_notes WHERE encounter_id = ? AND category = ?",
+                encounterId, normalizedCategory
+            );
+            if (removed > 0) audit(encounterId, "review.imaging-note.clear", "REVIEW", user, label + "影像补充描述已清空");
+        } else {
+            String now = now();
+            jdbcTemplate.update("""
+                INSERT INTO pre_ai_review_imaging_notes (
+                  id, encounter_id, category, note, created_at, created_by, created_by_role, updated_at, updated_by, updated_by_role
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE note = VALUES(note), updated_at = VALUES(updated_at),
+                  updated_by = VALUES(updated_by), updated_by_role = VALUES(updated_by_role)
+                """, "rin-" + UUID.randomUUID(), encounterId, normalizedCategory, note,
+                now, user.name(), user.role(), now, user.name(), user.role());
+            audit(encounterId, "review.imaging-note.save", "REVIEW", user, label + "影像补充描述已保存");
+        }
+        return buildReviewImagingReview(encounterId);
+    }
+
+    private String normalizeReviewImagingCategory(String value) {
+        String category = safe(value).toUpperCase(Locale.ROOT);
+        if (!REVIEW_IMAGING_CATEGORIES.contains(category)) throw badRequest("不支持的影像类别");
+        return category;
+    }
+
+    private Map<String, Object> buildReviewImagingReview(String encounterId) {
+        ArrayNode attachments = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_attachments WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY created_at",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> attachments.add(readAttachment(rs)),
+            encounterId
+        );
+        ArrayNode auxiliaryTasks = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> auxiliaryTasks.add(readAuxiliaryTask(rs)),
+            encounterId
+        );
+        return toMap(buildReviewImagingReview(attachments, auxiliaryTasks, loadReviewImagingNotes(encounterId)));
+    }
+
+    private ObjectNode buildReviewImagingReview(ArrayNode attachments, ArrayNode auxiliaryTasks, Map<String, ObjectNode> notes) {
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode categories = result.putArray("categories");
+        for (String code : REVIEW_IMAGING_CATEGORIES) {
+            List<ObjectNode> matched = classifyReviewImagingAttachments(code, attachments, auxiliaryTasks);
+            ObjectNode savedNote = notes.get(code);
+            if (matched.isEmpty() && savedNote == null) continue;
+            ObjectNode category = categories.addObject();
+            category.put("code", code);
+            category.put("label", REVIEW_IMAGING_LABELS.getOrDefault(code, code));
+            ArrayNode attachmentIds = category.putArray("attachmentIds");
+            for (ObjectNode attachment : matched) attachmentIds.add(text(attachment, "id"));
+            String conclusion = reviewImagingConclusion(code, auxiliaryTasks);
+            if (!conclusion.isBlank()) category.put("conclusion", conclusion);
+            if (savedNote == null) {
+                category.put("note", "");
+            } else {
+                category.put("note", text(savedNote, "note"));
+                putTextIfPresent(category, "updatedAt", text(savedNote, "updatedAt"));
+                putTextIfPresent(category, "updatedBy", text(savedNote, "updatedBy"));
+                putTextIfPresent(category, "updatedByRole", text(savedNote, "updatedByRole"));
+            }
+        }
+        return result;
+    }
+
+    private Map<String, ObjectNode> loadReviewImagingNotes(String encounterId) {
+        Map<String, ObjectNode> notes = new LinkedHashMap<>();
+        jdbcTemplate.query(
+            "SELECT category, note, updated_at, updated_by, updated_by_role FROM pre_ai_review_imaging_notes WHERE encounter_id = ?",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                String category = safe(rs.getString("category")).toUpperCase(Locale.ROOT);
+                row.put("category", category);
+                row.put("note", safe(rs.getString("note")));
+                row.put("updatedAt", safe(rs.getString("updated_at")));
+                row.put("updatedBy", safe(rs.getString("updated_by")));
+                row.put("updatedByRole", safe(rs.getString("updated_by_role")));
+                notes.put(category, row);
+            },
+            encounterId
+        );
+        return notes;
+    }
+
+    private List<ObjectNode> classifyReviewImagingAttachments(String category, ArrayNode attachments, ArrayNode auxiliaryTasks) {
+        Map<String, ObjectNode> taskById = new LinkedHashMap<>();
+        for (JsonNode node : auxiliaryTasks) {
+            if (node instanceof ObjectNode task) taskById.put(text(task, "id"), task);
+        }
+        List<ObjectNode> matched = new ArrayList<>();
+        for (JsonNode node : attachments) {
+            if (!(node instanceof ObjectNode attachment)) continue;
+            String taskId = text(attachment, "taskId");
+            ObjectNode task = taskById.get(taskId);
+            String taskType = task == null ? "" : text(task, "taskType");
+            String modality = task == null ? "" : text(task.path("data"), "modality");
+            String description = text(attachment, "description") + " " + text(attachment, "batchName");
+            boolean endoscopy = "COLONOSCOPY".equals(taskType) || reviewImagingContainsAny(description, "胃肠镜", "胃镜", "肠镜");
+            boolean ecg = "ECG".equals(taskType)
+                || reviewImagingContainsAny(description, "心电")
+                || ("IMAGING".equals(taskType) && reviewImagingContainsAny(modality, "心电"));
+            boolean dr = !endoscopy
+                && (("IMAGING".equals(taskType) && reviewImagingContainsAny(modality, "DR", "X线", "胸片"))
+                    || ("REGISTRATION".equals(text(attachment, "stageCode")) && taskId.isBlank() && isReviewImagingImage(attachment)));
+            String matchedCategory = endoscopy ? "ENDOSCOPY" : ecg ? "ECG" : dr ? "DR" : "";
+            if (!category.equals(matchedCategory)) continue;
+            if ("DR".equals(category) ? !isReviewImagingImage(attachment) : !isReviewImagingImageOrPdf(attachment)) continue;
+            matched.add(attachment);
+        }
+        matched.sort(Comparator.comparing(attachment -> text(attachment, "createdAt")));
+        return matched;
+    }
+
+    private String reviewImagingConclusion(String category, ArrayNode auxiliaryTasks) {
+        for (JsonNode node : auxiliaryTasks) {
+            if (!(node instanceof ObjectNode task)) continue;
+            String taskType = text(task, "taskType");
+            JsonNode data = task.path("data");
+            String modality = text(data, "modality");
+            boolean matched = switch (category) {
+                case "ENDOSCOPY" -> "COLONOSCOPY".equals(taskType);
+                case "ECG" -> "ECG".equals(taskType)
+                    || ("IMAGING".equals(taskType) && reviewImagingContainsAny(modality, "心电"));
+                case "DR" -> "IMAGING".equals(taskType) && reviewImagingContainsAny(modality, "DR", "X线", "胸片");
+                default -> false;
+            };
+            String conclusion = matched ? text(data, "conclusion") : "";
+            if (!conclusion.isBlank()) return conclusion;
+        }
+        return "";
+    }
+
+    private boolean hasReviewImagingMaterial(String encounterId, String category) {
+        ArrayNode attachments = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_attachments WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY created_at",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> attachments.add(readAttachment(rs)),
+            encounterId
+        );
+        ArrayNode auxiliaryTasks = objectMapper.createArrayNode();
+        jdbcTemplate.query(
+            "SELECT * FROM pre_ai_auxiliary_tasks WHERE encounter_id = ? ORDER BY created_at, id",
+            (org.springframework.jdbc.core.RowCallbackHandler) rs -> auxiliaryTasks.add(readAuxiliaryTask(rs)),
+            encounterId
+        );
+        return !classifyReviewImagingAttachments(category, attachments, auxiliaryTasks).isEmpty();
+    }
+
+    private boolean reviewImagingContainsAny(String value, String... keywords) {
+        String normalized = safe(value).toLowerCase(Locale.ROOT);
+        for (String keyword : keywords) {
+            if (normalized.contains(keyword.toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
+    }
+
+    private boolean isReviewImagingImage(JsonNode attachment) {
+        String mimeType = safe(text(attachment, "mimeType")).toLowerCase(Locale.ROOT);
+        if (mimeType.startsWith("image/")) return true;
+        String fileName = safe(text(attachment, "fileName")).toLowerCase(Locale.ROOT);
+        return fileName.matches(".*\\.(jpg|jpeg|png|gif|bmp|webp)$");
+    }
+
+    private boolean isReviewImagingPdf(JsonNode attachment) {
+        String mimeType = safe(text(attachment, "mimeType")).toLowerCase(Locale.ROOT);
+        if (mimeType.contains("pdf")) return true;
+        return safe(text(attachment, "fileName")).toLowerCase(Locale.ROOT).endsWith(".pdf");
+    }
+
+    private boolean isReviewImagingImageOrPdf(JsonNode attachment) {
+        return isReviewImagingImage(attachment) || isReviewImagingPdf(attachment);
+    }
+
     private Map<String, Object> reviewPreviewWithOverrides(String encounterId, SessionUser user, ArrayNode overrides) {
         ObjectNode workspace = workspace(encounterId, user);
         ArrayNode blockers = reviewBlockers(workspace);
@@ -2375,6 +2571,7 @@ public class PreAiEncounterService {
         jdbcTemplate.query("SELECT * FROM pre_ai_attachments WHERE encounter_id = ? AND status = 'ACTIVE' ORDER BY created_at", (org.springframework.jdbc.core.RowCallbackHandler) rs -> attachments.add(readAttachment(rs)), encounterId);
         ArrayNode voidedAttachments = result.putArray("voidedAttachments");
         jdbcTemplate.query("SELECT * FROM pre_ai_attachments WHERE encounter_id = ? AND status = 'VOIDED' ORDER BY created_at DESC LIMIT 20", (org.springframework.jdbc.core.RowCallbackHandler) rs -> voidedAttachments.add(readAttachment(rs)), encounterId);
+        result.set("imagingReview", buildReviewImagingReview(attachments, auxiliaryTasks, loadReviewImagingNotes(encounterId)));
         ArrayNode diagnoses = result.putArray("diagnoses");
         jdbcTemplate.query("SELECT * FROM pre_ai_diagnoses WHERE encounter_id = ? ORDER BY source_stage, sort_no, id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> diagnoses.add(readDiagnosis(rs)), encounterId);
         ArrayNode audits = result.putArray("auditLogs");
@@ -4515,6 +4712,7 @@ public class PreAiEncounterService {
     ) {}
     public record ReviewConfirmRequest(String statement, boolean criticalAcknowledged, Integer expectedVersion) {}
     public record ReviewOverridesRequest(Map<String, Object> data, Integer expectedVersion) {}
+    public record ImagingNoteRequest(String note) {}
     public record VersionRequest(Integer expectedVersion) {}
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
     public record FollowUpRegisterAndIssueRequest(String visitDate, Map<String, Object> visitMeta, String clientRequestId) {}

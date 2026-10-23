@@ -72,6 +72,16 @@
         我已逐项查看以上危急值，并确认进入后续临床处置
       </el-checkbox>
     </section>
+    <ReviewImagingSection
+      v-if="canReview"
+      :key="preview?.workspace?.encounter.id"
+      :review="imagingReview"
+      :attachments="attachments"
+      :can-review="canReview"
+      :loading="loading"
+      :saving-category="savingImagingCategory"
+      @save="(category, note) => emit('saveImagingNote', category, note)"
+    />
     <div v-if="preview" class="masked-preview">
       <div class="template-meta">
         <span>12 章标准模板</span>
@@ -409,11 +419,15 @@ import { computed, ref } from "vue";
 import { MoreFilled, Refresh } from "@element-plus/icons-vue";
 import type {
   GeneratedMedicalRecord,
+  PreAiAttachment,
   PreAiDocumentSection,
   PreAiEncounterStatus,
   PreAiExportVersion,
+  PreAiImagingCategory,
+  PreAiImagingReview,
   PreAiReviewPreview
 } from "@/api/modules/clinic";
+import ReviewImagingSection from "./ReviewImagingSection.vue";
 
 const props = defineProps<{
   preview?: PreAiReviewPreview;
@@ -423,6 +437,9 @@ const props = defineProps<{
   canGenerateTarget: boolean;
   criticalAcknowledged: boolean;
   loading: boolean;
+  imagingReview?: PreAiImagingReview;
+  attachments: PreAiAttachment[];
+  savingImagingCategory: string;
   versionLoading: boolean;
   encounterStatus: PreAiEncounterStatus;
   exports: PreAiExportVersion[];
@@ -550,6 +567,7 @@ const emit = defineEmits<{
   downloadAi: [version: GeneratedMedicalRecord];
   deleteTarget: [version: GeneratedMedicalRecord];
   saveRowOverride: [override: { sectionCode: string; rowId: string; label: string; value: string }];
+  saveImagingNote: [category: PreAiImagingCategory, note: string];
   "update:statement": [value: string];
   "update:criticalAcknowledged": [value: boolean];
 }>();
