@@ -374,40 +374,49 @@
                         class="selected-row"
                         :class="{ 'is-approved': line.reviewStatus === 'APPROVED' }"
                       >
+                        <button
+                          type="button"
+                          class="row-delete"
+                          :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                          :aria-label="`移除 ${line.itemName}`"
+                          title="移除"
+                          @click="removeLine(line.itemId)"
+                        >
+                          ×
+                        </button>
                         <span class="selected-name">
                           <strong>{{ line.itemName }}</strong>
                           <small>{{ line.unit }}<template v-if="line.exceptionReason"> · {{ line.exceptionReason }}</template></small>
                         </span>
+                        <span class="selected-state">
+                          <el-tag v-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">已通过</el-tag>
+                          <el-tag v-else-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">已驳回</el-tag>
+                          <small v-if="line.reviewNote">{{ line.reviewNote }}</small>
+                        </span>
                         <div class="quantity-control">
-                          <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, -1)">−</el-button>
+                          <el-button size="small" :disabled="!editable || line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, -1)">−</el-button>
                           <el-input-number
                             :model-value="line.actualQuantity"
                             :min="0.01"
                             :precision="2"
                             :step="1"
                             size="small"
-                            :disabled="line.reviewStatus === 'APPROVED'"
+                            :disabled="!editable || line.reviewStatus === 'APPROVED'"
                             controls-position="right"
                             @update:model-value="value => setLineQuantity(line, value)"
                           />
-                          <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, 1)">+</el-button>
+                          <el-button size="small" :disabled="!editable || line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, 1)">+</el-button>
                           <button
                             v-for="quick in [1, 2, 3]"
                             :key="quick"
                             type="button"
                             class="qty-chip"
-                            :disabled="line.reviewStatus === 'APPROVED'"
+                            :disabled="!editable || line.reviewStatus === 'APPROVED'"
                             @click="setLineQuantity(line, quick)"
                           >
                             {{ quick }}
                           </button>
                         </div>
-                        <span class="selected-state">
-                          <el-tag v-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">已通过</el-tag>
-                          <el-tag v-else-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">已驳回</el-tag>
-                          <small v-if="line.reviewNote">{{ line.reviewNote }}</small>
-                        </span>
-                        <el-button text type="danger" :disabled="line.reviewStatus === 'APPROVED'" @click="removeLine(line.itemId)">移除</el-button>
                       </div>
                       <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
                     </section>
@@ -2658,21 +2667,84 @@ onMounted(() => {
 }
 
 .selected-row {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) auto minmax(80px, auto) auto;
-  gap: 10px;
+  grid-template-areas:
+    "name state"
+    "qty qty";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 9px 10px 9px 34px;
   background: var(--hos-bg-surface);
   border: 1px solid var(--hos-border-light);
   border-radius: 10px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+
+  &:hover,
+  &:focus-within {
+    background: var(--hos-bg-primary);
+    border-color: var(--hos-border);
+  }
 
   &.is-approved {
     opacity: 0.8;
   }
 }
 
+.row-delete {
+  position: absolute;
+  top: 8px;
+  left: 7px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: #a33f3f;
+  font-size: 15px;
+  line-height: 1;
+  pointer-events: none;
+  cursor: pointer;
+  background: #fbefef;
+  border: 1px solid #efd3d3;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 140ms ease;
+
+  .selected-row:hover &,
+  .selected-row:focus-within & {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  &:hover:not(:disabled) {
+    color: #fff;
+    background: #c45454;
+    border-color: #c45454;
+  }
+
+  &:disabled {
+    display: none;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #c45454;
+    outline-offset: 1px;
+  }
+}
+
+@media (hover: none) {
+  .row-delete:not(:disabled) {
+    pointer-events: auto;
+    opacity: 0.55;
+  }
+}
+
 .selected-name {
+  grid-area: name;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2694,12 +2766,14 @@ onMounted(() => {
 }
 
 .quantity-control {
+  grid-area: qty;
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
 
   :deep(.el-input-number) {
-    width: 92px;
+    width: 84px;
   }
 }
 
@@ -2726,14 +2800,17 @@ onMounted(() => {
 }
 
 .selected-state {
+  grid-area: state;
   display: flex;
   flex-direction: column;
   gap: 2px;
   align-items: flex-end;
 
   small {
+    max-width: 150px;
     color: var(--hos-status-danger);
     font-size: 10px;
+    text-align: right;
   }
 }
 
