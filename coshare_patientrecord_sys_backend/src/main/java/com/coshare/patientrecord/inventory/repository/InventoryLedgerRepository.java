@@ -35,6 +35,12 @@ public class InventoryLedgerRepository {
 
     public String resolveDepartmentId(String departmentId, String departmentName) {
         if (departmentId != null && !departmentId.isBlank()) {
+            List<String> inventoryFound = jdbcTemplate.query(
+                "SELECT id FROM inventory_departments WHERE id = ? AND status = 'ACTIVE' LIMIT 1",
+                (rs, rowNum) -> rs.getString(1),
+                departmentId
+            );
+            if (!inventoryFound.isEmpty()) return inventoryFound.get(0);
             List<String> found = jdbcTemplate.query(
                 "SELECT id FROM clinic_departments WHERE id = ? LIMIT 1",
                 (rs, rowNum) -> rs.getString(1),
@@ -45,6 +51,12 @@ public class InventoryLedgerRepository {
         if (departmentName == null || departmentName.isBlank()) {
             throw new IllegalArgumentException("科室标识不能为空");
         }
+        List<String> inventoryFound = jdbcTemplate.query(
+            "SELECT id FROM inventory_departments WHERE name = ? AND status = 'ACTIVE' LIMIT 1",
+            (rs, rowNum) -> rs.getString(1),
+            departmentName
+        );
+        if (!inventoryFound.isEmpty()) return inventoryFound.get(0);
         List<String> found = jdbcTemplate.query(
             "SELECT id FROM clinic_departments WHERE name = ? ORDER BY id LIMIT 1",
             (rs, rowNum) -> rs.getString(1),
@@ -55,6 +67,12 @@ public class InventoryLedgerRepository {
     }
 
     public String departmentName(String departmentId) {
+        List<String> inventoryNames = jdbcTemplate.query(
+            "SELECT name FROM inventory_departments WHERE id = ? AND status = 'ACTIVE' LIMIT 1",
+            (rs, rowNum) -> rs.getString(1),
+            departmentId
+        );
+        if (!inventoryNames.isEmpty()) return inventoryNames.get(0);
         List<String> names = jdbcTemplate.query(
             "SELECT name FROM clinic_departments WHERE id = ? LIMIT 1",
             (rs, rowNum) -> rs.getString(1),

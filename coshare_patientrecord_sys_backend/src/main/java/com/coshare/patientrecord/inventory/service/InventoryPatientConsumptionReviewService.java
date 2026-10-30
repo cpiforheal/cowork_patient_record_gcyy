@@ -1,0 +1,584 @@
+package com.coshare.patientrecord.inventory.service;
+
+import com.coshare.patientrecord.auth.dto.SessionUser;
+import com.coshare.patientrecord.auth.service.InventoryAccessService;
+import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository;
+import com.coshare.patientrecord.inventory.repository.InventoryLedgerRepository.Balance;
+import com.coshare.patientrecord.inventory.repository.InventoryRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+/**
+ * Warehouse review for patient-bound consumable documents. Only approved lines
+ * produce inventory consumption events and ledger movements.
+ */
+@Service
+@Profile("mysql")
+public class InventoryPatientConsumptionReviewService {
+
+    private static final Set<String> DECISIONS = Set.of("APPROVED", "REJECTED");
+
+    private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
+    private final InventoryLedgerRepository ledger;
+    private final InventoryAccessService inventoryAccess;
+    private final InventoryPatientConsumptionService consumptionService;
+    private final InventoryRepository repository;
+
+    public InventoryPatientConsumptionReviewService(
+        JdbcTemplate jdbcTemplate,
+        ObjectMapper objectMapper,
+        InventoryLedgerRepository ledger,
+        InventoryAccessService inventoryAccess,
+        InventoryPatientConsumptionService consumptionService,
+        InventoryRepository repository
+    ) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
+        this.ledger = ledger;
+        this.inventoryAccess = inventoryAccess;
+        this.consumptionService = consumptionService;
+        this.repository = repository;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode batches(LocalDate businessDate, String departmentKey, String status, SessionUser user) {
+        LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
+        StringBuilder sql = new StringBuilder("SELECT * FROM inventory_consumption_approval_batches WHERE business_date = ?");
+        List<Object> params = new ArrayList<>();
+        params.add(date);
+        if (departmentKey != null && !departmentKey.isBlank()) {
+            sql.append(" AND department_key = ?");
+            params.add(departmentKey.trim());
+        } else if (!inventoryAccess.canViewAllDepartments(user)) {
+            sql.append(" AND department_name = ?");
+            params.add(canonicalDepartmentName(user.department()));
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" AND status = ?");
+            params.add(status.trim().toUpperCase(Locale.ROOT));
+        }
+        sql.append(" ORDER BY department_name");
+        ArrayNode list = jdbcTemplate.query(sql.toString(), resultSet -> {
+            ArrayNode rows = JsonNodeFactory.instance.arrayNode();
+            while (resultSet.next()) rows.add(batchRow(resultSet));
+            return rows;
+        }, params.toArray());
+        ObjectNode summary = objectMapper.createObjectNode();
+        int pending = 0, partial = 0, approved = 0, returned = 0;
+        for (JsonNode row : list) {
+            switch (row.path("status").asText("")) {
+                case "PENDING", "IN_REVIEW" -> pending++;
+                case "PARTIALLY_APPROVED" -> partial++;
+                case "APPROVED" -> approved++;
+                case "RETURNED" -> returned++;
+                default -> { }
+            }
+        }
+        summary.put("total", list.size());
+        summary.put("pending", pending);
+        summary.put("partiallyApproved", partial);
+        summary.put("approved", approved);
+        summary.put("returned", returned);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("businessDate", date.toString());
+        result.set("summary", summary);
+        result.set("list", list);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode batch(String batchId, SessionUser user) {
+        BatchRow batch = requireBatch(batchId, user);
+        List<ObjectNode> documents = jdbcTemplate.query(
+            """
+            SELECT d.*, si.patient_name, si.visit_no, si.service_name, si.service_code, si.stage_code,
+                   si.service_started_at, si.care_type, si.source_type
+            FROM inventory_patient_consumption_documents d
+            JOIN inventory_service_instances si ON si.id = d.service_instance_id
+            WHERE d.department_id = ? AND d.business_date = ?
+            ORDER BY si.service_started_at, si.patient_name
+            """,
+            (resultSet, rowNum) -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                row.put("documentId", resultSet.getString("id"));
+                row.put("serviceInstanceId", resultSet.getString("service_instance_id"));
+                row.put("patientId", resultSet.getString("patient_id"));
+                row.put("patientName", resultSet.getString("patient_name"));
+                row.put("visitNo", resultSet.getString("visit_no"));
+                row.put("encounterId", resultSet.getString("encounter_id"));
+                row.put("careType", resultSet.getString("care_type"));
+                row.put("serviceCode", resultSet.getString("service_code"));
+                row.put("serviceName", resultSet.getString("service_name"));
+                row.put("stageCode", resultSet.getString("stage_code"));
+                row.put("sourceType", resultSet.getString("source_type"));
+                Timestamp startedAt = resultSet.getTimestamp("service_started_at");
+                row.put("serviceStartedAt", startedAt == null ? "" : startedAt.toLocalDateTime().toString());
+                row.put("status", resultSet.getString("status"));
+                row.put("revision", resultSet.getInt("revision"));
+                Timestamp submittedAt = resultSet.getTimestamp("submitted_at");
+                row.put("submittedAt", submittedAt == null ? "" : submittedAt.toLocalDateTime().toString());
+                row.put("submittedBy", resultSet.getString("submitted_by"));
+                return row;
+            },
+            batch.departmentId(), batch.businessDate()
+        );
+        ArrayNode documentArray = JsonNodeFactory.instance.arrayNode();
+        for (ObjectNode document : documents) {
+            document.set("lines", loadLines(document.path("documentId").asText()));
+            documentArray.add(document);
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("batch", batchJson(batch));
+        result.set("documents", documentArray);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode decide(String batchId, JsonNode payload, SessionUser user) {
+        BatchRow batch = requireBatchForUpdate(batchId, user);
+        JsonNode decisions = payload == null ? null : payload.path("decisions");
+        if (decisions == null || !decisions.isArray() || decisions.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择需要审核的耗材行");
+        }
+        Set<String> seen = new HashSet<>();
+        ArrayNode errors = objectMapper.createArrayNode();
+        int approved = 0;
+        int rejected = 0;
+        for (JsonNode decisionNode : decisions) {
+            String lineId = text(decisionNode, "lineId");
+            String decision = text(decisionNode, "decision").toUpperCase(Locale.ROOT);
+            String note = text(decisionNode, "note");
+            if (lineId.isBlank() || !DECISIONS.contains(decision)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "审核决策格式不正确");
+            }
+            if (!seen.add(lineId)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "同一耗材行不能重复审核");
+            }
+            ReviewLine line = lockLine(lineId, batch);
+            if (decision.equals(line.reviewStatus())) {
+                continue;
+            }
+            if ("APPROVED".equals(line.reviewStatus())) {
+                errors.add(error(lineId, "该行已审核通过，不能重复处理"));
+                continue;
+            }
+            if ("REJECTED".equals(decision)) {
+                reject(line, batch, note, user);
+                rejected++;
+                continue;
+            }
+            try {
+                approve(line, batch, note, user);
+                approved++;
+            } catch (StockShortageException shortage) {
+                errors.add(error(lineId, shortage.getMessage()));
+            }
+        }
+        consumptionService.refreshBatch(batchId);
+        repository.log(user.name(), "审核患者耗材清单", "patient_consumption_approval_batch",
+            batch.departmentName() + " " + batch.businessDate(),
+            "通过 " + approved + " 行，驳回 " + rejected + " 行" + (errors.isEmpty() ? "" : "，异常 " + errors.size() + " 行"));
+        ObjectNode result = batch(batchId, user);
+        result.set("errors", errors);
+        return result;
+    }
+
+    private void approve(ReviewLine line, BatchRow batch, String note, SessionUser user) {
+        if (!Set.of("SUBMITTED", "PARTIALLY_APPROVED").contains(line.documentStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "患者清单当前状态不可审核");
+        }
+        if (line.actualQuantity().signum() <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "实际用量必须大于零");
+        }
+        ItemRow item = requireItem(line.itemId());
+        String idempotencyKey = "patient-line:" + line.lineId() + ":" + line.lineRevision() + ":CONSUMPTION";
+        List<String> existing = jdbcTemplate.query(
+            "SELECT id FROM inventory_consumption_events WHERE idempotency_key = ? LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString(1),
+            idempotencyKey
+        );
+        String eventId;
+        if (existing.isEmpty()) {
+            if (!ledger.isOpeningConfirmed(batch.departmentId())) {
+                throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+            }
+            String locationId = ledger.departmentLocation(batch.departmentId());
+            List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
+            BigDecimal available = balances.stream().map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (available.compareTo(line.actualQuantity()) < 0) {
+                throw new StockShortageException(item.name() + " 库存不足，当前可用 " + available.stripTrailingZeros().toPlainString());
+            }
+            List<Allocation> allocations = new ArrayList<>();
+            BigDecimal remaining = line.actualQuantity();
+            for (Balance balance : balances) {
+                if (remaining.signum() <= 0) break;
+                BigDecimal quantity = remaining.min(balance.available());
+                if (quantity.signum() > 0) {
+                    allocations.add(new Allocation(balance, quantity));
+                    remaining = remaining.subtract(quantity);
+                }
+            }
+            eventId = "patient-consumption-" + UUID.randomUUID();
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.put("sourceDocumentId", line.documentId());
+            raw.put("sourceLineId", line.lineId());
+            raw.put("serviceInstanceId", line.serviceInstanceId());
+            raw.put("patientId", line.patientId());
+            raw.put("itemId", line.itemId());
+            raw.put("quantity", line.actualQuantity());
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_consumption_events
+                  (id, command_id, source_document_id, source_line_id, correction_document_id, service_instance_id,
+                   patient_id, idempotency_key, encounter_id, case_token, route, care_type, care_encounter_id,
+                   department, department_id, visit_date, package_id, package_version, status, event_kind,
+                   trigger_stage, completion_version, operator_name, created_at, raw_json)
+                VALUES (?, NULL, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, NULL, NULL,
+                        'succeeded', 'CONSUMPTION', ?, NULL, ?, ?, CAST(? AS JSON))
+                """,
+                eventId, line.documentId(), line.lineId(), line.serviceInstanceId(), line.patientId(), idempotencyKey,
+                line.encounterId(), line.careType(), line.careType(), batch.departmentName(), batch.departmentId(),
+                batch.businessDate().toString(), firstNonBlank(line.stageCode(), line.serviceCode()),
+                user.name(), LocalDateTime.now().toString(), json(raw)
+            );
+            for (Allocation allocation : allocations) {
+                ledger.changeBalance(allocation.balance().id(), allocation.quantity().negate(), BigDecimal.ZERO);
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO inventory_consumption_details
+                      (id, event_id, item_id, batch_id, location_id, quantity, detail_kind, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', JSON_OBJECT('source', 'PATIENT_DOCUMENT'))
+                    """,
+                    "patient-consumption-detail-" + UUID.randomUUID(), eventId, line.itemId(),
+                    allocation.balance().batchId(), locationId, allocation.quantity()
+                );
+                ledger.movement(
+                    "CONSUMPTION", line.itemId(), allocation.balance().batchId(), locationId, null,
+                    allocation.quantity(), batch.departmentId(), "PATIENT_DOC_LINE", line.lineId(), eventId,
+                    null, user.name(), "患者耗材审核通过"
+                );
+            }
+        } else {
+            eventId = existing.get(0);
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE inventory_patient_consumption_lines
+            SET review_status = 'APPROVED', approved_quantity = actual_quantity,
+                consumption_event_id = ?, review_note = ?
+            WHERE id = ?
+            """,
+            eventId, blankToNull(note), line.lineId()
+        );
+        insertDecision(batch, line, "APPROVED", note, user, eventId);
+        refreshDocument(line.documentId());
+    }
+
+    private void reject(ReviewLine line, BatchRow batch, String note, SessionUser user) {
+        if (!Set.of("SUBMITTED", "PARTIALLY_APPROVED").contains(line.documentStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "患者清单当前状态不可审核");
+        }
+        jdbcTemplate.update(
+            "UPDATE inventory_patient_consumption_lines SET review_status = 'REJECTED', review_note = ? WHERE id = ?",
+            blankToNull(note), line.lineId()
+        );
+        insertDecision(batch, line, "REJECTED", note, user, null);
+        refreshDocument(line.documentId());
+    }
+
+    private void insertDecision(BatchRow batch, ReviewLine line, String decision, String note, SessionUser user, String eventId) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_consumption_approval_decisions
+              (id, batch_id, document_id, line_id, line_revision, decision, decision_note,
+               reviewer_username, reviewer_name, consumption_event_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE id = id
+            """,
+            "approval-decision-" + UUID.randomUUID(), batch.id(), line.documentId(), line.lineId(),
+            line.lineRevision(), decision, blankToNull(note), user.username(), user.name(), blankToNull(eventId)
+        );
+    }
+
+    private void refreshDocument(String documentId) {
+        ObjectNode counts = jdbcTemplate.query(
+            """
+            SELECT COUNT(*) total,
+                   COALESCE(SUM(CASE WHEN review_status = 'APPROVED' THEN 1 ELSE 0 END), 0) approved,
+                   COALESCE(SUM(CASE WHEN review_status = 'REJECTED' THEN 1 ELSE 0 END), 0) rejected,
+                   COALESCE(SUM(CASE WHEN review_status = 'PENDING' THEN 1 ELSE 0 END), 0) pending
+            FROM inventory_patient_consumption_lines WHERE document_id = ?
+            """,
+            resultSet -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                if (resultSet.next()) {
+                    row.put("total", resultSet.getInt("total"));
+                    row.put("approved", resultSet.getInt("approved"));
+                    row.put("rejected", resultSet.getInt("rejected"));
+                    row.put("pending", resultSet.getInt("pending"));
+                }
+                return row;
+            },
+            documentId
+        );
+        int total = counts.path("total").asInt();
+        int approved = counts.path("approved").asInt();
+        int rejected = counts.path("rejected").asInt();
+        int pending = counts.path("pending").asInt();
+        String status;
+        if (pending > 0 && approved + rejected > 0) status = "PARTIALLY_APPROVED";
+        else if (pending > 0) status = "SUBMITTED";
+        else if (rejected > 0 && approved > 0) status = "PARTIALLY_APPROVED";
+        else if (rejected > 0) status = "RETURNED";
+        else if (total == 0 || approved == total) status = "APPROVED";
+        else status = "SUBMITTED";
+        jdbcTemplate.update(
+            "UPDATE inventory_patient_consumption_documents SET status = ? WHERE id = ?",
+            status, documentId
+        );
+        jdbcTemplate.update(
+            """
+            UPDATE inventory_service_instances si
+            JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
+            SET si.status = ?
+            WHERE d.id = ?
+            """,
+            status, documentId
+        );
+    }
+
+    private ReviewLine lockLine(String lineId, BatchRow batch) {
+        List<ReviewLine> rows = jdbcTemplate.query(
+            """
+            SELECT l.*, d.status document_status, d.department_id document_department_id,
+                   d.department_key document_department_key, d.department_name document_department_name,
+                   d.business_date document_business_date, d.patient_id document_patient_id,
+                   d.encounter_id document_encounter_id, d.service_instance_id document_service_instance_id,
+                   si.care_type, si.stage_code, si.service_code
+            FROM inventory_patient_consumption_lines l
+            JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+            JOIN inventory_service_instances si ON si.id = d.service_instance_id
+            WHERE l.id = ? AND d.department_id = ? AND d.business_date = ?
+            FOR UPDATE
+            """,
+            (resultSet, rowNum) -> new ReviewLine(
+                resultSet.getString("id"), resultSet.getString("document_id"), resultSet.getString("item_id"),
+                resultSet.getBigDecimal("actual_quantity"), resultSet.getString("review_status"),
+                resultSet.getInt("line_revision"), resultSet.getString("document_status"),
+                resultSet.getString("document_service_instance_id"), resultSet.getString("document_patient_id"),
+                resultSet.getString("document_encounter_id"), resultSet.getString("care_type"),
+                resultSet.getString("stage_code"), resultSet.getString("service_code")
+            ),
+            lineId, batch.departmentId(), batch.businessDate()
+        );
+        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "耗材行不存在或不属于该审核批次");
+        return rows.get(0);
+    }
+
+    private BatchRow requireBatch(String batchId, SessionUser user) {
+        BatchRow batch = loadBatch(batchId);
+        if (!inventoryAccess.canViewAllDepartments(user) && !sameDepartment(user.department(), batch.departmentName())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权审核其他科室的耗材批次");
+        }
+        return batch;
+    }
+
+    private BatchRow requireBatchForUpdate(String batchId, SessionUser user) {
+        BatchRow batch = requireBatch(batchId, user);
+        List<BatchRow> rows = jdbcTemplate.query(
+            "SELECT * FROM inventory_consumption_approval_batches WHERE id = ? FOR UPDATE",
+            (resultSet, rowNum) -> mapBatch(resultSet),
+            batchId
+        );
+        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "审核批次不存在");
+        return rows.get(0);
+    }
+
+    private BatchRow loadBatch(String batchId) {
+        return jdbcTemplate.query(
+            "SELECT * FROM inventory_consumption_approval_batches WHERE id = ?",
+            resultSet -> resultSet.next() ? mapBatch(resultSet) : null,
+            batchId
+        );
+    }
+
+    private BatchRow mapBatch(ResultSet resultSet) throws SQLException {
+        Timestamp reviewedAt = resultSet.getTimestamp("reviewed_at");
+        return new BatchRow(
+            resultSet.getString("id"), resultSet.getString("department_id"), resultSet.getString("department_key"),
+            resultSet.getString("department_name"), resultSet.getDate("business_date").toLocalDate(),
+            resultSet.getString("status"), resultSet.getInt("document_count"), resultSet.getInt("line_count"),
+            resultSet.getInt("approved_line_count"), resultSet.getInt("rejected_line_count"),
+            resultSet.getString("reviewed_by"), reviewedAt == null ? null : reviewedAt.toLocalDateTime()
+        );
+    }
+
+    private ObjectNode batchRow(ResultSet resultSet) throws SQLException {
+        Timestamp reviewedAt = resultSet.getTimestamp("reviewed_at");
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("batchId", resultSet.getString("id"));
+        row.put("departmentId", resultSet.getString("department_id"));
+        row.put("departmentKey", resultSet.getString("department_key"));
+        row.put("departmentName", resultSet.getString("department_name"));
+        row.put("businessDate", resultSet.getDate("business_date").toLocalDate().toString());
+        row.put("status", resultSet.getString("status"));
+        row.put("documentCount", resultSet.getInt("document_count"));
+        row.put("lineCount", resultSet.getInt("line_count"));
+        row.put("approvedLineCount", resultSet.getInt("approved_line_count"));
+        row.put("rejectedLineCount", resultSet.getInt("rejected_line_count"));
+        row.put("reviewedBy", resultSet.getString("reviewed_by"));
+        row.put("reviewedAt", reviewedAt == null ? "" : reviewedAt.toLocalDateTime().toString());
+        return row;
+    }
+
+    private ObjectNode batchJson(BatchRow batch) {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("batchId", batch.id());
+        row.put("departmentId", batch.departmentId());
+        row.put("departmentKey", batch.departmentKey());
+        row.put("departmentName", batch.departmentName());
+        row.put("businessDate", batch.businessDate().toString());
+        row.put("status", batch.status());
+        row.put("documentCount", batch.documentCount());
+        row.put("lineCount", batch.lineCount());
+        row.put("approvedLineCount", batch.approvedLineCount());
+        row.put("rejectedLineCount", batch.rejectedLineCount());
+        row.put("reviewedBy", batch.reviewedBy());
+        row.put("reviewedAt", batch.reviewedAt() == null ? "" : batch.reviewedAt().toString());
+        return row;
+    }
+
+    private ArrayNode loadLines(String documentId) {
+        return jdbcTemplate.query(
+            """
+            SELECT l.*, i.name item_name, i.unit item_unit
+            FROM inventory_patient_consumption_lines l
+            JOIN inventory_items i ON i.id = l.item_id
+            WHERE l.document_id = ?
+            ORDER BY l.line_no
+            """,
+            resultSet -> {
+                ArrayNode rows = JsonNodeFactory.instance.arrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = rows.addObject();
+                    row.put("lineId", resultSet.getString("id"));
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", firstNonBlank(resultSet.getString("item_name"), resultSet.getString("item_name_snapshot")));
+                    row.put("unit", firstNonBlank(resultSet.getString("item_unit"), resultSet.getString("unit_snapshot")));
+                    row.put("presetQuantity", resultSet.getBigDecimal("preset_quantity"));
+                    row.put("actualQuantity", resultSet.getBigDecimal("actual_quantity"));
+                    row.put("source", resultSet.getString("source"));
+                    row.put("exceptionReason", resultSet.getString("exception_reason"));
+                    row.put("reviewStatus", resultSet.getString("review_status"));
+                    row.put("reviewNote", resultSet.getString("review_note"));
+                    row.put("lineRevision", resultSet.getInt("line_revision"));
+                    row.put("approvedQuantity", resultSet.getBigDecimal("approved_quantity"));
+                    row.put("consumptionEventId", resultSet.getString("consumption_event_id"));
+                }
+                return rows;
+            },
+            documentId
+        );
+    }
+
+    private ItemRow requireItem(String itemId) {
+        List<ItemRow> rows = jdbcTemplate.query(
+            "SELECT id, name, unit FROM inventory_items WHERE id = ? AND enabled = 1",
+            (resultSet, rowNum) -> new ItemRow(
+                resultSet.getString("id"), resultSet.getString("name"), resultSet.getString("unit")
+            ),
+            itemId
+        );
+        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "耗材不存在或已停用");
+        return rows.get(0);
+    }
+
+    private ObjectNode error(String lineId, String message) {
+        ObjectNode error = objectMapper.createObjectNode();
+        error.put("lineId", lineId);
+        error.put("message", message);
+        return error;
+    }
+
+    private static boolean sameDepartment(String userDepartment, String canonicalName) {
+        if (userDepartment == null) return false;
+        String value = userDepartment.trim();
+        return value.equals(canonicalName)
+            || (value.equals("后勤保洁") && canonicalName.equals("后勤"))
+            || (value.equals("后勤") && canonicalName.equals("后勤保洁"));
+    }
+
+    private static String canonicalDepartmentName(String value) {
+        if (value == null) return "";
+        return "后勤保洁".equals(value.trim()) ? "后勤" : value.trim();
+    }
+
+    private static String text(JsonNode node, String field) {
+        return node == null ? "" : node.path(field).asText("").trim();
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    private String json(JsonNode node) {
+        try {
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("审核事件序列化失败", error);
+        }
+    }
+
+    private record BatchRow(
+        String id, String departmentId, String departmentKey, String departmentName, LocalDate businessDate,
+        String status, int documentCount, int lineCount, int approvedLineCount, int rejectedLineCount,
+        String reviewedBy, LocalDateTime reviewedAt
+    ) {}
+
+    private record ReviewLine(
+        String lineId, String documentId, String itemId, BigDecimal actualQuantity, String reviewStatus,
+        int lineRevision, String documentStatus, String serviceInstanceId, String patientId, String encounterId,
+        String careType, String stageCode, String serviceCode
+    ) {}
+
+    private record ItemRow(String id, String name, String unit) {}
+
+    private record Allocation(Balance balance, BigDecimal quantity) {}
+
+    private static class StockShortageException extends RuntimeException {
+        StockShortageException(String message) {
+            super(message);
+        }
+    }
+}

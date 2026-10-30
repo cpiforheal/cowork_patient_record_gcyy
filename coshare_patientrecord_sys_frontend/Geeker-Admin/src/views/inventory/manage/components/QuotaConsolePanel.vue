@@ -100,6 +100,7 @@
             {{ bindingMeta[row.bindingType]?.short || row.bindingType }}
           </el-tag>
           <el-tag v-if="row.pending" size="small" type="success" effect="plain" class="row-tag">新增</el-tag>
+          <el-tag v-if="!row.itemId" size="small" type="warning" effect="plain" class="row-tag">未映射</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="绑定方式" width="118">
@@ -141,6 +142,16 @@
             <el-option label="门诊 + 住院" value="COMBINED" />
             <el-option label="其他人次" value="OTHER" />
           </el-select>
+        </template>
+      </el-table-column>
+      <el-table-column label="常用项" width="78" align="center">
+        <template #default="{ row }">
+          <el-switch
+            :model-value="Boolean(row.commonItem)"
+            size="small"
+            :disabled="!row.itemId"
+            @update:model-value="value => { row.commonItem = Boolean(value); markDirty(row as ConsoleRow); }"
+          />
         </template>
       </el-table-column>
       <el-table-column label="启用" width="72" align="center">
@@ -548,6 +559,7 @@ const visibleRows = computed<ConsoleRow[]>(() => {
     fixedAdjustment: create.fixedAdjustment,
     measurementScope: create.measurementScope,
     bindingType: create.bindingType || "PER_PERSON",
+    commonItem: false,
     enabled: true,
     pending: true,
     rowKey: `pending-${index}`
@@ -733,6 +745,7 @@ const save = async () => {
         fixedAdjustment: Number(rule.fixedAdjustment || 0),
         measurementScope: rule.measurementScope,
         bindingType: rule.bindingType || "PER_PERSON",
+        commonItem: Boolean(rule.commonItem),
         enabled: rule.enabled
       }));
     const result = (

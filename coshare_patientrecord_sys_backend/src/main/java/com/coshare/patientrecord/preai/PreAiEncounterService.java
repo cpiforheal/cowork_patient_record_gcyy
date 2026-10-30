@@ -11,6 +11,7 @@ import com.coshare.patientrecord.clinicqueue.ClinicQueueService;
 import com.coshare.patientrecord.file.dto.ClinicFileUploadRequest;
 import com.coshare.patientrecord.file.model.ClinicStoredFile;
 import com.coshare.patientrecord.file.service.ClinicFileService;
+import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionService;
 import com.coshare.patientrecord.inventory.service.InventoryStageConsumptionService;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -212,6 +213,7 @@ public class PreAiEncounterService {
     private final PreAiOutpatientDocxRenderer outpatientDocxRenderer;
     private final ClinicQueueService clinicQueueService;
     private final InventoryStageConsumptionService inventoryStageConsumptionService;
+    private final InventoryPatientConsumptionService inventoryPatientConsumptionService;
     private final AuthNavigationService navigationService;
     private final ClinicAiConfigService aiConfigService;
     private final Path generatedDir;
@@ -228,6 +230,7 @@ public class PreAiEncounterService {
         PreAiOutpatientDocxRenderer outpatientDocxRenderer,
         ClinicQueueService clinicQueueService,
         InventoryStageConsumptionService inventoryStageConsumptionService,
+        InventoryPatientConsumptionService inventoryPatientConsumptionService,
         AuthNavigationService navigationService,
         ClinicAiConfigService aiConfigService,
         @Value("${clinic.generated-pre-ai-dir:${clinic.attachment-dir}/../generated-pre-ai}") String generatedDir
@@ -240,6 +243,7 @@ public class PreAiEncounterService {
         this.outpatientDocxRenderer = outpatientDocxRenderer;
         this.clinicQueueService = clinicQueueService;
         this.inventoryStageConsumptionService = inventoryStageConsumptionService;
+        this.inventoryPatientConsumptionService = inventoryPatientConsumptionService;
         this.navigationService = navigationService;
         this.aiConfigService = aiConfigService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
@@ -1996,6 +2000,7 @@ public class PreAiEncounterService {
     }
 
     private void enqueueInventoryConsumption(ObjectNode encounter, String stage, long completionVersion, SessionUser user) {
+        enqueuePatientServiceEnrollment(encounter, stage, completionVersion, user);
         if (!INVENTORY_CONSUMPTION_STAGES.contains(stage)) return;
         inventoryStageConsumptionService.enqueueStageCompletion(
             text(encounter, "id"),
@@ -2007,6 +2012,46 @@ public class PreAiEncounterService {
             parseVisitDate(text(encounter.path("patient"), "visitDate")),
             user.name()
         );
+    }
+
+    private void enqueuePatientServiceEnrollment(ObjectNode encounter, String stage, long completionVersion, SessionUser user) {
+        List<Map<String, Object>> mappings = jdbcTemplate.queryForList(
+            """
+            SELECT department_key, service_code, service_name
+            FROM inventory_service_event_mappings
+            WHERE event_source = 'CLINICAL_STAGE' AND event_code = ? AND enabled = 1
+            LIMIT 1
+            """,
+            stage
+        );
+        if (mappings.isEmpty()) return;
+        Map<String, Object> mapping = mappings.get(0);
+        String encounterId = text(encounter, "id");
+        if (encounterId.isBlank()) return;
+        String patientId = text(encounter, "sourcePatientId");
+        if (patientId.isBlank()) patientId = text(encounter, "patientCaseId");
+        if (patientId.isBlank()) patientId = encounterId;
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("sourceEventId", "clinical-stage:" + encounterId + ":" + stage);
+        payload.put("encounterId", encounterId);
+        payload.put("patientId", patientId);
+        payload.put("patientName", text(encounter.path("patient"), "patientName"));
+        payload.put("visitNo", text(encounter, "visitNo"));
+        payload.put("careType", text(encounter, "inventoryCareType", "outpatient"));
+        payload.put("departmentKey", String.valueOf(mapping.get("department_key")));
+        payload.put("serviceCode", String.valueOf(mapping.get("service_code")));
+        payload.put("serviceName", String.valueOf(mapping.get("service_name")));
+        payload.put("stageCode", stage);
+        payload.put("serviceStartedAt", java.time.LocalDateTime.now().toString());
+        payload.put("businessDate", parseVisitDate(text(encounter.path("patient"), "visitDate")).toString());
+        payload.put("note", "临床阶段完成自动入列");
+        try {
+            inventoryPatientConsumptionService.enrollClinicalEventInternal(payload, user.name());
+        } catch (Exception error) {
+            // Inventory enrollment must never block the clinical workflow.
+            log.warn("患者耗材自动入列失败 encounter={} stage={} version={}: {}",
+                encounterId, stage, completionVersion, error.getMessage());
+        }
     }
 
     private void enqueueInventoryReversal(

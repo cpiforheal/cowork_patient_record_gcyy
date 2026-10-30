@@ -9,6 +9,8 @@ import com.coshare.patientrecord.config.PortalMode;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
+import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionReviewService;
+import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionService;
 import com.coshare.patientrecord.inventory.service.InventoryQuotaGovernanceService;
 import com.coshare.patientrecord.security.InventoryPermission;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -43,6 +45,8 @@ public class InventoryApiController {
     private final InventoryMessageBoardService messageBoardService;
     private final InventoryQuotaGovernanceService quotaGovernanceService;
     private final InventoryDepartmentDraftService departmentDraftService;
+    private final InventoryPatientConsumptionService patientConsumptionService;
+    private final InventoryPatientConsumptionReviewService patientConsumptionReviewService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -54,6 +58,8 @@ public class InventoryApiController {
         InventoryMessageBoardService messageBoardService,
         InventoryQuotaGovernanceService quotaGovernanceService,
         InventoryDepartmentDraftService departmentDraftService,
+        InventoryPatientConsumptionService patientConsumptionService,
+        InventoryPatientConsumptionReviewService patientConsumptionReviewService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -64,6 +70,8 @@ public class InventoryApiController {
         this.messageBoardService = messageBoardService;
         this.quotaGovernanceService = quotaGovernanceService;
         this.departmentDraftService = departmentDraftService;
+        this.patientConsumptionService = patientConsumptionService;
+        this.patientConsumptionReviewService = patientConsumptionReviewService;
         this.portalMode = portalMode;
     }
 
@@ -161,6 +169,21 @@ public class InventoryApiController {
     ) {
         requireCapability("inventory:role:manage");
         return ApiResult.success(objectMapper.convertValue(quotaGovernanceService.governance(date, versionId), Map.class));
+    }
+
+    @GetMapping("/inventory-api/quota-governance/mapping-worklist")
+    public ApiResult<Map<String, Object>> inventoryQuotaMappingWorklist(
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) String keyword
+    ) {
+        requireCapability("inventory:rule");
+        return ApiResult.success(asMap(quotaGovernanceService.mappingWorklist(departmentKey, keyword)));
+    }
+
+    @PutMapping("/inventory-api/quota-governance/mapping-worklist")
+    public ApiResult<Map<String, Object>> saveInventoryQuotaMappings(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:rule");
+        return ApiResult.of(200, "物资映射已保存", asMap(quotaGovernanceService.saveMappings(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/quota-governance/versions")
@@ -496,6 +519,106 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> saveDepartmentAllocationPlan(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.of(200, "Department allocation plan saved without inventory movement", databaseService.asMap(databaseService.saveDepartmentAllocationPlan(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench")
+    public ApiResult<Map<String, Object>> patientWorkbench(
+        @RequestParam String departmentKey,
+        @RequestParam(required = false) LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.workbench(departmentKey, date, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/detail")
+    public ApiResult<Map<String, Object>> patientWorkbenchDetail(@RequestParam String serviceInstanceId) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.document(serviceInstanceId, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/patients")
+    public ApiResult<Map<String, Object>> patientWorkbenchPatients(
+        @RequestParam(required = false) String keyword
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.searchPatients(keyword, user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/manual-patients")
+    public ApiResult<Map<String, Object>> addManualPatient(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者已加入本科室工作台", asMap(patientConsumptionService.manualAdd(toJson(payload), user)));
+    }
+
+    @PutMapping("/inventory-api/patient-workbench/documents")
+    public ApiResult<Map<String, Object>> savePatientWorkbenchDocument(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者耗材清单已保存", asMap(patientConsumptionService.saveDraft(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/documents/{documentId}/submit")
+    public ApiResult<Map<String, Object>> submitPatientWorkbenchDocument(
+        @org.springframework.web.bind.annotation.PathVariable String documentId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者耗材清单已提交审核", asMap(patientConsumptionService.submit(documentId, user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/clinical-events")
+    public ApiResult<Map<String, Object>> enrollClinicalEvent(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:rule");
+        return ApiResult.of(200, "临床服务事件已进入患者工作台", asMap(patientConsumptionService.enrollClinicalEvent(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/runtime-settings")
+    public ApiResult<Map<String, Object>> runtimeSettings() {
+        requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.runtimeSettings()));
+    }
+
+    @PutMapping("/inventory-api/runtime-settings/cutover-date")
+    public ApiResult<Map<String, Object>> saveCutoverDate(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "切换日期已保存", asMap(patientConsumptionService.saveCutoverDate(String.valueOf(payload.getOrDefault("date", "")), user)));
+    }
+
+    @GetMapping("/inventory-api/patient-trace")
+    public ApiResult<Map<String, Object>> patientTrace(@RequestParam String patientId) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.trace(patientId, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-dashboard")
+    public ApiResult<Map<String, Object>> patientDashboard(@RequestParam(required = false) LocalDate date) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.dashboard(date, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-review/batches")
+    public ApiResult<Map<String, Object>> patientReviewBatches(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) String status
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.success(asMap(patientConsumptionReviewService.batches(date, departmentKey, status, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-review/batches/{batchId}")
+    public ApiResult<Map<String, Object>> patientReviewBatch(
+        @org.springframework.web.bind.annotation.PathVariable String batchId
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.success(asMap(patientConsumptionReviewService.batch(batchId, user)));
+    }
+
+    @PostMapping("/inventory-api/patient-review/batches/{batchId}/decisions")
+    public ApiResult<Map<String, Object>> patientReviewDecisions(
+        @org.springframework.web.bind.annotation.PathVariable String batchId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "审核已处理", asMap(patientConsumptionReviewService.decide(batchId, toJson(payload), user)));
     }
 
     @GetMapping("/inventory-api/patient-consumption-drafts/detail")
@@ -908,6 +1031,10 @@ public class InventoryApiController {
 
     private JsonNode toJson(Map<String, Object> payload) {
         return objectMapper.valueToTree(payload == null ? Map.of() : payload);
+    }
+
+    private Map<String, Object> asMap(ObjectNode node) {
+        return objectMapper.convertValue(node, Map.class);
     }
 
     private static List<String> safeList(List<String> values) {

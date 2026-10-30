@@ -173,18 +173,22 @@
 
           <template v-else-if="activeTab === 'packages'">
             <template v-if="focusedDepartmentKey">
-              <el-radio-group v-model="departmentDraftMode" class="department-draft-mode">
-                <el-radio-button label="daily">科室日核算</el-radio-button>
-                <el-radio-button label="patient">患者耗用草稿</el-radio-button>
+              <el-radio-group v-if="!isInventoryPortal" v-model="departmentDraftMode" class="department-draft-mode">
+                <el-radio-button label="patient">患者耗材清单</el-radio-button>
+                <el-radio-button label="daily">旧日报（切换前）</el-radio-button>
               </el-radio-group>
+              <PatientConsumptionWorkspace
+                v-if="isInventoryPortal || departmentDraftMode === 'patient'"
+                :department-key="focusedDepartmentKey"
+                :today="today()"
+              />
               <DepartmentConsumptionWorkspace
-                v-if="departmentDraftMode === 'daily'"
+                v-else
                 :department-key="focusedDepartmentKey"
                 :items="db.items"
                 :batches="db.batches"
                 :today="today()"
               />
-              <PatientConsumptionDraftWorkspace v-else :department-key="focusedDepartmentKey" :today="today()" />
             </template>
             <DepartmentMaterialsPanel v-else-if="!isStandaloneConsumableEntry" @saved="onQuotaConsoleSaved" />
             <PackagePanel
@@ -240,6 +244,14 @@
               @export-csv="exportDailyRollupCsv"
               @export-xlsx="exportDailyRollupXlsx"
             />
+          </template>
+
+          <template v-else-if="activeTab === 'patientReview'">
+            <PatientConsumptionReviewPanel :today="today()" />
+          </template>
+
+          <template v-else-if="activeTab === 'patientTrace'">
+            <PatientConsumptionTracePanel />
           </template>
 
           <template v-else-if="activeTab === 'roles'">
@@ -589,7 +601,9 @@ import InventoryHelpDrawer from "./components/InventoryHelpDrawer.vue";
 import ItemsPanel from "./components/ItemsPanel.vue";
 import DepartmentConsumptionSummary from "./components/DepartmentConsumptionSummary.vue";
 import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWorkspace.vue";
-import PatientConsumptionDraftWorkspace from "./components/PatientConsumptionDraftWorkspace.vue";
+import PatientConsumptionWorkspace from "./components/PatientConsumptionWorkspace.vue";
+import PatientConsumptionReviewPanel from "./components/PatientConsumptionReviewPanel.vue";
+import PatientConsumptionTracePanel from "./components/PatientConsumptionTracePanel.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
@@ -601,6 +615,7 @@ import InventoryRolePanel from "./components/InventoryRolePanel.vue";
 import { createEmptyInventoryDb, useInventoryManage } from "./composables/useInventoryManage";
 import { exportCsv } from "./utils";
 
+const isInventoryPortal = import.meta.env.VITE_PORTAL_MODE === "inventory";
 const userStore = useUserStore();
 const authStore = useAuthStore();
 const route = useRoute();
@@ -616,7 +631,7 @@ const onQuotaConsoleSaved = () => {
   consumptionSummaryRef.value?.reload();
   void refreshOperationalData();
 };
-const departmentDraftMode = ref<"daily" | "patient">("daily");
+const departmentDraftMode = ref<"daily" | "patient">("patient");
 const initialInventoryLoading = computed(
   () =>
     !focusedDepartmentKey.value &&
@@ -757,6 +772,8 @@ const tabRoutePathMap: Record<string, string> = {
   packages: "/inventory/packages",
   trace: "/inventory/trace",
   daily: "/inventory/daily",
+  patientReview: "/inventory/patient-review",
+  patientTrace: "/inventory/patient-trace",
   roles: "/inventory/roles"
 };
 const inventorySystemTabRoutePathMap: Record<string, string> = {
@@ -770,6 +787,8 @@ const inventorySystemTabRoutePathMap: Record<string, string> = {
   packages: "/inventory-system/packages",
   trace: "/inventory-system/trace",
   daily: "/inventory-system/daily-verification",
+  patientReview: "/inventory-system/patient-review",
+  patientTrace: "/inventory-system/patient-trace",
   roles: "/inventory-system/role-management"
 };
 const inventoryDepartmentRouteMap: Record<string, string> = {
@@ -811,6 +830,8 @@ const tabRouteNameMap: Record<string, string> = {
   packages: "inventoryPackages",
   trace: "inventoryTrace",
   daily: "inventoryDaily",
+  patientReview: "inventoryPatientReview",
+  patientTrace: "inventoryPatientTrace",
   roles: "inventoryRoles"
 };
 const routeTabMap: Record<string, string> = {
@@ -826,6 +847,8 @@ const routeTabMap: Record<string, string> = {
   "/inventory/packages": "packages",
   "/inventory/trace": "trace",
   "/inventory/daily": "daily",
+  "/inventory/patient-review": "patientReview",
+  "/inventory/patient-trace": "patientTrace",
   "/inventory/roles": "roles",
   "/inventory-system/dashboard": "overview",
   "/inventory-system/executive": "executive",
@@ -839,6 +862,8 @@ const routeTabMap: Record<string, string> = {
   "/inventory-system/department-materials": "packages",
   "/inventory-system/trace": "trace",
   "/inventory-system/daily-verification": "daily",
+  "/inventory-system/patient-review": "patientReview",
+  "/inventory-system/patient-trace": "patientTrace",
   "/inventory-system/role-management": "roles"
 };
 const isStandaloneConsumableEntry = computed(
@@ -863,6 +888,8 @@ const tabNavItems = [
   { tab: "trace", title: "出入库追溯" },
   { tab: "items", title: "物资目录" },
   { tab: "daily", title: "每日核对与导出" },
+  { tab: "patientReview", title: "患者耗材审核" },
+  { tab: "patientTrace", title: "患者耗材追溯" },
   { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
@@ -1022,6 +1049,22 @@ const tabProfiles = {
     taskTitle: "按实际完成业务汇总",
     taskDesc: "患者相关耗用与日常申领分别保留，避免混算。"
   },
+  patientReview: {
+    kicker: "库管审核 / 患者耗材",
+    title: "患者耗材审核",
+    desc: "按科室和业务日期审核患者耗材清单；通过后扣减库存，驳回项退回科室修改。",
+    taskLabel: "当前重点",
+    taskTitle: "先处理待审核和库存异常",
+    taskDesc: "逐行审核，部分通过后未通过项可退回科室补交。"
+  },
+  patientTrace: {
+    kicker: "对账与追溯 / 患者耗材",
+    title: "患者耗材追溯",
+    desc: "从患者出发，查看就诊、科室服务实例、耗材明细、审核结果和库存流水。",
+    taskLabel: "追溯口径",
+    taskTitle: "以患者服务实例为最小单位",
+    taskDesc: "同一患者同日多个科室服务会分别保留，不合并、不覆盖。"
+  },
   roles: {
     kicker: "管理设置 / 岗位与权限",
     title: "岗位与权限",
@@ -1064,6 +1107,8 @@ const tabAuthMap: Record<string, readonly string[]> = {
   packages: ["inventory:read", "inventory:approve", "inventory:rule"],
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
+  patientReview: ["inventory:approve"],
+  patientTrace: ["inventory:read"],
   roles: ["inventory:role:manage"]
 };
 const canViewAllDepartments = computed(() =>

@@ -102,7 +102,7 @@ router.beforeEach(async to => {
       if (isInventoryPortal) {
         const isAdministrator = (authStore.capabilities || []).includes("inventory:role:manage");
         const departmentPath = "/inventory-system/departments/" + (authStore.activeDepartment?.id || "");
-        const portalLanding = isAdministrator ? "/inventory-system/daily-verification" : departmentPath;
+        const portalLanding = isAdministrator ? "/inventory-system/patient-review" : departmentPath;
         const isMessageBoard = to.path === "/inventory-system/message-board";
         const isDepartmentMaterials = to.path === "/inventory-system/department-materials";
         const isPackageRoute = to.path === "/inventory-system/packages" || isDepartmentMaterials;
@@ -111,6 +111,8 @@ router.beforeEach(async to => {
           ? isMessageBoard ||
             (isPackageRoute && hasPackageAccess) ||
             to.path === "/inventory-system/daily-verification" ||
+            to.path === "/inventory-system/patient-review" ||
+            to.path === "/inventory-system/patient-trace" ||
             to.path === "/inventory-system/role-management" ||
             to.path.startsWith("/inventory-system/departments/")
           : isMessageBoard || to.path === departmentPath || (isPackageRoute && hasPackageAccess);

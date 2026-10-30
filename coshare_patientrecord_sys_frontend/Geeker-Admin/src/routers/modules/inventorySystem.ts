@@ -15,6 +15,8 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   packages: "inventoryPackages",
   trace: "inventoryTrace",
   daily: "inventoryDaily",
+  patientReview: "inventoryPatientReview",
+  patientTrace: "inventoryPatientTrace",
   roles: "inventoryRoles"
 };
 
@@ -37,6 +39,8 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   packages: ["inventory:read", "inventory:approve", "inventory:rule"],
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
+  patientReview: ["inventory:approve"],
+  patientTrace: ["inventory:read"],
   roles: ["inventory:role:manage"],
   messageBoard: ["inventory:read"]
 };
@@ -90,6 +94,16 @@ export const getInventorySystemMenu = (
         path: `${INVENTORY_SYSTEM_PREFIX}/department-materials`,
         name: "inventorySystemDepartmentMaterials",
         meta: meta("科室套餐", "Collection")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/patient-review`,
+        name: "inventorySystemPatientReview",
+        meta: meta("患者耗材审核", "CircleCheck")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/patient-trace`,
+        name: "inventorySystemPatientTrace",
+        meta: meta("患者耗材追溯", "Search")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
@@ -154,6 +168,8 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/consumable-entry": "packages",
     "/inventory-system/trace": "trace",
     "/inventory-system/daily-verification": "daily",
+    "/inventory-system/patient-review": "patientReview",
+    "/inventory-system/patient-trace": "patientTrace",
     "/inventory-system/role-management": "roles"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
@@ -283,6 +299,18 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     name: "inventorySystemDailyVerification",
     component: inventoryView,
     meta: meta("每日耗材核对", "Tickets")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/patient-review`,
+    name: "inventorySystemPatientReview",
+    component: inventoryView,
+    meta: meta("患者耗材审核", "CircleCheck")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/patient-trace`,
+    name: "inventorySystemPatientTrace",
+    component: inventoryView,
+    meta: meta("患者耗材追溯", "Search")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,

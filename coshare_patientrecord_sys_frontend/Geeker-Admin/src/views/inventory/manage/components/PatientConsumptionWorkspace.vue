@@ -1,0 +1,1338 @@
+<template>
+  <section class="patient-workspace" v-loading="loading">
+    <header class="patient-toolbar">
+      <div class="toolbar-copy">
+        <span class="eyebrow">患者耗材 · {{ departmentName || "本科室" }}</span>
+        <h2>今天到本科室的患者</h2>
+        <p>按患者勾选实际使用的耗材；常用项已预勾选，数量默认取预设值，可改。提交后由库管审核，审核通过才扣库存。</p>
+      </div>
+      <div class="toolbar-actions">
+        <el-date-picker
+          v-model="businessDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          :clearable="false"
+          :disabled="loading"
+          @change="reload"
+        />
+        <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
+        <el-button type="primary" plain :icon="Plus" @click="openManualDialog">手动补录患者</el-button>
+      </div>
+    </header>
+
+    <div class="summary-strip">
+      <div class="summary-item">
+        <small>今日患者</small>
+        <strong>{{ workbench.summary.total || 0 }}</strong>
+      </div>
+      <div class="summary-item is-draft">
+        <small>草稿</small>
+        <strong>{{ workbench.summary.draft || 0 }}</strong>
+      </div>
+      <div class="summary-item is-pending">
+        <small>待审核</small>
+        <strong>{{ workbench.summary.submitted || 0 }}</strong>
+      </div>
+      <div class="summary-item is-approved">
+        <small>已通过</small>
+        <strong>{{ workbench.summary.approved || 0 }}</strong>
+      </div>
+      <div class="summary-item is-returned">
+        <small>已驳回</small>
+        <strong>{{ workbench.summary.returned || 0 }}</strong>
+      </div>
+      <div class="summary-item is-empty">
+        <small>未开始</small>
+        <strong>{{ workbench.summary.notStarted || 0 }}</strong>
+      </div>
+    </div>
+
+    <div class="patient-layout">
+      <aside class="patient-panel">
+        <div class="patient-panel-head">
+          <el-input
+            v-model="patientKeyword"
+            placeholder="搜索患者 / 就诊号"
+            clearable
+            :prefix-icon="Search"
+          />
+          <el-select v-model="statusFilter" class="status-filter" aria-label="筛选患者状态">
+            <el-option label="全部状态" value="ALL" />
+            <el-option label="未开始" value="NOT_STARTED" />
+            <el-option label="草稿" value="DRAFT" />
+            <el-option label="待审核" value="SUBMITTED" />
+            <el-option label="已驳回" value="RETURNED" />
+            <el-option label="已通过" value="APPROVED" />
+          </el-select>
+        </div>
+
+        <div class="patient-list" role="list">
+          <button
+            v-for="patient in filteredPatients"
+            :key="patient.serviceInstanceId"
+            type="button"
+            class="patient-card"
+            :class="{ 'is-active': selectedId === patient.serviceInstanceId }"
+            role="listitem"
+            @click="selectPatient(patient)"
+          >
+            <span class="patient-card-main">
+              <span class="patient-name">{{ patient.patientName || "未命名患者" }}</span>
+              <span class="patient-meta">
+                {{ patient.serviceName || "服务" }}
+                <i aria-hidden="true">·</i>
+                {{ patient.visitNo || "无就诊号" }}
+              </span>
+            </span>
+            <span class="patient-card-side">
+              <el-tag :type="statusType(patient.status)" size="small" effect="plain">
+                {{ statusLabel(patient.status) }}
+              </el-tag>
+              <small>{{ patient.lineCount || 0 }} 项</small>
+            </span>
+          </button>
+          <el-empty
+            v-if="!filteredPatients.length"
+            :image-size="70"
+            description="当前筛选下没有患者；可手动补录"
+          />
+        </div>
+      </aside>
+
+      <main v-if="detail" class="detail-panel">
+        <header class="detail-head">
+          <div class="detail-title-row">
+            <div>
+              <div class="detail-name-row">
+                <h3>{{ detail.patientName || "未命名患者" }}</h3>
+                <el-tag :type="statusType(detail.status)" effect="plain">{{ statusLabel(detail.status) }}</el-tag>
+                <el-tag v-if="detail.sourceType === 'MANUAL'" type="warning" effect="plain">手动补录</el-tag>
+              </div>
+              <p class="detail-meta">
+                {{ detail.serviceName || "服务" }}
+                <span>·</span>
+                {{ detail.visitNo || "无就诊号" }}
+                <span>·</span>
+                {{ formatDateTime(detail.serviceStartedAt) }}
+                <span v-if="detail.stageCode">· {{ detail.stageCode }}</span>
+              </p>
+            </div>
+            <div class="detail-actions">
+              <el-button v-if="editable" :loading="saving" @click="saveDraft">保存草稿</el-button>
+              <el-button v-if="editable" type="primary" :loading="submitting" @click="submitDocument">
+                {{ selectedLines.length ? "提交审核" : "未使用耗材并提交" }}
+              </el-button>
+              <el-tag v-else-if="detail.status === 'SUBMITTED'" type="warning" effect="plain">已提交，等待库管审核</el-tag>
+              <el-tag v-else-if="detail.status === 'APPROVED'" type="success" effect="plain">已审核通过</el-tag>
+              <el-tag v-else-if="detail.status === 'PARTIALLY_APPROVED'" type="warning" effect="plain">部分通过，可补交驳回项</el-tag>
+              <el-tag v-else type="danger" effect="plain">已驳回，请修改后重提</el-tag>
+            </div>
+          </div>
+        </header>
+
+        <el-alert
+          v-if="detail.status === 'RETURNED' || detail.status === 'PARTIALLY_APPROVED'"
+          class="review-alert"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="库管已处理该清单"
+          :description="rejectedSummary"
+        />
+
+        <div class="detail-toolbar">
+          <el-input
+            v-model="itemKeyword"
+            class="item-search"
+            placeholder="筛选预设耗材"
+            clearable
+            :prefix-icon="Search"
+          />
+          <el-button :icon="Plus" :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
+          <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
+          <span class="line-counter">已选 {{ selectedLines.length }} 项</span>
+        </div>
+
+        <div class="checklist-scroll">
+          <section v-for="group in visibleGroups" :key="group.name" class="checklist-group">
+            <header class="group-head">
+              <h4>{{ group.name }}</h4>
+              <span>{{ group.items.length }} 项</span>
+            </header>
+            <div
+              v-for="item in group.items"
+              :key="item.itemId"
+              class="checklist-row"
+              :class="{ 'is-checked': isChecked(item), 'is-approved': isApproved(item) }"
+            >
+              <el-checkbox
+                :model-value="isChecked(item)"
+                :disabled="!editable || isApproved(item)"
+                :aria-label="`使用 ${item.itemName}`"
+                @change="value => toggleItem(item, Boolean(value))"
+              />
+              <div class="item-copy">
+                <div class="item-name-row">
+                  <strong>{{ item.itemName }}</strong>
+                  <el-tag v-if="item.commonItem" size="small" type="success" effect="plain">常用</el-tag>
+                  <el-tag v-if="isApproved(item)" size="small" type="info" effect="plain">已通过</el-tag>
+                  <el-tag v-else-if="lineState[item.itemId]?.reviewStatus === 'REJECTED'" size="small" type="danger" effect="plain">已驳回</el-tag>
+                </div>
+                <span class="item-meta">
+                  {{ item.unit }}
+                  <i aria-hidden="true">·</i>
+                  预设 {{ formatQuantity(item.presetQuantity) }} {{ item.unit }}
+                  <template v-if="item.serviceGroup">
+                    <i aria-hidden="true">·</i>
+                    {{ item.serviceGroup }}
+                  </template>
+                </span>
+                <span v-if="lineState[item.itemId]?.reviewNote" class="review-note">
+                  审核意见：{{ lineState[item.itemId]?.reviewNote }}
+                </span>
+              </div>
+              <el-input-number
+                v-if="isChecked(item)"
+                :model-value="lineState[item.itemId]?.actualQuantity"
+                :min="0.01"
+                :precision="2"
+                :step="1"
+                :disabled="!editable || isApproved(item)"
+                controls-position="right"
+                size="small"
+                @update:model-value="value => updateQuantity(item, value)"
+              />
+              <span v-else class="preset-ghost">{{ formatQuantity(item.presetQuantity) }} {{ item.unit }}</span>
+            </div>
+          </section>
+
+          <section v-if="manualLines.length" class="checklist-group manual-group">
+            <header class="group-head">
+              <h4>追加耗材</h4>
+              <span>{{ manualLines.length }} 项</span>
+            </header>
+            <div
+              v-for="line in manualLines"
+              :key="line.itemId"
+              class="checklist-row is-checked"
+              :class="{ 'is-approved': line.reviewStatus === 'APPROVED' }"
+            >
+              <el-checkbox
+                :model-value="true"
+                :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                :aria-label="`移除 ${line.itemName}`"
+                @change="value => !value && removeLine(line.itemId)"
+              />
+              <div class="item-copy">
+                <div class="item-name-row">
+                  <strong>{{ line.itemName }}</strong>
+                  <el-tag size="small" type="warning" effect="plain">预设外</el-tag>
+                </div>
+                <span class="item-meta">{{ line.unit }} · {{ line.exceptionReason || "未填写原因" }}</span>
+              </div>
+              <el-input-number
+                :model-value="line.actualQuantity"
+                :min="0.01"
+                :precision="2"
+                :step="1"
+                :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                controls-position="right"
+                size="small"
+                @update:model-value="value => updateManualQuantity(line.itemId, value)"
+              />
+            </div>
+          </section>
+
+          <el-empty
+            v-if="!visibleGroups.length && !manualLines.length"
+            :image-size="80"
+            description="该科室还没有已映射到物资主数据的预设耗材，请先完成规则配置"
+          />
+        </div>
+      </main>
+
+      <main v-else class="detail-panel detail-empty">
+        <el-empty :image-size="96" description="选择左侧患者开始填写耗材清单" />
+      </main>
+    </div>
+
+    <el-dialog v-model="manualDialogVisible" title="手动补录患者" width="720px" class="patient-dialog">
+      <div class="manual-search-row">
+        <el-input
+          v-model="manualKeyword"
+          placeholder="输入患者姓名 / 就诊号"
+          clearable
+          :prefix-icon="Search"
+          @keyup.enter="searchManualPatients"
+        />
+        <el-button :loading="manualSearching" @click="searchManualPatients">搜索患者</el-button>
+      </div>
+      <div class="manual-results">
+        <button
+          v-for="patient in manualResults"
+          :key="patient.encounterId"
+          type="button"
+          class="manual-result"
+          :class="{ 'is-active': manualSelected?.encounterId === patient.encounterId }"
+          @click="manualSelected = patient"
+        >
+          <strong>{{ patient.patientName || "未命名患者" }}</strong>
+          <span>{{ patient.visitNo || "无就诊号" }} · {{ patient.departmentName || "未归属科室" }}</span>
+          <small>{{ patient.visitDate || "" }}</small>
+        </button>
+        <el-empty v-if="!manualResults.length" :image-size="60" description="输入关键词后搜索患者" />
+      </div>
+      <el-form label-position="top" class="manual-form">
+        <el-form-item label="服务项目">
+          <el-input v-model="manualServiceName" placeholder="例如：理疗、检查、手术" />
+        </el-form-item>
+        <el-form-item label="服务开始时间">
+          <el-date-picker
+            v-model="manualStartedAt"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            :clearable="false"
+          />
+        </el-form-item>
+        <el-form-item label="补录原因">
+          <el-input v-model="manualNote" placeholder="例如：临床系统未生成服务事件、临时加做" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="manualDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="manualSaving" :disabled="!manualSelected" @click="saveManualPatient">
+          加入工作台
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="addItemDialogVisible" title="追加预设外耗材" width="560px" class="patient-dialog">
+      <el-form label-position="top">
+        <el-form-item label="耗材">
+          <el-select
+            v-model="addItemId"
+            filterable
+            placeholder="搜索物资主数据"
+            class="add-item-select"
+          >
+            <el-option
+              v-for="item in availableItemOptions"
+              :key="item.itemId"
+              :label="`${item.itemName}（${item.unit}）`"
+              :value="item.itemId"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="实际用量">
+          <el-input-number v-model="addItemQuantity" :min="0.01" :precision="2" :step="1" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="追加原因">
+          <el-input v-model="addItemReason" placeholder="必填，例如：患者临时增加耗材" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addItemDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addManualLine">加入清单</el-button>
+      </template>
+    </el-dialog>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { Plus, Refresh, Search } from "@element-plus/icons-vue";
+import dayjs from "dayjs";
+import {
+  addInventoryManualPatientApi,
+  getInventoryPatientDetailApi,
+  getInventoryPatientWorkbenchApi,
+  saveInventoryPatientDocumentApi,
+  searchInventoryPatientsApi,
+  submitInventoryPatientDocumentApi,
+  type InventoryPatientConsumptionLine,
+  type InventoryPatientDetail,
+  type InventoryPatientPresetItem,
+  type InventoryPatientSearchResult,
+  type InventoryPatientWorkbench,
+  type InventoryPatientWorkbenchRow
+} from "@/api/modules/inventory";
+
+interface EditableLine {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  ruleId?: string;
+  presetQuantity?: number;
+  actualQuantity: number;
+  source: "COMMON" | "PRESET" | "MANUAL";
+  exceptionReason?: string;
+  lineId?: string;
+  reviewStatus?: "PENDING" | "APPROVED" | "REJECTED";
+  reviewNote?: string;
+  lineRevision?: number;
+}
+
+const props = defineProps<{
+  departmentKey: string;
+  today?: string;
+}>();
+
+const emptyWorkbench = (): InventoryPatientWorkbench => ({
+  departmentKey: props.departmentKey,
+  departmentName: "",
+  businessDate: props.today || dayjs().format("YYYY-MM-DD"),
+  cutoverDate: "",
+  patients: [],
+  summary: { total: 0, draft: 0, submitted: 0, approved: 0, returned: 0, notStarted: 0 }
+});
+
+const businessDate = ref(props.today || dayjs().format("YYYY-MM-DD"));
+const workbench = ref<InventoryPatientWorkbench>(emptyWorkbench());
+const detail = ref<InventoryPatientDetail | null>(null);
+const selectedId = ref("");
+const loading = ref(false);
+const saving = ref(false);
+const submitting = ref(false);
+const patientKeyword = ref("");
+const statusFilter = ref("ALL");
+const itemKeyword = ref("");
+const lineState = reactive<Record<string, EditableLine>>({});
+
+const manualDialogVisible = ref(false);
+const manualKeyword = ref("");
+const manualSearching = ref(false);
+const manualSaving = ref(false);
+const manualResults = ref<InventoryPatientSearchResult["list"]>([]);
+const manualSelected = ref<InventoryPatientSearchResult["list"][number] | null>(null);
+const manualServiceName = ref("手动补录");
+const manualStartedAt = ref(dayjs().format("YYYY-MM-DDTHH:mm:ss"));
+const manualNote = ref("");
+
+const addItemDialogVisible = ref(false);
+const addItemId = ref("");
+const addItemQuantity = ref(1);
+const addItemReason = ref("");
+
+const departmentName = computed(() => workbench.value.departmentName || detail.value?.departmentName || "");
+const editable = computed(() =>
+  detail.value ? ["DRAFT", "RETURNED", "PARTIALLY_APPROVED", "NOT_STARTED"].includes(detail.value.status) : false
+);
+const selectedLines = computed(() => Object.values(lineState));
+const manualLines = computed(() => selectedLines.value.filter(line => line.source === "MANUAL"));
+
+const filteredPatients = computed(() => {
+  const keyword = patientKeyword.value.trim().toLowerCase();
+  return workbench.value.patients.filter(patient => {
+    if (statusFilter.value !== "ALL") {
+      if (statusFilter.value === "SUBMITTED") {
+        if (!["SUBMITTED", "PARTIALLY_APPROVED"].includes(patient.status)) return false;
+      } else if (patient.status !== statusFilter.value) {
+        return false;
+      }
+    }
+    if (!keyword) return true;
+    return [patient.patientName, patient.visitNo, patient.serviceName, patient.encounterId]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(keyword));
+  });
+});
+
+const presetItems = computed(() => detail.value?.presetItems?.items ?? []);
+const visibleGroups = computed(() => {
+  const keyword = itemKeyword.value.trim().toLowerCase();
+  const filtered = presetItems.value.filter(item =>
+    !keyword ||
+    [item.itemName, item.materialName, item.serviceGroup].filter(Boolean).some(value =>
+      String(value).toLowerCase().includes(keyword)
+    )
+  );
+  const groups = new Map<string, InventoryPatientPresetItem[]>();
+  filtered
+    .filter(item => item.commonItem)
+    .forEach(item => {
+      const key = "常用耗材";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
+    });
+  filtered
+    .filter(item => !item.commonItem)
+    .forEach(item => {
+      const key = item.serviceGroup || "其他预设";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
+    });
+  return Array.from(groups.entries()).map(([name, items]) => ({ name, items }));
+});
+
+const availableItemOptions = computed(() => {
+  const items = detail.value?.availableItems ?? [];
+  return items.filter(item => !lineState[item.itemId]);
+});
+
+const rejectedSummary = computed(() => {
+  const rejected = selectedLines.value.filter(line => line.reviewStatus === "REJECTED");
+  if (!rejected.length) return "已保留审核通过项，未通过项可修改后重新提交。";
+  return `已驳回 ${rejected.length} 项：${rejected
+    .map(line => `${line.itemName}${line.reviewNote ? `（${line.reviewNote}）` : ""}`)
+    .join("、")}`;
+});
+
+const loadWorkbench = async (keepSelection = true) => {
+  loading.value = true;
+  try {
+    const result = await getInventoryPatientWorkbenchApi({
+      departmentKey: props.departmentKey,
+      date: businessDate.value
+    });
+    workbench.value = result.data ?? emptyWorkbench();
+    if (!keepSelection || !selectedId.value) {
+      const first = workbench.value.patients[0];
+      if (first) await selectPatient(first);
+      else {
+        selectedId.value = "";
+        detail.value = null;
+      }
+    } else {
+      const current = workbench.value.patients.find(patient => patient.serviceInstanceId === selectedId.value);
+      if (current) await selectPatient(current);
+      else {
+        selectedId.value = "";
+        detail.value = null;
+      }
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取患者工作台失败");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const reload = () => {
+  void loadWorkbench(false);
+};
+
+const selectPatient = async (patient: InventoryPatientWorkbenchRow) => {
+  selectedId.value = patient.serviceInstanceId;
+  try {
+    const result = await getInventoryPatientDetailApi(patient.serviceInstanceId);
+    applyDetail(result.data);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取患者耗材清单失败");
+  }
+};
+
+const applyDetail = (next: InventoryPatientDetail | undefined) => {
+  detail.value = next ?? null;
+  Object.keys(lineState).forEach(key => delete lineState[key]);
+  (next?.lines ?? []).forEach((line: InventoryPatientConsumptionLine) => {
+    lineState[line.itemId] = {
+      itemId: line.itemId,
+      itemName: line.itemName,
+      unit: line.unit,
+      ruleId: line.ruleId,
+      presetQuantity: line.presetQuantity ?? undefined,
+      actualQuantity: Number(line.actualQuantity || 0),
+      source: (line.source as EditableLine["source"]) || "PRESET",
+      exceptionReason: line.exceptionReason,
+      lineId: line.lineId,
+      reviewStatus: line.reviewStatus,
+      reviewNote: line.reviewNote,
+      lineRevision: line.lineRevision
+    };
+  });
+};
+
+const isChecked = (item: InventoryPatientPresetItem) => Boolean(lineState[item.itemId]);
+const isApproved = (item: InventoryPatientPresetItem) => lineState[item.itemId]?.reviewStatus === "APPROVED";
+
+const toggleItem = (item: InventoryPatientPresetItem, checked: boolean) => {
+  if (!editable.value) return;
+  if (isApproved(item)) return;
+  if (checked && !lineState[item.itemId]) {
+    lineState[item.itemId] = {
+      itemId: item.itemId,
+      itemName: item.itemName,
+      unit: item.unit,
+      ruleId: item.ruleId,
+      presetQuantity: item.presetQuantity,
+      actualQuantity: Number(item.presetQuantity || 1),
+      source: item.commonItem ? "COMMON" : "PRESET"
+    };
+  } else if (!checked) {
+    delete lineState[item.itemId];
+  }
+};
+
+const updateQuantity = (item: InventoryPatientPresetItem, value: number | undefined) => {
+  const line = lineState[item.itemId];
+  if (!line) return;
+  line.actualQuantity = Number(value || 0);
+};
+
+const updateManualQuantity = (itemId: string, value: number | undefined) => {
+  const line = lineState[itemId];
+  if (!line) return;
+  line.actualQuantity = Number(value || 0);
+};
+
+const removeLine = (itemId: string) => {
+  const line = lineState[itemId];
+  if (line?.reviewStatus === "APPROVED") return;
+  delete lineState[itemId];
+};
+
+const clearUnapproved = () => {
+  Object.values(lineState).forEach(line => {
+    if (line.reviewStatus !== "APPROVED") delete lineState[line.itemId];
+  });
+};
+
+const buildPayload = () => ({
+  serviceInstanceId: detail.value!.serviceInstanceId,
+  revision: detail.value!.revision || 0,
+  lines: selectedLines.value.map(line => ({
+    itemId: line.itemId,
+    ruleId: line.ruleId,
+    presetQuantity: line.presetQuantity,
+    actualQuantity: line.actualQuantity,
+    source: line.source,
+    exceptionReason: line.exceptionReason
+  }))
+});
+
+const persistDraft = async () => {
+  const result = await saveInventoryPatientDocumentApi(buildPayload());
+  applyDetail(result.data);
+  await refreshWorkbenchOnly();
+  return result.data;
+};
+
+const saveDraft = async () => {
+  if (!detail.value) return;
+  if (selectedLines.value.some(line => line.actualQuantity <= 0)) {
+    ElMessage.warning("已勾选耗材的数量必须大于零");
+    return;
+  }
+  saving.value = true;
+  try {
+    await persistDraft();
+    ElMessage.success("患者耗材清单已保存");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "保存患者耗材清单失败");
+  } finally {
+    saving.value = false;
+  }
+};
+
+const submitDocument = async () => {
+  if (!detail.value) return;
+  if (selectedLines.value.some(line => line.actualQuantity <= 0)) {
+    ElMessage.warning("已勾选耗材的数量必须大于零");
+    return;
+  }
+  const message = selectedLines.value.length
+    ? `确认提交 ${detail.value.patientName || "该患者"} 的 ${selectedLines.value.length} 项耗材？提交后科室不能直接修改。`
+    : `确认 ${detail.value.patientName || "该患者"} 今天未使用任何耗材？`;
+  try {
+    await ElMessageBox.confirm(message, "提交审核", {
+      confirmButtonText: "确认提交",
+      cancelButtonText: "再看看",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  submitting.value = true;
+  try {
+    let current = detail.value;
+    if (!current.documentId) {
+      current = (await persistDraft()) ?? current;
+    }
+    const result = await submitInventoryPatientDocumentApi(current.documentId);
+    applyDetail(result.data);
+    await refreshWorkbenchOnly();
+    ElMessage.success("已提交库管审核，审核通过前不会扣减库存");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "提交患者耗材清单失败");
+  } finally {
+    submitting.value = false;
+  }
+};
+
+const refreshWorkbenchOnly = async () => {
+  const result = await getInventoryPatientWorkbenchApi({
+    departmentKey: props.departmentKey,
+    date: businessDate.value
+  });
+  workbench.value = result.data ?? emptyWorkbench();
+};
+
+const openManualDialog = () => {
+  manualDialogVisible.value = true;
+  manualSelected.value = null;
+  manualResults.value = [];
+  manualKeyword.value = "";
+  manualServiceName.value = "手动补录";
+  manualStartedAt.value = dayjs().format("YYYY-MM-DDTHH:mm:ss");
+  manualNote.value = "";
+};
+
+const searchManualPatients = async () => {
+  manualSearching.value = true;
+  try {
+    const result = await searchInventoryPatientsApi(manualKeyword.value.trim());
+    manualResults.value = result.data?.list ?? [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "搜索患者失败");
+  } finally {
+    manualSearching.value = false;
+  }
+};
+
+const saveManualPatient = async () => {
+  if (!manualSelected.value) return;
+  manualSaving.value = true;
+  try {
+    const result = await addInventoryManualPatientApi({
+      departmentKey: props.departmentKey,
+      encounterId: manualSelected.value.encounterId,
+      patientId: manualSelected.value.patientId,
+      patientName: manualSelected.value.patientName,
+      visitNo: manualSelected.value.visitNo,
+      careType: manualSelected.value.careType,
+      serviceCode: "MANUAL",
+      serviceName: manualServiceName.value || "手动补录",
+      serviceStartedAt: manualStartedAt.value,
+      businessDate: businessDate.value,
+      note: manualNote.value
+    });
+    manualDialogVisible.value = false;
+    await refreshWorkbenchOnly();
+    const added = workbench.value.patients.find(
+      patient => patient.serviceInstanceId === result.data?.serviceInstanceId
+    );
+    if (added) await selectPatient(added);
+    ElMessage.success("患者已加入本科室工作台");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "手动补录患者失败");
+  } finally {
+    manualSaving.value = false;
+  }
+};
+
+const openAddItemDialog = () => {
+  addItemDialogVisible.value = true;
+  addItemId.value = "";
+  addItemQuantity.value = 1;
+  addItemReason.value = "";
+};
+
+const addManualLine = () => {
+  if (!addItemId.value) {
+    ElMessage.warning("请选择耗材");
+    return;
+  }
+  if (!addItemReason.value.trim()) {
+    ElMessage.warning("追加预设外耗材必须填写原因");
+    return;
+  }
+  if (lineState[addItemId.value]) {
+    ElMessage.warning("该耗材已在清单中");
+    return;
+  }
+  const item = (detail.value?.availableItems ?? []).find(option => option.itemId === addItemId.value);
+  if (!item) return;
+  if (item.itemId && (detail.value?.lines ?? []).some(line => line.itemId === item.itemId && line.reviewStatus === "APPROVED")) {
+    ElMessage.warning("该耗材已审核通过，不能重复添加");
+    return;
+  }
+  lineState[item.itemId] = {
+    itemId: item.itemId,
+    itemName: item.itemName,
+    unit: item.unit,
+    actualQuantity: Number(addItemQuantity.value || 1),
+    source: "MANUAL",
+    exceptionReason: addItemReason.value.trim()
+  };
+  addItemDialogVisible.value = false;
+};
+
+const statusLabel = (status: string) => {
+  switch (status) {
+    case "NOT_STARTED":
+      return "未开始";
+    case "DRAFT":
+      return "草稿";
+    case "SUBMITTED":
+      return "待审核";
+    case "PARTIALLY_APPROVED":
+      return "部分通过";
+    case "RETURNED":
+      return "已驳回";
+    case "APPROVED":
+      return "已通过";
+    default:
+      return status || "未知";
+  }
+};
+
+const statusType = (status: string): "success" | "warning" | "danger" | "info" => {
+  switch (status) {
+    case "APPROVED":
+      return "success";
+    case "RETURNED":
+      return "danger";
+    case "SUBMITTED":
+    case "PARTIALLY_APPROVED":
+      return "warning";
+    default:
+      return "info";
+  }
+};
+
+const formatQuantity = (value?: number | null) => {
+  if (value === null || value === undefined) return "1";
+  return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+};
+
+const formatDateTime = (value?: string) => {
+  if (!value) return "未记录服务时间";
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format("MM-DD HH:mm") : value;
+};
+
+watch(
+  () => props.departmentKey,
+  () => reload()
+);
+
+onMounted(() => {
+  void loadWorkbench(false);
+});
+</script>
+
+<style scoped lang="scss">
+.patient-workspace {
+  --hos-bg-primary: #fffdf9;
+  --hos-bg-surface: #faf7f1;
+  --hos-border: #e6ded1;
+  --hos-border-light: #f1ebe1;
+  --hos-text-primary: #2f2d27;
+  --hos-text-secondary: #6d675c;
+  --hos-text-muted: #9a9285;
+  --hos-primary: #347d68;
+  --hos-primary-soft: #edf7f1;
+  --hos-status-success: #3f8a62;
+  --hos-status-success-soft: #eef8f1;
+  --hos-status-warning: #b7791f;
+  --hos-status-warning-soft: #fff7e8;
+  --hos-status-danger: #c45454;
+  --hos-status-danger-soft: #fdf0ef;
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  min-height: calc(100vh - 180px);
+  background:
+    radial-gradient(circle at 8% 0%, rgb(237 247 241 / 85%), transparent 32%),
+    radial-gradient(circle at 96% 8%, rgb(255 247 232 / 60%), transparent 26%),
+    var(--hos-bg-surface);
+}
+
+.patient-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 24px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 18px;
+  box-shadow: var(--hos-shadow-card);
+}
+
+.toolbar-copy {
+  max-width: 720px;
+
+  .eyebrow {
+    display: inline-flex;
+    margin-bottom: 6px;
+    color: var(--hos-primary);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  h2 {
+    margin: 0 0 6px;
+    color: var(--hos-text-primary);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    margin: 0;
+    color: var(--hos-text-secondary);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 14px;
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 12px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-variant-numeric: tabular-nums;
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  &.is-draft strong {
+    color: var(--hos-text-secondary);
+  }
+
+  &.is-pending strong {
+    color: var(--hos-status-warning);
+  }
+
+  &.is-approved strong {
+    color: var(--hos-status-success);
+  }
+
+  &.is-returned strong {
+    color: var(--hos-status-danger);
+  }
+
+  &.is-empty strong {
+    color: var(--hos-text-muted);
+  }
+}
+
+.patient-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.patient-panel,
+.detail-panel {
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 18px;
+  box-shadow: var(--hos-shadow-card);
+}
+
+.patient-panel {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 220px);
+  overflow: hidden;
+}
+
+.patient-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--hos-border-light);
+}
+
+.status-filter {
+  width: 100%;
+}
+
+.patient-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.patient-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--hos-bg-surface);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+
+  &:hover {
+    border-color: var(--hos-border);
+    transform: translateY(-1px);
+  }
+
+  &.is-active {
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-primary);
+  }
+}
+
+.patient-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.patient-name {
+  overflow: hidden;
+  color: var(--hos-text-primary);
+  font-weight: 600;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-meta {
+  overflow: hidden;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  i {
+    margin: 0 4px;
+    font-style: normal;
+    opacity: 0.5;
+  }
+}
+
+.patient-card-side {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: flex-end;
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+}
+
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 620px;
+  padding: 20px;
+}
+
+.detail-empty {
+  display: grid;
+  place-items: center;
+}
+
+.detail-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.detail-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  h3 {
+    margin: 0;
+    color: var(--hos-text-primary);
+    font-size: 22px;
+    font-weight: 700;
+  }
+}
+
+.detail-meta {
+  margin: 6px 0 0;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+
+  span {
+    margin: 0 4px;
+    opacity: 0.5;
+  }
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.review-alert {
+  margin-top: 14px;
+}
+
+.detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--hos-border-light);
+  border-bottom: 1px solid var(--hos-border-light);
+}
+
+.item-search {
+  width: min(320px, 100%);
+}
+
+.line-counter {
+  margin-left: auto;
+  color: var(--hos-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.checklist-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 14px;
+  overflow: auto;
+}
+
+.checklist-group {
+  border: 1px solid var(--hos-border-light);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--hos-bg-surface);
+
+  h4 {
+    margin: 0;
+    color: var(--hos-text-primary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  span {
+    color: var(--hos-text-muted);
+    font-size: 12px;
+  }
+}
+
+.checklist-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 132px;
+  gap: 10px;
+  align-items: center;
+  min-height: 52px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hos-border-light);
+  transition: background 160ms ease;
+
+  &.is-checked {
+    background: color-mix(in srgb, var(--hos-primary-soft) 58%, transparent);
+  }
+
+  &.is-approved {
+    background: var(--hos-bg-surface);
+  }
+}
+
+.item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.item-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+
+  strong {
+    color: var(--hos-text-primary);
+    font-weight: 500;
+    font-size: 13px;
+  }
+}
+
+.item-meta {
+  color: var(--hos-text-muted);
+  font-size: 11px;
+
+  i {
+    margin: 0 4px;
+    font-style: normal;
+    opacity: 0.6;
+  }
+}
+
+.review-note {
+  color: var(--hos-status-danger);
+  font-size: 11px;
+}
+
+.preset-ghost {
+  color: var(--hos-text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  text-align: right;
+}
+
+.manual-group {
+  border-color: color-mix(in srgb, var(--hos-status-warning) 30%, var(--hos-border-light));
+}
+
+.patient-dialog {
+  :deep(.el-dialog__body) {
+    padding-top: 8px;
+  }
+}
+
+.manual-search-row {
+  display: flex;
+  gap: 8px;
+}
+
+.manual-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  margin: 12px 0;
+  overflow: auto;
+}
+
+.manual-result {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 10px 12px;
+  background: var(--hos-bg-surface);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover,
+  &.is-active {
+    border-color: var(--hos-primary);
+    background: var(--hos-primary-soft);
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 13px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+
+  small {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+}
+
+.manual-form {
+  margin-top: 4px;
+}
+
+.add-item-select {
+  width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .patient-layout {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 960px) {
+  .patient-workspace {
+    padding: 12px;
+  }
+
+  .patient-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-panel {
+    position: static;
+    max-height: 360px;
+  }
+
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .checklist-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .checklist-row :deep(.el-input-number) {
+    grid-column: 2;
+    width: 100%;
+  }
+
+  .preset-ghost {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+</style>

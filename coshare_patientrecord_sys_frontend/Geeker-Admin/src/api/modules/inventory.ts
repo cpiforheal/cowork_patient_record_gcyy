@@ -126,11 +126,13 @@ export interface InventoryQuotaRule {
   serviceGroup: string;
   careType: string;
   materialName: string;
+  itemId?: string | null;
   unit: string;
   standardQuantity: number | null;
   fixedAdjustment: number;
   measurementScope: "OUTPATIENT" | "INPATIENT" | "COMBINED" | "OTHER";
   bindingType: InventoryQuotaBindingType;
+  commonItem?: boolean;
   enabled: boolean;
 }
 
@@ -139,6 +141,26 @@ export interface InventoryQuotaGovernance {
   activeVersion: InventoryQuotaVersion | null;
   versions: InventoryQuotaVersion[];
   rules: InventoryQuotaRule[];
+}
+
+export interface InventoryQuotaMappingRule {
+  ruleId: string;
+  departmentKey: string;
+  departmentName: string;
+  sourceRow: number;
+  serviceGroup: string;
+  careType?: string;
+  materialName: string;
+  unit: string;
+  standardQuantity: number | null;
+  bindingType?: InventoryQuotaBindingType;
+  commonItem: boolean;
+}
+
+export interface InventoryQuotaMappingWorklist {
+  unmappedCount: number;
+  rules: InventoryQuotaMappingRule[];
+  items: InventoryPatientAvailableItem[];
 }
 
 export interface InventoryQuotaRuleCreatePayload {
@@ -418,6 +440,181 @@ export interface InventoryPatientConsumptionDraft {
 
 export interface InventoryPatientConsumptionDraftList {
   list: InventoryPatientConsumptionDraft[];
+}
+
+export type InventoryPatientDocumentStatus =
+  | "NOT_STARTED"
+  | "DRAFT"
+  | "SUBMITTED"
+  | "PARTIALLY_APPROVED"
+  | "RETURNED"
+  | "APPROVED";
+
+export interface InventoryPatientWorkbenchRow {
+  serviceInstanceId: string;
+  sourceType?: string;
+  patientId: string;
+  patientName: string;
+  visitNo?: string;
+  encounterId: string;
+  careType?: string;
+  departmentId?: string;
+  departmentKey?: string;
+  departmentName?: string;
+  serviceCode?: string;
+  serviceName?: string;
+  stageCode?: string;
+  serviceStartedAt?: string;
+  businessDate?: string;
+  status: InventoryPatientDocumentStatus;
+  documentId: string;
+  revision: number;
+  submittedAt?: string;
+  submittedBy?: string;
+  totalQuantity?: number;
+  lineCount?: number;
+}
+
+export interface InventoryPatientWorkbench {
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  cutoverDate?: string;
+  patients: InventoryPatientWorkbenchRow[];
+  summary: {
+    total: number;
+    draft: number;
+    submitted: number;
+    approved: number;
+    returned: number;
+    notStarted: number;
+  };
+}
+
+export interface InventoryPatientPresetItem {
+  ruleId: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  materialName?: string;
+  presetQuantity: number;
+  serviceGroup?: string;
+  careType?: string;
+  bindingType?: string;
+  triggerEvent?: string;
+  commonItem: boolean;
+  matchesService: boolean;
+}
+
+export interface InventoryPatientAvailableItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  spec?: string;
+  category?: string;
+}
+
+export interface InventoryPatientConsumptionLine {
+  lineId: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  ruleId?: string;
+  presetQuantity?: number | null;
+  actualQuantity: number;
+  source?: string;
+  exceptionReason?: string;
+  reviewStatus: "PENDING" | "APPROVED" | "REJECTED";
+  reviewNote?: string;
+  lineRevision: number;
+  approvedQuantity?: number | null;
+  consumptionEventId?: string;
+}
+
+export interface InventoryPatientDetail extends InventoryPatientWorkbenchRow {
+  presetItems: { items: InventoryPatientPresetItem[] };
+  availableItems: InventoryPatientAvailableItem[];
+  lines: InventoryPatientConsumptionLine[];
+}
+
+export interface InventoryPatientDocumentSavePayload {
+  serviceInstanceId: string;
+  revision: number;
+  lines: Array<{
+    itemId: string;
+    ruleId?: string;
+    presetQuantity?: number;
+    actualQuantity: number;
+    source: "COMMON" | "PRESET" | "MANUAL";
+    exceptionReason?: string;
+  }>;
+}
+
+export interface InventoryPatientSearchResult {
+  list: Array<{
+    source: string;
+    encounterId: string;
+    patientId: string;
+    patientName: string;
+    visitNo?: string;
+    careType?: string;
+    currentStage?: string;
+    departmentId?: string;
+    departmentName?: string;
+    visitDate?: string;
+    caseToken?: string;
+  }>;
+}
+
+export interface InventoryPatientReviewBatch {
+  batchId: string;
+  departmentId: string;
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  status: string;
+  documentCount: number;
+  lineCount: number;
+  approvedLineCount: number;
+  rejectedLineCount: number;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
+export interface InventoryPatientReviewBatchList {
+  businessDate: string;
+  summary: {
+    total: number;
+    pending: number;
+    partiallyApproved: number;
+    approved: number;
+    returned: number;
+  };
+  list: InventoryPatientReviewBatch[];
+}
+
+export interface InventoryPatientReviewDetail {
+  batch: InventoryPatientReviewBatch;
+  documents: Array<{
+    documentId: string;
+    serviceInstanceId: string;
+    patientId: string;
+    patientName: string;
+    visitNo?: string;
+    encounterId: string;
+    careType?: string;
+    serviceCode?: string;
+    serviceName?: string;
+    stageCode?: string;
+    sourceType?: string;
+    serviceStartedAt?: string;
+    status: string;
+    revision: number;
+    submittedAt?: string;
+    submittedBy?: string;
+    lines: InventoryPatientConsumptionLine[];
+  }>;
+  errors?: Array<{ lineId: string; message: string }>;
 }
 
 export interface InventoryBatch {
@@ -1574,6 +1771,19 @@ export const getInventoryQuotaGovernanceApi = async (date?: string, versionId?: 
     { ...(date ? { date } : {}), ...(versionId ? { versionId } : {}) }
   );
 
+export const getInventoryQuotaMappingWorklistApi = async (params: {
+  departmentKey?: string;
+  keyword?: string;
+} = {}) => getInventoryData<InventoryQuotaMappingWorklist>("/quota-governance/mapping-worklist", params);
+
+export const saveInventoryQuotaMappingsApi = async (payload: {
+  mappings: Array<{ ruleId: string; itemId: string; commonItem?: boolean }>;
+}) =>
+  putInventoryData<InventoryQuotaMappingWorklist, typeof payload>(
+    "/quota-governance/mapping-worklist",
+    payload
+  );
+
 export const createInventoryQuotaVersionApi = async (payload: {
   versionCode: string;
   effectiveDate: string;
@@ -1676,6 +1886,94 @@ export const listInventoryPatientConsumptionDraftsApi = async (params: {
 
 export const saveInventoryPatientConsumptionDraftApi = async (payload: InventoryPatientConsumptionDraft) =>
   putInventoryData<InventoryPatientConsumptionDraft, InventoryPatientConsumptionDraft>("/patient-consumption-drafts", payload);
+
+export const getInventoryPatientWorkbenchApi = async (params: { departmentKey: string; date?: string }) =>
+  getInventoryData<InventoryPatientWorkbench>("/patient-workbench", params);
+
+export const getInventoryPatientDetailApi = async (serviceInstanceId: string) =>
+  getInventoryData<InventoryPatientDetail>("/patient-workbench/detail", { serviceInstanceId });
+
+export const searchInventoryPatientsApi = async (keyword?: string) =>
+  getInventoryData<InventoryPatientSearchResult>("/patient-workbench/patients", { keyword });
+
+export const addInventoryManualPatientApi = async (payload: {
+  departmentKey: string;
+  encounterId: string;
+  patientId?: string;
+  patientName?: string;
+  visitNo?: string;
+  careType?: string;
+  serviceCode?: string;
+  serviceName?: string;
+  serviceStartedAt?: string;
+  businessDate?: string;
+  note?: string;
+}) => postInventoryData<InventoryPatientDetail, typeof payload>("/patient-workbench/manual-patients", payload);
+
+export const saveInventoryPatientDocumentApi = async (payload: InventoryPatientDocumentSavePayload) =>
+  putInventoryData<InventoryPatientDetail, InventoryPatientDocumentSavePayload>("/patient-workbench/documents", payload);
+
+export const submitInventoryPatientDocumentApi = async (documentId: string) =>
+  postInventoryData<InventoryPatientDetail, Record<string, unknown>>(
+    `/patient-workbench/documents/${encodeURIComponent(documentId)}/submit`,
+    {}
+  );
+
+export const getInventoryPatientTraceApi = async (patientId: string) =>
+  getInventoryData<{
+    patientId: string;
+    cutoverDate?: string;
+    instances: InventoryPatientDetail[];
+  }>("/patient-trace", { patientId });
+
+export const getInventoryPatientDashboardApi = async (date?: string) =>
+  getInventoryData<{
+    businessDate: string;
+    cutoverDate?: string;
+    summary: {
+      totalPatients: number;
+      submittedDocuments: number;
+      approvedDocuments: number;
+      returnedDocuments: number;
+      draftDocuments: number;
+      lineCount: number;
+      approvedLines: number;
+      rejectedLines: number;
+      pendingLines: number;
+    };
+    byDepartment: Array<{
+      departmentKey: string;
+      departmentName: string;
+      patientCount: number;
+      lineCount: number;
+      approvedLines: number;
+    }>;
+    topItems: Array<{ itemId: string; itemName: string; unit: string; quantity: number }>;
+  }>("/patient-dashboard", { date });
+
+export const getInventoryRuntimeSettingsApi = async () =>
+  getInventoryData<{ patientDetailCutoverDate: string }>("/runtime-settings");
+
+export const saveInventoryCutoverDateApi = async (date: string) =>
+  putInventoryData<{ patientDetailCutoverDate: string }, { date: string }>("/runtime-settings/cutover-date", { date });
+
+export const getInventoryPatientReviewBatchesApi = async (params: {
+  date?: string;
+  departmentKey?: string;
+  status?: string;
+}) => getInventoryData<InventoryPatientReviewBatchList>("/patient-review/batches", params);
+
+export const getInventoryPatientReviewBatchApi = async (batchId: string) =>
+  getInventoryData<InventoryPatientReviewDetail>(`/patient-review/batches/${encodeURIComponent(batchId)}`);
+
+export const decideInventoryPatientReviewApi = async (
+  batchId: string,
+  payload: { decisions: Array<{ lineId: string; decision: "APPROVED" | "REJECTED"; note?: string }> }
+) =>
+  postInventoryData<InventoryPatientReviewDetail, typeof payload>(
+    `/patient-review/batches/${encodeURIComponent(batchId)}/decisions`,
+    payload
+  );
 
 const normalizeLocationType = (value?: string): InventoryLocationBalance["locationType"] => {
   const normalized = String(value || "").toUpperCase();
