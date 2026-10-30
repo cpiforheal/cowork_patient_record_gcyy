@@ -177,10 +177,121 @@
               选择耗材
             </el-button>
           </div>
-          <div v-if="selectedLines.length" class="selection-preview">
-            <span v-for="line in selectedLines" :key="line.itemId" class="preview-chip">
-              {{ line.itemName }} <b>{{ formatQuantity(line.actualQuantity) }}{{ line.unit }}</b>
-            </span>
+          <div v-if="selectedLines.length" class="selection-board">
+            <div class="board-head">
+              <div class="board-summary">
+                <strong>{{ selectedLines.length }}</strong>
+                <span>项已选</span>
+                <span class="board-total">合计 {{ formatQuantity(selectedTotalQuantity) }}</span>
+                <span v-if="selectedFilterOptions[2].count" class="board-rejected">
+                  {{ selectedFilterOptions[2].count }} 项需处理
+                </span>
+              </div>
+              <el-input
+                v-model="selectedQuery"
+                class="board-search"
+                placeholder="在已选中查找耗材"
+                clearable
+                :prefix-icon="Search"
+              />
+            </div>
+            <div class="board-filters" role="tablist" aria-label="已选耗材状态筛选">
+              <button
+                v-for="option in selectedFilterOptions"
+                :key="option.key"
+                type="button"
+                role="tab"
+                class="board-filter"
+                :class="{ 'is-active': selectedFilter === option.key }"
+                :aria-selected="selectedFilter === option.key"
+                @click="selectedFilter = option.key"
+              >
+                {{ option.label }}
+                <b v-if="option.count">{{ option.count }}</b>
+              </button>
+            </div>
+
+            <div class="selected-grid">
+              <article
+                v-for="line in visibleSelectedLines"
+                :key="line.itemId"
+                class="selected-card"
+                :class="`tone-${selectedTone(line)}`"
+              >
+                <div class="card-line">
+                  <span class="state-dot" aria-hidden="true" />
+                  <div class="card-copy">
+                    <div class="card-title">
+                      <strong>{{ line.itemName }}</strong>
+                      <el-tag v-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">
+                        已驳回
+                      </el-tag>
+                      <el-tag v-else-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">
+                        已通过
+                      </el-tag>
+                    </div>
+                    <small>
+                      {{ line.unit }} · {{ selectedSourceLabel(line.source) }}
+                      <template v-if="line.exceptionReason"> · {{ line.exceptionReason }}</template>
+                    </small>
+                    <p v-if="line.reviewNote" class="review-note">{{ line.reviewNote }}</p>
+                  </div>
+                  <button
+                    type="button"
+                    class="card-remove"
+                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                    :aria-label="`移除 ${line.itemName}`"
+                    @click="removeLine(line.itemId)"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div class="card-quantity">
+                  <button
+                    type="button"
+                    class="qty-step"
+                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                    :aria-label="`减少 ${line.itemName}`"
+                    @click="adjustLineQuantity(line, -1)"
+                  >
+                    −
+                  </button>
+                  <el-input-number
+                    :model-value="line.actualQuantity"
+                    :min="0.01"
+                    :precision="2"
+                    :step="1"
+                    :controls="false"
+                    size="small"
+                    class="board-number"
+                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                    @update:model-value="value => setLineQuantity(line, value)"
+                  />
+                  <button
+                    type="button"
+                    class="qty-step"
+                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                    :aria-label="`增加 ${line.itemName}`"
+                    @click="adjustLineQuantity(line, 1)"
+                  >
+                    +
+                  </button>
+                  <div class="quick-set" aria-label="快捷数量">
+                    <button
+                      v-for="quick in [1, 2, 3]"
+                      :key="quick"
+                      type="button"
+                      :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                      @click="setLineQuantity(line, quick)"
+                    >
+                      {{ quick }}
+                    </button>
+                  </div>
+                  <span class="card-unit">{{ line.unit }}</span>
+                </div>
+              </article>
+            </div>
+            <p v-if="!visibleSelectedLines.length" class="board-empty">当前筛选下没有耗材</p>
           </div>
           <el-empty
             v-else
@@ -888,6 +999,59 @@ const editable = computed(() =>
 );
 const selectedLines = computed(() => Object.values(lineState));
 const manualLines = computed(() => selectedLines.value.filter(line => line.source === "MANUAL"));
+const selectedQuery = ref("");
+const selectedFilter = ref<"ALL" | "PENDING" | "REJECTED" | "APPROVED">("ALL");
+
+const selectedTotalQuantity = computed(() =>
+  selectedLines.value.reduce((sum, line) => sum + Number(line.actualQuantity || 0), 0)
+);
+const selectedFilterOptions = computed(() => {
+  const pending = selectedLines.value.filter(
+    line => line.reviewStatus !== "APPROVED" && line.reviewStatus !== "REJECTED"
+  ).length;
+  const rejected = selectedLines.value.filter(line => line.reviewStatus === "REJECTED").length;
+  const approved = selectedLines.value.filter(line => line.reviewStatus === "APPROVED").length;
+  return [
+    { key: "ALL" as const, label: "全部", count: selectedLines.value.length },
+    { key: "PENDING" as const, label: "待录", count: pending },
+    { key: "REJECTED" as const, label: "驳回", count: rejected },
+    { key: "APPROVED" as const, label: "通过", count: approved }
+  ];
+});
+const visibleSelectedLines = computed(() => {
+  const keyword = selectedQuery.value.trim().toLowerCase();
+  const statusRank = (line: EditableLine) => {
+    if (line.reviewStatus === "REJECTED") return 0;
+    if (line.reviewStatus === "APPROVED") return 2;
+    return 1;
+  };
+  const sourceRank = (line: EditableLine) => (line.source === "COMMON" ? 0 : line.source === "PRESET" ? 1 : 2);
+  return selectedLines.value
+    .filter(line => {
+      if (selectedFilter.value === "PENDING") {
+        if (line.reviewStatus === "APPROVED" || line.reviewStatus === "REJECTED") return false;
+      } else if (selectedFilter.value !== "ALL" && line.reviewStatus !== selectedFilter.value) {
+        return false;
+      }
+      if (!keyword) return true;
+      return [line.itemName, line.unit, line.exceptionReason, line.reviewNote]
+        .filter(Boolean)
+        .some(value => String(value).toLowerCase().includes(keyword));
+    })
+    .sort(
+      (a, b) =>
+        statusRank(a) - statusRank(b) ||
+        sourceRank(a) - sourceRank(b) ||
+        String(a.itemName).localeCompare(String(b.itemName), "zh-CN")
+    );
+});
+const selectedTone = (line: EditableLine) => {
+  if (line.reviewStatus === "REJECTED") return "rejected";
+  if (line.reviewStatus === "APPROVED") return "approved";
+  return "pending";
+};
+const selectedSourceLabel = (source: EditableLine["source"]) =>
+  source === "COMMON" ? "常用" : source === "MANUAL" ? "追加" : "预设";
 
 const filteredPatients = computed(() => {
   const keyword = patientKeyword.value.trim().toLowerCase();
@@ -2916,34 +3080,311 @@ onMounted(() => {
   }
 }
 
-.selection-preview {
+.selection-board {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background:
+    radial-gradient(circle at 0 0, rgb(52 125 104 / 8%), transparent 42%),
+    var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 14px;
+}
+
+.board-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-height: 180px;
-  overflow: auto;
-  padding: 10px;
-  background: var(--hos-bg-surface);
-  border: 1px solid var(--hos-border-light);
-  border-radius: 12px;
+  align-items: baseline;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 22px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
 }
 
-.preview-chip {
+.board-total {
+  margin-left: 4px;
+  color: var(--hos-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.board-rejected {
+  padding: 2px 7px;
+  color: #a33f3f;
+  font-size: 10px;
+  background: #fbefef;
+  border-radius: 999px;
+}
+
+.board-search {
+  width: 230px;
+}
+
+.board-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.board-filter {
   display: inline-flex;
   gap: 5px;
   align-items: center;
-  padding: 5px 9px;
-  color: var(--hos-text-primary);
-  background: var(--hos-bg-primary);
+  padding: 4px 9px;
+  color: var(--hos-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  background: rgb(255 255 255 / 68%);
   border: 1px solid var(--hos-border-light);
   border-radius: 999px;
-  font-size: 12px;
 
   b {
-    color: var(--hos-primary);
+    min-width: 16px;
+    padding: 0 4px;
+    color: var(--hos-text-muted);
+    font-size: 10px;
     font-variant-numeric: tabular-nums;
-    font-weight: 600;
+    text-align: center;
+    background: rgb(0 0 0 / 4%);
+    border-radius: 999px;
   }
+
+  &:hover {
+    border-color: var(--hos-border);
+  }
+
+  &.is-active {
+    color: #fff;
+    background: var(--hos-primary);
+    border-color: var(--hos-primary);
+
+    b {
+      color: #fff;
+      background: rgb(255 255 255 / 22%);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--hos-primary);
+    outline-offset: 1px;
+  }
+}
+
+.selected-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+  max-height: min(42vh, 420px);
+  padding: 1px 3px 1px 1px;
+  overflow: auto;
+}
+
+.selected-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fffdf9;
+  border: 1px solid #e9e1d5;
+  border-left: 3px solid #b7791f;
+  border-radius: 12px;
+
+  &.tone-rejected {
+    background: #fff7f4;
+    border-color: #efd8d1;
+    border-left-color: #c45454;
+  }
+
+  &.tone-approved {
+    background: #f4faf6;
+    border-color: #d8e9dd;
+    border-left-color: #3f8a62;
+  }
+}
+
+.card-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.state-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  background: #b7791f;
+  border-radius: 50%;
+
+  .tone-rejected & {
+    background: #c45454;
+  }
+
+  .tone-approved & {
+    background: #3f8a62;
+  }
+}
+
+.card-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.card-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+
+  strong {
+    overflow: hidden;
+    color: var(--hos-text-primary);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.card-copy small {
+  color: var(--hos-text-muted);
+  font-size: 10px;
+}
+
+.review-note {
+  margin: 1px 0 0;
+  color: #a33f3f;
+  font-size: 10px;
+}
+
+.card-remove {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--hos-text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+
+  &:hover {
+    color: #a33f3f;
+    background: #fbefef;
+  }
+
+  &:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+}
+
+.card-quantity {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding-left: 15px;
+}
+
+.qty-step {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--hos-text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  &:hover:not(:disabled) {
+    color: var(--hos-primary);
+    border-color: var(--hos-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.board-number {
+  width: 68px;
+
+  :deep(.el-input__wrapper) {
+    padding: 0 6px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px var(--hos-border-light) inset;
+  }
+
+  :deep(.el-input__inner) {
+    color: var(--hos-text-primary);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+}
+
+.quick-set {
+  display: flex;
+  gap: 2px;
+  margin-left: 2px;
+
+  button {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: var(--hos-text-muted);
+    font-size: 10px;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--hos-border-light);
+    border-radius: 6px;
+
+    &:hover:not(:disabled) {
+      color: var(--hos-primary);
+      background: var(--hos-primary-soft);
+      border-color: var(--hos-primary);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.card-unit {
+  margin-left: auto;
+  color: var(--hos-text-muted);
+  font-size: 10px;
+}
+
+.board-empty {
+  margin: 2px 0;
+  color: var(--hos-text-muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .selection-hints {
@@ -3319,6 +3760,10 @@ onMounted(() => {
   .patient-layout {
     grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   }
+
+  .selected-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
 }
 
 @media (max-width: 960px) {
@@ -3351,6 +3796,20 @@ onMounted(() => {
   .preset-ghost {
     grid-column: 2;
     text-align: left;
+  }
+
+  .board-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .board-search {
+    width: 100%;
+  }
+
+  .selected-grid {
+    grid-template-columns: 1fr;
+    max-height: none;
   }
 }
 </style>
