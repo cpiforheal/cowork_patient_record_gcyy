@@ -564,6 +564,33 @@ public class InventoryApiController {
         return ApiResult.of(200, "患者耗材清单已提交审核", asMap(patientConsumptionService.submit(documentId, user)));
     }
 
+    @PostMapping("/inventory-api/patient-workbench/batches/submit")
+    public ApiResult<Map<String, Object>> submitPatientWorkbenchBatch(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        String departmentKey = String.valueOf(payload.getOrDefault("departmentKey", ""));
+        String dateText = String.valueOf(payload.getOrDefault("businessDate", ""));
+        LocalDate date = dateText == null || dateText.isBlank() ? null : LocalDate.parse(dateText);
+        return ApiResult.of(200, "批量提交已处理", asMap(patientConsumptionService.submitBatch(departmentKey, date, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/recent-items")
+    public ApiResult<Map<String, Object>> patientWorkbenchRecentItems(
+        @RequestParam String departmentKey,
+        @RequestParam(defaultValue = "5") int limit
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.recentItems(departmentKey, limit, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/last-combination")
+    public ApiResult<Map<String, Object>> patientWorkbenchLastCombination(
+        @RequestParam String patientId,
+        @RequestParam String departmentKey
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.lastCombination(patientId, departmentKey, user)));
+    }
+
     @PostMapping("/inventory-api/patient-workbench/clinical-events")
     public ApiResult<Map<String, Object>> enrollClinicalEvent(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:rule");

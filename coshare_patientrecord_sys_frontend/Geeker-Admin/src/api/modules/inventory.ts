@@ -488,6 +488,10 @@ export interface InventoryPatientWorkbench {
     approved: number;
     returned: number;
     notStarted: number;
+    noConsumption?: number;
+    entered?: number;
+    missing?: number;
+    progress?: number;
   };
 }
 
@@ -504,6 +508,7 @@ export interface InventoryPatientPresetItem {
   triggerEvent?: string;
   commonItem: boolean;
   matchesService: boolean;
+  aliases?: string[];
 }
 
 export interface InventoryPatientAvailableItem {
@@ -512,6 +517,7 @@ export interface InventoryPatientAvailableItem {
   unit: string;
   spec?: string;
   category?: string;
+  aliases?: string[];
 }
 
 export interface InventoryPatientConsumptionLine {
@@ -532,6 +538,7 @@ export interface InventoryPatientConsumptionLine {
 }
 
 export interface InventoryPatientDetail extends InventoryPatientWorkbenchRow {
+  noConsumption?: boolean;
   presetItems: { items: InventoryPatientPresetItem[] };
   availableItems: InventoryPatientAvailableItem[];
   lines: InventoryPatientConsumptionLine[];
@@ -540,6 +547,7 @@ export interface InventoryPatientDetail extends InventoryPatientWorkbenchRow {
 export interface InventoryPatientDocumentSavePayload {
   serviceInstanceId: string;
   revision: number;
+  noConsumption?: boolean;
   lines: Array<{
     itemId: string;
     ruleId?: string;
@@ -547,6 +555,37 @@ export interface InventoryPatientDocumentSavePayload {
     actualQuantity: number;
     source: "COMMON" | "PRESET" | "MANUAL";
     exceptionReason?: string;
+  }>;
+}
+
+export interface InventoryPatientBatchSubmitResult {
+  businessDate: string;
+  total: number;
+  submitted: number;
+  blocked: boolean;
+  missing: Array<{ serviceInstanceId: string; patientName: string; reason: string }>;
+  failed: Array<{ serviceInstanceId: string; patientName: string; reason: string }>;
+}
+
+export interface InventoryPatientRecentItems {
+  items: Array<{
+    itemId: string;
+    itemName: string;
+    unit: string;
+    usageCount: number;
+    lastDate?: string;
+    aliases?: string[];
+  }>;
+}
+
+export interface InventoryPatientLastCombination {
+  items: Array<{
+    itemId: string;
+    itemName: string;
+    unit: string;
+    actualQuantity: number;
+    source?: string;
+    aliases?: string[];
   }>;
 }
 
@@ -1918,6 +1957,15 @@ export const submitInventoryPatientDocumentApi = async (documentId: string) =>
     `/patient-workbench/documents/${encodeURIComponent(documentId)}/submit`,
     {}
   );
+
+export const submitInventoryPatientBatchApi = async (payload: { departmentKey: string; businessDate: string }) =>
+  postInventoryData<InventoryPatientBatchSubmitResult, typeof payload>("/patient-workbench/batches/submit", payload);
+
+export const getInventoryPatientRecentItemsApi = async (params: { departmentKey: string; limit?: number }) =>
+  getInventoryData<InventoryPatientRecentItems>("/patient-workbench/recent-items", params);
+
+export const getInventoryPatientLastCombinationApi = async (params: { patientId: string; departmentKey: string }) =>
+  getInventoryData<InventoryPatientLastCombination>("/patient-workbench/last-combination", params);
 
 export const getInventoryPatientTraceApi = async (patientId: string) =>
   getInventoryData<{

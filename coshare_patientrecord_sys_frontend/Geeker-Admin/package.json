@@ -60,6 +60,7 @@
     "nprogress": "^0.2.0",
     "pinia": "^2.1.7",
     "pinia-plugin-persistedstate": "^3.2.1",
+    "pinyin-pro": "^3.29.5",
     "polygon-clipping": "^0.15.7",
     "qs": "^6.12.1",
     "screenfull": "^6.0.2",

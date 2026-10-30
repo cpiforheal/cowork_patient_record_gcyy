@@ -16,6 +16,9 @@
         <el-select v-model="selectedVersionId" size="small" filterable class="version-select" placeholder="切换查看版本">
           <el-option v-for="version in versions" :key="version.id" :value="version.id" :label="`${version.versionCode}（${version.effectiveDate} 生效）`" />
         </el-select>
+        <el-tag :type="commonCount >= 8 ? 'warning' : 'success'" effect="plain">
+          常用项 {{ commonCount }}/8
+        </el-tag>
         <el-button link type="primary" size="small" :disabled="!previousVersion" @click="openDiff">对比上一版本</el-button>
         <el-button link type="primary" size="small" @click="openAudit">变更记录</el-button>
       </div>
@@ -543,6 +546,8 @@ const departments = computed(() => {
 const hasChanges = computed(
   () => dirtyIds.value.size > 0 || pendingCreates.value.length > 0 || pendingDeletes.value.size > 0
 );
+const commonCount = computed(() => rules.value.filter(rule => rule.commonItem).length);
+
 const visibleRows = computed<ConsoleRow[]>(() => {
   const search = keyword.value.trim().toLowerCase();
   const created: ConsoleRow[] = pendingCreates.value.map((create, index) => ({

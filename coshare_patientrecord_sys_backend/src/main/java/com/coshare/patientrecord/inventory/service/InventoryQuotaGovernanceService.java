@@ -210,6 +210,7 @@ public class InventoryQuotaGovernanceService {
             boolean commonItem = mapping.has("commonItem")
                 ? mapping.path("commonItem").asBoolean(false)
                 : before.commonItem();
+            if (commonItem) requireCommonItemCapacity(before.versionId(), before.departmentKey(), ruleId);
             jdbcTemplate.update(
                 "UPDATE inventory_quota_rules SET item_id = ?, common_item = ? WHERE id = ?",
                 itemId, commonItem, ruleId
@@ -278,11 +279,29 @@ public class InventoryQuotaGovernanceService {
             if (itemCount == null || itemCount == 0) throw badRequest("物资主数据不存在或已停用");
         }
         Boolean commonItem = payload.has("commonItem") ? payload.path("commonItem").asBoolean(false) : null;
+        if (Boolean.TRUE.equals(commonItem)) {
+            Map<String, Object> owner = jdbcTemplate.queryForMap(
+                "SELECT version_id, department_key FROM inventory_quota_rules WHERE id = ?",
+                ruleId
+            );
+            requireCommonItemCapacity(String.valueOf(owner.get("version_id")), String.valueOf(owner.get("department_key")), ruleId);
+        }
         jdbcTemplate.update(
             "UPDATE inventory_quota_rules SET standard_quantity = ?, fixed_adjustment = ?, measurement_scope = ?, binding_type = ?, item_id = COALESCE(?, item_id), common_item = COALESCE(?, common_item), enabled = ? WHERE id = ?",
             standard, adjustment, scope, bindingType, itemId == null || itemId.isBlank() ? null : itemId,
             commonItem, enabled, ruleId
         );
+    }
+
+    private void requireCommonItemCapacity(String versionId, String departmentKey, String excludeRuleId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM inventory_quota_rules WHERE version_id = ? AND department_key = ? AND common_item = 1 AND id <> ?",
+            Integer.class,
+            versionId, departmentKey, excludeRuleId
+        );
+        if (count != null && count >= 8) {
+            throw badRequest("每个科室最多配置 8 个常用项");
+        }
     }
 
     private QuotaRule ruleById(String ruleId) {

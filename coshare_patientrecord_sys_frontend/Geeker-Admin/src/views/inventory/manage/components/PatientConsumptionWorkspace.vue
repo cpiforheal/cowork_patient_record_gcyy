@@ -16,6 +16,7 @@
           @change="reload"
         />
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
+        <el-button type="primary" :loading="batchSubmitting" @click="openBatchSubmit">批量提交</el-button>
         <el-button type="primary" plain :icon="Plus" @click="openManualDialog">手动补录患者</el-button>
       </div>
     </header>
@@ -58,7 +59,7 @@
           />
           <el-select v-model="statusFilter" class="status-filter" aria-label="筛选患者状态">
             <el-option label="全部状态" value="ALL" />
-            <el-option label="未开始" value="NOT_STARTED" />
+            <el-option label="未录入优先" value="NOT_STARTED" />
             <el-option label="草稿" value="DRAFT" />
             <el-option label="待审核" value="SUBMITTED" />
             <el-option label="已驳回" value="RETURNED" />
@@ -81,7 +82,7 @@
               <span class="patient-meta">
                 {{ patient.serviceName || "服务" }}
                 <i aria-hidden="true">·</i>
-                {{ patient.visitNo || "无就诊号" }}
+                {{ maskVisitNo(patient.visitNo) }}
               </span>
             </span>
             <span class="patient-card-side">
@@ -111,17 +112,20 @@
               <p class="detail-meta">
                 {{ detail.serviceName || "服务" }}
                 <span>·</span>
-                {{ detail.visitNo || "无就诊号" }}
+                {{ maskVisitNo(detail.visitNo) }}
+                <button type="button" class="link-button" @click="showFullVisitNo = !showFullVisitNo">
+                  {{ showFullVisitNo ? "隐藏" : "显示完整" }}
+                </button>
                 <span>·</span>
                 {{ formatDateTime(detail.serviceStartedAt) }}
                 <span v-if="detail.stageCode">· {{ detail.stageCode }}</span>
               </p>
             </div>
             <div class="detail-actions">
-              <el-button v-if="editable" :loading="saving" @click="saveDraft">保存草稿</el-button>
-              <el-button v-if="editable" type="primary" :loading="submitting" @click="submitDocument">
-                {{ selectedLines.length ? "提交审核" : "未使用耗材并提交" }}
-              </el-button>
+              <template v-if="editable">
+                <el-button size="small" :disabled="!previousPatient" @click="copyPreviousPatient">同上一患者</el-button>
+                <el-button size="small" @click="applyLastCombination">套用上次组合</el-button>
+              </template>
               <el-tag v-else-if="detail.status === 'SUBMITTED'" type="warning" effect="plain">已提交，等待库管审核</el-tag>
               <el-tag v-else-if="detail.status === 'APPROVED'" type="success" effect="plain">已审核通过</el-tag>
               <el-tag v-else-if="detail.status === 'PARTIALLY_APPROVED'" type="warning" effect="plain">部分通过，可补交驳回项</el-tag>
@@ -152,6 +156,89 @@
           <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
           <span class="line-counter">已选 {{ selectedLines.length }} 项</span>
         </div>
+
+        <section v-if="commonItems.length" class="quick-section">
+          <div class="section-title"><h4>常用</h4><span>点一下加入，不默认勾选</span></div>
+          <div class="chip-row">
+            <button
+              v-for="item in commonItems"
+              :key="item.itemId"
+              type="button"
+              class="quick-chip"
+              :class="{ 'is-selected': isChecked(item) }"
+              @click="toggleItem(item, !isChecked(item))"
+            >
+              {{ item.itemName }}
+              <small>{{ formatQuantity(item.presetQuantity) }}{{ item.unit }}</small>
+            </button>
+          </div>
+        </section>
+
+        <section v-if="recentItems.length" class="quick-section">
+          <div class="section-title"><h4>最近使用</h4><span>当前账号近 30 天</span></div>
+          <div class="chip-row">
+            <button
+              v-for="item in recentItems"
+              :key="item.itemId"
+              type="button"
+              class="quick-chip is-recent"
+              :class="{ 'is-selected': Boolean(lineState[item.itemId]) }"
+              @click="addRecentItem(item)"
+            >
+              {{ item.itemName }}
+              <small>{{ item.unit }} · 用过 {{ item.usageCount }} 次</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="selected-section">
+          <div class="section-title">
+            <h4>已选耗材</h4>
+            <span>{{ selectedLines.length }} 项 · 数量默认取预设，可改</span>
+          </div>
+          <div
+            v-for="line in selectedLines"
+            :key="line.itemId"
+            class="selected-row"
+            :class="{ 'is-approved': line.reviewStatus === 'APPROVED' }"
+          >
+            <span class="selected-name">
+              <strong>{{ line.itemName }}</strong>
+              <small>{{ line.unit }}<template v-if="line.exceptionReason"> · {{ line.exceptionReason }}</template></small>
+            </span>
+            <div class="quantity-control">
+              <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, -1)">−</el-button>
+              <el-input-number
+                :model-value="line.actualQuantity"
+                :min="0.01"
+                :precision="2"
+                :step="1"
+                size="small"
+                :disabled="line.reviewStatus === 'APPROVED'"
+                controls-position="right"
+                @update:model-value="value => setLineQuantity(line, value)"
+              />
+              <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, 1)">+</el-button>
+              <button
+                v-for="quick in [1, 2, 3]"
+                :key="quick"
+                type="button"
+                class="qty-chip"
+                :disabled="line.reviewStatus === 'APPROVED'"
+                @click="setLineQuantity(line, quick)"
+              >
+                {{ quick }}
+              </button>
+            </div>
+            <span class="selected-state">
+              <el-tag v-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">已通过</el-tag>
+              <el-tag v-else-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">已驳回</el-tag>
+              <small v-if="line.reviewNote">{{ line.reviewNote }}</small>
+            </span>
+            <el-button text type="danger" :disabled="line.reviewStatus === 'APPROVED'" @click="removeLine(line.itemId)">移除</el-button>
+          </div>
+          <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
+        </section>
 
         <div class="checklist-scroll">
           <section v-for="group in visibleGroups" :key="group.name" class="checklist-group">
@@ -249,6 +336,19 @@
             description="该科室还没有已映射到物资主数据的预设耗材，请先完成规则配置"
           />
         </div>
+
+        <footer class="sticky-actions">
+          <span class="save-state">{{ saveState || "未保存" }}</span>
+          <el-button :loading="saving" :disabled="!editable" @click="saveAndNext">保存并下一位</el-button>
+          <el-button
+            type="primary"
+            :loading="saving"
+            :disabled="!editable || hasApprovedLines"
+            @click="noConsumptionAndNext"
+          >
+            未使用并下一位
+          </el-button>
+        </footer>
       </main>
 
       <main v-else class="detail-panel detail-empty">
@@ -335,6 +435,48 @@
         <el-button type="primary" @click="addManualLine">加入清单</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchDialogVisible" title="批量提交审核" width="640px">
+      <div class="batch-summary">
+        <div><small>今日患者</small><strong>{{ workbench.summary.total || 0 }}</strong></div>
+        <div><small>已录/未使用</small><strong>{{ (workbench.summary.total || 0) - (workbench.summary.notStarted || 0) }}</strong></div>
+        <div><small>未录入</small><strong class="danger">{{ workbench.summary.notStarted || 0 }}</strong></div>
+        <div><small>已驳回</small><strong class="danger">{{ workbench.summary.returned || 0 }}</strong></div>
+      </div>
+      <el-alert
+        v-if="batchMissing.length"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="还有患者未录入，不能批量提交"
+        :description="`${batchMissing.length} 位患者尚未录入耗材。请先补录或标记未使用。`"
+      />
+      <div v-if="batchMissing.length" class="batch-missing">
+        <button
+          v-for="patient in batchMissing"
+          :key="patient.serviceInstanceId"
+          type="button"
+          class="missing-row"
+          @click="selectPatient(patient); batchDialogVisible = false"
+        >
+          <span>{{ patient.patientName || "未命名患者" }}</span>
+          <small>{{ maskVisitNo(patient.visitNo) }} · {{ patient.serviceName || "服务" }}</small>
+          <el-tag size="small" type="warning" effect="plain">去补录</el-tag>
+        </button>
+      </div>
+      <div v-if="batchResult" class="batch-result">
+        <p>已提交 {{ batchResult.submitted }} 位患者。</p>
+        <p v-if="batchResult.failed?.length" class="danger">
+          失败 {{ batchResult.failed.length }} 位：{{ batchResult.failed.map(item => `${item.patientName}（${item.reason}）`).join("；") }}
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="batchDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSubmitting" :disabled="!canSubmitBatch" @click="submitBatch">
+          提交当天全部患者
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -343,16 +485,22 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, Refresh, Search } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
+import { pinyin } from "pinyin-pro";
 import {
   addInventoryManualPatientApi,
   getInventoryPatientDetailApi,
+  getInventoryPatientLastCombinationApi,
+  getInventoryPatientRecentItemsApi,
   getInventoryPatientWorkbenchApi,
   saveInventoryPatientDocumentApi,
   searchInventoryPatientsApi,
+  submitInventoryPatientBatchApi,
   submitInventoryPatientDocumentApi,
+  type InventoryPatientBatchSubmitResult,
   type InventoryPatientConsumptionLine,
   type InventoryPatientDetail,
   type InventoryPatientPresetItem,
+  type InventoryPatientRecentItems,
   type InventoryPatientSearchResult,
   type InventoryPatientWorkbench,
   type InventoryPatientWorkbenchRow
@@ -394,10 +542,16 @@ const selectedId = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const submitting = ref(false);
+const batchSubmitting = ref(false);
 const patientKeyword = ref("");
-const statusFilter = ref("ALL");
+const statusFilter = ref("NOT_STARTED");
 const itemKeyword = ref("");
 const lineState = reactive<Record<string, EditableLine>>({});
+const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
+const saveState = ref("");
+const showFullVisitNo = ref(false);
+const batchDialogVisible = ref(false);
+const batchResult = ref<InventoryPatientBatchSubmitResult | null>(null);
 
 const manualDialogVisible = ref(false);
 const manualKeyword = ref("");
@@ -441,12 +595,13 @@ const filteredPatients = computed(() => {
 const presetItems = computed(() => detail.value?.presetItems?.items ?? []);
 const visibleGroups = computed(() => {
   const keyword = itemKeyword.value.trim().toLowerCase();
-  const filtered = presetItems.value.filter(item =>
-    !keyword ||
-    [item.itemName, item.materialName, item.serviceGroup].filter(Boolean).some(value =>
-      String(value).toLowerCase().includes(keyword)
-    )
-  );
+  const filtered = presetItems.value.filter(item => {
+    if (!keyword) return true;
+    const initials = String(pinyin(item.itemName, { pattern: "first", toneType: "none" }));
+    return [item.itemName, item.materialName, item.serviceGroup, item.unit, ...(item.aliases ?? []), initials]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(keyword));
+  });
   const groups = new Map<string, InventoryPatientPresetItem[]>();
   filtered
     .filter(item => item.commonItem)
@@ -464,6 +619,15 @@ const visibleGroups = computed(() => {
     });
   return Array.from(groups.entries()).map(([name, items]) => ({ name, items }));
 });
+
+const commonItems = computed(() => presetItems.value.filter(item => item.commonItem).slice(0, 8));
+const hasApprovedLines = computed(() => selectedLines.value.some(line => line.reviewStatus === "APPROVED"));
+const previousPatient = computed(() => {
+  const index = workbench.value.patients.findIndex(patient => patient.serviceInstanceId === selectedId.value);
+  return index > 0 ? workbench.value.patients[index - 1] : null;
+});
+const batchMissing = computed(() => workbench.value.patients.filter(patient => patient.status === "NOT_STARTED"));
+const canSubmitBatch = computed(() => batchMissing.value.length === 0 && !batchSubmitting.value);
 
 const availableItemOptions = computed(() => {
   const items = detail.value?.availableItems ?? [];
@@ -486,8 +650,9 @@ const loadWorkbench = async (keepSelection = true) => {
       date: businessDate.value
     });
     workbench.value = result.data ?? emptyWorkbench();
+    await loadRecentItems();
     if (!keepSelection || !selectedId.value) {
-      const first = workbench.value.patients[0];
+      const first = filteredPatients.value[0] || workbench.value.patients[0];
       if (first) await selectPatient(first);
       else {
         selectedId.value = "";
@@ -512,8 +677,22 @@ const reload = () => {
   void loadWorkbench(false);
 };
 
-const selectPatient = async (patient: InventoryPatientWorkbenchRow) => {
+const loadRecentItems = async () => {
+  try {
+    const result = await getInventoryPatientRecentItemsApi({ departmentKey: props.departmentKey, limit: 5 });
+    recentItems.value = result.data?.items ?? [];
+  } catch {
+    recentItems.value = [];
+  }
+};
+
+const selectPatient = async (patient: InventoryPatientWorkbenchRow, skipSave = false) => {
+  if (patient.serviceInstanceId === selectedId.value) return;
+  if (!skipSave && detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
+    await persistDraft(true);
+  }
   selectedId.value = patient.serviceInstanceId;
+  showFullVisitNo.value = false;
   try {
     const result = await getInventoryPatientDetailApi(patient.serviceInstanceId);
     applyDetail(result.data);
@@ -541,6 +720,7 @@ const applyDetail = (next: InventoryPatientDetail | undefined) => {
       lineRevision: line.lineRevision
     };
   });
+  saveState.value = next?.status === "DRAFT" ? "已保存" : "";
 };
 
 const isChecked = (item: InventoryPatientPresetItem) => Boolean(lineState[item.itemId]);
@@ -588,23 +768,35 @@ const clearUnapproved = () => {
   });
 };
 
-const buildPayload = () => ({
+const buildPayload = (noConsumption = false) => ({
   serviceInstanceId: detail.value!.serviceInstanceId,
   revision: detail.value!.revision || 0,
-  lines: selectedLines.value.map(line => ({
-    itemId: line.itemId,
-    ruleId: line.ruleId,
-    presetQuantity: line.presetQuantity,
-    actualQuantity: line.actualQuantity,
-    source: line.source,
-    exceptionReason: line.exceptionReason
-  }))
+  noConsumption,
+  lines: noConsumption
+    ? []
+    : selectedLines.value
+        .filter(line => line.reviewStatus !== "APPROVED")
+        .map(line => ({
+          itemId: line.itemId,
+          ruleId: line.ruleId,
+          presetQuantity: line.presetQuantity,
+          actualQuantity: line.actualQuantity,
+          source: line.source,
+          exceptionReason: line.exceptionReason
+        }))
 });
 
-const persistDraft = async () => {
-  const result = await saveInventoryPatientDocumentApi(buildPayload());
+const persistDraft = async (silent = false, noConsumption = false) => {
+  if (!detail.value) return undefined;
+  if (!noConsumption && selectedLines.value.filter(line => line.reviewStatus !== "APPROVED").length === 0) {
+    if (!silent) ElMessage.warning("未选择耗材；如确实未使用，请点“未使用并下一位”");
+    return undefined;
+  }
+  const result = await saveInventoryPatientDocumentApi(buildPayload(noConsumption));
   applyDetail(result.data);
+  saveState.value = `已保存 ${dayjs().format("HH:mm")}`;
   await refreshWorkbenchOnly();
+  void loadRecentItems();
   return result.data;
 };
 
@@ -657,6 +849,166 @@ const submitDocument = async () => {
     ElMessage.error(error instanceof Error ? error.message : "提交患者耗材清单失败");
   } finally {
     submitting.value = false;
+  }
+};
+
+const setLineQuantity = (line: EditableLine, value: number | undefined) => {
+  if (line.reviewStatus === "APPROVED" || !editable.value) return;
+  line.actualQuantity = Math.max(0.01, Number(value || 0));
+};
+
+const adjustLineQuantity = (line: EditableLine, delta: number) => {
+  setLineQuantity(line, line.actualQuantity + delta);
+};
+
+const addRecentItem = (item: InventoryPatientRecentItems["items"][number]) => {
+  const preset = presetItems.value.find(entry => entry.itemId === item.itemId);
+  if (preset) {
+    toggleItem(preset, true);
+    return;
+  }
+  if (lineState[item.itemId]) return;
+  lineState[item.itemId] = {
+    itemId: item.itemId,
+    itemName: item.itemName,
+    unit: item.unit,
+    presetQuantity: 1,
+    actualQuantity: 1,
+    source: "MANUAL",
+    exceptionReason: "最近使用"
+  };
+};
+
+const selectNextPatient = async () => {
+  const patients = workbench.value.patients;
+  const index = patients.findIndex(patient => patient.serviceInstanceId === selectedId.value);
+  const ordered = patients.slice(index + 1).concat(patients.slice(0, index + 1));
+  const next = ordered.find(patient => ["NOT_STARTED", "DRAFT", "RETURNED"].includes(patient.status));
+  if (!next) {
+    ElMessage.success("今天到本科室的患者已全部录入");
+    return;
+  }
+  await selectPatient(next, true);
+};
+
+const saveAndNext = async () => {
+  const result = await persistDraft(false, false);
+  if (result) await selectNextPatient();
+};
+
+const noConsumptionAndNext = async () => {
+  const result = await persistDraft(false, true);
+  if (result) await selectNextPatient();
+};
+
+const applyLinesFromDetail = (lines: InventoryPatientConsumptionLine[]) => {
+  Object.keys(lineState).forEach(key => {
+    if (lineState[key]?.reviewStatus !== "APPROVED") delete lineState[key];
+  });
+  lines.forEach(line => {
+    if (line.reviewStatus === "APPROVED" || lineState[line.itemId]) return;
+    lineState[line.itemId] = {
+      itemId: line.itemId,
+      itemName: line.itemName,
+      unit: line.unit,
+      presetQuantity: line.presetQuantity ?? undefined,
+      actualQuantity: Number(line.actualQuantity || 1),
+      source: (line.source as EditableLine["source"]) || "PRESET",
+      exceptionReason: line.exceptionReason || (line.source === "MANUAL" ? "套用历史组合" : undefined),
+      reviewStatus: "PENDING"
+    };
+  });
+};
+
+const copyPreviousPatient = async () => {
+  const previous = previousPatient.value;
+  if (!previous) {
+    ElMessage.info("当前患者前面没有可复制的患者");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将 ${previous.patientName || "上一位患者"} 的耗材复制给当前患者？已审核通过的项不会被覆盖。`,
+      "同上一患者",
+      { confirmButtonText: "复制", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    const result = await getInventoryPatientDetailApi(previous.serviceInstanceId);
+    applyLinesFromDetail(result.data?.lines ?? []);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取上一位患者失败");
+  }
+};
+
+const applyLastCombination = async () => {
+  if (!detail.value) return;
+  try {
+    await ElMessageBox.confirm("套用该患者上一次的耗材组合？当前未保存的改动会被替换。", "套用上次组合", {
+      confirmButtonText: "套用",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  try {
+    const result = await getInventoryPatientLastCombinationApi({
+      patientId: detail.value.patientId,
+      departmentKey: props.departmentKey
+    });
+    const items = result.data?.items ?? [];
+    if (!items.length) {
+      ElMessage.info("该患者还没有可套用的历史组合");
+      return;
+    }
+    applyLinesFromDetail(
+      items.map(item => ({
+        lineId: "",
+        itemId: item.itemId,
+        itemName: item.itemName,
+        unit: item.unit,
+        presetQuantity: null,
+        actualQuantity: item.actualQuantity,
+        source: item.source || "PRESET",
+        reviewStatus: "PENDING",
+        lineRevision: 0
+      }))
+    );
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取上次组合失败");
+  }
+};
+
+const openBatchSubmit = async () => {
+  if (detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
+    await persistDraft(true, false);
+  }
+  batchResult.value = null;
+  batchDialogVisible.value = true;
+};
+
+const submitBatch = async () => {
+  batchSubmitting.value = true;
+  try {
+    const result = await submitInventoryPatientBatchApi({
+      departmentKey: props.departmentKey,
+      businessDate: businessDate.value
+    });
+    batchResult.value = result.data ?? null;
+    if (result.data?.blocked) {
+      ElMessage.warning("还有患者未完成，请先补录或标记未使用");
+    } else {
+      ElMessage.success(`已提交 ${result.data?.submitted || 0} 位患者`);
+      batchDialogVisible.value = false;
+      await loadWorkbench(true);
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "批量提交失败");
+  } finally {
+    batchSubmitting.value = false;
   }
 };
 
@@ -800,6 +1152,12 @@ const formatDateTime = (value?: string) => {
   if (!value) return "未记录服务时间";
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format("MM-DD HH:mm") : value;
+};
+
+const maskVisitNo = (value?: string) => {
+  if (!value) return "无就诊号";
+  if (showFullVisitNo.value) return value;
+  return value.length <= 4 ? value : `****${value.slice(-4)}`;
 };
 
 watch(
@@ -1291,6 +1649,265 @@ onMounted(() => {
 
 .add-item-select {
   width: 100%;
+}
+
+.quick-section,
+.selected-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hos-border-light);
+}
+
+.section-title {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+
+  h4 {
+    margin: 0;
+    color: var(--hos-text-primary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  span {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  color: var(--hos-text-primary);
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+
+  &.is-selected {
+    color: var(--hos-primary);
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-primary);
+  }
+
+  &.is-recent {
+    border-style: dashed;
+  }
+}
+
+.selected-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto minmax(80px, auto) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 10px;
+
+  &.is-approved {
+    opacity: 0.8;
+  }
+}
+
+.selected-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  strong {
+    overflow: hidden;
+    color: var(--hos-text-primary);
+    font-weight: 500;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+}
+
+.quantity-control {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+
+  :deep(.el-input-number) {
+    width: 92px;
+  }
+}
+
+.qty-chip {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  color: var(--hos-text-secondary);
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+
+  &:hover:not(:disabled) {
+    color: var(--hos-primary);
+    border-color: var(--hos-primary);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+.selected-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+
+  small {
+    color: var(--hos-status-danger);
+    font-size: 10px;
+  }
+}
+
+.sticky-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 18px;
+  margin: 0 -20px -20px;
+  background: color-mix(in srgb, var(--hos-bg-primary) 94%, transparent);
+  border-top: 1px solid var(--hos-border-light);
+  backdrop-filter: blur(8px);
+}
+
+.save-state {
+  margin-right: auto;
+  color: var(--hos-text-muted);
+  font-size: 11px;
+}
+
+.link-button {
+  padding: 0;
+  color: var(--hos-primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.batch-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    background: var(--hos-bg-surface);
+    border-radius: 10px;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .danger {
+    color: var(--hos-status-danger);
+  }
+}
+
+.batch-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.missing-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--hos-bg-surface);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: var(--hos-primary);
+  }
+
+  span {
+    color: var(--hos-text-primary);
+    font-size: 12px;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+
+  :deep(.el-tag) {
+    margin-left: auto;
+  }
+}
+
+.batch-result {
+  margin-top: 12px;
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+
+  .danger {
+    color: var(--hos-status-danger);
+  }
+}
+
+.summary-item {
+  padding: 8px 12px;
+
+  strong {
+    font-size: 18px;
+  }
 }
 
 @media (max-width: 1180px) {

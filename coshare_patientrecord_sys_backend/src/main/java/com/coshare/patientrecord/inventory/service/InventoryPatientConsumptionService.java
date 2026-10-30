@@ -66,7 +66,7 @@ public class InventoryPatientConsumptionService {
         ArrayNode patients = jdbcTemplate.query(
             """
             SELECT si.*, d.id document_id, d.status document_status, d.revision document_revision,
-                   d.submitted_at, d.submitted_by,
+                   d.submitted_at, d.submitted_by, d.no_consumption document_no_consumption,
                    COALESCE((SELECT SUM(l.actual_quantity)
                              FROM inventory_patient_consumption_lines l
                              WHERE l.document_id = d.id), 0) total_quantity,
@@ -111,6 +111,7 @@ public class InventoryPatientConsumptionService {
             result.put("revision", document.revision());
             result.put("submittedAt", document.submittedAt() == null ? "" : document.submittedAt().toString());
             result.put("submittedBy", document.submittedBy());
+            result.put("noConsumption", document.noConsumption());
             result.set("lines", loadLines(document.id()));
         }
         result.set("presetItems", presetItems(instance.departmentKey(), instance.serviceCode(), instance.serviceName()));
@@ -131,6 +132,10 @@ public class InventoryPatientConsumptionService {
             throw staleDocument();
         }
         List<LineDraft> lines = parseLines(payload.path("lines"));
+        boolean noConsumption = payload.path("noConsumption").asBoolean(false);
+        if (noConsumption && !lines.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "标记未使用耗材时不能同时填写耗材明细");
+        }
         String documentId = document == null ? "patient-document-" + UUID.randomUUID() : document.id();
         ObjectNode raw = objectMapper.createObjectNode();
         raw.put("serviceInstanceId", instance.id());
@@ -138,6 +143,7 @@ public class InventoryPatientConsumptionService {
         raw.put("businessDate", instance.businessDate().toString());
         raw.put("patientId", instance.patientId());
         raw.put("encounterId", instance.encounterId());
+        raw.put("noConsumption", noConsumption);
         ArrayNode rawLines = raw.putArray("lines");
         lines.forEach(line -> {
             ObjectNode rawLine = rawLines.addObject();
@@ -151,11 +157,13 @@ public class InventoryPatientConsumptionService {
                 """
                 INSERT INTO inventory_patient_consumption_documents
                   (id, service_instance_id, department_id, department_key, department_name, business_date,
-                   patient_id, encounter_id, status, revision, operator_name, operator_username, raw_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', 1, ?, ?, CAST(? AS JSON))
+                   patient_id, encounter_id, status, revision, operator_name, operator_username,
+                   no_consumption, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', 1, ?, ?, ?, CAST(? AS JSON))
                 """,
                 documentId, instance.id(), instance.departmentId(), instance.departmentKey(), instance.departmentName(),
-                instance.businessDate(), instance.patientId(), instance.encounterId(), user.name(), user.username(), json(raw)
+                instance.businessDate(), instance.patientId(), instance.encounterId(), user.name(), user.username(),
+                noConsumption ? 1 : 0, json(raw)
             );
         } else {
             Set<String> approvedItems = "PARTIALLY_APPROVED".equals(document.status())
@@ -173,10 +181,11 @@ public class InventoryPatientConsumptionService {
             int updated = jdbcTemplate.update(
                 """
                 UPDATE inventory_patient_consumption_documents
-                SET revision = revision + 1, operator_name = ?, operator_username = ?, raw_json = CAST(? AS JSON)
+                SET revision = revision + 1, operator_name = ?, operator_username = ?,
+                    no_consumption = ?, raw_json = CAST(? AS JSON)
                 WHERE id = ? AND revision = ?
                 """,
-                user.name(), user.username(), json(raw), documentId, expectedRevision
+                user.name(), user.username(), noConsumption ? 1 : 0, json(raw), documentId, expectedRevision
             );
             if (updated != 1) throw staleDocument();
             if ("PARTIALLY_APPROVED".equals(document.status())) {
@@ -220,7 +229,10 @@ public class InventoryPatientConsumptionService {
             documentId
         );
         String nextStatus;
-        if (openLineCount > 0) {
+        if (document.noConsumption()) {
+            jdbcTemplate.update("DELETE FROM inventory_patient_consumption_lines WHERE document_id = ?", documentId);
+            nextStatus = "APPROVED";
+        } else if (openLineCount > 0) {
             jdbcTemplate.update(
                 """
                 UPDATE inventory_patient_consumption_lines
@@ -248,6 +260,171 @@ public class InventoryPatientConsumptionService {
         repository.log(user.name(), "提交患者耗材清单", "patient_consumption_document", instance.patientName() + " " + instance.businessDate(),
             "已提交库管审核，审核通过前不会扣减库存");
         return document(instance.id(), user);
+    }
+
+    @Transactional
+    public ObjectNode submitBatch(String departmentKey, LocalDate businessDate, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
+        List<BatchPatient> patients = jdbcTemplate.query(
+            """
+            SELECT si.id service_instance_id, si.patient_name,
+                   d.id document_id, d.status document_status, d.no_consumption
+            FROM inventory_service_instances si
+            LEFT JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
+            WHERE si.department_key = ? AND si.business_date = ?
+            ORDER BY si.service_started_at, si.patient_name
+            """,
+            (resultSet, rowNum) -> new BatchPatient(
+                resultSet.getString("service_instance_id"), resultSet.getString("patient_name"),
+                resultSet.getString("document_id"), resultSet.getString("document_status"),
+                resultSet.getBoolean("no_consumption")
+            ),
+            department.key(), date
+        );
+        ArrayNode missing = objectMapper.createArrayNode();
+        ArrayNode failed = objectMapper.createArrayNode();
+        int submitted = 0;
+        for (BatchPatient patient : patients) {
+            if (patient.documentId() == null || patient.documentId().isBlank()) {
+                missing.add(batchIssue(patient, "尚未录入耗材"));
+                continue;
+            }
+            if ("RETURNED".equals(patient.status())) {
+                failed.add(batchIssue(patient, "已驳回，需修改后重新提交"));
+                continue;
+            }
+            if (!Set.of("DRAFT", "PARTIALLY_APPROVED").contains(patient.status())) {
+                continue;
+            }
+            if ("DRAFT".equals(patient.status())) {
+                if (patient.noConsumption()) {
+                    jdbcTemplate.update(
+                        "UPDATE inventory_patient_consumption_documents SET status = 'APPROVED', submitted_at = CURRENT_TIMESTAMP(3), submitted_by = ? WHERE id = ? AND status = 'DRAFT'",
+                        user.name(), patient.documentId()
+                    );
+                    jdbcTemplate.update(
+                        "UPDATE inventory_service_instances SET status = 'APPROVED' WHERE id = ?",
+                        patient.serviceInstanceId()
+                    );
+                    submitted++;
+                } else {
+                    Integer lineCount = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM inventory_patient_consumption_lines WHERE document_id = ?",
+                        Integer.class,
+                        patient.documentId()
+                    );
+                    if (lineCount == null || lineCount == 0) {
+                        failed.add(batchIssue(patient, "未选择耗材，也未标记未使用"));
+                        continue;
+                    }
+                    submit(patient.documentId(), user);
+                    submitted++;
+                }
+            } else {
+                submit(patient.documentId(), user);
+                submitted++;
+            }
+        }
+        String batchId = upsertBatchForDepartment(department, date);
+        refreshBatch(batchId);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("businessDate", date.toString());
+        result.put("total", patients.size());
+        result.put("submitted", submitted);
+        result.put("blocked", !missing.isEmpty() || !failed.isEmpty());
+        result.set("missing", missing);
+        result.set("failed", failed);
+        repository.log(user.name(), "批量提交患者耗材清单", "patient_consumption_approval_batch",
+            department.name() + " " + date, "提交 " + submitted + " 位患者，缺失 " + missing.size() + "，失败 " + failed.size());
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode recentItems(String departmentKey, int limit, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        int size = Math.max(1, Math.min(limit, 20));
+        ArrayNode items = jdbcTemplate.query(
+            """
+            SELECT l.item_id, i.name item_name, i.unit, COUNT(*) usage_count, MAX(d.business_date) last_date
+            FROM inventory_patient_consumption_lines l
+            JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+            JOIN inventory_items i ON i.id = l.item_id
+            WHERE d.department_key = ? AND d.operator_username = ?
+              AND d.business_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              AND d.status IN ('SUBMITTED', 'PARTIALLY_APPROVED', 'APPROVED')
+            GROUP BY l.item_id, i.name, i.unit
+            ORDER BY usage_count DESC, last_date DESC
+            LIMIT ?
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", resultSet.getString("item_name"));
+                    row.put("unit", resultSet.getString("unit"));
+                    row.put("usageCount", resultSet.getInt("usage_count"));
+                    row.put("lastDate", resultSet.getDate("last_date") == null ? "" : resultSet.getDate("last_date").toString());
+                }
+                return list;
+            },
+            department.key(), user.username(), size
+        );
+        attachAliases(items);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("items", items);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode lastCombination(String patientId, String departmentKey, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        if (patientId == null || patientId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少患者标识");
+        }
+        List<String> documentIds = jdbcTemplate.query(
+            """
+            SELECT d.id FROM inventory_patient_consumption_documents d
+            JOIN inventory_service_instances si ON si.id = d.service_instance_id
+            WHERE d.patient_id = ? AND si.department_key = ?
+              AND d.status IN ('SUBMITTED', 'PARTIALLY_APPROVED', 'APPROVED')
+            ORDER BY COALESCE(d.submitted_at, d.updated_at) DESC
+            LIMIT 1
+            """,
+            (resultSet, rowNum) -> resultSet.getString(1),
+            patientId.trim(), department.key()
+        );
+        ObjectNode result = objectMapper.createObjectNode();
+        if (documentIds.isEmpty()) {
+            result.set("items", objectMapper.createArrayNode());
+            return result;
+        }
+        ArrayNode lines = jdbcTemplate.query(
+            """
+            SELECT l.item_id, i.name item_name, i.unit, l.actual_quantity, l.source
+            FROM inventory_patient_consumption_lines l
+            JOIN inventory_items i ON i.id = l.item_id
+            WHERE l.document_id = ?
+            ORDER BY l.line_no
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", resultSet.getString("item_name"));
+                    row.put("unit", resultSet.getString("unit"));
+                    row.put("actualQuantity", resultSet.getBigDecimal("actual_quantity"));
+                    row.put("source", resultSet.getString("source"));
+                }
+                return list;
+            },
+            documentIds.get(0)
+        );
+        attachAliases(lines);
+        result.set("items", lines);
+        return result;
     }
 
     @Transactional
@@ -583,13 +760,14 @@ public class InventoryPatientConsumptionService {
             },
             departmentKey
         );
+        attachAliases(items);
         ObjectNode result = objectMapper.createObjectNode();
         result.set("items", items);
         return result;
     }
 
     private ArrayNode availableItems() {
-        return jdbcTemplate.query(
+        ArrayNode items = jdbcTemplate.query(
             """
             SELECT id, name, unit, spec, category
             FROM inventory_items
@@ -610,6 +788,8 @@ public class InventoryPatientConsumptionService {
                 return list;
             }
         );
+        attachAliases(items);
+        return items;
     }
 
     private ArrayNode loadLines(String documentId) {
@@ -839,6 +1019,8 @@ public class InventoryPatientConsumptionService {
         Timestamp submittedAt = hasColumn(resultSet, "submitted_at") ? resultSet.getTimestamp("submitted_at") : null;
         row.put("submittedAt", submittedAt == null ? "" : submittedAt.toLocalDateTime().toString());
         row.put("submittedBy", hasColumn(resultSet, "submitted_by") ? resultSet.getString("submitted_by") : "");
+        row.put("noConsumption", hasColumn(resultSet, "document_no_consumption")
+            && Boolean.TRUE.equals(resultSet.getBoolean("document_no_consumption")));
         if (hasColumn(resultSet, "total_quantity")) {
             row.put("totalQuantity", resultSet.getBigDecimal("total_quantity"));
             row.put("lineCount", resultSet.getInt("line_count"));
@@ -866,8 +1048,62 @@ public class InventoryPatientConsumptionService {
         return row;
     }
 
+    private String upsertBatchForDepartment(Department department, LocalDate date) {
+        String departmentId = resolveDepartmentId(department.key());
+        String batchId = "approval-batch-" + UUID.randomUUID();
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_consumption_approval_batches
+              (id, department_id, department_key, department_name, business_date, status, document_count, line_count,
+               approved_line_count, rejected_line_count)
+            VALUES (?, ?, ?, ?, ?, 'PENDING', 0, 0, 0, 0)
+            ON DUPLICATE KEY UPDATE department_name = VALUES(department_name)
+            """,
+            batchId, departmentId, department.key(), department.name(), date
+        );
+        return jdbcTemplate.queryForObject(
+            "SELECT id FROM inventory_consumption_approval_batches WHERE department_id = ? AND business_date = ?",
+            String.class,
+            departmentId, date
+        );
+    }
+
+    private ObjectNode batchIssue(BatchPatient patient, String reason) {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("serviceInstanceId", patient.serviceInstanceId());
+        row.put("patientName", patient.patientName());
+        row.put("reason", reason);
+        return row;
+    }
+
+    private void attachAliases(ArrayNode items) {
+        Map<String, ArrayNode> aliasesByItem = new LinkedHashMap<>();
+        for (JsonNode item : items) {
+            String itemId = item.path("itemId").asText("");
+            if (!itemId.isBlank()) aliasesByItem.computeIfAbsent(itemId, key -> objectMapper.createArrayNode());
+        }
+        if (aliasesByItem.isEmpty()) return;
+        String placeholders = String.join(",", aliasesByItem.keySet().stream().map(key -> "?").toList());
+        jdbcTemplate.query(
+            "SELECT item_id, alias_name FROM inventory_item_aliases WHERE status = 'confirmed' AND item_id IN (" + placeholders + ") ORDER BY alias_name",
+            (org.springframework.jdbc.core.ResultSetExtractor<Void>) resultSet -> {
+                while (resultSet.next()) {
+                    ArrayNode values = aliasesByItem.get(resultSet.getString("item_id"));
+                    if (values != null) values.add(resultSet.getString("alias_name"));
+                }
+                return null;
+            },
+            aliasesByItem.keySet().toArray()
+        );
+        for (JsonNode item : items) {
+            String itemId = item.path("itemId").asText("");
+            ArrayNode values = aliasesByItem.get(itemId);
+            ((ObjectNode) item).set("aliases", values == null ? objectMapper.createArrayNode() : values);
+        }
+    }
+
     private ObjectNode workbenchSummary(ArrayNode patients) {
-        int total = 0, draft = 0, submitted = 0, approved = 0, returned = 0, notStarted = 0;
+        int total = 0, draft = 0, submitted = 0, approved = 0, returned = 0, notStarted = 0, noConsumption = 0;
         for (JsonNode patient : patients) {
             total++;
             String status = patient.path("status").asText("");
@@ -879,6 +1115,7 @@ public class InventoryPatientConsumptionService {
                 case "NOT_STARTED" -> notStarted++;
                 default -> { }
             }
+            if (patient.path("noConsumption").asBoolean(false)) noConsumption++;
         }
         ObjectNode summary = objectMapper.createObjectNode();
         summary.put("total", total);
@@ -887,6 +1124,10 @@ public class InventoryPatientConsumptionService {
         summary.put("approved", approved);
         summary.put("returned", returned);
         summary.put("notStarted", notStarted);
+        summary.put("noConsumption", noConsumption);
+        summary.put("entered", total - notStarted);
+        summary.put("missing", notStarted);
+        summary.put("progress", total == 0 ? 0 : Math.round((total - notStarted) * 100.0 / total));
         return summary;
     }
 
@@ -941,7 +1182,8 @@ public class InventoryPatientConsumptionService {
             resultSet.getString("department_key"), resultSet.getString("department_name"),
             resultSet.getDate("business_date").toLocalDate(), resultSet.getString("patient_id"),
             resultSet.getString("encounter_id"), resultSet.getString("status"), resultSet.getInt("revision"),
-            submittedAt == null ? null : submittedAt.toLocalDateTime(), resultSet.getString("submitted_by")
+            submittedAt == null ? null : submittedAt.toLocalDateTime(), resultSet.getString("submitted_by"),
+            resultSet.getBoolean("no_consumption")
         );
     }
 
@@ -1159,9 +1401,13 @@ public class InventoryPatientConsumptionService {
         LocalDateTime serviceStartedAt, LocalDate businessDate
     ) {}
 
+    private record BatchPatient(
+        String serviceInstanceId, String patientName, String documentId, String status, boolean noConsumption
+    ) {}
+
     private record Document(
         String id, String serviceInstanceId, String departmentId, String departmentKey, String departmentName,
         LocalDate businessDate, String patientId, String encounterId, String status, int revision,
-        LocalDateTime submittedAt, String submittedBy
+        LocalDateTime submittedAt, String submittedBy, boolean noConsumption
     ) {}
 }
