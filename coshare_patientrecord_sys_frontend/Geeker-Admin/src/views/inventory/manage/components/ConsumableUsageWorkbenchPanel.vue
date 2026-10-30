@@ -28,26 +28,28 @@
       <div><small>涉及患者</small><strong>{{ totals.patientCount || 0 }}</strong></div>
     </div>
 
-    <el-table :data="items" class="usage-table" height="calc(100vh - 320px)" @row-click="openItem">
-      <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="unit" label="单位" width="90" />
-      <el-table-column label="使用总量" width="120" align="right">
-        <template #default="{ row }">{{ formatQuantity(row.quantity) }}</template>
-      </el-table-column>
-      <el-table-column prop="patientCount" label="患者数" width="90" align="right" />
-      <el-table-column label="已通过" width="110" align="right">
-        <template #default="{ row }">{{ formatQuantity(row.approvedQuantity) }}</template>
-      </el-table-column>
-      <el-table-column label="待审核" width="110" align="right">
-        <template #default="{ row }">{{ formatQuantity(row.pendingQuantity) }}</template>
-      </el-table-column>
-      <el-table-column width="100" align="right">
-        <template #default>
-          <el-button text type="primary">患者名单</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <el-empty v-if="!items.length && !loading" :image-size="80" description="今天还没有耗材记录" />
+    <div v-if="items.length" class="usage-table-wrap">
+      <el-table :data="items" class="usage-table" height="100%" @row-click="openItem">
+        <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="unit" label="单位" width="90" />
+        <el-table-column label="使用总量" width="120" align="right">
+          <template #default="{ row }">{{ formatQuantity(row.quantity) }}</template>
+        </el-table-column>
+        <el-table-column prop="patientCount" label="患者数" width="90" align="right" />
+        <el-table-column label="已通过" width="110" align="right">
+          <template #default="{ row }">{{ formatQuantity(row.approvedQuantity) }}</template>
+        </el-table-column>
+        <el-table-column label="待审核" width="110" align="right">
+          <template #default="{ row }">{{ formatQuantity(row.pendingQuantity) }}</template>
+        </el-table-column>
+        <el-table-column width="100" align="right">
+          <template #default>
+            <el-button text type="primary">患者名单</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <el-empty v-else-if="!loading" class="usage-empty" :image-size="80" description="今天还没有耗材记录" />
 
     <el-drawer v-model="detailVisible" :title="`${selectedItem?.itemName || ''} · 患者名单`" size="70%" append-to-body>
       <div v-loading="detailLoading" class="patient-list">
@@ -185,9 +187,11 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  height: calc(100vh - 150px);
   padding: 18px;
-  min-height: calc(100vh - 150px);
+  overflow: hidden;
   background: var(--hos-bg-surface);
+  box-sizing: border-box;
 }
 
 .usage-toolbar {
@@ -261,10 +265,24 @@ onMounted(() => {
   }
 }
 
+.usage-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .usage-table {
+  height: 100%;
   background: var(--hos-bg-primary);
   border: 1px solid var(--hos-border-light);
   border-radius: 14px;
+}
+
+.usage-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .patient-list {

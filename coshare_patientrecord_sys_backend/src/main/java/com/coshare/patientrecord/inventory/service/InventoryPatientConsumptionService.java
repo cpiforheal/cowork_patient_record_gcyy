@@ -468,18 +468,10 @@ public class InventoryPatientConsumptionService {
               ORDER BY pe2.updated_at DESC LIMIT 1
             )
             """;
-        String visitTypeExpression = """
-            COALESCE(
-              e.visit_type,
-              CASE WHEN pe.inventory_care_type = 'inpatient' THEN '住院' ELSE '门诊' END,
-              p.visit_type
-            )
-            """;
-        String where = """
-            WHERE (? = '' OR p.name LIKE ? OR p.visit_no LIKE ? OR pe.case_token LIKE ?)
-              AND (? = '' OR """ + visitTypeExpression + " = ?)\n" + """
-              AND (? = '' OR LEFT(COALESCE(e.visit_date, p.visit_date), 10) = ?)
-            """;
+        String visitTypeExpression = "COALESCE(e.visit_type, CASE WHEN pe.inventory_care_type = 'inpatient' THEN '住院' ELSE '门诊' END, p.visit_type)";
+        String where = "WHERE (? = '' OR p.name LIKE ? OR p.visit_no LIKE ? OR pe.case_token LIKE ?) "
+            + "AND (? = '' OR " + visitTypeExpression + " = ?) "
+            + "AND (? = '' OR LEFT(COALESCE(e.visit_date, p.visit_date), 10) = ?)";
         List<Object> params = new ArrayList<>(List.of(search, like, like, like, type, type, date, date));
         Integer total = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) " + joins + where,
@@ -488,18 +480,15 @@ public class InventoryPatientConsumptionService {
         );
         params.add(safeSize);
         params.add((safePage - 1) * safeSize);
+        String listSql = "SELECT p.id patient_id, p.name patient_name, p.visit_no, p.visit_date, p.visit_type, "
+            + "p.status, p.encounter_count, COALESCE(e.id, pe.id) encounter_id, "
+            + "COALESCE(CAST(e.visit_no AS CHAR), CAST(pe.visit_no AS CHAR), p.visit_no) encounter_visit_no, "
+            + visitTypeExpression + " encounter_visit_type, "
+            + "COALESCE(e.visit_date, p.visit_date) encounter_visit_date, pe.case_token, pe.current_stage "
+            + joins + where
+            + " ORDER BY COALESCE(e.visit_date, p.visit_date) DESC, p.updated_at DESC LIMIT ? OFFSET ?";
         ArrayNode list = jdbcTemplate.query(
-            """
-            SELECT p.id patient_id, p.name patient_name, p.visit_no, p.visit_date, p.visit_type,
-                   p.status, p.encounter_count, COALESCE(e.id, pe.id) encounter_id,
-                   COALESCE(CAST(e.visit_no AS CHAR), CAST(pe.visit_no AS CHAR), p.visit_no) encounter_visit_no,
-                   """ + visitTypeExpression + " encounter_visit_type,\n" + """
-                   COALESCE(e.visit_date, p.visit_date) encounter_visit_date,
-                   pe.case_token, pe.current_stage
-            """ + joins + where + """
-             ORDER BY COALESCE(e.visit_date, p.visit_date) DESC, p.updated_at DESC
-             LIMIT ? OFFSET ?
-            """,
+            listSql,
             resultSet -> {
                 ArrayNode rows = objectMapper.createArrayNode();
                 while (resultSet.next()) {
