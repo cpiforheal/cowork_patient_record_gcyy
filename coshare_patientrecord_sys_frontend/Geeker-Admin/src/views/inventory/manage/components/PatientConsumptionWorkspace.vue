@@ -30,7 +30,7 @@
         </div>
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
         <el-button type="primary" :loading="batchSubmitting" @click="openBatchSubmit">批量提交</el-button>
-        <el-button type="primary" plain :icon="Plus" @click="openManualDialog">手动补录患者</el-button>
+        <el-button type="primary" plain :icon="Search" @click="openPatientSource">患者来源</el-button>
       </div>
     </header>
 
@@ -106,6 +106,7 @@
               <div class="detail-name-row">
                 <h3>{{ detail.patientName || "未命名患者" }}</h3>
                 <el-tag :type="statusType(detail.status)" effect="plain">{{ statusLabel(detail.status) }}</el-tag>
+                <el-tag v-if="detail.attentionFlag" type="danger" effect="plain">重点</el-tag>
                 <el-tag v-if="detail.sourceType === 'MANUAL'" type="warning" effect="plain">手动补录</el-tag>
               </div>
               <p class="detail-meta">
@@ -119,8 +120,11 @@
                 {{ formatDateTime(detail.serviceStartedAt) }}
                 <span v-if="detail.stageCode">· {{ detail.stageCode }}</span>
               </p>
+              <p v-if="detail.specialNote" class="patient-note">备注：{{ detail.specialNote }}</p>
             </div>
             <div class="detail-actions">
+              <el-button size="small" @click="openHistory">历史</el-button>
+              <el-button size="small" @click="openNoteDialog">{{ detail.attentionFlag ? "已标记" : "备注/标记" }}</el-button>
               <template v-if="editable">
                 <el-button size="small" :disabled="!previousPatient" @click="copyPreviousPatient">同上一患者</el-button>
                 <el-button size="small" @click="applyLastCombination">套用上次组合</el-button>
@@ -508,19 +512,35 @@
     <el-dialog v-model="addItemDialogVisible" title="追加预设外耗材" width="560px" class="patient-dialog">
       <el-form label-position="top">
         <el-form-item label="耗材">
-          <el-select
-            v-model="addItemId"
-            filterable
-            placeholder="搜索物资主数据"
-            class="add-item-select"
-          >
-            <el-option
-              v-for="item in availableItemOptions"
+          <el-input
+            v-model="manualItemKeyword"
+            placeholder="搜索名称 / 拼音首字母 / 别名"
+            clearable
+            :prefix-icon="Search"
+          />
+          <div v-if="!manualItemSelected" class="manual-item-results">
+            <button
+              v-for="item in manualItemResults"
               :key="item.itemId"
-              :label="`${item.itemName}（${item.unit}）`"
-              :value="item.itemId"
-            />
-          </el-select>
+              type="button"
+              class="manual-item-option"
+              @click="selectManualItem(item)"
+            >
+              <span>
+                <strong>{{ item.itemName }}</strong>
+                <small>{{ item.unit }} · {{ item.category || "物资" }}</small>
+              </span>
+              <el-tag size="small" effect="plain">选择</el-tag>
+            </button>
+            <el-empty v-if="!manualItemResults.length" :image-size="50" description="没有匹配耗材" />
+          </div>
+          <div v-else class="manual-item-selected">
+            <span>
+              <strong>{{ manualItemSelected.itemName }}</strong>
+              <small>{{ manualItemSelected.unit }}</small>
+            </span>
+            <el-button text type="primary" @click="clearManualItem">重新选择</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="实际用量">
           <el-input-number v-model="addItemQuantity" :min="0.01" :precision="2" :step="1" controls-position="right" />
@@ -534,6 +554,107 @@
         <el-button type="primary" @click="addManualLine">加入清单</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="sourceDrawerVisible" title="患者来源" size="70%" append-to-body>
+      <div class="source-shell">
+        <div class="source-toolbar">
+          <el-input
+            v-model="sourceKeyword"
+            placeholder="姓名 / 就诊号 / 病例标识"
+            clearable
+            :prefix-icon="Search"
+            @keyup.enter="loadPatientSource(true)"
+          />
+          <el-select v-model="sourceVisitType" clearable placeholder="全部就诊情况" @change="loadPatientSource(true)">
+            <el-option label="门诊" value="门诊" />
+            <el-option label="住院" value="住院" />
+          </el-select>
+          <el-date-picker
+            v-model="sourceDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="录入日期"
+            clearable
+            @change="loadPatientSource(true)"
+          />
+          <el-button :icon="Refresh" :loading="sourceLoading" @click="loadPatientSource(true)">刷新</el-button>
+          <el-button @click="openManualDialog">手动新增</el-button>
+        </div>
+        <p class="source-summary">共 {{ sourceTotal }} 位患者，按录入时间从新到旧排列</p>
+        <div v-loading="sourceLoading" class="source-list">
+          <div v-for="row in sourceRows" :key="row.patientId + '-' + (row.encounterId || '')" class="source-card">
+            <div class="source-main">
+              <strong>{{ row.patientName }}</strong>
+              <span>{{ row.caseToken || row.visitNo }} · {{ row.encounterVisitType || row.visitType }} · {{ row.encounterVisitDate || row.visitDate }}</span>
+              <small>{{ row.currentStage || row.status || "未记录阶段" }} · {{ row.encounterCount }} 次就诊</small>
+            </div>
+            <el-button
+              size="small"
+              :type="isSourceAdded(row) ? 'success' : 'primary'"
+              :plain="isSourceAdded(row)"
+              :loading="sourceAddingId === row.encounterId"
+              :disabled="!row.encounterId"
+              @click="addPatientFromSource(row)"
+            >
+              {{ isSourceAdded(row) ? "已在工作台" : "加入本科室" }}
+            </el-button>
+          </div>
+          <el-empty v-if="!sourceRows.length && !sourceLoading" description="没有匹配患者；可手动新增" />
+        </div>
+        <div v-if="sourceRows.length < sourceTotal" class="source-more">
+          <el-button :loading="sourceLoading" @click="loadMoreSource">加载更多</el-button>
+        </div>
+      </div>
+    </el-drawer>
+
+    <el-dialog v-model="noteDialogVisible" title="患者备注与标记" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="重点标记">
+          <el-switch v-model="noteForm.attentionFlag" active-text="重点患者" inactive-text="普通" />
+        </el-form-item>
+        <el-form-item label="特殊情况备注">
+          <el-input
+            v-model="noteForm.specialNote"
+            type="textarea"
+            :rows="4"
+            maxlength="1000"
+            show-word-limit
+            placeholder="例如：术后特殊情况、耗材使用需复核、家属沟通事项"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="noteDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="noteSaving" @click="savePatientNote">保存备注</el-button>
+      </template>
+    </el-dialog>
+
+    <el-drawer v-model="historyDrawerVisible" :title="`${historyPatientName} · 历史耗材`" size="70%" append-to-body>
+      <div v-loading="historyLoading" class="history-shell">
+        <article v-for="instance in patientHistory" :key="instance.serviceInstanceId" class="history-card">
+          <header>
+            <div>
+              <strong>{{ instance.businessDate }}</strong>
+              <span>{{ instance.departmentName }} · {{ instance.serviceName }}</span>
+            </div>
+            <el-tag :type="statusType(instance.status)" size="small" effect="plain">{{ statusLabel(instance.status) }}</el-tag>
+          </header>
+          <p v-if="instance.specialNote" class="history-note">备注：{{ instance.specialNote }}</p>
+          <div v-for="line in instance.lines" :key="line.lineId" class="history-line">
+            <span>{{ line.itemName }} × {{ formatQuantity(line.actualQuantity) }}{{ line.unit }}</span>
+            <el-tag
+              size="small"
+              effect="plain"
+              :type="line.reviewStatus === 'APPROVED' ? 'success' : line.reviewStatus === 'REJECTED' ? 'danger' : 'warning'"
+            >
+              {{ line.reviewStatus === "APPROVED" ? "已通过" : line.reviewStatus === "REJECTED" ? "已驳回" : "待审核" }}
+            </el-tag>
+          </div>
+          <p v-if="!instance.lines.length" class="history-empty">未使用耗材</p>
+        </article>
+        <el-empty v-if="!patientHistory.length && !historyLoading" description="暂无历史记录" />
+      </div>
+    </el-drawer>
 
     <el-dialog v-model="batchDialogVisible" title="批量提交审核" width="640px">
       <div class="batch-summary">
@@ -592,12 +713,16 @@ import {
   getInventoryPatientLastCombinationApi,
   getInventoryPatientPackagesApi,
   getInventoryPatientRecentItemsApi,
+  getInventoryPatientSourceApi,
+  getInventoryPatientTraceApi,
   getInventoryPatientWorkbenchApi,
   saveInventoryPatientDocumentApi,
+  saveInventoryPatientNoteApi,
   saveInventoryPatientPackageApi,
   searchInventoryPatientsApi,
   submitInventoryPatientBatchApi,
   submitInventoryPatientDocumentApi,
+  type InventoryPatientAvailableItem,
   type InventoryPatientBatchSubmitResult,
   type InventoryPatientConsumablePackage,
   type InventoryPatientConsumptionLine,
@@ -605,6 +730,7 @@ import {
   type InventoryPatientPresetItem,
   type InventoryPatientRecentItems,
   type InventoryPatientSearchResult,
+  type InventoryPatientSourceRow,
   type InventoryPatientWorkbench,
   type InventoryPatientWorkbenchRow
 } from "@/api/modules/inventory";
@@ -667,6 +793,24 @@ const drawerMode = ref<"QUICK" | "ALL">("QUICK");
 const searchInputRef = ref<{ focus: () => void } | null>(null);
 const batchDialogVisible = ref(false);
 const batchResult = ref<InventoryPatientBatchSubmitResult | null>(null);
+const sourceDrawerVisible = ref(false);
+const sourceKeyword = ref("");
+const sourceVisitType = ref("");
+const sourceDate = ref(todayValue);
+const sourceRows = ref<InventoryPatientSourceRow[]>([]);
+const sourceTotal = ref(0);
+const sourcePage = ref(1);
+const sourceLoading = ref(false);
+const sourceAddingId = ref("");
+const noteDialogVisible = ref(false);
+const noteSaving = ref(false);
+const noteForm = reactive({ specialNote: "", attentionFlag: false });
+const historyDrawerVisible = ref(false);
+const historyLoading = ref(false);
+const historyPatientName = ref("");
+const patientHistory = ref<InventoryPatientDetail[]>([]);
+const manualItemKeyword = ref("");
+const manualItemSelected = ref<InventoryPatientAvailableItem | null>(null);
 
 const manualDialogVisible = ref(false);
 const manualKeyword = ref("");
@@ -797,6 +941,18 @@ const canSubmitBatch = computed(() => batchMissing.value.length === 0 && !batchS
 const availableItemOptions = computed(() => {
   const items = detail.value?.availableItems ?? [];
   return items.filter(item => !lineState[item.itemId]);
+});
+
+const manualItemResults = computed(() => {
+  const keyword = manualItemKeyword.value.trim().toLowerCase();
+  return (detail.value?.availableItems ?? [])
+    .filter(item => !lineState[item.itemId] || item.itemId === addItemId.value)
+    .filter(item => {
+      if (!keyword) return true;
+      const initials = String(pinyin(item.itemName, { pattern: "first", toneType: "none" }));
+      return [item.itemName, ...(item.aliases ?? []), initials].join(" ").toLowerCase().includes(keyword);
+    })
+    .slice(0, 30);
 });
 
 const rejectedSummary = computed(() => {
@@ -1282,6 +1438,7 @@ const refreshWorkbenchOnly = async () => {
 };
 
 const openManualDialog = () => {
+  sourceDrawerVisible.value = false;
   manualDialogVisible.value = true;
   manualSelected.value = null;
   manualResults.value = [];
@@ -1334,29 +1491,174 @@ const saveManualPatient = async () => {
   }
 };
 
+const openPatientSource = async () => {
+  sourceKeyword.value = "";
+  sourceVisitType.value = "";
+  sourceDate.value = businessDate.value;
+  sourcePage.value = 1;
+  sourceDrawerVisible.value = true;
+  await loadPatientSource(true);
+};
+
+const loadPatientSource = async (reset = false) => {
+  if (reset) {
+    sourcePage.value = 1;
+    sourceRows.value = [];
+  }
+  sourceLoading.value = true;
+  try {
+    const result = await getInventoryPatientSourceApi({
+      keyword: sourceKeyword.value.trim() || undefined,
+      visitType: sourceVisitType.value || undefined,
+      date: sourceDate.value || undefined,
+      page: sourcePage.value,
+      size: 30
+    });
+    const list = result.data?.list ?? [];
+    sourceRows.value = reset ? list : [...sourceRows.value, ...list];
+    sourceTotal.value = result.data?.total ?? sourceRows.value.length;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取患者档案失败");
+  } finally {
+    sourceLoading.value = false;
+  }
+};
+
+const loadMoreSource = async () => {
+  sourcePage.value += 1;
+  await loadPatientSource(false);
+};
+
+const isSourceAdded = (row: InventoryPatientSourceRow) =>
+  workbench.value.patients.some(patient =>
+    (row.encounterId && patient.encounterId === row.encounterId) || patient.patientId === row.patientId
+  );
+
+const addPatientFromSource = async (row: InventoryPatientSourceRow) => {
+  if (!row.encounterId) {
+    ElMessage.warning("该患者没有可用就诊记录");
+    return;
+  }
+  const existing = workbench.value.patients.find(patient =>
+    patient.encounterId === row.encounterId || patient.patientId === row.patientId
+  );
+  if (existing) {
+    sourceDrawerVisible.value = false;
+    await selectPatient(existing, true);
+    return;
+  }
+  sourceAddingId.value = row.encounterId;
+  try {
+    const visitDate = row.encounterVisitDate || row.visitDate;
+    const startedAt = visitDate ? `${visitDate.slice(0, 10)}T08:00:00` : dayjs().format("YYYY-MM-DDTHH:mm:ss");
+    const visitType = row.encounterVisitType || row.visitType;
+    const result = await addInventoryManualPatientApi({
+      departmentKey: props.departmentKey,
+      encounterId: row.encounterId,
+      patientId: row.patientId,
+      patientName: row.patientName,
+      visitNo: row.encounterVisitNo || row.visitNo,
+      careType: visitType.includes("住院") ? "inpatient" : "outpatient",
+      serviceCode: "ARCHIVE",
+      serviceName: "患者档案加入",
+      serviceStartedAt: startedAt,
+      businessDate: businessDate.value,
+      note: "从患者档案加入"
+    });
+    sourceDrawerVisible.value = false;
+    await loadWorkbench(false);
+    const added = workbench.value.patients.find(patient => patient.serviceInstanceId === result.data?.serviceInstanceId);
+    if (added) await selectPatient(added, true);
+    ElMessage.success("患者已加入本科室工作台");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "加入患者失败");
+  } finally {
+    sourceAddingId.value = "";
+  }
+};
+
+const openNoteDialog = () => {
+  if (!detail.value) return;
+  noteForm.specialNote = detail.value.specialNote || "";
+  noteForm.attentionFlag = Boolean(detail.value.attentionFlag);
+  noteDialogVisible.value = true;
+};
+
+const savePatientNote = async () => {
+  const current = detail.value;
+  if (!current) return;
+  noteSaving.value = true;
+  try {
+    const result = await saveInventoryPatientNoteApi({
+      serviceInstanceId: current.serviceInstanceId,
+      specialNote: noteForm.specialNote.trim(),
+      attentionFlag: noteForm.attentionFlag
+    });
+    current.specialNote = result.data?.specialNote ?? noteForm.specialNote.trim();
+    current.attentionFlag = Boolean(result.data?.attentionFlag ?? noteForm.attentionFlag);
+    const row = workbench.value.patients.find(patient => patient.serviceInstanceId === current.serviceInstanceId);
+    if (row) {
+      row.specialNote = current.specialNote;
+      row.attentionFlag = current.attentionFlag;
+    }
+    noteDialogVisible.value = false;
+    ElMessage.success("患者备注已保存");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "保存患者备注失败");
+  } finally {
+    noteSaving.value = false;
+  }
+};
+
+const openHistory = async () => {
+  if (!detail.value?.patientId) return;
+  historyPatientName.value = detail.value.patientName || "患者";
+  historyDrawerVisible.value = true;
+  historyLoading.value = true;
+  try {
+    const result = await getInventoryPatientTraceApi(detail.value.patientId);
+    patientHistory.value = result.data?.instances ?? [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取患者历史失败");
+  } finally {
+    historyLoading.value = false;
+  }
+};
+
 const openAddItemDialog = () => {
   addItemDialogVisible.value = true;
   addItemId.value = "";
   addItemQuantity.value = 1;
   addItemReason.value = "";
+  manualItemKeyword.value = "";
+  manualItemSelected.value = null;
+};
+
+const selectManualItem = (item: InventoryPatientAvailableItem) => {
+  addItemId.value = item.itemId;
+  manualItemSelected.value = item;
+};
+
+const clearManualItem = () => {
+  addItemId.value = "";
+  manualItemSelected.value = null;
 };
 
 const addManualLine = () => {
-  if (!addItemId.value) {
-    ElMessage.warning("请选择耗材");
+  const item = manualItemSelected.value;
+  if (!item) {
+    ElMessage.warning("请先选择耗材");
     return;
   }
   if (!addItemReason.value.trim()) {
     ElMessage.warning("追加预设外耗材必须填写原因");
     return;
   }
-  if (lineState[addItemId.value]) {
+  if (lineState[item.itemId]) {
     ElMessage.warning("该耗材已在清单中");
     return;
   }
-  const item = (detail.value?.availableItems ?? []).find(option => option.itemId === addItemId.value);
-  if (!item) return;
-  if (item.itemId && (detail.value?.lines ?? []).some(line => line.itemId === item.itemId && line.reviewStatus === "APPROVED")) {
+  if ((detail.value?.lines ?? []).some(line => line.itemId === item.itemId && line.reviewStatus === "APPROVED")) {
     ElMessage.warning("该耗材已审核通过，不能重复添加");
     return;
   }
@@ -2579,6 +2881,215 @@ onMounted(() => {
     border-right: 0;
     border-bottom: 1px solid var(--hos-border-light);
   }
+}
+
+.patient-note {
+  margin: 4px 0 0;
+  color: var(--hos-status-warning);
+  font-size: 12px;
+}
+
+.manual-item-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  margin-top: 6px;
+  overflow: auto;
+}
+
+.manual-item-option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--hos-bg-surface);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: var(--hos-primary);
+  }
+
+  span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 12px;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+}
+
+.manual-item-selected {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  margin-top: 6px;
+  background: var(--hos-primary-soft);
+  border: 1px solid var(--hos-primary);
+  border-radius: 8px;
+
+  span {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 12px;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+}
+
+.source-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.source-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  .el-input {
+    width: 260px;
+  }
+
+  .el-select {
+    width: 140px;
+  }
+}
+
+.source-summary {
+  margin: 0;
+  color: var(--hos-text-muted);
+  font-size: 12px;
+}
+
+.source-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+  overflow: auto;
+}
+
+.source-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 12px;
+}
+
+.source-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 14px;
+  }
+
+  span {
+    color: var(--hos-text-secondary);
+    font-size: 11px;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+}
+
+.source-more {
+  text-align: center;
+}
+
+.history-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-card {
+  padding: 14px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 12px;
+
+  header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+
+    div {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    strong {
+      color: var(--hos-text-primary);
+      font-size: 14px;
+    }
+
+    span {
+      color: var(--hos-text-muted);
+      font-size: 11px;
+    }
+  }
+}
+
+.history-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--hos-border-light);
+  color: var(--hos-text-secondary);
+  font-size: 12px;
+}
+
+.history-note {
+  margin: 8px 0 0;
+  color: var(--hos-status-warning);
+  font-size: 11px;
+}
+
+.history-empty {
+  margin: 8px 0 0;
+  color: var(--hos-text-muted);
+  font-size: 11px;
 }
 
 @media (max-width: 1180px) {

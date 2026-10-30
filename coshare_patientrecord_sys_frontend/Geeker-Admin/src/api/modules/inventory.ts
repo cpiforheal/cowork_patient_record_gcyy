@@ -473,6 +473,8 @@ export interface InventoryPatientWorkbenchRow {
   submittedBy?: string;
   totalQuantity?: number;
   lineCount?: number;
+  specialNote?: string;
+  attentionFlag?: boolean;
 }
 
 export interface InventoryPatientWorkbench {
@@ -626,6 +628,29 @@ export interface InventoryPatientSearchResult {
     visitDate?: string;
     caseToken?: string;
   }>;
+}
+
+export interface InventoryPatientSourceRow {
+  patientId: string;
+  patientName: string;
+  visitNo: string;
+  visitDate: string;
+  visitType: string;
+  status: string;
+  encounterCount: number;
+  encounterId: string;
+  encounterVisitNo: string;
+  encounterVisitType: string;
+  encounterVisitDate: string;
+  caseToken: string;
+  currentStage: string;
+}
+
+export interface InventoryPatientSourceList {
+  total: number;
+  pageNum: number;
+  pageSize: number;
+  list: InventoryPatientSourceRow[];
 }
 
 export interface InventoryPatientReviewBatch {
@@ -1957,6 +1982,24 @@ export const getInventoryPatientDetailApi = async (serviceInstanceId: string) =>
 
 export const searchInventoryPatientsApi = async (keyword?: string) =>
   getInventoryData<InventoryPatientSearchResult>("/patient-workbench/patients", { keyword });
+
+export const getInventoryPatientSourceApi = async (params: {
+  keyword?: string;
+  visitType?: string;
+  date?: string;
+  page?: number;
+  size?: number;
+}) => getInventoryData<InventoryPatientSourceList>("/patient-workbench/patient-source", params);
+
+export const saveInventoryPatientNoteApi = async (payload: {
+  serviceInstanceId: string;
+  specialNote: string;
+  attentionFlag: boolean;
+}) =>
+  putInventoryData<{ serviceInstanceId: string; specialNote: string; attentionFlag: boolean }, typeof payload>(
+    "/patient-workbench/notes",
+    payload
+  );
 
 export const addInventoryManualPatientApi = async (payload: {
   departmentKey: string;

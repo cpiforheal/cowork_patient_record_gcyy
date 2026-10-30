@@ -592,6 +592,24 @@ public class InventoryApiController {
         return ApiResult.success(asMap(patientConsumptionService.lastCombination(patientId, departmentKey, user)));
     }
 
+    @GetMapping("/inventory-api/patient-workbench/patient-source")
+    public ApiResult<Map<String, Object>> patientWorkbenchSource(
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) String visitType,
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "30") int size
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.patientSource(keyword, visitType, date, page, size, user)));
+    }
+
+    @PutMapping("/inventory-api/patient-workbench/notes")
+    public ApiResult<Map<String, Object>> savePatientWorkbenchNote(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者备注已保存", asMap(patientConsumptionService.updateInstanceNote(toJson(payload), user)));
+    }
+
     @GetMapping("/inventory-api/patient-workbench/packages")
     public ApiResult<Map<String, Object>> patientWorkbenchPackages(@RequestParam String departmentKey) {
         SessionUser user = requireCapability("inventory:read");

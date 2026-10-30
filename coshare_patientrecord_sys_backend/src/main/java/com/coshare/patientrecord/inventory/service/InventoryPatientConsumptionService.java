@@ -427,6 +427,100 @@ public class InventoryPatientConsumptionService {
         return result;
     }
 
+    @Transactional
+    public ObjectNode updateInstanceNote(JsonNode payload, SessionUser user) {
+        String instanceId = text(payload, "serviceInstanceId");
+        Instance instance = requireInstance(instanceId, user);
+        String note = text(payload, "specialNote");
+        if (note.length() > 1000) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "备注不能超过 1000 个字符");
+        boolean attention = payload.path("attentionFlag").asBoolean(false);
+        jdbcTemplate.update(
+            "UPDATE inventory_service_instances SET special_note = ?, attention_flag = ? WHERE id = ?",
+            note, attention ? 1 : 0, instance.id()
+        );
+        repository.log(user.name(), "保存患者耗材备注", "inventory_service_instance", instance.patientName(),
+            attention ? "重点标记；" + note : note);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("serviceInstanceId", instance.id());
+        result.put("specialNote", note);
+        result.put("attentionFlag", attention);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode patientSource(String keyword, String visitType, LocalDate businessDate, int page, int size, SessionUser user) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        String search = keyword == null ? "" : keyword.trim();
+        String like = "%" + search + "%";
+        String type = visitType == null ? "" : visitType.trim();
+        String date = businessDate == null ? "" : businessDate.toString();
+        String joins = """
+            FROM clinic_patients p
+            LEFT JOIN clinic_patient_encounters e ON e.id = (
+              SELECT e2.id FROM clinic_patient_encounters e2
+              WHERE e2.patient_id = p.id
+              ORDER BY e2.visit_date DESC, e2.sort_no DESC LIMIT 1
+            )
+            LEFT JOIN pre_ai_encounters pe ON pe.id = (
+              SELECT pe2.id FROM pre_ai_encounters pe2
+              WHERE pe2.source_patient_id = p.id
+              ORDER BY pe2.updated_at DESC LIMIT 1
+            )
+            """;
+        String where = """
+            WHERE (? = '' OR p.name LIKE ? OR p.visit_no LIKE ? OR pe.case_token LIKE ?)
+              AND (? = '' OR COALESCE(e.visit_type, p.visit_type) = ?)
+              AND (? = '' OR LEFT(COALESCE(e.visit_date, p.visit_date), 10) = ?)
+            """;
+        List<Object> params = new ArrayList<>(List.of(search, like, like, like, type, type, date, date));
+        Integer total = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) " + joins + where,
+            Integer.class,
+            params.toArray()
+        );
+        params.add(safeSize);
+        params.add((safePage - 1) * safeSize);
+        ArrayNode list = jdbcTemplate.query(
+            """
+            SELECT p.id patient_id, p.name patient_name, p.visit_no, p.visit_date, p.visit_type,
+                   p.status, p.encounter_count, e.id encounter_id, e.visit_no encounter_visit_no,
+                   e.visit_type encounter_visit_type, e.visit_date encounter_visit_date,
+                   pe.case_token, pe.current_stage
+            """ + joins + where + """
+             ORDER BY COALESCE(e.visit_date, p.visit_date) DESC, p.updated_at DESC
+             LIMIT ? OFFSET ?
+            """,
+            resultSet -> {
+                ArrayNode rows = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = rows.addObject();
+                    row.put("patientId", resultSet.getString("patient_id"));
+                    row.put("patientName", resultSet.getString("patient_name"));
+                    row.put("visitNo", resultSet.getString("visit_no") == null ? "" : resultSet.getString("visit_no"));
+                    row.put("visitDate", resultSet.getString("visit_date") == null ? "" : resultSet.getString("visit_date"));
+                    row.put("visitType", resultSet.getString("visit_type") == null ? "" : resultSet.getString("visit_type"));
+                    row.put("status", resultSet.getString("status") == null ? "" : resultSet.getString("status"));
+                    row.put("encounterCount", resultSet.getInt("encounter_count"));
+                    row.put("encounterId", resultSet.getString("encounter_id") == null ? "" : resultSet.getString("encounter_id"));
+                    row.put("encounterVisitNo", resultSet.getString("encounter_visit_no") == null ? "" : resultSet.getString("encounter_visit_no"));
+                    row.put("encounterVisitType", resultSet.getString("encounter_visit_type") == null ? "" : resultSet.getString("encounter_visit_type"));
+                    row.put("encounterVisitDate", resultSet.getString("encounter_visit_date") == null ? "" : resultSet.getString("encounter_visit_date"));
+                    row.put("caseToken", resultSet.getString("case_token") == null ? "" : resultSet.getString("case_token"));
+                    row.put("currentStage", resultSet.getString("current_stage") == null ? "" : resultSet.getString("current_stage"));
+                }
+                return rows;
+            },
+            params.toArray()
+        );
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("total", total == null ? 0 : total);
+        result.put("pageNum", safePage);
+        result.put("pageSize", safeSize);
+        result.set("list", list);
+        return result;
+    }
+
     @Transactional(readOnly = true)
     public ObjectNode packages(String departmentKey, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
@@ -1149,6 +1243,8 @@ public class InventoryPatientConsumptionService {
             ? "" : resultSet.getTimestamp("service_started_at").toLocalDateTime().toString());
         row.put("businessDate", resultSet.getDate("business_date") == null
             ? "" : resultSet.getDate("business_date").toLocalDate().toString());
+        row.put("specialNote", resultSet.getString("special_note") == null ? "" : resultSet.getString("special_note"));
+        row.put("attentionFlag", resultSet.getBoolean("attention_flag"));
         boolean hasDocument = hasColumn(resultSet, "document_id");
         String documentId = hasDocument ? resultSet.getString("document_id") : null;
         row.put("documentId", documentId == null ? "" : documentId);
@@ -1183,6 +1279,8 @@ public class InventoryPatientConsumptionService {
         row.put("stageCode", instance.stageCode());
         row.put("serviceStartedAt", instance.serviceStartedAt().toString());
         row.put("businessDate", instance.businessDate().toString());
+        row.put("specialNote", instance.specialNote());
+        row.put("attentionFlag", instance.attentionFlag());
         return row;
     }
 
@@ -1241,7 +1339,7 @@ public class InventoryPatientConsumptionService {
     }
 
     private ObjectNode workbenchSummary(ArrayNode patients) {
-        int total = 0, draft = 0, submitted = 0, approved = 0, returned = 0, notStarted = 0, noConsumption = 0;
+        int total = 0, draft = 0, submitted = 0, approved = 0, returned = 0, notStarted = 0, noConsumption = 0, attention = 0;
         for (JsonNode patient : patients) {
             total++;
             String status = patient.path("status").asText("");
@@ -1254,6 +1352,7 @@ public class InventoryPatientConsumptionService {
                 default -> { }
             }
             if (patient.path("noConsumption").asBoolean(false)) noConsumption++;
+            if (patient.path("attentionFlag").asBoolean(false)) attention++;
         }
         ObjectNode summary = objectMapper.createObjectNode();
         summary.put("total", total);
@@ -1263,6 +1362,7 @@ public class InventoryPatientConsumptionService {
         summary.put("returned", returned);
         summary.put("notStarted", notStarted);
         summary.put("noConsumption", noConsumption);
+        summary.put("attention", attention);
         summary.put("entered", total - notStarted);
         summary.put("missing", notStarted);
         summary.put("progress", total == 0 ? 0 : Math.round((total - notStarted) * 100.0 / total));
@@ -1280,7 +1380,9 @@ public class InventoryPatientConsumptionService {
                 resultSet.getString("department_id"), resultSet.getString("department_key"), resultSet.getString("department_name"),
                 resultSet.getString("service_code"), resultSet.getString("service_name"), resultSet.getString("stage_code"),
                 resultSet.getTimestamp("service_started_at").toLocalDateTime(),
-                resultSet.getDate("business_date").toLocalDate()
+                resultSet.getDate("business_date").toLocalDate(),
+                resultSet.getString("special_note") == null ? "" : resultSet.getString("special_note"),
+                resultSet.getBoolean("attention_flag")
             ),
             id
         );
@@ -1536,7 +1638,7 @@ public class InventoryPatientConsumptionService {
         String id, String sourceType, String sourceEventId, String encounterId, String careEncounterId,
         String patientId, String patientName, String visitNo, String careType, String departmentId,
         String departmentKey, String departmentName, String serviceCode, String serviceName, String stageCode,
-        LocalDateTime serviceStartedAt, LocalDate businessDate
+        LocalDateTime serviceStartedAt, LocalDate businessDate, String specialNote, boolean attentionFlag
     ) {}
 
     private record BatchPatient(
