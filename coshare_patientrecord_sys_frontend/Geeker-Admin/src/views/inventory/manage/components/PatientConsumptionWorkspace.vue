@@ -3,48 +3,47 @@
     <header class="patient-toolbar">
       <div class="toolbar-copy">
         <span class="eyebrow">患者耗材 · {{ departmentName || "本科室" }}</span>
-        <h2>今天到本科室的患者</h2>
-        <p>按患者勾选实际使用的耗材；常用项已预勾选，数量默认取预设值，可改。提交后由库管审核，审核通过才扣库存。</p>
+        <h2>患者耗材录入</h2>
+        <p>班后补录：选患者 → 选耗材 → 下一位；最后统一提交。</p>
       </div>
       <div class="toolbar-actions">
-        <el-date-picker
-          v-model="businessDate"
-          type="date"
-          value-format="YYYY-MM-DD"
-          :clearable="false"
-          :disabled="loading"
-          @change="reload"
-        />
+        <div class="date-strip">
+          <button
+            v-for="day in recentDays"
+            :key="day.value"
+            type="button"
+            class="date-chip"
+            :class="{ 'is-active': businessDate === day.value }"
+            @click="changeDate(day.value)"
+          >
+            {{ day.label }}
+          </button>
+          <el-date-picker
+            v-model="businessDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :clearable="false"
+            :disabled="loading"
+            class="date-picker-compact"
+            @change="changeDate"
+          />
+        </div>
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
         <el-button type="primary" :loading="batchSubmitting" @click="openBatchSubmit">批量提交</el-button>
         <el-button type="primary" plain :icon="Plus" @click="openManualDialog">手动补录患者</el-button>
       </div>
     </header>
 
-    <div class="summary-strip">
-      <div class="summary-item">
-        <small>今日患者</small>
-        <strong>{{ workbench.summary.total || 0 }}</strong>
-      </div>
-      <div class="summary-item is-draft">
-        <small>草稿</small>
-        <strong>{{ workbench.summary.draft || 0 }}</strong>
-      </div>
-      <div class="summary-item is-pending">
-        <small>待审核</small>
-        <strong>{{ workbench.summary.submitted || 0 }}</strong>
-      </div>
-      <div class="summary-item is-approved">
-        <small>已通过</small>
-        <strong>{{ workbench.summary.approved || 0 }}</strong>
-      </div>
-      <div class="summary-item is-returned">
-        <small>已驳回</small>
-        <strong>{{ workbench.summary.returned || 0 }}</strong>
-      </div>
-      <div class="summary-item is-empty">
-        <small>未开始</small>
-        <strong>{{ workbench.summary.notStarted || 0 }}</strong>
+    <div class="status-strip">
+      <span class="status-progress">已录 <b>{{ summary.entered || 0 }}</b> / <b>{{ summary.total || 0 }}</b></span>
+      <span><b>{{ summary.notStarted || 0 }}</b> 未录</span>
+      <span><b>{{ summary.draft || 0 }}</b> 草稿</span>
+      <span><b>{{ summary.submitted || 0 }}</b> 待审</span>
+      <span><b>{{ summary.returned || 0 }}</b> 驳回</span>
+      <span><b>{{ summary.approved || 0 }}</b> 通过</span>
+      <span v-if="businessDate !== todayValue" class="backfill-badge">补录模式</span>
+      <div class="status-progress-bar" aria-hidden="true">
+        <span :style="{ width: `${progress}%` }"></span>
       </div>
     </div>
 
@@ -150,7 +149,7 @@
               <h4>已选耗材</h4>
               <p>{{ selectedLines.length }} 项 · 数量默认取预设，可改</p>
             </div>
-            <el-button type="primary" size="large" :icon="Plus" :disabled="!editable" @click="drawerVisible = true">
+            <el-button type="primary" size="large" :icon="Plus" :disabled="!editable" @click="openConsumableDrawer">
               选择耗材
             </el-button>
           </div>
@@ -178,9 +177,18 @@
 
         <footer class="sticky-actions">
           <span class="save-state">{{ saveState || "未保存" }}</span>
-          <el-button :loading="saving" :disabled="!editable" @click="saveAndNext">保存并下一位</el-button>
           <el-button
             type="primary"
+            size="large"
+            :loading="saving"
+            :disabled="!editable"
+            @click="saveAndNext"
+          >
+            保存并下一位
+          </el-button>
+          <el-button
+            plain
+            size="large"
             :loading="saving"
             :disabled="!editable || hasApprovedLines"
             @click="noConsumptionAndNext"
@@ -211,8 +219,8 @@
             <h3>{{ detail?.serviceName || "服务" }} · 已选 {{ selectedLines.length }} 项</h3>
           </div>
           <div class="drawer-head-actions">
-            <span class="drawer-hint">搜索名称、拼音首字母或别名</span>
-            <el-button type="primary" @click="drawerVisible = false">完成选择</el-button>
+            <span class="drawer-hint">/ 搜索 · Enter 添加第一项 · Esc 关闭</span>
+            <el-button circle text :icon="Close" aria-label="关闭耗材选择" @click="drawerVisible = false" />
           </div>
         </header>
         <div class="drawer-grid">
@@ -273,15 +281,38 @@
                         v-model="itemKeyword"
                         class="item-search"
                         placeholder="搜索耗材名称 / 拼音首字母 / 别名"
+                        aria-label="搜索耗材"
                         clearable
                         :prefix-icon="Search"
+                        @keyup.enter.prevent="addFirstVisibleItem"
                       />
                       <el-button :icon="Plus" :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
                       <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
                       <span class="line-counter">已选 {{ selectedLines.length }} 项</span>
                     </div>
 
-                    <section v-if="commonItems.length" class="quick-section">
+                    <div class="drawer-mode">
+                      <button
+                        type="button"
+                        class="mode-tab"
+                        :class="{ 'is-active': drawerMode === 'QUICK' && !itemKeyword }"
+                        @click="drawerMode = 'QUICK'; itemKeyword = ''"
+                      >
+                        快捷选择
+                      </button>
+                      <button
+                        type="button"
+                        class="mode-tab"
+                        :class="{ 'is-active': drawerMode === 'ALL' || itemKeyword }"
+                        @click="drawerMode = 'ALL'"
+                      >
+                        全部预设
+                      </button>
+                      <span v-if="itemKeyword" class="mode-count">搜索到 {{ searchCount }} 项</span>
+                      <span v-else class="mode-count">{{ presetItems.length }} 项可选用</span>
+                    </div>
+
+                    <section v-if="!showFullPresetList && commonItems.length" class="quick-section">
                       <div class="section-title"><h4>常用</h4><span>点一下加入，不默认勾选</span></div>
                       <div class="chip-row">
                         <button
@@ -298,7 +329,7 @@
                       </div>
                     </section>
 
-                    <section v-if="recentItems.length" class="quick-section">
+                    <section v-if="!showFullPresetList && recentItems.length" class="quick-section">
                       <div class="section-title"><h4>最近使用</h4><span>当前账号近 30 天</span></div>
                       <div class="chip-row">
                         <button
@@ -315,9 +346,14 @@
                       </div>
                     </section>
 
+                    <div v-if="!showFullPresetList" class="quick-browse">
+                      <p v-if="!commonItems.length && !recentItems.length">还没有常用项和最近使用记录。</p>
+                      <el-button type="primary" plain @click="drawerMode = 'ALL'">
+                        浏览全部预设（{{ presetItems.length }} 项）
+                      </el-button>
+                    </div>
 
-
-                    <div class="checklist-scroll">
+                    <div v-if="showFullPresetList" class="checklist-scroll">
                       <section v-for="group in visibleGroups" :key="group.name" class="checklist-group">
                         <header class="group-head">
                           <h4>{{ group.name }}</h4>
@@ -375,7 +411,7 @@
                       <el-empty
                         v-if="!visibleGroups.length && !manualLines.length"
                         :image-size="80"
-                        description="该科室还没有已映射到物资主数据的预设耗材，请先完成规则配置"
+                        :description="itemKeyword ? '没有匹配耗材，试试别名或拼音首字母' : '该科室还没有已映射到物资主数据的预设耗材，请先完成规则配置'"
                       />
                     </div>
 
@@ -516,7 +552,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Refresh, Search } from "@element-plus/icons-vue";
+import { Close, Plus, Refresh, Search } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
 import { pinyin } from "pinyin-pro";
 import {
@@ -568,7 +604,8 @@ const emptyWorkbench = (): InventoryPatientWorkbench => ({
   summary: { total: 0, draft: 0, submitted: 0, approved: 0, returned: 0, notStarted: 0 }
 });
 
-const businessDate = ref(props.today || dayjs().format("YYYY-MM-DD"));
+const todayValue = props.today || dayjs().format("YYYY-MM-DD");
+const businessDate = ref(todayValue);
 const workbench = ref<InventoryPatientWorkbench>(emptyWorkbench());
 const detail = ref<InventoryPatientDetail | null>(null);
 const selectedId = ref("");
@@ -584,6 +621,7 @@ const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
 const saveState = ref("");
 const showFullVisitNo = ref(false);
 const drawerVisible = ref(false);
+const drawerMode = ref<"QUICK" | "ALL">("QUICK");
 const searchInputRef = ref<{ focus: () => void } | null>(null);
 const batchDialogVisible = ref(false);
 const batchResult = ref<InventoryPatientBatchSubmitResult | null>(null);
@@ -661,6 +699,20 @@ const previousPatient = computed(() => {
   const index = workbench.value.patients.findIndex(patient => patient.serviceInstanceId === selectedId.value);
   return index > 0 ? workbench.value.patients[index - 1] : null;
 });
+const summary = computed(() => workbench.value.summary);
+const progress = computed(() => {
+  const total = summary.value.total || 0;
+  const missing = summary.value.notStarted || 0;
+  return total ? Math.round(((total - missing) * 100) / total) : 0;
+});
+const recentDays = computed(() =>
+  Array.from({ length: 7 }, (_, index) => {
+    const value = dayjs().subtract(index, "day").format("YYYY-MM-DD");
+    return { value, label: index === 0 ? "今天" : index === 1 ? "昨天" : dayjs(value).format("MM-DD") };
+  })
+);
+const showFullPresetList = computed(() => drawerMode.value === "ALL" || itemKeyword.value.trim().length > 0);
+const searchCount = computed(() => visibleGroups.value.reduce((sum, group) => sum + group.items.length, 0));
 const batchMissing = computed(() => workbench.value.patients.filter(patient => patient.status === "NOT_STARTED"));
 const canSubmitBatch = computed(() => batchMissing.value.length === 0 && !batchSubmitting.value);
 
@@ -1191,6 +1243,28 @@ const formatDateTime = (value?: string) => {
 
 const focusSearch = () => {
   searchInputRef.value?.focus();
+};
+
+const openConsumableDrawer = () => {
+  drawerMode.value = "QUICK";
+  itemKeyword.value = "";
+  drawerVisible.value = true;
+};
+
+const addFirstVisibleItem = () => {
+  if (!itemKeyword.value.trim()) return;
+  const first = visibleGroups.value[0]?.items[0];
+  if (first && !isChecked(first)) toggleItem(first, true);
+};
+
+const changeDate = async (value: string) => {
+  if (!value || value === businessDate.value) return;
+  if (detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
+    await persistDraft(true);
+  }
+  businessDate.value = value;
+  selectedId.value = "";
+  await loadWorkbench(false);
 };
 
 const maskVisitNo = (value?: string) => {
@@ -1947,6 +2021,150 @@ onMounted(() => {
   strong {
     font-size: 18px;
   }
+}
+
+.patient-toolbar {
+  padding: 14px 18px;
+  border-radius: 14px;
+}
+
+.toolbar-copy {
+  h2 {
+    margin-bottom: 3px;
+    font-size: 20px;
+  }
+
+  p {
+    font-size: 12px;
+  }
+}
+
+.date-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.date-chip {
+  padding: 5px 10px;
+  color: var(--hos-text-secondary);
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+
+  &.is-active {
+    color: #fff;
+    background: var(--hos-primary);
+    border-color: var(--hos-primary);
+  }
+}
+
+.date-picker-compact {
+  width: 128px;
+}
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 4px 2px;
+  color: var(--hos-text-muted);
+  font-size: 12px;
+
+  b {
+    margin: 0 2px;
+    color: var(--hos-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.status-progress {
+  color: var(--hos-text-secondary);
+  font-weight: 600;
+}
+
+.status-progress-bar {
+  flex: 1 1 180px;
+  height: 4px;
+  overflow: hidden;
+  background: var(--hos-border-light);
+  border-radius: 999px;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--hos-primary);
+    transition: width 200ms ease;
+  }
+}
+
+.backfill-badge {
+  padding: 2px 8px;
+  color: var(--hos-status-warning);
+  background: var(--hos-status-warning-soft);
+  border-radius: 999px;
+}
+
+.drawer-mode {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--hos-border-light);
+}
+
+.mode-tab {
+  padding: 6px 12px;
+  color: var(--hos-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+
+  &.is-active {
+    color: var(--hos-primary);
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-primary);
+  }
+}
+
+.mode-count {
+  margin-left: auto;
+  color: var(--hos-text-muted);
+  font-size: 11px;
+}
+
+.quick-browse {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 14px;
+  background: var(--hos-bg-primary);
+  border: 1px dashed var(--hos-border);
+  border-radius: 12px;
+
+  p {
+    margin: 0;
+    color: var(--hos-text-muted);
+    font-size: 12px;
+  }
+}
+
+.drawer-right .detail-toolbar {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.drawer-left .selected-section {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .selection-summary {
