@@ -610,6 +610,22 @@ public class InventoryApiController {
         return ApiResult.of(200, "患者备注已保存", asMap(patientConsumptionService.updateInstanceNote(toJson(payload), user)));
     }
 
+    @GetMapping("/inventory-api/patient-workbench/packages/all")
+    public ApiResult<Map<String, Object>> allPatientWorkbenchPackages() {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(patientConsumptionService.allPackages()));
+    }
+
+    @GetMapping("/inventory-api/consumable-usage")
+    public ApiResult<Map<String, Object>> consumableUsage(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) String itemId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.consumableUsage(date, departmentKey, itemId, user)));
+    }
+
     @GetMapping("/inventory-api/patient-workbench/packages")
     public ApiResult<Map<String, Object>> patientWorkbenchPackages(@RequestParam String departmentKey) {
         SessionUser user = requireCapability("inventory:read");

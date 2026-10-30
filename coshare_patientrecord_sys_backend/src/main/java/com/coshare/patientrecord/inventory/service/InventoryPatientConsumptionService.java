@@ -531,6 +531,156 @@ public class InventoryPatientConsumptionService {
     }
 
     @Transactional(readOnly = true)
+    public ObjectNode allPackages() {
+        List<ObjectNode> rows = jdbcTemplate.query(
+            """
+            SELECT id, department_key, department_name, name, created_by, created_at, updated_at
+            FROM inventory_patient_consumable_packages
+            ORDER BY department_name, name
+            """,
+            (resultSet, rowNum) -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                row.put("id", resultSet.getString("id"));
+                row.put("departmentKey", resultSet.getString("department_key"));
+                row.put("departmentName", resultSet.getString("department_name"));
+                row.put("name", resultSet.getString("name"));
+                row.put("createdBy", resultSet.getString("created_by"));
+                row.put("updatedAt", resultSet.getTimestamp("updated_at") == null
+                    ? "" : resultSet.getTimestamp("updated_at").toLocalDateTime().toString());
+                return row;
+            }
+        );
+        ArrayNode packages = objectMapper.createArrayNode();
+        for (ObjectNode row : rows) {
+            row.set("items", packageLines(row.path("id").asText()));
+            packages.add(row);
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("packages", packages);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public ObjectNode consumableUsage(LocalDate businessDate, String departmentKey, String itemId, SessionUser user) {
+        LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
+        String department = departmentKey == null ? "" : departmentKey.trim();
+        if (!department.isBlank()) {
+            requireDepartment(department, user);
+        } else if (!inventoryAccess.canViewAllDepartments(user)) {
+            department = departmentKeyForUser(user);
+        }
+        String item = itemId == null ? "" : itemId.trim();
+        if (!item.isBlank()) {
+            ArrayNode patients = jdbcTemplate.query(
+                """
+                SELECT si.patient_id, si.patient_name, si.visit_no, si.department_name, si.service_name,
+                       l.actual_quantity, l.review_status, d.status document_status, si.attention_flag
+                FROM inventory_patient_consumption_lines l
+                JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+                JOIN inventory_service_instances si ON si.id = d.service_instance_id
+                WHERE si.business_date = ?
+                  AND (? = '' OR si.department_key = ?)
+                  AND l.item_id = ?
+                  AND l.review_status <> 'REJECTED'
+                ORDER BY si.department_name, si.patient_name
+                """,
+                resultSet -> {
+                    ArrayNode list = objectMapper.createArrayNode();
+                    while (resultSet.next()) {
+                        ObjectNode row = list.addObject();
+                        row.put("patientId", resultSet.getString("patient_id"));
+                        row.put("patientName", resultSet.getString("patient_name"));
+                        row.put("visitNo", resultSet.getString("visit_no"));
+                        row.put("departmentName", resultSet.getString("department_name"));
+                        row.put("serviceName", resultSet.getString("service_name"));
+                        row.put("quantity", resultSet.getBigDecimal("actual_quantity"));
+                        row.put("reviewStatus", resultSet.getString("review_status"));
+                        row.put("documentStatus", resultSet.getString("document_status"));
+                        row.put("attentionFlag", resultSet.getBoolean("attention_flag"));
+                    }
+                    return list;
+                },
+                date, department, department, item
+            );
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("businessDate", date.toString());
+            result.put("departmentKey", department);
+            result.put("itemId", item);
+            result.set("patients", patients);
+            return result;
+        }
+        ArrayNode items = jdbcTemplate.query(
+            """
+            SELECT l.item_id,
+                   MAX(COALESCE(l.item_name_snapshot, i.name)) item_name,
+                   MAX(COALESCE(l.unit_snapshot, i.unit)) unit,
+                   SUM(l.actual_quantity) quantity,
+                   COUNT(DISTINCT si.patient_id) patient_count,
+                   SUM(CASE WHEN l.review_status = 'APPROVED' THEN l.actual_quantity ELSE 0 END) approved_quantity,
+                   SUM(CASE WHEN l.review_status = 'SUBMITTED' THEN l.actual_quantity ELSE 0 END) pending_quantity
+            FROM inventory_patient_consumption_lines l
+            JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+            JOIN inventory_service_instances si ON si.id = d.service_instance_id
+            LEFT JOIN inventory_items i ON i.id = l.item_id
+            WHERE si.business_date = ?
+              AND (? = '' OR si.department_key = ?)
+              AND l.review_status <> 'REJECTED'
+            GROUP BY l.item_id
+            ORDER BY quantity DESC, item_name
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", resultSet.getString("item_name"));
+                    row.put("unit", resultSet.getString("unit"));
+                    row.put("quantity", resultSet.getBigDecimal("quantity"));
+                    row.put("patientCount", resultSet.getInt("patient_count"));
+                    row.put("approvedQuantity", resultSet.getBigDecimal("approved_quantity"));
+                    row.put("pendingQuantity", resultSet.getBigDecimal("pending_quantity"));
+                }
+                return list;
+            },
+            date, department, department
+        );
+        ObjectNode totals = objectMapper.createObjectNode();
+        totals.put("itemCount", items.size());
+        BigDecimal totalQuantity = BigDecimal.ZERO;
+        for (JsonNode row : items) {
+            totalQuantity = totalQuantity.add(row.path("quantity").decimalValue());
+        }
+        Integer distinctPatients = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(DISTINCT si.patient_id)
+            FROM inventory_patient_consumption_lines l
+            JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+            JOIN inventory_service_instances si ON si.id = d.service_instance_id
+            WHERE si.business_date = ? AND (? = '' OR si.department_key = ?)
+              AND l.review_status <> 'REJECTED'
+            """,
+            Integer.class,
+            date, department, department
+        );
+        totals.put("totalQuantity", totalQuantity);
+        totals.put("patientCount", distinctPatients == null ? 0 : distinctPatients);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("businessDate", date.toString());
+        result.put("departmentKey", department);
+        result.set("totals", totals);
+        result.set("items", items);
+        return result;
+    }
+
+    private String departmentKeyForUser(SessionUser user) {
+        String name = canonicalDepartmentName(user.department());
+        for (Department department : DEPARTMENTS.values()) {
+            if (department.name().equals(name)) return department.key();
+        }
+        return "";
+    }
+
+    @Transactional(readOnly = true)
     public ObjectNode packages(String departmentKey, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         List<ObjectNode> rows = jdbcTemplate.query(
@@ -645,9 +795,11 @@ public class InventoryPatientConsumptionService {
     private ArrayNode packageLines(String packageId) {
         return jdbcTemplate.query(
             """
-            SELECT l.item_id, i.name item_name, i.unit item_unit, l.quantity, l.source, l.exception_reason
+            SELECT l.item_id, l.item_name_snapshot, l.unit_snapshot,
+                   i.name mapped_item_name, i.unit mapped_unit,
+                   l.quantity, l.source, l.exception_reason
             FROM inventory_patient_consumable_package_lines l
-            JOIN inventory_items i ON i.id = l.item_id
+            LEFT JOIN inventory_items i ON i.id = l.item_id
             WHERE l.package_id = ?
             ORDER BY l.line_no
             """,
@@ -655,9 +807,13 @@ public class InventoryPatientConsumptionService {
                 ArrayNode list = objectMapper.createArrayNode();
                 while (resultSet.next()) {
                     ObjectNode row = list.addObject();
+                    String snapshotName = firstNonBlank(resultSet.getString("item_name_snapshot"), resultSet.getString("mapped_item_name"));
+                    String mappedName = firstNonBlank(resultSet.getString("mapped_item_name"), snapshotName);
                     row.put("itemId", resultSet.getString("item_id"));
-                    row.put("itemName", resultSet.getString("item_name"));
-                    row.put("unit", resultSet.getString("item_unit"));
+                    row.put("itemName", snapshotName);
+                    row.put("unit", firstNonBlank(resultSet.getString("unit_snapshot"), resultSet.getString("mapped_unit")));
+                    row.put("mappedItemName", mappedName);
+                    row.put("mappingConflict", !normalizeMaterial(snapshotName).equals(normalizeMaterial(mappedName)));
                     row.put("quantity", resultSet.getBigDecimal("quantity"));
                     row.put("source", resultSet.getString("source"));
                     row.put("exceptionReason", resultSet.getString("exception_reason"));
@@ -1048,8 +1204,8 @@ public class InventoryPatientConsumptionService {
                     ObjectNode row = list.addObject();
                     row.put("lineId", resultSet.getString("id"));
                     row.put("itemId", resultSet.getString("item_id"));
-                    row.put("itemName", firstNonBlank(resultSet.getString("item_name"), resultSet.getString("item_name_snapshot")));
-                    row.put("unit", firstNonBlank(resultSet.getString("item_unit"), resultSet.getString("unit_snapshot")));
+                    row.put("itemName", firstNonBlank(resultSet.getString("item_name_snapshot"), resultSet.getString("item_name")));
+                    row.put("unit", firstNonBlank(resultSet.getString("unit_snapshot"), resultSet.getString("item_unit")));
                     row.put("ruleId", resultSet.getString("rule_id"));
                     row.put("presetQuantity", resultSet.getBigDecimal("preset_quantity"));
                     row.put("actualQuantity", resultSet.getBigDecimal("actual_quantity"));
@@ -1079,15 +1235,19 @@ public class InventoryPatientConsumptionService {
             BigDecimal actual = decimal(node, "actualQuantity");
             if (actual == null || actual.signum() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "实际用量必须为非负数");
             if (actual.signum() == 0) continue;
-            if (!seen.add(itemId)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "同一患者不能重复添加同一耗材");
             ItemSnapshot item = requireItem(itemId);
+            String displayName = firstNonBlank(text(node, "itemName"), item.name());
+            String displayUnit = firstNonBlank(text(node, "unit"), item.unit());
+            if (!seen.add(itemId + "|" + displayName + "|" + displayUnit)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "同一患者不能重复添加同一耗材");
+            }
             BigDecimal preset = decimal(node, "presetQuantity");
             String source = firstNonBlank(text(node, "source"), "PRESET").toUpperCase(Locale.ROOT);
             String exceptionReason = text(node, "exceptionReason");
             if ("MANUAL".equals(source) && exceptionReason.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "追加预设外耗材时必须填写原因");
             }
-            lines.add(new LineDraft(item.id(), item.name(), item.unit(), text(node, "ruleId"), text(node, "ruleVersion"),
+            lines.add(new LineDraft(item.id(), displayName, displayUnit, text(node, "ruleId"), text(node, "ruleVersion"),
                 preset, actual, source, exceptionReason));
         }
         return lines;
@@ -1590,6 +1750,10 @@ public class InventoryPatientConsumptionService {
 
     private static String text(JsonNode node, String field) {
         return node == null ? "" : node.path(field).asText("").trim();
+    }
+
+    private static String normalizeMaterial(String value) {
+        return value == null ? "" : value.replaceAll("[（(].*?[）)]", "").replaceAll("\\s", "").trim();
     }
 
     private static String firstNonBlank(String... values) {

@@ -17,6 +17,7 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   daily: "inventoryDaily",
   patientReview: "inventoryPatientReview",
   patientTrace: "inventoryPatientTrace",
+  consumableWorkbench: "inventoryConsumableWorkbench",
   roles: "inventoryRoles"
 };
 
@@ -41,6 +42,7 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   daily: ["inventory:read"],
   patientReview: ["inventory:approve"],
   patientTrace: ["inventory:read"],
+  consumableWorkbench: ["inventory:read"],
   roles: ["inventory:role:manage"],
   messageBoard: ["inventory:read"]
 };
@@ -106,6 +108,11 @@ export const getInventorySystemMenu = (
         meta: meta("患者耗材追溯", "Search")
       },
       {
+        path: `${INVENTORY_SYSTEM_PREFIX}/consumable-workbench`,
+        name: "inventorySystemConsumableWorkbench",
+        meta: meta("耗材工作台", "DataLine")
+      },
+      {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
         name: "inventorySystemRoleManagement",
         meta: meta("账号管理", "UserFilled")
@@ -124,6 +131,11 @@ export const getInventorySystemMenu = (
       path: `${INVENTORY_SYSTEM_PREFIX}/departments/${departmentKey}`,
       name: "inventorySystemPortalDepartment",
       meta: meta(department ? `我的科室日报（${department.title}）` : "我的科室日报", "EditPen")
+    },
+    {
+      path: `${INVENTORY_SYSTEM_PREFIX}/consumable-workbench`,
+      name: "inventorySystemConsumableWorkbench",
+      meta: meta("耗材工作台", "DataLine")
     },
     {
       path: `${INVENTORY_SYSTEM_PREFIX}/message-board`,
@@ -170,6 +182,7 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/daily-verification": "daily",
     "/inventory-system/patient-review": "patientReview",
     "/inventory-system/patient-trace": "patientTrace",
+    "/inventory-system/consumable-workbench": "consumableWorkbench",
     "/inventory-system/role-management": "roles"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
@@ -311,6 +324,12 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     name: "inventorySystemPatientTrace",
     component: inventoryView,
     meta: meta("患者耗材追溯", "Search")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/consumable-workbench`,
+    name: "inventorySystemConsumableWorkbench",
+    component: inventoryView,
+    meta: meta("耗材工作台", "DataLine")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,

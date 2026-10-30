@@ -113,9 +113,13 @@ router.beforeEach(async to => {
             to.path === "/inventory-system/daily-verification" ||
             to.path === "/inventory-system/patient-review" ||
             to.path === "/inventory-system/patient-trace" ||
+            to.path === "/inventory-system/consumable-workbench" ||
             to.path === "/inventory-system/role-management" ||
             to.path.startsWith("/inventory-system/departments/")
-          : isMessageBoard || to.path === departmentPath || (isPackageRoute && hasPackageAccess);
+          : isMessageBoard ||
+            to.path === departmentPath ||
+            to.path === "/inventory-system/consumable-workbench" ||
+            (isPackageRoute && hasPackageAccess);
         if (!allowed) return { path: portalLanding, replace: true };
       }
       const tab = inventoryTabFromPath(to.path);

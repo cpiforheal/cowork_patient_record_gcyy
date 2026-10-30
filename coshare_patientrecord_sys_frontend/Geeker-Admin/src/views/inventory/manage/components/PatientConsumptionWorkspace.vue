@@ -1086,20 +1086,18 @@ const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
   if (!editable.value || !pkg.items.length) return;
   try {
     await ElMessageBox.confirm(
-      `套用“${pkg.name}”的 ${pkg.items.length} 项耗材？已审核通过的项不会被覆盖。`,
+      `将当前未审核耗材替换为“${pkg.name}”的 ${pkg.items.length} 项内容？已审核通过的项会保留。`,
       "套用患者套餐",
       { confirmButtonText: "套用", cancelButtonText: "取消", type: "warning" }
     );
   } catch {
     return;
   }
+  Object.keys(lineState).forEach(key => {
+    if (lineState[key]?.reviewStatus !== "APPROVED") delete lineState[key];
+  });
   pkg.items.forEach(item => {
     if (lineState[item.itemId]?.reviewStatus === "APPROVED") return;
-    const existing = lineState[item.itemId];
-    if (existing) {
-      existing.actualQuantity = Number(item.quantity || 1);
-      return;
-    }
     lineState[item.itemId] = {
       itemId: item.itemId,
       itemName: item.itemName,
@@ -1109,7 +1107,7 @@ const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
       exceptionReason: item.exceptionReason || (item.source === "MANUAL" ? "患者套餐" : undefined)
     };
   });
-  ElMessage.success(`已套用“${pkg.name}”`);
+  ElMessage.success(`已套用“${pkg.name}”，当前清单已按套餐替换`);
 };
 
 const deletePackage = async (pkg: InventoryPatientConsumablePackage) => {
@@ -1223,6 +1221,8 @@ const buildPayload = (noConsumption = false) => ({
         .filter(line => line.reviewStatus !== "APPROVED")
         .map(line => ({
           itemId: line.itemId,
+          itemName: line.itemName,
+          unit: line.unit,
           ruleId: line.ruleId,
           presetQuantity: line.presetQuantity,
           actualQuantity: line.actualQuantity,

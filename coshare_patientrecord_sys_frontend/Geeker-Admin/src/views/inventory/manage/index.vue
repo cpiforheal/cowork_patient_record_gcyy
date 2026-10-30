@@ -254,6 +254,10 @@
             <PatientConsumptionTracePanel />
           </template>
 
+          <template v-else-if="activeTab === 'consumableWorkbench'">
+            <ConsumableUsageWorkbenchPanel :can-view-all-departments="canViewAllDepartments" :today="today()" />
+          </template>
+
           <template v-else-if="activeTab === 'roles'">
             <InventoryRolePanel
               :roles="inventoryRoles"
@@ -604,6 +608,7 @@ import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWo
 import PatientConsumptionWorkspace from "./components/PatientConsumptionWorkspace.vue";
 import PatientConsumptionReviewPanel from "./components/PatientConsumptionReviewPanel.vue";
 import PatientConsumptionTracePanel from "./components/PatientConsumptionTracePanel.vue";
+import ConsumableUsageWorkbenchPanel from "./components/ConsumableUsageWorkbenchPanel.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
@@ -774,6 +779,7 @@ const tabRoutePathMap: Record<string, string> = {
   daily: "/inventory/daily",
   patientReview: "/inventory/patient-review",
   patientTrace: "/inventory/patient-trace",
+  consumableWorkbench: "/inventory/consumable-workbench",
   roles: "/inventory/roles"
 };
 const inventorySystemTabRoutePathMap: Record<string, string> = {
@@ -789,6 +795,7 @@ const inventorySystemTabRoutePathMap: Record<string, string> = {
   daily: "/inventory-system/daily-verification",
   patientReview: "/inventory-system/patient-review",
   patientTrace: "/inventory-system/patient-trace",
+  consumableWorkbench: "/inventory-system/consumable-workbench",
   roles: "/inventory-system/role-management"
 };
 const inventoryDepartmentRouteMap: Record<string, string> = {
@@ -832,6 +839,7 @@ const tabRouteNameMap: Record<string, string> = {
   daily: "inventoryDaily",
   patientReview: "inventoryPatientReview",
   patientTrace: "inventoryPatientTrace",
+  consumableWorkbench: "inventoryConsumableWorkbench",
   roles: "inventoryRoles"
 };
 const routeTabMap: Record<string, string> = {
@@ -849,6 +857,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory/daily": "daily",
   "/inventory/patient-review": "patientReview",
   "/inventory/patient-trace": "patientTrace",
+  "/inventory/consumable-workbench": "consumableWorkbench",
   "/inventory/roles": "roles",
   "/inventory-system/dashboard": "overview",
   "/inventory-system/executive": "executive",
@@ -864,6 +873,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory-system/daily-verification": "daily",
   "/inventory-system/patient-review": "patientReview",
   "/inventory-system/patient-trace": "patientTrace",
+  "/inventory-system/consumable-workbench": "consumableWorkbench",
   "/inventory-system/role-management": "roles"
 };
 const isStandaloneConsumableEntry = computed(
@@ -890,6 +900,7 @@ const tabNavItems = [
   { tab: "daily", title: "每日核对与导出" },
   { tab: "patientReview", title: "患者耗材审核" },
   { tab: "patientTrace", title: "患者耗材追溯" },
+  { tab: "consumableWorkbench", title: "耗材工作台" },
   { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
@@ -1065,6 +1076,14 @@ const tabProfiles = {
     taskTitle: "以患者服务实例为最小单位",
     taskDesc: "同一患者同日多个科室服务会分别保留，不合并、不覆盖。"
   },
+  consumableWorkbench: {
+    kicker: "统计汇总 / 耗材工作台",
+    title: "今日耗材使用汇总",
+    desc: "按科室和业务日期汇总耗材使用量，点击耗材查看患者名单和审核状态。",
+    taskLabel: "统计口径",
+    taskTitle: "只看当天已记录的耗材",
+    taskDesc: "驳回行不计入汇总；管理端可切换全院或单个科室。"
+  },
   roles: {
     kicker: "管理设置 / 岗位与权限",
     title: "岗位与权限",
@@ -1109,6 +1128,7 @@ const tabAuthMap: Record<string, readonly string[]> = {
   daily: ["inventory:read"],
   patientReview: ["inventory:approve"],
   patientTrace: ["inventory:read"],
+  consumableWorkbench: ["inventory:read"],
   roles: ["inventory:role:manage"]
 };
 const canViewAllDepartments = computed(() =>

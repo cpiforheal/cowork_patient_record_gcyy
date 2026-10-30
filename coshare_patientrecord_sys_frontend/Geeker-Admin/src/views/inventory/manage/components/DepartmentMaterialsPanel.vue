@@ -9,7 +9,9 @@
               ? "全院耗材定额总控制台（每人次 / 固定日耗 / 按需领取 / 仪器触发）"
               : workspace === "mapping"
                 ? "把定额规则映射到库存物资主数据"
-                : `${selectedDepartment || "全部科室"} · ${visibleRows.length} 项耗材`
+                : workspace === "patientPackages"
+                  ? "各科室保存的患者耗材套餐，可查看并修改数量"
+                  : `${selectedDepartment || "全部科室"} · ${visibleRows.length} 项耗材`
           }}
         </span>
       </div>
@@ -17,11 +19,13 @@
         <el-radio-button value="quota">耗材定额</el-radio-button>
         <el-radio-button value="packages">自动扣减套餐</el-radio-button>
         <el-radio-button value="mapping">物资映射</el-radio-button>
+        <el-radio-button value="patientPackages">患者套餐</el-radio-button>
       </el-radio-group>
     </header>
 
     <QuotaConsolePanel v-if="workspace === 'quota'" @saved="$emit('saved')" />
     <QuotaItemMappingPanel v-else-if="workspace === 'mapping'" @saved="$emit('saved')" />
+    <PatientPackageAdminPanel v-else-if="workspace === 'patientPackages'" />
 
     <template v-else-if="workspace === 'packages'">
       <el-alert
@@ -101,6 +105,7 @@ import { Refresh } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/modules/user";
 import QuotaConsolePanel from "./QuotaConsolePanel.vue";
 import QuotaItemMappingPanel from "./QuotaItemMappingPanel.vue";
+import PatientPackageAdminPanel from "./PatientPackageAdminPanel.vue";
 import {
   getInventoryDbApi,
   saveInventoryPackageApi,
@@ -110,7 +115,7 @@ import {
   type InventoryPackageStatus
 } from "@/api/modules/inventory";
 
-const workspace = ref<"quota" | "packages" | "mapping">("quota");
+const workspace = ref<"quota" | "packages" | "mapping" | "patientPackages">("quota");
 defineEmits<{ saved: [] }>();
 
 const departmentCatalog = [

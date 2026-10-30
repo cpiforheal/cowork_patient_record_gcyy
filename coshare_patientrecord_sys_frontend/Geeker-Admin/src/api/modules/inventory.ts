@@ -552,6 +552,8 @@ export interface InventoryPatientDocumentSavePayload {
   noConsumption?: boolean;
   lines: Array<{
     itemId: string;
+    itemName?: string;
+    unit?: string;
     ruleId?: string;
     presetQuantity?: number;
     actualQuantity: number;
@@ -598,6 +600,8 @@ export interface InventoryPatientConsumablePackageItem {
   quantity: number;
   source?: string;
   exceptionReason?: string;
+  mappedItemName?: string;
+  mappingConflict?: boolean;
 }
 
 export interface InventoryPatientConsumablePackage {
@@ -2036,6 +2040,9 @@ export const getInventoryPatientLastCombinationApi = async (params: { patientId:
 export const getInventoryPatientPackagesApi = async (params: { departmentKey: string }) =>
   getInventoryData<InventoryPatientConsumablePackageList>("/patient-workbench/packages", params);
 
+export const getAllInventoryPatientPackagesApi = async () =>
+  getInventoryData<InventoryPatientConsumablePackageList>("/patient-workbench/packages/all");
+
 export const saveInventoryPatientPackageApi = async (payload: {
   departmentKey: string;
   name: string;
@@ -2064,6 +2071,43 @@ export const getInventoryPatientTraceApi = async (patientId: string) =>
     cutoverDate?: string;
     instances: InventoryPatientDetail[];
   }>("/patient-trace", { patientId });
+
+export interface InventoryConsumableUsageItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  quantity: number;
+  patientCount: number;
+  approvedQuantity: number;
+  pendingQuantity: number;
+}
+
+export interface InventoryConsumableUsagePatient {
+  patientId: string;
+  patientName: string;
+  visitNo?: string;
+  departmentName: string;
+  serviceName?: string;
+  quantity: number;
+  reviewStatus: string;
+  documentStatus: string;
+  attentionFlag?: boolean;
+}
+
+export interface InventoryConsumableUsage {
+  businessDate: string;
+  departmentKey: string;
+  totals?: { itemCount: number; totalQuantity: number; patientCount: number };
+  items?: InventoryConsumableUsageItem[];
+  itemId?: string;
+  patients?: InventoryConsumableUsagePatient[];
+}
+
+export const getInventoryConsumableUsageApi = async (params: {
+  date?: string;
+  departmentKey?: string;
+  itemId?: string;
+}) => getInventoryData<InventoryConsumableUsage>("/consumable-usage", params);
 
 export const getInventoryPatientDashboardApi = async (date?: string) =>
   getInventoryData<{
