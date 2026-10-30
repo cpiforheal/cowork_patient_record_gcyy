@@ -187,9 +187,9 @@
             size="large"
             :loading="saving"
             :disabled="!editable"
-            @click="saveAndNext"
+            @click="submitAndNext"
           >
-            保存并下一位
+            提交并下一位
           </el-button>
           <el-button
             plain
@@ -199,6 +199,9 @@
             @click="noConsumptionAndNext"
           >
             未使用并下一位
+          </el-button>
+          <el-button text size="large" :loading="saving" :disabled="!editable" @click="saveAndNext">
+            仅保存
           </el-button>
         </footer>
       </main>
@@ -580,27 +583,41 @@
           />
           <el-button :icon="Refresh" :loading="sourceLoading" @click="loadPatientSource(true)">刷新</el-button>
           <el-button @click="openManualDialog">手动新增</el-button>
+          <el-switch v-model="sourceOnlyUnadded" active-text="只看未加入" />
         </div>
-        <p class="source-summary">共 {{ sourceTotal }} 位患者，按录入时间从新到旧排列</p>
+        <p class="source-summary">
+          共 {{ sourceTotal }} 位患者；当前显示 {{ visibleSourceRows.length }} 位未加入患者，点击整行即可加入。
+        </p>
         <div v-loading="sourceLoading" class="source-list">
-          <div v-for="row in sourceRows" :key="row.patientId + '-' + (row.encounterId || '')" class="source-card">
+          <div
+            v-for="row in visibleSourceRows"
+            :key="row.patientId + '-' + (row.encounterId || '')"
+            class="source-card"
+            :class="{ 'is-added': isSourceAdded(row) }"
+            @click="addPatientFromSource(row)"
+          >
             <div class="source-main">
               <strong>{{ row.patientName }}</strong>
               <span>{{ row.caseToken || row.visitNo }} · {{ row.encounterVisitType || row.visitType }} · {{ row.encounterVisitDate || row.visitDate }}</span>
               <small>{{ row.currentStage || row.status || "未记录阶段" }} · {{ row.encounterCount }} 次就诊</small>
             </div>
             <el-button
+              v-if="row.encounterId"
               size="small"
               :type="isSourceAdded(row) ? 'success' : 'primary'"
               :plain="isSourceAdded(row)"
               :loading="sourceAddingId === row.encounterId"
-              :disabled="!row.encounterId"
-              @click="addPatientFromSource(row)"
+              @click.stop="addPatientFromSource(row)"
             >
               {{ isSourceAdded(row) ? "已在工作台" : "加入本科室" }}
             </el-button>
+            <el-tag v-else size="small" type="info" effect="plain">无就诊记录</el-tag>
           </div>
-          <el-empty v-if="!sourceRows.length && !sourceLoading" description="没有匹配患者；可手动新增" />
+          <el-empty v-if="!visibleSourceRows.length && !sourceLoading" description="当前没有未加入的患者">
+            <el-button v-if="sourceRows.length" text type="primary" @click="sourceOnlyUnadded = false">
+              显示已加入患者
+            </el-button>
+          </el-empty>
         </div>
         <div v-if="sourceRows.length < sourceTotal" class="source-more">
           <el-button :loading="sourceLoading" @click="loadMoreSource">加载更多</el-button>
@@ -801,6 +818,7 @@ const sourceDate = ref(todayValue);
 const sourceRows = ref<InventoryPatientSourceRow[]>([]);
 const sourceTotal = ref(0);
 const sourcePage = ref(1);
+const sourceOnlyUnadded = ref(true);
 const sourceLoading = ref(false);
 const sourceAddingId = ref("");
 const noteDialogVisible = ref(false);
@@ -936,6 +954,15 @@ const recentDays = computed(() =>
 );
 const showFullPresetList = computed(() => drawerMode.value === "ALL" || itemKeyword.value.trim().length > 0);
 const searchCount = computed(() => visibleGroups.value.reduce((sum, group) => sum + group.items.length, 0));
+const visibleSourceRows = computed(() =>
+  sourceOnlyUnadded.value
+    ? sourceRows.value.filter(row =>
+        !workbench.value.patients.some(patient =>
+          (row.encounterId && patient.encounterId === row.encounterId) || patient.patientId === row.patientId
+        )
+      )
+    : sourceRows.value
+);
 const batchMissing = computed(() => workbench.value.patients.filter(patient => patient.status === "NOT_STARTED"));
 const canSubmitBatch = computed(() => batchMissing.value.length === 0 && !batchSubmitting.value);
 
@@ -1314,9 +1341,30 @@ const saveAndNext = async () => {
   if (result) await selectNextPatient();
 };
 
+const submitAndNext = async () => {
+  const result = await persistDraft(false, false);
+  if (!result?.documentId) return;
+  try {
+    await submitInventoryPatientDocumentApi(result.documentId);
+    await loadWorkbench(true);
+    await selectNextPatient();
+    ElMessage.success("已提交库管审核");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "提交审核失败");
+  }
+};
+
 const noConsumptionAndNext = async () => {
   const result = await persistDraft(false, true);
-  if (result) await selectNextPatient();
+  if (!result?.documentId) return;
+  try {
+    await submitInventoryPatientDocumentApi(result.documentId);
+    await loadWorkbench(true);
+    await selectNextPatient();
+    ElMessage.success("已标记未使用并提交审核");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "提交审核失败");
+  }
 };
 
 const applyLinesFromDetail = (lines: InventoryPatientConsumptionLine[]) => {
@@ -3006,6 +3054,25 @@ onMounted(() => {
   background: var(--hos-bg-primary);
   border: 1px solid var(--hos-border-light);
   border-radius: 12px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+
+  &:hover {
+    border-color: var(--hos-primary);
+    transform: translateY(-1px);
+  }
+
+  &.is-added {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  &.is-added:hover {
+    border-color: var(--hos-border-light);
+    transform: none;
+  }
 }
 
 .source-main {

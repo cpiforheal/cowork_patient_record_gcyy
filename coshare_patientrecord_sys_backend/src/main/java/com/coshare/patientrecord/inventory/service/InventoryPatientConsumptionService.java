@@ -468,9 +468,16 @@ public class InventoryPatientConsumptionService {
               ORDER BY pe2.updated_at DESC LIMIT 1
             )
             """;
+        String visitTypeExpression = """
+            COALESCE(
+              e.visit_type,
+              CASE WHEN pe.inventory_care_type = 'inpatient' THEN '住院' ELSE '门诊' END,
+              p.visit_type
+            )
+            """;
         String where = """
             WHERE (? = '' OR p.name LIKE ? OR p.visit_no LIKE ? OR pe.case_token LIKE ?)
-              AND (? = '' OR COALESCE(e.visit_type, p.visit_type) = ?)
+              AND (? = '' OR """ + visitTypeExpression + " = ?)\n" + """
               AND (? = '' OR LEFT(COALESCE(e.visit_date, p.visit_date), 10) = ?)
             """;
         List<Object> params = new ArrayList<>(List.of(search, like, like, like, type, type, date, date));
@@ -484,8 +491,10 @@ public class InventoryPatientConsumptionService {
         ArrayNode list = jdbcTemplate.query(
             """
             SELECT p.id patient_id, p.name patient_name, p.visit_no, p.visit_date, p.visit_type,
-                   p.status, p.encounter_count, e.id encounter_id, e.visit_no encounter_visit_no,
-                   e.visit_type encounter_visit_type, e.visit_date encounter_visit_date,
+                   p.status, p.encounter_count, COALESCE(e.id, pe.id) encounter_id,
+                   COALESCE(CAST(e.visit_no AS CHAR), CAST(pe.visit_no AS CHAR), p.visit_no) encounter_visit_no,
+                   """ + visitTypeExpression + " encounter_visit_type,\n" + """
+                   COALESCE(e.visit_date, p.visit_date) encounter_visit_date,
                    pe.case_token, pe.current_stage
             """ + joins + where + """
              ORDER BY COALESCE(e.visit_date, p.visit_date) DESC, p.updated_at DESC
@@ -1125,6 +1134,12 @@ public class InventoryPatientConsumptionService {
     ) {
         String id = "service-instance-" + UUID.randomUUID();
         String departmentId = resolveDepartmentId(department.key());
+        List<String> existingDay = jdbcTemplate.query(
+            "SELECT id FROM inventory_service_instances WHERE patient_id = ? AND department_key = ? AND business_date = ? LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString(1),
+            patientId, department.key(), businessDate
+        );
+        if (!existingDay.isEmpty()) return existingDay.get(0);
         jdbcTemplate.update(
             """
             INSERT INTO inventory_service_instances
