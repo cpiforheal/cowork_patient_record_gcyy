@@ -301,6 +301,12 @@ public class InventoryDepartmentDailyReportService {
         result.put("entryMode", department.entryMode());
         result.put("month", first.toString());
         result.put("today", LocalDate.now().toString());
+        Integer todayNewPatients = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM pre_ai_encounters WHERE DATE(created_at) = ?",
+            Integer.class,
+            LocalDate.now()
+        );
+        result.put("todayNewPatients", todayNewPatients == null ? 0 : todayNewPatients);
         result.set("days", days);
         return result;
     }

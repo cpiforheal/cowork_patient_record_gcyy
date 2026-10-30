@@ -1905,6 +1905,7 @@ export interface InventoryDepartmentDailyReportCalendar {
   entryMode: "PATIENT" | "DAILY";
   month: string;
   today: string;
+  todayNewPatients?: number;
   days: InventoryDepartmentDailyReportCalendarDay[];
 }
 

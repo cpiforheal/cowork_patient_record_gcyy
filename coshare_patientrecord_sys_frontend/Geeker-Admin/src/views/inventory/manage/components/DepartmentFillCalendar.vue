@@ -1,5 +1,5 @@
 <template>
-  <aside class="fill-calendar" aria-label="填写日历">
+  <aside class="fill-calendar" :class="{ 'is-wide': wide }" aria-label="填写日历">
     <header class="calendar-head">
       <div class="calendar-title">
         <span class="eyebrow">填写日历</span>
@@ -13,11 +13,12 @@
     </header>
 
     <div class="calendar-summary">
-      <span><b>{{ filledDays }}</b> 天已填</span>
+      <span><b>{{ filledDays }}</b> 天已填完</span>
       <span v-if="mode === 'PATIENT'"><b>{{ monthPeople }}</b> 人已填</span>
       <span v-else><b>{{ monthLines }}</b> 项已填</span>
       <span v-if="missingDays" class="is-missing"><b>{{ missingDays }}</b> 天未填</span>
       <span v-if="suggestDays" class="is-suggest"><b>{{ suggestDays }}</b> 天待补</span>
+      <span v-if="mode === 'PATIENT' && todayNewPatients" class="is-new">全院新到 <b>{{ todayNewPatients }}</b> 人</span>
     </div>
 
     <div v-loading="loading" class="calendar-grid" role="grid">
@@ -95,7 +96,9 @@ const props = defineProps<{
   selectedDate: string;
   mode: "PATIENT" | "DAILY";
   days: InventoryDepartmentDailyReportCalendarDay[];
+  todayNewPatients?: number;
   loading?: boolean;
+  wide?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -247,6 +250,51 @@ const select = (date: string) => {
   border-radius: 14px;
 }
 
+.fill-calendar.is-wide {
+  display: grid;
+  grid-template-areas:
+    "head grid"
+    "summary grid"
+    "legend grid"
+    "selected grid";
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  gap: 10px 22px;
+  align-items: start;
+
+  .calendar-head {
+    grid-area: head;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .calendar-summary {
+    grid-area: summary;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .calendar-grid {
+    grid-area: grid;
+    min-height: 252px;
+  }
+
+  .calendar-cell {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    height: 50px;
+    padding: 8px 10px;
+  }
+
+  .calendar-legend {
+    grid-area: legend;
+  }
+
+  .calendar-selected {
+    grid-area: selected;
+  }
+}
+
 .calendar-head {
   display: flex;
   gap: 8px;
@@ -310,6 +358,10 @@ const select = (date: string) => {
 
   .is-suggest b {
     color: var(--fill-warn);
+  }
+
+  .is-new b {
+    color: var(--fill-brand);
   }
 }
 
@@ -551,6 +603,31 @@ const select = (date: string) => {
   &.is-suggest {
     color: var(--fill-warn);
     background: var(--fill-warn-soft);
+  }
+}
+
+@media (max-width: 1180px) {
+  .fill-calendar.is-wide {
+    display: flex;
+    flex-direction: column;
+
+    .calendar-head {
+      flex-direction: row;
+      align-items: flex-start;
+    }
+
+    .calendar-summary {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    .calendar-grid {
+      min-height: 224px;
+    }
+
+    .calendar-cell {
+      height: 46px;
+    }
   }
 }
 
