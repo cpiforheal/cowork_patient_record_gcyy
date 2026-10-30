@@ -63,7 +63,7 @@ public class InventoryPatientConsumptionService {
     public ObjectNode workbench(String departmentKey, LocalDate businessDate, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
-        ArrayNode patients = jdbcTemplate.query(
+        ArrayNode instanceRows = jdbcTemplate.query(
             """
             SELECT si.*, d.id document_id, d.status document_status, d.revision document_revision,
                    d.submitted_at, d.submitted_by, d.no_consumption document_no_consumption,
@@ -85,6 +85,77 @@ public class InventoryPatientConsumptionService {
             },
             department.key(), date
         );
+        Map<String, ObjectNode> instanceByPatient = new LinkedHashMap<>();
+        Map<String, ObjectNode> instanceByEncounter = new LinkedHashMap<>();
+        for (JsonNode node : instanceRows) {
+            if (!(node instanceof ObjectNode row)) continue;
+            instanceByPatient.putIfAbsent(row.path("patientId").asText(), row);
+            instanceByEncounter.putIfAbsent(row.path("encounterId").asText(), row);
+        }
+        ArrayNode patients = JsonNodeFactory.instance.arrayNode();
+        Set<String> usedInstances = new java.util.HashSet<>();
+        Set<String> seenPatients = new java.util.HashSet<>();
+        jdbcTemplate.query(
+            """
+            SELECT e.id encounter_id,
+                   COALESCE(NULLIF(e.source_patient_id, ''), e.patient_case_id, e.id) patient_id,
+                   COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.patientName')), ''),
+                            NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.patient_json, '$.name')), ''), '未命名患者') patient_name,
+                   CAST(e.visit_no AS CHAR) visit_no,
+                   e.inventory_care_type care_type,
+                   e.current_stage,
+                   e.created_at
+            FROM pre_ai_encounters e
+            LEFT JOIN pre_ai_patient_cases c ON c.id = e.patient_case_id
+            WHERE e.status <> 'CANCELLED' AND DATE(e.created_at) = ?
+            ORDER BY e.created_at, e.id
+            """,
+            resultSet -> {
+                while (resultSet.next()) {
+                    String patientId = resultSet.getString("patient_id");
+                    String encounterId = resultSet.getString("encounter_id");
+                    ObjectNode matched = instanceByPatient.get(patientId);
+                    if (matched == null) matched = instanceByEncounter.get(encounterId);
+                    if (matched != null) {
+                        if (usedInstances.add(matched.path("serviceInstanceId").asText())) patients.add(matched);
+                        continue;
+                    }
+                    if (!seenPatients.add(patientId)) continue;
+                    ObjectNode row = objectMapper.createObjectNode();
+                    row.put("serviceInstanceId", "");
+                    row.put("sourceType", "REGISTRATION");
+                    row.put("patientId", patientId);
+                    row.put("patientName", resultSet.getString("patient_name"));
+                    row.put("visitNo", resultSet.getString("visit_no") == null ? "" : resultSet.getString("visit_no"));
+                    row.put("encounterId", encounterId);
+                    row.put("careType", resultSet.getString("care_type"));
+                    row.put("departmentId", "");
+                    row.put("departmentKey", department.key());
+                    row.put("departmentName", department.name());
+                    row.put("serviceCode", "REGISTRATION");
+                    row.put("serviceName", "前台登记");
+                    row.put("stageCode", resultSet.getString("current_stage") == null ? "" : resultSet.getString("current_stage"));
+                    row.put("serviceStartedAt", resultSet.getString("created_at") == null ? "" : resultSet.getString("created_at"));
+                    row.put("businessDate", date.toString());
+                    row.put("specialNote", "");
+                    row.put("attentionFlag", false);
+                    row.put("documentId", "");
+                    row.put("status", "NOT_STARTED");
+                    row.put("revision", 0);
+                    row.put("submittedAt", "");
+                    row.put("submittedBy", "");
+                    row.put("noConsumption", false);
+                    row.put("totalQuantity", BigDecimal.ZERO);
+                    row.put("lineCount", 0);
+                    patients.add(row);
+                }
+            },
+            date
+        );
+        for (JsonNode node : instanceRows) {
+            if (!(node instanceof ObjectNode row)) continue;
+            if (usedInstances.add(row.path("serviceInstanceId").asText())) patients.add(row);
+        }
         ObjectNode result = JsonNodeFactory.instance.objectNode();
         result.put("departmentKey", department.key());
         result.put("departmentName", department.name());
@@ -841,8 +912,9 @@ public class InventoryPatientConsumptionService {
         LocalDate businessDate = parseDate(firstNonBlank(text(payload, "businessDate"), startedAt.toLocalDate().toString()));
         String serviceCode = firstNonBlank(text(payload, "serviceCode"), "MANUAL");
         String serviceName = firstNonBlank(text(payload, "serviceName"), "手动补录");
+        String sourceType = "REGISTRATION".equalsIgnoreCase(text(payload, "sourceType")) ? "REGISTRATION" : "MANUAL";
         String instanceId = insertInstance(
-            "MANUAL", null, encounterId, patient.careEncounterId(), firstNonBlank(text(payload, "patientId"), patient.id()),
+            sourceType, null, encounterId, patient.careEncounterId(), firstNonBlank(text(payload, "patientId"), patient.id()),
             patientName, visitNo, careType, department, serviceCode, serviceName, text(payload, "stageCode"),
             startedAt, businessDate, firstNonBlank(text(payload, "note"), "科室手动补录"), user.name()
         );

@@ -242,9 +242,9 @@ public class InventoryDepartmentDailyReportService {
         if ("PATIENT".equals(department.entryMode())) {
             jdbcTemplate.query(
                 """
-                SELECT si.business_date,
+                SELECT roster.business_date,
                        COUNT(*) patient_total,
-                       COUNT(DISTINCT CASE WHEN d.id IS NOT NULL THEN si.patient_id END) patient_count,
+                       COUNT(DISTINCT d.patient_id) patient_count,
                        SUM(CASE WHEN d.status IN ('SUBMITTED', 'PARTIALLY_APPROVED', 'APPROVED') THEN 1 ELSE 0 END) entered,
                        SUM(CASE WHEN d.status = 'DRAFT' THEN 1 ELSE 0 END) draft,
                        SUM(CASE WHEN d.status = 'RETURNED' THEN 1 ELSE 0 END) returned,
@@ -252,10 +252,20 @@ public class InventoryDepartmentDailyReportService {
                             AND (SELECT COUNT(*) FROM inventory_patient_consumption_lines l WHERE l.document_id = d.id) = 0)
                            THEN 1 ELSE 0 END) missing,
                        SUM(CASE WHEN COALESCE(d.no_consumption, 0) = 1 THEN 1 ELSE 0 END) no_consumption
-                FROM inventory_service_instances si
-                LEFT JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
-                WHERE si.department_key = ? AND si.business_date BETWEEN ? AND ?
-                GROUP BY si.business_date
+                FROM (
+                  SELECT DATE(e.created_at) business_date,
+                         COALESCE(NULLIF(e.source_patient_id, ''), e.patient_case_id, e.id) patient_id
+                  FROM pre_ai_encounters e
+                  WHERE e.status <> 'CANCELLED' AND DATE(e.created_at) BETWEEN ? AND ?
+                  GROUP BY DATE(e.created_at), COALESCE(NULLIF(e.source_patient_id, ''), e.patient_case_id, e.id)
+                  UNION
+                  SELECT si.business_date, si.patient_id
+                  FROM inventory_service_instances si
+                  WHERE si.department_key = ? AND si.business_date BETWEEN ? AND ?
+                ) roster
+                LEFT JOIN inventory_patient_consumption_documents d
+                  ON d.patient_id = roster.patient_id AND d.department_key = ? AND d.business_date = roster.business_date
+                GROUP BY roster.business_date
                 """,
                 resultSet -> {
                     while (resultSet.next()) {
@@ -280,7 +290,7 @@ public class InventoryDepartmentDailyReportService {
                         row.put("noConsumption", resultSet.getInt("no_consumption"));
                     }
                 },
-                department.key(), first, last
+                first, last, department.key(), first, last, department.key()
             );
         }
         ArrayNode calendarDays = objectMapper.createArrayNode();
@@ -301,14 +311,28 @@ public class InventoryDepartmentDailyReportService {
         result.put("entryMode", department.entryMode());
         result.put("month", first.toString());
         result.put("today", LocalDate.now().toString());
-        Integer todayNewPatients = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM pre_ai_encounters WHERE DATE(created_at) = ?",
-            Integer.class,
-            LocalDate.now()
-        );
-        result.put("todayNewPatients", todayNewPatients == null ? 0 : todayNewPatients);
+        result.put("expectedFrom", expectedFrom(department).toString());
         result.set("days", days);
         return result;
+    }
+
+    private LocalDate expectedFrom(Department department) {
+        List<String> cutover = jdbcTemplate.query(
+            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'patient_detail_cutover_date'",
+            (resultSet, rowNum) -> resultSet.getString(1)
+        );
+        if (!cutover.isEmpty() && cutover.get(0) != null && !cutover.get(0).isBlank()) {
+            try {
+                return LocalDate.parse(cutover.get(0).trim());
+            } catch (Exception ignored) {
+                // Fall back to the department's first recorded day.
+            }
+        }
+        String sql = "DAILY".equals(department.entryMode())
+            ? "SELECT MIN(business_date) FROM inventory_department_daily_reports WHERE department_key = ?"
+            : "SELECT MIN(business_date) FROM inventory_service_instances WHERE department_key = ?";
+        java.sql.Date earliest = jdbcTemplate.query(sql, resultSet -> resultSet.next() ? resultSet.getDate(1) : null, department.key());
+        return earliest == null ? LocalDate.now() : earliest.toLocalDate();
     }
 
     @Transactional(readOnly = true)

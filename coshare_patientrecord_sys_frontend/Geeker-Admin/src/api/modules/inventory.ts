@@ -503,6 +503,7 @@ export interface InventoryPatientWorkbenchRow {
   submittedBy?: string;
   totalQuantity?: number;
   lineCount?: number;
+  noConsumption?: boolean;
   specialNote?: string;
   attentionFlag?: boolean;
 }
@@ -1905,7 +1906,7 @@ export interface InventoryDepartmentDailyReportCalendar {
   entryMode: "PATIENT" | "DAILY";
   month: string;
   today: string;
-  todayNewPatients?: number;
+  expectedFrom?: string;
   days: InventoryDepartmentDailyReportCalendarDay[];
 }
 
@@ -2113,6 +2114,8 @@ export const addInventoryManualPatientApi = async (payload: {
   serviceName?: string;
   serviceStartedAt?: string;
   businessDate?: string;
+  stageCode?: string;
+  sourceType?: "REGISTRATION" | "MANUAL";
   note?: string;
 }) => postInventoryData<InventoryPatientDetail, typeof payload>("/patient-workbench/manual-patients", payload);
 

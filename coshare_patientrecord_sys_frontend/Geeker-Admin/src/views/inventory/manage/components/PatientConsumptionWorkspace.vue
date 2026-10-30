@@ -55,7 +55,7 @@
       :selected-date="businessDate"
       mode="PATIENT"
       :days="calendarDays"
-      :today-new-patients="todayNewPatients"
+      :expected-from="calendarExpectedFrom"
       :loading="calendarLoading"
       @update:month="changeCalendarMonth"
       @select-date="selectCalendarDate"
@@ -72,7 +72,7 @@
           />
           <el-select v-model="statusFilter" class="status-filter" aria-label="筛选患者状态">
             <el-option label="全部状态" value="ALL" />
-            <el-option label="未录入优先" value="NOT_STARTED" />
+            <el-option label="未录入" value="NOT_STARTED" />
             <el-option label="草稿" value="DRAFT" />
             <el-option label="待审核" value="SUBMITTED" />
             <el-option label="已驳回" value="RETURNED" />
@@ -83,10 +83,13 @@
         <div class="patient-list" role="list">
           <button
             v-for="patient in filteredPatients"
-            :key="patient.serviceInstanceId"
+            :key="patient.serviceInstanceId || patient.encounterId || patient.patientId"
             type="button"
             class="patient-card"
-            :class="{ 'is-active': selectedId === patient.serviceInstanceId }"
+            :class="{
+              'is-active': selectedId === patient.serviceInstanceId,
+              [`tone-${statusTone(patient.status)}`]: true
+            }"
             role="listitem"
             @click="selectPatient(patient)"
           >
@@ -100,6 +103,7 @@
             </span>
             <span class="patient-card-side">
               <el-tag v-if="patient.attentionFlag" type="danger" size="small" effect="plain">重点</el-tag>
+              <el-tag v-if="patient.noConsumption" type="info" size="small" effect="plain">未使用</el-tag>
               <el-tag :type="statusType(patient.status)" size="small" effect="plain">
                 {{ statusLabel(patient.status) }}
               </el-tag>
@@ -123,6 +127,7 @@
                 <el-tag :type="statusType(detail.status)" effect="plain">{{ statusLabel(detail.status) }}</el-tag>
                 <el-tag v-if="detail.attentionFlag" type="danger" effect="plain">重点</el-tag>
                 <el-tag v-if="detail.sourceType === 'MANUAL'" type="warning" effect="plain">手动补录</el-tag>
+                <el-tag v-else-if="detail.sourceType === 'REGISTRATION'" type="info" effect="plain">前台登记</el-tag>
               </div>
               <p class="detail-meta">
                 {{ detail.serviceName || "服务" }}
@@ -714,7 +719,7 @@
       <div v-if="batchMissing.length" class="batch-missing">
         <button
           v-for="patient in batchMissing"
-          :key="patient.serviceInstanceId"
+          :key="patient.serviceInstanceId || patient.encounterId || patient.patientId"
           type="button"
           class="missing-row"
           @click="selectPatient(patient); batchDialogVisible = false"
@@ -817,7 +822,7 @@ const todayValue = props.today || dayjs().format("YYYY-MM-DD");
 const businessDate = ref(todayValue);
 const calendarMonth = ref(dayjs(businessDate.value).format("YYYY-MM-01"));
 const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
-const todayNewPatients = ref(0);
+const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
 const workbench = ref<InventoryPatientWorkbench>(emptyWorkbench());
 const detail = ref<InventoryPatientDetail | null>(null);
@@ -827,7 +832,7 @@ const saving = ref(false);
 const submitting = ref(false);
 const batchSubmitting = ref(false);
 const patientKeyword = ref("");
-const statusFilter = ref("NOT_STARTED");
+const statusFilter = ref("ALL");
 const itemKeyword = ref("");
 const lineState = reactive<Record<string, EditableLine>>({});
 const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
@@ -1035,7 +1040,9 @@ const loadWorkbench = async (keepSelection = true) => {
     calendarMonth.value = dayjs(businessDate.value).startOf("month").format("YYYY-MM-01");
     void loadCalendar();
     if (!keepSelection || !selectedId.value) {
-      const first = filteredPatients.value[0] || workbench.value.patients[0];
+      const first =
+        filteredPatients.value.find(patient => patient.serviceInstanceId) ||
+        workbench.value.patients.find(patient => patient.serviceInstanceId);
       if (first) await selectPatient(first);
       else {
         selectedId.value = "";
@@ -1068,10 +1075,10 @@ const loadCalendar = async () => {
       month: calendarMonth.value
     });
     calendarDays.value = result.data?.days ?? [];
-    todayNewPatients.value = result.data?.todayNewPatients ?? 0;
+    calendarExpectedFrom.value = result.data?.expectedFrom ?? "";
   } catch {
     calendarDays.value = [];
-    todayNewPatients.value = 0;
+    calendarExpectedFrom.value = "";
   } finally {
     calendarLoading.value = false;
   }
@@ -1189,9 +1196,36 @@ const deletePackage = async (pkg: InventoryPatientConsumablePackage) => {
 };
 
 const selectPatient = async (patient: InventoryPatientWorkbenchRow, skipSave = false) => {
-  if (patient.serviceInstanceId === selectedId.value) return;
+  if (patient.serviceInstanceId && patient.serviceInstanceId === selectedId.value) return;
   if (!skipSave && detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
     await persistDraft(true);
+  }
+  if (!patient.serviceInstanceId) {
+    try {
+      const result = await addInventoryManualPatientApi({
+        departmentKey: props.departmentKey,
+        encounterId: patient.encounterId,
+        patientId: patient.patientId,
+        patientName: patient.patientName,
+        visitNo: patient.visitNo,
+        careType: patient.careType,
+        serviceCode: "REGISTRATION",
+        serviceName: "前台登记",
+        serviceStartedAt: patient.serviceStartedAt,
+        businessDate: businessDate.value,
+        stageCode: patient.stageCode,
+        sourceType: "REGISTRATION",
+        note: "前台登记患者首次录入"
+      });
+      selectedId.value = result.data?.serviceInstanceId || "";
+      showFullVisitNo.value = false;
+      applyDetail(result.data);
+      await refreshWorkbenchOnly();
+      void loadCalendar();
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : "登记患者进入本科室失败");
+    }
+    return;
   }
   selectedId.value = patient.serviceInstanceId;
   showFullVisitNo.value = false;
@@ -1805,12 +1839,31 @@ const statusLabel = (status: string) => {
   }
 };
 
+const statusTone = (status: string) => {
+  switch (status) {
+    case "NOT_STARTED":
+      return "missing";
+    case "DRAFT":
+      return "draft";
+    case "RETURNED":
+      return "returned";
+    case "APPROVED":
+      return "approved";
+    default:
+      return "submitted";
+  }
+};
+
 const statusType = (status: string): "success" | "warning" | "danger" | "info" => {
   switch (status) {
     case "APPROVED":
       return "success";
     case "RETURNED":
       return "danger";
+    case "NOT_STARTED":
+      return "warning";
+    case "DRAFT":
+      return "info";
     case "SUBMITTED":
     case "PARTIALLY_APPROVED":
       return "warning";
@@ -2057,17 +2110,41 @@ onMounted(() => {
   text-align: left;
   transition:
     border-color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
+    background 160ms ease;
 
   &:hover {
     border-color: var(--hos-border);
-    transform: translateY(-1px);
+  }
+
+  &.tone-missing {
+    background: #fff8ef;
+    border-left: 3px solid #d97706;
+  }
+
+  &.tone-draft {
+    background: #fffbeb;
+    border-left: 3px solid #b7791f;
+  }
+
+  &.tone-submitted {
+    background: #eff6ff;
+    border-left: 3px solid #4f7cac;
+  }
+
+  &.tone-returned {
+    background: #fdf0f0;
+    border-left: 3px solid #c45454;
+  }
+
+  &.tone-approved {
+    background: #eef8f1;
+    border-left: 3px solid #3f8a62;
   }
 
   &.is-active {
     background: var(--hos-primary-soft);
     border-color: var(--hos-primary);
+    border-left: 3px solid var(--hos-primary);
   }
 }
 

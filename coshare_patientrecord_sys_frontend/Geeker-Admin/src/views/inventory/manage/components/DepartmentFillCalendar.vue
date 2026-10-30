@@ -14,11 +14,11 @@
 
     <div class="calendar-summary">
       <span><b>{{ filledDays }}</b> 天已填完</span>
-      <span v-if="mode === 'PATIENT'"><b>{{ monthPeople }}</b> 人已填</span>
+      <span v-if="mode === 'PATIENT'"><b>{{ monthExpected }}</b> 人应填</span>
       <span v-else><b>{{ monthLines }}</b> 项已填</span>
+      <span v-if="mode === 'PATIENT'"><b>{{ monthPeople }}</b> 人已填</span>
       <span v-if="missingDays" class="is-missing"><b>{{ missingDays }}</b> 天未填</span>
       <span v-if="suggestDays" class="is-suggest"><b>{{ suggestDays }}</b> 天待补</span>
-      <span v-if="mode === 'PATIENT' && todayNewPatients" class="is-new">全院新到 <b>{{ todayNewPatients }}</b> 人</span>
     </div>
 
     <div v-loading="loading" class="calendar-grid" role="grid">
@@ -96,7 +96,7 @@ const props = defineProps<{
   selectedDate: string;
   mode: "PATIENT" | "DAILY";
   days: InventoryDepartmentDailyReportCalendarDay[];
-  todayNewPatients?: number;
+  expectedFrom?: string;
   loading?: boolean;
   wide?: boolean;
 }>();
@@ -121,7 +121,11 @@ const grid = computed(() => {
 const byDate = computed(() => new Map(props.days.map(day => [day.date, day])));
 const dayOf = (date: string) => byDate.value.get(date);
 
-const currentMonthDays = computed(() => props.days.filter(day => day.date.slice(0, 7) === props.month.slice(0, 7)));
+const currentMonthDays = computed(() =>
+  props.days.filter(
+    day => day.date.slice(0, 7) === props.month.slice(0, 7) && (!props.expectedFrom || day.date >= props.expectedFrom)
+  )
+);
 const filledDays = computed(() => {
   if (props.mode === "PATIENT") {
     return currentMonthDays.value.filter(
@@ -142,6 +146,7 @@ const suggestDays = computed(() => {
 });
 const monthLines = computed(() => currentMonthDays.value.reduce((sum, day) => sum + Number(day.lineCount || 0), 0));
 const monthPeople = computed(() => currentMonthDays.value.reduce((sum, day) => sum + Number(day.patientCount || 0), 0));
+const monthExpected = computed(() => currentMonthDays.value.reduce((sum, day) => sum + Number(day.patientTotal || 0), 0));
 const missingDays = computed(() => {
   if (props.month.slice(0, 7) > props.today.slice(0, 7)) return 0;
   return grid.value.filter(date => stateOf(date) === "missing").length;
@@ -151,6 +156,7 @@ const isFuture = (date: string) => date > props.today;
 
 const stateOf = (date: string): CalendarState => {
   if (date.slice(0, 7) !== props.month.slice(0, 7)) return "outside";
+  if (props.expectedFrom && date < props.expectedFrom) return "none";
   if (isFuture(date)) return "future";
   const day = dayOf(date);
   if (props.mode === "PATIENT") {
@@ -180,7 +186,9 @@ const badge = (date: string) => {
   if (state === "outside" || state === "future" || state === "none") return "";
   const day = dayOf(date);
   if (props.mode === "PATIENT") {
-    if (day && Number(day.patientTotal || 0) > 0) return `${day.patientCount || 0}人`;
+    if (day && Number(day.patientTotal || 0) > 0) {
+      return `${day.patientCount || 0}/${day.patientTotal}人`;
+    }
     return state === "due" ? "待填" : "";
   }
   if (day) {

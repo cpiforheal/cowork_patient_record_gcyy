@@ -84,6 +84,7 @@
         :selected-date="businessDate"
         :mode="draft?.entryMode || 'DAILY'"
         :days="calendarDays"
+        :expected-from="calendarExpectedFrom"
         :loading="calendarLoading"
         @update:month="changeCalendarMonth"
         @select-date="selectCalendarDate"
@@ -155,6 +156,7 @@ const addItemQuantity = ref(1);
 const addItemReason = ref("");
 const calendarMonth = ref(dayjs(businessDate.value).format("YYYY-MM-01"));
 const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
+const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
 const calendarToday = computed(() => props.today || dayjs().format("YYYY-MM-DD"));
 
@@ -193,6 +195,7 @@ const loadCalendar = async () => {
       month: calendarMonth.value
     });
     calendarDays.value = result.data?.days ?? [];
+    calendarExpectedFrom.value = result.data?.expectedFrom ?? "";
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取填写日历失败");
   } finally {
