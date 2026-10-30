@@ -144,198 +144,37 @@
           :description="rejectedSummary"
         />
 
-        <div class="detail-toolbar">
-          <el-input
-            v-model="itemKeyword"
-            class="item-search"
-            placeholder="筛选预设耗材"
-            clearable
-            :prefix-icon="Search"
-          />
-          <el-button :icon="Plus" :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
-          <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
-          <span class="line-counter">已选 {{ selectedLines.length }} 项</span>
-        </div>
-
-        <section v-if="commonItems.length" class="quick-section">
-          <div class="section-title"><h4>常用</h4><span>点一下加入，不默认勾选</span></div>
-          <div class="chip-row">
-            <button
-              v-for="item in commonItems"
-              :key="item.itemId"
-              type="button"
-              class="quick-chip"
-              :class="{ 'is-selected': isChecked(item) }"
-              @click="toggleItem(item, !isChecked(item))"
-            >
-              {{ item.itemName }}
-              <small>{{ formatQuantity(item.presetQuantity) }}{{ item.unit }}</small>
-            </button>
+        <section class="selection-summary">
+          <div class="selection-summary-head">
+            <div>
+              <h4>已选耗材</h4>
+              <p>{{ selectedLines.length }} 项 · 数量默认取预设，可改</p>
+            </div>
+            <el-button type="primary" size="large" :icon="Plus" :disabled="!editable" @click="drawerVisible = true">
+              选择耗材
+            </el-button>
           </div>
-        </section>
-
-        <section v-if="recentItems.length" class="quick-section">
-          <div class="section-title"><h4>最近使用</h4><span>当前账号近 30 天</span></div>
-          <div class="chip-row">
-            <button
-              v-for="item in recentItems"
-              :key="item.itemId"
-              type="button"
-              class="quick-chip is-recent"
-              :class="{ 'is-selected': Boolean(lineState[item.itemId]) }"
-              @click="addRecentItem(item)"
-            >
-              {{ item.itemName }}
-              <small>{{ item.unit }} · 用过 {{ item.usageCount }} 次</small>
-            </button>
-          </div>
-        </section>
-
-        <section class="selected-section">
-          <div class="section-title">
-            <h4>已选耗材</h4>
-            <span>{{ selectedLines.length }} 项 · 数量默认取预设，可改</span>
-          </div>
-          <div
-            v-for="line in selectedLines"
-            :key="line.itemId"
-            class="selected-row"
-            :class="{ 'is-approved': line.reviewStatus === 'APPROVED' }"
-          >
-            <span class="selected-name">
-              <strong>{{ line.itemName }}</strong>
-              <small>{{ line.unit }}<template v-if="line.exceptionReason"> · {{ line.exceptionReason }}</template></small>
+          <div v-if="selectedLines.length" class="selection-preview">
+            <span v-for="line in selectedLines" :key="line.itemId" class="preview-chip">
+              {{ line.itemName }} <b>{{ formatQuantity(line.actualQuantity) }}{{ line.unit }}</b>
             </span>
-            <div class="quantity-control">
-              <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, -1)">−</el-button>
-              <el-input-number
-                :model-value="line.actualQuantity"
-                :min="0.01"
-                :precision="2"
-                :step="1"
-                size="small"
-                :disabled="line.reviewStatus === 'APPROVED'"
-                controls-position="right"
-                @update:model-value="value => setLineQuantity(line, value)"
-              />
-              <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, 1)">+</el-button>
-              <button
-                v-for="quick in [1, 2, 3]"
-                :key="quick"
-                type="button"
-                class="qty-chip"
-                :disabled="line.reviewStatus === 'APPROVED'"
-                @click="setLineQuantity(line, quick)"
-              >
-                {{ quick }}
-              </button>
-            </div>
-            <span class="selected-state">
-              <el-tag v-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">已通过</el-tag>
-              <el-tag v-else-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">已驳回</el-tag>
-              <small v-if="line.reviewNote">{{ line.reviewNote }}</small>
-            </span>
-            <el-button text type="danger" :disabled="line.reviewStatus === 'APPROVED'" @click="removeLine(line.itemId)">移除</el-button>
           </div>
-          <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
-        </section>
-
-        <div class="checklist-scroll">
-          <section v-for="group in visibleGroups" :key="group.name" class="checklist-group">
-            <header class="group-head">
-              <h4>{{ group.name }}</h4>
-              <span>{{ group.items.length }} 项</span>
-            </header>
-            <div
-              v-for="item in group.items"
-              :key="item.itemId"
-              class="checklist-row"
-              :class="{ 'is-checked': isChecked(item), 'is-approved': isApproved(item) }"
-            >
-              <el-checkbox
-                :model-value="isChecked(item)"
-                :disabled="!editable || isApproved(item)"
-                :aria-label="`使用 ${item.itemName}`"
-                @change="value => toggleItem(item, Boolean(value))"
-              />
-              <div class="item-copy">
-                <div class="item-name-row">
-                  <strong>{{ item.itemName }}</strong>
-                  <el-tag v-if="item.commonItem" size="small" type="success" effect="plain">常用</el-tag>
-                  <el-tag v-if="isApproved(item)" size="small" type="info" effect="plain">已通过</el-tag>
-                  <el-tag v-else-if="lineState[item.itemId]?.reviewStatus === 'REJECTED'" size="small" type="danger" effect="plain">已驳回</el-tag>
-                </div>
-                <span class="item-meta">
-                  {{ item.unit }}
-                  <i aria-hidden="true">·</i>
-                  预设 {{ formatQuantity(item.presetQuantity) }} {{ item.unit }}
-                  <template v-if="item.serviceGroup">
-                    <i aria-hidden="true">·</i>
-                    {{ item.serviceGroup }}
-                  </template>
-                </span>
-                <span v-if="lineState[item.itemId]?.reviewNote" class="review-note">
-                  审核意见：{{ lineState[item.itemId]?.reviewNote }}
-                </span>
-              </div>
-              <el-input-number
-                v-if="isChecked(item)"
-                :model-value="lineState[item.itemId]?.actualQuantity"
-                :min="0.01"
-                :precision="2"
-                :step="1"
-                :disabled="!editable || isApproved(item)"
-                controls-position="right"
-                size="small"
-                @update:model-value="value => updateQuantity(item, value)"
-              />
-              <span v-else class="preset-ghost">{{ formatQuantity(item.presetQuantity) }} {{ item.unit }}</span>
-            </div>
-          </section>
-
-          <section v-if="manualLines.length" class="checklist-group manual-group">
-            <header class="group-head">
-              <h4>追加耗材</h4>
-              <span>{{ manualLines.length }} 项</span>
-            </header>
-            <div
-              v-for="line in manualLines"
-              :key="line.itemId"
-              class="checklist-row is-checked"
-              :class="{ 'is-approved': line.reviewStatus === 'APPROVED' }"
-            >
-              <el-checkbox
-                :model-value="true"
-                :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                :aria-label="`移除 ${line.itemName}`"
-                @change="value => !value && removeLine(line.itemId)"
-              />
-              <div class="item-copy">
-                <div class="item-name-row">
-                  <strong>{{ line.itemName }}</strong>
-                  <el-tag size="small" type="warning" effect="plain">预设外</el-tag>
-                </div>
-                <span class="item-meta">{{ line.unit }} · {{ line.exceptionReason || "未填写原因" }}</span>
-              </div>
-              <el-input-number
-                :model-value="line.actualQuantity"
-                :min="0.01"
-                :precision="2"
-                :step="1"
-                :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                controls-position="right"
-                size="small"
-                @update:model-value="value => updateManualQuantity(line.itemId, value)"
-              />
-            </div>
-          </section>
-
           <el-empty
-            v-if="!visibleGroups.length && !manualLines.length"
-            :image-size="80"
-            description="该科室还没有已映射到物资主数据的预设耗材，请先完成规则配置"
+            v-else
+            :image-size="72"
+            description="还没有选耗材；点“选择耗材”从常用、最近或全部预设中添加"
           />
-        </div>
+          <div class="selection-hints">
+            <span v-if="commonItems.length">常用 {{ commonItems.length }} 项</span>
+            <span v-if="recentItems.length">最近使用 {{ recentItems.length }} 项</span>
+            <span v-if="presetItems.length">全部预设 {{ presetItems.length }} 项</span>
+            <span v-if="detail.noConsumption" class="is-muted">已标记未使用耗材</span>
+          </div>
+          <div class="selection-actions">
+            <el-button :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
+            <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
+          </div>
+        </section>
 
         <footer class="sticky-actions">
           <span class="save-state">{{ saveState || "未保存" }}</span>
@@ -355,6 +194,200 @@
         <el-empty :image-size="96" description="选择左侧患者开始填写耗材清单" />
       </main>
     </div>
+
+    <el-drawer
+      v-model="drawerVisible"
+      direction="rtl"
+      size="82%"
+      :with-header="false"
+      append-to-body
+      class="consumable-drawer"
+      @opened="focusSearch"
+    >
+      <div class="drawer-shell">
+        <header class="drawer-head">
+          <div>
+            <span class="eyebrow">为 {{ detail?.patientName || "患者" }} 选择耗材</span>
+            <h3>{{ detail?.serviceName || "服务" }} · 已选 {{ selectedLines.length }} 项</h3>
+          </div>
+          <div class="drawer-head-actions">
+            <span class="drawer-hint">搜索名称、拼音首字母或别名</span>
+            <el-button type="primary" @click="drawerVisible = false">完成选择</el-button>
+          </div>
+        </header>
+        <div class="drawer-grid">
+          <section class="drawer-left">
+                    <section class="selected-section">
+                      <div class="section-title">
+                        <h4>已选耗材</h4>
+                        <span>{{ selectedLines.length }} 项 · 数量默认取预设，可改</span>
+                      </div>
+                      <div
+                        v-for="line in selectedLines"
+                        :key="line.itemId"
+                        class="selected-row"
+                        :class="{ 'is-approved': line.reviewStatus === 'APPROVED' }"
+                      >
+                        <span class="selected-name">
+                          <strong>{{ line.itemName }}</strong>
+                          <small>{{ line.unit }}<template v-if="line.exceptionReason"> · {{ line.exceptionReason }}</template></small>
+                        </span>
+                        <div class="quantity-control">
+                          <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, -1)">−</el-button>
+                          <el-input-number
+                            :model-value="line.actualQuantity"
+                            :min="0.01"
+                            :precision="2"
+                            :step="1"
+                            size="small"
+                            :disabled="line.reviewStatus === 'APPROVED'"
+                            controls-position="right"
+                            @update:model-value="value => setLineQuantity(line, value)"
+                          />
+                          <el-button size="small" :disabled="line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, 1)">+</el-button>
+                          <button
+                            v-for="quick in [1, 2, 3]"
+                            :key="quick"
+                            type="button"
+                            class="qty-chip"
+                            :disabled="line.reviewStatus === 'APPROVED'"
+                            @click="setLineQuantity(line, quick)"
+                          >
+                            {{ quick }}
+                          </button>
+                        </div>
+                        <span class="selected-state">
+                          <el-tag v-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">已通过</el-tag>
+                          <el-tag v-else-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">已驳回</el-tag>
+                          <small v-if="line.reviewNote">{{ line.reviewNote }}</small>
+                        </span>
+                        <el-button text type="danger" :disabled="line.reviewStatus === 'APPROVED'" @click="removeLine(line.itemId)">移除</el-button>
+                      </div>
+                      <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
+                    </section>
+          </section>
+          <section class="drawer-right">
+                    <div class="detail-toolbar">
+                      <el-input
+                        ref="searchInputRef"
+                        v-model="itemKeyword"
+                        class="item-search"
+                        placeholder="搜索耗材名称 / 拼音首字母 / 别名"
+                        clearable
+                        :prefix-icon="Search"
+                      />
+                      <el-button :icon="Plus" :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
+                      <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
+                      <span class="line-counter">已选 {{ selectedLines.length }} 项</span>
+                    </div>
+
+                    <section v-if="commonItems.length" class="quick-section">
+                      <div class="section-title"><h4>常用</h4><span>点一下加入，不默认勾选</span></div>
+                      <div class="chip-row">
+                        <button
+                          v-for="item in commonItems"
+                          :key="item.itemId"
+                          type="button"
+                          class="quick-chip"
+                          :class="{ 'is-selected': isChecked(item) }"
+                          @click="toggleItem(item, !isChecked(item))"
+                        >
+                          {{ item.itemName }}
+                          <small>{{ formatQuantity(item.presetQuantity) }}{{ item.unit }}</small>
+                        </button>
+                      </div>
+                    </section>
+
+                    <section v-if="recentItems.length" class="quick-section">
+                      <div class="section-title"><h4>最近使用</h4><span>当前账号近 30 天</span></div>
+                      <div class="chip-row">
+                        <button
+                          v-for="item in recentItems"
+                          :key="item.itemId"
+                          type="button"
+                          class="quick-chip is-recent"
+                          :class="{ 'is-selected': Boolean(lineState[item.itemId]) }"
+                          @click="addRecentItem(item)"
+                        >
+                          {{ item.itemName }}
+                          <small>{{ item.unit }} · 用过 {{ item.usageCount }} 次</small>
+                        </button>
+                      </div>
+                    </section>
+
+
+
+                    <div class="checklist-scroll">
+                      <section v-for="group in visibleGroups" :key="group.name" class="checklist-group">
+                        <header class="group-head">
+                          <h4>{{ group.name }}</h4>
+                          <span>{{ group.items.length }} 项</span>
+                        </header>
+                        <div
+                          v-for="item in group.items"
+                          :key="item.itemId"
+                          class="checklist-row"
+                          :class="{ 'is-checked': isChecked(item), 'is-approved': isApproved(item) }"
+                        >
+                          <el-checkbox
+                            :model-value="isChecked(item)"
+                            :disabled="!editable || isApproved(item)"
+                            :aria-label="`使用 ${item.itemName}`"
+                            @change="value => toggleItem(item, Boolean(value))"
+                          />
+                          <div class="item-copy">
+                            <div class="item-name-row">
+                              <strong>{{ item.itemName }}</strong>
+                              <el-tag v-if="item.commonItem" size="small" type="success" effect="plain">常用</el-tag>
+                              <el-tag v-if="isApproved(item)" size="small" type="info" effect="plain">已通过</el-tag>
+                              <el-tag v-else-if="lineState[item.itemId]?.reviewStatus === 'REJECTED'" size="small" type="danger" effect="plain">已驳回</el-tag>
+                            </div>
+                            <span class="item-meta">
+                              {{ item.unit }}
+                              <i aria-hidden="true">·</i>
+                              预设 {{ formatQuantity(item.presetQuantity) }} {{ item.unit }}
+                              <template v-if="item.serviceGroup">
+                                <i aria-hidden="true">·</i>
+                                {{ item.serviceGroup }}
+                              </template>
+                            </span>
+                            <span v-if="lineState[item.itemId]?.reviewNote" class="review-note">
+                              审核意见：{{ lineState[item.itemId]?.reviewNote }}
+                            </span>
+                          </div>
+                          <el-input-number
+                            v-if="isChecked(item)"
+                            :model-value="lineState[item.itemId]?.actualQuantity"
+                            :min="0.01"
+                            :precision="2"
+                            :step="1"
+                            :disabled="!editable || isApproved(item)"
+                            controls-position="right"
+                            size="small"
+                            @update:model-value="value => updateQuantity(item, value)"
+                          />
+                          <span v-else class="preset-ghost">{{ formatQuantity(item.presetQuantity) }} {{ item.unit }}</span>
+                        </div>
+                      </section>
+
+
+
+                      <el-empty
+                        v-if="!visibleGroups.length && !manualLines.length"
+                        :image-size="80"
+                        description="该科室还没有已映射到物资主数据的预设耗材，请先完成规则配置"
+                      />
+                    </div>
+
+
+          </section>
+        </div>
+        <footer class="drawer-footer">
+          <span>已选 {{ selectedLines.length }} 项</span>
+          <el-button @click="drawerVisible = false">完成选择</el-button>
+        </footer>
+      </div>
+    </el-drawer>
 
     <el-dialog v-model="manualDialogVisible" title="手动补录患者" width="720px" class="patient-dialog">
       <div class="manual-search-row">
@@ -550,6 +583,8 @@ const lineState = reactive<Record<string, EditableLine>>({});
 const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
 const saveState = ref("");
 const showFullVisitNo = ref(false);
+const drawerVisible = ref(false);
+const searchInputRef = ref<{ focus: () => void } | null>(null);
 const batchDialogVisible = ref(false);
 const batchResult = ref<InventoryPatientBatchSubmitResult | null>(null);
 
@@ -1152,6 +1187,10 @@ const formatDateTime = (value?: string) => {
   if (!value) return "未记录服务时间";
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format("MM-DD HH:mm") : value;
+};
+
+const focusSearch = () => {
+  searchInputRef.value?.focus();
 };
 
 const maskVisitNo = (value?: string) => {
@@ -1907,6 +1946,191 @@ onMounted(() => {
 
   strong {
     font-size: 18px;
+  }
+}
+
+.selection-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 0 8px;
+}
+
+.selection-summary-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+
+  h4 {
+    margin: 0 0 3px;
+    color: var(--hos-text-primary);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  p {
+    margin: 0;
+    color: var(--hos-text-muted);
+    font-size: 12px;
+  }
+}
+
+.selection-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 12px;
+}
+
+.preview-chip {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 9px;
+  color: var(--hos-text-primary);
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+  font-size: 12px;
+
+  b {
+    color: var(--hos-primary);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+}
+
+.selection-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--hos-text-muted);
+  font-size: 11px;
+
+  .is-muted {
+    color: var(--hos-status-warning);
+  }
+}
+
+.selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.consumable-drawer {
+  :deep(.el-drawer__body) {
+    padding: 0;
+    overflow: hidden;
+  }
+}
+
+.drawer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--hos-bg-surface);
+}
+
+.drawer-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  background: var(--hos-bg-primary);
+  border-bottom: 1px solid var(--hos-border-light);
+
+  h3 {
+    margin: 4px 0 0;
+    color: var(--hos-text-primary);
+    font-size: 20px;
+    font-weight: 700;
+  }
+}
+
+.drawer-head-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.drawer-hint {
+  color: var(--hos-text-muted);
+  font-size: 11px;
+}
+
+.drawer-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 38%) minmax(0, 62%);
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.drawer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+  overflow: auto;
+  background: var(--hos-bg-primary);
+  border-right: 1px solid var(--hos-border-light);
+}
+
+.drawer-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 22px;
+  overflow: auto;
+}
+
+.drawer-toolbar {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.drawer-right .checklist-scroll {
+  gap: 10px;
+  padding-top: 0;
+}
+
+.drawer-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 24px;
+  background: var(--hos-bg-primary);
+  border-top: 1px solid var(--hos-border-light);
+
+  span {
+    margin-right: auto;
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 1040px) {
+  .drawer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer-left {
+    max-height: 38vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--hos-border-light);
   }
 }
 
