@@ -85,6 +85,7 @@
               </span>
             </span>
             <span class="patient-card-side">
+              <el-tag v-if="patient.attentionFlag" type="danger" size="small" effect="plain">重点</el-tag>
               <el-tag :type="statusType(patient.status)" size="small" effect="plain">
                 {{ statusLabel(patient.status) }}
               </el-tag>
