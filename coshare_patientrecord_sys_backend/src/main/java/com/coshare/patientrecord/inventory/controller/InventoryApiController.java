@@ -7,6 +7,7 @@ import com.coshare.patientrecord.auth.service.InventoryPortalAccountAdminService
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.config.PortalMode;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
+import com.coshare.patientrecord.inventory.service.InventoryDepartmentDailyReportService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionReviewService;
@@ -48,6 +49,7 @@ public class InventoryApiController {
     private final InventoryDepartmentDraftService departmentDraftService;
     private final InventoryPatientConsumptionService patientConsumptionService;
     private final InventoryPatientConsumptionReviewService patientConsumptionReviewService;
+    private final InventoryDepartmentDailyReportService departmentDailyReportService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -61,6 +63,7 @@ public class InventoryApiController {
         InventoryDepartmentDraftService departmentDraftService,
         InventoryPatientConsumptionService patientConsumptionService,
         InventoryPatientConsumptionReviewService patientConsumptionReviewService,
+        InventoryDepartmentDailyReportService departmentDailyReportService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -73,6 +76,7 @@ public class InventoryApiController {
         this.departmentDraftService = departmentDraftService;
         this.patientConsumptionService = patientConsumptionService;
         this.patientConsumptionReviewService = patientConsumptionReviewService;
+        this.departmentDailyReportService = departmentDailyReportService;
         this.portalMode = portalMode;
     }
 
@@ -161,6 +165,43 @@ public class InventoryApiController {
         SessionUser user = requireCapability("inventory:role:manage");
         LocalDate[] period = resolveDailyRollupPeriod(date, from, to);
         return ApiResult.success(databaseService.asMap(databaseService.adminDepartmentDailyRollup(period[0], period[1], user)));
+    }
+
+    @GetMapping("/inventory-api/department-daily-reports")
+    public ApiResult<Map<String, Object>> departmentDailyReport(
+        @RequestParam String departmentKey,
+        @RequestParam(required = false) LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(departmentDailyReportService.read(departmentKey, date, user)));
+    }
+
+    @PutMapping("/inventory-api/department-daily-reports")
+    public ApiResult<Map<String, Object>> saveDepartmentDailyReport(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "科室日报已保存", asMap(departmentDailyReportService.save(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/department-daily-reports/{reportId}/submit")
+    public ApiResult<Map<String, Object>> submitDepartmentDailyReport(
+        @org.springframework.web.bind.annotation.PathVariable String reportId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "科室日报已提交", asMap(departmentDailyReportService.submit(reportId, user)));
+    }
+
+    @GetMapping("/inventory-api/department-daily-reports/{reportId}/export/{format}")
+    public ResponseEntity<byte[]> exportDepartmentDailyReport(
+        @org.springframework.web.bind.annotation.PathVariable String reportId,
+        @org.springframework.web.bind.annotation.PathVariable String format
+    ) {
+        SessionUser user = requireCapability("inventory:export");
+        boolean xlsx = "xlsx".equalsIgnoreCase(format);
+        return attachment(
+            departmentDailyReportService.export(reportId, format, user),
+            "department-daily-report-" + reportId + (xlsx ? ".xlsx" : ".csv"),
+            xlsx ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv;charset=UTF-8"
+        );
     }
 
     @GetMapping("/inventory-api/quota-governance")

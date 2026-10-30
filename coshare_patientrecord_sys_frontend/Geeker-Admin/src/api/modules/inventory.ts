@@ -442,6 +442,36 @@ export interface InventoryPatientConsumptionDraftList {
   list: InventoryPatientConsumptionDraft[];
 }
 
+export interface InventoryDepartmentDailyReportLine {
+  lineId?: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  presetQuantity?: number | null;
+  actualQuantity: number;
+  source: "TEMPLATE" | "MANUAL";
+  exceptionReason?: string;
+  reviewStatus?: string;
+  reviewNote?: string;
+}
+
+export interface InventoryDepartmentDailyReport {
+  id: string;
+  departmentKey: string;
+  departmentId: string;
+  departmentName: string;
+  businessDate: string;
+  entryMode: "PATIENT" | "DAILY";
+  status: string;
+  revision: number;
+  note: string;
+  submittedBy?: string;
+  submittedAt?: string;
+  locked: boolean;
+  closure?: { status: string; submittedBy?: string; submittedAt?: string; lockedAt?: string };
+  lines: InventoryDepartmentDailyReportLine[];
+}
+
 export type InventoryPatientDocumentStatus =
   | "NOT_STARTED"
   | "DRAFT"
@@ -1846,6 +1876,38 @@ export const getInventoryDbApi = async () => {
 
 export const getInventoryDepartmentDailyDraftApi = async (params: { departmentKey: string; date: string }) =>
   getInventoryData<InventoryDepartmentDailyDraft>("/department-daily-drafts", params);
+
+export const getInventoryDepartmentDailyReportApi = async (params: { departmentKey: string; date: string }) =>
+  getInventoryData<InventoryDepartmentDailyReport>("/department-daily-reports", params);
+
+export const saveInventoryDepartmentDailyReportApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  revision: number;
+  note: string;
+  lines: Array<{
+    itemId: string;
+    itemName?: string;
+    unit?: string;
+    presetQuantity?: number | null;
+    actualQuantity: number;
+    source: "TEMPLATE" | "MANUAL";
+    exceptionReason?: string;
+  }>;
+}) =>
+  putInventoryData<InventoryDepartmentDailyReport, typeof payload>("/department-daily-reports", payload);
+
+export const submitInventoryDepartmentDailyReportApi = async (reportId: string) =>
+  postInventoryData<InventoryDepartmentDailyReport, Record<string, unknown>>(
+    `/department-daily-reports/${encodeURIComponent(reportId)}/submit`,
+    {}
+  );
+
+export const downloadInventoryDepartmentDailyReportApi = async (reportId: string, format: "xlsx" | "csv") =>
+  downloadInventoryFile(
+    `/department-daily-reports/${encodeURIComponent(reportId)}/export/${format}`,
+    `department-daily-report-${reportId}.${format}`
+  );
 
 export const getInventoryDepartmentDailyDraftSummaryApi = async (date: string) =>
   getInventoryData<InventoryDepartmentDailyDraftSummary>("/department-daily-drafts/summary", { date });

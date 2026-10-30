@@ -173,22 +173,31 @@
 
           <template v-else-if="activeTab === 'packages'">
             <template v-if="focusedDepartmentKey">
-              <el-radio-group v-if="!isInventoryPortal" v-model="departmentDraftMode" class="department-draft-mode">
-                <el-radio-button label="patient">患者耗材清单</el-radio-button>
-                <el-radio-button label="daily">旧日报（切换前）</el-radio-button>
-              </el-radio-group>
-              <PatientConsumptionWorkspace
-                v-if="isInventoryPortal || departmentDraftMode === 'patient'"
+              <DepartmentDailyReportPanel
+                v-if="isDailyDepartment"
                 :department-key="focusedDepartmentKey"
+                :department-name="focusedDepartment"
                 :today="today()"
-              />
-              <DepartmentConsumptionWorkspace
-                v-else
-                :department-key="focusedDepartmentKey"
                 :items="db.items"
-                :batches="db.batches"
-                :today="today()"
               />
+              <template v-else>
+                <el-radio-group v-if="!isInventoryPortal" v-model="departmentDraftMode" class="department-draft-mode">
+                  <el-radio-button label="patient">患者耗材清单</el-radio-button>
+                  <el-radio-button label="daily">旧日报（切换前）</el-radio-button>
+                </el-radio-group>
+                <PatientConsumptionWorkspace
+                  v-if="isInventoryPortal || departmentDraftMode === 'patient'"
+                  :department-key="focusedDepartmentKey"
+                  :today="today()"
+                />
+                <DepartmentConsumptionWorkspace
+                  v-else
+                  :department-key="focusedDepartmentKey"
+                  :items="db.items"
+                  :batches="db.batches"
+                  :today="today()"
+                />
+              </template>
             </template>
             <DepartmentMaterialsPanel v-else-if="!isStandaloneConsumableEntry" @saved="onQuotaConsoleSaved" />
             <PackagePanel
@@ -606,6 +615,7 @@ import ItemsPanel from "./components/ItemsPanel.vue";
 import DepartmentConsumptionSummary from "./components/DepartmentConsumptionSummary.vue";
 import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWorkspace.vue";
 import PatientConsumptionWorkspace from "./components/PatientConsumptionWorkspace.vue";
+import DepartmentDailyReportPanel from "./components/DepartmentDailyReportPanel.vue";
 import PatientConsumptionReviewPanel from "./components/PatientConsumptionReviewPanel.vue";
 import PatientConsumptionTracePanel from "./components/PatientConsumptionTracePanel.vue";
 import ConsumableUsageWorkbenchPanel from "./components/ConsumableUsageWorkbenchPanel.vue";
@@ -880,6 +890,9 @@ const isStandaloneConsumableEntry = computed(
   () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
 );
 const focusedDepartment = computed(() => inventoryDepartmentRouteMap[route.path] || "");
+const isDailyDepartment = computed(() =>
+  ["logistics", "cashier", "western-pharmacy", "tcm-pharmacy"].includes(focusedDepartmentKey.value)
+);
 const focusedDepartmentKey = computed(() => inventoryDepartmentKeyRouteMap[route.path] || "");
 const categoryOptions = ["医用耗材", "办公物资", "消毒用品", "检验用品", "护理用品", "低值易耗"];
 const unitOptions = ["个", "盒", "包", "瓶", "支", "卷", "套", "箱"];
