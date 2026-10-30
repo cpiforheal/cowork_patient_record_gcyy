@@ -1889,6 +1889,12 @@ export interface InventoryDepartmentDailyReportCalendarDay {
   status: string;
   lineCount: number;
   patientCount: number;
+  patientTotal?: number;
+  entered?: number;
+  draft?: number;
+  returned?: number;
+  missing?: number;
+  noConsumption?: number;
   submittedAt?: string;
   submittedBy?: string;
 }

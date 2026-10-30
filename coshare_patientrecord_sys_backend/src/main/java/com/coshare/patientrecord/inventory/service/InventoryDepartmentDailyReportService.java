@@ -235,29 +235,66 @@ public class InventoryDepartmentDailyReportService {
             },
             department.key(), first, last
         );
-        Map<String, Integer> patientCounts = new LinkedHashMap<>();
+        Map<String, ObjectNode> dayMap = new LinkedHashMap<>();
+        for (JsonNode day : days) {
+            if (day instanceof ObjectNode row) dayMap.put(row.path("date").asText(), row);
+        }
         if ("PATIENT".equals(department.entryMode())) {
             jdbcTemplate.query(
                 """
-                SELECT si.business_date, COUNT(DISTINCT si.patient_id) patient_count
+                SELECT si.business_date,
+                       COUNT(*) patient_total,
+                       COUNT(DISTINCT CASE WHEN d.id IS NOT NULL THEN si.patient_id END) patient_count,
+                       SUM(CASE WHEN d.status IN ('SUBMITTED', 'PARTIALLY_APPROVED', 'APPROVED') THEN 1 ELSE 0 END) entered,
+                       SUM(CASE WHEN d.status = 'DRAFT' THEN 1 ELSE 0 END) draft,
+                       SUM(CASE WHEN d.status = 'RETURNED' THEN 1 ELSE 0 END) returned,
+                       SUM(CASE WHEN d.id IS NULL OR (d.status = 'DRAFT' AND COALESCE(d.no_consumption, 0) = 0
+                            AND (SELECT COUNT(*) FROM inventory_patient_consumption_lines l WHERE l.document_id = d.id) = 0)
+                           THEN 1 ELSE 0 END) missing,
+                       SUM(CASE WHEN COALESCE(d.no_consumption, 0) = 1 THEN 1 ELSE 0 END) no_consumption
                 FROM inventory_service_instances si
-                JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
+                LEFT JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
                 WHERE si.department_key = ? AND si.business_date BETWEEN ? AND ?
                 GROUP BY si.business_date
                 """,
                 resultSet -> {
                     while (resultSet.next()) {
-                        patientCounts.put(resultSet.getDate("business_date").toLocalDate().toString(), resultSet.getInt("patient_count"));
+                        String date = resultSet.getDate("business_date").toLocalDate().toString();
+                        ObjectNode row = dayMap.get(date);
+                        if (row == null) {
+                            row = objectMapper.createObjectNode();
+                            row.put("date", date);
+                            row.put("reportId", "");
+                            row.put("status", "");
+                            row.put("lineCount", 0);
+                            row.put("submittedAt", "");
+                            row.put("submittedBy", "");
+                            dayMap.put(date, row);
+                        }
+                        row.put("patientTotal", resultSet.getInt("patient_total"));
+                        row.put("patientCount", resultSet.getInt("patient_count"));
+                        row.put("entered", resultSet.getInt("entered"));
+                        row.put("draft", resultSet.getInt("draft"));
+                        row.put("returned", resultSet.getInt("returned"));
+                        row.put("missing", resultSet.getInt("missing"));
+                        row.put("noConsumption", resultSet.getInt("no_consumption"));
                     }
                 },
                 department.key(), first, last
             );
         }
-        for (JsonNode day : days) {
-            if (day instanceof ObjectNode row) {
-                row.put("patientCount", patientCounts.getOrDefault(day.path("date").asText(), 0));
-            }
+        ArrayNode calendarDays = objectMapper.createArrayNode();
+        for (ObjectNode row : new java.util.TreeMap<>(dayMap).values()) {
+            if (!row.has("patientTotal")) row.put("patientTotal", 0);
+            if (!row.has("patientCount")) row.put("patientCount", 0);
+            if (!row.has("entered")) row.put("entered", 0);
+            if (!row.has("draft")) row.put("draft", 0);
+            if (!row.has("returned")) row.put("returned", 0);
+            if (!row.has("missing")) row.put("missing", 0);
+            if (!row.has("noConsumption")) row.put("noConsumption", 0);
+            calendarDays.add(row);
         }
+        days = calendarDays;
         ObjectNode result = objectMapper.createObjectNode();
         result.put("departmentKey", department.key());
         result.put("departmentName", department.name());

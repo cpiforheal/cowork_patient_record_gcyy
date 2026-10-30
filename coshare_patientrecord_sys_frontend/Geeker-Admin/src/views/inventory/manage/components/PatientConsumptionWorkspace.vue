@@ -29,6 +29,7 @@
           />
         </div>
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
+        <el-button plain :icon="Calendar" @click="calendarDrawerVisible = true">填写日历</el-button>
         <el-button type="primary" :loading="batchSubmitting" @click="openBatchSubmit">批量提交</el-button>
         <el-button type="primary" plain :icon="Search" @click="openPatientSource">患者来源</el-button>
       </div>
@@ -207,9 +208,34 @@
       </main>
 
       <main v-else class="detail-panel detail-empty">
-        <el-empty :image-size="96" description="选择左侧患者开始填写耗材清单" />
+        <div class="empty-calendar">
+          <DepartmentFillCalendar
+            :month="calendarMonth"
+            :today="todayValue"
+            :selected-date="businessDate"
+            mode="PATIENT"
+            :days="calendarDays"
+            :loading="calendarLoading"
+            @update:month="changeCalendarMonth"
+            @select-date="selectCalendarDate"
+          />
+          <p>选择左侧患者开始填写耗材清单，或从日历切到需要补录的日期。</p>
+        </div>
       </main>
     </div>
+
+    <el-drawer v-model="calendarDrawerVisible" title="填写日历" size="380px" append-to-body>
+      <DepartmentFillCalendar
+        :month="calendarMonth"
+        :today="todayValue"
+        :selected-date="businessDate"
+        mode="PATIENT"
+        :days="calendarDays"
+        :loading="calendarLoading"
+        @update:month="changeCalendarMonth"
+        @select-date="selectCalendarDate"
+      />
+    </el-drawer>
 
     <el-drawer
       v-model="drawerVisible"
@@ -729,12 +755,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Close, Plus, Refresh, Search } from "@element-plus/icons-vue";
+import { Calendar, Close, Plus, Refresh, Search } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
 import { pinyin } from "pinyin-pro";
+import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
 import {
   addInventoryManualPatientApi,
   deleteInventoryPatientPackageApi,
+  getInventoryDepartmentDailyReportCalendarApi,
   getInventoryPatientDetailApi,
   getInventoryPatientLastCombinationApi,
   getInventoryPatientPackagesApi,
@@ -748,6 +776,7 @@ import {
   searchInventoryPatientsApi,
   submitInventoryPatientBatchApi,
   submitInventoryPatientDocumentApi,
+  type InventoryDepartmentDailyReportCalendarDay,
   type InventoryPatientAvailableItem,
   type InventoryPatientBatchSubmitResult,
   type InventoryPatientConsumablePackage,
@@ -798,6 +827,10 @@ const emptyWorkbench = (): InventoryPatientWorkbench => ({
 
 const todayValue = props.today || dayjs().format("YYYY-MM-DD");
 const businessDate = ref(todayValue);
+const calendarDrawerVisible = ref(false);
+const calendarMonth = ref(dayjs(businessDate.value).format("YYYY-MM-01"));
+const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
+const calendarLoading = ref(false);
 const workbench = ref<InventoryPatientWorkbench>(emptyWorkbench());
 const detail = ref<InventoryPatientDetail | null>(null);
 const selectedId = ref("");
@@ -1011,6 +1044,8 @@ const loadWorkbench = async (keepSelection = true) => {
     workbench.value = result.data ?? emptyWorkbench();
     await loadRecentItems();
     await loadPackages();
+    calendarMonth.value = dayjs(businessDate.value).startOf("month").format("YYYY-MM-01");
+    void loadCalendar();
     if (!keepSelection || !selectedId.value) {
       const first = filteredPatients.value[0] || workbench.value.patients[0];
       if (first) await selectPatient(first);
@@ -1035,6 +1070,31 @@ const loadWorkbench = async (keepSelection = true) => {
 
 const reload = () => {
   void loadWorkbench(false);
+};
+
+const loadCalendar = async () => {
+  calendarLoading.value = true;
+  try {
+    const result = await getInventoryDepartmentDailyReportCalendarApi({
+      departmentKey: props.departmentKey,
+      month: calendarMonth.value
+    });
+    calendarDays.value = result.data?.days ?? [];
+  } catch {
+    calendarDays.value = [];
+  } finally {
+    calendarLoading.value = false;
+  }
+};
+
+const changeCalendarMonth = (month: string) => {
+  calendarMonth.value = month;
+  void loadCalendar();
+};
+
+const selectCalendarDate = (date: string) => {
+  calendarDrawerVisible.value = false;
+  if (date !== businessDate.value) void changeDate(date);
 };
 
 const loadRecentItems = async () => {
@@ -1252,6 +1312,7 @@ const persistDraft = async (silent = false, noConsumption = false) => {
   saveState.value = `已保存 ${dayjs().format("HH:mm")}`;
   await refreshWorkbenchOnly();
   void loadRecentItems();
+  void loadCalendar();
   return result.data;
 };
 
@@ -1299,6 +1360,7 @@ const submitDocument = async () => {
     const result = await submitInventoryPatientDocumentApi(current.documentId);
     applyDetail(result.data);
     await refreshWorkbenchOnly();
+    void loadCalendar();
     ElMessage.success("已提交库管审核，审核通过前不会扣减库存");
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "提交患者耗材清单失败");
@@ -2073,6 +2135,21 @@ onMounted(() => {
 .detail-empty {
   display: grid;
   place-items: center;
+}
+
+.empty-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  width: min(100%, 360px);
+
+  p {
+    margin: 0;
+    color: var(--hos-text-muted);
+    font-size: 12px;
+    text-align: center;
+  }
 }
 
 .detail-title-row {

@@ -14,8 +14,8 @@
 
     <div class="calendar-summary">
       <span><b>{{ filledDays }}</b> 天已填</span>
-      <span v-if="mode === 'PATIENT'"><b>{{ monthPeople }}</b> 人</span>
-      <span v-else><b>{{ monthLines }}</b> 项</span>
+      <span v-if="mode === 'PATIENT'"><b>{{ monthPeople }}</b> 人已填</span>
+      <span v-else><b>{{ monthLines }}</b> 项已填</span>
       <span v-if="missingDays" class="is-missing"><b>{{ missingDays }}</b> 天未填</span>
       <span v-if="suggestDays" class="is-suggest"><b>{{ suggestDays }}</b> 天待补</span>
     </div>
@@ -49,9 +49,15 @@
           <strong>{{ dateTitle(date) }}</strong>
           <span class="pop-status" :class="`is-${stateOf(date)}`">{{ stateLabel(date) }}</span>
           <dl>
-            <template v-if="dayOf(date)">
+            <template v-if="mode === 'PATIENT'">
+              <div><dt>已填写</dt><dd>{{ dayOf(date)?.patientCount || 0 }} 人</dd></div>
+              <div><dt>应填写</dt><dd>{{ dayOf(date)?.patientTotal || 0 }} 人</dd></div>
+              <div v-if="Number(dayOf(date)?.missing || 0)"><dt>缺录</dt><dd>{{ dayOf(date)?.missing }} 人</dd></div>
+              <div v-if="Number(dayOf(date)?.draft || 0)"><dt>草稿</dt><dd>{{ dayOf(date)?.draft }} 人</dd></div>
+              <div v-if="Number(dayOf(date)?.returned || 0)"><dt>被驳回</dt><dd>{{ dayOf(date)?.returned }} 人</dd></div>
+            </template>
+            <template v-else-if="dayOf(date)">
               <div><dt>耗材项</dt><dd>{{ dayOf(date)?.lineCount || 0 }} 项</dd></div>
-              <div v-if="mode === 'PATIENT'"><dt>填写人数</dt><dd>{{ dayOf(date)?.patientCount || 0 }} 人</dd></div>
               <div v-if="dayOf(date)?.submittedAt"><dt>提交时间</dt><dd>{{ formatDateTime(dayOf(date)?.submittedAt) }}</dd></div>
             </template>
             <div v-else><dt>状态</dt><dd>{{ date < today ? "这天还没有填写记录" : "等待今天填写" }}</dd></div>
@@ -100,7 +106,7 @@ const emit = defineEmits<{
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
 const weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
-type CalendarState = "filled" | "due" | "missing" | "suggest" | "future" | "outside";
+type CalendarState = "filled" | "due" | "missing" | "suggest" | "none" | "future" | "outside";
 
 const monthTitle = computed(() => dayjs(props.month).format("YYYY 年 M 月"));
 const grid = computed(() => {
@@ -113,10 +119,24 @@ const byDate = computed(() => new Map(props.days.map(day => [day.date, day])));
 const dayOf = (date: string) => byDate.value.get(date);
 
 const currentMonthDays = computed(() => props.days.filter(day => day.date.slice(0, 7) === props.month.slice(0, 7)));
-const filledDays = computed(() =>
-  currentMonthDays.value.filter(day => ["SUBMITTED", "PARTIALLY_APPROVED", "APPROVED"].includes(day.status)).length
-);
-const suggestDays = computed(() => currentMonthDays.value.filter(day => ["DRAFT", "RETURNED"].includes(day.status)).length);
+const filledDays = computed(() => {
+  if (props.mode === "PATIENT") {
+    return currentMonthDays.value.filter(
+      day => Number(day.patientTotal || 0) > 0 && Number(day.missing || 0) === 0
+        && Number(day.draft || 0) === 0 && Number(day.returned || 0) === 0
+    ).length;
+  }
+  return currentMonthDays.value.filter(day => ["SUBMITTED", "PARTIALLY_APPROVED", "APPROVED"].includes(day.status)).length;
+});
+const suggestDays = computed(() => {
+  if (props.mode === "PATIENT") {
+    return currentMonthDays.value.filter(
+      day => Number(day.draft || 0) > 0 || Number(day.returned || 0) > 0
+        || (Number(day.patientTotal || 0) > 0 && Number(day.missing || 0) > 0 && Number(day.patientCount || 0) > 0)
+    ).length;
+  }
+  return currentMonthDays.value.filter(day => ["DRAFT", "RETURNED"].includes(day.status)).length;
+});
 const monthLines = computed(() => currentMonthDays.value.reduce((sum, day) => sum + Number(day.lineCount || 0), 0));
 const monthPeople = computed(() => currentMonthDays.value.reduce((sum, day) => sum + Number(day.patientCount || 0), 0));
 const missingDays = computed(() => {
@@ -128,12 +148,20 @@ const isFuture = (date: string) => date > props.today;
 
 const stateOf = (date: string): CalendarState => {
   if (date.slice(0, 7) !== props.month.slice(0, 7)) return "outside";
+  if (isFuture(date)) return "future";
   const day = dayOf(date);
+  if (props.mode === "PATIENT") {
+    if (day && Number(day.patientTotal || 0) > 0) {
+      if (Number(day.missing || 0) === 0 && Number(day.draft || 0) === 0 && Number(day.returned || 0) === 0) return "filled";
+      if (Number(day.patientCount || 0) > 0 || Number(day.draft || 0) > 0 || Number(day.returned || 0) > 0) return "suggest";
+      return date === props.today ? "due" : "missing";
+    }
+    return date === props.today ? "due" : "none";
+  }
   if (day) {
     if (["SUBMITTED", "PARTIALLY_APPROVED", "APPROVED"].includes(day.status)) return "filled";
     if (["DRAFT", "RETURNED"].includes(day.status)) return "suggest";
   }
-  if (isFuture(date)) return "future";
   return date === props.today ? "due" : "missing";
 };
 
@@ -146,10 +174,13 @@ const cellClass = (date: string) => ({
 
 const badge = (date: string) => {
   const state = stateOf(date);
-  if (state === "outside" || state === "future") return "";
+  if (state === "outside" || state === "future" || state === "none") return "";
   const day = dayOf(date);
+  if (props.mode === "PATIENT") {
+    if (day && Number(day.patientTotal || 0) > 0) return `${day.patientCount || 0}人`;
+    return state === "due" ? "待填" : "";
+  }
   if (day) {
-    if (props.mode === "PATIENT" && Number(day.patientCount || 0) > 0) return `${day.patientCount}人`;
     if (Number(day.lineCount || 0) > 0) return `${day.lineCount}项`;
     return "已填";
   }
@@ -166,6 +197,8 @@ const stateLabel = (date: string) => {
       return "实际未填";
     case "suggest":
       return "建议补充";
+    case "none":
+      return "当天无患者";
     case "future":
       return "未到日期";
     default:
