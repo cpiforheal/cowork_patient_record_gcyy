@@ -2,9 +2,9 @@
   <section class="review-workspace" v-loading="loading">
     <header class="review-toolbar">
       <div class="toolbar-copy">
-        <span class="eyebrow">库管审核 · 患者耗材</span>
-        <h2>患者耗材审核</h2>
-        <p>按科室和业务日期审核患者耗材清单。逐行通过或驳回；通过后立即扣减科室库存，驳回项退回科室修改。</p>
+        <span class="eyebrow">库管审核 · 耗材</span>
+        <h2>耗材审核</h2>
+        <p>按科室和业务日期审核患者耗材清单或科室日报。逐行通过或驳回；通过后立即扣减科室库存，驳回项退回科室修改。</p>
       </div>
       <div class="toolbar-actions">
         <el-date-picker
@@ -67,7 +67,10 @@
             @click="selectBatch(batch)"
           >
             <span class="batch-main">
-              <strong>{{ batch.departmentName }}</strong>
+              <strong>
+                {{ batch.departmentName }}
+                <el-tag v-if="batch.batchType === 'DAILY'" size="small" type="info" effect="plain">日报</el-tag>
+              </strong>
               <span>{{ batch.businessDate }}</span>
             </span>
             <span class="batch-side">
@@ -89,7 +92,7 @@
             <p class="detail-meta">
               {{ detail.batch.businessDate }}
               <span>·</span>
-              患者 {{ detail.documents.length }} 人
+              {{ isDailyBatch ? "科室日报" : `患者 ${detail.documents.length} 人` }}
               <span>·</span>
               待审 {{ pendingLineCount }} 行
               <span>·</span>
@@ -127,6 +130,7 @@
                 <strong>{{ document.patientName || "未命名患者" }}</strong>
                 <el-tag :type="statusType(document.status)" size="small" effect="plain">{{ statusLabel(document.status) }}</el-tag>
                 <el-tag v-if="document.sourceType === 'MANUAL'" size="small" type="warning" effect="plain">手动补录</el-tag>
+                <el-tag v-if="isDailyBatch" size="small" type="info" effect="plain">科室日报</el-tag>
                 <span class="document-meta">
                   {{ document.serviceName || "服务" }}
                   <i aria-hidden="true">·</i>
@@ -142,7 +146,7 @@
                 type="primary"
                 @click="approveDocument(document)"
               >
-                通过本患者待审
+                {{ isDailyBatch ? "通过本日报待审" : "通过本患者待审" }}
               </el-button>
             </header>
 
@@ -189,7 +193,7 @@
             </div>
           </article>
 
-          <el-empty v-if="!detail.documents.length" :image-size="80" description="该批次没有患者耗材清单" />
+          <el-empty v-if="!detail.documents.length" :image-size="80" description="该批次没有耗材明细" />
         </div>
       </main>
 
@@ -280,6 +284,7 @@ const pendingLineIds = computed(() =>
   )
 );
 const pendingLineCount = computed(() => pendingLineIds.value.length);
+const isDailyBatch = computed(() => detail.value?.batch.batchType === "DAILY");
 
 const reload = async (keepSelection = true) => {
   loading.value = true;

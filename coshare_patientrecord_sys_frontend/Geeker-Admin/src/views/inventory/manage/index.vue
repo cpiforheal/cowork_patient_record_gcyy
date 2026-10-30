@@ -264,7 +264,11 @@
           </template>
 
           <template v-else-if="activeTab === 'consumableWorkbench'">
-            <ConsumableUsageWorkbenchPanel :can-view-all-departments="canViewAllDepartments" :today="today()" />
+            <ConsumableUsageWorkbenchPanel
+              :can-view-all-departments="canViewAllDepartments"
+              :today="today()"
+              @open-department="openDepartmentDraft"
+            />
           </template>
 
           <template v-else-if="activeTab === 'roles'">

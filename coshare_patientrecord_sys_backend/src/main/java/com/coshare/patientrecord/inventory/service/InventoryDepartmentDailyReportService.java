@@ -189,6 +189,7 @@ public class InventoryDepartmentDailyReportService {
             """,
             user.name(), reportId
         );
+        upsertApprovalBatch(report);
         upsertClosure(department, report.businessDate(), "SUBMITTED", user);
         repository.log(user.name(), "提交科室日报", "department_daily_report", department.name() + " " + report.businessDate(),
             "已提交库管审核，未扣减库存");
@@ -310,6 +311,27 @@ public class InventoryDepartmentDailyReportService {
         if (date.isBefore(LocalDate.now()) && report != null && "SUBMITTED".equals(report.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "科室日报已提交且已过业务日，不能直接修改；请发起更正");
         }
+    }
+
+    private void upsertApprovalBatch(Report report) {
+        Integer lineCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM inventory_department_daily_report_lines WHERE report_id = ?",
+            Integer.class,
+            report.id()
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_consumption_approval_batches
+              (id, department_id, department_key, department_name, batch_type, business_date, status,
+               document_count, line_count, approved_line_count, rejected_line_count)
+            VALUES (?, ?, ?, ?, 'DAILY', ?, 'PENDING', 1, ?, 0, 0)
+            ON DUPLICATE KEY UPDATE batch_type = 'DAILY', status = 'PENDING', document_count = 1,
+              line_count = VALUES(line_count), approved_line_count = 0, rejected_line_count = 0,
+              reviewed_by = NULL, reviewed_at = NULL
+            """,
+            "daily-approval-batch-" + UUID.randomUUID(), report.departmentId(), report.departmentKey(),
+            report.departmentName(), report.businessDate(), lineCount == null ? 0 : lineCount
+        );
     }
 
     private void upsertClosure(Department department, LocalDate date, String status, SessionUser user) {

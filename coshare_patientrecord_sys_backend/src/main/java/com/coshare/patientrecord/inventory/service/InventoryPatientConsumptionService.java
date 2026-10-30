@@ -448,13 +448,14 @@ public class InventoryPatientConsumptionService {
     }
 
     @Transactional(readOnly = true)
-    public ObjectNode patientSource(String keyword, String visitType, LocalDate businessDate, int page, int size, SessionUser user) {
+    public ObjectNode patientSource(String keyword, String visitType, LocalDate businessDate, String departmentName, int page, int size, SessionUser user) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
         String search = keyword == null ? "" : keyword.trim();
         String like = "%" + search + "%";
         String type = visitType == null ? "" : visitType.trim();
         String date = businessDate == null ? "" : businessDate.toString();
+        String department = departmentName == null ? "" : departmentName.trim();
         String joins = """
             FROM clinic_patients p
             LEFT JOIN clinic_patient_encounters e ON e.id = (
@@ -469,10 +470,12 @@ public class InventoryPatientConsumptionService {
             )
             """;
         String visitTypeExpression = "COALESCE(e.visit_type, CASE WHEN pe.inventory_care_type = 'inpatient' THEN '住院' ELSE '门诊' END, p.visit_type)";
+        String departmentExpression = "COALESCE(pe.owning_department_name_snapshot, '')";
         String where = "WHERE (? = '' OR p.name LIKE ? OR p.visit_no LIKE ? OR pe.case_token LIKE ?) "
             + "AND (? = '' OR " + visitTypeExpression + " = ?) "
-            + "AND (? = '' OR LEFT(COALESCE(e.visit_date, p.visit_date), 10) = ?)";
-        List<Object> params = new ArrayList<>(List.of(search, like, like, like, type, type, date, date));
+            + "AND (? = '' OR LEFT(COALESCE(e.visit_date, p.visit_date), 10) = ?) "
+            + "AND (? = '' OR " + departmentExpression + " = ?)";
+        List<Object> params = new ArrayList<>(List.of(search, like, like, like, type, type, date, date, department, department));
         Integer total = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) " + joins + where,
             Integer.class,
@@ -484,7 +487,8 @@ public class InventoryPatientConsumptionService {
             + "p.status, p.encounter_count, COALESCE(e.id, pe.id) encounter_id, "
             + "COALESCE(CAST(e.visit_no AS CHAR), CAST(pe.visit_no AS CHAR), p.visit_no) encounter_visit_no, "
             + visitTypeExpression + " encounter_visit_type, "
-            + "COALESCE(e.visit_date, p.visit_date) encounter_visit_date, pe.case_token, pe.current_stage "
+            + "COALESCE(e.visit_date, p.visit_date) encounter_visit_date, pe.case_token, pe.current_stage, "
+            + departmentExpression + " department_name "
             + joins + where
             + " ORDER BY COALESCE(e.visit_date, p.visit_date) DESC, p.updated_at DESC LIMIT ? OFFSET ?";
         ArrayNode list = jdbcTemplate.query(
@@ -506,15 +510,26 @@ public class InventoryPatientConsumptionService {
                     row.put("encounterVisitDate", resultSet.getString("encounter_visit_date") == null ? "" : resultSet.getString("encounter_visit_date"));
                     row.put("caseToken", resultSet.getString("case_token") == null ? "" : resultSet.getString("case_token"));
                     row.put("currentStage", resultSet.getString("current_stage") == null ? "" : resultSet.getString("current_stage"));
+                    row.put("departmentName", resultSet.getString("department_name") == null ? "" : resultSet.getString("department_name"));
                 }
                 return rows;
             },
             params.toArray()
         );
+        List<String> departments = jdbcTemplate.query(
+            """
+            SELECT DISTINCT owning_department_name_snapshot department_name
+            FROM pre_ai_encounters
+            WHERE owning_department_name_snapshot IS NOT NULL AND owning_department_name_snapshot <> ''
+            ORDER BY department_name
+            """,
+            (resultSet, rowNum) -> resultSet.getString("department_name")
+        );
         ObjectNode result = objectMapper.createObjectNode();
         result.put("total", total == null ? 0 : total);
         result.put("pageNum", safePage);
         result.put("pageSize", safeSize);
+        result.set("departments", objectMapper.valueToTree(departments));
         result.set("list", list);
         return result;
     }

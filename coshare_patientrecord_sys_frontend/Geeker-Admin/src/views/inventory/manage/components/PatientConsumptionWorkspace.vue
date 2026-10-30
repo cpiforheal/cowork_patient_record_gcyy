@@ -569,6 +569,9 @@
             :prefix-icon="Search"
             @keyup.enter="loadPatientSource(true)"
           />
+          <el-select v-model="sourceDepartment" clearable filterable placeholder="全院科室" @change="loadPatientSource(true)">
+            <el-option v-for="department in sourceDepartments" :key="department" :label="department" :value="department" />
+          </el-select>
           <el-select v-model="sourceVisitType" clearable placeholder="全部就诊情况" @change="loadPatientSource(true)">
             <el-option label="门诊" value="门诊" />
             <el-option label="住院" value="住院" />
@@ -586,7 +589,8 @@
           <el-switch v-model="sourceOnlyUnadded" active-text="只看未加入" />
         </div>
         <p class="source-summary">
-          共 {{ sourceTotal }} 位患者；当前显示 {{ visibleSourceRows.length }} 位未加入患者，点击整行即可加入。
+          全院 {{ sourceTotal }} 位患者<span v-if="sourceDepartment"> · {{ sourceDepartment }}</span>；当前显示
+          {{ visibleSourceRows.length }} 位未加入患者，点击整行即可加入。
         </p>
         <div v-loading="sourceLoading" class="source-list">
           <div
@@ -598,7 +602,11 @@
           >
             <div class="source-main">
               <strong>{{ row.patientName }}</strong>
-              <span>{{ row.caseToken || row.visitNo }} · {{ row.encounterVisitType || row.visitType }} · {{ row.encounterVisitDate || row.visitDate }}</span>
+              <span>
+                <em v-if="row.departmentName" class="source-department">{{ row.departmentName }}</em>
+                {{ row.caseToken || row.visitNo }} · {{ row.encounterVisitType || row.visitType }} ·
+                {{ row.encounterVisitDate || row.visitDate }}
+              </span>
               <small>{{ row.currentStage || row.status || "未记录阶段" }} · {{ row.encounterCount }} 次就诊</small>
             </div>
             <el-button
@@ -814,6 +822,8 @@ const batchResult = ref<InventoryPatientBatchSubmitResult | null>(null);
 const sourceDrawerVisible = ref(false);
 const sourceKeyword = ref("");
 const sourceVisitType = ref("");
+const sourceDepartment = ref("");
+const sourceDepartments = ref<string[]>([]);
 const sourceDate = ref(todayValue);
 const sourceRows = ref<InventoryPatientSourceRow[]>([]);
 const sourceTotal = ref(0);
@@ -1543,6 +1553,7 @@ const saveManualPatient = async () => {
 const openPatientSource = async () => {
   sourceKeyword.value = "";
   sourceVisitType.value = "";
+  sourceDepartment.value = "";
   sourceDate.value = businessDate.value;
   sourcePage.value = 1;
   sourceDrawerVisible.value = true;
@@ -1559,6 +1570,7 @@ const loadPatientSource = async (reset = false) => {
     const result = await getInventoryPatientSourceApi({
       keyword: sourceKeyword.value.trim() || undefined,
       visitType: sourceVisitType.value || undefined,
+      department: sourceDepartment.value || undefined,
       date: sourceDate.value || undefined,
       page: sourcePage.value,
       size: 30
@@ -1566,6 +1578,7 @@ const loadPatientSource = async (reset = false) => {
     const list = result.data?.list ?? [];
     sourceRows.value = reset ? list : [...sourceRows.value, ...list];
     sourceTotal.value = result.data?.total ?? sourceRows.value.length;
+    sourceDepartments.value = result.data?.departments ?? sourceDepartments.value;
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取患者档案失败");
   } finally {
@@ -3095,6 +3108,16 @@ onMounted(() => {
     color: var(--hos-text-muted);
     font-size: 10px;
   }
+}
+
+.source-department {
+  padding: 1px 6px;
+  margin-right: 4px;
+  color: var(--hos-primary);
+  font-size: 10px;
+  font-style: normal;
+  background: var(--hos-primary-soft);
+  border-radius: 999px;
 }
 
 .source-more {

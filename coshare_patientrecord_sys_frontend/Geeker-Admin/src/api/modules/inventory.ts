@@ -678,12 +678,14 @@ export interface InventoryPatientSourceRow {
   encounterVisitDate: string;
   caseToken: string;
   currentStage: string;
+  departmentName: string;
 }
 
 export interface InventoryPatientSourceList {
   total: number;
   pageNum: number;
   pageSize: number;
+  departments?: string[];
   list: InventoryPatientSourceRow[];
 }
 
@@ -692,6 +694,7 @@ export interface InventoryPatientReviewBatch {
   departmentId: string;
   departmentKey: string;
   departmentName: string;
+  batchType?: "PATIENT" | "DAILY";
   businessDate: string;
   status: string;
   documentCount: number;
@@ -2053,6 +2056,7 @@ export const getInventoryPatientSourceApi = async (params: {
   keyword?: string;
   visitType?: string;
   date?: string;
+  department?: string;
   page?: number;
   size?: number;
 }) => getInventoryData<InventoryPatientSourceList>("/patient-workbench/patient-source", params);
@@ -2145,24 +2149,88 @@ export interface InventoryConsumableUsageItem {
 }
 
 export interface InventoryConsumableUsagePatient {
-  patientId: string;
+  patientId?: string;
   patientName: string;
   visitNo?: string;
   departmentName: string;
   serviceName?: string;
   quantity: number;
   reviewStatus: string;
-  documentStatus: string;
+  documentStatus?: string;
   attentionFlag?: boolean;
+  sourceType?: "PATIENT" | "DAILY";
+}
+
+export interface InventoryConsumableUsageTotals {
+  itemCount: number;
+  totalQuantity: number;
+  patientCount: number;
+  patientTotal?: number;
+  entered?: number;
+  draft?: number;
+  returned?: number;
+  missingPatientCount?: number;
+  noConsumption?: number;
+  reportTotal?: number;
+  reportSubmitted?: number;
+  reportMissing?: number;
+  missingCount?: number;
+}
+
+export interface InventoryConsumableUsageMissingPatient {
+  departmentKey: string;
+  departmentName: string;
+  serviceInstanceId: string;
+  patientName: string;
+  visitNo?: string;
+  serviceName?: string;
+  reason: string;
+}
+
+export interface InventoryConsumableUsageMissingReport {
+  departmentKey: string;
+  departmentName: string;
+  reportId?: string;
+  status: string;
+  reason: string;
+}
+
+export interface InventoryConsumableUsageClosure {
+  status: string;
+  submittedBy?: string;
+  submittedAt?: string;
+  lockedAt?: string;
+  locked?: boolean;
+  closedDepartments?: number;
+  totalDepartments?: number;
 }
 
 export interface InventoryConsumableUsage {
   businessDate: string;
   departmentKey: string;
-  totals?: { itemCount: number; totalQuantity: number; patientCount: number };
+  mode?: "PATIENT" | "DAILY" | "ALL";
+  totals?: InventoryConsumableUsageTotals;
+  closure?: InventoryConsumableUsageClosure;
   items?: InventoryConsumableUsageItem[];
   itemId?: string;
   patients?: InventoryConsumableUsagePatient[];
+  missingPatients?: InventoryConsumableUsageMissingPatient[];
+  missingReports?: InventoryConsumableUsageMissingReport[];
+}
+
+export interface InventoryDayCloseResult {
+  businessDate: string;
+  departmentKey: string;
+  totalDepartments: number;
+  closedDepartments: number;
+  submittedDocuments: number;
+  submittedReports: number;
+  blocked: boolean;
+  message: string;
+  missingPatients: InventoryConsumableUsageMissingPatient[];
+  failedPatients: InventoryConsumableUsageMissingPatient[];
+  missingReports: InventoryConsumableUsageMissingReport[];
+  closed: string[];
 }
 
 export const getInventoryConsumableUsageApi = async (params: {
@@ -2170,6 +2238,21 @@ export const getInventoryConsumableUsageApi = async (params: {
   departmentKey?: string;
   itemId?: string;
 }) => getInventoryData<InventoryConsumableUsage>("/consumable-usage", params);
+
+export const closeInventoryConsumableUsageDayApi = async (payload: {
+  businessDate: string;
+  departmentKey?: string;
+}) =>
+  postInventoryData<InventoryDayCloseResult, typeof payload>("/consumable-usage/close", payload);
+
+export const downloadInventoryConsumableUsageDayApi = async (
+  params: { date: string; departmentKey?: string },
+  format: "xlsx" | "csv"
+) =>
+  downloadInventoryFile(
+    `/consumable-usage/export/${format}${buildInventoryQuery(params)}`,
+    `consumable-day-${params.date}.${format}`
+  );
 
 export const getInventoryPatientDashboardApi = async (date?: string) =>
   getInventoryData<{

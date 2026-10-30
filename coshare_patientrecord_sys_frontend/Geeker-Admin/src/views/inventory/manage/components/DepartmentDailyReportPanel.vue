@@ -215,7 +215,14 @@ const exportReport = async () => {
   if (!draft.value?.id) return;
   exporting.value = true;
   try {
-    await downloadInventoryDepartmentDailyReportApi(draft.value.id, "xlsx");
+    const { blob, filename } = await downloadInventoryDepartmentDailyReportApi(draft.value.id, "xlsx");
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    ElMessage.success("科室日报已导出");
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "导出科室日报失败");
   } finally {
@@ -254,6 +261,8 @@ const statusLabel = (status?: string) => {
       return "已提交";
     case "APPROVED":
       return "已通过";
+    case "PARTIALLY_APPROVED":
+      return "部分通过";
     case "RETURNED":
       return "已驳回";
     default:
@@ -264,7 +273,7 @@ const statusLabel = (status?: string) => {
 const statusType = (status?: string): "success" | "warning" | "danger" | "info" => {
   if (status === "APPROVED") return "success";
   if (status === "RETURNED") return "danger";
-  if (status === "SUBMITTED") return "warning";
+  if (status === "SUBMITTED" || status === "PARTIALLY_APPROVED") return "warning";
   return "info";
 };
 

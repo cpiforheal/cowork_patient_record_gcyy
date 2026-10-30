@@ -113,6 +113,7 @@ public class InventoryPatientConsumptionReviewService {
     @Transactional(readOnly = true)
     public ObjectNode batch(String batchId, SessionUser user) {
         BatchRow batch = requireBatch(batchId, user);
+        if ("DAILY".equals(batch.batchType())) return dailyBatch(batch);
         List<ObjectNode> documents = jdbcTemplate.query(
             """
             SELECT d.*, si.patient_name, si.visit_no, si.service_name, si.service_code, si.stage_code,
@@ -160,6 +161,7 @@ public class InventoryPatientConsumptionReviewService {
     @Transactional
     public ObjectNode decide(String batchId, JsonNode payload, SessionUser user) {
         BatchRow batch = requireBatchForUpdate(batchId, user);
+        if ("DAILY".equals(batch.batchType())) return decideDaily(batch, payload, user);
         JsonNode decisions = payload == null ? null : payload.path("decisions");
         if (decisions == null || !decisions.isArray() || decisions.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择需要审核的耗材行");
@@ -205,6 +207,326 @@ public class InventoryPatientConsumptionReviewService {
         ObjectNode result = batch(batchId, user);
         result.set("errors", errors);
         return result;
+    }
+
+    private ObjectNode dailyBatch(BatchRow batch) {
+        ArrayNode documents = JsonNodeFactory.instance.arrayNode();
+        DailyReportRow report = loadDailyReport(batch);
+        if (report != null) {
+            ObjectNode document = documents.addObject();
+            document.put("documentId", report.id());
+            document.put("serviceInstanceId", "");
+            document.put("patientId", "");
+            document.put("patientName", "科室日报");
+            document.put("visitNo", "");
+            document.put("encounterId", "");
+            document.put("careType", "");
+            document.put("serviceCode", "DAILY_REPORT");
+            document.put("serviceName", "科室日报");
+            document.put("stageCode", "DAILY_REPORT");
+            document.put("sourceType", "DAILY");
+            document.put("serviceStartedAt", report.submittedAt() == null ? "" : report.submittedAt().toString());
+            document.put("status", report.status());
+            document.put("revision", report.revision());
+            document.put("submittedAt", report.submittedAt() == null ? "" : report.submittedAt().toString());
+            document.put("submittedBy", report.submittedBy());
+            document.set("lines", loadDailyLines(report.id(), report.revision()));
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("batch", batchJson(batch));
+        result.set("documents", documents);
+        return result;
+    }
+
+    private ObjectNode decideDaily(BatchRow batch, JsonNode payload, SessionUser user) {
+        JsonNode decisions = payload == null ? null : payload.path("decisions");
+        if (decisions == null || !decisions.isArray() || decisions.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择需要审核的耗材行");
+        }
+        DailyReportRow report = loadDailyReport(batch);
+        if (report == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室日报不存在");
+        if (!Set.of("SUBMITTED", "PARTIALLY_APPROVED").contains(report.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "科室日报当前状态不可审核");
+        }
+        Set<String> seen = new HashSet<>();
+        ArrayNode errors = objectMapper.createArrayNode();
+        int approved = 0;
+        int rejected = 0;
+        for (JsonNode decisionNode : decisions) {
+            String lineId = text(decisionNode, "lineId");
+            String decision = text(decisionNode, "decision").toUpperCase(Locale.ROOT);
+            String note = text(decisionNode, "note");
+            if (lineId.isBlank() || !DECISIONS.contains(decision)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "审核决策格式不正确");
+            }
+            if (!seen.add(lineId)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "同一耗材行不能重复审核");
+            }
+            DailyReviewLine line = lockDailyLine(lineId, batch);
+            if (decision.equals(line.reviewStatus())) continue;
+            if ("APPROVED".equals(line.reviewStatus())) {
+                errors.add(error(lineId, "该行已审核通过，不能重复处理"));
+                continue;
+            }
+            if ("REJECTED".equals(decision)) {
+                rejectDaily(line, batch, report, note, user);
+                rejected++;
+                continue;
+            }
+            try {
+                approveDaily(line, batch, report, note, user);
+                approved++;
+            } catch (StockShortageException shortage) {
+                errors.add(error(lineId, shortage.getMessage()));
+            }
+        }
+        refreshDailyReview(batch, report, user);
+        repository.log(user.name(), "审核科室日报", "inventory_consumption_approval_batch",
+            batch.departmentName() + " " + batch.businessDate(),
+            "通过 " + approved + " 行，驳回 " + rejected + " 行" + (errors.isEmpty() ? "" : "，异常 " + errors.size() + " 行"));
+        ObjectNode result = batch(batch.id(), user);
+        result.set("errors", errors);
+        return result;
+    }
+
+    private void approveDaily(DailyReviewLine line, BatchRow batch, DailyReportRow report, String note, SessionUser user) {
+        if (line.actualQuantity() == null || line.actualQuantity().signum() <= 0) {
+            jdbcTemplate.update(
+                "UPDATE inventory_department_daily_report_lines SET review_status = 'APPROVED', review_note = ? WHERE id = ?",
+                blankToNull(note), line.lineId()
+            );
+            insertDecision(batch, new ReviewLine(line.lineId(), report.id(), line.itemId(), BigDecimal.ZERO,
+                "APPROVED", report.revision(), report.status(), "", "", report.id(), "outpatient",
+                "DAILY_REPORT", "DAILY_REPORT"), "APPROVED", note, user, null);
+            return;
+        }
+        ItemRow item = requireItem(line.itemId());
+        String idempotencyKey = "daily-line:" + line.lineId() + ":" + report.revision() + ":CONSUMPTION";
+        List<String> existing = jdbcTemplate.query(
+            "SELECT id FROM inventory_consumption_events WHERE idempotency_key = ? LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString(1),
+            idempotencyKey
+        );
+        String eventId;
+        if (existing.isEmpty()) {
+            if (!ledger.isOpeningConfirmed(batch.departmentId())) {
+                throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+            }
+            String locationId = ledger.departmentLocation(batch.departmentId());
+            List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
+            BigDecimal available = balances.stream().map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (available.compareTo(line.actualQuantity()) < 0) {
+                throw new StockShortageException(item.name() + " 库存不足，当前可用 " + available.stripTrailingZeros().toPlainString());
+            }
+            List<Allocation> allocations = new ArrayList<>();
+            BigDecimal remaining = line.actualQuantity();
+            for (Balance balance : balances) {
+                if (remaining.signum() <= 0) break;
+                BigDecimal quantity = remaining.min(balance.available());
+                if (quantity.signum() > 0) {
+                    allocations.add(new Allocation(balance, quantity));
+                    remaining = remaining.subtract(quantity);
+                }
+            }
+            eventId = "daily-consumption-" + UUID.randomUUID();
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.put("sourceType", "DAILY_REPORT");
+            raw.put("sourceDocumentId", report.id());
+            raw.put("sourceLineId", line.lineId());
+            raw.put("itemId", line.itemId());
+            raw.put("quantity", line.actualQuantity());
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_consumption_events
+                  (id, command_id, source_document_id, source_line_id, correction_document_id, service_instance_id,
+                   patient_id, idempotency_key, encounter_id, case_token, route, care_type, care_encounter_id,
+                   department, department_id, visit_date, package_id, package_version, status, event_kind,
+                   trigger_stage, completion_version, operator_name, created_at, raw_json)
+                VALUES (?, NULL, ?, ?, NULL, NULL, NULL, ?, ?, NULL, 'DAILY_REPORT', 'outpatient', NULL,
+                        ?, ?, ?, NULL, NULL, 'succeeded', 'CONSUMPTION', 'DAILY_REPORT', NULL, ?, ?, CAST(? AS JSON))
+                """,
+                eventId, report.id(), line.lineId(), idempotencyKey, report.id(),
+                batch.departmentName(), batch.departmentId(), batch.businessDate().toString(),
+                user.name(), LocalDateTime.now().toString(), json(raw)
+            );
+            for (Allocation allocation : allocations) {
+                ledger.changeBalance(allocation.balance().id(), allocation.quantity().negate(), BigDecimal.ZERO);
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO inventory_consumption_details
+                      (id, event_id, item_id, batch_id, location_id, quantity, detail_kind, raw_json)
+                    VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', JSON_OBJECT('source', 'DAILY_REPORT'))
+                    """,
+                    "daily-consumption-detail-" + UUID.randomUUID(), eventId, line.itemId(),
+                    allocation.balance().batchId(), locationId, allocation.quantity()
+                );
+                ledger.movement(
+                    "CONSUMPTION", line.itemId(), allocation.balance().batchId(), locationId, null,
+                    allocation.quantity(), batch.departmentId(), "DAILY_REPORT_LINE", line.lineId(), eventId,
+                    null, user.name(), "科室日报审核通过"
+                );
+            }
+        } else {
+            eventId = existing.get(0);
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE inventory_department_daily_report_lines
+            SET review_status = 'APPROVED', consumption_event_id = ?, review_note = ?
+            WHERE id = ?
+            """,
+            eventId, blankToNull(note), line.lineId()
+        );
+        insertDecision(batch, new ReviewLine(line.lineId(), report.id(), line.itemId(), line.actualQuantity(),
+            "APPROVED", report.revision(), report.status(), "", "", report.id(), "outpatient",
+            "DAILY_REPORT", "DAILY_REPORT"), "APPROVED", note, user, eventId);
+    }
+
+    private void rejectDaily(DailyReviewLine line, BatchRow batch, DailyReportRow report, String note, SessionUser user) {
+        jdbcTemplate.update(
+            "UPDATE inventory_department_daily_report_lines SET review_status = 'REJECTED', review_note = ? WHERE id = ?",
+            blankToNull(note), line.lineId()
+        );
+        insertDecision(batch, new ReviewLine(line.lineId(), report.id(), line.itemId(), line.actualQuantity(),
+            "REJECTED", report.revision(), report.status(), "", "", report.id(), "outpatient",
+            "DAILY_REPORT", "DAILY_REPORT"), "REJECTED", note, user, null);
+    }
+
+    private void refreshDailyReview(BatchRow batch, DailyReportRow report, SessionUser user) {
+        ObjectNode counts = jdbcTemplate.query(
+            """
+            SELECT COUNT(*) total,
+                   COALESCE(SUM(CASE WHEN review_status = 'APPROVED' THEN 1 ELSE 0 END), 0) approved,
+                   COALESCE(SUM(CASE WHEN review_status = 'REJECTED' THEN 1 ELSE 0 END), 0) rejected,
+                   COALESCE(SUM(CASE WHEN review_status = 'PENDING' THEN 1 ELSE 0 END), 0) pending
+            FROM inventory_department_daily_report_lines WHERE report_id = ?
+            """,
+            resultSet -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                if (resultSet.next()) {
+                    row.put("total", resultSet.getInt("total"));
+                    row.put("approved", resultSet.getInt("approved"));
+                    row.put("rejected", resultSet.getInt("rejected"));
+                    row.put("pending", resultSet.getInt("pending"));
+                }
+                return row;
+            },
+            report.id()
+        );
+        int total = counts.path("total").asInt();
+        int approved = counts.path("approved").asInt();
+        int rejected = counts.path("rejected").asInt();
+        int pending = counts.path("pending").asInt();
+        String batchStatus;
+        String reportStatus;
+        if (pending > 0 && approved + rejected > 0) {
+            batchStatus = "PARTIALLY_APPROVED";
+            reportStatus = "PARTIALLY_APPROVED";
+        } else if (pending > 0) {
+            batchStatus = "PENDING";
+            reportStatus = "SUBMITTED";
+        } else if (rejected > 0 && approved > 0) {
+            batchStatus = "PARTIALLY_APPROVED";
+            reportStatus = "PARTIALLY_APPROVED";
+        } else if (rejected > 0) {
+            batchStatus = "RETURNED";
+            reportStatus = "RETURNED";
+        } else {
+            batchStatus = "APPROVED";
+            reportStatus = "APPROVED";
+        }
+        jdbcTemplate.update(
+            "UPDATE inventory_department_daily_reports SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP(3) WHERE id = ?",
+            reportStatus, user.name(), report.id()
+        );
+        jdbcTemplate.update(
+            """
+            UPDATE inventory_consumption_approval_batches
+            SET status = ?, line_count = ?, approved_line_count = ?, rejected_line_count = ?,
+                reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP(3)
+            WHERE id = ?
+            """,
+            batchStatus, total, approved, rejected, user.name(), batch.id()
+        );
+        if ("APPROVED".equals(reportStatus)) {
+            jdbcTemplate.update(
+                "UPDATE inventory_department_day_closures SET status = 'APPROVED' WHERE department_id = ? AND business_date = ?",
+                report.departmentId(), report.businessDate()
+            );
+        }
+    }
+
+    private DailyReviewLine lockDailyLine(String lineId, BatchRow batch) {
+        List<DailyReviewLine> rows = jdbcTemplate.query(
+            """
+            SELECT l.id, l.report_id, l.item_id, l.actual_quantity, l.review_status,
+                   r.status report_status, r.revision report_revision
+            FROM inventory_department_daily_report_lines l
+            JOIN inventory_department_daily_reports r ON r.id = l.report_id
+            WHERE l.id = ? AND r.department_id = ? AND r.business_date = ?
+            FOR UPDATE
+            """,
+            (resultSet, rowNum) -> new DailyReviewLine(
+                resultSet.getString("id"), resultSet.getString("report_id"), resultSet.getString("item_id"),
+                resultSet.getBigDecimal("actual_quantity"), resultSet.getString("review_status"),
+                resultSet.getString("report_status"), resultSet.getInt("report_revision")
+            ),
+            lineId, batch.departmentId(), batch.businessDate()
+        );
+        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "耗材行不存在或不属于该科室日报");
+        return rows.get(0);
+    }
+
+    private DailyReportRow loadDailyReport(BatchRow batch) {
+        return jdbcTemplate.query(
+            "SELECT * FROM inventory_department_daily_reports WHERE department_id = ? AND business_date = ?",
+            resultSet -> {
+                if (!resultSet.next()) return null;
+                Timestamp submittedAt = resultSet.getTimestamp("submitted_at");
+                return new DailyReportRow(
+                    resultSet.getString("id"), resultSet.getString("department_id"),
+                    resultSet.getString("department_key"), resultSet.getString("department_name"),
+                    resultSet.getDate("business_date").toLocalDate(), resultSet.getString("status"),
+                    resultSet.getInt("revision"), resultSet.getString("submitted_by"),
+                    submittedAt == null ? null : submittedAt.toLocalDateTime()
+                );
+            },
+            batch.departmentId(), batch.businessDate()
+        );
+    }
+
+    private ArrayNode loadDailyLines(String reportId, int reportRevision) {
+        return jdbcTemplate.query(
+            """
+            SELECT l.*, i.name item_name, i.unit item_unit
+            FROM inventory_department_daily_report_lines l
+            LEFT JOIN inventory_items i ON i.id = l.item_id
+            WHERE l.report_id = ?
+            ORDER BY l.line_no
+            """,
+            resultSet -> {
+                ArrayNode rows = JsonNodeFactory.instance.arrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = rows.addObject();
+                    row.put("lineId", resultSet.getString("id"));
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", firstNonBlank(resultSet.getString("item_name_snapshot"), resultSet.getString("item_name")));
+                    row.put("unit", firstNonBlank(resultSet.getString("unit_snapshot"), resultSet.getString("item_unit")));
+                    row.put("presetQuantity", resultSet.getBigDecimal("preset_quantity"));
+                    row.put("actualQuantity", resultSet.getBigDecimal("actual_quantity"));
+                    row.put("source", resultSet.getString("source"));
+                    row.put("exceptionReason", resultSet.getString("exception_reason"));
+                    row.put("reviewStatus", resultSet.getString("review_status"));
+                    row.put("reviewNote", resultSet.getString("review_note"));
+                    row.put("lineRevision", reportRevision);
+                    row.put("approvedQuantity", "APPROVED".equals(resultSet.getString("review_status"))
+                        ? resultSet.getBigDecimal("actual_quantity") : null);
+                    row.put("consumptionEventId", resultSet.getString("consumption_event_id"));
+                }
+                return rows;
+            },
+            reportId
+        );
     }
 
     private void approve(ReviewLine line, BatchRow batch, String note, SessionUser user) {
@@ -430,7 +752,8 @@ public class InventoryPatientConsumptionReviewService {
         Timestamp reviewedAt = resultSet.getTimestamp("reviewed_at");
         return new BatchRow(
             resultSet.getString("id"), resultSet.getString("department_id"), resultSet.getString("department_key"),
-            resultSet.getString("department_name"), resultSet.getDate("business_date").toLocalDate(),
+            resultSet.getString("department_name"), resultSet.getString("batch_type"),
+            resultSet.getDate("business_date").toLocalDate(),
             resultSet.getString("status"), resultSet.getInt("document_count"), resultSet.getInt("line_count"),
             resultSet.getInt("approved_line_count"), resultSet.getInt("rejected_line_count"),
             resultSet.getString("reviewed_by"), reviewedAt == null ? null : reviewedAt.toLocalDateTime()
@@ -444,6 +767,7 @@ public class InventoryPatientConsumptionReviewService {
         row.put("departmentId", resultSet.getString("department_id"));
         row.put("departmentKey", resultSet.getString("department_key"));
         row.put("departmentName", resultSet.getString("department_name"));
+        row.put("batchType", resultSet.getString("batch_type"));
         row.put("businessDate", resultSet.getDate("business_date").toLocalDate().toString());
         row.put("status", resultSet.getString("status"));
         row.put("documentCount", resultSet.getInt("document_count"));
@@ -461,6 +785,7 @@ public class InventoryPatientConsumptionReviewService {
         row.put("departmentId", batch.departmentId());
         row.put("departmentKey", batch.departmentKey());
         row.put("departmentName", batch.departmentName());
+        row.put("batchType", batch.batchType());
         row.put("businessDate", batch.businessDate().toString());
         row.put("status", batch.status());
         row.put("documentCount", batch.documentCount());
@@ -561,9 +886,19 @@ public class InventoryPatientConsumptionReviewService {
     }
 
     private record BatchRow(
+        String id, String departmentId, String departmentKey, String departmentName, String batchType,
+        LocalDate businessDate, String status, int documentCount, int lineCount, int approvedLineCount,
+        int rejectedLineCount, String reviewedBy, LocalDateTime reviewedAt
+    ) {}
+
+    private record DailyReportRow(
         String id, String departmentId, String departmentKey, String departmentName, LocalDate businessDate,
-        String status, int documentCount, int lineCount, int approvedLineCount, int rejectedLineCount,
-        String reviewedBy, LocalDateTime reviewedAt
+        String status, int revision, String submittedBy, LocalDateTime submittedAt
+    ) {}
+
+    private record DailyReviewLine(
+        String lineId, String reportId, String itemId, BigDecimal actualQuantity, String reviewStatus,
+        String reportStatus, int reportRevision
     ) {}
 
     private record ReviewLine(

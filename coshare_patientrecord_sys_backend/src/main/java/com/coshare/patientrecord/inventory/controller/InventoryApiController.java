@@ -7,6 +7,7 @@ import com.coshare.patientrecord.auth.service.InventoryPortalAccountAdminService
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.config.PortalMode;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
+import com.coshare.patientrecord.inventory.service.InventoryDayCloseService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDailyReportService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
@@ -50,6 +51,7 @@ public class InventoryApiController {
     private final InventoryPatientConsumptionService patientConsumptionService;
     private final InventoryPatientConsumptionReviewService patientConsumptionReviewService;
     private final InventoryDepartmentDailyReportService departmentDailyReportService;
+    private final InventoryDayCloseService dayCloseService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -64,6 +66,7 @@ public class InventoryApiController {
         InventoryPatientConsumptionService patientConsumptionService,
         InventoryPatientConsumptionReviewService patientConsumptionReviewService,
         InventoryDepartmentDailyReportService departmentDailyReportService,
+        InventoryDayCloseService dayCloseService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -77,6 +80,7 @@ public class InventoryApiController {
         this.patientConsumptionService = patientConsumptionService;
         this.patientConsumptionReviewService = patientConsumptionReviewService;
         this.departmentDailyReportService = departmentDailyReportService;
+        this.dayCloseService = dayCloseService;
         this.portalMode = portalMode;
     }
 
@@ -638,11 +642,12 @@ public class InventoryApiController {
         @RequestParam(required = false) String keyword,
         @RequestParam(required = false) String visitType,
         @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String department,
         @RequestParam(defaultValue = "1") int page,
         @RequestParam(defaultValue = "30") int size
     ) {
         SessionUser user = requireCapability("inventory:read");
-        return ApiResult.success(asMap(patientConsumptionService.patientSource(keyword, visitType, date, page, size, user)));
+        return ApiResult.success(asMap(patientConsumptionService.patientSource(keyword, visitType, date, department, page, size, user)));
     }
 
     @PutMapping("/inventory-api/patient-workbench/notes")
@@ -664,7 +669,29 @@ public class InventoryApiController {
         @RequestParam(required = false) String itemId
     ) {
         SessionUser user = requireCapability("inventory:read");
-        return ApiResult.success(asMap(patientConsumptionService.consumableUsage(date, departmentKey, itemId, user)));
+        return ApiResult.success(asMap(dayCloseService.usage(date, departmentKey, itemId, user)));
+    }
+
+    @PostMapping("/inventory-api/consumable-usage/close")
+    public ApiResult<Map<String, Object>> closeConsumableUsageDay(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "日结已处理", asMap(dayCloseService.close(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/consumable-usage/export/{format}")
+    public ResponseEntity<byte[]> exportConsumableUsageDay(
+        @org.springframework.web.bind.annotation.PathVariable String format,
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String departmentKey
+    ) {
+        SessionUser user = requireCapability("inventory:export");
+        boolean xlsx = "xlsx".equalsIgnoreCase(format);
+        LocalDate businessDate = date == null ? LocalDate.now() : date;
+        return attachment(
+            dayCloseService.export(businessDate, departmentKey, format, user),
+            "consumable-day-" + businessDate + (xlsx ? ".xlsx" : ".csv"),
+            xlsx ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv;charset=UTF-8"
+        );
     }
 
     @GetMapping("/inventory-api/patient-workbench/packages")
