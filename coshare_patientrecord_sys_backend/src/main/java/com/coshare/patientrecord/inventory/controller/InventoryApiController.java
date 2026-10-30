@@ -180,6 +180,15 @@ public class InventoryApiController {
         return ApiResult.success(asMap(departmentDailyReportService.read(departmentKey, date, user)));
     }
 
+    @GetMapping("/inventory-api/department-daily-reports/calendar")
+    public ApiResult<Map<String, Object>> departmentDailyReportCalendar(
+        @RequestParam String departmentKey,
+        @RequestParam(required = false) String month
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(departmentDailyReportService.calendar(departmentKey, month, user)));
+    }
+
     @PutMapping("/inventory-api/department-daily-reports")
     public ApiResult<Map<String, Object>> saveDepartmentDailyReport(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:read");

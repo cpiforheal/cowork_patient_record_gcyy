@@ -1883,6 +1883,30 @@ export const getInventoryDepartmentDailyDraftApi = async (params: { departmentKe
 export const getInventoryDepartmentDailyReportApi = async (params: { departmentKey: string; date: string }) =>
   getInventoryData<InventoryDepartmentDailyReport>("/department-daily-reports", params);
 
+export interface InventoryDepartmentDailyReportCalendarDay {
+  date: string;
+  reportId: string;
+  status: string;
+  lineCount: number;
+  patientCount: number;
+  submittedAt?: string;
+  submittedBy?: string;
+}
+
+export interface InventoryDepartmentDailyReportCalendar {
+  departmentKey: string;
+  departmentName: string;
+  entryMode: "PATIENT" | "DAILY";
+  month: string;
+  today: string;
+  days: InventoryDepartmentDailyReportCalendarDay[];
+}
+
+export const getInventoryDepartmentDailyReportCalendarApi = async (params: {
+  departmentKey: string;
+  month: string;
+}) => getInventoryData<InventoryDepartmentDailyReportCalendar>("/department-daily-reports/calendar", params);
+
 export const saveInventoryDepartmentDailyReportApi = async (payload: {
   departmentKey: string;
   businessDate: string;

@@ -197,6 +197,78 @@ public class InventoryDepartmentDailyReportService {
     }
 
     @Transactional(readOnly = true)
+    public ObjectNode calendar(String departmentKey, String month, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        LocalDate first;
+        try {
+            String value = month == null || month.isBlank()
+                ? LocalDate.now().withDayOfMonth(1).toString()
+                : month.trim();
+            if (value.length() == 7) value = value + "-01";
+            first = LocalDate.parse(value).withDayOfMonth(1);
+        } catch (Exception ignored) {
+            first = LocalDate.now().withDayOfMonth(1);
+        }
+        LocalDate last = first.withDayOfMonth(first.lengthOfMonth());
+        ArrayNode days = jdbcTemplate.query(
+            """
+            SELECT r.id, r.business_date, r.status, r.submitted_at, r.submitted_by,
+                   (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
+                    WHERE l.report_id = r.id AND l.actual_quantity > 0) line_count
+            FROM inventory_department_daily_reports r
+            WHERE r.department_key = ? AND r.business_date BETWEEN ? AND ?
+            ORDER BY r.business_date
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("date", resultSet.getDate("business_date").toLocalDate().toString());
+                    row.put("reportId", resultSet.getString("id"));
+                    row.put("status", resultSet.getString("status"));
+                    row.put("lineCount", resultSet.getInt("line_count"));
+                    Timestamp submittedAt = resultSet.getTimestamp("submitted_at");
+                    row.put("submittedAt", submittedAt == null ? "" : submittedAt.toLocalDateTime().toString());
+                    row.put("submittedBy", resultSet.getString("submitted_by"));
+                }
+                return list;
+            },
+            department.key(), first, last
+        );
+        Map<String, Integer> patientCounts = new LinkedHashMap<>();
+        if ("PATIENT".equals(department.entryMode())) {
+            jdbcTemplate.query(
+                """
+                SELECT si.business_date, COUNT(DISTINCT si.patient_id) patient_count
+                FROM inventory_service_instances si
+                JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
+                WHERE si.department_key = ? AND si.business_date BETWEEN ? AND ?
+                GROUP BY si.business_date
+                """,
+                resultSet -> {
+                    while (resultSet.next()) {
+                        patientCounts.put(resultSet.getDate("business_date").toLocalDate().toString(), resultSet.getInt("patient_count"));
+                    }
+                },
+                department.key(), first, last
+            );
+        }
+        for (JsonNode day : days) {
+            if (day instanceof ObjectNode row) {
+                row.put("patientCount", patientCounts.getOrDefault(day.path("date").asText(), 0));
+            }
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("departmentKey", department.key());
+        result.put("departmentName", department.name());
+        result.put("entryMode", department.entryMode());
+        result.put("month", first.toString());
+        result.put("today", LocalDate.now().toString());
+        result.set("days", days);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
     public byte[] export(String reportId, String format, SessionUser user) {
         Report report = loadReportById(reportId);
         if (report == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室日报不存在");

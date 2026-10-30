@@ -15,63 +15,79 @@
       </div>
     </header>
 
-    <div class="report-summary">
-      <span>耗材行 <b>{{ lines.length }}</b></span>
-      <span>实际总量 <b>{{ totalQuantity }}</b></span>
-      <span v-if="draft?.locked" class="locked">已锁定</span>
-      <span v-else-if="draft?.closure?.submittedAt" class="submitted">提交于 {{ formatDateTime(draft.closure.submittedAt) }}</span>
-    </div>
+    <div class="report-body">
+      <div class="report-main">
+        <div class="report-summary">
+          <span>耗材行 <b>{{ lines.length }}</b></span>
+          <span>实际总量 <b>{{ totalQuantity }}</b></span>
+          <span v-if="draft?.locked" class="locked">已锁定</span>
+          <span v-else-if="draft?.closure?.submittedAt" class="submitted">提交于 {{ formatDateTime(draft.closure.submittedAt) }}</span>
+        </div>
 
-    <el-alert
-      v-if="draft?.locked"
-      type="warning"
-      :closable="false"
-      show-icon
-      title="该业务日已锁定"
-      description="历史日报不能直接修改；如需更正，请发起更正单。"
-    />
+        <el-alert
+          v-if="draft?.locked"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="该业务日已锁定"
+          description="历史日报不能直接修改；如需更正，请发起更正单。"
+        />
 
-    <el-table :data="lines" class="report-table" height="calc(100vh - 340px)">
-      <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="unit" label="单位" width="90" />
-      <el-table-column label="模板数量" width="110" align="right">
-        <template #default="{ row }">{{ formatQuantity(row.presetQuantity) }}</template>
-      </el-table-column>
-      <el-table-column label="实际使用" width="150">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="row.actualQuantity"
-            :min="0"
-            :precision="2"
-            :step="1"
-            size="small"
-            controls-position="right"
-            :disabled="!editable"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="来源" width="90">
-        <template #default="{ row }">
-          <el-tag size="small" effect="plain" :type="row.source === 'MANUAL' ? 'warning' : 'info'">
-            {{ row.source === "MANUAL" ? "追加" : "模板" }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="说明" min-width="200">
-        <template #default="{ row }">
-          <el-input v-model="row.exceptionReason" size="small" :disabled="!editable" placeholder="选填" />
-        </template>
-      </el-table-column>
-      <el-table-column width="70" align="center">
-        <template #default="{ $index }">
-          <el-button text type="danger" :disabled="!editable" @click="removeLine($index)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        <el-table :data="lines" class="report-table" height="calc(100vh - 340px)">
+          <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="unit" label="单位" width="90" />
+          <el-table-column label="模板数量" width="110" align="right">
+            <template #default="{ row }">{{ formatQuantity(row.presetQuantity) }}</template>
+          </el-table-column>
+          <el-table-column label="实际使用" width="150">
+            <template #default="{ row }">
+              <el-input-number
+                v-model="row.actualQuantity"
+                :min="0"
+                :precision="2"
+                :step="1"
+                size="small"
+                controls-position="right"
+                :disabled="!editable"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain" :type="row.source === 'MANUAL' ? 'warning' : 'info'">
+                {{ row.source === "MANUAL" ? "追加" : "模板" }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="说明" min-width="200">
+            <template #default="{ row }">
+              <el-input v-model="row.exceptionReason" size="small" :disabled="!editable" placeholder="选填" />
+            </template>
+          </el-table-column>
+          <el-table-column width="70" align="center">
+            <template #default="{ $index }">
+              <el-button text type="danger" :disabled="!editable" @click="removeLine($index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
-    <div class="report-footer">
-      <el-button :icon="Plus" :disabled="!editable" @click="addDialogVisible = true">追加耗材</el-button>
-      <span>模板按当前定额规则带出；追加耗材请填写说明。</span>
+        <div class="report-footer">
+          <el-button :icon="Plus" :disabled="!editable" @click="addDialogVisible = true">追加耗材</el-button>
+          <span>模板按当前定额规则带出；追加耗材请填写说明。</span>
+        </div>
+      </div>
+
+      <DepartmentFillCalendar
+        class="report-calendar"
+        :month="calendarMonth"
+        :today="calendarToday"
+        :selected-date="businessDate"
+        :mode="draft?.entryMode || 'DAILY'"
+        :days="calendarDays"
+        :loading="calendarLoading"
+        @update:month="changeCalendarMonth"
+        @select-date="selectCalendarDate"
+      />
     </div>
 
     <el-dialog v-model="addDialogVisible" title="追加科室日报耗材" width="540px">
@@ -106,12 +122,15 @@ import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
+import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
 import {
   downloadInventoryDepartmentDailyReportApi,
   getInventoryDepartmentDailyReportApi,
+  getInventoryDepartmentDailyReportCalendarApi,
   saveInventoryDepartmentDailyReportApi,
   submitInventoryDepartmentDailyReportApi,
   type InventoryDepartmentDailyReport,
+  type InventoryDepartmentDailyReportCalendarDay,
   type InventoryDepartmentDailyReportLine,
   type InventoryItem
 } from "@/api/modules/inventory";
@@ -134,6 +153,10 @@ const addDialogVisible = ref(false);
 const addItemId = ref("");
 const addItemQuantity = ref(1);
 const addItemReason = ref("");
+const calendarMonth = ref(dayjs(businessDate.value).format("YYYY-MM-01"));
+const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
+const calendarLoading = ref(false);
+const calendarToday = computed(() => props.today || dayjs().format("YYYY-MM-DD"));
 
 const editable = computed(() => {
   const status = draft.value?.status;
@@ -153,11 +176,38 @@ const load = async () => {
     });
     draft.value = result.data ?? null;
     lines.value = (result.data?.lines ?? []).map(line => ({ ...line, actualQuantity: Number(line.actualQuantity || 0) }));
+    calendarMonth.value = dayjs(businessDate.value).startOf("month").format("YYYY-MM-01");
+    void loadCalendar();
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取科室日报失败");
   } finally {
     loading.value = false;
   }
+};
+
+const loadCalendar = async () => {
+  calendarLoading.value = true;
+  try {
+    const result = await getInventoryDepartmentDailyReportCalendarApi({
+      departmentKey: props.departmentKey,
+      month: calendarMonth.value
+    });
+    calendarDays.value = result.data?.days ?? [];
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取填写日历失败");
+  } finally {
+    calendarLoading.value = false;
+  }
+};
+
+const changeCalendarMonth = (month: string) => {
+  calendarMonth.value = month;
+  void loadCalendar();
+};
+
+const selectCalendarDate = (date: string) => {
+  businessDate.value = date;
+  void load();
 };
 
 const save = async () => {
@@ -182,6 +232,7 @@ const save = async () => {
     draft.value = result.data ?? draft.value;
     lines.value = (result.data?.lines ?? []).map(line => ({ ...line, actualQuantity: Number(line.actualQuantity || 0) }));
     ElMessage.success("科室日报已保存");
+    void loadCalendar();
     return result.data ?? null;
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "保存科室日报失败");
@@ -204,6 +255,7 @@ const submit = async () => {
     draft.value = result.data ?? draft.value;
     lines.value = (result.data?.lines ?? lines.value).map(line => ({ ...line, actualQuantity: Number(line.actualQuantity || 0) }));
     ElMessage.success("科室日报已提交库管审核");
+    void loadCalendar();
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "提交科室日报失败");
   } finally {
@@ -355,6 +407,25 @@ onMounted(() => {
   align-items: center;
 }
 
+.report-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 318px;
+  gap: 14px;
+  align-items: start;
+}
+
+.report-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.report-calendar {
+  position: sticky;
+  top: 12px;
+}
+
 .report-summary {
   display: flex;
   flex-wrap: wrap;
@@ -392,6 +463,17 @@ onMounted(() => {
 
 .add-item-select {
   width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .report-body {
+    grid-template-columns: 1fr;
+  }
+
+  .report-calendar {
+    position: static;
+    order: -1;
+  }
 }
 
 @media (max-width: 760px) {
