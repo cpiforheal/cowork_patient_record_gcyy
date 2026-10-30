@@ -427,6 +427,144 @@ public class InventoryPatientConsumptionService {
         return result;
     }
 
+    @Transactional(readOnly = true)
+    public ObjectNode packages(String departmentKey, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        List<ObjectNode> rows = jdbcTemplate.query(
+            """
+            SELECT id, department_key, department_name, name, created_by, created_at, updated_at
+            FROM inventory_patient_consumable_packages
+            WHERE department_key = ?
+            ORDER BY updated_at DESC, name
+            """,
+            (resultSet, rowNum) -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                row.put("id", resultSet.getString("id"));
+                row.put("departmentKey", resultSet.getString("department_key"));
+                row.put("departmentName", resultSet.getString("department_name"));
+                row.put("name", resultSet.getString("name"));
+                row.put("createdBy", resultSet.getString("created_by"));
+                row.put("updatedAt", resultSet.getTimestamp("updated_at") == null
+                    ? "" : resultSet.getTimestamp("updated_at").toLocalDateTime().toString());
+                return row;
+            },
+            department.key()
+        );
+        ArrayNode packages = objectMapper.createArrayNode();
+        for (ObjectNode row : rows) {
+            row.set("items", packageLines(row.path("id").asText()));
+            packages.add(row);
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("packages", packages);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode savePackage(JsonNode payload, SessionUser user) {
+        Department department = requireDepartment(text(payload, "departmentKey"), user);
+        String name = text(payload, "name");
+        if (name.isBlank() || name.length() > 120) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "套餐名称不能为空且不能超过 120 个字符");
+        }
+        JsonNode itemsNode = payload.path("lines");
+        if (!itemsNode.isArray() || itemsNode.isEmpty() || itemsNode.size() > 200) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "套餐至少包含一项耗材，且不能超过 200 项");
+        }
+        List<LineDraft> lines = new ArrayList<>();
+        for (JsonNode node : itemsNode) {
+            String itemId = text(node, "itemId");
+            BigDecimal quantity = decimal(node, "quantity");
+            if (itemId.isBlank() || quantity == null || quantity.signum() <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "套餐耗材和数量不能为空");
+            }
+            ItemSnapshot item = requireItem(itemId);
+            lines.add(new LineDraft(
+                item.id(),
+                firstNonBlank(text(node, "itemName"), item.name()),
+                firstNonBlank(text(node, "unit"), item.unit()),
+                "", "", null, quantity,
+                firstNonBlank(text(node, "source"), "PRESET"), text(node, "exceptionReason")
+            ));
+        }
+        String packageId = "patient-package-" + UUID.randomUUID();
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_patient_consumable_packages
+              (id, department_key, department_name, name, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE department_name = VALUES(department_name), created_by = VALUES(created_by)
+            """,
+            packageId, department.key(), department.name(), name, user.name()
+        );
+        packageId = jdbcTemplate.queryForObject(
+            "SELECT id FROM inventory_patient_consumable_packages WHERE department_key = ? AND name = ?",
+            String.class,
+            department.key(), name
+        );
+        jdbcTemplate.update("DELETE FROM inventory_patient_consumable_package_lines WHERE package_id = ?", packageId);
+        int lineNo = 0;
+        for (LineDraft line : lines) {
+            ObjectNode raw = objectMapper.createObjectNode();
+            raw.put("itemId", line.itemId());
+            raw.put("quantity", line.actualQuantity());
+            raw.put("source", line.source());
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_patient_consumable_package_lines
+                  (id, package_id, line_no, item_id, item_name_snapshot, unit_snapshot, quantity, source, exception_reason, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON))
+                """,
+                "patient-package-line-" + UUID.randomUUID(), packageId, ++lineNo, line.itemId(), line.itemName(),
+                line.unit(), line.actualQuantity(), line.source(), blankToNull(line.exceptionReason()), json(raw)
+            );
+        }
+        repository.log(user.name(), "保存患者耗材套餐", "patient_consumable_package",
+            department.name() + " " + name, "保存 " + lines.size() + " 项耗材，可用于后续患者一键套用");
+        return packages(department.key(), user);
+    }
+
+    @Transactional
+    public ObjectNode deletePackage(String packageId, SessionUser user) {
+        List<String> departmentKeys = jdbcTemplate.query(
+            "SELECT department_key FROM inventory_patient_consumable_packages WHERE id = ?",
+            (resultSet, rowNum) -> resultSet.getString(1),
+            packageId
+        );
+        if (departmentKeys.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "患者耗材套餐不存在");
+        Department department = requireDepartment(departmentKeys.get(0), user);
+        jdbcTemplate.update("DELETE FROM inventory_patient_consumable_package_lines WHERE package_id = ?", packageId);
+        jdbcTemplate.update("DELETE FROM inventory_patient_consumable_packages WHERE id = ?", packageId);
+        repository.log(user.name(), "删除患者耗材套餐", "patient_consumable_package", packageId, "删除套餐");
+        return packages(department.key(), user);
+    }
+
+    private ArrayNode packageLines(String packageId) {
+        return jdbcTemplate.query(
+            """
+            SELECT l.item_id, i.name item_name, i.unit item_unit, l.quantity, l.source, l.exception_reason
+            FROM inventory_patient_consumable_package_lines l
+            JOIN inventory_items i ON i.id = l.item_id
+            WHERE l.package_id = ?
+            ORDER BY l.line_no
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", resultSet.getString("item_name"));
+                    row.put("unit", resultSet.getString("item_unit"));
+                    row.put("quantity", resultSet.getBigDecimal("quantity"));
+                    row.put("source", resultSet.getString("source"));
+                    row.put("exceptionReason", resultSet.getString("exception_reason"));
+                }
+                return list;
+            },
+            packageId
+        );
+    }
+
     @Transactional
     public ObjectNode manualAdd(JsonNode payload, SessionUser user) {
         Department department = requireDepartment(text(payload, "departmentKey"), user);

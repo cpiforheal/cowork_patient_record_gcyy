@@ -589,6 +589,29 @@ export interface InventoryPatientLastCombination {
   }>;
 }
 
+export interface InventoryPatientConsumablePackageItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  quantity: number;
+  source?: string;
+  exceptionReason?: string;
+}
+
+export interface InventoryPatientConsumablePackage {
+  id: string;
+  departmentKey: string;
+  departmentName: string;
+  name: string;
+  createdBy: string;
+  updatedAt?: string;
+  items: InventoryPatientConsumablePackageItem[];
+}
+
+export interface InventoryPatientConsumablePackageList {
+  packages: InventoryPatientConsumablePackage[];
+}
+
 export interface InventoryPatientSearchResult {
   list: Array<{
     source: string;
@@ -1966,6 +1989,31 @@ export const getInventoryPatientRecentItemsApi = async (params: { departmentKey:
 
 export const getInventoryPatientLastCombinationApi = async (params: { patientId: string; departmentKey: string }) =>
   getInventoryData<InventoryPatientLastCombination>("/patient-workbench/last-combination", params);
+
+export const getInventoryPatientPackagesApi = async (params: { departmentKey: string }) =>
+  getInventoryData<InventoryPatientConsumablePackageList>("/patient-workbench/packages", params);
+
+export const saveInventoryPatientPackageApi = async (payload: {
+  departmentKey: string;
+  name: string;
+  lines: Array<{
+    itemId: string;
+    itemName: string;
+    unit: string;
+    quantity: number;
+    source?: string;
+    exceptionReason?: string;
+  }>;
+}) =>
+  postInventoryData<InventoryPatientConsumablePackageList, typeof payload>(
+    "/patient-workbench/packages",
+    payload
+  );
+
+export const deleteInventoryPatientPackageApi = async (packageId: string) =>
+  deleteInventoryData<InventoryPatientConsumablePackageList>(
+    `/patient-workbench/packages/${encodeURIComponent(packageId)}`
+  );
 
 export const getInventoryPatientTraceApi = async (patientId: string) =>
   getInventoryData<{

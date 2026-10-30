@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Profile;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -589,6 +590,26 @@ public class InventoryApiController {
     ) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.success(asMap(patientConsumptionService.lastCombination(patientId, departmentKey, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/packages")
+    public ApiResult<Map<String, Object>> patientWorkbenchPackages(@RequestParam String departmentKey) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(patientConsumptionService.packages(departmentKey, user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/packages")
+    public ApiResult<Map<String, Object>> savePatientWorkbenchPackage(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者耗材套餐已保存", asMap(patientConsumptionService.savePackage(toJson(payload), user)));
+    }
+
+    @DeleteMapping("/inventory-api/patient-workbench/packages/{packageId}")
+    public ApiResult<Map<String, Object>> deletePatientWorkbenchPackage(
+        @org.springframework.web.bind.annotation.PathVariable String packageId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者耗材套餐已删除", asMap(patientConsumptionService.deletePackage(packageId, user)));
     }
 
     @PostMapping("/inventory-api/patient-workbench/clinical-events")

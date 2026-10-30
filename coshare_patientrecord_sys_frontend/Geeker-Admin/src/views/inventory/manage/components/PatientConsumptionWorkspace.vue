@@ -166,7 +166,7 @@
           <div class="selection-hints">
             <span v-if="commonItems.length">常用 {{ commonItems.length }} 项</span>
             <span v-if="recentItems.length">最近使用 {{ recentItems.length }} 项</span>
-            <span v-if="presetItems.length">全部预设 {{ presetItems.length }} 项</span>
+            <span v-if="dedupedPresetItems.length">全部预设 {{ dedupedPresetItems.length }} 项</span>
             <span v-if="detail.noConsumption" class="is-muted">已标记未使用耗材</span>
           </div>
           <div class="selection-actions">
@@ -273,6 +273,32 @@
                       </div>
                       <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
                     </section>
+
+                    <section class="package-section">
+                      <div class="section-title">
+                        <h4>患者套餐</h4>
+                        <span>保存当前组合，后续一键套用</span>
+                      </div>
+                      <el-button
+                        size="small"
+                        :loading="packageSaving"
+                        :disabled="!editable || !selectedLines.length"
+                        @click="saveCurrentAsPackage"
+                      >
+                        保存当前为套餐
+                      </el-button>
+                      <div v-if="patientPackages.length" class="package-list">
+                        <div v-for="pkg in patientPackages" :key="pkg.id" class="package-row">
+                          <span class="package-name">
+                            {{ pkg.name }}
+                            <small>{{ pkg.items.length }} 项</small>
+                          </span>
+                          <el-button size="small" text type="primary" :disabled="!editable" @click="applyPackage(pkg)">套用</el-button>
+                          <el-button size="small" text type="danger" @click="deletePackage(pkg)">删除</el-button>
+                        </div>
+                      </div>
+                      <p v-else class="package-empty">还没有保存的患者套餐</p>
+                    </section>
           </section>
           <section class="drawer-right">
                     <div class="detail-toolbar">
@@ -309,7 +335,7 @@
                         全部预设
                       </button>
                       <span v-if="itemKeyword" class="mode-count">搜索到 {{ searchCount }} 项</span>
-                      <span v-else class="mode-count">{{ presetItems.length }} 项可选用</span>
+                      <span v-else class="mode-count">{{ dedupedPresetItems.length }} 项可选用</span>
                     </div>
 
                     <section v-if="!showFullPresetList && commonItems.length" class="quick-section">
@@ -323,7 +349,7 @@
                           :class="{ 'is-selected': isChecked(item) }"
                           @click="toggleItem(item, !isChecked(item))"
                         >
-                          {{ item.itemName }}
+                          {{ item.materialName || item.itemName }}
                           <small>{{ formatQuantity(item.presetQuantity) }}{{ item.unit }}</small>
                         </button>
                       </div>
@@ -349,7 +375,7 @@
                     <div v-if="!showFullPresetList" class="quick-browse">
                       <p v-if="!commonItems.length && !recentItems.length">还没有常用项和最近使用记录。</p>
                       <el-button type="primary" plain @click="drawerMode = 'ALL'">
-                        浏览全部预设（{{ presetItems.length }} 项）
+                        浏览全部预设（{{ dedupedPresetItems.length }} 项）
                       </el-button>
                     </div>
 
@@ -373,8 +399,9 @@
                           />
                           <div class="item-copy">
                             <div class="item-name-row">
-                              <strong>{{ item.itemName }}</strong>
+                              <strong>{{ item.materialName || item.itemName }}</strong>
                               <el-tag v-if="item.commonItem" size="small" type="success" effect="plain">常用</el-tag>
+                              <el-tag v-if="item.mappingConflict" size="small" type="warning" effect="plain">映射冲突</el-tag>
                               <el-tag v-if="isApproved(item)" size="small" type="info" effect="plain">已通过</el-tag>
                               <el-tag v-else-if="lineState[item.itemId]?.reviewStatus === 'REJECTED'" size="small" type="danger" effect="plain">已驳回</el-tag>
                             </div>
@@ -382,10 +409,13 @@
                               {{ item.unit }}
                               <i aria-hidden="true">·</i>
                               预设 {{ formatQuantity(item.presetQuantity) }} {{ item.unit }}
-                              <template v-if="item.serviceGroup">
+                              <template v-if="item.serviceGroups?.length || item.serviceGroup">
                                 <i aria-hidden="true">·</i>
-                                {{ item.serviceGroup }}
+                                {{ item.serviceGroups?.join(" / ") || item.serviceGroup }}
                               </template>
+                            </span>
+                            <span v-if="item.mappingConflict" class="mapping-hint">
+                              实际物资：{{ item.mappedItemNames.join(" / ") }}
                             </span>
                             <span v-if="lineState[item.itemId]?.reviewNote" class="review-note">
                               审核意见：{{ lineState[item.itemId]?.reviewNote }}
@@ -557,15 +587,19 @@ import dayjs from "dayjs";
 import { pinyin } from "pinyin-pro";
 import {
   addInventoryManualPatientApi,
+  deleteInventoryPatientPackageApi,
   getInventoryPatientDetailApi,
   getInventoryPatientLastCombinationApi,
+  getInventoryPatientPackagesApi,
   getInventoryPatientRecentItemsApi,
   getInventoryPatientWorkbenchApi,
   saveInventoryPatientDocumentApi,
+  saveInventoryPatientPackageApi,
   searchInventoryPatientsApi,
   submitInventoryPatientBatchApi,
   submitInventoryPatientDocumentApi,
   type InventoryPatientBatchSubmitResult,
+  type InventoryPatientConsumablePackage,
   type InventoryPatientConsumptionLine,
   type InventoryPatientDetail,
   type InventoryPatientPresetItem,
@@ -588,6 +622,12 @@ interface EditableLine {
   reviewStatus?: "PENDING" | "APPROVED" | "REJECTED";
   reviewNote?: string;
   lineRevision?: number;
+}
+
+interface DisplayItem extends InventoryPatientPresetItem {
+  serviceGroups: string[];
+  mappingConflict: boolean;
+  mappedItemNames: string[];
 }
 
 const props = defineProps<{
@@ -618,6 +658,8 @@ const statusFilter = ref("NOT_STARTED");
 const itemKeyword = ref("");
 const lineState = reactive<Record<string, EditableLine>>({});
 const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
+const patientPackages = ref<InventoryPatientConsumablePackage[]>([]);
+const packageSaving = ref(false);
 const saveState = ref("");
 const showFullVisitNo = ref(false);
 const drawerVisible = ref(false);
@@ -666,16 +708,52 @@ const filteredPatients = computed(() => {
 });
 
 const presetItems = computed(() => detail.value?.presetItems?.items ?? []);
+const dedupedPresetItems = computed<DisplayItem[]>(() => {
+  const map = new Map<string, DisplayItem>();
+  for (const item of presetItems.value) {
+    const key = `${item.materialName || item.itemName}|${item.unit || ""}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        ...item,
+        serviceGroups: item.serviceGroup ? [item.serviceGroup] : [],
+        mappingConflict: false,
+        mappedItemNames: [item.itemName]
+      });
+      continue;
+    }
+    if (item.serviceGroup && !existing.serviceGroups.includes(item.serviceGroup)) {
+      existing.serviceGroups.push(item.serviceGroup);
+    }
+    existing.commonItem = existing.commonItem || item.commonItem;
+    existing.aliases = unique([...(existing.aliases ?? []), ...(item.aliases ?? [])]);
+    existing.mappedItemNames = unique([...existing.mappedItemNames, item.itemName]);
+    existing.mappingConflict = existing.mappedItemNames.length > 1;
+    if (item.matchesService && !existing.matchesService) {
+      existing.itemId = item.itemId;
+      existing.ruleId = item.ruleId;
+      existing.itemName = item.itemName;
+      existing.presetQuantity = item.presetQuantity;
+      existing.matchesService = true;
+    } else if (existing.presetQuantity == null && item.presetQuantity != null) {
+      existing.presetQuantity = item.presetQuantity;
+    }
+  }
+  return Array.from(map.values());
+});
+
 const visibleGroups = computed(() => {
   const keyword = itemKeyword.value.trim().toLowerCase();
-  const filtered = presetItems.value.filter(item => {
+  const filtered = dedupedPresetItems.value.filter(item => {
     if (!keyword) return true;
-    const initials = String(pinyin(item.itemName, { pattern: "first", toneType: "none" }));
-    return [item.itemName, item.materialName, item.serviceGroup, item.unit, ...(item.aliases ?? []), initials]
+    const initials = [item.itemName, item.materialName]
+      .map(text => String(pinyin(text || "", { pattern: "first", toneType: "none" })))
+      .join(" ");
+    return [item.itemName, item.materialName, ...(item.serviceGroups ?? []), item.unit, ...(item.aliases ?? []), initials]
       .filter(Boolean)
       .some(value => String(value).toLowerCase().includes(keyword));
   });
-  const groups = new Map<string, InventoryPatientPresetItem[]>();
+  const groups = new Map<string, DisplayItem[]>();
   filtered
     .filter(item => item.commonItem)
     .forEach(item => {
@@ -686,14 +764,14 @@ const visibleGroups = computed(() => {
   filtered
     .filter(item => !item.commonItem)
     .forEach(item => {
-      const key = item.serviceGroup || "其他预设";
+      const key = item.serviceGroups[0] || item.serviceGroup || "其他预设";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(item);
     });
   return Array.from(groups.entries()).map(([name, items]) => ({ name, items }));
 });
 
-const commonItems = computed(() => presetItems.value.filter(item => item.commonItem).slice(0, 8));
+const commonItems = computed(() => dedupedPresetItems.value.filter(item => item.commonItem).slice(0, 8));
 const hasApprovedLines = computed(() => selectedLines.value.some(line => line.reviewStatus === "APPROVED"));
 const previousPatient = computed(() => {
   const index = workbench.value.patients.findIndex(patient => patient.serviceInstanceId === selectedId.value);
@@ -738,6 +816,7 @@ const loadWorkbench = async (keepSelection = true) => {
     });
     workbench.value = result.data ?? emptyWorkbench();
     await loadRecentItems();
+    await loadPackages();
     if (!keepSelection || !selectedId.value) {
       const first = filteredPatients.value[0] || workbench.value.patients[0];
       if (first) await selectPatient(first);
@@ -770,6 +849,101 @@ const loadRecentItems = async () => {
     recentItems.value = result.data?.items ?? [];
   } catch {
     recentItems.value = [];
+  }
+};
+
+const loadPackages = async () => {
+  try {
+    const result = await getInventoryPatientPackagesApi({ departmentKey: props.departmentKey });
+    patientPackages.value = result.data?.packages ?? [];
+  } catch {
+    patientPackages.value = [];
+  }
+};
+
+const saveCurrentAsPackage = async () => {
+  if (!selectedLines.value.length) {
+    ElMessage.warning("请先选择耗材");
+    return;
+  }
+  try {
+    const result = await ElMessageBox.prompt("保存当前已选耗材，后续可一键套用到其他患者。", "保存为患者套餐", {
+      confirmButtonText: "保存",
+      cancelButtonText: "取消",
+      inputPlaceholder: "例如：检验科常规采血组合",
+      inputValidator: value => (value && value.trim() ? true : "请填写套餐名称")
+    });
+    const name = String(result.value || "").trim();
+    if (!name) return;
+    packageSaving.value = true;
+    const saved = await saveInventoryPatientPackageApi({
+      departmentKey: props.departmentKey,
+      name,
+      lines: selectedLines.value.map(line => ({
+        itemId: line.itemId,
+        itemName: line.itemName,
+        unit: line.unit,
+        quantity: line.actualQuantity,
+        source: line.source,
+        exceptionReason: line.exceptionReason
+      }))
+    });
+    patientPackages.value = saved.data?.packages ?? [];
+    ElMessage.success("患者套餐已保存");
+  } catch (error) {
+    if (error === "cancel" || error === "close") return;
+    ElMessage.error(error instanceof Error ? error.message : "保存患者套餐失败");
+  } finally {
+    packageSaving.value = false;
+  }
+};
+
+const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
+  if (!editable.value || !pkg.items.length) return;
+  try {
+    await ElMessageBox.confirm(
+      `套用“${pkg.name}”的 ${pkg.items.length} 项耗材？已审核通过的项不会被覆盖。`,
+      "套用患者套餐",
+      { confirmButtonText: "套用", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  pkg.items.forEach(item => {
+    if (lineState[item.itemId]?.reviewStatus === "APPROVED") return;
+    const existing = lineState[item.itemId];
+    if (existing) {
+      existing.actualQuantity = Number(item.quantity || 1);
+      return;
+    }
+    lineState[item.itemId] = {
+      itemId: item.itemId,
+      itemName: item.itemName,
+      unit: item.unit,
+      actualQuantity: Number(item.quantity || 1),
+      source: (item.source as EditableLine["source"]) || "PRESET",
+      exceptionReason: item.exceptionReason || (item.source === "MANUAL" ? "患者套餐" : undefined)
+    };
+  });
+  ElMessage.success(`已套用“${pkg.name}”`);
+};
+
+const deletePackage = async (pkg: InventoryPatientConsumablePackage) => {
+  try {
+    await ElMessageBox.confirm(`删除套餐“${pkg.name}”？`, "删除患者套餐", {
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  try {
+    const result = await deleteInventoryPatientPackageApi(pkg.id);
+    patientPackages.value = result.data?.packages ?? [];
+    ElMessage.success("套餐已删除");
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "删除患者套餐失败");
   }
 };
 
@@ -819,7 +993,7 @@ const toggleItem = (item: InventoryPatientPresetItem, checked: boolean) => {
   if (checked && !lineState[item.itemId]) {
     lineState[item.itemId] = {
       itemId: item.itemId,
-      itemName: item.itemName,
+      itemName: item.materialName || item.itemName,
       unit: item.unit,
       ruleId: item.ruleId,
       presetQuantity: item.presetQuantity,
@@ -1266,6 +1440,8 @@ const changeDate = async (value: string) => {
   selectedId.value = "";
   await loadWorkbench(false);
 };
+
+const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 
 const maskVisitNo = (value?: string) => {
   if (!value) return "无就诊号";
@@ -2107,6 +2283,59 @@ onMounted(() => {
   color: var(--hos-status-warning);
   background: var(--hos-status-warning-soft);
   border-radius: 999px;
+}
+
+.mapping-hint {
+  color: var(--hos-status-warning);
+  font-size: 10px;
+}
+
+.package-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--hos-border-light);
+}
+
+.package-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.package-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px;
+  align-items: center;
+  padding: 7px 9px;
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 9px;
+}
+
+.package-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  color: var(--hos-text-primary);
+  font-size: 12px;
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+}
+
+.package-empty {
+  margin: 0;
+  color: var(--hos-text-muted);
+  font-size: 11px;
 }
 
 .drawer-mode {
