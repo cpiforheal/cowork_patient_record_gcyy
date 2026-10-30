@@ -40,6 +40,7 @@
       <transition v-else name="inventory-fade" mode="out-in">
         <div :key="activeTab" class="workspace-pane">
           <template v-if="activeTab === 'overview'">
+            <AdminDataQualityCard v-if="hasInventoryAuth('inventory:role:manage')" />
             <DepartmentConsumptionSummary ref="consumptionSummaryRef" :today="today()" @open-department="openDepartmentDraft" />
           </template>
 
@@ -269,6 +270,10 @@
               :today="today()"
               @open-department="openDepartmentDraft"
             />
+          </template>
+
+          <template v-else-if="activeTab === 'adminReview'">
+            <AdminReviewPanel :today="today()" />
           </template>
 
           <template v-else-if="activeTab === 'roles'">
@@ -623,6 +628,8 @@ import DepartmentDailyReportPanel from "./components/DepartmentDailyReportPanel.
 import PatientConsumptionReviewPanel from "./components/PatientConsumptionReviewPanel.vue";
 import PatientConsumptionTracePanel from "./components/PatientConsumptionTracePanel.vue";
 import ConsumableUsageWorkbenchPanel from "./components/ConsumableUsageWorkbenchPanel.vue";
+import AdminReviewPanel from "./components/AdminReviewPanel.vue";
+import AdminDataQualityCard from "./components/AdminDataQualityCard.vue";
 import RequestsPanel from "./components/RequestsPanel.vue";
 import StockPanel from "./components/StockPanel.vue";
 import TracePanel from "./components/TracePanel.vue";
@@ -794,6 +801,7 @@ const tabRoutePathMap: Record<string, string> = {
   patientReview: "/inventory/patient-review",
   patientTrace: "/inventory/patient-trace",
   consumableWorkbench: "/inventory/consumable-workbench",
+  adminReview: "/inventory/admin-review",
   roles: "/inventory/roles"
 };
 const inventorySystemTabRoutePathMap: Record<string, string> = {
@@ -810,6 +818,7 @@ const inventorySystemTabRoutePathMap: Record<string, string> = {
   patientReview: "/inventory-system/patient-review",
   patientTrace: "/inventory-system/patient-trace",
   consumableWorkbench: "/inventory-system/consumable-workbench",
+  adminReview: "/inventory-system/admin-review",
   roles: "/inventory-system/role-management"
 };
 const inventoryDepartmentRouteMap: Record<string, string> = {
@@ -854,6 +863,7 @@ const tabRouteNameMap: Record<string, string> = {
   patientReview: "inventoryPatientReview",
   patientTrace: "inventoryPatientTrace",
   consumableWorkbench: "inventoryConsumableWorkbench",
+  adminReview: "inventoryAdminReview",
   roles: "inventoryRoles"
 };
 const routeTabMap: Record<string, string> = {
@@ -872,6 +882,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory/patient-review": "patientReview",
   "/inventory/patient-trace": "patientTrace",
   "/inventory/consumable-workbench": "consumableWorkbench",
+  "/inventory/admin-review": "adminReview",
   "/inventory/roles": "roles",
   "/inventory-system/dashboard": "overview",
   "/inventory-system/executive": "executive",
@@ -888,6 +899,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory-system/patient-review": "patientReview",
   "/inventory-system/patient-trace": "patientTrace",
   "/inventory-system/consumable-workbench": "consumableWorkbench",
+  "/inventory-system/admin-review": "adminReview",
   "/inventory-system/role-management": "roles"
 };
 const isStandaloneConsumableEntry = computed(
@@ -918,6 +930,7 @@ const tabNavItems = [
   { tab: "patientReview", title: "患者耗材审核" },
   { tab: "patientTrace", title: "患者耗材追溯" },
   { tab: "consumableWorkbench", title: "耗材工作台" },
+  { tab: "adminReview", title: "管理审查" },
   { tab: "roles", title: "岗位与权限" }
 ] as const;
 const workflowSteps = [
@@ -1093,6 +1106,14 @@ const tabProfiles = {
     taskTitle: "以患者服务实例为最小单位",
     taskDesc: "同一患者同日多个科室服务会分别保留，不合并、不覆盖。"
   },
+  adminReview: {
+    kicker: "管理审查 / 异常与趋势",
+    title: "管理审查",
+    desc: "每日异常队列、耗材趋势矩阵和冻结周月报表。",
+    taskLabel: "审查口径",
+    taskTitle: "阻断项优先，趋势进周报",
+    taskDesc: "异常只读下钻到患者耗材行与审核状态，不引入处理状态。"
+  },
   consumableWorkbench: {
     kicker: "统计汇总 / 耗材工作台",
     title: "今日耗材使用汇总",
@@ -1146,6 +1167,7 @@ const tabAuthMap: Record<string, readonly string[]> = {
   patientReview: ["inventory:approve"],
   patientTrace: ["inventory:read"],
   consumableWorkbench: ["inventory:read"],
+  adminReview: ["inventory:role:manage"],
   roles: ["inventory:role:manage"]
 };
 const canViewAllDepartments = computed(() =>

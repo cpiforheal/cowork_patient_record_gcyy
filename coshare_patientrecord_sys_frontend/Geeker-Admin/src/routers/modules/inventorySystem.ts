@@ -113,6 +113,11 @@ export const getInventorySystemMenu = (
         meta: meta("耗材工作台", "DataLine")
       },
       {
+        path: `${INVENTORY_SYSTEM_PREFIX}/admin-review`,
+        name: "inventorySystemAdminReview",
+        meta: meta("管理审查", "DataAnalysis")
+      },
+      {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
         name: "inventorySystemRoleManagement",
         meta: meta("账号管理", "UserFilled")
@@ -183,6 +188,7 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/patient-review": "patientReview",
     "/inventory-system/patient-trace": "patientTrace",
     "/inventory-system/consumable-workbench": "consumableWorkbench",
+    "/inventory-system/admin-review": "adminReview",
     "/inventory-system/role-management": "roles"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
@@ -330,6 +336,12 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     name: "inventorySystemConsumableWorkbench",
     component: inventoryView,
     meta: meta("耗材工作台", "DataLine")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/admin-review`,
+    name: "inventorySystemAdminReview",
+    component: inventoryView,
+    meta: meta("管理审查", "DataAnalysis")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,

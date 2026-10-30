@@ -2288,6 +2288,178 @@ export const downloadInventoryConsumableUsageDayApi = async (
     `consumable-day-${params.date}.${format}`
   );
 
+export interface InventoryAdminAnomalyPatient {
+  serviceInstanceId: string;
+  patientName: string;
+  visitNo?: string;
+  status: string;
+  submittedAt?: string;
+}
+
+export interface InventoryAdminAnomaly {
+  id: string;
+  type: string;
+  severity: "BLOCKING" | "ANOMALY" | "TIMELINESS";
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  patientId?: string;
+  patientName: string;
+  visitNo?: string;
+  serviceInstanceId?: string;
+  documentId?: string;
+  reportId?: string;
+  status?: string;
+  reason: string;
+  currentValue?: string;
+  thresholdValue?: string;
+  submittedAt?: string;
+  operatorName?: string;
+  patients: InventoryAdminAnomalyPatient[];
+}
+
+export interface InventoryAdminAnomalyResponse {
+  date: string;
+  range: number;
+  from: string;
+  to: string;
+  summary: { total: number; blocking: number; anomaly: number; timeliness: number; byType?: Record<string, number> };
+  items: InventoryAdminAnomaly[];
+}
+
+export interface InventoryAdminQualityItem {
+  key: string;
+  label: string;
+  count: number;
+  severity: string;
+  detail: string;
+  route: string;
+}
+
+export interface InventoryAdminQuality {
+  ready: boolean;
+  items: InventoryAdminQualityItem[];
+}
+
+export interface InventoryAdminMatrix {
+  departmentKey: string;
+  departmentName: string;
+  entryMode: "PATIENT" | "DAILY";
+  metric: "QUANTITY" | "PER_PATIENT";
+  from: string;
+  to: string;
+  dates: string[];
+  patientCounts: Record<string, number>;
+  reportDays: Record<string, number>;
+  items: Array<{ itemId: string; itemName: string; unit: string; cells: Record<string, number | null> }>;
+}
+
+export interface InventoryAdminTrend {
+  from: string;
+  to: string;
+  previousFrom: string;
+  previousTo: string;
+  items: Array<Record<string, unknown>>;
+  anomalies: Array<Record<string, unknown>>;
+  presetDeviations: Array<Record<string, unknown>>;
+}
+
+export interface InventoryAdminThresholdRow {
+  scope: "GLOBAL" | "DEPARTMENT" | "ITEM";
+  departmentKey: string;
+  itemId: string;
+  key: string;
+  value: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface InventoryAdminThresholds {
+  items: InventoryAdminThresholdRow[];
+  departments: Array<{ id: string; key: string; name: string; entryMode: string }>;
+}
+
+export interface InventoryAdminReportSnapshot {
+  id: string;
+  reportType: "WEEK" | "MONTH";
+  periodStart: string;
+  periodEnd: string;
+  status: string;
+  generatedBy: string;
+  generatedAt: string;
+  summary?: {
+    patients: number;
+    reportDays: number;
+    itemCount: number;
+    totalQuantity: number;
+    previousQuantity: number;
+    deltaQuantity: number;
+    changeRate?: number | null;
+  };
+  departments?: Array<{ departmentKey: string; departmentName: string; quantity: number; patients: number }>;
+  items?: Array<{ itemId: string; itemName: string; unit: string; quantity: number }>;
+  anomalies?: InventoryAdminAnomaly[];
+  trends?: InventoryAdminTrend;
+}
+
+export interface InventoryAdminReportList {
+  items: InventoryAdminReportSnapshot[];
+}
+
+export const getInventoryAdminAnomaliesApi = async (params: {
+  date?: string;
+  range?: number;
+  type?: string;
+  departmentKey?: string;
+}) => getInventoryData<InventoryAdminAnomalyResponse>("/admin-review/anomalies", params);
+
+export const getInventoryAdminDataQualityApi = async () =>
+  getInventoryData<InventoryAdminQuality>("/admin-review/data-quality");
+
+export const getInventoryAdminMatrixApi = async (params: {
+  departmentKey?: string;
+  from?: string;
+  to?: string;
+  metric?: "QUANTITY" | "PER_PATIENT";
+}) => getInventoryData<InventoryAdminMatrix>("/admin-review/matrix", params);
+
+export const getInventoryAdminTrendsApi = async (params: {
+  periodStart?: string;
+  periodEnd?: string;
+  departmentKey?: string;
+}) => getInventoryData<InventoryAdminTrend>("/admin-review/trends", params);
+
+export const getInventoryAdminThresholdsApi = async () =>
+  getInventoryData<InventoryAdminThresholds>("/admin-review/thresholds");
+
+export const saveInventoryAdminThresholdsApi = async (payload: {
+  items: Array<{
+    scope: "GLOBAL" | "DEPARTMENT" | "ITEM";
+    departmentKey?: string;
+    itemId?: string;
+    key: string;
+    value: number;
+  }>;
+}) => putInventoryData<InventoryAdminThresholds, typeof payload>("/admin-review/thresholds", payload);
+
+export const generateInventoryAdminReportApi = async (payload: {
+  reportType: "WEEK" | "MONTH";
+  periodStart?: string;
+  periodEnd?: string;
+}) => postInventoryData<InventoryAdminReportSnapshot, typeof payload>("/admin-review/reports", payload);
+
+export const listInventoryAdminReportsApi = async () =>
+  getInventoryData<InventoryAdminReportList>("/admin-review/reports");
+
+export const getInventoryAdminReportApi = async (id: string) =>
+  getInventoryData<InventoryAdminReportSnapshot>(`/admin-review/reports/${encodeURIComponent(id)}`);
+
+export const downloadInventoryAdminReportApi = async (id: string, format: "xlsx" | "csv" | "pdf") =>
+  downloadInventoryFile(
+    `/admin-review/reports/${encodeURIComponent(id)}/export/${format}`,
+    `admin-review-report-${id}.${format}`
+  );
+
 export const getInventoryPatientDashboardApi = async (date?: string) =>
   getInventoryData<{
     businessDate: string;

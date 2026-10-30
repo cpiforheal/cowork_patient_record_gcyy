@@ -6,6 +6,8 @@ import com.coshare.patientrecord.auth.service.InventoryAccessService;
 import com.coshare.patientrecord.auth.service.InventoryPortalAccountAdminService;
 import com.coshare.patientrecord.common.api.ApiResult;
 import com.coshare.patientrecord.config.PortalMode;
+import com.coshare.patientrecord.inventory.service.InventoryAdminReportService;
+import com.coshare.patientrecord.inventory.service.InventoryAdminReviewService;
 import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
 import com.coshare.patientrecord.inventory.service.InventoryDayCloseService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDailyReportService;
@@ -52,6 +54,8 @@ public class InventoryApiController {
     private final InventoryPatientConsumptionReviewService patientConsumptionReviewService;
     private final InventoryDepartmentDailyReportService departmentDailyReportService;
     private final InventoryDayCloseService dayCloseService;
+    private final InventoryAdminReviewService adminReviewService;
+    private final InventoryAdminReportService adminReportService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -67,6 +71,8 @@ public class InventoryApiController {
         InventoryPatientConsumptionReviewService patientConsumptionReviewService,
         InventoryDepartmentDailyReportService departmentDailyReportService,
         InventoryDayCloseService dayCloseService,
+        InventoryAdminReviewService adminReviewService,
+        InventoryAdminReportService adminReportService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -81,6 +87,8 @@ public class InventoryApiController {
         this.patientConsumptionReviewService = patientConsumptionReviewService;
         this.departmentDailyReportService = departmentDailyReportService;
         this.dayCloseService = dayCloseService;
+        this.adminReviewService = adminReviewService;
+        this.adminReportService = adminReportService;
         this.portalMode = portalMode;
     }
 
@@ -669,6 +677,91 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> allPatientWorkbenchPackages() {
         requireCapability("inventory:role:manage");
         return ApiResult.success(asMap(patientConsumptionService.allPackages()));
+    }
+
+    @GetMapping("/inventory-api/admin-review/anomalies")
+    public ApiResult<Map<String, Object>> adminReviewAnomalies(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(defaultValue = "1") int range,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String departmentKey
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReviewService.anomalies(date, range, type, departmentKey)));
+    }
+
+    @GetMapping("/inventory-api/admin-review/data-quality")
+    public ApiResult<Map<String, Object>> adminReviewDataQuality() {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReviewService.dataQuality()));
+    }
+
+    @GetMapping("/inventory-api/admin-review/matrix")
+    public ApiResult<Map<String, Object>> adminReviewMatrix(
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(defaultValue = "QUANTITY") String metric
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReviewService.matrix(departmentKey, from, to, metric)));
+    }
+
+    @GetMapping("/inventory-api/admin-review/trends")
+    public ApiResult<Map<String, Object>> adminReviewTrends(
+        @RequestParam(required = false) LocalDate periodStart,
+        @RequestParam(required = false) LocalDate periodEnd,
+        @RequestParam(required = false) String departmentKey
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReviewService.trends(periodStart, periodEnd, departmentKey)));
+    }
+
+    @GetMapping("/inventory-api/admin-review/thresholds")
+    public ApiResult<Map<String, Object>> adminReviewThresholds() {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReviewService.thresholds()));
+    }
+
+    @PutMapping("/inventory-api/admin-review/thresholds")
+    public ApiResult<Map<String, Object>> saveAdminReviewThresholds(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "审查阈值已保存", asMap(adminReviewService.saveThresholds(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/admin-review/reports")
+    public ApiResult<Map<String, Object>> generateAdminReviewReport(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "报表快照已生成", asMap(adminReportService.generate(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/admin-review/reports")
+    public ApiResult<Map<String, Object>> adminReviewReports() {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReportService.list()));
+    }
+
+    @GetMapping("/inventory-api/admin-review/reports/{reportId}")
+    public ApiResult<Map<String, Object>> adminReviewReport(
+        @org.springframework.web.bind.annotation.PathVariable String reportId
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(adminReportService.detail(reportId)));
+    }
+
+    @GetMapping("/inventory-api/admin-review/reports/{reportId}/export/{format}")
+    public ResponseEntity<byte[]> exportAdminReviewReport(
+        @org.springframework.web.bind.annotation.PathVariable String reportId,
+        @org.springframework.web.bind.annotation.PathVariable String format
+    ) {
+        requireCapability("inventory:role:manage");
+        boolean xlsx = "xlsx".equalsIgnoreCase(format);
+        boolean pdf = "pdf".equalsIgnoreCase(format);
+        String extension = xlsx ? ".xlsx" : pdf ? ".pdf" : ".csv";
+        String media = xlsx ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : pdf ? "application/pdf" : "text/csv;charset=UTF-8";
+        return attachment(adminReportService.export(reportId, format),
+            "admin-review-report-" + reportId + extension, media);
     }
 
     @GetMapping("/inventory-api/consumable-usage")
