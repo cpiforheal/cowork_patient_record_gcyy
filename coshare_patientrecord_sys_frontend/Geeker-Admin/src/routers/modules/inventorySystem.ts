@@ -18,6 +18,7 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   patientReview: "inventoryPatientReview",
   patientTrace: "inventoryPatientTrace",
   consumableWorkbench: "inventoryConsumableWorkbench",
+  adminReview: "inventoryAdminReview",
   roles: "inventoryRoles"
 };
 
@@ -43,6 +44,7 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   patientReview: ["inventory:approve"],
   patientTrace: ["inventory:read"],
   consumableWorkbench: ["inventory:read"],
+  adminReview: ["inventory:role:manage"],
   roles: ["inventory:role:manage"],
   messageBoard: ["inventory:read"]
 };
