@@ -2,6 +2,11 @@
   <form class="ef" aria-label="登记复查" @submit.prevent="submit">
     <div class="ef-head">
       <strong>登记复查</strong>
+      <el-select v-model="timeSlot" size="small" class="ef-slot" aria-label="复查时段">
+        <el-option label="上午" value="AM" />
+        <el-option label="下午" value="PM" />
+        <el-option label="晚上" value="EVENING" />
+      </el-select>
       <span class="ef-quick-label">设为当前行日期：</span>
       <button
         v-for="quick in QUICK_OFFSETS"
@@ -92,6 +97,7 @@ import { NAME_SEPARATORS, QUICK_OFFSETS, dateTitle, fmt } from "./dates";
 
 const props = defineProps<{ today: string; counts: Record<string, number> }>();
 const emit = defineEmits<{ saved: [] }>();
+const timeSlot = ref<"AM" | "PM" | "EVENING">("AM");
 
 interface Row {
   key: number;
@@ -203,6 +209,7 @@ const submit = async () => {
       try {
         await createRecheckApi({
           planDate: row.planDate,
+          timeSlot: timeSlot.value,
           patientName: row.patientName.trim(),
           phone: row.phone.trim(),
           note: row.note.trim()

@@ -895,6 +895,12 @@ public class InventoryPatientConsumptionService {
             FROM inventory_patient_consumable_package_lines l
             LEFT JOIN inventory_items i ON i.id = l.item_id
             WHERE l.package_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_quota_rules r
+                JOIN inventory_quota_versions v ON v.id = r.version_id AND v.status = 'ACTIVE'
+                JOIN inventory_patient_consumable_packages p ON p.department_key = r.department_key
+                WHERE p.id = ? AND r.enabled = 1 AND r.binding_type = 'FIXED_DAILY' AND r.item_id = l.item_id
+              )
             ORDER BY l.line_no
             """,
             resultSet -> {
@@ -914,7 +920,7 @@ public class InventoryPatientConsumptionService {
                 }
                 return list;
             },
-            packageId
+            packageId, packageId
         );
     }
 
@@ -1445,7 +1451,16 @@ public class InventoryPatientConsumptionService {
             FROM inventory_quota_rules r
             JOIN inventory_quota_versions v ON v.id = r.version_id AND v.status = 'ACTIVE'
             JOIN inventory_items i ON i.id = r.item_id AND i.enabled = 1
-            WHERE r.department_key = ? AND r.enabled = 1
+            WHERE r.department_key = ? AND r.enabled = 1 AND r.binding_type <> 'FIXED_DAILY'
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_quota_rules fr
+                JOIN inventory_quota_versions fv ON fv.id = fr.version_id AND fv.status = 'ACTIVE'
+                LEFT JOIN inventory_items fi ON fi.id = fr.item_id
+                WHERE fr.department_key = r.department_key AND fr.enabled = 1
+                  AND fr.binding_type = 'FIXED_DAILY'
+                  AND (fr.item_id = r.item_id OR fr.material_name = r.material_name OR fi.name = i.name
+                       OR fr.material_name LIKE CONCAT(i.name, '%') OR i.name LIKE CONCAT(fr.material_name, '%'))
+              )
             ORDER BY r.common_item DESC, r.service_group, i.name
             """,
             resultSet -> {

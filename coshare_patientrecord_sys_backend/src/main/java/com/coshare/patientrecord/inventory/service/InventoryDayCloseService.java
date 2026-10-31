@@ -373,10 +373,37 @@ public class InventoryDayCloseService {
         );
     }
 
+    private ObjectNode fixedReportIssue(Department department, LocalDate date) {
+        Integer fixedRules = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*) FROM inventory_quota_rules r
+            JOIN inventory_quota_versions v ON v.id = r.version_id AND v.status = 'ACTIVE'
+            WHERE r.department_key = ? AND r.enabled = 1 AND r.binding_type = 'FIXED_DAILY'
+            """,
+            Integer.class, department.key()
+        );
+        if (fixedRules == null || fixedRules == 0) return null;
+        List<String[]> rows = jdbcTemplate.query(
+            "SELECT id, status FROM inventory_department_daily_reports WHERE department_id = ? AND business_date = ?",
+            (resultSet, rowNum) -> new String[] { resultSet.getString("id"), resultSet.getString("status") },
+            department.id(), date
+        );
+        if (rows.isEmpty()) {
+            return reportIssue(department, "", "MISSING", "固定耗材尚未确认");
+        }
+        String status = rows.get(0)[1];
+        if (SetLike.CLOSED.contains(status)) return null;
+        return reportIssue(department, rows.get(0)[0], status, "固定耗材未提交审核");
+    }
+
     private ArrayNode missingReportsFor(List<Department> scope, LocalDate date) {
         ArrayNode list = objectMapper.createArrayNode();
         for (Department department : scope) {
-            if (!"DAILY".equals(department.entryMode())) continue;
+            if ("PATIENT".equals(department.entryMode())) {
+                ObjectNode fixed = fixedReportIssue(department, date);
+                if (fixed != null) list.add(fixed);
+                continue;
+            }
             ReportSummary report = reportSummary(department, date);
             if (report != null && !"DRAFT".equals(report.status())) continue;
             ObjectNode row = list.addObject();
@@ -471,6 +498,11 @@ public class InventoryDayCloseService {
                 } else {
                     missingReports.add(reportIssue(department, report.id(), report.status(), "日报状态为 " + report.status()));
                 }
+                continue;
+            }
+            ObjectNode fixedIssue = fixedReportIssue(department, date);
+            if (fixedIssue != null) {
+                missingReports.add(fixedIssue);
                 continue;
             }
             ObjectNode batch = patientConsumptionService.submitBatch(department.key(), date, user);

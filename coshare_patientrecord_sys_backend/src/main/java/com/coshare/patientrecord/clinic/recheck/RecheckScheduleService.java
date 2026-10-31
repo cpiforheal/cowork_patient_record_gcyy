@@ -45,7 +45,7 @@ public class RecheckScheduleService {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String COLUMNS =
-        "id, plan_date, patient_name, phone, note, status, status_note, source_id, rescheduled_to, created_by, created_at, updated_by, updated_at";
+        "id, plan_date, time_slot, patient_name, phone, note, status, status_note, source_id, rescheduled_to, created_by, created_at, updated_by, updated_at";
 
     private final JdbcTemplate jdbcTemplate;
     private final PreAiEncounterService encounterService;
@@ -163,12 +163,13 @@ public class RecheckScheduleService {
         String name = requireName(text(body, "patientName"));
         String phone = normalizePhone(text(body, "phone"));
         String note = limit(text(body, "note"), 200, "备注");
+        String timeSlot = normalizeSlot(text(body, "timeSlot"), "AM");
         ensureNoDuplicate(planDate.toString(), name, phone, null);
         String id = newId();
         String now = now();
         jdbcTemplate.update(
-            "INSERT INTO clinic_recheck_schedule (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, '', NULL, NULL, ?, ?, ?, ?)",
-            id, planDate.toString(), name, phone, note, PLANNED, user.name(), now, user.name(), now);
+            "INSERT INTO clinic_recheck_schedule (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, NULL, ?, ?, ?, ?)",
+            id, planDate.toString(), timeSlot, name, phone, note, PLANNED, user.name(), now, user.name(), now);
         audit(user, "recheck.create", "登记复查：" + name + " @ " + planDate);
         return get(id).toMap();
     }
@@ -187,10 +188,11 @@ public class RecheckScheduleService {
         String name = body.containsKey("patientName") ? requireName(text(body, "patientName")) : existing.patientName();
         String phone = body.containsKey("phone") ? normalizePhone(text(body, "phone")) : existing.phone();
         String note = body.containsKey("note") ? limit(text(body, "note"), 200, "备注") : existing.note();
+        String timeSlot = body.containsKey("timeSlot") ? normalizeSlot(text(body, "timeSlot"), existing.timeSlot()) : existing.timeSlot();
         ensureNoDuplicate(planDate, name, phone, id);
         jdbcTemplate.update(
-            "UPDATE clinic_recheck_schedule SET plan_date = ?, patient_name = ?, phone = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?",
-            planDate, name, phone, note, user.name(), now(), id);
+            "UPDATE clinic_recheck_schedule SET plan_date = ?, time_slot = ?, patient_name = ?, phone = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?",
+            planDate, timeSlot, name, phone, note, user.name(), now(), id);
         audit(user, "recheck.update", "编辑复查登记：" + name + " @ " + planDate);
         return get(id).toMap();
     }
@@ -287,6 +289,15 @@ public class RecheckScheduleService {
         return phone;
     }
 
+    private static String normalizeSlot(String value, String fallback) {
+        String slot = value == null ? "" : value.trim().toUpperCase();
+        if (slot.isBlank()) return fallback == null ? "" : fallback;
+        if (!slot.equals("AM") && !slot.equals("PM") && !slot.equals("EVENING")) {
+            throw bad("复查时段只能是上午、下午或晚上");
+        }
+        return slot;
+    }
+
     static boolean canEdit(SessionUser user) {
         return user != null && EDIT_ROLES.contains(RoleCatalog.canonicalize(user.role()));
     }
@@ -298,7 +309,7 @@ public class RecheckScheduleService {
         List<Entry> candidates = jdbcTemplate.query(
             "SELECT " + COLUMNS + " FROM clinic_recheck_schedule WHERE plan_date = ? AND status NOT IN (?, ?)",
             (rs, rowNum) -> mapEntry(rs), planDate, CANCELLED, RESCHEDULED);
-        Entry incoming = new Entry("", planDate, name, phone, "", PLANNED, "", "", null, "", "", "", "");
+        Entry incoming = new Entry("", planDate, "", name, phone, "", PLANNED, "", "", null, "", "", "", "");
         boolean duplicate = candidates.stream()
             .filter(entry -> excludeId == null || !excludeId.equals(entry.id()))
             .anyMatch(entry -> samePatient(incoming, entry));
@@ -316,9 +327,9 @@ public class RecheckScheduleService {
 
     private static Entry mapEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new Entry(
-            rs.getString("id"), rs.getString("plan_date"), rs.getString("patient_name"), nz(rs.getString("phone")),
-            nz(rs.getString("note")), rs.getString("status"), nz(rs.getString("status_note")), rs.getString("source_id"),
-            rs.getString("rescheduled_to"), rs.getString("created_by"), rs.getString("created_at"),
+            rs.getString("id"), rs.getString("plan_date"), nz(rs.getString("time_slot")), rs.getString("patient_name"),
+            nz(rs.getString("phone")), nz(rs.getString("note")), rs.getString("status"), nz(rs.getString("status_note")),
+            rs.getString("source_id"), rs.getString("rescheduled_to"), rs.getString("created_by"), rs.getString("created_at"),
             rs.getString("updated_by"), rs.getString("updated_at"));
     }
 
@@ -374,13 +385,15 @@ public class RecheckScheduleService {
     }
 
     record Entry(
-        String id, String planDate, String patientName, String phone, String note, String status, String statusNote,
-        String sourceId, String rescheduledTo, String createdBy, String createdAt, String updatedBy, String updatedAt
+        String id, String planDate, String timeSlot, String patientName, String phone, String note, String status,
+        String statusNote, String sourceId, String rescheduledTo, String createdBy, String createdAt,
+        String updatedBy, String updatedAt
     ) {
         Map<String, Object> toMap() {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", id);
             row.put("planDate", planDate);
+            row.put("timeSlot", timeSlot);
             row.put("patientName", patientName);
             row.put("phone", phone);
             row.put("note", note);

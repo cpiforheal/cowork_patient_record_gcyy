@@ -7,6 +7,7 @@ export type RecheckStatus = "PLANNED" | "ARRIVED" | "ABSENT" | "RESCHEDULED" | "
 export interface RecheckEntry {
   id: string;
   planDate: string;
+  timeSlot: "AM" | "PM" | "EVENING" | "";
   patientName: string;
   phone: string;
   note: string;
@@ -66,11 +67,18 @@ export const getRecheckBoardApi = async (from: string, to: string) => {
   return parseClinicApiResponse<RecheckBoard>(result);
 };
 
-export const createRecheckApi = (body: { planDate: string; patientName: string; phone?: string; note?: string }) =>
-  send<RecheckEntry>(BASE, "POST", body);
+export const createRecheckApi = (body: {
+  planDate: string;
+  timeSlot?: "AM" | "PM" | "EVENING";
+  patientName: string;
+  phone?: string;
+  note?: string;
+}) => send<RecheckEntry>(BASE, "POST", body);
 
-export const updateRecheckApi = (id: string, body: Partial<Pick<RecheckEntry, "planDate" | "patientName" | "phone" | "note">>) =>
-  send<RecheckEntry>(`${BASE}/${encodeURIComponent(id)}`, "PUT", body);
+export const updateRecheckApi = (
+  id: string,
+  body: Partial<Pick<RecheckEntry, "planDate" | "timeSlot" | "patientName" | "phone" | "note">>
+) => send<RecheckEntry>(`${BASE}/${encodeURIComponent(id)}`, "PUT", body);
 
 export const markRecheckApi = (id: string, status: "ARRIVED" | "ABSENT" | "PLANNED", statusNote = "") =>
   send<RecheckEntry>(`${BASE}/${encodeURIComponent(id)}/status`, "POST", { status, statusNote });

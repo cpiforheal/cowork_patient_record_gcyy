@@ -207,6 +207,68 @@ public class InventoryDepartmentDailyReportService {
     }
 
     @Transactional(readOnly = true)
+    public ObjectNode fixedConsumables(String departmentKey, LocalDate businessDate, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
+        Report report = loadReport(department.id(), date);
+        Report yesterday = loadReport(department.id(), date.minusDays(1));
+        Map<String, BigDecimal> yesterdayActual = new LinkedHashMap<>();
+        if (yesterday != null) {
+            for (JsonNode line : loadLines(yesterday.id())) {
+                yesterdayActual.put(line.path("itemId").asText(), line.path("actualQuantity").decimalValue());
+            }
+        }
+        Map<String, BigDecimal> currentActual = new LinkedHashMap<>();
+        if (report != null) {
+            for (JsonNode line : loadLines(report.id())) {
+                currentActual.put(line.path("itemId").asText(), line.path("actualQuantity").decimalValue());
+            }
+        }
+        List<ObjectNode> ruleRows = jdbcTemplate.query(
+            """
+            SELECT r.item_id, i.name item_name, i.unit item_unit, r.standard_quantity, r.material_name
+            FROM inventory_quota_rules r
+            JOIN inventory_quota_versions v ON v.id = r.version_id AND v.status = 'ACTIVE'
+            JOIN inventory_items i ON i.id = r.item_id AND i.enabled = 1
+            WHERE r.department_key = ? AND r.enabled = 1 AND r.binding_type = 'FIXED_DAILY'
+            ORDER BY r.service_group, r.source_row
+            """,
+            (resultSet, rowNum) -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                String itemId = resultSet.getString("item_id");
+                BigDecimal standard = resultSet.getBigDecimal("standard_quantity");
+                BigDecimal yesterdayValue = yesterdayActual.get(itemId);
+                BigDecimal actual = currentActual.containsKey(itemId)
+                    ? currentActual.get(itemId)
+                    : yesterdayValue != null && yesterdayValue.signum() > 0 ? yesterdayValue
+                    : standard == null ? BigDecimal.ZERO : standard;
+                row.put("itemId", itemId);
+                row.put("itemName", resultSet.getString("item_name"));
+                row.put("unit", firstNonBlank(resultSet.getString("item_unit")));
+                row.put("standardQuantity", standard);
+                row.put("yesterdayQuantity", yesterdayValue);
+                row.put("actualQuantity", actual);
+                row.put("source", "TEMPLATE");
+                row.put("reviewStatus", report == null ? "DRAFT" : report.status());
+                return row;
+            },
+            department.key()
+        );
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("departmentKey", department.key());
+        result.put("departmentName", department.name());
+        result.put("entryMode", department.entryMode());
+        result.put("businessDate", date.toString());
+        result.put("reportId", report == null ? "" : report.id());
+        result.put("status", report == null ? "DRAFT" : report.status());
+        result.put("revision", report == null ? 0 : report.revision());
+        result.put("zeroUsage", report != null && report.zeroUsage());
+        result.put("locked", report != null && isLocked(date, report, closureJson(department.id(), date)));
+        result.set("items", objectMapper.valueToTree(ruleRows));
+        return result;
+    }
+
+    @Transactional(readOnly = true)
     public ObjectNode calendar(String departmentKey, String month, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         LocalDate first;

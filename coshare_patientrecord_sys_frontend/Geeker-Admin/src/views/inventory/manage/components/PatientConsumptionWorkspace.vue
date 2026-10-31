@@ -28,6 +28,8 @@
             @change="changeDate"
           />
         </div>
+        <el-button v-if="fixedCount" plain @click="fixedVisible = true">固定耗材 · {{ fixedStatusLabel }}</el-button>
+        <el-button plain @click="followupVisible = true">复诊预约</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
         <el-button type="primary" :loading="batchSubmitting" @click="openBatchSubmit">批量提交</el-button>
         <el-button type="primary" plain :icon="Search" @click="openPatientSource">患者来源</el-button>
@@ -914,6 +916,29 @@
       </template>
     </el-dialog>
 
+    <FixedConsumablesDialog
+      v-model="fixedVisible"
+      :department-key="props.departmentKey"
+      :department-name="workbench.departmentName"
+      :date="businessDate"
+      @updated="loadFixedStatus"
+    />
+    <FollowupAppointmentsDialog
+      v-model="followupVisible"
+      :department-key="props.departmentKey"
+      :date="businessDate"
+      @arrived="handleFollowupArrived"
+      @batch="followupVisible = false; followupBatchVisible = true"
+    />
+    <FollowupBatchDialog
+      v-model="followupBatchVisible"
+      :department-key="props.departmentKey"
+      :date="businessDate"
+      :packages="patientPackages"
+      :existing-patient-ids="existingPatientIds"
+      @completed="handleFollowupBatchCompleted"
+    />
+
     <el-dialog v-model="summaryVisible" title="今日摘要" width="520px">
       <div class="summary-dialog">
         <div class="summary-dialog-grid">
@@ -944,8 +969,12 @@ import { Close, Plus, Refresh, Search } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
 import { pinyin } from "pinyin-pro";
 import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
+import FixedConsumablesDialog from "./FixedConsumablesDialog.vue";
+import FollowupAppointmentsDialog from "./FollowupAppointmentsDialog.vue";
+import FollowupBatchDialog from "./FollowupBatchDialog.vue";
 import {
   addInventoryManualPatientApi,
+  getInventoryFixedConsumablesApi,
   batchInventoryPatientZeroUseApi,
   deleteInventoryPatientPackageApi,
   restoreInventoryPatientDayStatusApi,
@@ -1020,6 +1049,11 @@ const calendarMonth = ref(dayjs(businessDate.value).format("YYYY-MM-01"));
 const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
 const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
+const fixedVisible = ref(false);
+const fixedCount = ref(0);
+const fixedStatus = ref("");
+const followupVisible = ref(false);
+const followupBatchVisible = ref(false);
 const workbench = ref<InventoryPatientWorkbench>(emptyWorkbench());
 const detail = ref<InventoryPatientDetail | null>(null);
 const selectedId = ref("");
@@ -1346,6 +1380,7 @@ const loadWorkbench = async (keepSelection = true) => {
     await loadPackages();
     calendarMonth.value = dayjs(businessDate.value).startOf("month").format("YYYY-MM-01");
     void loadCalendar();
+    void loadFixedStatus();
     if (!keepSelection || !selectedId.value) {
       const first =
         filteredPatients.value.find(patient => patient.serviceInstanceId) ||
@@ -1373,6 +1408,40 @@ const loadWorkbench = async (keepSelection = true) => {
 const reload = () => {
   void loadWorkbench(false);
 };
+
+const loadFixedStatus = async () => {
+  try {
+    const result = await getInventoryFixedConsumablesApi({
+      departmentKey: props.departmentKey,
+      date: businessDate.value
+    });
+    fixedCount.value = result.data?.items?.length ?? 0;
+    fixedStatus.value = result.data?.status || "DRAFT";
+  } catch {
+    fixedCount.value = 0;
+    fixedStatus.value = "";
+  }
+};
+
+const existingPatientIds = computed(() => workbench.value.patients.map(patient => patient.patientId).filter(Boolean));
+
+const handleFollowupArrived = async (detail: InventoryPatientDetail | undefined) => {
+  await loadWorkbench(false);
+  if (!detail?.serviceInstanceId) return;
+  const patient = workbench.value.patients.find(item => item.serviceInstanceId === detail.serviceInstanceId);
+  if (patient) await selectPatient(patient, true);
+};
+
+const handleFollowupBatchCompleted = async () => {
+  await loadWorkbench(false);
+};
+
+const fixedStatusLabel = computed(() => {
+  if (fixedStatus.value === "APPROVED") return "已通过";
+  if (fixedStatus.value === "SUBMITTED") return "待审核";
+  if (fixedStatus.value === "RETURNED") return "已驳回";
+  return "待确认";
+});
 
 const loadCalendar = async () => {
   calendarLoading.value = true;

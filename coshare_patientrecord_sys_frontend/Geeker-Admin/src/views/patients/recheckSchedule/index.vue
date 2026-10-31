@@ -238,6 +238,13 @@
           />
           <span v-else>{{ dateTitle(edit.planDate, today) }}（已标记，日期不可改）</span>
         </el-form-item>
+        <el-form-item label="时段">
+          <el-select v-model="edit.timeSlot" style="width: 100%">
+            <el-option label="上午" value="AM" />
+            <el-option label="下午" value="PM" />
+            <el-option label="晚上" value="EVENING" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="姓名"><el-input v-model="edit.patientName" maxlength="50" /></el-form-item>
         <el-form-item label="电话"><el-input v-model="edit.phone" maxlength="30" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="edit.note" maxlength="200" /></el-form-item>
@@ -400,7 +407,15 @@ const mark = (entry: RecheckEntry, status: "ARRIVED" | "ABSENT" | "PLANNED") => 
 };
 
 const resched = reactive({ visible: false, entry: null as RecheckEntry | null, newDate: "", reason: "", earlyArrival: false });
-const edit = reactive({ visible: false, entry: null as RecheckEntry | null, planDate: "", patientName: "", phone: "", note: "" });
+const edit = reactive({
+  visible: false,
+  entry: null as RecheckEntry | null,
+  planDate: "",
+  timeSlot: "AM" as "AM" | "PM" | "EVENING",
+  patientName: "",
+  phone: "",
+  note: ""
+});
 
 /** 改期日期统一入口：勾选"提前到院"后手动改到其他日期时自动取消勾选 */
 const setReschedDate = (value: string) => {
@@ -425,6 +440,7 @@ const act = (entry: RecheckEntry, action: RowAction) => {
       visible: true,
       entry,
       planDate: entry.planDate,
+      timeSlot: entry.timeSlot || "AM",
       patientName: entry.patientName,
       phone: entry.phone,
       note: entry.note
@@ -465,6 +481,7 @@ const submitEdit = async () => {
     () =>
       updateRecheckApi(entry.id, {
         planDate: edit.planDate,
+        timeSlot: edit.timeSlot,
         patientName: edit.patientName.trim(),
         phone: edit.phone.trim(),
         note: edit.note.trim()

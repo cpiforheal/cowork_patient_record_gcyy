@@ -1928,6 +1928,72 @@ export const getInventoryDepartmentDailyReportCalendarApi = async (params: {
   month: string;
 }) => getInventoryData<InventoryDepartmentDailyReportCalendar>("/department-daily-reports/calendar", params);
 
+export interface InventoryFixedConsumable {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  standardQuantity?: number | null;
+  yesterdayQuantity?: number | null;
+  actualQuantity: number;
+  source: "TEMPLATE" | "MANUAL";
+  reviewStatus?: string;
+}
+
+export interface InventoryFixedConsumables {
+  departmentKey: string;
+  departmentName: string;
+  entryMode: "PATIENT" | "DAILY";
+  businessDate: string;
+  reportId: string;
+  status: string;
+  revision: number;
+  zeroUsage: boolean;
+  locked: boolean;
+  items: InventoryFixedConsumable[];
+}
+
+export const getInventoryFixedConsumablesApi = async (params: { departmentKey: string; date: string }) =>
+  getInventoryData<InventoryFixedConsumables>("/patient-workbench/fixed-consumables", params);
+
+export interface InventoryFollowupAppointment {
+  recheckId: string;
+  planDate: string;
+  timeSlot: "AM" | "PM" | "EVENING" | "";
+  patientName: string;
+  phone: string;
+  note: string;
+  status: string;
+  matchType: "SOURCE" | "NAME_PHONE" | "PENDING";
+  matched: boolean;
+  patientId: string;
+  encounterId: string;
+  visitNo: string;
+}
+
+export interface InventoryFollowupSlot {
+  slot: string;
+  label: string;
+  items: InventoryFollowupAppointment[];
+}
+
+export interface InventoryFollowupAppointments {
+  businessDate: string;
+  departmentKey: string;
+  slots: InventoryFollowupSlot[];
+}
+
+export const getInventoryFollowupAppointmentsApi = async (params: { departmentKey: string; date: string }) =>
+  getInventoryData<InventoryFollowupAppointments>("/patient-workbench/followup-appointments", params);
+
+export const arriveInventoryFollowupAppointmentApi = async (
+  recheckId: string,
+  payload: { departmentKey: string; businessDate: string }
+) =>
+  postInventoryData<InventoryPatientDetail, typeof payload>(
+    `/patient-workbench/followup-appointments/${encodeURIComponent(recheckId)}/arrive`,
+    payload
+  );
+
 export const saveInventoryDepartmentDailyReportApi = async (payload: {
   departmentKey: string;
   businessDate: string;

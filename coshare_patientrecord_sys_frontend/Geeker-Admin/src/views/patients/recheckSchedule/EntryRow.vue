@@ -61,7 +61,8 @@ const stateText = computed(() => {
 
 const noteText = computed(() => {
   const { entry } = props;
-  const parts = [entry.note];
+  const slot = entry.timeSlot === "AM" ? "上午" : entry.timeSlot === "PM" ? "下午" : entry.timeSlot === "EVENING" ? "晚上" : "";
+  const parts = [slot, entry.note];
   if (entry.status === "RESCHEDULED" && entry.rescheduledTo) parts.push(`改到 ${dayjs(entry.rescheduledTo).format("MM/DD")}`);
   if (entry.statusNote) parts.push(entry.statusNote);
   if (entry.sourceId) parts.push("改期而来");

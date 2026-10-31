@@ -12,6 +12,7 @@ import com.coshare.patientrecord.inventory.service.InventoryDatabaseService;
 import com.coshare.patientrecord.inventory.service.InventoryDayCloseService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDailyReportService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
+import com.coshare.patientrecord.inventory.service.InventoryFollowupService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionReviewService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionService;
@@ -56,6 +57,7 @@ public class InventoryApiController {
     private final InventoryDayCloseService dayCloseService;
     private final InventoryAdminReviewService adminReviewService;
     private final InventoryAdminReportService adminReportService;
+    private final InventoryFollowupService followupService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -73,6 +75,7 @@ public class InventoryApiController {
         InventoryDayCloseService dayCloseService,
         InventoryAdminReviewService adminReviewService,
         InventoryAdminReportService adminReportService,
+        InventoryFollowupService followupService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -89,6 +92,7 @@ public class InventoryApiController {
         this.dayCloseService = dayCloseService;
         this.adminReviewService = adminReviewService;
         this.adminReportService = adminReportService;
+        this.followupService = followupService;
         this.portalMode = portalMode;
     }
 
@@ -619,6 +623,33 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> addManualPatient(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.of(200, "患者已加入本科室工作台", asMap(patientConsumptionService.manualAdd(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/fixed-consumables")
+    public ApiResult<Map<String, Object>> fixedConsumables(
+        @RequestParam String departmentKey,
+        @RequestParam(required = false) LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(departmentDailyReportService.fixedConsumables(departmentKey, date, user)));
+    }
+
+    @GetMapping("/inventory-api/patient-workbench/followup-appointments")
+    public ApiResult<Map<String, Object>> followupAppointments(
+        @RequestParam(required = false) String departmentKey,
+        @RequestParam(required = false) LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(followupService.appointments(departmentKey, date, user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/followup-appointments/{recheckId}/arrive")
+    public ApiResult<Map<String, Object>> arriveFollowupAppointment(
+        @org.springframework.web.bind.annotation.PathVariable String recheckId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "复诊患者已到院", asMap(followupService.arrive(recheckId, toJson(payload), user)));
     }
 
     @PutMapping("/inventory-api/patient-workbench/day-status")
