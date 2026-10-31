@@ -354,7 +354,12 @@ public class InventoryPatientConsumptionReviewService {
         );
         if (!existing.isEmpty()) return existing.get(0);
         if (!ledger.isOpeningConfirmed(batch.departmentId())) {
-            throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+            // 科室期初为零时，只要已有发放到科室的可用库存，就允许正常扣减
+            boolean hasStock = ledger.lockAvailableBalances(ledger.departmentLocation(batch.departmentId()), line.itemId()).stream()
+                .map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add).signum() > 0;
+            if (!hasStock) {
+                throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+            }
         }
         String locationId = ledger.departmentLocation(batch.departmentId());
         List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
@@ -609,7 +614,12 @@ public class InventoryPatientConsumptionReviewService {
         );
         if (!existing.isEmpty()) return existing.get(0);
         if (!ledger.isOpeningConfirmed(batch.departmentId())) {
-            throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+            // 科室期初为零时，只要已有发放到科室的可用库存，就允许正常扣减
+            boolean hasStock = ledger.lockAvailableBalances(ledger.departmentLocation(batch.departmentId()), line.itemId()).stream()
+                .map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add).signum() > 0;
+            if (!hasStock) {
+                throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+            }
         }
         String locationId = ledger.departmentLocation(batch.departmentId());
         List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());

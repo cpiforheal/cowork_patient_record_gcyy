@@ -13,10 +13,13 @@ import com.coshare.patientrecord.inventory.service.InventoryDayCloseService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDailyReportService;
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
 import com.coshare.patientrecord.inventory.service.InventoryFollowupService;
+import com.coshare.patientrecord.inventory.service.InventoryInboundService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
+import com.coshare.patientrecord.inventory.service.InventoryOpeningImportService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionReviewService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionService;
 import com.coshare.patientrecord.inventory.service.InventoryQuotaGovernanceService;
+import com.coshare.patientrecord.inventory.service.InventoryStockOverviewService;
 import com.coshare.patientrecord.security.InventoryPermission;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +40,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
@@ -58,6 +62,9 @@ public class InventoryApiController {
     private final InventoryAdminReviewService adminReviewService;
     private final InventoryAdminReportService adminReportService;
     private final InventoryFollowupService followupService;
+    private final InventoryInboundService inboundService;
+    private final InventoryOpeningImportService openingImportService;
+    private final InventoryStockOverviewService stockOverviewService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -76,6 +83,9 @@ public class InventoryApiController {
         InventoryAdminReviewService adminReviewService,
         InventoryAdminReportService adminReportService,
         InventoryFollowupService followupService,
+        InventoryInboundService inboundService,
+        InventoryOpeningImportService openingImportService,
+        InventoryStockOverviewService stockOverviewService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -93,6 +103,9 @@ public class InventoryApiController {
         this.adminReviewService = adminReviewService;
         this.adminReportService = adminReportService;
         this.followupService = followupService;
+        this.inboundService = inboundService;
+        this.openingImportService = openingImportService;
+        this.stockOverviewService = stockOverviewService;
         this.portalMode = portalMode;
     }
 
@@ -1180,6 +1193,86 @@ public class InventoryApiController {
         return ApiResult.of(200, "inbound saved", databaseService.asMap(databaseService.inbound(toJson(payload), user)));
     }
 
+    @GetMapping("/inventory-api/warehouse/inbound-orders")
+    public ApiResult<Map<String, Object>> inboundOrders(
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(required = false) String supplier,
+        @RequestParam(required = false) String status
+    ) {
+        requireCapability("inventory:issue");
+        return ApiResult.success(asMap(inboundService.listOrders(from, to, supplier, status)));
+    }
+
+    @GetMapping("/inventory-api/warehouse/inbound-orders/{orderId}")
+    public ApiResult<Map<String, Object>> inboundOrder(@org.springframework.web.bind.annotation.PathVariable String orderId) {
+        requireCapability("inventory:issue");
+        return ApiResult.success(asMap(inboundService.getOrder(orderId)));
+    }
+
+    @PostMapping("/inventory-api/warehouse/inbound-orders")
+    public ApiResult<Map<String, Object>> createInboundOrder(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:issue");
+        return ApiResult.of(200, "入库单已保存", asMap(inboundService.createOrder(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/warehouse/inbound-orders/{orderId}/reverse")
+    public ApiResult<Map<String, Object>> reverseInboundOrder(
+        @org.springframework.web.bind.annotation.PathVariable String orderId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:issue");
+        String reason = payload == null ? "" : String.valueOf(payload.getOrDefault("reason", "")).trim();
+        return ApiResult.of(200, "入库单已红冲", asMap(inboundService.reverseOrder(orderId, reason, user)));
+    }
+
+    @GetMapping("/inventory-api/warehouse/suppliers")
+    public ApiResult<List<String>> inboundSuppliers() {
+        requireCapability("inventory:issue");
+        return ApiResult.success(objectMapper.convertValue(inboundService.supplierSuggestions(), List.class));
+    }
+
+    @GetMapping("/inventory-api/warehouse/stock")
+    public ApiResult<Map<String, Object>> warehouseStock(
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) String category,
+        @RequestParam(required = false) String filter
+    ) {
+        requireCapability("inventory:read");
+        return ApiResult.success(asMap(stockOverviewService.warehouseStock(keyword, category, filter)));
+    }
+
+    @GetMapping("/inventory-api/warehouse/alerts")
+    public ApiResult<Map<String, Object>> warehouseAlerts() {
+        requireCapability("inventory:read");
+        return ApiResult.success(asMap(stockOverviewService.alerts()));
+    }
+
+    @GetMapping("/inventory-api/department-stock")
+    public ApiResult<Map<String, Object>> departmentStock(@RequestParam(required = false) String departmentId) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(stockOverviewService.departmentStock(user, departmentId)));
+    }
+
+    @GetMapping("/inventory-api/warehouse/opening-template")
+    public ResponseEntity<byte[]> openingTemplate() {
+        requireCapability("inventory:issue");
+        return attachment(openingImportService.template(), "期初库存导入模板.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+
+    @PostMapping("/inventory-api/warehouse/opening-import/preview")
+    public ApiResult<Map<String, Object>> previewOpeningImport(@RequestParam("file") MultipartFile file) {
+        SessionUser user = requireCapability("inventory:issue");
+        return ApiResult.success(asMap(openingImportService.preview(file, user)));
+    }
+
+    @PostMapping("/inventory-api/warehouse/opening-import/commit")
+    public ApiResult<Map<String, Object>> commitOpeningImport(@RequestParam("file") MultipartFile file) {
+        SessionUser user = requireCapability("inventory:issue");
+        return ApiResult.of(200, "期初库存已导入", asMap(openingImportService.commit(file, user)));
+    }
+
     @PostMapping("/inventory-api/requests")
     public ApiResult<Map<String, Object>> createRequest(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:request");
@@ -1196,6 +1289,12 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> issueRequest(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:issue");
         return ApiResult.of(200, "request issued", databaseService.asMap(databaseService.issueRequest(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/requests/fulfill")
+    public ApiResult<Map<String, Object>> fulfillRequest(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:issue");
+        return ApiResult.of(200, "申领已发放到科室库", databaseService.asMap(databaseService.fulfillRequest(toJson(payload), user)));
     }
 
     @PostMapping("/inventory-api/requests/receive")

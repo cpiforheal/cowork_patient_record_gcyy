@@ -101,8 +101,11 @@ router.beforeEach(async to => {
       if (!authStore.hasInventorySystemAccessGet) return { path: "/403", replace: true };
       if (isInventoryPortal) {
         const isAdministrator = (authStore.capabilities || []).includes("inventory:role:manage");
+        const isWarehouse = !isAdministrator && (authStore.capabilities || []).includes("inventory:issue");
         const departmentPath = "/inventory-system/departments/" + (authStore.activeDepartment?.id || "");
-        const portalLanding = isAdministrator ? "/inventory-system/patient-review" : departmentPath;
+        const portalLanding = isAdministrator
+          ? "/inventory-system/patient-review"
+          : isWarehouse ? "/inventory-system/warehouse" : departmentPath;
         const isMessageBoard = to.path === "/inventory-system/message-board";
         const isDepartmentMaterials = to.path === "/inventory-system/department-materials";
         const isPackageRoute = to.path === "/inventory-system/packages" || isDepartmentMaterials;
@@ -117,10 +120,12 @@ router.beforeEach(async to => {
             to.path === "/inventory-system/consumable-workbench" ||
             to.path === "/inventory-system/role-management" ||
             to.path.startsWith("/inventory-system/departments/")
-          : isMessageBoard ||
-            to.path === departmentPath ||
-            to.path === "/inventory-system/consumable-workbench" ||
-            (isPackageRoute && hasPackageAccess);
+          : isWarehouse
+            ? isMessageBoard || to.path === "/inventory-system/warehouse"
+            : isMessageBoard ||
+              to.path === departmentPath ||
+              to.path === "/inventory-system/consumable-workbench" ||
+              (isPackageRoute && hasPackageAccess);
         if (!allowed) return { path: portalLanding, replace: true };
       }
       const tab = inventoryTabFromPath(to.path);

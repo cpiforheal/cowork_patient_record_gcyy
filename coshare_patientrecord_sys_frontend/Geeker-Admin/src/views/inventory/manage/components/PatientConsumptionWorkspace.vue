@@ -8,6 +8,9 @@
       </div>
       <div class="toolbar-actions">
         <el-button v-if="fixedCount" plain @click="fixedVisible = true">固定耗材 · {{ fixedStatusLabel }}</el-button>
+        <el-button plain @click="deptStockVisible = true">
+          科室库存{{ deptLowCount ? ` · ${deptLowCount} 项预警` : "" }}
+        </el-button>
         <el-dropdown trigger="click" @command="handleAddPatientCommand">
           <el-button type="primary" plain>加入患者 ▾</el-button>
           <template #dropdown>
@@ -659,6 +662,19 @@
                             <span v-if="item.mappingConflict" class="mapping-hint">
                               实际物资：{{ item.mappedItemNames.join(" / ") }}
                             </span>
+                            <span
+                              v-if="deptStockOf(item.itemId)"
+                              class="stock-hint"
+                              :class="{ 'is-short': isShortAfter(item.itemId) }"
+                            >
+                              本月进 {{ formatQuantity(deptStockOf(item.itemId)?.monthInbound) }} ·
+                              用 {{ formatQuantity(deptStockOf(item.itemId)?.monthUsed) }} ·
+                              存 {{ formatQuantity(deptStockOf(item.itemId)?.deptAvailable) }}
+                              （中心 {{ formatQuantity(deptStockOf(item.itemId)?.centralAvailable) }}）
+                              <template v-if="lineState[item.itemId]">
+                                · 选后剩 {{ formatQuantity(remainingAfter(item.itemId)) }}
+                              </template>
+                            </span>
                             <span v-if="lineState[item.itemId]?.reviewNote" class="review-note">
                               审核意见：{{ lineState[item.itemId]?.reviewNote }}
                             </span>
@@ -959,6 +975,7 @@
       </template>
     </el-dialog>
 
+    <DepartmentStockDrawer v-model="deptStockVisible" @changed="loadDepartmentStock" />
     <FixedConsumablesDialog
       v-model="fixedVisible"
       :department-key="props.departmentKey"
@@ -1016,6 +1033,7 @@ import FixedConsumablesDialog from "./FixedConsumablesDialog.vue";
 import FollowupAppointmentsDialog from "./FollowupAppointmentsDialog.vue";
 import FollowupBatchDialog from "./FollowupBatchDialog.vue";
 import DepartmentPackageBoard from "./DepartmentPackageBoard.vue";
+import DepartmentStockDrawer from "./DepartmentStockDrawer.vue";
 import {
   addInventoryManualPatientApi,
   getInventoryFixedConsumablesApi,
@@ -1024,6 +1042,7 @@ import {
   setInventoryPatientDayStatusApi,
   withdrawInventoryPatientZeroUseApi,
   getInventoryDepartmentDailyReportCalendarApi,
+  getInventoryDepartmentStockApi,
   getInventoryPatientDetailApi,
   getInventoryPatientLastCombinationApi,
   getInventoryPatientPackagesApi,
@@ -1092,6 +1111,9 @@ const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
 const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
 const calendarExpanded = ref(false);
+const deptStockVisible = ref(false);
+const deptStockMap = ref<Record<string, any>>({});
+const deptLowCount = computed(() => Object.values(deptStockMap.value).filter(item => item.lowStock).length);
 const fixedVisible = ref(false);
 const fixedCount = ref(0);
 const fixedStatus = ref("");
@@ -1480,6 +1502,7 @@ const loadWorkbench = async (keepSelection = true) => {
     calendarMonth.value = dayjs(businessDate.value).startOf("month").format("YYYY-MM-01");
     void loadCalendar();
     void loadFixedStatus();
+    void loadDepartmentStock();
     if (!keepSelection || !selectedId.value) {
       const first =
         filteredPatients.value.find(patient => patient.serviceInstanceId) ||
@@ -1538,6 +1561,24 @@ const fixedStatusLabel = computed(() => {
   if (fixedStatus.value === "RETURNED") return "已驳回";
   return "待确认";
 });
+
+const loadDepartmentStock = async () => {
+  try {
+    const result = await getInventoryDepartmentStockApi();
+    const map: Record<string, any> = {};
+    (result.data?.items ?? []).forEach(item => {
+      map[item.itemId] = item;
+    });
+    deptStockMap.value = map;
+  } catch {
+    deptStockMap.value = {};
+  }
+};
+
+const deptStockOf = (itemId: string) => deptStockMap.value[itemId];
+const remainingAfter = (itemId: string) =>
+  Number(deptStockOf(itemId)?.deptAvailable || 0) - Number(lineState[itemId]?.actualQuantity || 0);
+const isShortAfter = (itemId: string) => Boolean(lineState[itemId]) && remainingAfter(itemId) < 0;
 
 const loadCalendar = async () => {
   calendarLoading.value = true;
@@ -3846,6 +3887,16 @@ onMounted(() => {
 .mapping-hint {
   color: var(--hos-status-warning);
   font-size: 10px;
+}
+
+.stock-hint {
+  color: var(--hos-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+
+  &.is-short {
+    color: var(--hos-status-danger);
+  }
 }
 
 .drawer-mode {

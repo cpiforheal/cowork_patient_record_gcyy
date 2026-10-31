@@ -116,6 +116,10 @@ public class InventoryDatabaseService {
         return requestWorkflow.issueRequest(payload, user);
     }
 
+    public ObjectNode fulfillRequest(JsonNode payload, SessionUser user) {
+        return requestWorkflow.fulfillRequest(payload, user);
+    }
+
     public ObjectNode receiveRequest(JsonNode payload, SessionUser user) {
         return requestWorkflow.receiveRequest(payload, user);
     }

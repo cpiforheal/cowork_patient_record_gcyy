@@ -19,6 +19,7 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   patientTrace: "inventoryPatientTrace",
   consumableWorkbench: "inventoryConsumableWorkbench",
   adminReview: "inventoryAdminReview",
+  warehouse: "inventoryWarehouse",
   roles: "inventoryRoles"
 };
 
@@ -45,6 +46,7 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   patientTrace: ["inventory:read"],
   consumableWorkbench: ["inventory:read"],
   adminReview: ["inventory:role:manage"],
+  warehouse: ["inventory:issue"],
   roles: ["inventory:role:manage"],
   messageBoard: ["inventory:read"]
 };
@@ -87,6 +89,15 @@ export const getInventorySystemMenu = (
   departmentKey?: string
 ): Menu.MenuOptions[] => {
   const granted = new Set([...capabilities, ...Object.values(buttonPermissions).flat()]);
+  if (granted.has("inventory:issue") && !granted.has("inventory:role:manage")) {
+    return [
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/warehouse`,
+        name: "inventorySystemWarehouse",
+        meta: meta("库管台", "Goods")
+      }
+    ];
+  }
   if (granted.has("inventory:role:manage")) {
     return [
       {
@@ -191,6 +202,7 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/patient-trace": "patientTrace",
     "/inventory-system/consumable-workbench": "consumableWorkbench",
     "/inventory-system/admin-review": "adminReview",
+    "/inventory-system/warehouse": "warehouse",
     "/inventory-system/role-management": "roles"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
@@ -204,6 +216,7 @@ export const inventorySystemPathForLegacy = (path: string) => {
 };
 
 const inventoryView = () => import("@/views/inventory/manage/index.vue");
+const warehouseView = () => import("@/views/inventory/warehouse/index.vue");
 const redirectTo = (path: string) => () => path;
 
 export const inventorySystemRoutes: RouteRecordRaw[] = [
@@ -248,6 +261,12 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
     name: "inventorySystemAnalytics",
     redirect: redirectTo(`${INVENTORY_SYSTEM_PREFIX}/executive`),
     meta: meta("管理设置", "PieChart")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/warehouse`,
+    name: "inventorySystemWarehouse",
+    component: warehouseView,
+    meta: meta("库管台", "Goods")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/stock`,

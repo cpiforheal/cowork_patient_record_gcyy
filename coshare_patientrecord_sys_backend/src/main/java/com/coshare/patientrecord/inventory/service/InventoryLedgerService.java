@@ -211,7 +211,7 @@ public class InventoryLedgerService {
         if (!List.of("IN_TRANSIT", "PARTIALLY_IN_TRANSIT").contains(transfer.status())) {
             throw new IllegalArgumentException("只能签收已配发物资");
         }
-        if (hasUnmovedReservation(transfer.id())) throw new IllegalArgumentException("申领单尚未全部配发，不能签收");
+        boolean partiallyIssued = hasUnmovedReservation(transfer.id());
         String departmentLocation = ledger.departmentLocation(transfer.departmentId());
         List<TransferAllocation> allocations = transferAllocationsForUpdate(transfer.id());
         BigDecimal total = BigDecimal.ZERO;
@@ -238,15 +238,22 @@ public class InventoryLedgerService {
             );
             total = total.add(pending);
         }
-        ledger.jdbc().update(
-            """
-            UPDATE inventory_transfers
-            SET status = 'RECEIVED', received_by = ?, received_at = CURRENT_TIMESTAMP(3)
-            WHERE id = ?
-            """,
-            user.name(),
-            transfer.id()
-        );
+        if (partiallyIssued) {
+            ledger.jdbc().update(
+                "UPDATE inventory_transfers SET status = 'PARTIALLY_IN_TRANSIT' WHERE id = ?",
+                transfer.id()
+            );
+        } else {
+            ledger.jdbc().update(
+                """
+                UPDATE inventory_transfers
+                SET status = 'RECEIVED', received_by = ?, received_at = CURRENT_TIMESTAMP(3)
+                WHERE id = ?
+                """,
+                user.name(),
+                transfer.id()
+            );
+        }
         return total;
     }
 

@@ -3214,3 +3214,89 @@ export const saveInventoryUnitConversionsApi = async (params: { unitConversions:
     InventoryApiList<InventoryUnitConversion> & { total?: number },
     { unitConversions: InventoryUnitConversion[]; itemId?: string }
   >("/mapping/unit-conversions", params);
+
+export interface InventoryInboundOrder {
+  id: string;
+  orderNo: string;
+  supplier: string;
+  purchaseDate: string;
+  supplierDocumentNo?: string;
+  status: "ACTIVE" | "REVERSED";
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+  lineCount?: number;
+  totalQuantity?: number;
+  reversedBy?: string;
+  reverseReason?: string;
+  reversedAt?: string;
+  lines?: Array<{
+    id: string;
+    itemId: string;
+    itemName: string;
+    unit: string;
+    batchId: string;
+    batchNo: string;
+    expiryDate: string;
+    issueQuantity: number;
+    conversionFactor: number;
+    quantity: number;
+    remark?: string;
+  }>;
+}
+
+export const getInventoryInboundOrdersApi = async (params: { from?: string; to?: string; supplier?: string; status?: string } = {}) =>
+  getInventoryData<{ from: string; to: string; list: InventoryInboundOrder[] }>("/warehouse/inbound-orders", params);
+
+export const getInventoryInboundOrderApi = async (orderId: string) =>
+  getInventoryData<InventoryInboundOrder>(`/warehouse/inbound-orders/${encodeURIComponent(orderId)}`);
+
+export const createInventoryInboundOrderApi = async (payload: Record<string, unknown>) =>
+  postInventoryData<InventoryInboundOrder, Record<string, unknown>>("/warehouse/inbound-orders", payload);
+
+export const reverseInventoryInboundOrderApi = async (orderId: string, reason: string) =>
+  postInventoryData<InventoryInboundOrder, { reason: string }>(
+    `/warehouse/inbound-orders/${encodeURIComponent(orderId)}/reverse`,
+    { reason }
+  );
+
+export const getInventoryInboundSuppliersApi = async () =>
+  getInventoryData<string[]>("/warehouse/suppliers");
+
+export const getInventoryWarehouseStockApi = async (params: { keyword?: string; category?: string; filter?: string } = {}) =>
+  getInventoryData<{ items: any[]; batches: any[]; today: string }>("/warehouse/stock", params);
+
+export const getInventoryWarehouseAlertsApi = async () =>
+  getInventoryData<{ centralLow: any[]; departmentLow: any[]; expiring: any[] }>("/warehouse/alerts");
+
+export const getInventoryDepartmentStockApi = async (departmentId?: string) =>
+  getInventoryData<{ departmentId: string; departmentName: string; month: string; items: any[] }>(
+    "/department-stock",
+    departmentId ? { departmentId } : undefined
+  );
+
+export const fulfillInventoryRequestApi = async (payload: { id: string; lines?: Array<{ id: string; issuedQuantity: number }> }) =>
+  postInventoryData<Record<string, unknown>, typeof payload>("/requests/fulfill", payload);
+
+const uploadInventoryFile = async <T>(path: string, file: File): Promise<T> => {
+  const form = new FormData();
+  form.append("file", file);
+  const result = await fetch(`${INVENTORY_API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form
+  });
+  return parseInventoryDataResponse<T>(result);
+};
+
+export const previewInventoryOpeningImportApi = async (file: File) =>
+  uploadInventoryFile<{ rowCount: number; rows: any[]; errors: Array<{ row: number; name: string; message: string }> }>(
+    "/warehouse/opening-import/preview",
+    file
+  );
+
+export const commitInventoryOpeningImportApi = async (file: File) =>
+  uploadInventoryFile<{ rows: number; created: number; updated: number }>("/warehouse/opening-import/commit", file);
+
+export const downloadInventoryOpeningTemplateApi = async () =>
+  downloadInventoryFile("/warehouse/opening-template", "期初库存导入模板.xlsx");

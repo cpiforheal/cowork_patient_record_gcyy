@@ -193,7 +193,9 @@ public class InventoryPortalAuthService {
     }
 
     private SessionUser toSessionUser(Account account, Instant expiresAt) {
-        String roleLabel = "admin".equals(account.clinicRole()) ? "进销存管理员" : "科室填报";
+        String roleLabel = "admin".equals(account.clinicRole())
+            ? "进销存管理员"
+            : "inventory_warehouse".equals(account.clinicRole()) ? "库管员" : "科室填报";
         return new SessionUser(
             account.id(), account.username(), account.displayName(), account.clinicRole(), roleLabel,
             account.departmentKey(), account.departmentName(), account.mustChangePassword(), expiresAt

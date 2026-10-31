@@ -113,6 +113,51 @@ public class InventoryRequestWorkflow {
     }
 
     @Transactional
+    public ObjectNode fulfillRequest(JsonNode payload, SessionUser user) {
+        requireWarehouse(user);
+        String requestId = repository.text(payload, "id");
+        ObjectNode request = repository.loadRequest(requestId);
+        String status = repository.text(request, "status");
+        if ("pending".equals(status)) {
+            approveRequest(payload, user);
+            request = repository.loadRequest(requestId);
+        } else if (!List.of("approved", "partially_issued").contains(status)) {
+            throw new IllegalArgumentException("只有待审核、待发放或部分发放的申领单可以确认发放");
+        }
+        issueRequest(payload, user);
+        request = repository.loadRequest(requestId);
+        String issuedStatus = repository.text(request, "status");
+        if (!List.of("issued", "partially_issued").contains(issuedStatus)) {
+            return request;
+        }
+        ledgerService.receiveRequest(request, user);
+        ArrayNode lines = repository.requestLines(request);
+        boolean allReceived = true;
+        for (JsonNode lineNode : lines) {
+            ObjectNode line = repository.object(lineNode);
+            BigDecimal requested = repository.quantity(line, "quantity");
+            BigDecimal issued = repository.quantity(line, "issuedQuantity");
+            if (issued.compareTo(requested) >= 0) line.put("status", "received");
+            else if (issued.signum() > 0) {
+                line.put("status", "partially_issued");
+                allReceived = false;
+            } else {
+                line.put("status", "approved");
+                allReceived = false;
+            }
+        }
+        request.put("status", allReceived ? "received" : "partially_issued");
+        request.put("receivedAt", repository.now());
+        request.put("receiver", "中心库代签收");
+        repository.upsertRequest(request);
+        repository.log(
+            user.name(), "确认发放", "request", repository.requestLineSummary(lines),
+            repository.text(request, "department") + " 已由中心库直接发放到科室库"
+        );
+        return repository.loadRequest(requestId);
+    }
+
+    @Transactional
     public ObjectNode rejectRequest(JsonNode payload, SessionUser user) {
         requireWarehouse(user);
         ObjectNode request = repository.loadRequest(repository.text(payload, "id"));

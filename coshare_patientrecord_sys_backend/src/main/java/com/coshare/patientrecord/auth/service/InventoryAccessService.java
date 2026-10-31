@@ -149,7 +149,7 @@ public class InventoryAccessService {
         ));
         result.put(WAREHOUSE, profile(
             WAREHOUSE, "库房管理员", "负责物资档案、入库、审批发放、盘点报损和出入库追溯。", true,
-            paths("/inventory/overview", "/inventory/requests", "/inventory/stock", "/inventory/items", "/inventory/controls", "/inventory/weekly", "/inventory/trace"),
+            paths("/inventory-system/warehouse", "/inventory/overview", "/inventory/requests", "/inventory/stock", "/inventory/items", "/inventory/controls", "/inventory/weekly", "/inventory/trace"),
             permissions("inventoryOverview=inventory:read,inventory:approve,inventory:issue,inventory:receive,inventory:count,inventory:export", "inventoryRequests=inventory:read,inventory:approve,inventory:issue,inventory:receive,inventory:export", "inventoryStock=inventory:read,inventory:issue,inventory:receive,inventory:count,inventory:export", "inventoryItems=inventory:read,inventory:item:manage,inventory:export", "inventoryControls=inventory:read,inventory:receive,inventory:count,inventory:export", "inventoryWeekly=inventory:read,inventory:export", "inventoryTrace=inventory:read,inventory:export")
         ));
         result.put(DEPARTMENT, profile(
@@ -158,9 +158,9 @@ public class InventoryAccessService {
             permissions("inventoryOverview=inventory:read,inventory:request,inventory:receive", "inventoryRequests=inventory:read,inventory:request,inventory:receive", "inventoryWeekly=inventory:read")
         ));
         result.put(DEPARTMENT_REPORTER, profile(
-            DEPARTMENT_REPORTER, "科室耗材填报员", "仅填写本部门耗材日报。", false,
-            paths("/inventory/daily"),
-            permissions("inventoryDaily=inventory:read")
+            DEPARTMENT_REPORTER, "科室耗材填报员", "填写本部门耗材日报，并申领/签收本科室库存。", false,
+            paths("/inventory/daily", "/inventory/requests"),
+            permissions("inventoryDaily=inventory:read", "inventoryRequests=inventory:read,inventory:request,inventory:receive")
         ));
         result.put(AUDITOR, profile(
             AUDITOR, "耗材质控员", "维护患者变量规则，复核日核表并导出全院耗材报表。", true,
