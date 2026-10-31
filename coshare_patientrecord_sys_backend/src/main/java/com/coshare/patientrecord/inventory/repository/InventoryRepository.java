@@ -348,8 +348,33 @@ public class InventoryRepository {
             normalizeRequestLine(line, defaultStatus);
             normalized.add(line);
         }
+        normalized = mergeRequestLines(normalized);
         if (normalized.isEmpty()) throw new IllegalArgumentException("请至少添加一项申领物资");
         return normalized;
+    }
+
+    private ArrayNode mergeRequestLines(ArrayNode lines) {
+        java.util.Map<String, ObjectNode> merged = new java.util.LinkedHashMap<>();
+        for (JsonNode lineNode : lines) {
+            ObjectNode line = object(lineNode);
+            String itemId = text(line, "itemId");
+            if (itemId.isBlank()) continue;
+            ObjectNode existing = merged.get(itemId);
+            if (existing == null) {
+                line.put("sourceCount", 1);
+                merged.put(itemId, line);
+                continue;
+            }
+            putQuantity(existing, "quantity", quantity(existing, "quantity").add(quantity(line, "quantity")));
+            existing.put("sourceCount", existing.path("sourceCount").asInt(1) + 1);
+            if (!text(existing, "remark").contains(text(line, "remark")) && !text(line, "remark").isBlank()) {
+                existing.put("remark", text(existing, "remark").isBlank()
+                    ? text(line, "remark") : text(existing, "remark") + "；" + text(line, "remark"));
+            }
+        }
+        ArrayNode result = objectMapper.createArrayNode();
+        merged.values().forEach(result::add);
+        return result;
     }
 
     private void normalizeRequestLine(ObjectNode line, String defaultStatus) {

@@ -14,7 +14,9 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
@@ -172,6 +174,7 @@ public class InventoryInboundService {
         String purchaseDateText = text(payload, "purchaseDate");
         LocalDate purchaseDate = purchaseDateText.isBlank() ? LocalDate.now() : LocalDate.parse(purchaseDateText);
         String supplier = text(payload, "supplier");
+        ArrayNode mergedLines = mergeInboundLines(lines);
         String orderId = "inbound-" + UUID.randomUUID();
         String orderNo = nextOrderNo(purchaseDate);
         jdbcTemplate.update(
@@ -183,7 +186,7 @@ public class InventoryInboundService {
             orderId, orderNo, blankToNull(supplier), purchaseDate,
             blankToNull(text(payload, "supplierDocumentNo")), blankToNull(text(payload, "note")), user.name()
         );
-        for (JsonNode lineNode : lines) {
+        for (JsonNode lineNode : mergedLines) {
             String itemId = text(lineNode, "itemId");
             if (itemId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "入库行缺少物资");
             BigDecimal issueQuantity = decimal(lineNode, "issueQuantity", "quantity");
@@ -296,6 +299,41 @@ public class InventoryInboundService {
     private ArrayNode queryArray(String sql, RowMapper<ObjectNode> mapper, Object... args) {
         ArrayNode result = objectMapper.createArrayNode();
         jdbcTemplate.query(sql, mapper, args).forEach(result::add);
+        return result;
+    }
+
+    private ArrayNode mergeInboundLines(JsonNode lines) {
+        Map<String, ObjectNode> merged = new LinkedHashMap<>();
+        for (JsonNode lineNode : lines) {
+            ObjectNode line = lineNode.deepCopy();
+            String itemId = text(line, "itemId");
+            if (itemId.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "入库行缺少物资");
+            BigDecimal quantity = decimal(line, "issueQuantity", "quantity");
+            if (quantity.signum() <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "入库数量必须大于 0");
+            BigDecimal factor = decimal(line, "conversionFactor", "factor");
+            if (factor.signum() <= 0) factor = BigDecimal.ONE;
+            line.put("issueQuantity", quantity);
+            line.put("conversionFactor", factor);
+            String key = itemId + "|" + text(line, "batchNo").trim().toLowerCase() + "|" + text(line, "expiryDate").trim();
+            ObjectNode existing = merged.get(key);
+            if (existing == null) {
+                line.put("mergeCount", 1);
+                merged.put(key, line);
+                continue;
+            }
+            if (existing.path("conversionFactor").decimalValue().compareTo(factor) != 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "同一物资的换算系数不一致，请检查入库行");
+            }
+            existing.put("issueQuantity", existing.path("issueQuantity").decimalValue().add(quantity));
+            existing.put("mergeCount", existing.path("mergeCount").asInt(1) + 1);
+            String remark = text(line, "remark");
+            if (!remark.isBlank()) {
+                String old = text(existing, "remark");
+                if (!old.contains(remark)) existing.put("remark", old.isBlank() ? remark : old + "；" + remark);
+            }
+        }
+        ArrayNode result = objectMapper.createArrayNode();
+        merged.values().forEach(result::add);
         return result;
     }
 

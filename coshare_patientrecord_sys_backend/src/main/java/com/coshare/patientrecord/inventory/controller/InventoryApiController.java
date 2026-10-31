@@ -1232,6 +1232,12 @@ public class InventoryApiController {
         return ApiResult.success(objectMapper.convertValue(inboundService.supplierSuggestions(), List.class));
     }
 
+    @GetMapping("/inventory-api/item-options")
+    public ApiResult<java.util.List<Map<String, Object>>> inventoryItemOptions() {
+        requireCapability("inventory:read");
+        return ApiResult.success(objectMapper.convertValue(stockOverviewService.itemOptions(), java.util.List.class));
+    }
+
     @GetMapping("/inventory-api/warehouse/stock")
     public ApiResult<Map<String, Object>> warehouseStock(
         @RequestParam(required = false) String keyword,

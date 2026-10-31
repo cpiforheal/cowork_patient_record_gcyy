@@ -3300,3 +3300,18 @@ export const commitInventoryOpeningImportApi = async (file: File) =>
 
 export const downloadInventoryOpeningTemplateApi = async () =>
   downloadInventoryFile("/warehouse/opening-template", "期初库存导入模板.xlsx");
+
+export interface InventoryItemOption {
+  itemId: string;
+  name: string;
+  spec?: string;
+  unit?: string;
+  baseUnit?: string;
+  issueUnit?: string;
+  conversionFactor?: number;
+  batchRequired?: boolean;
+  expiryRequired?: boolean;
+}
+
+export const getInventoryItemOptionsApi = async () =>
+  getInventoryData<InventoryItemOption[]>("/item-options");

@@ -197,30 +197,101 @@
           <el-input v-model="inboundForm.supplierDocumentNo" clearable placeholder="供货单号（选填）" />
         </div>
         <el-input v-model="inboundForm.note" clearable placeholder="备注（选填）" />
-        <div class="line-table">
+        <div class="inbound-tools">
+          <el-input
+            v-model="inboundSearch"
+            clearable
+            placeholder="输入物资名称 / 拼音首字母，回车添加"
+            @keydown="onInboundSearchKeydown"
+          />
+          <el-button @click="openPaste">批量粘贴</el-button>
+          <el-button @click="loadLastInbound">载入上次单</el-button>
+        </div>
+        <div v-if="searchResults.length" class="search-results">
+          <button
+            v-for="(item, index) in searchResults"
+            :key="item.itemId"
+            type="button"
+            :class="{ 'is-active': index === searchIndex }"
+            @click="pickSearchItem(item)"
+          >
+            <span>{{ item.name }}<small v-if="item.spec">（{{ item.spec }}）</small></span>
+            <em>{{ item.issueUnit || item.unit }}</em>
+          </button>
+        </div>
+        <div v-if="inboundForm.lines.length" class="line-table">
           <div class="line-head">
-            <span>物资</span><span>数量</span><span>换算</span><span>批号</span><span>有效期</span><span>备注</span><span />
+            <span>物资</span><span>领用数量</span><span>换算</span><span>折算</span><span>批号</span><span>有效期</span><span>备注</span><span />
           </div>
           <div v-for="(line, index) in inboundForm.lines" :key="line.key" class="line-row">
-            <el-select v-model="line.itemId" filterable placeholder="选择物资" @change="onInboundItem(line)">
-              <el-option v-for="item in items" :key="item.id" :label="`${item.name}${item.spec ? '（' + item.spec + '）' : ''}`" :value="item.id" />
-            </el-select>
+            <span class="line-item-name">
+              {{ line.itemName }}
+              <small v-if="line.mergeCount > 1" :title="line.sources.join('；')">由 {{ line.mergeCount }} 行合并</small>
+            </span>
             <el-input-number v-model="line.issueQuantity" :min="0.01" :precision="2" :controls="false" />
             <el-input-number v-model="line.conversionFactor" :min="0.0001" :precision="4" :controls="false" />
+            <span class="line-base">{{ formatNumber(Number(line.issueQuantity || 0) * Number(line.conversionFactor || 1)) }}</span>
             <el-input v-model="line.batchNo" :placeholder="line.batchRequired ? '必填批号' : '批号'" />
             <el-date-picker v-model="line.expiryDate" type="date" value-format="YYYY-MM-DD" :placeholder="line.expiryRequired ? '必填效期' : '有效期'" />
             <el-input v-model="line.remark" placeholder="备注" />
-            <el-button link type="danger" :disabled="inboundForm.lines.length === 1" @click="removeInboundLine(index)">删除</el-button>
+            <el-button link type="danger" @click="removeInboundLine(index)">删除</el-button>
           </div>
         </div>
-        <el-button :icon="Plus" @click="addInboundLine">加一行</el-button>
         <div class="drawer-foot">
-          <span>{{ inboundForm.lines.filter(line => line.itemId).length }} 行待入库</span>
+          <span>{{ inboundForm.lines.length }} 行待入库{{ inboundForm.lines.reduce((sum, line) => sum + Math.max(0, line.mergeCount - 1), 0) ? ` · 已合并 ${inboundForm.lines.reduce((sum, line) => sum + Math.max(0, line.mergeCount - 1), 0)} 行` : "" }}</span>
           <el-button @click="inboundVisible = false">取消</el-button>
           <el-button type="primary" :loading="saving" @click="saveInbound">保存入库</el-button>
         </div>
       </div>
     </el-drawer>
+
+    <el-dialog v-model="pasteVisible" title="批量粘贴入库" width="820px" append-to-body>
+      <el-input
+        v-model="pasteText"
+        type="textarea"
+        :rows="5"
+        placeholder="每行一条：物资名称 [Tab/逗号] 数量 [Tab/逗号] 批号 有效期（可选）"
+      />
+      <div class="paste-actions">
+        <el-button @click="previewPaste">解析预览</el-button>
+        <span>数量按领用单位；批号/效期必填物资缺字段会标红</span>
+      </div>
+      <el-table v-if="pasteRows.length" :data="pasteRows" border size="small" max-height="360">
+        <el-table-column label="名称" min-width="150">
+          <template #default="{ row }">
+            <el-input v-model="row.name" @change="rematchPaste" />
+          </template>
+        </el-table-column>
+        <el-table-column label="数量" width="100">
+          <template #default="{ row }"><el-input-number v-model="row.quantity" :min="0.01" :precision="2" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="匹配" min-width="180">
+          <template #default="{ row }">
+            <el-select
+              v-if="row.candidates?.length"
+              :model-value="row.item?.itemId || ''"
+              placeholder="选择规格"
+              @change="(id: string) => pickPasteCandidate(row, id)"
+            >
+              <el-option v-for="candidate in row.candidates" :key="candidate.itemId" :label="`${candidate.name}${candidate.spec ? '（' + candidate.spec + '）' : ''}`" :value="candidate.itemId" />
+            </el-select>
+            <span v-else-if="row.item">{{ row.item.name }}<small v-if="row.item.spec">（{{ row.item.spec }}）</small></span>
+            <span v-else class="danger">{{ row.error || "未匹配" }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="批号" width="120">
+          <template #default="{ row }"><el-input v-model="row.batchNo" /></template>
+        </el-table-column>
+        <el-table-column label="有效期" width="140">
+          <template #default="{ row }"><el-input v-model="row.expiryDate" placeholder="YYYY-MM-DD" /></template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <span class="paste-summary">{{ pasteRows.filter(row => row.item).length }} / {{ pasteRows.length }} 行可导入</span>
+        <el-button @click="pasteVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!pasteRows.length || pasteRows.some(row => !row.item)" @click="importPaste">导入到清单</el-button>
+      </template>
+    </el-dialog>
 
     <el-drawer v-model="orderVisible" :title="currentOrder?.orderNo || '入库单明细'" size="58%" append-to-body>
       <template v-if="currentOrder">
@@ -354,6 +425,7 @@ import {
   getInventoryInboundOrderApi,
   getInventoryInboundOrdersApi,
   getInventoryInboundSuppliersApi,
+  getInventoryItemOptionsApi,
   getInventoryWarehouseAlertsApi,
   getInventoryWarehouseStockApi,
   previewInventoryOpeningImportApi,
@@ -361,14 +433,15 @@ import {
   reverseInventoryInboundOrderApi,
   saveInventoryItemApi,
   type InventoryInboundOrder,
-  type InventoryItem,
+  type InventoryItemOption,
   type InventoryRequest
 } from "@/api/modules/inventory";
+import { conversionFactor, matchBulkRows, parseBulkText, type ParsedBulkRow } from "@/views/inventory/manage/composables/bulkItemImport";
 
 const activeTab = ref<"inbound" | "stock" | "requests" | "alerts">("inbound");
 const loading = ref(false);
 const saving = ref(false);
-const items = ref<InventoryItem[]>([]);
+const items = ref<InventoryItemOption[]>([]);
 const requests = ref<InventoryRequest[]>([]);
 const suppliers = ref<string[]>([]);
 
@@ -392,6 +465,12 @@ const requestStatus = ref("");
 const requestKeyword = ref("");
 
 const inboundVisible = ref(false);
+const inboundSearch = ref("");
+const searchIndex = ref(0);
+const pasteVisible = ref(false);
+const pasteText = ref("");
+const pasteRows = ref<ParsedBulkRow[]>([]);
+const pasting = ref(false);
 const orderVisible = ref(false);
 const requestVisible = ref(false);
 const importVisible = ref(false);
@@ -406,6 +485,13 @@ const inboundForm = reactive({
   supplierDocumentNo: "",
   note: "",
   lines: [newInboundLine()]
+});
+const searchResults = computed(() => {
+  const keyword = inboundSearch.value.trim().toLowerCase();
+  if (!keyword) return [];
+  return items.value
+    .filter(item => `${item.name} ${item.spec || ""}`.toLowerCase().includes(keyword))
+    .slice(0, 8);
 });
 
 const itemVisible = ref(false);
@@ -442,22 +528,117 @@ function monthStart() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-function newInboundLine() {
+function newInboundLine(item?: InventoryItemOption) {
   return {
     key: inboundKey++,
-    itemId: "",
+    itemId: item?.itemId || "",
+    itemName: item?.name || "",
     issueQuantity: 1,
-    conversionFactor: 1,
+    conversionFactor: conversionFactor(item),
     batchNo: "",
     expiryDate: "",
     remark: "",
-    batchRequired: false,
-    expiryRequired: false
+    batchRequired: Boolean(item?.batchRequired),
+    expiryRequired: Boolean(item?.expiryRequired),
+    mergeCount: 1,
+    sources: [] as string[]
   };
 }
 
 const formatNumber = (value?: number | string) => Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
-const itemName = (itemId: string) => items.value.find(item => item.id === itemId)?.name || itemId;
+const itemName = (itemId: string) => items.value.find(item => item.itemId === itemId)?.name || itemId;
+
+const addInboundItem = (item: InventoryItemOption, quantity = 1, batchNo = "", expiryDate = "", remark = "") => {
+  const key = `${item.itemId}|${batchNo.trim().toLowerCase()}|${expiryDate.trim()}`;
+  const existing = inboundForm.lines.find(line =>
+    `${line.itemId}|${line.batchNo.trim().toLowerCase()}|${line.expiryDate.trim()}` === key
+  );
+  if (existing) {
+    existing.issueQuantity = Number(existing.issueQuantity || 0) + Number(quantity || 0);
+    existing.mergeCount += 1;
+    existing.sources.push(`${formatNumber(quantity)} ${item.issueUnit || item.unit || ""}`);
+    return;
+  }
+  const line = newInboundLine(item);
+  line.issueQuantity = Number(quantity || 1);
+  line.batchNo = batchNo;
+  line.expiryDate = expiryDate;
+  line.remark = remark;
+  line.sources = [`${formatNumber(quantity)} ${item.issueUnit || item.unit || ""}`];
+  inboundForm.lines.push(line);
+};
+
+const pickSearchItem = (item: InventoryItemOption) => {
+  addInboundItem(item, 1);
+  inboundSearch.value = "";
+  searchIndex.value = 0;
+};
+
+const onInboundSearchKeydown = (event: KeyboardEvent) => {
+  if (!searchResults.value.length) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    searchIndex.value = (searchIndex.value + 1) % searchResults.value.length;
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    searchIndex.value = (searchIndex.value - 1 + searchResults.value.length) % searchResults.value.length;
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    pickSearchItem(searchResults.value[searchIndex.value] || searchResults.value[0]);
+  } else if (event.key === "Escape") {
+    inboundSearch.value = "";
+  }
+};
+
+const openPaste = () => {
+  pasteText.value = "";
+  pasteRows.value = [];
+  pasteVisible.value = true;
+};
+
+const previewPaste = () => {
+  pasteRows.value = matchBulkRows(parseBulkText(pasteText.value, true), items.value);
+};
+
+const rematchPaste = () => {
+  pasteRows.value = matchBulkRows(
+    pasteRows.value.map(row => ({ ...row, item: undefined, candidates: [], error: undefined })),
+    items.value
+  );
+};
+
+const pickPasteCandidate = (row: ParsedBulkRow, itemId: string) => {
+  const item = items.value.find(option => option.itemId === itemId);
+  if (!item) return;
+  row.item = item;
+  row.candidates = [];
+  row.error = "";
+};
+
+const importPaste = () => {
+  const ready = pasteRows.value.filter(row => row.item && row.quantity > 0 && !row.error);
+  if (!ready.length) return ElMessage.warning("没有可导入的匹配行");
+  ready.forEach(row => addInboundItem(row.item!, row.quantity, row.batchNo, row.expiryDate));
+  pasteVisible.value = false;
+  ElMessage.success(`已导入 ${ready.length} 行，重复物资已合并`);
+};
+
+const loadLastInbound = async () => {
+  const list = await getInventoryInboundOrdersApi({ status: "ACTIVE" });
+  const last = list.data?.list?.[0];
+  if (!last) return ElMessage.info("还没有可复用的入库单");
+  const detail = (await getInventoryInboundOrderApi(last.id)).data;
+  if (!detail) return;
+  inboundForm.supplier = detail.supplier || "";
+  inboundForm.supplierDocumentNo = detail.supplierDocumentNo || "";
+  inboundForm.purchaseDate = new Date().toISOString().slice(0, 10);
+  inboundForm.lines = [];
+  (detail.lines ?? []).forEach(line => {
+    const option = items.value.find(item => item.itemId === line.itemId);
+    if (option) addInboundItem(option, Number(line.issueQuantity || 0), line.batchNo || "", line.expiryDate || "", line.remark || "");
+  });
+  ElMessage.success("已载入上次入库单");
+};
 const batchesOf = (itemId: string) => stockBatches.value.filter(batch => batch.itemId === itemId);
 const centralOf = (itemId: string) =>
   stockItems.value.find(item => item.itemId === itemId)?.centralQuantity ?? 0;
@@ -468,9 +649,9 @@ const requestTone = (status: string) =>
   status === "rejected" ? "danger" : status === "received" ? "success" : status === "partially_issued" ? "warning" : "info";
 
 const loadDb = async () => {
-  const result = await getInventoryDbApi();
-  items.value = (result.data?.items ?? []).filter(item => item.enabled !== false);
-  requests.value = result.data?.requests ?? [];
+  const [options, db] = await Promise.all([getInventoryItemOptionsApi(), getInventoryDbApi()]);
+  items.value = options.data ?? [];
+  requests.value = db.data?.requests ?? [];
 };
 
 const loadInbound = async () => {
@@ -537,23 +718,22 @@ const openInbound = async () => {
   inboundForm.supplier = "";
   inboundForm.supplierDocumentNo = "";
   inboundForm.note = "";
-  inboundForm.lines = [newInboundLine()];
+  inboundForm.lines = [];
   suppliers.value = (await getInventoryInboundSuppliersApi()).data ?? [];
   inboundVisible.value = true;
 };
 
-const addInboundLine = () => inboundForm.lines.push(newInboundLine());
 const removeInboundLine = (index: number) => inboundForm.lines.splice(index, 1);
-
-const onInboundItem = (line: ReturnType<typeof newInboundLine>) => {
-  const item = items.value.find(entry => entry.id === line.itemId);
-  line.batchRequired = Boolean(item?.batchRequired);
-  line.expiryRequired = Boolean(item?.expiryRequired);
-};
 
 const saveInbound = async () => {
   const lines = inboundForm.lines.filter(line => line.itemId && Number(line.issueQuantity) > 0);
   if (!lines.length) return ElMessage.warning("请至少添加一行入库物资");
+  const invalid = lines.find(line =>
+    Number(line.issueQuantity) <= 0 ||
+    (line.batchRequired && !line.batchNo.trim()) ||
+    (line.expiryRequired && !line.expiryDate)
+  );
+  if (invalid) return ElMessage.warning(`${invalid.itemName} 的数量、批号或有效期不完整`);
   saving.value = true;
   try {
     await createInventoryInboundOrderApi({
@@ -862,10 +1042,95 @@ onMounted(() => {
 .line-head,
 .line-row {
   display: grid;
-  grid-template-columns: 1.5fr 0.7fr 0.6fr 0.9fr 1fr 0.9fr 0.3fr;
+  grid-template-columns: 1.4fr 0.7fr 0.6fr 0.6fr 0.9fr 1fr 0.9fr 0.3fr;
   gap: 6px;
   align-items: center;
   padding: 6px 8px;
+}
+
+.line-item-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: #2f2d27;
+  font-size: 12px;
+
+  small {
+    color: #b45309;
+    font-size: 10px;
+  }
+}
+
+.line-base {
+  color: #6d675c;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbound-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  .el-input {
+    flex: 1 1 320px;
+  }
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  margin-top: -4px;
+  overflow: hidden;
+  background: #fffdf9;
+  border: 1px solid #efe8dd;
+  border-radius: 10px;
+
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    color: #2f2d27;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+
+    small {
+      color: #9a9285;
+    }
+
+    em {
+      color: #9a9285;
+      font-style: normal;
+      font-size: 11px;
+    }
+
+    &:hover,
+    &.is-active {
+      background: #edf7f1;
+    }
+  }
+}
+
+.paste-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0;
+
+  span {
+    color: #9a9285;
+    font-size: 11px;
+  }
+}
+
+.paste-summary {
+  margin-right: auto;
+  color: #9a9285;
+  font-size: 12px;
 }
 
 .line-head {

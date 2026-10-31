@@ -39,6 +39,33 @@ public class InventoryStockOverviewService {
         this.accessService = accessService;
     }
 
+    public ArrayNode itemOptions() {
+        return queryArray(
+            """
+            SELECT i.id, i.name, i.spec, i.unit, i.base_unit, i.issue_unit,
+                   i.batch_required, i.expiry_required,
+                   COALESCE((SELECT c.factor FROM inventory_unit_conversions c
+                             WHERE c.item_id = i.id AND c.status = 'active'
+                               AND c.source_unit = i.issue_unit AND c.target_unit = i.base_unit
+                             ORDER BY c.updated_at DESC LIMIT 1), 1) conversion_factor
+            FROM inventory_items i WHERE i.enabled = 1 ORDER BY i.name
+            """,
+            (resultSet, rowNum) -> {
+                ObjectNode row = objectMapper.createObjectNode();
+                row.put("itemId", resultSet.getString("id"));
+                row.put("name", resultSet.getString("name"));
+                row.put("spec", nz(resultSet.getString("spec")));
+                row.put("unit", nz(resultSet.getString("unit")));
+                row.put("baseUnit", nz(resultSet.getString("base_unit")));
+                row.put("issueUnit", nz(resultSet.getString("issue_unit")));
+                row.put("conversionFactor", scale(resultSet.getBigDecimal("conversion_factor")));
+                row.put("batchRequired", resultSet.getBoolean("batch_required"));
+                row.put("expiryRequired", resultSet.getBoolean("expiry_required"));
+                return row;
+            }
+        );
+    }
+
     public ObjectNode warehouseStock(String keyword, String category, String filter) {
         String like = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
         String categoryFilter = category == null ? "" : category.trim();
@@ -269,7 +296,11 @@ public class InventoryStockOverviewService {
                     FROM inventory_consumption_details d
                     JOIN inventory_consumption_events e ON e.id = d.event_id
                     WHERE e.department_id = ? AND d.item_id = i.id
-                      AND e.status = 'succeeded' AND e.created_at >= ?) month_used
+                      AND e.status = 'succeeded' AND e.created_at >= ?) month_used,
+                   COALESCE((SELECT c.factor FROM inventory_unit_conversions c
+                             WHERE c.item_id = i.id AND c.status = 'active'
+                               AND c.source_unit = i.issue_unit AND c.target_unit = i.base_unit
+                             ORDER BY c.updated_at DESC LIMIT 1), 1) conversion_factor
             FROM inventory_items i
             WHERE i.enabled = 1
             ORDER BY i.name
@@ -287,6 +318,7 @@ public class InventoryStockOverviewService {
                 row.put("unit", nz(resultSet.getString("unit")));
                 row.put("baseUnit", nz(resultSet.getString("base_unit")));
                 row.put("issueUnit", nz(resultSet.getString("issue_unit")));
+                row.put("conversionFactor", scale(resultSet.getBigDecimal("conversion_factor")));
                 row.put("monthInbound", monthInbound);
                 row.put("monthUsed", scale(resultSet.getBigDecimal("month_used")));
                 row.put("deptAvailable", available);

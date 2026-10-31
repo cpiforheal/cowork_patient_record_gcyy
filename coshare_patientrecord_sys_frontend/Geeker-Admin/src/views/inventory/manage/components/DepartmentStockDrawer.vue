@@ -49,15 +49,28 @@
         <el-tab-pane label="申领" name="request">
           <div class="request-panel">
             <div class="request-tools">
-              <el-select v-model="addItemId" filterable clearable placeholder="搜索并添加物资" class="add-select" @change="onAddItem">
-                <el-option
-                  v-for="item in selectableItems"
-                  :key="item.itemId"
-                  :label="`${item.name}${item.spec ? '（' + item.spec + '）' : ''}`"
-                  :value="item.itemId"
-                />
-              </el-select>
-              <span class="hint">低库存物资已按“本月已用 - 当前存”预填，可修改</span>
+              <el-input
+                v-model="searchKeyword"
+                clearable
+                placeholder="输入物资名称 / 拼音，回车添加"
+                class="add-select"
+                @keydown="onSearchKeydown"
+              />
+              <el-button @click="openPaste">批量粘贴</el-button>
+              <el-button :loading="copying" @click="copyLastRequest">复制上次申领</el-button>
+              <span class="hint">低库存已预填，重复物资自动相加</span>
+            </div>
+            <div v-if="searchResults.length" class="search-results">
+              <button
+                v-for="(item, index) in searchResults"
+                :key="item.itemId"
+                type="button"
+                :class="{ 'is-active': index === searchIndex }"
+                @click="pickSearchItem(item)"
+              >
+                <span>{{ item.name }}<small v-if="item.spec">（{{ item.spec }}）</small></span>
+                <em>{{ item.issueUnit || item.unit }}</em>
+              </button>
             </div>
             <el-table :data="cart" border empty-text="还没有申领物资">
               <el-table-column label="物资" min-width="150">
@@ -67,12 +80,18 @@
               <el-table-column label="当前存" width="90">
                 <template #default="{ row }">{{ formatNumber(row.deptAvailable) }}</template>
               </el-table-column>
-              <el-table-column label="申领数量" width="150">
+              <el-table-column :label="`申领数量（领用单位）`" width="160">
                 <template #default="{ row }">
                   <el-input-number v-model="row.quantity" :min="0.01" :precision="2" :controls="false" />
+                  <small v-if="row.mergeCount > 1" class="merged" :title="row.sources.join('；')">由 {{ row.mergeCount }} 行合并</small>
                 </template>
               </el-table-column>
-              <el-table-column prop="unit" label="单位" width="80" />
+              <el-table-column label="折算" width="110">
+                <template #default="{ row }">
+                  {{ formatNumber(Number(row.quantity || 0) * Number(row.factor || 1)) }} {{ row.baseUnit }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="unit" label="单位" width="70" />
               <el-table-column label="操作" width="80">
                 <template #default="{ $index }">
                   <el-button link type="danger" @click="cart.splice($index, 1)">移除</el-button>
@@ -117,7 +136,42 @@
         </el-tab-pane>
       </el-tabs>
     </div>
-  </el-drawer>
+  
+    <el-dialog v-model="pasteVisible" title="批量粘贴申领" width="760px" append-to-body>
+      <el-input
+        v-model="pasteText"
+        type="textarea"
+        :rows="5"
+        placeholder="每行一条：物资名称 [Tab/逗号] 数量（领用单位）"
+      />
+      <div class="paste-actions">
+        <el-button @click="previewPaste">解析预览</el-button>
+        <span>同名多规格需在预览中选择</span>
+      </div>
+      <el-table v-if="pasteRows.length" :data="pasteRows" border size="small" max-height="320">
+        <el-table-column label="名称" min-width="160">
+          <template #default="{ row }"><el-input v-model="row.name" @change="rematchPaste" /></template>
+        </el-table-column>
+        <el-table-column label="数量" width="110">
+          <template #default="{ row }"><el-input-number v-model="row.quantity" :min="0.01" :precision="2" :controls="false" /></template>
+        </el-table-column>
+        <el-table-column label="匹配" min-width="200">
+          <template #default="{ row }">
+            <el-select v-if="row.candidates?.length" :model-value="row.item?.itemId || ''" placeholder="选择规格" @change="(id: string) => { const c = row.candidates?.find(x => x.itemId === id); if (c) { row.item = c; row.candidates = []; row.error = ''; } }">
+              <el-option v-for="candidate in row.candidates" :key="candidate.itemId" :label="`${candidate.name}${candidate.spec ? '（' + candidate.spec + '）' : ''}`" :value="candidate.itemId" />
+            </el-select>
+            <span v-else-if="row.item">{{ row.item.name }}<small v-if="row.item.spec">（{{ row.item.spec }}）</small></span>
+            <span v-else class="danger">{{ row.error || "未匹配" }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <span class="paste-summary">{{ pasteRows.filter(row => row.item).length }} / {{ pasteRows.length }} 行可导入</span>
+        <el-button @click="pasteVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!pasteRows.length || pasteRows.some(row => !row.item)" @click="importPaste">导入到申领</el-button>
+      </template>
+    </el-dialog>
+</el-drawer>
 </template>
 
 <script setup lang="ts">
@@ -132,6 +186,7 @@ import {
   getInventoryDepartmentStockApi,
   type InventoryRequest
 } from "@/api/modules/inventory";
+import { conversionFactor, matchBulkRows, parseBulkText, type ParsedBulkRow } from "../composables/bulkItemImport";
 
 defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ "update:modelValue": [value: boolean]; changed: [] }>();
@@ -141,20 +196,32 @@ const tab = ref<"stock" | "request" | "mine">("stock");
 const loading = ref(false);
 const submitting = ref(false);
 const keyword = ref("");
-const addItemId = ref("");
+const searchKeyword = ref("");
+const searchIndex = ref(0);
 const reason = ref("");
+const pasteVisible = ref(false);
+const pasteText = ref("");
+const pasteRows = ref<ParsedBulkRow[]>([]);
+const copying = ref(false);
 const requestStatus = ref("");
 const stock = reactive<{ month: string; departmentName: string; items: any[] }>({ month: "", departmentName: "", items: [] });
 const requests = ref<InventoryRequest[]>([]);
-const cart = ref<Array<{ itemId: string; name: string; spec: string; unit: string; deptAvailable: number; quantity: number }>>([]);
+const cart = ref<Array<{
+  itemId: string; name: string; spec: string; unit: string; baseUnit: string;
+  deptAvailable: number; quantity: number; factor: number; mergeCount: number; sources: string[];
+}>>([]);
 
 const filteredStock = computed(() => {
   const term = keyword.value.trim().toLowerCase();
   return stock.items.filter(item => !term || `${item.name} ${item.spec}`.toLowerCase().includes(term));
 });
-const selectableItems = computed(() =>
-  stock.items.filter(item => !cart.value.some(line => line.itemId === item.itemId))
-);
+const searchResults = computed(() => {
+  const term = searchKeyword.value.trim().toLowerCase();
+  if (!term) return [];
+  return stock.items
+    .filter(item => `${item.name} ${item.spec || ""}`.toLowerCase().includes(term))
+    .slice(0, 8);
+});
 const filteredRequests = computed(() =>
   requests.value.filter(request =>
     (!requestStatus.value || request.status === requestStatus.value) &&
@@ -177,16 +244,10 @@ const onOpen = async () => {
     stock.departmentName = data?.departmentName || "";
     stock.items = data?.items ?? [];
     requests.value = dbResult.data?.requests ?? [];
-    cart.value = stock.items
+    cart.value = [];
+    stock.items
       .filter(item => item.lowStock && Number(item.suggestedQuantity || 0) > 0)
-      .map(item => ({
-        itemId: item.itemId,
-        name: item.name,
-        spec: item.spec,
-        unit: item.baseUnit || item.unit,
-        deptAvailable: Number(item.deptAvailable || 0),
-        quantity: Number(item.suggestedQuantity || 1)
-      }));
+      .forEach(item => addToCart(item, issueQuantityOf(item, Number(item.suggestedQuantity)), "低库存预填"));
     tab.value = cart.value.length ? "request" : "stock";
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取科室库存失败");
@@ -195,28 +256,115 @@ const onOpen = async () => {
   }
 };
 
-const addToCart = (item: any, quantity: number) => {
+const issueQuantityOf = (item: any, baseQuantity: number) => {
+  const factor = conversionFactor(item);
+  return Math.max(0.01, Number(baseQuantity || 0) / factor);
+};
+
+const addToCart = (item: any, quantity: number, source = "手工添加") => {
   const existing = cart.value.find(line => line.itemId === item.itemId);
   if (existing) {
-    existing.quantity += quantity;
+    existing.quantity = Number(existing.quantity || 0) + Number(quantity || 0);
+    existing.mergeCount += 1;
+    existing.sources.push(source);
   } else {
     cart.value.push({
       itemId: item.itemId,
       name: item.name,
       spec: item.spec,
-      unit: item.baseUnit || item.unit,
+      unit: item.issueUnit || item.unit,
+      baseUnit: item.baseUnit || item.unit,
       deptAvailable: Number(item.deptAvailable || 0),
-      quantity: Math.max(0.01, Number(quantity || 1))
+      quantity: Math.max(0.01, Number(quantity || 1)),
+      factor: conversionFactor(item),
+      mergeCount: 1,
+      sources: [source]
     });
   }
   tab.value = "request";
 };
 
-const onAddItem = (itemId: string) => {
-  if (!itemId) return;
-  const item = stock.items.find(row => row.itemId === itemId);
-  if (item) addToCart(item, 1);
-  addItemId.value = "";
+const pickSearchItem = (item: any) => {
+  addToCart(item, 1, "搜索添加");
+  searchKeyword.value = "";
+  searchIndex.value = 0;
+};
+
+const onSearchKeydown = (event: KeyboardEvent) => {
+  if (!searchResults.value.length) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    searchIndex.value = (searchIndex.value + 1) % searchResults.value.length;
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    searchIndex.value = (searchIndex.value - 1 + searchResults.value.length) % searchResults.value.length;
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    pickSearchItem(searchResults.value[searchIndex.value] || searchResults.value[0]);
+  } else if (event.key === "Escape") {
+    searchKeyword.value = "";
+  }
+};
+
+const openPaste = () => {
+  pasteText.value = "";
+  pasteRows.value = [];
+  pasteVisible.value = true;
+};
+
+const previewPaste = () => {
+  const options = stock.items.map(item => ({
+    itemId: item.itemId,
+    name: item.name,
+    spec: item.spec,
+    issueUnit: item.issueUnit,
+    baseUnit: item.baseUnit,
+    conversionFactor: item.conversionFactor
+  }));
+  pasteRows.value = matchBulkRows(parseBulkText(pasteText.value, false), options);
+};
+
+const rematchPaste = () => {
+  const options = stock.items.map(item => ({
+    itemId: item.itemId,
+    name: item.name,
+    spec: item.spec,
+    issueUnit: item.issueUnit,
+    baseUnit: item.baseUnit,
+    conversionFactor: item.conversionFactor
+  }));
+  pasteRows.value = matchBulkRows(
+    pasteRows.value.map(row => ({ ...row, item: undefined, candidates: [], error: undefined })),
+    options
+  );
+};
+
+const importPaste = () => {
+  const ready = pasteRows.value.filter(row => row.item && row.quantity > 0 && !row.error);
+  if (!ready.length) return ElMessage.warning("没有可导入的匹配行");
+  ready.forEach(row => {
+    const item = stock.items.find(entry => entry.itemId === row.item!.itemId);
+    if (item) addToCart(item, row.quantity, "批量粘贴");
+  });
+  pasteVisible.value = false;
+  ElMessage.success(`已导入 ${ready.length} 行，重复物资数量已合并`);
+};
+
+const copyLastRequest = async () => {
+  const last = requests.value
+    .filter(request => request.lines?.length && request.status !== "cancelled")
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  if (!last) return ElMessage.info("还没有可复制的申领");
+  copying.value = true;
+  try {
+    (last.lines ?? []).forEach(line => {
+      const item = stock.items.find(entry => entry.itemId === line.itemId);
+      if (item) addToCart(item, issueQuantityOf(item, Number(line.quantity || 0)), "复制上次申领");
+    });
+    ElMessage.success("已复制上次申领，重复物资数量已合并");
+  } finally {
+    copying.value = false;
+  }
 };
 
 const submitRequest = async () => {
@@ -229,7 +377,7 @@ const submitRequest = async () => {
       owner: userStore.userInfo.name,
       reason: reason.value.trim() || "低库存补货",
       expectedUseWeek: dayjs().format("YYYY-MM-DD"),
-      lines: cart.value.map(line => ({ itemId: line.itemId, quantity: Number(line.quantity) }))
+      lines: cart.value.map(line => ({ itemId: line.itemId, quantity: Number((Number(line.quantity) * line.factor).toFixed(2)) }))
     });
     ElMessage.success("申领已提交，等待中心库发放");
     reason.value = "";
@@ -305,6 +453,66 @@ const cancelRequest = async (request: InventoryRequest) => {
   .add-select {
     width: 300px;
   }
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fffdf9;
+  border: 1px solid #efe8dd;
+  border-radius: 10px;
+
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    color: #2f2d27;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+
+    small {
+      color: #9a9285;
+    }
+
+    em {
+      color: #9a9285;
+      font-style: normal;
+      font-size: 11px;
+    }
+
+    &:hover,
+    &.is-active {
+      background: #edf7f1;
+    }
+  }
+}
+
+.merged {
+  display: block;
+  color: #b45309;
+  font-size: 10px;
+}
+
+.paste-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0;
+
+  span {
+    color: #9a9285;
+    font-size: 11px;
+  }
+}
+
+.paste-summary {
+  margin-right: auto;
+  color: #9a9285;
+  font-size: 12px;
 }
 
 .request-foot {
