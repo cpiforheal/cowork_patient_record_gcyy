@@ -10,20 +10,32 @@
           <el-option v-for="pkg in packages" :key="pkg.id" :label="`${pkg.name}（${pkg.items.length} 项）`" :value="pkg.id" />
         </el-select>
         <el-input
+          ref="searchInputRef"
           v-model="keyword"
-          placeholder="搜索姓名 / 就诊号 / 病例标识"
+          placeholder="扫描或输入姓名 / 就诊号，回车搜索/加入"
           clearable
           :prefix-icon="Search"
           class="patient-search"
-          @keyup.enter="search"
+          @keydown.enter.prevent="handleSearchEnter"
+          @keydown.up.prevent="moveHighlight(-1)"
+          @keydown.down.prevent="moveHighlight(1)"
+          @keyup.esc="clearSearch"
         />
         <el-button :icon="Search" :loading="searching" @click="search">搜索</el-button>
       </div>
 
+      <p class="keyboard-hint">回车：唯一结果直接加入；多个结果用 ↑↓ 选择、回车加入；加入后自动回到搜索框。</p>
+
       <div v-if="searchResults.length" class="search-results">
-        <button v-for="row in searchResults" :key="row.encounterId" type="button" @click="addPatient(row)">
+        <button
+          v-for="(row, index) in searchResults"
+          :key="row.encounterId"
+          type="button"
+          :class="{ 'is-highlighted': highlightIndex === index }"
+          @click="addPatient(row)"
+        >
           <span><strong>{{ row.patientName }}</strong><small>{{ row.visitNo || row.caseToken || row.encounterId }}</small></span>
-          <span class="add-hint">加入批次 +</span>
+          <span class="add-hint">{{ highlightIndex === index ? "回车加入 ↵" : "加入批次 +" }}</span>
         </button>
       </div>
 
@@ -62,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { Search } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
@@ -93,6 +105,7 @@ const props = defineProps<{
   date: string;
   packages: InventoryPatientConsumablePackage[];
   existingPatientIds?: string[];
+  initialPackageId?: string;
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: boolean]; completed: [] }>();
 
@@ -107,6 +120,10 @@ const searching = ref(false);
 const running = ref(false);
 const searchResults = ref<SearchRow[]>([]);
 const selected = ref<BatchRow[]>([]);
+const searchInputRef = ref<{ focus: () => void } | null>(null);
+const highlightIndex = ref(0);
+
+const focusSearch = () => nextTick(() => searchInputRef.value?.focus());
 
 const search = async () => {
   if (!keyword.value.trim()) return;
@@ -114,6 +131,8 @@ const search = async () => {
   try {
     const result = await searchInventoryPatientsApi(keyword.value.trim());
     searchResults.value = (result.data?.list ?? []) as SearchRow[];
+    highlightIndex.value = 0;
+    if (searchResults.value.length === 1) addPatient(searchResults.value[0]);
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "搜索患者失败");
   } finally {
@@ -121,12 +140,40 @@ const search = async () => {
   }
 };
 
+const handleSearchEnter = async () => {
+  if (!keyword.value.trim() && !searchResults.value.length) return;
+  if (searchResults.value.length) {
+    addPatient(searchResults.value[highlightIndex.value] || searchResults.value[0]);
+    return;
+  }
+  await search();
+};
+
+const moveHighlight = (offset: number) => {
+  if (!searchResults.value.length) return;
+  highlightIndex.value =
+    (highlightIndex.value + offset + searchResults.value.length) % searchResults.value.length;
+};
+
+const clearSearch = () => {
+  keyword.value = "";
+  searchResults.value = [];
+  focusSearch();
+};
+
 const addPatient = (row: SearchRow) => {
-  if (selected.value.some(item => item.patientId === row.patientId)) return;
+  if (selected.value.some(item => item.patientId === row.patientId)) {
+    ElMessage.info(`${row.patientName} 已在批次中`);
+    keyword.value = "";
+    searchResults.value = [];
+    focusSearch();
+    return;
+  }
   const skipped = (props.existingPatientIds ?? []).includes(row.patientId);
   selected.value.push({ ...row, source: "search", skipped });
   keyword.value = "";
   searchResults.value = [];
+  focusSearch();
 };
 
 const run = async () => {
@@ -210,10 +257,12 @@ watch(
   value => {
     if (!value) return;
     mode.value = "PACKAGE";
-    packageId.value = "";
+    packageId.value = props.initialPackageId || "";
     keyword.value = "";
     searchResults.value = [];
     selected.value = [];
+    highlightIndex.value = 0;
+    focusSearch();
   }
 );
 </script>
@@ -263,6 +312,11 @@ watch(
     border: 1px solid #efe8dd;
     border-radius: 8px;
 
+    &.is-highlighted {
+      background: #edf7f1;
+      border-color: #347d68;
+    }
+
     span:first-child {
       display: flex;
       flex-direction: column;
@@ -281,6 +335,12 @@ watch(
 
 .add-hint {
   color: #347d68;
+  font-size: 10px;
+}
+
+.keyboard-hint {
+  margin: -4px 0 0;
+  color: #9a9285;
   font-size: 10px;
 }
 

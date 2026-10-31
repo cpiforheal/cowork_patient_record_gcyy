@@ -393,6 +393,16 @@
       </main>
     </div>
 
+    <DepartmentPackageBoard
+      :packages="patientPackages"
+      :department-key="props.departmentKey"
+      :date="businessDate"
+      :existing-patient-ids="existingPatientIds"
+      :can-apply="Boolean(detail) && editable"
+      @refresh="loadPackages"
+      @apply="applyPackage"
+    />
+
     <el-drawer
       v-model="drawerVisible"
       direction="rtl"
@@ -972,6 +982,7 @@ import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
 import FixedConsumablesDialog from "./FixedConsumablesDialog.vue";
 import FollowupAppointmentsDialog from "./FollowupAppointmentsDialog.vue";
 import FollowupBatchDialog from "./FollowupBatchDialog.vue";
+import DepartmentPackageBoard from "./DepartmentPackageBoard.vue";
 import {
   addInventoryManualPatientApi,
   getInventoryFixedConsumablesApi,
