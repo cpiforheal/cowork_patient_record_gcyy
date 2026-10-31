@@ -753,6 +753,9 @@ export interface InventoryPatientReviewDetail {
     lines: InventoryPatientConsumptionLine[];
   }>;
   errors?: Array<{ lineId: string; message: string }>;
+  deferred?: Array<{ lineId: string; itemId?: string; itemName?: string; message: string }>;
+  deferredLineCount?: number;
+  deducted?: number;
 }
 
 export interface InventoryBatch {
@@ -2656,6 +2659,12 @@ export const decideInventoryPatientReviewApi = async (
   postInventoryData<InventoryPatientReviewDetail, typeof payload>(
     `/patient-review/batches/${encodeURIComponent(batchId)}/decisions`,
     payload
+  );
+
+export const retryInventoryReviewDeductionsApi = async (batchId: string) =>
+  postInventoryData<InventoryPatientReviewDetail, Record<string, never>>(
+    `/patient-review/batches/${encodeURIComponent(batchId)}/retry-deductions`,
+    {}
   );
 
 const normalizeLocationType = (value?: string): InventoryLocationBalance["locationType"] => {

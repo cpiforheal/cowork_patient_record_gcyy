@@ -946,6 +946,14 @@ public class InventoryApiController {
         return ApiResult.of(200, "审核已处理", asMap(patientConsumptionReviewService.decide(batchId, toJson(payload), user)));
     }
 
+    @PostMapping("/inventory-api/patient-review/batches/{batchId}/retry-deductions")
+    public ApiResult<Map<String, Object>> patientReviewRetryDeductions(
+        @org.springframework.web.bind.annotation.PathVariable String batchId
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "库存补扣已处理", asMap(patientConsumptionReviewService.retryDeductions(batchId, user)));
+    }
+
     @GetMapping("/inventory-api/patient-consumption-drafts/detail")
     public ApiResult<Map<String, Object>> patientConsumptionDraft(@RequestParam String id) {
         SessionUser user = requireCapability("inventory:read");

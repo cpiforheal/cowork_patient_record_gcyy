@@ -155,6 +155,7 @@ public class InventoryPatientConsumptionReviewService {
         ObjectNode result = objectMapper.createObjectNode();
         result.set("batch", batchJson(batch));
         result.set("documents", documentArray);
+        result.put("deferredLineCount", deferredLineCount(batch));
         return result;
     }
 
@@ -168,8 +169,10 @@ public class InventoryPatientConsumptionReviewService {
         }
         Set<String> seen = new HashSet<>();
         ArrayNode errors = objectMapper.createArrayNode();
+        ArrayNode deferred = objectMapper.createArrayNode();
         int approved = 0;
         int rejected = 0;
+        int deferredCount = 0;
         for (JsonNode decisionNode : decisions) {
             String lineId = text(decisionNode, "lineId");
             String decision = text(decisionNode, "decision").toUpperCase(Locale.ROOT);
@@ -197,15 +200,19 @@ public class InventoryPatientConsumptionReviewService {
                 approve(line, batch, note, user);
                 approved++;
             } catch (StockShortageException shortage) {
-                errors.add(error(lineId, shortage.getMessage()));
+                approveWithoutDeduction(line, batch, note, shortage.getMessage(), deferred, user);
+                deferredCount++;
             }
         }
         consumptionService.refreshBatch(batchId);
         repository.log(user.name(), "审核患者耗材清单", "patient_consumption_approval_batch",
             batch.departmentName() + " " + batch.businessDate(),
-            "通过 " + approved + " 行，驳回 " + rejected + " 行" + (errors.isEmpty() ? "" : "，异常 " + errors.size() + " 行"));
+            "通过 " + approved + " 行，驳回 " + rejected + " 行，待补扣 " + deferredCount + " 行"
+                + (errors.isEmpty() ? "" : "，异常 " + errors.size() + " 行"));
         ObjectNode result = batch(batchId, user);
         result.set("errors", errors);
+        result.set("deferred", deferred);
+        result.put("deferredLineCount", deferredLineCount(batch));
         return result;
     }
 
@@ -235,6 +242,7 @@ public class InventoryPatientConsumptionReviewService {
         ObjectNode result = objectMapper.createObjectNode();
         result.set("batch", batchJson(batch));
         result.set("documents", documents);
+        result.put("deferredLineCount", deferredLineCount(batch));
         return result;
     }
 
@@ -250,8 +258,10 @@ public class InventoryPatientConsumptionReviewService {
         }
         Set<String> seen = new HashSet<>();
         ArrayNode errors = objectMapper.createArrayNode();
+        ArrayNode deferred = objectMapper.createArrayNode();
         int approved = 0;
         int rejected = 0;
+        int deferredCount = 0;
         for (JsonNode decisionNode : decisions) {
             String lineId = text(decisionNode, "lineId");
             String decision = text(decisionNode, "decision").toUpperCase(Locale.ROOT);
@@ -277,15 +287,19 @@ public class InventoryPatientConsumptionReviewService {
                 approveDaily(line, batch, report, note, user);
                 approved++;
             } catch (StockShortageException shortage) {
-                errors.add(error(lineId, shortage.getMessage()));
+                approveDailyWithoutDeduction(line, batch, report, note, shortage.getMessage(), deferred, user);
+                deferredCount++;
             }
         }
         refreshDailyReview(batch, report, user);
         repository.log(user.name(), "审核科室日报", "inventory_consumption_approval_batch",
             batch.departmentName() + " " + batch.businessDate(),
-            "通过 " + approved + " 行，驳回 " + rejected + " 行" + (errors.isEmpty() ? "" : "，异常 " + errors.size() + " 行"));
+            "通过 " + approved + " 行，驳回 " + rejected + " 行，待补扣 " + deferredCount + " 行"
+                + (errors.isEmpty() ? "" : "，异常 " + errors.size() + " 行"));
         ObjectNode result = batch(batch.id(), user);
         result.set("errors", errors);
+        result.set("deferred", deferred);
+        result.put("deferredLineCount", deferredLineCount(batch));
         return result;
     }
 
@@ -300,75 +314,7 @@ public class InventoryPatientConsumptionReviewService {
                 "DAILY_REPORT", "DAILY_REPORT"), "APPROVED", note, user, null);
             return;
         }
-        ItemRow item = requireItem(line.itemId());
-        String idempotencyKey = "daily-line:" + line.lineId() + ":" + report.revision() + ":CONSUMPTION";
-        List<String> existing = jdbcTemplate.query(
-            "SELECT id FROM inventory_consumption_events WHERE idempotency_key = ? LIMIT 1",
-            (resultSet, rowNum) -> resultSet.getString(1),
-            idempotencyKey
-        );
-        String eventId;
-        if (existing.isEmpty()) {
-            if (!ledger.isOpeningConfirmed(batch.departmentId())) {
-                throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
-            }
-            String locationId = ledger.departmentLocation(batch.departmentId());
-            List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
-            BigDecimal available = balances.stream().map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add);
-            if (available.compareTo(line.actualQuantity()) < 0) {
-                throw new StockShortageException(item.name() + " 库存不足，当前可用 " + available.stripTrailingZeros().toPlainString());
-            }
-            List<Allocation> allocations = new ArrayList<>();
-            BigDecimal remaining = line.actualQuantity();
-            for (Balance balance : balances) {
-                if (remaining.signum() <= 0) break;
-                BigDecimal quantity = remaining.min(balance.available());
-                if (quantity.signum() > 0) {
-                    allocations.add(new Allocation(balance, quantity));
-                    remaining = remaining.subtract(quantity);
-                }
-            }
-            eventId = "daily-consumption-" + UUID.randomUUID();
-            ObjectNode raw = objectMapper.createObjectNode();
-            raw.put("sourceType", "DAILY_REPORT");
-            raw.put("sourceDocumentId", report.id());
-            raw.put("sourceLineId", line.lineId());
-            raw.put("itemId", line.itemId());
-            raw.put("quantity", line.actualQuantity());
-            jdbcTemplate.update(
-                """
-                INSERT INTO inventory_consumption_events
-                  (id, command_id, source_document_id, source_line_id, correction_document_id, service_instance_id,
-                   patient_id, idempotency_key, encounter_id, case_token, route, care_type, care_encounter_id,
-                   department, department_id, visit_date, package_id, package_version, status, event_kind,
-                   trigger_stage, completion_version, operator_name, created_at, raw_json)
-                VALUES (?, NULL, ?, ?, NULL, NULL, NULL, ?, ?, NULL, 'DAILY_REPORT', 'outpatient', NULL,
-                        ?, ?, ?, NULL, NULL, 'succeeded', 'CONSUMPTION', 'DAILY_REPORT', NULL, ?, ?, CAST(? AS JSON))
-                """,
-                eventId, report.id(), line.lineId(), idempotencyKey, report.id(),
-                batch.departmentName(), batch.departmentId(), batch.businessDate().toString(),
-                user.name(), LocalDateTime.now().toString(), json(raw)
-            );
-            for (Allocation allocation : allocations) {
-                ledger.changeBalance(allocation.balance().id(), allocation.quantity().negate(), BigDecimal.ZERO);
-                jdbcTemplate.update(
-                    """
-                    INSERT INTO inventory_consumption_details
-                      (id, event_id, item_id, batch_id, location_id, quantity, detail_kind, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', JSON_OBJECT('source', 'DAILY_REPORT'))
-                    """,
-                    "daily-consumption-detail-" + UUID.randomUUID(), eventId, line.itemId(),
-                    allocation.balance().batchId(), locationId, allocation.quantity()
-                );
-                ledger.movement(
-                    "CONSUMPTION", line.itemId(), allocation.balance().batchId(), locationId, null,
-                    allocation.quantity(), batch.departmentId(), "DAILY_REPORT_LINE", line.lineId(), eventId,
-                    null, user.name(), "科室日报审核通过"
-                );
-            }
-        } else {
-            eventId = existing.get(0);
-        }
+        String eventId = deductDaily(line, batch, report, user);
         jdbcTemplate.update(
             """
             UPDATE inventory_department_daily_report_lines
@@ -380,6 +326,91 @@ public class InventoryPatientConsumptionReviewService {
         insertDecision(batch, new ReviewLine(line.lineId(), report.id(), line.itemId(), line.actualQuantity(),
             "APPROVED", report.revision(), report.status(), "", "", report.id(), "outpatient",
             "DAILY_REPORT", "DAILY_REPORT"), "APPROVED", note, user, eventId);
+    }
+
+    private void approveDailyWithoutDeduction(
+        DailyReviewLine line, BatchRow batch, DailyReportRow report, String note, String reason,
+        ArrayNode deferred, SessionUser user
+    ) {
+        String deferredNote = appendNote(note, "待补扣：" + reason);
+        jdbcTemplate.update(
+            "UPDATE inventory_department_daily_report_lines SET review_status = 'APPROVED', review_note = ? WHERE id = ?",
+            deferredNote, line.lineId()
+        );
+        insertDecision(batch, new ReviewLine(line.lineId(), report.id(), line.itemId(), line.actualQuantity(),
+            "APPROVED", report.revision(), report.status(), "", "", report.id(), "outpatient",
+            "DAILY_REPORT", "DAILY_REPORT"), "APPROVED", deferredNote, user, null);
+        createDeductionTask(batch, "DAILY_REPORT", report.id(), line.lineId(), line.itemId(), reason, user);
+        deferred.add(deferredLine(line.lineId(), line.itemId(), reason));
+    }
+
+    private String deductDaily(DailyReviewLine line, BatchRow batch, DailyReportRow report, SessionUser user) {
+        ItemRow item = requireItem(line.itemId());
+        String idempotencyKey = "daily-line:" + line.lineId() + ":" + report.revision() + ":CONSUMPTION";
+        List<String> existing = jdbcTemplate.query(
+            "SELECT id FROM inventory_consumption_events WHERE idempotency_key = ? LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString(1),
+            idempotencyKey
+        );
+        if (!existing.isEmpty()) return existing.get(0);
+        if (!ledger.isOpeningConfirmed(batch.departmentId())) {
+            throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+        }
+        String locationId = ledger.departmentLocation(batch.departmentId());
+        List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
+        BigDecimal available = balances.stream().map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (available.compareTo(line.actualQuantity()) < 0) {
+            throw new StockShortageException(item.name() + " 库存不足，当前可用 " + available.stripTrailingZeros().toPlainString());
+        }
+        List<Allocation> allocations = new ArrayList<>();
+        BigDecimal remaining = line.actualQuantity();
+        for (Balance balance : balances) {
+            if (remaining.signum() <= 0) break;
+            BigDecimal quantity = remaining.min(balance.available());
+            if (quantity.signum() > 0) {
+                allocations.add(new Allocation(balance, quantity));
+                remaining = remaining.subtract(quantity);
+            }
+        }
+        String eventId = "daily-consumption-" + UUID.randomUUID();
+        ObjectNode raw = objectMapper.createObjectNode();
+        raw.put("sourceType", "DAILY_REPORT");
+        raw.put("sourceDocumentId", report.id());
+        raw.put("sourceLineId", line.lineId());
+        raw.put("itemId", line.itemId());
+        raw.put("quantity", line.actualQuantity());
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_consumption_events
+              (id, command_id, source_document_id, source_line_id, correction_document_id, service_instance_id,
+               patient_id, idempotency_key, encounter_id, case_token, route, care_type, care_encounter_id,
+               department, department_id, visit_date, package_id, package_version, status, event_kind,
+               trigger_stage, completion_version, operator_name, created_at, raw_json)
+            VALUES (?, NULL, ?, ?, NULL, NULL, NULL, ?, ?, NULL, 'DAILY_REPORT', 'outpatient', NULL,
+                    ?, ?, ?, NULL, NULL, 'succeeded', 'CONSUMPTION', 'DAILY_REPORT', NULL, ?, ?, CAST(? AS JSON))
+            """,
+            eventId, report.id(), line.lineId(), idempotencyKey, report.id(),
+            batch.departmentName(), batch.departmentId(), batch.businessDate().toString(),
+            user.name(), LocalDateTime.now().toString(), json(raw)
+        );
+        for (Allocation allocation : allocations) {
+            ledger.changeBalance(allocation.balance().id(), allocation.quantity().negate(), BigDecimal.ZERO);
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_consumption_details
+                  (id, event_id, item_id, batch_id, location_id, quantity, detail_kind, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', JSON_OBJECT('source', 'DAILY_REPORT'))
+                """,
+                "daily-consumption-detail-" + UUID.randomUUID(), eventId, line.itemId(),
+                allocation.balance().batchId(), locationId, allocation.quantity()
+            );
+            ledger.movement(
+                "CONSUMPTION", line.itemId(), allocation.balance().batchId(), locationId, null,
+                allocation.quantity(), batch.departmentId(), "DAILY_REPORT_LINE", line.lineId(), eventId,
+                null, user.name(), "科室日报审核通过"
+            );
+        }
+        return eventId;
     }
 
     private void rejectDaily(DailyReviewLine line, BatchRow batch, DailyReportRow report, String note, SessionUser user) {
@@ -536,77 +567,7 @@ public class InventoryPatientConsumptionReviewService {
         if (line.actualQuantity().signum() <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "实际用量必须大于零");
         }
-        ItemRow item = requireItem(line.itemId());
-        String idempotencyKey = "patient-line:" + line.lineId() + ":" + line.lineRevision() + ":CONSUMPTION";
-        List<String> existing = jdbcTemplate.query(
-            "SELECT id FROM inventory_consumption_events WHERE idempotency_key = ? LIMIT 1",
-            (resultSet, rowNum) -> resultSet.getString(1),
-            idempotencyKey
-        );
-        String eventId;
-        if (existing.isEmpty()) {
-            if (!ledger.isOpeningConfirmed(batch.departmentId())) {
-                throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
-            }
-            String locationId = ledger.departmentLocation(batch.departmentId());
-            List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
-            BigDecimal available = balances.stream().map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add);
-            if (available.compareTo(line.actualQuantity()) < 0) {
-                throw new StockShortageException(item.name() + " 库存不足，当前可用 " + available.stripTrailingZeros().toPlainString());
-            }
-            List<Allocation> allocations = new ArrayList<>();
-            BigDecimal remaining = line.actualQuantity();
-            for (Balance balance : balances) {
-                if (remaining.signum() <= 0) break;
-                BigDecimal quantity = remaining.min(balance.available());
-                if (quantity.signum() > 0) {
-                    allocations.add(new Allocation(balance, quantity));
-                    remaining = remaining.subtract(quantity);
-                }
-            }
-            eventId = "patient-consumption-" + UUID.randomUUID();
-            ObjectNode raw = objectMapper.createObjectNode();
-            raw.put("sourceDocumentId", line.documentId());
-            raw.put("sourceLineId", line.lineId());
-            raw.put("serviceInstanceId", line.serviceInstanceId());
-            raw.put("patientId", line.patientId());
-            raw.put("itemId", line.itemId());
-            raw.put("quantity", line.actualQuantity());
-            jdbcTemplate.update(
-                """
-                INSERT INTO inventory_consumption_events
-                  (id, command_id, source_document_id, source_line_id, correction_document_id, service_instance_id,
-                   patient_id, idempotency_key, encounter_id, case_token, route, care_type, care_encounter_id,
-                   department, department_id, visit_date, package_id, package_version, status, event_kind,
-                   trigger_stage, completion_version, operator_name, created_at, raw_json)
-                VALUES (?, NULL, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, NULL, NULL,
-                        'succeeded', 'CONSUMPTION', ?, NULL, ?, ?, CAST(? AS JSON))
-                """,
-                eventId, line.documentId(), line.lineId(), line.serviceInstanceId(), line.patientId(), idempotencyKey,
-                line.encounterId(), line.careType(), line.careType(), batch.departmentName(), batch.departmentId(),
-                batch.businessDate().toString(), firstNonBlank(line.stageCode(), line.serviceCode()),
-                user.name(), LocalDateTime.now().toString(), json(raw)
-            );
-            for (Allocation allocation : allocations) {
-                ledger.changeBalance(allocation.balance().id(), allocation.quantity().negate(), BigDecimal.ZERO);
-                jdbcTemplate.update(
-                    """
-                    INSERT INTO inventory_consumption_details
-                      (id, event_id, item_id, batch_id, location_id, quantity, detail_kind, raw_json)
-                    VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', JSON_OBJECT('source', 'PATIENT_DOCUMENT'))
-                    """,
-                    "patient-consumption-detail-" + UUID.randomUUID(), eventId, line.itemId(),
-                    allocation.balance().batchId(), locationId, allocation.quantity()
-                );
-                ledger.movement(
-                    "CONSUMPTION", line.itemId(), allocation.balance().batchId(), locationId, null,
-                    allocation.quantity(), batch.departmentId(), "PATIENT_DOC_LINE", line.lineId(), eventId,
-                    null, user.name(), "患者耗材审核通过"
-                );
-            }
-        } else {
-            eventId = existing.get(0);
-        }
+        String eventId = deductPatient(line, batch, user);
         jdbcTemplate.update(
             """
             UPDATE inventory_patient_consumption_lines
@@ -618,6 +579,95 @@ public class InventoryPatientConsumptionReviewService {
         );
         insertDecision(batch, line, "APPROVED", note, user, eventId);
         refreshDocument(line.documentId());
+    }
+
+    private void approveWithoutDeduction(
+        ReviewLine line, BatchRow batch, String note, String reason, ArrayNode deferred, SessionUser user
+    ) {
+        String deferredNote = appendNote(note, "待补扣：" + reason);
+        jdbcTemplate.update(
+            """
+            UPDATE inventory_patient_consumption_lines
+            SET review_status = 'APPROVED', approved_quantity = actual_quantity, review_note = ?
+            WHERE id = ?
+            """,
+            deferredNote, line.lineId()
+        );
+        insertDecision(batch, line, "APPROVED", deferredNote, user, null);
+        createDeductionTask(batch, "PATIENT_DOCUMENT", line.documentId(), line.lineId(), line.itemId(), reason, user);
+        deferred.add(deferredLine(line.lineId(), line.itemId(), reason));
+        refreshDocument(line.documentId());
+    }
+
+    private String deductPatient(ReviewLine line, BatchRow batch, SessionUser user) {
+        ItemRow item = requireItem(line.itemId());
+        String idempotencyKey = "patient-line:" + line.lineId() + ":" + line.lineRevision() + ":CONSUMPTION";
+        List<String> existing = jdbcTemplate.query(
+            "SELECT id FROM inventory_consumption_events WHERE idempotency_key = ? LIMIT 1",
+            (resultSet, rowNum) -> resultSet.getString(1),
+            idempotencyKey
+        );
+        if (!existing.isEmpty()) return existing.get(0);
+        if (!ledger.isOpeningConfirmed(batch.departmentId())) {
+            throw new StockShortageException("科室期初库存尚未盘点确认，暂不能扣减");
+        }
+        String locationId = ledger.departmentLocation(batch.departmentId());
+        List<Balance> balances = ledger.lockAvailableBalances(locationId, line.itemId());
+        BigDecimal available = balances.stream().map(Balance::available).reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (available.compareTo(line.actualQuantity()) < 0) {
+            throw new StockShortageException(item.name() + " 库存不足，当前可用 " + available.stripTrailingZeros().toPlainString());
+        }
+        List<Allocation> allocations = new ArrayList<>();
+        BigDecimal remaining = line.actualQuantity();
+        for (Balance balance : balances) {
+            if (remaining.signum() <= 0) break;
+            BigDecimal quantity = remaining.min(balance.available());
+            if (quantity.signum() > 0) {
+                allocations.add(new Allocation(balance, quantity));
+                remaining = remaining.subtract(quantity);
+            }
+        }
+        String eventId = "patient-consumption-" + UUID.randomUUID();
+        ObjectNode raw = objectMapper.createObjectNode();
+        raw.put("sourceDocumentId", line.documentId());
+        raw.put("sourceLineId", line.lineId());
+        raw.put("serviceInstanceId", line.serviceInstanceId());
+        raw.put("patientId", line.patientId());
+        raw.put("itemId", line.itemId());
+        raw.put("quantity", line.actualQuantity());
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_consumption_events
+              (id, command_id, source_document_id, source_line_id, correction_document_id, service_instance_id,
+               patient_id, idempotency_key, encounter_id, case_token, route, care_type, care_encounter_id,
+               department, department_id, visit_date, package_id, package_version, status, event_kind,
+               trigger_stage, completion_version, operator_name, created_at, raw_json)
+            VALUES (?, NULL, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, NULL, NULL,
+                    'succeeded', 'CONSUMPTION', ?, NULL, ?, ?, CAST(? AS JSON))
+            """,
+            eventId, line.documentId(), line.lineId(), line.serviceInstanceId(), line.patientId(), idempotencyKey,
+            line.encounterId(), line.careType(), line.careType(), batch.departmentName(), batch.departmentId(),
+            batch.businessDate().toString(), firstNonBlank(line.stageCode(), line.serviceCode()),
+            user.name(), LocalDateTime.now().toString(), json(raw)
+        );
+        for (Allocation allocation : allocations) {
+            ledger.changeBalance(allocation.balance().id(), allocation.quantity().negate(), BigDecimal.ZERO);
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_consumption_details
+                  (id, event_id, item_id, batch_id, location_id, quantity, detail_kind, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', JSON_OBJECT('source', 'PATIENT_DOCUMENT'))
+                """,
+                "patient-consumption-detail-" + UUID.randomUUID(), eventId, line.itemId(),
+                allocation.balance().batchId(), locationId, allocation.quantity()
+            );
+            ledger.movement(
+                "CONSUMPTION", line.itemId(), allocation.balance().batchId(), locationId, null,
+                allocation.quantity(), batch.departmentId(), "PATIENT_DOC_LINE", line.lineId(), eventId,
+                null, user.name(), "患者耗材审核通过"
+            );
+        }
+        return eventId;
     }
 
     private void reject(ReviewLine line, BatchRow batch, String note, SessionUser user) {
@@ -847,6 +897,176 @@ public class InventoryPatientConsumptionReviewService {
         error.put("lineId", lineId);
         error.put("message", message);
         return error;
+    }
+
+    private ObjectNode deferredLine(String lineId, String itemId, String message) {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("lineId", lineId);
+        row.put("itemId", itemId);
+        row.put("message", message);
+        try {
+            row.put("itemName", requireItem(itemId).name());
+        } catch (RuntimeException ignored) {
+            row.put("itemName", itemId);
+        }
+        return row;
+    }
+
+    private void createDeductionTask(
+        BatchRow batch, String sourceType, String sourceId, String lineId, String itemId,
+        String reason, SessionUser user
+    ) {
+        String itemName;
+        try {
+            itemName = requireItem(itemId).name();
+        } catch (RuntimeException ignored) {
+            itemName = itemId;
+        }
+        String message = itemName + " 已通过，库存待补扣：" + reason;
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_exception_tasks
+              (id, command_id, exception_type, severity, status, department_id, department_name_snapshot,
+               encounter_id, trigger_stage, item_id, message, source_type, source_id, line_id)
+            VALUES (?, NULL, 'REVIEW_DEDUCTION_PENDING', 'HIGH', 'OPEN', ?, ?, NULL, 'REVIEW', ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE status = 'OPEN', message = VALUES(message), resolved_by = NULL,
+              resolution_note = NULL, resolved_at = NULL, updated_at = CURRENT_TIMESTAMP(3)
+            """,
+            "inventory-exception-" + UUID.randomUUID(), batch.departmentId(), batch.departmentName(),
+            itemId, message, sourceType, sourceId, lineId
+        );
+    }
+
+    private void resolveDeductionTask(String lineId, SessionUser user) {
+        jdbcTemplate.update(
+            """
+            UPDATE inventory_exception_tasks
+            SET status = 'RESOLVED', resolved_by = ?, resolution_note = '库存补扣完成',
+                resolved_at = CURRENT_TIMESTAMP(3), updated_at = CURRENT_TIMESTAMP(3)
+            WHERE line_id = ? AND exception_type = 'REVIEW_DEDUCTION_PENDING' AND status <> 'RESOLVED'
+            """,
+            user.name(), lineId
+        );
+    }
+
+    private int deferredLineCount(BatchRow batch) {
+        Integer count;
+        if ("DAILY".equals(batch.batchType())) {
+            count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM inventory_department_daily_report_lines l
+                JOIN inventory_department_daily_reports r ON r.id = l.report_id
+                WHERE r.department_id = ? AND r.business_date = ?
+                  AND l.review_status = 'APPROVED' AND l.consumption_event_id IS NULL
+                  AND l.actual_quantity > 0
+                """,
+                Integer.class, batch.departmentId(), batch.businessDate()
+            );
+        } else {
+            count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM inventory_patient_consumption_lines l
+                JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+                WHERE d.department_id = ? AND d.business_date = ?
+                  AND l.review_status = 'APPROVED' AND l.consumption_event_id IS NULL
+                  AND l.actual_quantity > 0
+                """,
+                Integer.class, batch.departmentId(), batch.businessDate()
+            );
+        }
+        return count == null ? 0 : count;
+    }
+
+    @Transactional
+    public ObjectNode retryDeductions(String batchId, SessionUser user) {
+        BatchRow batch = requireBatchForUpdate(batchId, user);
+        ArrayNode errors = objectMapper.createArrayNode();
+        int deducted = 0;
+        if ("DAILY".equals(batch.batchType())) {
+            DailyReportRow report = loadDailyReport(batch);
+            if (report == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室日报不存在");
+            List<String> lineIds = jdbcTemplate.query(
+                """
+                SELECT id FROM inventory_department_daily_report_lines
+                WHERE report_id = ? AND review_status = 'APPROVED'
+                  AND consumption_event_id IS NULL AND actual_quantity > 0
+                ORDER BY line_no FOR UPDATE
+                """,
+                (resultSet, rowNum) -> resultSet.getString(1),
+                report.id()
+            );
+            for (String lineId : lineIds) {
+                DailyReviewLine line = lockDailyLine(lineId, batch);
+                try {
+                    String eventId = deductDaily(line, batch, report, user);
+                    jdbcTemplate.update(
+                        """
+                        UPDATE inventory_department_daily_report_lines
+                        SET consumption_event_id = ?, review_note = CASE
+                            WHEN review_note LIKE '%待补扣%' THEN '补扣完成' ELSE review_note END
+                        WHERE id = ?
+                        """,
+                        eventId, lineId
+                    );
+                    resolveDeductionTask(lineId, user);
+                    deducted++;
+                } catch (StockShortageException shortage) {
+                    errors.add(error(lineId, shortage.getMessage()));
+                }
+            }
+            refreshDailyReview(batch, report, user);
+        } else {
+            List<String> lineIds = jdbcTemplate.query(
+                """
+                SELECT l.id
+                FROM inventory_patient_consumption_lines l
+                JOIN inventory_patient_consumption_documents d ON d.id = l.document_id
+                WHERE d.department_id = ? AND d.business_date = ?
+                  AND l.review_status = 'APPROVED' AND l.consumption_event_id IS NULL
+                  AND l.actual_quantity > 0
+                ORDER BY d.id, l.line_no FOR UPDATE
+                """,
+                (resultSet, rowNum) -> resultSet.getString(1),
+                batch.departmentId(), batch.businessDate()
+            );
+            Set<String> documents = new HashSet<>();
+            for (String lineId : lineIds) {
+                ReviewLine line = lockLine(lineId, batch);
+                try {
+                    String eventId = deductPatient(line, batch, user);
+                    jdbcTemplate.update(
+                        """
+                        UPDATE inventory_patient_consumption_lines
+                        SET consumption_event_id = ?, review_note = CASE
+                            WHEN review_note LIKE '%待补扣%' THEN '补扣完成' ELSE review_note END
+                        WHERE id = ?
+                        """,
+                        eventId, lineId
+                    );
+                    resolveDeductionTask(lineId, user);
+                    documents.add(line.documentId());
+                    deducted++;
+                } catch (StockShortageException shortage) {
+                    errors.add(error(lineId, shortage.getMessage()));
+                }
+            }
+            for (String documentId : documents) refreshDocument(documentId);
+            consumptionService.refreshBatch(batchId);
+        }
+        repository.log(user.name(), "库存补扣", "inventory_consumption_approval_batch",
+            batch.departmentName() + " " + batch.businessDate(),
+            "补扣 " + deducted + " 行" + (errors.isEmpty() ? "" : "，待处理 " + errors.size() + " 行"));
+        ObjectNode result = batch(batchId, user);
+        result.set("errors", errors);
+        result.put("deducted", deducted);
+        return result;
+    }
+
+    private static String appendNote(String note, String extra) {
+        String base = note == null ? "" : note.trim();
+        return base.isBlank() ? extra : base + "；" + extra;
     }
 
     private static boolean sameDepartment(String userDepartment, String canonicalName) {

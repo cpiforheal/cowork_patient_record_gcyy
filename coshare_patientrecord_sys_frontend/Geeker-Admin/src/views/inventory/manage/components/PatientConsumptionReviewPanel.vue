@@ -99,9 +99,22 @@
               已通过 {{ detail.batch.approvedLineCount }} 行
               <span>·</span>
               已驳回 {{ detail.batch.rejectedLineCount }} 行
+              <template v-if="deferredCount">
+                <span>·</span>
+                <span class="deferred-count">待补扣 {{ deferredCount }} 行</span>
+              </template>
             </p>
           </div>
           <div class="detail-actions">
+            <el-button
+              v-if="deferredCount"
+              type="warning"
+              plain
+              :loading="retrying"
+              @click="retryDeductions"
+            >
+              库存补扣（{{ deferredCount }}）
+            </el-button>
             <el-button
               type="primary"
               :loading="deciding"
@@ -121,6 +134,15 @@
           show-icon
           title="部分耗材行未通过"
           :description="decisionErrors.map(error => error.message).join('；')"
+        />
+        <el-alert
+          v-if="deferredCount"
+          class="decision-alert"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="已通过，但库存待补扣"
+          :description="`${deferredCount} 行耗材已审核通过，因科室库存未建立暂未扣减；库存到位后点“库存补扣”即可补扣。`"
         />
 
         <div class="document-list">
@@ -180,6 +202,7 @@
                   <el-tag size="small" effect="plain" :type="lineStatusType(line.reviewStatus)">
                     {{ lineStatusLabel(line.reviewStatus) }}
                   </el-tag>
+                  <el-tag v-if="isDeferredLine(line)" size="small" type="warning" effect="plain">待补扣</el-tag>
                   <small v-if="line.reviewNote" class="line-note">{{ line.reviewNote }}</small>
                 </span>
                 <span class="line-actions">
@@ -233,6 +256,7 @@ import {
   getInventoryPatientReviewBatchApi,
   getInventoryPatientReviewBatchesApi,
   getInventoryRuntimeSettingsApi,
+  retryInventoryReviewDeductionsApi,
   saveInventoryCutoverDateApi,
   type InventoryPatientConsumptionLine,
   type InventoryPatientReviewBatch,
@@ -273,6 +297,7 @@ const detail = ref<InventoryPatientReviewDetail | null>(null);
 const selectedBatchId = ref("");
 const loading = ref(false);
 const deciding = ref(false);
+const retrying = ref(false);
 const decisionErrors = ref<Array<{ lineId: string; message: string }>>([]);
 const settingsVisible = ref(false);
 const settingsSaving = ref(false);
@@ -285,6 +310,13 @@ const pendingLineIds = computed(() =>
 );
 const pendingLineCount = computed(() => pendingLineIds.value.length);
 const isDailyBatch = computed(() => detail.value?.batch.batchType === "DAILY");
+const isDeferredLine = (line: InventoryPatientConsumptionLine) =>
+  line.reviewStatus === "APPROVED" && Number(line.actualQuantity) > 0 && !line.consumptionEventId;
+const deferredCount = computed(
+  () =>
+    detail.value?.deferredLineCount ??
+    (detail.value?.documents ?? []).flatMap(document => document.lines).filter(isDeferredLine).length
+);
 
 const reload = async (keepSelection = true) => {
   loading.value = true;
@@ -350,11 +382,16 @@ const decide = async (line: InventoryPatientConsumptionLine, decision: "APPROVED
       decisions: [{ lineId: line.lineId, decision, note }]
     });
     const errors = result.data?.errors ?? [];
+    const deferred = result.data?.deferred ?? [];
     detail.value = result.data ?? detail.value;
     await reload(true);
     decisionErrors.value = errors;
     if (errors.length) {
       ElMessage.warning(errors.map(error => error.message).join("；"));
+      return;
+    }
+    if (deferred.length) {
+      ElMessage.warning(`已通过，库存待补扣：${deferred.map(item => item.message).join("；")}`);
       return;
     }
     if (decision === "APPROVED") ElMessage.success("已通过并生成库存流水");
@@ -420,11 +457,14 @@ const submitDecisions = async (
   try {
     const result = await decideInventoryPatientReviewApi(detail.value.batch.batchId, { decisions });
     const errors = result.data?.errors ?? [];
+    const deferred = result.data?.deferred ?? [];
     detail.value = result.data ?? detail.value;
     await reload(true);
     decisionErrors.value = errors;
     if (errors.length) {
       ElMessage.warning(`已处理，但有 ${errors.length} 行未通过：${errors.map(error => error.message).join("；")}`);
+    } else if (deferred.length) {
+      ElMessage.warning(`已通过 ${decisions.length - deferred.length} 行，${deferred.length} 行库存待补扣（暂未扣减）`);
     } else {
       ElMessage.success(successMessage);
     }
@@ -432,6 +472,26 @@ const submitDecisions = async (
     ElMessage.error(error instanceof Error ? error.message : "审核失败");
   } finally {
     deciding.value = false;
+  }
+};
+
+const retryDeductions = async () => {
+  if (!detail.value) return;
+  retrying.value = true;
+  try {
+    const result = await retryInventoryReviewDeductionsApi(detail.value.batch.batchId);
+    const errors = result.data?.errors ?? [];
+    detail.value = result.data ?? detail.value;
+    await reload(true);
+    if (errors.length) {
+      ElMessage.warning(`仍有 ${errors.length} 行未补扣：${errors.map(error => error.message).join("；")}`);
+    } else {
+      ElMessage.success(`已补扣 ${result.data?.deducted ?? 0} 行`);
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "库存补扣失败");
+  } finally {
+    retrying.value = false;
   }
 };
 
@@ -808,6 +868,12 @@ onMounted(() => {
   span {
     margin: 0 4px;
     opacity: 0.5;
+  }
+
+  .deferred-count {
+    color: var(--hos-status-warning);
+    font-weight: 600;
+    opacity: 1;
   }
 }
 
