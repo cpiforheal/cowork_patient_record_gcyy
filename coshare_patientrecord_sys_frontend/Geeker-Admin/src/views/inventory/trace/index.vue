@@ -115,6 +115,9 @@
             </section>
           </div>
           <el-empty v-else :image-size="70" description="当前筛选下没有节点" />
+          <div v-if="lifecycle && lifecycle.events.length < lifecycle.total" class="load-more">
+            <el-button :loading="loadingMore" @click="loadMore">加载更多（已显示 {{ lifecycle.events.length }} / {{ lifecycle.total }}）</el-button>
+          </div>
         </template>
         <el-empty v-else :image-size="80" description="搜索物资、批号、单号或患者开始追溯" />
       </el-tab-pane>
@@ -155,6 +158,7 @@ const router = useRouter();
 const keyword = ref("");
 const searching = ref(false);
 const loading = ref(false);
+const loadingMore = ref(false);
 const subjects = ref<InventoryTraceSubject[]>([]);
 const selected = ref<InventoryTraceSubject | null>(null);
 const lifecycle = ref<InventoryTraceLifecycle | null>(null);
@@ -218,12 +222,31 @@ const reloadLifecycle = async () => {
   if (!selected.value) return;
   loading.value = true;
   try {
-    const result = await getInventoryTraceLifecycleApi(params());
+    const result = await getInventoryTraceLifecycleApi({ ...params(), page: 1, size: 20 });
     lifecycle.value = result.data ?? null;
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取生命周期失败");
   } finally {
     loading.value = false;
+  }
+};
+
+const loadMore = async () => {
+  if (!lifecycle.value) return;
+  loadingMore.value = true;
+  try {
+    const nextPage = lifecycle.value.page + 1;
+    const result = await getInventoryTraceLifecycleApi({ ...params(), page: nextPage, size: 20 });
+    const next = result.data;
+    if (!next) return;
+    lifecycle.value = {
+      ...next,
+      events: [...lifecycle.value.events, ...next.events]
+    };
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "加载更多失败");
+  } finally {
+    loadingMore.value = false;
   }
 };
 
@@ -523,6 +546,12 @@ onMounted(async () => {
     color: #6d675c;
     font-size: 11px;
   }
+}
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .link-button {

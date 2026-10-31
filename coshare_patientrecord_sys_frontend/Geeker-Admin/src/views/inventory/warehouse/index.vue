@@ -49,6 +49,10 @@
       </el-tab-pane>
 
       <el-tab-pane label="库存" name="stock">
+        <div v-if="alerts.centralLow.length || alerts.expiring.length" class="alert-banner">
+          <span>低库存 {{ alerts.centralLow.length }} 项 · 临期批次 {{ alerts.expiring.length }} 批</span>
+          <el-button link type="warning" @click="stockFilter = 'LOW'; loadStock()">查看低库存</el-button>
+        </div>
         <div class="filter-bar">
           <el-input v-model="stockKeyword" clearable placeholder="物资 / 规格 / 分类" @keyup.enter="loadStock" />
           <el-select v-model="stockCategory" clearable filterable placeholder="分类" @change="loadStock">
@@ -149,38 +153,7 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="预警" name="alerts">
-        <div class="alert-grid">
-          <section class="alert-card">
-            <header><strong>中心库低库存</strong><span>{{ alerts.centralLow.length }} 项</span></header>
-            <el-table :data="alerts.centralLow" size="small" border height="300" empty-text="暂无低库存">
-              <el-table-column prop="itemName" label="物资" min-width="140" />
-              <el-table-column prop="spec" label="规格" min-width="100" show-overflow-tooltip />
-              <el-table-column prop="quantity" label="可用" width="80" />
-              <el-table-column prop="warningLine" label="预警线" width="80" />
-            </el-table>
-          </section>
-          <section class="alert-card">
-            <header><strong>科室低库存</strong><span>{{ alerts.departmentLow.length }} 项</span></header>
-            <el-table :data="alerts.departmentLow" size="small" border height="300" empty-text="暂无科室低库存">
-              <el-table-column prop="departmentName" label="科室" width="100" />
-              <el-table-column prop="itemName" label="物资" min-width="130" />
-              <el-table-column prop="available" label="结余" width="80" />
-              <el-table-column prop="warningLine" label="预警线" width="80" />
-            </el-table>
-          </section>
-          <section class="alert-card wide">
-            <header><strong>临期批次（30 天内）</strong><span>{{ alerts.expiring.length }} 批</span></header>
-            <el-table :data="alerts.expiring" size="small" border height="260" empty-text="暂无临期批次">
-              <el-table-column prop="itemName" label="物资" min-width="140" />
-              <el-table-column prop="batchNo" label="批号" min-width="120" />
-              <el-table-column prop="expiryDate" label="有效期" width="110" />
-              <el-table-column prop="quantity" label="数量" width="80" />
-              <el-table-column prop="departmentName" label="位置" width="110" />
-            </el-table>
-          </section>
-        </div>
-      </el-tab-pane>
+
     </el-tabs>
 
     <el-drawer v-model="inboundVisible" title="新建入库单" size="72%" append-to-body>
@@ -438,7 +411,7 @@ import {
 } from "@/api/modules/inventory";
 import { conversionFactor, matchBulkRows, parseBulkText, type ParsedBulkRow } from "@/views/inventory/manage/composables/bulkItemImport";
 
-const activeTab = ref<"inbound" | "stock" | "requests" | "alerts">("inbound");
+const activeTab = ref<"inbound" | "stock" | "requests">("inbound");
 const loading = ref(false);
 const saving = ref(false);
 const items = ref<InventoryItemOption[]>([]);
@@ -693,7 +666,6 @@ const refreshAll = async () => {
   loading.value = true;
   try {
     await Promise.all([loadDb(), loadInbound(), loadStock(), loadAlerts(), loadRequests()]);
-    if (activeTab.value === "alerts") await loadAlerts();
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取库管台失败");
   } finally {
@@ -704,8 +676,7 @@ const refreshAll = async () => {
 const onTabChange = async (name: string | number) => {
   if (name === "inbound") await loadInbound();
   else if (name === "stock") await loadStock();
-  else if (name === "requests") await loadRequests();
-  else await loadAlerts();
+  else await loadRequests();
 };
 
 const querySuppliers = (query: string, callback: (rows: Array<{ value: string }>) => void) => {
@@ -965,6 +936,23 @@ onMounted(() => {
   background: #fffdf9;
   border: 1px solid #efe8dd;
   border-radius: 14px;
+}
+
+.alert-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  color: #8a5a12;
+  background: #fff8e8;
+  border: 1px solid #f0dcb4;
+  border-radius: 10px;
+  font-size: 12px;
+
+  .el-button {
+    margin-left: auto;
+  }
 }
 
 .filter-bar {

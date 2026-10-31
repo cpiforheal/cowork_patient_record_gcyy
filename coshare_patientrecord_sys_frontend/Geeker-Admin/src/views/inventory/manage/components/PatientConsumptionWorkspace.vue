@@ -7,7 +7,6 @@
         <p>选患者 → 选耗材 → 下一位；修改自动保存，最后统一提交。</p>
       </div>
       <div class="toolbar-actions">
-        <el-button v-if="fixedCount" plain @click="fixedVisible = true">固定耗材 · {{ fixedStatusLabel }}</el-button>
         <el-button plain @click="deptStockVisible = true">
           科室库存{{ deptLowCount ? ` · ${deptLowCount} 项预警` : "" }}
         </el-button>
@@ -21,7 +20,15 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button :icon="Refresh" :loading="loading" aria-label="刷新工作台" @click="reload" />
+        <el-dropdown trigger="click" @command="handleWorkspaceMore">
+          <el-button plain>更多 ▾</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-if="fixedCount" command="FIXED">固定耗材 · {{ fixedStatusLabel }}</el-dropdown-item>
+              <el-dropdown-item command="REFRESH">刷新工作台</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="selectedPatientKeys.length" type="primary" :loading="batchSubmitting" @click="openBatchSubmit">
           提交当天全部
         </el-button>
@@ -1661,6 +1668,11 @@ const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
 
 const handleApplyPackageFromDrawer = async (pkg: InventoryPatientConsumablePackage) => {
   if (await applyPackage(pkg)) packageDrawerVisible.value = false;
+};
+
+const handleWorkspaceMore = (command: string) => {
+  if (command === "FIXED") fixedVisible.value = true;
+  else if (command === "REFRESH") reload();
 };
 
 const handleAddPatientCommand = (command: string) => {
