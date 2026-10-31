@@ -644,7 +644,7 @@
                           />
                           <div class="item-copy">
                             <div class="item-name-row">
-                              <strong>{{ item.materialName || item.itemName }}</strong>
+                              <strong>{{ item.itemName }}</strong>
                               <el-tag v-if="item.commonItem" size="small" type="success" effect="plain">常用</el-tag>
                               <el-tag v-if="item.mappingConflict" size="small" type="warning" effect="plain">映射冲突</el-tag>
                               <el-tag v-if="isApproved(item)" size="small" type="info" effect="plain">已通过</el-tag>
@@ -659,8 +659,8 @@
                                 {{ item.serviceGroups?.join(" / ") || item.serviceGroup }}
                               </template>
                             </span>
-                            <span v-if="item.mappingConflict" class="mapping-hint">
-                              实际物资：{{ item.mappedItemNames.join(" / ") }}
+                            <span v-if="needsMappingHint(item)" class="mapping-hint">
+                              对应申领项：{{ item.materialName }}
                             </span>
                             <span
                               v-if="deptStockOf(item.itemId)"
@@ -1317,7 +1317,7 @@ const presetItems = computed(() => detail.value?.presetItems?.items ?? []);
 const dedupedPresetItems = computed<DisplayItem[]>(() => {
   const map = new Map<string, DisplayItem>();
   for (const item of presetItems.value) {
-    const key = `${item.materialName || item.itemName}|${item.unit || ""}`;
+    const key = `${item.itemId}|${item.unit || ""}`;
     const existing = map.get(key);
     if (!existing) {
       map.set(key, {
@@ -1333,31 +1333,33 @@ const dedupedPresetItems = computed<DisplayItem[]>(() => {
     }
     existing.commonItem = existing.commonItem || item.commonItem;
     existing.aliases = unique([...(existing.aliases ?? []), ...(item.aliases ?? [])]);
-    existing.mappedItemNames = unique([...existing.mappedItemNames, item.itemName]);
-    existing.mappingConflict = existing.mappedItemNames.length > 1;
-    if (item.matchesService && !existing.matchesService) {
-      existing.itemId = item.itemId;
-      existing.ruleId = item.ruleId;
-      existing.itemName = item.itemName;
-      existing.presetQuantity = item.presetQuantity;
-      existing.matchesService = true;
-    } else if (existing.presetQuantity == null && item.presetQuantity != null) {
+    if (item.presetQuantity != null && (existing.presetQuantity == null || item.matchesService)) {
       existing.presetQuantity = item.presetQuantity;
     }
+    if (item.matchesService) existing.matchesService = true;
   }
   return Array.from(map.values());
 });
 
 const visibleGroups = computed(() => {
   const keyword = itemKeyword.value.trim().toLowerCase();
+  const singleLatin = /^[a-z0-9]$/.test(keyword);
+  const matches = (value: string) => {
+    const text = String(value || "").toLowerCase();
+    return singleLatin ? text.startsWith(keyword) : text.includes(keyword);
+  };
   const filtered = dedupedPresetItems.value.filter(item => {
     if (!keyword) return true;
-    const initials = [item.itemName, item.materialName]
-      .map(text => String(pinyin(text || "", { pattern: "first", toneType: "none" })))
-      .join(" ");
-    return [item.itemName, item.materialName, ...(item.serviceGroups ?? []), item.unit, ...(item.aliases ?? []), initials]
+    const initials = String(pinyin(item.itemName || "", { pattern: "first", toneType: "none" })).toLowerCase();
+    const firstInitial = initials.trim().split(/\s+/)[0] || "";
+    const fullPinyin = String(pinyin(item.itemName || "", { toneType: "none" })).toLowerCase();
+    const nameMatches = [item.itemName, item.materialName, ...(item.aliases ?? [])]
       .filter(Boolean)
-      .some(value => String(value).toLowerCase().includes(keyword));
+      .some(matches);
+    const pinyinMatches = singleLatin
+      ? firstInitial.startsWith(keyword) || fullPinyin.startsWith(keyword)
+      : initials.includes(keyword) || fullPinyin.includes(keyword);
+    return nameMatches || pinyinMatches;
   });
   const groups = new Map<string, DisplayItem[]>();
   filtered
@@ -1575,6 +1577,9 @@ const loadDepartmentStock = async () => {
   }
 };
 
+const baseItemName = (value?: string) => String(value || "").replace(/[（(].*$/, "").trim();
+const needsMappingHint = (item: DisplayItem) =>
+  Boolean(item.materialName && baseItemName(item.materialName) !== baseItemName(item.itemName));
 const deptStockOf = (itemId: string) => deptStockMap.value[itemId];
 const remainingAfter = (itemId: string) =>
   Number(deptStockOf(itemId)?.deptAvailable || 0) - Number(lineState[itemId]?.actualQuantity || 0);
