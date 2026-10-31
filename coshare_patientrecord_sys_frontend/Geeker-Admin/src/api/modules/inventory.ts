@@ -3315,3 +3315,102 @@ export interface InventoryItemOption {
 
 export const getInventoryItemOptionsApi = async () =>
   getInventoryData<InventoryItemOption[]>("/item-options");
+
+export interface InventoryTraceSubject {
+  kind: "ITEM" | "BATCH" | "INBOUND" | "REQUEST" | "PATIENT";
+  id: string;
+  itemId?: string;
+  batchId?: string;
+  orderNo?: string;
+  label: string;
+  spec?: string;
+  unit?: string;
+  balance?: number;
+  latestAt?: string;
+  pendingCount?: number;
+  note?: string;
+  patientKeyword?: string;
+}
+
+export interface InventoryTraceEvent {
+  eventId: string;
+  eventType: string;
+  eventLabel: string;
+  occurredAt: string;
+  quantity: number;
+  unit?: string;
+  batchNo?: string;
+  department?: string;
+  operator?: string;
+  documentType?: string;
+  documentId?: string;
+  documentNo?: string;
+  status: "DONE" | "PENDING" | "WARNING";
+  note?: string;
+  patient?: { name: string; visitNo?: string };
+}
+
+export interface InventoryTraceLifecycle {
+  summary: {
+    itemId: string;
+    batchId: string;
+    itemName: string;
+    spec: string;
+    unit: string;
+    inboundTotal: number;
+    usedTotal: number;
+    returnedTotal: number;
+    scrappedTotal: number;
+    pendingDeductionCount: number;
+    centralAvailable: number;
+    departmentAvailable: number;
+  };
+  events: InventoryTraceEvent[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export const getInventoryTraceSubjectsApi = async (params: Record<string, unknown>) =>
+  getInventoryData<InventoryTraceSubject[]>("/trace/subjects", params);
+
+export const getInventoryTraceLifecycleApi = async (params: Record<string, unknown>) =>
+  getInventoryData<InventoryTraceLifecycle>("/trace/lifecycle", params);
+
+export const exportInventoryTraceApi = async (params: Record<string, unknown>, format: "xlsx" | "pdf") =>
+  downloadInventoryFile(`/trace/export/${format}${buildInventoryQuery(params)}`, `内部追溯.${format}`);
+
+export interface InventoryOpsHealth {
+  openingUnconfirmed: number;
+  mappingConflicts: number;
+  missingBatchOrExpiry: number;
+  lowStock: number;
+  expiringBatches: number;
+  pendingDeduction: number;
+  openExceptions: number;
+  negativeStock: number;
+}
+
+export interface InventoryOpsException {
+  type: string;
+  typeLabel: string;
+  occurredAt: string;
+  department: string;
+  itemId: string;
+  itemName: string;
+  spec: string;
+  unit: string;
+  quantity: number;
+  documentType: string;
+  documentId: string;
+  documentNo: string;
+  reason: string;
+  status: string;
+  actionPath: string;
+}
+
+export const getInventoryOpsHealthApi = async () =>
+  getInventoryData<InventoryOpsHealth>("/ops/health");
+
+export const getInventoryOpsExceptionsApi = async (params: Record<string, unknown> = {}) =>
+  getInventoryData<InventoryOpsException[]>("/ops/exceptions", params);

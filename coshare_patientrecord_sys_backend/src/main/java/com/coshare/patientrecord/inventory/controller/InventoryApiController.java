@@ -14,6 +14,8 @@ import com.coshare.patientrecord.inventory.service.InventoryDepartmentDailyRepor
 import com.coshare.patientrecord.inventory.service.InventoryDepartmentDraftService;
 import com.coshare.patientrecord.inventory.service.InventoryFollowupService;
 import com.coshare.patientrecord.inventory.service.InventoryInboundService;
+import com.coshare.patientrecord.inventory.service.InventoryLifecycleTraceService;
+import com.coshare.patientrecord.inventory.service.InventoryOpsHealthService;
 import com.coshare.patientrecord.inventory.service.InventoryMessageBoardService;
 import com.coshare.patientrecord.inventory.service.InventoryOpeningImportService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionReviewService;
@@ -65,6 +67,8 @@ public class InventoryApiController {
     private final InventoryInboundService inboundService;
     private final InventoryOpeningImportService openingImportService;
     private final InventoryStockOverviewService stockOverviewService;
+    private final InventoryLifecycleTraceService lifecycleTraceService;
+    private final InventoryOpsHealthService opsHealthService;
     private final PortalMode portalMode;
 
     public InventoryApiController(
@@ -86,6 +90,8 @@ public class InventoryApiController {
         InventoryInboundService inboundService,
         InventoryOpeningImportService openingImportService,
         InventoryStockOverviewService stockOverviewService,
+        InventoryLifecycleTraceService lifecycleTraceService,
+        InventoryOpsHealthService opsHealthService,
         PortalMode portalMode
     ) {
         this.databaseService = databaseService;
@@ -106,6 +112,8 @@ public class InventoryApiController {
         this.inboundService = inboundService;
         this.openingImportService = openingImportService;
         this.stockOverviewService = stockOverviewService;
+        this.lifecycleTraceService = lifecycleTraceService;
+        this.opsHealthService = opsHealthService;
         this.portalMode = portalMode;
     }
 
@@ -1191,6 +1199,92 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> inbound(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:issue");
         return ApiResult.of(200, "inbound saved", databaseService.asMap(databaseService.inbound(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/trace/subjects")
+    public ApiResult<java.util.List<Map<String, Object>>> traceSubjects(
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(required = false) String department,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String operator
+    ) {
+        requireCapability("inventory:read");
+        return ApiResult.success(objectMapper.convertValue(
+            lifecycleTraceService.subjects(keyword, from, to, department, type, operator), java.util.List.class));
+    }
+
+    @GetMapping("/inventory-api/trace/lifecycle")
+    public ApiResult<Map<String, Object>> traceLifecycle(
+        @RequestParam(required = false) String itemId,
+        @RequestParam(required = false) String batchId,
+        @RequestParam(required = false) String orderNo,
+        @RequestParam(required = false) String requestId,
+        @RequestParam(required = false) String patientKeyword,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(required = false) String department,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String operator,
+        @RequestParam(defaultValue = "false") boolean abnormal,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "200") int size
+    ) {
+        requireCapability("inventory:read");
+        return ApiResult.success(asMap(lifecycleTraceService.lifecycle(
+            itemId, batchId, orderNo, requestId, patientKeyword, from, to, department, type, operator,
+            abnormal, page, size
+        )));
+    }
+
+    @GetMapping("/inventory-api/trace/export/{format}")
+    public ResponseEntity<byte[]> exportTrace(
+        @org.springframework.web.bind.annotation.PathVariable String format,
+        @RequestParam(required = false) String itemId,
+        @RequestParam(required = false) String batchId,
+        @RequestParam(required = false) String orderNo,
+        @RequestParam(required = false) String requestId,
+        @RequestParam(required = false) String patientKeyword,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(required = false) String department,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String operator,
+        @RequestParam(defaultValue = "false") boolean abnormal
+    ) {
+        requireCapability("inventory:read");
+        var lifecycle = lifecycleTraceService.lifecycle(
+            itemId, batchId, orderNo, requestId, patientKeyword, from, to, department, type, operator,
+            abnormal, 1, 500
+        );
+        if ("pdf".equalsIgnoreCase(format)) {
+            return attachment(lifecycleTraceService.exportPdf(lifecycle), "内部追溯摘要.pdf", "application/pdf");
+        }
+        return attachment(
+            lifecycleTraceService.exportXlsx(lifecycle),
+            "内部追溯明细.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+    }
+
+    @GetMapping("/inventory-api/ops/health")
+    public ApiResult<Map<String, Object>> opsHealth() {
+        requireCapability("inventory:issue");
+        return ApiResult.success(asMap(opsHealthService.health()));
+    }
+
+    @GetMapping("/inventory-api/ops/exceptions")
+    public ApiResult<java.util.List<Map<String, Object>>> opsExceptions(
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String department,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to,
+        @RequestParam(required = false) String status
+    ) {
+        requireCapability("inventory:issue");
+        return ApiResult.success(objectMapper.convertValue(
+            opsHealthService.exceptions(type, department, from, to, status), java.util.List.class));
     }
 
     @GetMapping("/inventory-api/warehouse/inbound-orders")

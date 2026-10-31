@@ -20,6 +20,7 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   consumableWorkbench: "inventoryConsumableWorkbench",
   adminReview: "inventoryAdminReview",
   warehouse: "inventoryWarehouse",
+  ops: "inventoryOps",
   roles: "inventoryRoles"
 };
 
@@ -47,6 +48,7 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   consumableWorkbench: ["inventory:read"],
   adminReview: ["inventory:role:manage"],
   warehouse: ["inventory:issue"],
+  ops: ["inventory:issue"],
   roles: ["inventory:role:manage"],
   messageBoard: ["inventory:read"]
 };
@@ -95,6 +97,16 @@ export const getInventorySystemMenu = (
         path: `${INVENTORY_SYSTEM_PREFIX}/warehouse`,
         name: "inventorySystemWarehouse",
         meta: meta("库管台", "Goods")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
+        name: "inventorySystemTrace",
+        meta: meta("全链路追溯", "Connection")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/ops`,
+        name: "inventorySystemOps",
+        meta: meta("进销存运维", "Warning")
       }
     ];
   }
@@ -131,6 +143,16 @@ export const getInventorySystemMenu = (
         meta: meta("管理审查", "DataAnalysis")
       },
       {
+        path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
+        name: "inventorySystemTrace",
+        meta: meta("全链路追溯", "Connection")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/ops`,
+        name: "inventorySystemOps",
+        meta: meta("进销存运维", "Warning")
+      },
+      {
         path: `${INVENTORY_SYSTEM_PREFIX}/role-management`,
         name: "inventorySystemRoleManagement",
         meta: meta("账号管理", "UserFilled")
@@ -151,9 +173,9 @@ export const getInventorySystemMenu = (
       meta: meta(department ? `我的科室日报（${department.title}）` : "我的科室日报", "EditPen")
     },
     {
-      path: `${INVENTORY_SYSTEM_PREFIX}/consumable-workbench`,
-      name: "inventorySystemConsumableWorkbench",
-      meta: meta("耗材工作台", "DataLine")
+      path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
+      name: "inventorySystemTrace",
+      meta: meta("全链路追溯", "Connection")
     },
     {
       path: `${INVENTORY_SYSTEM_PREFIX}/message-board`,
@@ -203,6 +225,7 @@ export const inventoryTabFromPath = (path: string) => {
     "/inventory-system/consumable-workbench": "consumableWorkbench",
     "/inventory-system/admin-review": "adminReview",
     "/inventory-system/warehouse": "warehouse",
+    "/inventory-system/ops": "ops",
     "/inventory-system/role-management": "roles"
   };
   return paths[path] || (path.startsWith("/inventory-system/departments/") ? "packages" : "");
@@ -217,6 +240,8 @@ export const inventorySystemPathForLegacy = (path: string) => {
 
 const inventoryView = () => import("@/views/inventory/manage/index.vue");
 const warehouseView = () => import("@/views/inventory/warehouse/index.vue");
+const traceView = () => import("@/views/inventory/trace/index.vue");
+const opsView = () => import("@/views/inventory/ops/index.vue");
 const redirectTo = (path: string) => () => path;
 
 export const inventorySystemRoutes: RouteRecordRaw[] = [
@@ -325,8 +350,14 @@ export const inventorySystemRoutes: RouteRecordRaw[] = [
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/trace`,
     name: "inventorySystemTrace",
-    component: inventoryView,
-    meta: meta("出入库追溯", "TrendCharts")
+    component: traceView,
+    meta: meta("全链路追溯", "Connection")
+  },
+  {
+    path: `${INVENTORY_SYSTEM_PREFIX}/ops`,
+    name: "inventorySystemOps",
+    component: opsView,
+    meta: meta("进销存运维", "Warning")
   },
   {
     path: `${INVENTORY_SYSTEM_PREFIX}/executive`,

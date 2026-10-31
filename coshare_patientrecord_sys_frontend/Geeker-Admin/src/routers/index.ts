@@ -118,13 +118,17 @@ router.beforeEach(async to => {
             to.path === "/inventory-system/patient-trace" ||
             to.path === "/inventory-system/admin-review" ||
             to.path === "/inventory-system/consumable-workbench" ||
+            to.path === "/inventory-system/trace" ||
+            to.path === "/inventory-system/ops" ||
             to.path === "/inventory-system/role-management" ||
             to.path.startsWith("/inventory-system/departments/")
           : isWarehouse
             ? isMessageBoard || to.path === "/inventory-system/warehouse"
+              || to.path === "/inventory-system/trace" || to.path === "/inventory-system/ops"
             : isMessageBoard ||
               to.path === departmentPath ||
               to.path === "/inventory-system/consumable-workbench" ||
+              to.path === "/inventory-system/trace" ||
               (isPackageRoute && hasPackageAccess);
         if (!allowed) return { path: portalLanding, replace: true };
       }
