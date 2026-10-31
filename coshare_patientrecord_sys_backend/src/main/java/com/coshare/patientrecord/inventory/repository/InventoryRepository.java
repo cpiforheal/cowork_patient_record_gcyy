@@ -96,9 +96,8 @@ public class InventoryRepository {
         for (JsonNode row : rows) {
             String rowDepartmentId = text(row, "departmentId");
             boolean stableIdMatches = departmentId != null && !departmentId.isBlank() && departmentId.equals(rowDepartmentId);
-            boolean legacyNameMatches = rowDepartmentId.isBlank()
-                && department != null && !department.isBlank() && department.equals(text(row, "department"));
-            if (stableIdMatches || legacyNameMatches) {
+            boolean nameMatches = department != null && !department.isBlank() && department.equals(text(row, "department"));
+            if (stableIdMatches || nameMatches) {
                 filtered.add(row);
             }
         }
@@ -523,8 +522,36 @@ public class InventoryRepository {
     }
 
     public void applyUserDepartment(ObjectNode row, SessionUser user) {
-        row.put("departmentId", user.activeDepartmentId());
+        row.put("departmentId", resolveDepartmentId(user.activeDepartmentId(), user.department()));
         row.put("department", user.department());
+    }
+
+    private String resolveDepartmentId(String departmentId, String departmentName) {
+        if (departmentId != null && !departmentId.isBlank()) {
+            List<String> inventory = jdbcTemplate.query(
+                "SELECT id FROM inventory_departments WHERE id = ? AND status = 'ACTIVE' LIMIT 1",
+                (resultSet, rowNum) -> resultSet.getString(1), departmentId
+            );
+            if (!inventory.isEmpty()) return inventory.get(0);
+            List<String> clinic = jdbcTemplate.query(
+                "SELECT id FROM clinic_departments WHERE id = ? LIMIT 1",
+                (resultSet, rowNum) -> resultSet.getString(1), departmentId
+            );
+            if (!clinic.isEmpty()) return clinic.get(0);
+        }
+        if (departmentName != null && !departmentName.isBlank()) {
+            List<String> inventory = jdbcTemplate.query(
+                "SELECT id FROM inventory_departments WHERE name = ? AND status = 'ACTIVE' LIMIT 1",
+                (resultSet, rowNum) -> resultSet.getString(1), departmentName
+            );
+            if (!inventory.isEmpty()) return inventory.get(0);
+            List<String> clinic = jdbcTemplate.query(
+                "SELECT id FROM clinic_departments WHERE name = ? ORDER BY id LIMIT 1",
+                (resultSet, rowNum) -> resultSet.getString(1), departmentName
+            );
+            if (!clinic.isEmpty()) return clinic.get(0);
+        }
+        return departmentId == null ? "" : departmentId;
     }
 
     public boolean isInventoryManager(SessionUser user) {
@@ -533,8 +560,9 @@ public class InventoryRepository {
 
     public boolean sameDepartment(SessionUser user, JsonNode row) {
         String rowDepartmentId = text(row, "departmentId");
-        if (!rowDepartmentId.isBlank()) {
-            return user.activeDepartmentId() != null && user.activeDepartmentId().equals(rowDepartmentId);
+        if (!rowDepartmentId.isBlank() && user.activeDepartmentId() != null
+            && user.activeDepartmentId().equals(rowDepartmentId)) {
+            return true;
         }
         String department = user.department();
         return department != null && department.equals(text(row, "department"));

@@ -1238,13 +1238,13 @@ public class InventoryApiController {
         @RequestParam(required = false) String category,
         @RequestParam(required = false) String filter
     ) {
-        requireCapability("inventory:read");
+        requireCapability("inventory:issue");
         return ApiResult.success(asMap(stockOverviewService.warehouseStock(keyword, category, filter)));
     }
 
     @GetMapping("/inventory-api/warehouse/alerts")
     public ApiResult<Map<String, Object>> warehouseAlerts() {
-        requireCapability("inventory:read");
+        requireCapability("inventory:issue");
         return ApiResult.success(asMap(stockOverviewService.alerts()));
     }
 

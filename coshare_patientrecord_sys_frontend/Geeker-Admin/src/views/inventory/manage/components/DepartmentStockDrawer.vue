@@ -164,7 +164,7 @@ const filteredRequests = computed(() =>
 
 const formatNumber = (value?: number | string) => Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const requestLabel = (status: string) =>
-  ({ pending: "待审核", approved: "待发放", partially_issued: "部分发放", issued: "已发放", received: "已发放", rejected: "已驳回", cancelled: "已撤销" })[status] || status;
+  ({ pending: "待审核", approved: "已通过待发放", partially_issued: "部分发放", issued: "已发放", received: "已发放", rejected: "已驳回", cancelled: "已撤销" })[status] || status;
 const requestTone = (status: string) =>
   status === "rejected" ? "danger" : status === "received" ? "success" : status === "partially_issued" ? "warning" : "info";
 
@@ -176,7 +176,7 @@ const onOpen = async () => {
     stock.month = data?.month || "";
     stock.departmentName = data?.departmentName || "";
     stock.items = data?.items ?? [];
-    requests.value = (dbResult.data?.requests ?? []).filter((request: InventoryRequest) => request.department === stock.departmentName);
+    requests.value = dbResult.data?.requests ?? [];
     cart.value = stock.items
       .filter(item => item.lowStock && Number(item.suggestedQuantity || 0) > 0)
       .map(item => ({

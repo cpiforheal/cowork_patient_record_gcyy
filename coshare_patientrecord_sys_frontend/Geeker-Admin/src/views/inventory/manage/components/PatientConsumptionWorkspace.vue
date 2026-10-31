@@ -3202,6 +3202,7 @@ onMounted(() => {
 }
 
 .checklist-group {
+  flex-shrink: 0;
   border: 1px solid var(--hos-border-light);
   border-radius: 14px;
   overflow: hidden;
@@ -4321,7 +4322,8 @@ onMounted(() => {
 .drawer-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   background: var(--hos-bg-surface);
 }
 
@@ -4357,15 +4359,19 @@ onMounted(() => {
 .drawer-grid {
   display: grid;
   grid-template-columns: minmax(320px, 38%) minmax(0, 62%);
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .drawer-left {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
+  height: 100%;
   padding: 16px 20px;
   overflow: auto;
   background: var(--hos-bg-primary);
@@ -4376,8 +4382,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  height: 100%;
   padding: 16px 22px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .drawer-toolbar {
@@ -4387,8 +4395,11 @@ onMounted(() => {
 }
 
 .drawer-right .checklist-scroll {
+  flex: 1 1 0;
   gap: 10px;
+  min-height: 0;
   padding-top: 0;
+  overflow: auto;
 }
 
 .drawer-footer {

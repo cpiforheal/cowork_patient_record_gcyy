@@ -648,7 +648,7 @@ public class InventoryMappingService {
         List<String> conditions = new ArrayList<>();
         List<Object> params = new ArrayList<>();
         if (user != null && !canReadAll(user)) {
-            conditions.add("(e.department_id = ? OR (e.department_id IS NULL AND e.department = ?))");
+            conditions.add("(e.department_id = ? OR e.department = ?)");
             params.add(user.activeDepartmentId() == null ? "" : user.activeDepartmentId());
             params.add(user.department() == null ? "" : user.department());
         } else if (department != null && !department.isBlank()) {

@@ -483,9 +483,9 @@ public class InventoryDatabaseService {
             for (JsonNode row : rows) {
                 String rowDepartmentId = repository.text(row, "departmentId");
                 boolean stableIdMatches = departmentId != null && !departmentId.isBlank() && departmentId.equals(rowDepartmentId);
-                boolean legacyNameMatches = rowDepartmentId.isBlank()
-                    && department != null && department.equals(repository.text(row, "department"));
-                if (stableIdMatches || legacyNameMatches) filtered.add(row);
+                boolean nameMatches = department != null && !department.isBlank()
+                    && department.equals(repository.text(row, "department"));
+                if (stableIdMatches || nameMatches) filtered.add(row);
             }
         }
         return filtered;

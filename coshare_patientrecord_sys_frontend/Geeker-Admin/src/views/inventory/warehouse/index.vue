@@ -463,7 +463,7 @@ const centralOf = (itemId: string) =>
   stockItems.value.find(item => item.itemId === itemId)?.centralQuantity ?? 0;
 
 const requestLabel = (status: string) =>
-  ({ pending: "待审核", approved: "待发放", partially_issued: "部分发放", issued: "已发放", received: "已发放", rejected: "已驳回", cancelled: "已撤销", void: "已作废" })[status] || status;
+  ({ pending: "待审核", approved: "已通过待发放", partially_issued: "部分发放", issued: "已发放", received: "已发放", rejected: "已驳回", cancelled: "已撤销", void: "已作废" })[status] || status;
 const requestTone = (status: string) =>
   status === "rejected" ? "danger" : status === "received" ? "success" : status === "partially_issued" ? "warning" : "info";
 
