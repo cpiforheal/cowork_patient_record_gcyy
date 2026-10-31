@@ -6,7 +6,10 @@
           <span class="eyebrow">每日固定基线</span>
           <p>{{ date }} · 默认取昨日实际，没有昨日记录时取规则预设</p>
         </div>
-        <el-tag :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
+        <div class="fixed-head-actions">
+          <el-button :icon="Clock" @click="openHistory">历史回看</el-button>
+          <el-tag :type="statusType" effect="plain">{{ statusLabel }}</el-tag>
+        </div>
       </div>
       <el-table :data="rows" max-height="420">
         <el-table-column prop="itemName" label="耗材" min-width="180" show-overflow-tooltip />
@@ -44,6 +47,37 @@
       <el-button type="primary" :disabled="!editable" :loading="submitting" @click="submit">提交固定耗材</el-button>
     </template>
 
+    <el-dialog v-model="historyVisible" title="固定耗材历史回看" width="820px" append-to-body>
+      <div class="history-shell" v-loading="historyLoading">
+        <div class="history-toolbar">
+          <el-radio-group v-model="historyDays" @change="loadHistory">
+            <el-radio-button :label="30">最近 30 天</el-radio-button>
+            <el-radio-button :label="60">最近 60 天</el-radio-button>
+            <el-radio-button :label="90">最近 90 天</el-radio-button>
+          </el-radio-group>
+          <span v-if="historyData">{{ historyData.from }} 至 {{ historyData.to }}</span>
+        </div>
+        <h4>按耗材汇总</h4>
+        <el-table :data="historyData?.items || []" max-height="240">
+          <el-table-column prop="itemName" label="耗材" min-width="180" />
+          <el-table-column prop="unit" label="单位" width="70" />
+          <el-table-column prop="totalQuantity" label="累计数量" width="110" align="right" />
+          <el-table-column prop="daysUsed" label="使用天数" width="90" align="right" />
+        </el-table>
+        <h4>按日期回看</h4>
+        <el-table :data="historyData?.days || []" max-height="260">
+          <el-table-column prop="date" label="业务日" width="110" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">{{ historyStatusLabel(row.status) }}</template>
+          </el-table-column>
+          <el-table-column prop="itemCount" label="耗材项" width="90" align="right" />
+          <el-table-column prop="totalQuantity" label="总量" width="90" align="right" />
+          <el-table-column prop="submittedAt" label="提交时间" min-width="150" />
+        </el-table>
+        <el-empty v-if="!historyLoading && !historyData?.days?.length" :image-size="60" description="范围内没有固定耗材记录" />
+      </div>
+    </el-dialog>
+
     <el-dialog v-model="addVisible" title="临时追加固定耗材" width="520px" append-to-body>
       <el-form label-position="top">
         <el-form-item label="耗材">
@@ -69,10 +103,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus } from "@element-plus/icons-vue";
+import { Clock, Plus } from "@element-plus/icons-vue";
+import dayjs from "dayjs";
 import {
   getInventoryDbApi,
+  getInventoryFixedConsumablesHistoryApi,
   getInventoryFixedConsumablesApi,
+  type InventoryFixedHistory,
   saveInventoryDepartmentDailyReportApi,
   submitInventoryDepartmentDailyReportApi,
   type InventoryFixedConsumable,
@@ -106,6 +143,10 @@ const addItemId = ref("");
 const addQuantity = ref(1);
 const addReason = ref("");
 const allItems = ref<InventoryItem[]>([]);
+const historyVisible = ref(false);
+const historyLoading = ref(false);
+const historyDays = ref(30);
+const historyData = ref<InventoryFixedHistory | null>(null);
 
 const editable = computed(() => !locked.value && ["DRAFT", "RETURNED"].includes(status.value));
 const statusLabel = computed(() => {
@@ -196,6 +237,32 @@ const submit = async () => {
   }
 };
 
+const loadHistory = async () => {
+  historyLoading.value = true;
+  try {
+    const to = dayjs().format("YYYY-MM-DD");
+    const from = dayjs().subtract(historyDays.value - 1, "day").format("YYYY-MM-DD");
+    const result = await getInventoryFixedConsumablesHistoryApi({
+      departmentKey: props.departmentKey,
+      from,
+      to
+    });
+    historyData.value = result.data ?? null;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取固定耗材历史失败");
+  } finally {
+    historyLoading.value = false;
+  }
+};
+
+const openHistory = () => {
+  historyVisible.value = true;
+  void loadHistory();
+};
+
+const historyStatusLabel = (status: string) =>
+  ({ DRAFT: "草稿", SUBMITTED: "待审核", PARTIALLY_APPROVED: "部分通过", APPROVED: "已通过", RETURNED: "已驳回" })[status] || status;
+
 const openAddItem = async () => {
   if (!allItems.value.length) {
     try {
@@ -259,6 +326,33 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.fixed-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  h4 {
+    margin: 6px 0 0;
+    color: #2f2d27;
+    font-size: 13px;
+  }
+}
+
+.history-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  color: #9a9285;
+  font-size: 11px;
 }
 
 .fixed-head {

@@ -167,6 +167,35 @@
             <el-button size="small" type="danger" text :loading="batchBusy" @click="withdrawBatchZeroUse">撤回零使用</el-button>
             <el-button size="small" type="primary" :loading="batchBusy" @click="batchSubmitSelected">提交草稿</el-button>
           </div>
+          <div class="batch-package">
+            <el-checkbox v-model="batchPackageEnabled">套用科室套餐</el-checkbox>
+            <el-select
+              v-if="batchPackageEnabled"
+              v-model="batchPackageId"
+              size="small"
+              filterable
+              placeholder="选择本科室套餐"
+              class="batch-package-select"
+            >
+              <el-option
+                v-for="pkg in patientPackages"
+                :key="pkg.id"
+                :label="`${pkg.name}（${pkg.items.length} 项）`"
+                :value="pkg.id"
+              />
+            </el-select>
+            <el-button
+              v-if="batchPackageEnabled"
+              size="small"
+              type="primary"
+              plain
+              :disabled="!batchPackageId"
+              :loading="batchBusy"
+              @click="applyBatchPackage"
+            >
+              套用到已选
+            </el-button>
+          </div>
         </div>
       </aside>
 
@@ -1219,6 +1248,8 @@ const allVisibleSelected = computed(
 const summaryVisible = ref(false);
 const summaryCopying = ref(false);
 const batchBusy = ref(false);
+const batchPackageEnabled = ref(false);
+const batchPackageId = ref("");
 
 const timeGroupLabel = (value?: string) => {
   const time = value ? dayjs(value) : null;
@@ -2124,6 +2155,79 @@ const batchSubmitSelected = async () => {
   }
 };
 
+const applyBatchPackage = async () => {
+  const pkg = patientPackages.value.find(item => item.id === batchPackageId.value);
+  if (!pkg || !pkg.items.length) {
+    ElMessage.warning("请选择包含耗材的科室套餐");
+    return;
+  }
+  const targets = selectedPatients.value.filter(patient =>
+    ["NOT_STARTED", "DRAFT", "RETURNED"].includes(patient.status) && !patient.noConsumption
+  );
+  if (!targets.length) {
+    ElMessage.warning("已选患者中没有可套用套餐的未完成清单");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将把“${pkg.name}”套用到 ${targets.length} 位患者。已有草稿/驳回清单会被套餐内容替换，已审核通过的清单会跳过。`,
+      "批量套用科室套餐",
+      { confirmButtonText: "套用", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  batchBusy.value = true;
+  let applied = 0;
+  const errors: string[] = [];
+  try {
+    for (const patient of targets) {
+      try {
+        let serviceInstanceId = patient.serviceInstanceId;
+        if (!serviceInstanceId) {
+          const added = await addInventoryManualPatientApi({
+            departmentKey: props.departmentKey,
+            encounterId: patient.encounterId,
+            patientId: patient.patientId,
+            patientName: patient.patientName,
+            visitNo: patient.visitNo,
+            careType: patient.careType,
+            serviceCode: "REGISTRATION",
+            serviceName: "前台登记",
+            sourceType: "REGISTRATION",
+            serviceStartedAt: patient.serviceStartedAt,
+            businessDate: businessDate.value,
+            note: "初诊套用科室套餐"
+          });
+          serviceInstanceId = added.data?.serviceInstanceId || "";
+        }
+        if (!serviceInstanceId) throw new Error("未生成服务实例");
+        await saveInventoryPatientDocumentApi({
+          serviceInstanceId,
+          revision: patient.revision || 0,
+          noConsumption: false,
+          lines: pkg.items.map(item => ({
+            itemId: item.itemId,
+            itemName: item.itemName,
+            unit: item.unit,
+            actualQuantity: Number(item.quantity || 1),
+            source: (item.source as "COMMON" | "PRESET" | "MANUAL" | undefined) || "PRESET",
+            exceptionReason: item.exceptionReason
+          }))
+        });
+        applied++;
+      } catch (error) {
+        errors.push(`${patient.patientName}：${error instanceof Error ? error.message : "套用失败"}`);
+      }
+    }
+    if (errors.length) ElMessage.warning(`已套用 ${applied} 位，${errors.length} 位失败`);
+    else ElMessage.success(`已套用 ${applied} 位患者`);
+    await refreshAfterBatch();
+  } finally {
+    batchBusy.value = false;
+  }
+};
+
 const summaryText = computed(() => {
   const value = summary.value;
   return [
@@ -2840,6 +2944,19 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.batch-package {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-top: 4px;
+  border-top: 1px dashed var(--hos-border-light);
+}
+
+.batch-package-select {
+  min-width: 170px;
 }
 
 .summary-trigger {

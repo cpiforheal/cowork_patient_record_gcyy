@@ -634,6 +634,16 @@ public class InventoryApiController {
         return ApiResult.success(asMap(departmentDailyReportService.fixedConsumables(departmentKey, date, user)));
     }
 
+    @GetMapping("/inventory-api/patient-workbench/fixed-consumables/history")
+    public ApiResult<Map<String, Object>> fixedConsumablesHistory(
+        @RequestParam String departmentKey,
+        @RequestParam(required = false) LocalDate from,
+        @RequestParam(required = false) LocalDate to
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(departmentDailyReportService.fixedHistory(departmentKey, from, to, user)));
+    }
+
     @GetMapping("/inventory-api/patient-workbench/followup-appointments")
     public ApiResult<Map<String, Object>> followupAppointments(
         @RequestParam(required = false) String departmentKey,

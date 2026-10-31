@@ -269,6 +269,73 @@ public class InventoryDepartmentDailyReportService {
     }
 
     @Transactional(readOnly = true)
+    public ObjectNode fixedHistory(String departmentKey, LocalDate from, LocalDate to, SessionUser user) {
+        Department department = requireDepartment(departmentKey, user);
+        LocalDate end = to == null ? LocalDate.now() : to;
+        LocalDate start = from == null ? end.minusDays(29) : from;
+        if (start.isAfter(end)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "开始日期不能晚于结束日期");
+        if (start.plusDays(92).isBefore(end)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "最多回看 92 天");
+        ArrayNode days = jdbcTemplate.query(
+            """
+            SELECT r.id, r.business_date, r.status, r.submitted_at,
+                   COUNT(l.id) item_count, COALESCE(SUM(l.actual_quantity), 0) total_quantity
+            FROM inventory_department_daily_reports r
+            LEFT JOIN inventory_department_daily_report_lines l ON l.report_id = r.id
+            WHERE r.department_key = ? AND r.business_date BETWEEN ? AND ?
+            GROUP BY r.id, r.business_date, r.status, r.submitted_at
+            ORDER BY r.business_date DESC
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("date", resultSet.getDate("business_date").toLocalDate().toString());
+                    row.put("reportId", resultSet.getString("id"));
+                    row.put("status", resultSet.getString("status"));
+                    row.put("itemCount", resultSet.getInt("item_count"));
+                    row.put("totalQuantity", resultSet.getBigDecimal("total_quantity"));
+                    Timestamp submittedAt = resultSet.getTimestamp("submitted_at");
+                    row.put("submittedAt", submittedAt == null ? "" : submittedAt.toLocalDateTime().toString());
+                }
+                return list;
+            },
+            department.key(), start, end
+        );
+        ArrayNode items = jdbcTemplate.query(
+            """
+            SELECT l.item_id, MAX(l.item_name_snapshot) item_name, MAX(l.unit_snapshot) unit,
+                   SUM(l.actual_quantity) total_quantity, COUNT(DISTINCT r.business_date) days_used
+            FROM inventory_department_daily_report_lines l
+            JOIN inventory_department_daily_reports r ON r.id = l.report_id
+            WHERE r.department_key = ? AND r.business_date BETWEEN ? AND ?
+            GROUP BY l.item_id
+            ORDER BY total_quantity DESC
+            """,
+            resultSet -> {
+                ArrayNode list = objectMapper.createArrayNode();
+                while (resultSet.next()) {
+                    ObjectNode row = list.addObject();
+                    row.put("itemId", resultSet.getString("item_id"));
+                    row.put("itemName", resultSet.getString("item_name"));
+                    row.put("unit", resultSet.getString("unit"));
+                    row.put("totalQuantity", resultSet.getBigDecimal("total_quantity"));
+                    row.put("daysUsed", resultSet.getInt("days_used"));
+                }
+                return list;
+            },
+            department.key(), start, end
+        );
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("departmentKey", department.key());
+        result.put("departmentName", department.name());
+        result.put("from", start.toString());
+        result.put("to", end.toString());
+        result.set("days", days);
+        result.set("items", items);
+        return result;
+    }
+
+    @Transactional(readOnly = true)
     public ObjectNode calendar(String departmentKey, String month, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         LocalDate first;

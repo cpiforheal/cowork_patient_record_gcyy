@@ -1955,6 +1955,34 @@ export interface InventoryFixedConsumables {
 export const getInventoryFixedConsumablesApi = async (params: { departmentKey: string; date: string }) =>
   getInventoryData<InventoryFixedConsumables>("/patient-workbench/fixed-consumables", params);
 
+export interface InventoryFixedHistory {
+  departmentKey: string;
+  departmentName: string;
+  from: string;
+  to: string;
+  days: Array<{
+    date: string;
+    reportId: string;
+    status: string;
+    itemCount: number;
+    totalQuantity: number;
+    submittedAt: string;
+  }>;
+  items: Array<{
+    itemId: string;
+    itemName: string;
+    unit: string;
+    totalQuantity: number;
+    daysUsed: number;
+  }>;
+}
+
+export const getInventoryFixedConsumablesHistoryApi = async (params: {
+  departmentKey: string;
+  from?: string;
+  to?: string;
+}) => getInventoryData<InventoryFixedHistory>("/patient-workbench/fixed-consumables/history", params);
+
 export interface InventoryFollowupAppointment {
   recheckId: string;
   planDate: string;
