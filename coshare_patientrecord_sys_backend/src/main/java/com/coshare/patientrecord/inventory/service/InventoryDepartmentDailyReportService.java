@@ -73,12 +73,14 @@ public class InventoryDepartmentDailyReportService {
             result.put("id", "");
             result.put("status", "DRAFT");
             result.put("revision", 0);
+            result.put("zeroUsage", false);
             result.put("note", "");
             result.set("lines", templateLines(department.key()));
         } else {
             result.put("id", report.id());
             result.put("status", report.status());
             result.put("revision", report.revision());
+            result.put("zeroUsage", report.zeroUsage());
             result.put("note", report.note());
             result.put("submittedBy", report.submittedBy());
             result.put("submittedAt", report.submittedAt() == null ? "" : report.submittedAt().toString());
@@ -119,28 +121,30 @@ public class InventoryDepartmentDailyReportService {
             ));
         }
         String note = text(payload, "note");
+        boolean zeroUsage = payload.path("zeroUsage").asBoolean(false);
         String reportId = current == null ? "department-daily-report-" + UUID.randomUUID() : current.id();
         ObjectNode raw = objectMapper.createObjectNode();
         raw.put("departmentKey", department.key());
         raw.put("businessDate", date.toString());
         raw.put("note", note);
+        raw.put("zeroUsage", zeroUsage);
         if (current == null) {
             jdbcTemplate.update(
                 """
                 INSERT INTO inventory_department_daily_reports
-                  (id, department_id, department_key, department_name, business_date, status, revision, note, raw_json)
-                VALUES (?, ?, ?, ?, ?, 'DRAFT', 1, ?, CAST(? AS JSON))
+                  (id, department_id, department_key, department_name, business_date, status, zero_usage, revision, note, raw_json)
+                VALUES (?, ?, ?, ?, ?, 'DRAFT', ?, 1, ?, CAST(? AS JSON))
                 """,
-                reportId, department.id(), department.key(), department.name(), date, note, json(raw)
+                reportId, department.id(), department.key(), department.name(), date, zeroUsage ? 1 : 0, note, json(raw)
             );
         } else {
             jdbcTemplate.update(
                 """
                 UPDATE inventory_department_daily_reports
-                SET revision = revision + 1, note = ?, status = 'DRAFT', raw_json = CAST(? AS JSON)
+                SET revision = revision + 1, note = ?, zero_usage = ?, status = 'DRAFT', raw_json = CAST(? AS JSON)
                 WHERE id = ? AND revision = ?
                 """,
-                note, json(raw), reportId, expectedRevision
+                note, zeroUsage ? 1 : 0, json(raw), reportId, expectedRevision
             );
         }
         jdbcTemplate.update("DELETE FROM inventory_department_daily_report_lines WHERE report_id = ?", reportId);
@@ -178,21 +182,27 @@ public class InventoryDepartmentDailyReportService {
             Integer.class,
             reportId
         );
-        if (positiveLines == null || positiveLines == 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "科室日报至少需要一行实际使用量");
+        if (!report.zeroUsage() && (positiveLines == null || positiveLines == 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "科室日报至少需要一行实际使用量，或标记今日无使用");
         }
+        String nextStatus = report.zeroUsage() ? "APPROVED" : "SUBMITTED";
         jdbcTemplate.update(
             """
             UPDATE inventory_department_daily_reports
-            SET status = 'SUBMITTED', submitted_by = ?, submitted_at = CURRENT_TIMESTAMP(3)
+            SET status = ?, submitted_by = ?, submitted_at = CURRENT_TIMESTAMP(3)
             WHERE id = ?
             """,
-            user.name(), reportId
+            nextStatus, user.name(), reportId
         );
-        upsertApprovalBatch(report);
-        upsertClosure(department, report.businessDate(), "SUBMITTED", user);
-        repository.log(user.name(), "提交科室日报", "department_daily_report", department.name() + " " + report.businessDate(),
-            "已提交库管审核，未扣减库存");
+        if (report.zeroUsage()) {
+            upsertClosure(department, report.businessDate(), "APPROVED", user);
+        } else {
+            upsertApprovalBatch(report);
+            upsertClosure(department, report.businessDate(), "SUBMITTED", user);
+        }
+        repository.log(user.name(), report.zeroUsage() ? "提交科室零使用日" : "提交科室日报",
+            "department_daily_report", department.name() + " " + report.businessDate(),
+            report.zeroUsage() ? "今日无使用，自动完成" : "已提交库管审核，未扣减库存");
         return read(department.key(), report.businessDate(), user);
     }
 
@@ -263,12 +273,14 @@ public class InventoryDepartmentDailyReportService {
                   FROM inventory_service_instances si
                   WHERE si.department_key = ? AND si.business_date BETWEEN ? AND ?
                 ) roster
+                LEFT JOIN inventory_patient_day_statuses st
+                  ON st.department_key = ? AND st.business_date = roster.business_date AND st.patient_id = roster.patient_id
                 LEFT JOIN inventory_patient_consumption_documents d
                   ON d.patient_id = roster.patient_id AND d.department_key = ? AND d.business_date = roster.business_date
+                WHERE st.status IS NULL OR st.status <> 'NOT_ARRIVED'
                 GROUP BY roster.business_date
                 """,
                 resultSet -> {
-                    while (resultSet.next()) {
                         String date = resultSet.getDate("business_date").toLocalDate().toString();
                         ObjectNode row = dayMap.get(date);
                         if (row == null) {
@@ -288,9 +300,8 @@ public class InventoryDepartmentDailyReportService {
                         row.put("returned", resultSet.getInt("returned"));
                         row.put("missing", resultSet.getInt("missing"));
                         row.put("noConsumption", resultSet.getInt("no_consumption"));
-                    }
                 },
-                first, last, department.key(), first, last, department.key()
+                first, last, department.key(), first, last, department.key(), department.key()
             );
         }
         ArrayNode calendarDays = objectMapper.createArrayNode();
@@ -333,6 +344,30 @@ public class InventoryDepartmentDailyReportService {
             : "SELECT MIN(business_date) FROM inventory_service_instances WHERE department_key = ?";
         java.sql.Date earliest = jdbcTemplate.query(sql, resultSet -> resultSet.next() ? resultSet.getDate(1) : null, department.key());
         return earliest == null ? LocalDate.now() : earliest.toLocalDate();
+    }
+
+    @Transactional
+    public ObjectNode withdrawZeroUse(String reportId, SessionUser user) {
+        Report report = loadReportById(reportId);
+        if (report == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室日报不存在");
+        Department department = requireDepartment(report.departmentKey(), user);
+        if (!report.businessDate().equals(LocalDate.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "锁日后请使用带原因的更正");
+        }
+        if (!report.zeroUsage() || !"APPROVED".equals(report.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该日报不是零使用状态");
+        }
+        jdbcTemplate.update(
+            "UPDATE inventory_department_daily_reports SET status = 'DRAFT', zero_usage = 0, submitted_by = NULL, submitted_at = NULL WHERE id = ?",
+            reportId
+        );
+        jdbcTemplate.update(
+            "UPDATE inventory_department_day_closures SET status = 'OPEN' WHERE department_id = ? AND business_date = ?",
+            department.id(), report.businessDate()
+        );
+        repository.log(user.name(), "撤回科室零使用日", "department_daily_report",
+            department.name() + " " + report.businessDate(), "恢复为草稿");
+        return read(department.key(), report.businessDate(), user);
     }
 
     @Transactional(readOnly = true)
@@ -507,8 +542,9 @@ public class InventoryDepartmentDailyReportService {
         return new Report(
             resultSet.getString("id"), resultSet.getString("department_id"), resultSet.getString("department_key"),
             resultSet.getString("department_name"), resultSet.getDate("business_date").toLocalDate(),
-            resultSet.getString("status"), resultSet.getInt("revision"), resultSet.getString("note"),
-            resultSet.getString("submitted_by"), submittedAt == null ? null : submittedAt.toLocalDateTime()
+            resultSet.getString("status"), resultSet.getBoolean("zero_usage"), resultSet.getInt("revision"),
+            resultSet.getString("note"), resultSet.getString("submitted_by"),
+            submittedAt == null ? null : submittedAt.toLocalDateTime()
         );
     }
 
@@ -661,5 +697,6 @@ public class InventoryDepartmentDailyReportService {
     private record Item(String id, String name, String unit) {}
     private record Line(String itemId, String itemName, String unit, BigDecimal presetQuantity, BigDecimal actualQuantity, String source, String exceptionReason) {}
     private record Report(String id, String departmentId, String departmentKey, String departmentName, LocalDate businessDate,
-                          String status, int revision, String note, String submittedBy, LocalDateTime submittedAt) {}
+                          String status, boolean zeroUsage, int revision, String note, String submittedBy,
+                          LocalDateTime submittedAt) {}
 }

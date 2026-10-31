@@ -140,6 +140,12 @@ public class InventoryAdminReviewService {
                     FROM pre_ai_encounters e
                     LEFT JOIN pre_ai_patient_cases c ON c.id = e.patient_case_id
                     WHERE e.status <> 'CANCELLED' AND DATE(e.created_at) BETWEEN ? AND ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM inventory_patient_day_statuses st
+                        WHERE st.department_key = ? AND st.business_date = DATE(e.created_at)
+                          AND st.patient_id = COALESCE(NULLIF(e.source_patient_id, ''), e.patient_case_id, e.id)
+                          AND st.status = 'NOT_ARRIVED'
+                      )
                     GROUP BY DATE(e.created_at), COALESCE(NULLIF(e.source_patient_id, ''), e.patient_case_id, e.id)
                     ORDER BY business_date, patient_name
                     """,
@@ -156,7 +162,7 @@ public class InventoryAdminReviewService {
                             items.add(patientAnomaly("MISSING", "BLOCKING", row, "已登记但尚未录入耗材", null, null));
                         }
                     },
-                    start, end
+                    start, end, selected.key()
                 );
             }
         }
@@ -490,6 +496,11 @@ public class InventoryAdminReviewService {
             FROM inventory_service_instances si
             LEFT JOIN inventory_patient_consumption_documents d ON d.service_instance_id = si.id
             WHERE si.business_date BETWEEN ? AND ? AND (? = '' OR si.department_key = ?)
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_patient_day_statuses st
+                WHERE st.department_key = si.department_key AND st.business_date = si.business_date
+                  AND st.patient_id = si.patient_id AND st.status = 'NOT_ARRIVED'
+              )
             ORDER BY si.department_key, si.business_date, si.patient_name
             """,
             (resultSet, rowNum) -> new InstanceRow(

@@ -211,6 +211,14 @@ public class InventoryApiController {
         return ApiResult.of(200, "科室日报已提交", asMap(departmentDailyReportService.submit(reportId, user)));
     }
 
+    @PostMapping("/inventory-api/department-daily-reports/{reportId}/zero-use/withdraw")
+    public ApiResult<Map<String, Object>> withdrawDepartmentZeroUse(
+        @org.springframework.web.bind.annotation.PathVariable String reportId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "零使用日已撤回", asMap(departmentDailyReportService.withdrawZeroUse(reportId, user)));
+    }
+
     @GetMapping("/inventory-api/department-daily-reports/{reportId}/export/{format}")
     public ResponseEntity<byte[]> exportDepartmentDailyReport(
         @org.springframework.web.bind.annotation.PathVariable String reportId,
@@ -611,6 +619,30 @@ public class InventoryApiController {
     public ApiResult<Map<String, Object>> addManualPatient(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.of(200, "患者已加入本科室工作台", asMap(patientConsumptionService.manualAdd(toJson(payload), user)));
+    }
+
+    @PutMapping("/inventory-api/patient-workbench/day-status")
+    public ApiResult<Map<String, Object>> setPatientDayStatus(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者状态已更新", asMap(patientConsumptionService.setDayStatuses(toJson(payload), user)));
+    }
+
+    @PutMapping("/inventory-api/patient-workbench/day-status/restore")
+    public ApiResult<Map<String, Object>> restorePatientDayStatus(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "患者已恢复待录", asMap(patientConsumptionService.restoreDayStatuses(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/zero-use")
+    public ApiResult<Map<String, Object>> batchZeroUse(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "已标记未使用", asMap(patientConsumptionService.batchZeroUse(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/patient-workbench/zero-use/withdraw")
+    public ApiResult<Map<String, Object>> withdrawZeroUse(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "已撤回未使用", asMap(patientConsumptionService.withdrawZeroUse(toJson(payload), user)));
     }
 
     @PutMapping("/inventory-api/patient-workbench/documents")

@@ -35,12 +35,18 @@
     </header>
 
     <div class="status-strip">
-      <span class="status-progress">已录 <b>{{ summary.entered || 0 }}</b> / <b>{{ summary.total || 0 }}</b></span>
+      <span class="status-progress">已录 <b>{{ summary.entered || 0 }}</b> / <b>{{ summary.expected ?? summary.total ?? 0 }}</b></span>
       <span><b>{{ summary.notStarted || 0 }}</b> 未录</span>
       <span><b>{{ summary.draft || 0 }}</b> 草稿</span>
       <span><b>{{ summary.submitted || 0 }}</b> 待审</span>
       <span><b>{{ summary.returned || 0 }}</b> 驳回</span>
       <span><b>{{ summary.approved || 0 }}</b> 通过</span>
+      <span v-if="summary.notArrived"><b>{{ summary.notArrived }}</b> 未到</span>
+      <span v-if="summary.deferred"><b>{{ summary.deferred }}</b> 暂缓</span>
+      <span v-if="(summary.pendingSlaOverdue || 0) + (summary.returnedSlaOverdue || 0)" class="sla-overdue">
+        <b>{{ (summary.pendingSlaOverdue || 0) + (summary.returnedSlaOverdue || 0) }}</b> 超8h
+      </span>
+      <button type="button" class="summary-trigger" @click="summaryVisible = true">今日摘要</button>
       <span v-if="businessDate !== todayValue" class="backfill-badge">补录模式</span>
       <div class="status-progress-bar" aria-hidden="true">
         <span :style="{ width: `${progress}%` }"></span>
@@ -77,44 +83,88 @@
             <el-option label="待审核" value="SUBMITTED" />
             <el-option label="已驳回" value="RETURNED" />
             <el-option label="已通过" value="APPROVED" />
+            <el-option label="未到" value="NOT_ARRIVED" />
+            <el-option label="暂缓" value="DEFERRED" />
           </el-select>
+          <div class="patient-panel-tools">
+            <el-checkbox :model-value="allVisibleSelected" @update:model-value="value => toggleAllVisible(Boolean(value))">
+              全选当前筛选
+            </el-checkbox>
+            <span>{{ filteredPatients.length }} 人</span>
+          </div>
         </div>
 
         <div class="patient-list" role="list">
-          <button
-            v-for="patient in filteredPatients"
-            :key="patient.serviceInstanceId || patient.encounterId || patient.patientId"
-            type="button"
-            class="patient-card"
-            :class="{
-              'is-active': selectedId === patient.serviceInstanceId,
-              [`tone-${statusTone(patient.status)}`]: true
-            }"
-            role="listitem"
-            @click="selectPatient(patient)"
-          >
-            <span class="patient-card-main">
-              <span class="patient-name">{{ patient.patientName || "未命名患者" }}</span>
-              <span class="patient-meta">
-                {{ patient.serviceName || "服务" }}
-                <i aria-hidden="true">·</i>
-                {{ maskVisitNo(patient.visitNo) }}
-              </span>
-            </span>
-            <span class="patient-card-side">
-              <el-tag v-if="patient.attentionFlag" type="danger" size="small" effect="plain">重点</el-tag>
-              <el-tag v-if="patient.noConsumption" type="info" size="small" effect="plain">未使用</el-tag>
-              <el-tag :type="statusType(patient.status)" size="small" effect="plain">
-                {{ statusLabel(patient.status) }}
-              </el-tag>
-              <small>{{ patient.lineCount || 0 }} 项</small>
-            </span>
-          </button>
+          <template v-for="(patient, index) in filteredPatients" :key="patientKey(patient)">
+            <div v-if="showTimeGroup(index)" class="timeline-mark" aria-hidden="true">
+              <span>{{ timeGroupLabel(patient.arrivalAt || patient.serviceStartedAt) }}</span>
+              <i />
+            </div>
+            <div
+              class="patient-card"
+              :class="{
+                'is-active': selectedId === patient.serviceInstanceId,
+                [`tone-${statusTone(patient.status)}`]: true,
+                'is-not-arrived': patient.patientState === 'NOT_ARRIVED',
+                'is-deferred': patient.patientState === 'DEFERRED'
+              }"
+              role="listitem"
+            >
+              <el-checkbox
+                class="patient-select"
+                :model-value="selectedPatientKeys.includes(patientKey(patient))"
+                :aria-label="`选择 ${patient.patientName || '患者'}`"
+                @update:model-value="value => togglePatientSelection(patient, Boolean(value))"
+                @click.stop
+              />
+              <button type="button" class="patient-card-body" @click="selectPatient(patient)">
+                <span class="patient-card-main">
+                  <span class="patient-name">{{ patient.patientName || "未命名患者" }}</span>
+                  <span class="patient-meta">
+                    {{ arrivalLabel(patient) }}
+                    <i aria-hidden="true">·</i>
+                    {{ patient.serviceName || "服务" }}
+                    <i aria-hidden="true">·</i>
+                    {{ maskVisitNo(patient.visitNo) }}
+                  </span>
+                  <span v-if="slaLabel(patient)" class="sla-label" :class="`is-${slaTone(patient)}`">
+                    {{ slaLabel(patient) }}
+                  </span>
+                </span>
+                <span class="patient-card-side">
+                  <el-tag v-if="patient.attentionFlag" type="danger" size="small" effect="plain">重点</el-tag>
+                  <el-tag v-if="patient.patientState === 'NOT_ARRIVED'" type="info" size="small" effect="plain">未到</el-tag>
+                  <el-tag v-else-if="patient.patientState === 'DEFERRED'" type="warning" size="small" effect="plain">暂缓</el-tag>
+                  <el-tag v-if="patient.noConsumption" type="info" size="small" effect="plain">未使用</el-tag>
+                  <el-tag :type="statusType(patient.status)" size="small" effect="plain">
+                    {{ statusLabel(patient.status) }}
+                  </el-tag>
+                  <small>{{ patient.lineCount || 0 }} 项</small>
+                </span>
+              </button>
+            </div>
+          </template>
           <el-empty
             v-if="!filteredPatients.length"
             :image-size="70"
             description="当前筛选下没有患者；可手动补录"
           />
+        </div>
+        <div v-if="selectedPatientKeys.length" class="batch-bar">
+          <div class="batch-bar-head">
+            <strong>已选 {{ selectedPatientKeys.length }} 人</strong>
+            <el-checkbox :model-value="allVisibleSelected" @update:model-value="value => toggleAllVisible(Boolean(value))">
+              全选当前
+            </el-checkbox>
+          </div>
+          <div class="batch-bar-actions">
+            <el-button size="small" :loading="batchBusy" @click="runBatchStatus('NOT_ARRIVED')">未到</el-button>
+            <el-button size="small" :loading="batchBusy" @click="runBatchStatus('DEFERRED')">暂缓</el-button>
+            <el-button size="small" :loading="batchBusy" @click="restoreBatchStatus">恢复待录</el-button>
+            <el-button size="small" type="warning" plain :loading="batchBusy" @click="runBatchZeroUse">零使用</el-button>
+            <el-button size="small" type="danger" text :loading="batchBusy" @click="withdrawBatchZeroUse">撤回零使用</el-button>
+            <el-button size="small" type="primary" :loading="batchBusy" @click="batchSubmitSelected">提交草稿</el-button>
+          </div>
         </div>
       </aside>
 
@@ -723,6 +773,7 @@
             clearable
             @change="loadPatientSource(true)"
           />
+          <el-input v-model="sourceLateReason" placeholder="补录原因（补录历史日必填）" clearable />
           <el-button :icon="Refresh" :loading="sourceLoading" @click="loadPatientSource(true)">刷新</el-button>
           <el-button @click="openManualDialog">手动新增</el-button>
           <el-switch v-model="sourceOnlyUnadded" active-text="只看未加入" />
@@ -862,6 +913,27 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="summaryVisible" title="今日摘要" width="520px">
+      <div class="summary-dialog">
+        <div class="summary-dialog-grid">
+          <div><small>应填</small><strong>{{ summary.expected ?? summary.total ?? 0 }}</strong></div>
+          <div><small>已填</small><strong>{{ summary.entered || 0 }}</strong></div>
+          <div><small>未录</small><strong>{{ summary.notStarted || 0 }}</strong></div>
+          <div><small>待审核</small><strong>{{ summary.submitted || 0 }}</strong></div>
+          <div><small>驳回</small><strong>{{ summary.returned || 0 }}</strong></div>
+          <div><small>未到</small><strong>{{ summary.notArrived || 0 }}</strong></div>
+          <div><small>暂缓</small><strong>{{ summary.deferred || 0 }}</strong></div>
+          <div><small>待审/驳回超8h</small><strong>{{ (summary.pendingSlaOverdue || 0) + (summary.returnedSlaOverdue || 0) }}</strong></div>
+        </div>
+        <p class="summary-time">生成于 {{ dayjs().format("YYYY-MM-DD HH:mm") }} · {{ businessDate }}</p>
+        <p class="summary-text">{{ summaryText }}</p>
+      </div>
+      <template #footer>
+        <el-button @click="summaryVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="summaryCopying" @click="copySummary">复制摘要</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -874,7 +946,11 @@ import { pinyin } from "pinyin-pro";
 import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
 import {
   addInventoryManualPatientApi,
+  batchInventoryPatientZeroUseApi,
   deleteInventoryPatientPackageApi,
+  restoreInventoryPatientDayStatusApi,
+  setInventoryPatientDayStatusApi,
+  withdrawInventoryPatientZeroUseApi,
   getInventoryDepartmentDailyReportCalendarApi,
   getInventoryPatientDetailApi,
   getInventoryPatientLastCombinationApi,
@@ -971,6 +1047,7 @@ const sourceVisitType = ref("");
 const sourceDepartment = ref("");
 const sourceDepartments = ref<string[]>([]);
 const sourceDate = ref(todayValue);
+const sourceLateReason = ref("");
 const sourceRows = ref<InventoryPatientSourceRow[]>([]);
 const sourceTotal = ref(0);
 const sourcePage = ref(1);
@@ -1062,22 +1139,79 @@ const selectedTone = (line: EditableLine) => {
 const selectedSourceLabel = (source: EditableLine["source"]) =>
   source === "COMMON" ? "常用" : source === "MANUAL" ? "追加" : "预设";
 
+const patientKey = (patient: InventoryPatientWorkbenchRow) =>
+  patient.serviceInstanceId || patient.encounterId || patient.patientId;
+
 const filteredPatients = computed(() => {
   const keyword = patientKeyword.value.trim().toLowerCase();
-  return workbench.value.patients.filter(patient => {
-    if (statusFilter.value !== "ALL") {
-      if (statusFilter.value === "SUBMITTED") {
-        if (!["SUBMITTED", "PARTIALLY_APPROVED"].includes(patient.status)) return false;
-      } else if (patient.status !== statusFilter.value) {
-        return false;
+  return workbench.value.patients
+    .filter(patient => {
+      if (["NOT_ARRIVED", "DEFERRED"].includes(statusFilter.value)) {
+        if (patient.patientState !== statusFilter.value) return false;
+      } else if (statusFilter.value !== "ALL") {
+        if (patient.patientState === "NOT_ARRIVED") return false;
+        if (statusFilter.value === "SUBMITTED") {
+          if (!["SUBMITTED", "PARTIALLY_APPROVED"].includes(patient.status)) return false;
+        } else if (patient.status !== statusFilter.value) {
+          return false;
+        }
       }
-    }
-    if (!keyword) return true;
-    return [patient.patientName, patient.visitNo, patient.serviceName, patient.encounterId]
-      .filter(Boolean)
-      .some(value => String(value).toLowerCase().includes(keyword));
-  });
+      if (!keyword) return true;
+      return [patient.patientName, patient.visitNo, patient.serviceName, patient.encounterId]
+        .filter(Boolean)
+        .some(value => String(value).toLowerCase().includes(keyword));
+    })
+    .sort((a, b) => String(a.arrivalAt || a.serviceStartedAt || "").localeCompare(String(b.arrivalAt || b.serviceStartedAt || "")));
 });
+
+const selectedPatientKeys = ref<string[]>([]);
+const selectedPatients = computed(() =>
+  workbench.value.patients.filter(patient => selectedPatientKeys.value.includes(patientKey(patient)))
+);
+const allVisibleSelected = computed(
+  () => filteredPatients.value.length > 0 && filteredPatients.value.every(patient => selectedPatientKeys.value.includes(patientKey(patient)))
+);
+const summaryVisible = ref(false);
+const summaryCopying = ref(false);
+const batchBusy = ref(false);
+
+const timeGroupLabel = (value?: string) => {
+  const time = value ? dayjs(value) : null;
+  return time?.isValid() ? time.format("HH:00") : "时间未记录";
+};
+const showTimeGroup = (index: number) => {
+  if (index === 0) return true;
+  return timeGroupLabel(filteredPatients.value[index].arrivalAt || filteredPatients.value[index].serviceStartedAt)
+    !== timeGroupLabel(filteredPatients.value[index - 1].arrivalAt || filteredPatients.value[index - 1].serviceStartedAt);
+};
+const arrivalLabel = (patient: InventoryPatientWorkbenchRow) => {
+  const time = patient.arrivalAt || patient.serviceStartedAt;
+  return time && dayjs(time).isValid() ? dayjs(time).format("HH:mm") : "—";
+};
+const slaLabel = (patient: InventoryPatientWorkbenchRow) => {
+  const age = Number(patient.statusAgeMinutes || 0);
+  if (!age) return "";
+  if (patient.status === "RETURNED") return `驳回 ${Math.floor(age / 60)}h`;
+  if (["SUBMITTED", "PARTIALLY_APPROVED"].includes(patient.status)) return `待审 ${Math.floor(age / 60)}h`;
+  return "";
+};
+const slaTone = (patient: InventoryPatientWorkbenchRow) => {
+  const age = Number(patient.statusAgeMinutes || 0);
+  if (age >= 480) return "overdue";
+  if (age >= 120) return "warn";
+  return "";
+};
+const togglePatientSelection = (patient: InventoryPatientWorkbenchRow, checked: boolean) => {
+  const key = patientKey(patient);
+  if (checked) {
+    if (!selectedPatientKeys.value.includes(key)) selectedPatientKeys.value.push(key);
+  } else {
+    selectedPatientKeys.value = selectedPatientKeys.value.filter(item => item !== key);
+  }
+};
+const toggleAllVisible = (checked: boolean) => {
+  selectedPatientKeys.value = checked ? filteredPatients.value.map(patientKey) : [];
+};
 
 const presetItems = computed(() => detail.value?.presetItems?.items ?? []);
 const dedupedPresetItems = computed<DisplayItem[]>(() => {
@@ -1477,10 +1611,11 @@ const clearUnapproved = () => {
   });
 };
 
-const buildPayload = (noConsumption = false) => ({
+const buildPayload = (noConsumption = false, correctionReason = "") => ({
   serviceInstanceId: detail.value!.serviceInstanceId,
   revision: detail.value!.revision || 0,
   noConsumption,
+  correctionReason: correctionReason || undefined,
   lines: noConsumption
     ? []
     : selectedLines.value
@@ -1497,13 +1632,13 @@ const buildPayload = (noConsumption = false) => ({
         }))
 });
 
-const persistDraft = async (silent = false, noConsumption = false) => {
+const persistDraft = async (silent = false, noConsumption = false, correctionReason = "") => {
   if (!detail.value) return undefined;
   if (!noConsumption && selectedLines.value.filter(line => line.reviewStatus !== "APPROVED").length === 0) {
     if (!silent) ElMessage.warning("未选择耗材；如确实未使用，请点“未使用并下一位”");
     return undefined;
   }
-  const result = await saveInventoryPatientDocumentApi(buildPayload(noConsumption));
+  const result = await saveInventoryPatientDocumentApi(buildPayload(noConsumption, correctionReason));
   applyDetail(result.data);
   saveState.value = `已保存 ${dayjs().format("HH:mm")}`;
   await refreshWorkbenchOnly();
@@ -1512,15 +1647,32 @@ const persistDraft = async (silent = false, noConsumption = false) => {
   return result.data;
 };
 
+const promptCorrectionReason = async () => {
+  if (businessDate.value >= todayValue) return "";
+  try {
+    const result = await ElMessageBox.prompt("业务日已过，请填写补录/更正原因", "补录与更正", {
+      confirmButtonText: "继续保存",
+      cancelButtonText: "取消",
+      inputPlaceholder: "例如：患者离开后才补录",
+      inputValidator: value => Boolean(value && String(value).trim()) || "必须填写原因"
+    });
+    return String(result.value || "").trim();
+  } catch {
+    return null;
+  }
+};
+
 const saveDraft = async () => {
   if (!detail.value) return;
   if (selectedLines.value.some(line => line.actualQuantity <= 0)) {
     ElMessage.warning("已勾选耗材的数量必须大于零");
     return;
   }
+  const correctionReason = await promptCorrectionReason();
+  if (correctionReason === null) return;
   saving.value = true;
   try {
-    await persistDraft();
+    await persistDraft(false, false, correctionReason);
     ElMessage.success("患者耗材清单已保存");
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "保存患者耗材清单失败");
@@ -1547,11 +1699,13 @@ const submitDocument = async () => {
   } catch {
     return;
   }
+  const correctionReason = await promptCorrectionReason();
+  if (correctionReason === null) return;
   submitting.value = true;
   try {
     let current = detail.value;
-    if (!current.documentId) {
-      current = (await persistDraft()) ?? current;
+    if (!current.documentId || correctionReason) {
+      current = (await persistDraft(true, false, correctionReason)) ?? current;
     }
     const result = await submitInventoryPatientDocumentApi(current.documentId);
     applyDetail(result.data);
@@ -1746,6 +1900,176 @@ const submitBatch = async () => {
   }
 };
 
+const refreshAfterBatch = async () => {
+  selectedPatientKeys.value = [];
+  await loadWorkbench(false);
+  void loadCalendar();
+};
+
+const runBatchStatus = async (status: "NOT_ARRIVED" | "DEFERRED") => {
+  const targets = selectedPatients.value.filter(patient => patient.status === "NOT_STARTED");
+  if (!targets.length) {
+    ElMessage.warning("只能对尚未开始录入的患者标记未到或暂缓");
+    return;
+  }
+  batchBusy.value = true;
+  try {
+    await setInventoryPatientDayStatusApi({
+      departmentKey: props.departmentKey,
+      businessDate: businessDate.value,
+      patientIds: targets.map(patient => patient.patientId),
+      status
+    });
+    ElMessage.success(status === "NOT_ARRIVED" ? "已标记未到" : "已标记暂缓");
+    await refreshAfterBatch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "批量状态更新失败");
+  } finally {
+    batchBusy.value = false;
+  }
+};
+
+const restoreBatchStatus = async () => {
+  if (!selectedPatients.value.length) {
+    ElMessage.warning("请先勾选患者");
+    return;
+  }
+  batchBusy.value = true;
+  try {
+    await restoreInventoryPatientDayStatusApi({
+      departmentKey: props.departmentKey,
+      businessDate: businessDate.value,
+      patientIds: selectedPatients.value.map(patient => patient.patientId)
+    });
+    ElMessage.success("已恢复为待录");
+    await refreshAfterBatch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "恢复待录失败");
+  } finally {
+    batchBusy.value = false;
+  }
+};
+
+const zeroUseTargets = computed(() =>
+  selectedPatients.value.length ? selectedPatients.value : filteredPatients.value.filter(patient => patient.patientState !== "NOT_ARRIVED")
+);
+
+const runBatchZeroUse = async () => {
+  const targets = zeroUseTargets.value;
+  if (!targets.length) {
+    ElMessage.warning("当前没有可标记的患者");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将为当前 ${targets.length} 位患者逐人标记“未使用”。之后新到的患者仍保持待录。`,
+      "批量零使用",
+      { confirmButtonText: "确认标记", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  batchBusy.value = true;
+  try {
+    const result = await batchInventoryPatientZeroUseApi({
+      departmentKey: props.departmentKey,
+      businessDate: businessDate.value,
+      patients: targets.map(patient => ({
+        patientId: patient.patientId,
+        encounterId: patient.encounterId,
+        patientName: patient.patientName,
+        visitNo: patient.visitNo,
+        careType: patient.careType
+      }))
+    });
+    const updated = result.data?.updated || 0;
+    const errors = result.data?.errors || [];
+    if (errors.length) ElMessage.warning(`已处理 ${updated} 人，${errors.length} 人需检查`);
+    else ElMessage.success(`已标记 ${updated} 位患者未使用`);
+    await refreshAfterBatch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "批量零使用失败");
+  } finally {
+    batchBusy.value = false;
+  }
+};
+
+const withdrawBatchZeroUse = async () => {
+  const targets = zeroUseTargets.value;
+  if (!targets.length) return;
+  try {
+    await ElMessageBox.confirm(`撤回当前 ${targets.length} 位患者的未使用记录？`, "撤回零使用", {
+      confirmButtonText: "撤回",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  batchBusy.value = true;
+  try {
+    const result = await withdrawInventoryPatientZeroUseApi({
+      departmentKey: props.departmentKey,
+      businessDate: businessDate.value,
+      patientIds: targets.map(patient => patient.patientId)
+    });
+    ElMessage.success(`已撤回 ${result.data?.withdrawn || 0} 份未使用记录`);
+    await refreshAfterBatch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "撤回零使用失败");
+  } finally {
+    batchBusy.value = false;
+  }
+};
+
+const batchSubmitSelected = async () => {
+  const targets = selectedPatients.value.filter(patient => patient.documentId && patient.status === "DRAFT");
+  if (!targets.length) {
+    ElMessage.warning("已选患者中没有可提交的草稿");
+    return;
+  }
+  batchBusy.value = true;
+  let submitted = 0;
+  try {
+    for (const patient of targets) {
+      await submitInventoryPatientDocumentApi(patient.documentId);
+      submitted++;
+    }
+    ElMessage.success(`已提交 ${submitted} 位患者`);
+    await refreshAfterBatch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "批量提交失败");
+  } finally {
+    batchBusy.value = false;
+  }
+};
+
+const summaryText = computed(() => {
+  const value = summary.value;
+  return [
+    `今日摘要 ${businessDate.value}`,
+    `应填 ${value.expected ?? value.total ?? 0} 人`,
+    `已填 ${value.entered || 0} 人`,
+    `未录 ${value.notStarted || 0} 人`,
+    `待审 ${value.submitted || 0} 人`,
+    `驳回 ${value.returned || 0} 人`,
+    `未到 ${value.notArrived || 0} 人`,
+    `暂缓 ${value.deferred || 0} 人`
+  ].join(" · ");
+});
+
+const copySummary = async () => {
+  summaryCopying.value = true;
+  try {
+    await navigator.clipboard.writeText(summaryText.value);
+    ElMessage.success("摘要已复制");
+  } catch {
+    ElMessage.warning("当前浏览器不允许复制，请手动选择文本");
+  } finally {
+    summaryCopying.value = false;
+  }
+};
+
 const refreshWorkbenchOnly = async () => {
   const result = await getInventoryPatientWorkbenchApi({
     departmentKey: props.departmentKey,
@@ -1813,6 +2137,7 @@ const openPatientSource = async () => {
   sourceVisitType.value = "";
   sourceDepartment.value = "";
   sourceDate.value = businessDate.value;
+  sourceLateReason.value = "";
   sourcePage.value = 1;
   sourceDrawerVisible.value = true;
   await loadPatientSource(true);
@@ -1859,6 +2184,11 @@ const addPatientFromSource = async (row: InventoryPatientSourceRow) => {
     ElMessage.warning("该患者没有可用就诊记录");
     return;
   }
+  const targetDate = sourceDate.value || businessDate.value;
+  if (targetDate !== businessDate.value && !sourceLateReason.value.trim()) {
+    ElMessage.warning("补录历史日期需要填写补录原因");
+    return;
+  }
   const existing = workbench.value.patients.find(patient =>
     patient.encounterId === row.encounterId || patient.patientId === row.patientId
   );
@@ -1882,10 +2212,12 @@ const addPatientFromSource = async (row: InventoryPatientSourceRow) => {
       serviceCode: "ARCHIVE",
       serviceName: "患者档案加入",
       serviceStartedAt: startedAt,
-      businessDate: businessDate.value,
-      note: "从患者档案加入"
+      businessDate: targetDate,
+      lateReason: targetDate !== todayValue ? sourceLateReason.value.trim() : undefined,
+      note: targetDate !== todayValue ? "患者档案补录" : "从患者档案加入"
     });
     sourceDrawerVisible.value = false;
+    if (targetDate !== businessDate.value) businessDate.value = targetDate;
     await loadWorkbench(false);
     const added = workbench.value.patients.find(patient => patient.serviceInstanceId === result.data?.serviceInstanceId);
     if (added) await selectPatient(added, true);
@@ -2264,18 +2596,48 @@ onMounted(() => {
 
 .patient-list {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
   padding: 10px;
   overflow: auto;
 }
 
+.patient-panel-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--hos-text-muted);
+  font-size: 10px;
+}
+
+.timeline-mark {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 2px 0;
+  color: var(--hos-text-muted);
+  font-size: 10px;
+
+  span {
+    min-width: 42px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  i {
+    flex: 1;
+    height: 1px;
+    background: var(--hos-border-light);
+  }
+}
+
 .patient-card {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   align-items: flex-start;
-  justify-content: space-between;
-  padding: 12px;
+  padding: 8px 10px 8px 6px;
   background: var(--hos-bg-surface);
   border: 1px solid transparent;
   border-radius: 12px;
@@ -2314,11 +2676,150 @@ onMounted(() => {
     border-left: 3px solid #3f8a62;
   }
 
+  &.is-not-arrived {
+    opacity: 0.62;
+    border-left-style: dashed;
+  }
+
+  &.is-deferred {
+    border-left-color: #b7791f;
+  }
+
   &.is-active {
     background: var(--hos-primary-soft);
     border-color: var(--hos-primary);
     border-left: 3px solid var(--hos-primary);
   }
+}
+
+.patient-select {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+
+.patient-card-body {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 4px 2px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+
+  &:focus-visible {
+    outline: 2px solid var(--hos-primary);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+}
+
+.sla-label {
+  align-self: flex-start;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+
+  &.is-warn {
+    color: #8a5a13;
+    background: #fdf6e7;
+  }
+
+  &.is-overdue {
+    color: #a33f3f;
+    background: #fbefef;
+  }
+}
+
+.batch-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fffdf9;
+  border-top: 1px solid var(--hos-border-light);
+  box-shadow: 0 -6px 16px rgb(47 45 39 / 6%);
+}
+
+.batch-bar-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--hos-text-secondary);
+  font-size: 11px;
+}
+
+.batch-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.summary-trigger {
+  padding: 2px 8px;
+  color: var(--hos-primary);
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--hos-primary-soft);
+  border: 1px solid #cfe6da;
+  border-radius: 999px;
+}
+
+.sla-overdue {
+  color: #a33f3f;
+}
+
+.summary-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.summary-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 10px;
+    background: #f8f5ef;
+    border-radius: 9px;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 19px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.summary-time,
+.summary-text {
+  margin: 0;
+  color: var(--hos-text-muted);
+  font-size: 11px;
+}
+
+.summary-text {
+  padding: 8px 10px;
+  color: var(--hos-text-secondary);
+  background: #f8f5ef;
+  border-radius: 8px;
 }
 
 .patient-card-main {

@@ -66,7 +66,7 @@ public class InventoryPatientConsumptionService {
         ArrayNode instanceRows = jdbcTemplate.query(
             """
             SELECT si.*, d.id document_id, d.status document_status, d.revision document_revision,
-                   d.submitted_at, d.submitted_by, d.no_consumption document_no_consumption,
+                   d.submitted_at, d.updated_at document_updated_at, d.submitted_by, d.no_consumption document_no_consumption,
                    COALESCE((SELECT SUM(l.actual_quantity)
                              FROM inventory_patient_consumption_lines l
                              WHERE l.document_id = d.id), 0) total_quantity,
@@ -155,6 +155,20 @@ public class InventoryPatientConsumptionService {
         for (JsonNode node : instanceRows) {
             if (!(node instanceof ObjectNode row)) continue;
             if (usedInstances.add(row.path("serviceInstanceId").asText())) patients.add(row);
+        }
+        Map<String, String> dayStates = new java.util.HashMap<>();
+        jdbcTemplate.query(
+            "SELECT patient_id, status FROM inventory_patient_day_statuses WHERE department_key = ? AND business_date = ?",
+            resultSet -> {
+                dayStates.put(resultSet.getString("patient_id"), resultSet.getString("status"));
+            },
+            department.key(), date
+        );
+        for (JsonNode node : patients) {
+            if (!(node instanceof ObjectNode row)) continue;
+            String state = dayStates.getOrDefault(row.path("patientId").asText(), "");
+            row.put("patientState", state);
+            if (row.path("arrivalAt").asText("").isBlank()) row.put("arrivalAt", row.path("serviceStartedAt").asText(""));
         }
         ObjectNode result = JsonNodeFactory.instance.objectNode();
         result.put("departmentKey", department.key());
@@ -279,6 +293,11 @@ public class InventoryPatientConsumptionService {
             "UPDATE inventory_service_instances SET status = 'DRAFT' WHERE id = ? AND status = 'OPEN'",
             instance.id()
         );
+        String correctionReason = text(payload, "correctionReason");
+        if (!correctionReason.isBlank()) {
+            logEntryChange(instance.departmentKey(), instance.businessDate(), instance.patientId(), documentId,
+                "CORRECTION", correctionReason, user);
+        }
         repository.log(user.name(), "保存患者耗材清单", "patient_consumption_document", instance.patientName() + " " + instance.businessDate(),
             "患者耗材清单保存为草稿，尚未提交审核");
         return document(instance.id(), user);
@@ -918,7 +937,227 @@ public class InventoryPatientConsumptionService {
             patientName, visitNo, careType, department, serviceCode, serviceName, text(payload, "stageCode"),
             startedAt, businessDate, firstNonBlank(text(payload, "note"), "科室手动补录"), user.name()
         );
+        String lateReason = text(payload, "lateReason");
+        if (!lateReason.isBlank() || businessDate.isBefore(LocalDate.now())) {
+            logEntryChange(department.key(), businessDate, patient.id(), "",
+                "LATE_ENTRY", lateReason.isBlank() ? "晚登记补录" : lateReason, user);
+        }
         return document(instanceId, user);
+    }
+
+    @Transactional
+    public ObjectNode setDayStatuses(JsonNode payload, SessionUser user) {
+        Department department = requireDepartment(text(payload, "departmentKey"), user);
+        LocalDate date = parseDate(text(payload, "businessDate"));
+        String status = text(payload, "status").toUpperCase(Locale.ROOT);
+        if (!Set.of("NOT_ARRIVED", "DEFERRED").contains(status)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "患者状态不正确");
+        }
+        JsonNode patients = payload.path("patientIds");
+        if (!patients.isArray() || patients.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择患者");
+        }
+        int count = 0;
+        for (JsonNode node : patients) {
+            String patientId = node.asText("").trim();
+            if (patientId.isBlank()) continue;
+            jdbcTemplate.update(
+                """
+                INSERT INTO inventory_patient_day_statuses
+                  (id, department_key, business_date, patient_id, status, created_by, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE status = VALUES(status), updated_by = VALUES(updated_by)
+                """,
+                "patient-day-status-" + UUID.randomUUID(), department.key(), date, patientId, status,
+                user.name(), user.name()
+            );
+            count++;
+        }
+        repository.log(user.name(), "标记患者日状态", "patient_day_status", department.name() + " " + date,
+            status + " " + count + " 人");
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("updated", count);
+        result.put("status", status);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode restoreDayStatuses(JsonNode payload, SessionUser user) {
+        Department department = requireDepartment(text(payload, "departmentKey"), user);
+        LocalDate date = parseDate(text(payload, "businessDate"));
+        JsonNode patients = payload.path("patientIds");
+        if (!patients.isArray() || patients.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择患者");
+        }
+        int count = 0;
+        for (JsonNode node : patients) {
+            String patientId = node.asText("").trim();
+            if (patientId.isBlank()) continue;
+            count += jdbcTemplate.update(
+                "DELETE FROM inventory_patient_day_statuses WHERE department_key = ? AND business_date = ? AND patient_id = ?",
+                department.key(), date, patientId
+            );
+        }
+        repository.log(user.name(), "恢复患者待录", "patient_day_status", department.name() + " " + date,
+            "恢复 " + count + " 人");
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("restored", count);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode batchZeroUse(JsonNode payload, SessionUser user) {
+        Department department = requireDepartment(text(payload, "departmentKey"), user);
+        LocalDate date = parseDate(text(payload, "businessDate"));
+        JsonNode patients = payload.path("patients");
+        if (!patients.isArray() || patients.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择需要标记未使用的患者");
+        }
+        if (patients.size() > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "单次最多处理 100 位患者");
+        }
+        int count = 0;
+        ArrayNode errors = objectMapper.createArrayNode();
+        for (JsonNode node : patients) {
+            String patientId = text(node, "patientId");
+            String encounterId = text(node, "encounterId");
+            if (patientId.isBlank()) continue;
+            try {
+                List<String> instanceIds = jdbcTemplate.query(
+                    "SELECT id FROM inventory_service_instances WHERE patient_id = ? AND department_key = ? AND business_date = ? LIMIT 1",
+                    (resultSet, rowNum) -> resultSet.getString(1),
+                    patientId, department.key(), date
+                );
+                String instanceId;
+                if (instanceIds.isEmpty()) {
+                    if (encounterId.isBlank()) {
+                        errors.add(zeroUseError(patientId, text(node, "patientName"), "缺少就诊记录，无法建立服务实例"));
+                        continue;
+                    }
+                    PatientSnapshot patient = resolvePatient(patientId, encounterId);
+                    instanceId = insertInstance("REGISTRATION", null, encounterId, patient.careEncounterId(),
+                        patientId, firstNonBlank(text(node, "patientName"), patient.name()),
+                        firstNonBlank(text(node, "visitNo"), patient.visitNo()),
+                        normalizeCareType(firstNonBlank(text(node, "careType"), patient.careType())),
+                        department, "REGISTRATION", "前台登记", "", LocalDateTime.now(), date,
+                        "批量零使用", user.name());
+                } else {
+                    instanceId = instanceIds.get(0);
+                }
+                Document document = loadDocument(instanceId);
+                if (document != null) {
+                    Integer approved = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM inventory_patient_consumption_lines WHERE document_id = ? AND review_status = 'APPROVED'",
+                        Integer.class, document.id()
+                    );
+                    if (approved != null && approved > 0) {
+                        errors.add(zeroUseError(patientId, text(node, "patientName"), "已有审核通过耗材，不能批量零使用"));
+                        continue;
+                    }
+                    jdbcTemplate.update("DELETE FROM inventory_patient_consumption_lines WHERE document_id = ?", document.id());
+                    jdbcTemplate.update(
+                        """
+                        UPDATE inventory_patient_consumption_documents
+                        SET status = 'APPROVED', no_consumption = 1, submitted_at = CURRENT_TIMESTAMP(3),
+                            submitted_by = ?, revision = revision + 1
+                        WHERE id = ?
+                        """,
+                        user.name(), document.id()
+                    );
+                    logEntryChange(department.key(), date, patientId, document.id(), "ZERO_USE", "批量零使用", user);
+                } else {
+                    String documentId = "patient-document-" + UUID.randomUUID();
+                    ObjectNode raw = objectMapper.createObjectNode();
+                    raw.put("serviceInstanceId", instanceId);
+                    raw.put("departmentKey", department.key());
+                    raw.put("businessDate", date.toString());
+                    raw.put("patientId", patientId);
+                    raw.put("noConsumption", true);
+                    raw.put("reason", "批量零使用");
+                    jdbcTemplate.update(
+                        """
+                        INSERT INTO inventory_patient_consumption_documents
+                          (id, service_instance_id, department_id, department_key, department_name, business_date,
+                           patient_id, encounter_id, status, revision, operator_name, operator_username,
+                           no_consumption, raw_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', 1, ?, ?, 1, CAST(? AS JSON))
+                        """,
+                        documentId, instanceId, resolveDepartmentId(department.key()), department.key(), department.name(),
+                        date, patientId, encounterId, user.name(), user.username(), json(raw)
+                    );
+                    logEntryChange(department.key(), date, patientId, documentId, "ZERO_USE", "批量零使用", user);
+                }
+                jdbcTemplate.update("UPDATE inventory_service_instances SET status = 'APPROVED' WHERE id = ?", instanceId);
+                count++;
+            } catch (Exception error) {
+                errors.add(zeroUseError(patientId, text(node, "patientName"), error.getMessage()));
+            }
+        }
+        repository.log(user.name(), "批量标记未使用", "patient_consumption_document", department.name() + " " + date,
+            "处理 " + count + " 人，异常 " + errors.size() + " 人");
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("updated", count);
+        result.set("errors", errors);
+        return result;
+    }
+
+    @Transactional
+    public ObjectNode withdrawZeroUse(JsonNode payload, SessionUser user) {
+        Department department = requireDepartment(text(payload, "departmentKey"), user);
+        LocalDate date = parseDate(text(payload, "businessDate"));
+        if (!date.equals(LocalDate.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "锁日后请使用带原因的更正");
+        }
+        JsonNode patients = payload.path("patientIds");
+        if (!patients.isArray() || patients.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择需要撤回的患者");
+        }
+        int count = 0;
+        for (JsonNode node : patients) {
+            String patientId = node.asText("").trim();
+            if (patientId.isBlank()) continue;
+            List<String> documentIds = jdbcTemplate.query(
+                "SELECT id FROM inventory_patient_consumption_documents WHERE patient_id = ? AND department_key = ? AND business_date = ? AND no_consumption = 1",
+                (resultSet, rowNum) -> resultSet.getString(1),
+                patientId, department.key(), date
+            );
+            for (String documentId : documentIds) {
+                jdbcTemplate.update("DELETE FROM inventory_patient_consumption_lines WHERE document_id = ?", documentId);
+                jdbcTemplate.update("DELETE FROM inventory_patient_consumption_documents WHERE id = ?", documentId);
+                jdbcTemplate.update(
+                    "UPDATE inventory_service_instances SET status = 'OPEN' WHERE patient_id = ? AND department_key = ? AND business_date = ?",
+                    patientId, department.key(), date
+                );
+                logEntryChange(department.key(), date, patientId, documentId, "ZERO_USE_WITHDRAW", "撤回批量零使用", user);
+                count++;
+            }
+        }
+        repository.log(user.name(), "撤回批量未使用", "patient_consumption_document", department.name() + " " + date,
+            "撤回 " + count + " 份");
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("withdrawn", count);
+        return result;
+    }
+
+    private ObjectNode zeroUseError(String patientId, String patientName, String message) {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("patientId", patientId);
+        row.put("patientName", patientName);
+        row.put("message", message == null ? "处理失败" : message);
+        return row;
+    }
+
+    private void logEntryChange(String departmentKey, LocalDate date, String patientId, String documentId,
+                                String changeType, String reason, SessionUser user) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO inventory_patient_entry_changes
+              (id, department_key, business_date, patient_id, document_id, change_type, reason, operator_username)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            "patient-entry-change-" + UUID.randomUUID(), departmentKey, date, patientId, documentId,
+            changeType, reason == null ? "" : reason, user.username()
+        );
     }
 
     @Transactional
@@ -1490,8 +1729,10 @@ public class InventoryPatientConsumptionService {
         row.put("serviceCode", resultSet.getString("service_code"));
         row.put("serviceName", resultSet.getString("service_name"));
         row.put("stageCode", resultSet.getString("stage_code"));
-        row.put("serviceStartedAt", resultSet.getTimestamp("service_started_at") == null
-            ? "" : resultSet.getTimestamp("service_started_at").toLocalDateTime().toString());
+        String startedAt = resultSet.getTimestamp("service_started_at") == null
+            ? "" : resultSet.getTimestamp("service_started_at").toLocalDateTime().toString();
+        row.put("serviceStartedAt", startedAt);
+        row.put("arrivalAt", startedAt);
         row.put("businessDate", resultSet.getDate("business_date") == null
             ? "" : resultSet.getDate("business_date").toLocalDate().toString());
         row.put("specialNote", resultSet.getString("special_note") == null ? "" : resultSet.getString("special_note"));
@@ -1504,6 +1745,16 @@ public class InventoryPatientConsumptionService {
         Timestamp submittedAt = hasColumn(resultSet, "submitted_at") ? resultSet.getTimestamp("submitted_at") : null;
         row.put("submittedAt", submittedAt == null ? "" : submittedAt.toLocalDateTime().toString());
         row.put("submittedBy", hasColumn(resultSet, "submitted_by") ? resultSet.getString("submitted_by") : "");
+        String documentStatus = row.path("status").asText("");
+        LocalDateTime statusSince = null;
+        if ("RETURNED".equals(documentStatus) && hasColumn(resultSet, "document_updated_at")) {
+            Timestamp updatedAt = resultSet.getTimestamp("document_updated_at");
+            statusSince = updatedAt == null ? null : updatedAt.toLocalDateTime();
+        } else if (Set.of("SUBMITTED", "PARTIALLY_APPROVED").contains(documentStatus) && submittedAt != null) {
+            statusSince = submittedAt.toLocalDateTime();
+        }
+        row.put("statusSince", statusSince == null ? "" : statusSince.toString());
+        row.put("statusAgeMinutes", statusSince == null ? 0 : Math.max(0, java.time.Duration.between(statusSince, LocalDateTime.now()).toMinutes()));
         row.put("noConsumption", hasColumn(resultSet, "document_no_consumption")
             && Boolean.TRUE.equals(resultSet.getBoolean("document_no_consumption")));
         if (hasColumn(resultSet, "total_quantity")) {
@@ -1591,22 +1842,38 @@ public class InventoryPatientConsumptionService {
 
     private ObjectNode workbenchSummary(ArrayNode patients) {
         int total = 0, draft = 0, submitted = 0, approved = 0, returned = 0, notStarted = 0, noConsumption = 0, attention = 0;
+        int notArrived = 0, deferred = 0, pendingSlaWarn = 0, pendingSlaOverdue = 0, returnedSlaWarn = 0, returnedSlaOverdue = 0;
         for (JsonNode patient : patients) {
             total++;
+            String patientState = patient.path("patientState").asText("");
+            if ("NOT_ARRIVED".equals(patientState)) notArrived++;
+            if ("DEFERRED".equals(patientState)) deferred++;
             String status = patient.path("status").asText("");
-            switch (status) {
-                case "DRAFT" -> draft++;
-                case "SUBMITTED", "PARTIALLY_APPROVED" -> submitted++;
-                case "APPROVED" -> approved++;
-                case "RETURNED" -> returned++;
-                case "NOT_STARTED" -> notStarted++;
-                default -> { }
+            if (!"NOT_ARRIVED".equals(patientState)) {
+                switch (status) {
+                    case "DRAFT" -> draft++;
+                    case "SUBMITTED", "PARTIALLY_APPROVED" -> submitted++;
+                    case "APPROVED" -> approved++;
+                    case "RETURNED" -> returned++;
+                    case "NOT_STARTED" -> notStarted++;
+                    default -> { }
+                }
+                long age = patient.path("statusAgeMinutes").asLong(0);
+                if (Set.of("SUBMITTED", "PARTIALLY_APPROVED").contains(status)) {
+                    if (age >= 480) pendingSlaOverdue++;
+                    else if (age >= 120) pendingSlaWarn++;
+                } else if ("RETURNED".equals(status)) {
+                    if (age >= 480) returnedSlaOverdue++;
+                    else if (age >= 120) returnedSlaWarn++;
+                }
             }
             if (patient.path("noConsumption").asBoolean(false)) noConsumption++;
             if (patient.path("attentionFlag").asBoolean(false)) attention++;
         }
+        int expected = total - notArrived;
         ObjectNode summary = objectMapper.createObjectNode();
         summary.put("total", total);
+        summary.put("expected", Math.max(0, expected));
         summary.put("draft", draft);
         summary.put("submitted", submitted);
         summary.put("approved", approved);
@@ -1614,9 +1881,15 @@ public class InventoryPatientConsumptionService {
         summary.put("notStarted", notStarted);
         summary.put("noConsumption", noConsumption);
         summary.put("attention", attention);
-        summary.put("entered", total - notStarted);
+        summary.put("notArrived", notArrived);
+        summary.put("deferred", deferred);
+        summary.put("pendingSlaWarn", pendingSlaWarn);
+        summary.put("pendingSlaOverdue", pendingSlaOverdue);
+        summary.put("returnedSlaWarn", returnedSlaWarn);
+        summary.put("returnedSlaOverdue", returnedSlaOverdue);
+        summary.put("entered", Math.max(0, expected - notStarted));
         summary.put("missing", notStarted);
-        summary.put("progress", total == 0 ? 0 : Math.round((total - notStarted) * 100.0 / total));
+        summary.put("progress", expected == 0 ? 0 : Math.round((expected - notStarted) * 100.0 / expected));
         return summary;
     }
 

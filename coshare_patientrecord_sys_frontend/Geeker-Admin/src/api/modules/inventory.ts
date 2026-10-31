@@ -467,6 +467,7 @@ export interface InventoryDepartmentDailyReport {
   note: string;
   submittedBy?: string;
   submittedAt?: string;
+  zeroUsage?: boolean;
   locked: boolean;
   closure?: { status: string; submittedBy?: string; submittedAt?: string; lockedAt?: string };
   lines: InventoryDepartmentDailyReportLine[];
@@ -495,6 +496,10 @@ export interface InventoryPatientWorkbenchRow {
   serviceName?: string;
   stageCode?: string;
   serviceStartedAt?: string;
+  arrivalAt?: string;
+  patientState?: "" | "NOT_ARRIVED" | "DEFERRED";
+  statusSince?: string;
+  statusAgeMinutes?: number;
   businessDate?: string;
   status: InventoryPatientDocumentStatus;
   documentId: string;
@@ -524,6 +529,13 @@ export interface InventoryPatientWorkbench {
     noConsumption?: number;
     entered?: number;
     missing?: number;
+    expected?: number;
+    notArrived?: number;
+    deferred?: number;
+    pendingSlaWarn?: number;
+    pendingSlaOverdue?: number;
+    returnedSlaWarn?: number;
+    returnedSlaOverdue?: number;
     progress?: number;
   };
 }
@@ -581,6 +593,7 @@ export interface InventoryPatientDocumentSavePayload {
   serviceInstanceId: string;
   revision: number;
   noConsumption?: boolean;
+  correctionReason?: string;
   lines: Array<{
     itemId: string;
     itemName?: string;
@@ -1920,6 +1933,7 @@ export const saveInventoryDepartmentDailyReportApi = async (payload: {
   businessDate: string;
   revision: number;
   note: string;
+  zeroUsage?: boolean;
   lines: Array<{
     itemId: string;
     itemName?: string;
@@ -1931,6 +1945,12 @@ export const saveInventoryDepartmentDailyReportApi = async (payload: {
   }>;
 }) =>
   putInventoryData<InventoryDepartmentDailyReport, typeof payload>("/department-daily-reports", payload);
+
+export const withdrawInventoryDepartmentZeroUseApi = async (reportId: string) =>
+  postInventoryData<InventoryDepartmentDailyReport, Record<string, unknown>>(
+    `/department-daily-reports/${encodeURIComponent(reportId)}/zero-use/withdraw`,
+    {}
+  );
 
 export const submitInventoryDepartmentDailyReportApi = async (reportId: string) =>
   postInventoryData<InventoryDepartmentDailyReport, Record<string, unknown>>(
@@ -2116,6 +2136,7 @@ export const addInventoryManualPatientApi = async (payload: {
   businessDate?: string;
   stageCode?: string;
   sourceType?: "REGISTRATION" | "MANUAL";
+  lateReason?: string;
   note?: string;
 }) => postInventoryData<InventoryPatientDetail, typeof payload>("/patient-workbench/manual-patients", payload);
 
@@ -2130,6 +2151,40 @@ export const submitInventoryPatientDocumentApi = async (documentId: string) =>
 
 export const submitInventoryPatientBatchApi = async (payload: { departmentKey: string; businessDate: string }) =>
   postInventoryData<InventoryPatientBatchSubmitResult, typeof payload>("/patient-workbench/batches/submit", payload);
+
+export const setInventoryPatientDayStatusApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  patientIds: string[];
+  status: "NOT_ARRIVED" | "DEFERRED";
+}) => putInventoryData<{ updated: number; status: string }, typeof payload>("/patient-workbench/day-status", payload);
+
+export const restoreInventoryPatientDayStatusApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  patientIds: string[];
+}) => putInventoryData<{ restored: number }, typeof payload>("/patient-workbench/day-status/restore", payload);
+
+export const batchInventoryPatientZeroUseApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  patients: Array<{
+    patientId: string;
+    encounterId?: string;
+    patientName?: string;
+    visitNo?: string;
+    careType?: string;
+  }>;
+}) => postInventoryData<{ updated: number; errors: Array<{ patientName: string; message: string }> }, typeof payload>(
+  "/patient-workbench/zero-use",
+  payload
+);
+
+export const withdrawInventoryPatientZeroUseApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  patientIds: string[];
+}) => postInventoryData<{ withdrawn: number }, typeof payload>("/patient-workbench/zero-use/withdraw", payload);
 
 export const getInventoryPatientRecentItemsApi = async (params: { departmentKey: string; limit?: number }) =>
   getInventoryData<InventoryPatientRecentItems>("/patient-workbench/recent-items", params);

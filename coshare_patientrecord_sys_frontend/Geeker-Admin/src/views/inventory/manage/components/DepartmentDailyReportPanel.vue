@@ -11,6 +11,8 @@
         <el-tag :type="statusType(draft?.status)" effect="plain">{{ statusLabel(draft?.status) }}</el-tag>
         <el-button :disabled="!editable" :loading="saving" @click="save">保存草稿</el-button>
         <el-button type="primary" :disabled="!editable" :loading="submitting" @click="submit">提交审核</el-button>
+        <el-button v-if="editable && !draft?.zeroUsage" :loading="submitting" @click="submitZeroUse">今日无使用</el-button>
+        <el-button v-if="draft?.zeroUsage" :loading="submitting" @click="withdrawZeroUse">撤回零使用</el-button>
         <el-button v-if="draft?.id" :disabled="exporting" :loading="exporting" @click="exportReport">导出</el-button>
       </div>
     </header>
@@ -120,7 +122,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
 import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
@@ -130,6 +132,7 @@ import {
   getInventoryDepartmentDailyReportCalendarApi,
   saveInventoryDepartmentDailyReportApi,
   submitInventoryDepartmentDailyReportApi,
+  withdrawInventoryDepartmentZeroUseApi,
   type InventoryDepartmentDailyReport,
   type InventoryDepartmentDailyReportCalendarDay,
   type InventoryDepartmentDailyReportLine,
@@ -222,6 +225,7 @@ const save = async () => {
       businessDate: businessDate.value,
       revision: draft.value.revision || 0,
       note: "",
+      zeroUsage: Boolean(draft.value.zeroUsage),
       lines: lines.value.map(line => ({
         itemId: line.itemId,
         itemName: line.itemName,
@@ -261,6 +265,60 @@ const submit = async () => {
     void loadCalendar();
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "提交科室日报失败");
+  } finally {
+    submitting.value = false;
+  }
+};
+
+const submitZeroUse = async () => {
+  if (!draft.value) return;
+  try {
+    await ElMessageBox.confirm("确认今天科室没有使用任何耗材？确认后按零使用日完成，之后新产生的使用需要撤回或更正。", "今日无使用", {
+      confirmButtonText: "确认无使用",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  submitting.value = true;
+  try {
+    draft.value = { ...draft.value, zeroUsage: true };
+    lines.value = lines.value.map(line => ({ ...line, actualQuantity: 0 }));
+    const saved = await save();
+    if (!saved?.id) return;
+    const result = await submitInventoryDepartmentDailyReportApi(saved.id);
+    draft.value = result.data ?? draft.value;
+    lines.value = result.data?.lines ?? lines.value;
+    ElMessage.success("已标记今日无使用并完成");
+    void loadCalendar();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "零使用提交失败");
+  } finally {
+    submitting.value = false;
+  }
+};
+
+const withdrawZeroUse = async () => {
+  if (!draft.value?.id) return;
+  try {
+    await ElMessageBox.confirm("撤回今日零使用并恢复为草稿？", "撤回零使用", {
+      confirmButtonText: "撤回",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  submitting.value = true;
+  try {
+    const result = await withdrawInventoryDepartmentZeroUseApi(draft.value.id);
+    draft.value = result.data ?? draft.value;
+    lines.value = result.data?.lines ?? lines.value;
+    ElMessage.success("已撤回，恢复为草稿");
+    void loadCalendar();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "撤回零使用失败");
   } finally {
     submitting.value = false;
   }
