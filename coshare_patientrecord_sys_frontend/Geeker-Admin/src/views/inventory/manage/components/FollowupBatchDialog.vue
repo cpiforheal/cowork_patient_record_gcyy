@@ -63,6 +63,10 @@
         {{ mode === "PACKAGE" ? "统一套餐会应用到批次内全部患者。" : "每位患者带出各自最近一次已提交/通过的组合。" }}
         生成后直接提交审核；当天已有草稿/待审/已通过的患者会跳过。
       </p>
+      <div v-if="batchErrors.length" class="batch-errors" role="alert">
+        <strong>以下患者未生成：</strong>
+        <span v-for="error in batchErrors" :key="error">{{ error }}</span>
+      </div>
     </div>
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
@@ -122,6 +126,7 @@ const searchResults = ref<SearchRow[]>([]);
 const selected = ref<BatchRow[]>([]);
 const searchInputRef = ref<{ focus: () => void } | null>(null);
 const highlightIndex = ref(0);
+const batchErrors = ref<string[]>([]);
 
 const focusSearch = () => nextTick(() => searchInputRef.value?.focus());
 
@@ -184,6 +189,7 @@ const run = async () => {
     return;
   }
   running.value = true;
+  batchErrors.value = [];
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
@@ -204,7 +210,7 @@ const run = async () => {
           serviceCode: "FOLLOWUP",
           serviceName: "复诊",
           sourceType: "REGISTRATION",
-          serviceStartedAt: (row.visitDate || props.date) + "T08:00:00",
+          serviceStartedAt: `${(row.visitDate || props.date).slice(0, 10)}T08:00:00`,
           businessDate: props.date,
           note: "复诊套餐批处理"
         });
@@ -243,10 +249,14 @@ const run = async () => {
         errors.push(`${row.patientName}：${error instanceof Error ? error.message : "处理失败"}`);
       }
     }
-    if (errors.length) ElMessage.warning(`已生成 ${created} 位，${errors.length} 位失败`);
-    else ElMessage.success(`已生成并提交 ${created} 位${skipped ? `，跳过 ${skipped} 位` : ""}`);
-    emit("completed");
-    visible.value = false;
+    batchErrors.value = errors;
+    if (errors.length) {
+      ElMessage.warning(`已生成 ${created} 位，${errors.length} 位失败，原因见弹窗下方`);
+    } else {
+      ElMessage.success(`已生成并提交 ${created} 位${skipped ? `，跳过 ${skipped} 位` : ""}`);
+      emit("completed");
+      visible.value = false;
+    }
   } finally {
     running.value = false;
   }
@@ -348,5 +358,17 @@ watch(
   margin: 0;
   color: #9a9285;
   font-size: 11px;
+}
+
+.batch-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  color: #8a5a13;
+  font-size: 11px;
+  background: #fdf6e7;
+  border: 1px solid #f0dfb8;
+  border-radius: 8px;
 }
 </style>
