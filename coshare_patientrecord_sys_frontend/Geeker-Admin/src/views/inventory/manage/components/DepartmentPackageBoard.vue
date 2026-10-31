@@ -1,12 +1,15 @@
 <template>
-  <section class="package-board" v-loading="loading">
-    <header class="board-head">
-      <div>
+  <section class="package-board" :class="{ 'is-embedded': embedded }" v-loading="loading">
+    <header class="board-head" :class="{ 'is-embedded': embedded }">
+      <div v-if="!embedded">
         <span class="eyebrow">科室预设套餐</span>
         <h3>常用组合与复诊批处理</h3>
         <p>查看、编辑本科室套餐；可直接把套餐用于当前患者，或发起复诊套餐批处理。</p>
       </div>
-      <el-button type="primary" plain :icon="Plus" @click="openCreate">新增套餐</el-button>
+      <div class="board-head-actions">
+        <el-button v-if="currentItems?.length" @click="openCreateFromCurrent">当前组合存为套餐</el-button>
+        <el-button type="primary" plain :icon="Plus" @click="openCreate">新增套餐</el-button>
+      </div>
     </header>
 
     <div v-if="packages.length" class="package-grid">
@@ -92,6 +95,8 @@ const props = defineProps<{
   date: string;
   existingPatientIds?: string[];
   canApply?: boolean;
+  embedded?: boolean;
+  currentItems?: { itemId: string; itemName: string; unit: string; quantity: number }[];
 }>();
 const emit = defineEmits<{
   refresh: [];
@@ -133,6 +138,25 @@ const openCreate = async () => {
   editorName.value = "";
   editorRows.value = [];
   addEditorRow();
+  editorVisible.value = true;
+};
+
+const openCreateFromCurrent = async () => {
+  const rows = (props.currentItems ?? []).filter(item => item.quantity > 0);
+  if (!rows.length) {
+    ElMessage.warning("当前患者还没有可保存的耗材");
+    return;
+  }
+  await loadItems();
+  editing.value = null;
+  editorName.value = "";
+  editorRows.value = rows.map(item => ({
+    key: nextKey.value++,
+    itemId: item.itemId,
+    itemName: item.itemName,
+    unit: item.unit,
+    quantity: Number(item.quantity || 1)
+  }));
   editorVisible.value = true;
 };
 
@@ -217,6 +241,13 @@ const openBatch = (pkg: InventoryPatientConsumablePackage) => {
   background: #fffdf9;
   border: 1px solid #efe8dd;
   border-radius: 16px;
+
+  &.is-embedded {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+  }
 }
 
 .board-head {
@@ -224,6 +255,18 @@ const openBatch = (pkg: InventoryPatientConsumablePackage) => {
   gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
+
+  &.is-embedded {
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .board-head-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
 
   h3 {
     margin: 3px 0;

@@ -4,70 +4,76 @@
       <div class="toolbar-copy">
         <span class="eyebrow">患者耗材 · {{ departmentName || "本科室" }}</span>
         <h2>患者耗材录入</h2>
-        <p>班后补录：选患者 → 选耗材 → 下一位；最后统一提交。</p>
+        <p>选患者 → 选耗材 → 下一位；修改自动保存，最后统一提交。</p>
       </div>
       <div class="toolbar-actions">
-        <div class="date-strip">
-          <button
-            v-for="day in recentDays"
-            :key="day.value"
-            type="button"
-            class="date-chip"
-            :class="{ 'is-active': businessDate === day.value }"
-            @click="changeDate(day.value)"
-          >
-            {{ day.label }}
-          </button>
-          <el-date-picker
-            v-model="businessDate"
-            type="date"
-            value-format="YYYY-MM-DD"
-            :clearable="false"
-            :disabled="loading"
-            class="date-picker-compact"
-            @change="changeDate"
-          />
-        </div>
         <el-button v-if="fixedCount" plain @click="fixedVisible = true">固定耗材 · {{ fixedStatusLabel }}</el-button>
-        <el-button plain @click="followupVisible = true">复诊预约</el-button>
-        <el-button :icon="Refresh" :loading="loading" @click="reload">刷新</el-button>
-        <el-button type="primary" :loading="batchSubmitting" @click="openBatchSubmit">批量提交</el-button>
-        <el-button type="primary" plain :icon="Search" @click="openPatientSource">患者来源</el-button>
+        <el-dropdown trigger="click" @command="handleAddPatientCommand">
+          <el-button type="primary" plain>加入患者 ▾</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="SOURCE">患者来源</el-dropdown-item>
+              <el-dropdown-item command="FOLLOWUP">复诊预约</el-dropdown-item>
+              <el-dropdown-item command="MANUAL">手动补录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button :icon="Refresh" :loading="loading" aria-label="刷新工作台" @click="reload" />
+        <el-button v-if="selectedPatientKeys.length" type="primary" :loading="batchSubmitting" @click="openBatchSubmit">
+          提交当天全部
+        </el-button>
       </div>
     </header>
 
-    <div class="status-strip">
+    <button type="button" class="status-strip" aria-label="打开今日摘要" @click="summaryVisible = true">
       <span class="status-progress">已录 <b>{{ summary.entered || 0 }}</b> / <b>{{ summary.expected ?? summary.total ?? 0 }}</b></span>
-      <span><b>{{ summary.notStarted || 0 }}</b> 未录</span>
-      <span><b>{{ summary.draft || 0 }}</b> 草稿</span>
-      <span><b>{{ summary.submitted || 0 }}</b> 待审</span>
-      <span><b>{{ summary.returned || 0 }}</b> 驳回</span>
-      <span><b>{{ summary.approved || 0 }}</b> 通过</span>
-      <span v-if="summary.notArrived"><b>{{ summary.notArrived }}</b> 未到</span>
-      <span v-if="summary.deferred"><b>{{ summary.deferred }}</b> 暂缓</span>
-      <span v-if="(summary.pendingSlaOverdue || 0) + (summary.returnedSlaOverdue || 0)" class="sla-overdue">
-        <b>{{ (summary.pendingSlaOverdue || 0) + (summary.returnedSlaOverdue || 0) }}</b> 超8h
+      <span v-if="summary.notStarted"><b>{{ summary.notStarted }}</b> 未录</span>
+      <span v-if="summary.returned" class="is-danger"><b>{{ summary.returned }}</b> 驳回</span>
+      <span v-if="(summary.notArrived || 0) + (summary.deferred || 0)">
+        <b>{{ (summary.notArrived || 0) + (summary.deferred || 0) }}</b> 未到/暂缓
       </span>
-      <button type="button" class="summary-trigger" @click="summaryVisible = true">今日摘要</button>
       <span v-if="businessDate !== todayValue" class="backfill-badge">补录模式</span>
-      <div class="status-progress-bar" aria-hidden="true">
+      <span class="status-hint" aria-hidden="true">摘要 ›</span>
+      <span class="status-progress-bar" aria-hidden="true">
         <span :style="{ width: `${progress}%` }"></span>
-      </div>
-    </div>
+      </span>
+    </button>
 
-    <DepartmentFillCalendar
-      class="workspace-calendar"
-      wide
-      :month="calendarMonth"
-      :today="todayValue"
-      :selected-date="businessDate"
-      mode="PATIENT"
-      :days="calendarDays"
-      :expected-from="calendarExpectedFrom"
-      :loading="calendarLoading"
-      @update:month="changeCalendarMonth"
-      @select-date="selectCalendarDate"
-    />
+    <div class="calendar-card">
+      <div class="calendar-strip">
+        <button
+          v-for="day in stripDays"
+          :key="day.value"
+          type="button"
+          class="calendar-day-chip"
+          :class="[`is-${calendarStateOf(day.value)}`, { 'is-active': businessDate === day.value }]"
+          @click="changeDate(day.value)"
+        >
+          <span class="chip-label">{{ day.label }}</span>
+          <span v-if="calendarDayOf(day.value)" class="chip-count">
+            {{ calendarDayOf(day.value)?.patientCount || 0 }}/{{ calendarDayOf(day.value)?.patientTotal || 0 }}
+          </span>
+        </button>
+        <span class="calendar-month-summary">本月已填 <b>{{ monthFilledDays }}</b>/<b>{{ monthTrackedDays }}</b> 天</span>
+        <el-button text type="primary" class="calendar-toggle" @click="calendarExpanded = !calendarExpanded">
+          {{ calendarExpanded ? "收起月历" : "展开月历" }}
+        </el-button>
+      </div>
+      <DepartmentFillCalendar
+        v-if="calendarExpanded"
+        class="workspace-calendar"
+        wide
+        :month="calendarMonth"
+        :today="todayValue"
+        :selected-date="businessDate"
+        mode="PATIENT"
+        :days="calendarDays"
+        :expected-from="calendarExpectedFrom"
+        :loading="calendarLoading"
+        @update:month="changeCalendarMonth"
+        @select-date="selectCalendarDate"
+      />
+    </div>
 
     <div class="patient-layout">
       <aside class="patient-panel">
@@ -224,16 +230,29 @@
               <p v-if="detail.specialNote" class="patient-note">备注：{{ detail.specialNote }}</p>
             </div>
             <div class="detail-actions">
-              <el-button size="small" @click="openHistory">历史</el-button>
-              <el-button size="small" @click="openNoteDialog">{{ detail.attentionFlag ? "已标记" : "备注/标记" }}</el-button>
-              <template v-if="editable">
-                <el-button size="small" :disabled="!previousPatient" @click="copyPreviousPatient">同上一患者</el-button>
-                <el-button size="small" @click="applyLastCombination">套用上次组合</el-button>
-              </template>
-              <el-tag v-else-if="detail.status === 'SUBMITTED'" type="warning" effect="plain">已提交，等待库管审核</el-tag>
-              <el-tag v-else-if="detail.status === 'APPROVED'" type="success" effect="plain">已审核通过</el-tag>
-              <el-tag v-else-if="detail.status === 'PARTIALLY_APPROVED'" type="warning" effect="plain">部分通过，可补交驳回项</el-tag>
-              <el-tag v-else type="danger" effect="plain">已驳回，请修改后重提</el-tag>
+              <el-dropdown v-if="editable" trigger="click" @command="handleReuseCommand">
+                <el-button size="small">复用 ▾</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="PREVIOUS" :disabled="!previousPatient">同上一患者</el-dropdown-item>
+                    <el-dropdown-item command="LAST">套用上次组合</el-dropdown-item>
+                    <el-dropdown-item command="PACKAGE">套用科室套餐</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-dropdown trigger="click" @command="handleMoreCommand">
+                <el-button size="small">更多 ▾</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="HISTORY">历史耗材</el-dropdown-item>
+                    <el-dropdown-item command="NOTE">{{ detail.attentionFlag ? "备注/标记（已标记）" : "备注/标记" }}</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-tag v-if="!editable && detail.status === 'SUBMITTED'" type="warning" effect="plain">已提交，等待库管审核</el-tag>
+              <el-tag v-else-if="!editable && detail.status === 'APPROVED'" type="success" effect="plain">已审核通过</el-tag>
+              <el-tag v-else-if="!editable && detail.status === 'PARTIALLY_APPROVED'" type="warning" effect="plain">部分通过，可补交驳回项</el-tag>
+              <el-tag v-else-if="!editable" type="danger" effect="plain">已驳回，请修改后重提</el-tag>
             </div>
           </div>
         </header>
@@ -386,13 +405,12 @@
             <span v-if="detail.noConsumption" class="is-muted">已标记未使用耗材</span>
           </div>
           <div class="selection-actions">
-            <el-button :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
             <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
           </div>
         </section>
 
         <footer class="sticky-actions">
-          <span class="save-state">{{ saveState || "未保存" }}</span>
+          <span class="save-state">{{ saveState || "修改自动保存" }}</span>
           <el-button
             type="primary"
             size="large"
@@ -411,9 +429,6 @@
           >
             未使用并下一位
           </el-button>
-          <el-button text size="large" :loading="saving" :disabled="!editable" @click="saveAndNext">
-            仅保存
-          </el-button>
         </footer>
       </main>
 
@@ -422,15 +437,31 @@
       </main>
     </div>
 
-    <DepartmentPackageBoard
-      :packages="patientPackages"
-      :department-key="props.departmentKey"
-      :date="businessDate"
-      :existing-patient-ids="existingPatientIds"
-      :can-apply="Boolean(detail) && editable"
-      @refresh="loadPackages"
-      @apply="applyPackage"
-    />
+    <div class="package-summary">
+      <div class="package-summary-copy">
+        <strong>科室套餐</strong>
+        <span v-if="patientPackages.length">{{ patientPackages.length }} 个 · {{ packagePreview }}</span>
+        <span v-else>暂无套餐，可把常用组合存为套餐</span>
+      </div>
+      <div class="package-summary-actions">
+        <el-button @click="packageDrawerVisible = true">管理</el-button>
+        <el-button type="primary" plain @click="followupBatchVisible = true">复诊批处理</el-button>
+      </div>
+    </div>
+
+    <el-drawer v-model="packageDrawerVisible" title="科室套餐" size="60%" append-to-body>
+      <DepartmentPackageBoard
+        embedded
+        :packages="patientPackages"
+        :department-key="props.departmentKey"
+        :date="businessDate"
+        :existing-patient-ids="existingPatientIds"
+        :can-apply="Boolean(detail) && editable"
+        :current-items="currentPackageItems"
+        @refresh="loadPackages"
+        @apply="handleApplyPackageFromDrawer"
+      />
+    </el-drawer>
 
     <el-drawer
       v-model="drawerVisible"
@@ -511,32 +542,6 @@
                       </div>
                       <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
                     </section>
-
-                    <section class="package-section">
-                      <div class="section-title">
-                        <h4>患者套餐</h4>
-                        <span>保存当前组合，后续一键套用</span>
-                      </div>
-                      <el-button
-                        size="small"
-                        :loading="packageSaving"
-                        :disabled="!editable || !selectedLines.length"
-                        @click="saveCurrentAsPackage"
-                      >
-                        保存当前为套餐
-                      </el-button>
-                      <div v-if="patientPackages.length" class="package-list">
-                        <div v-for="pkg in patientPackages" :key="pkg.id" class="package-row">
-                          <span class="package-name">
-                            {{ pkg.name }}
-                            <small>{{ pkg.items.length }} 项</small>
-                          </span>
-                          <el-button size="small" text type="primary" :disabled="!editable" @click="applyPackage(pkg)">套用</el-button>
-                          <el-button size="small" text type="danger" @click="deletePackage(pkg)">删除</el-button>
-                        </div>
-                      </div>
-                      <p v-else class="package-empty">还没有保存的患者套餐</p>
-                    </section>
           </section>
           <section class="drawer-right">
                     <div class="detail-toolbar">
@@ -551,7 +556,6 @@
                         @keyup.enter.prevent="addFirstVisibleItem"
                       />
                       <el-button :icon="Plus" :disabled="!editable" @click="openAddItemDialog">追加预设外耗材</el-button>
-                      <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
                       <span class="line-counter">已选 {{ selectedLines.length }} 项</span>
                     </div>
 
@@ -1016,7 +1020,6 @@ import {
   addInventoryManualPatientApi,
   getInventoryFixedConsumablesApi,
   batchInventoryPatientZeroUseApi,
-  deleteInventoryPatientPackageApi,
   restoreInventoryPatientDayStatusApi,
   setInventoryPatientDayStatusApi,
   withdrawInventoryPatientZeroUseApi,
@@ -1030,7 +1033,6 @@ import {
   getInventoryPatientWorkbenchApi,
   saveInventoryPatientDocumentApi,
   saveInventoryPatientNoteApi,
-  saveInventoryPatientPackageApi,
   searchInventoryPatientsApi,
   submitInventoryPatientBatchApi,
   submitInventoryPatientDocumentApi,
@@ -1089,6 +1091,7 @@ const calendarMonth = ref(dayjs(businessDate.value).format("YYYY-MM-01"));
 const calendarDays = ref<InventoryDepartmentDailyReportCalendarDay[]>([]);
 const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
+const calendarExpanded = ref(false);
 const fixedVisible = ref(false);
 const fixedCount = ref(0);
 const fixedStatus = ref("");
@@ -1099,7 +1102,6 @@ const detail = ref<InventoryPatientDetail | null>(null);
 const selectedId = ref("");
 const loading = ref(false);
 const saving = ref(false);
-const submitting = ref(false);
 const batchSubmitting = ref(false);
 const patientKeyword = ref("");
 const statusFilter = ref("ALL");
@@ -1107,7 +1109,7 @@ const itemKeyword = ref("");
 const lineState = reactive<Record<string, EditableLine>>({});
 const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
 const patientPackages = ref<InventoryPatientConsumablePackage[]>([]);
-const packageSaving = ref(false);
+const packageDrawerVisible = ref(false);
 const saveState = ref("");
 const showFullVisitNo = ref(false);
 const drawerVisible = ref(false);
@@ -1371,6 +1373,60 @@ const recentDays = computed(() =>
     return { value, label: index === 0 ? "今天" : index === 1 ? "昨天" : dayjs(value).format("MM-DD") };
   })
 );
+const calendarDayOf = (date: string) => calendarDays.value.find(day => day.date === date);
+const calendarStateOf = (date: string) => {
+  if (calendarExpectedFrom.value && date < calendarExpectedFrom.value) return "none";
+  if (date > todayValue) return "future";
+  const day = calendarDayOf(date);
+  if (day && Number(day.patientTotal || 0) > 0) {
+    if (Number(day.missing || 0) === 0 && Number(day.draft || 0) === 0 && Number(day.returned || 0) === 0) return "filled";
+    if (Number(day.patientCount || 0) > 0 || Number(day.draft || 0) > 0 || Number(day.returned || 0) > 0) return "suggest";
+    return date === todayValue ? "due" : "missing";
+  }
+  return date === todayValue ? "due" : "none";
+};
+const stripDays = computed(() => {
+  const days = recentDays.value
+    .slice()
+    .reverse()
+    .map(day => ({ value: day.value, label: day.label }));
+  if (businessDate.value && !days.some(day => day.value === businessDate.value)) {
+    days.unshift({ value: businessDate.value, label: dayjs(businessDate.value).format("MM-DD") });
+  }
+  return days;
+});
+const monthCalendarDays = computed(() =>
+  calendarDays.value.filter(
+    day => day.date.slice(0, 7) === calendarMonth.value.slice(0, 7) && (!calendarExpectedFrom.value || day.date >= calendarExpectedFrom.value)
+  )
+);
+const monthTrackedDays = computed(() => monthCalendarDays.value.filter(day => Number(day.patientTotal || 0) > 0).length);
+const monthFilledDays = computed(
+  () =>
+    monthCalendarDays.value.filter(
+      day =>
+        Number(day.patientTotal || 0) > 0 &&
+        Number(day.missing || 0) === 0 &&
+        Number(day.draft || 0) === 0 &&
+        Number(day.returned || 0) === 0
+    ).length
+);
+const packagePreview = computed(() =>
+  patientPackages.value
+    .slice(0, 3)
+    .map(pkg => pkg.name)
+    .join("、") + (patientPackages.value.length > 3 ? "…" : "")
+);
+const currentPackageItems = computed(() =>
+  selectedLines.value
+    .filter(line => line.reviewStatus !== "APPROVED")
+    .map(line => ({
+      itemId: line.itemId,
+      itemName: line.itemName,
+      unit: line.unit,
+      quantity: Number(line.actualQuantity || 0)
+    }))
+);
 const showFullPresetList = computed(() => drawerMode.value === "ALL" || itemKeyword.value.trim().length > 0);
 const searchCount = computed(() => visibleGroups.value.reduce((sum, group) => sum + group.items.length, 0));
 const visibleSourceRows = computed(() =>
@@ -1411,6 +1467,7 @@ const rejectedSummary = computed(() => {
 });
 
 const loadWorkbench = async (keepSelection = true) => {
+  await flushAutoSave();
   loading.value = true;
   try {
     const result = await getInventoryPatientWorkbenchApi({
@@ -1506,6 +1563,7 @@ const changeCalendarMonth = (month: string) => {
 
 const selectCalendarDate = (date: string) => {
   if (date !== businessDate.value) void changeDate(date);
+  calendarExpanded.value = false;
 };
 
 const loadRecentItems = async () => {
@@ -1526,45 +1584,8 @@ const loadPackages = async () => {
   }
 };
 
-const saveCurrentAsPackage = async () => {
-  if (!selectedLines.value.length) {
-    ElMessage.warning("请先选择耗材");
-    return;
-  }
-  try {
-    const result = await ElMessageBox.prompt("保存当前已选耗材，后续可一键套用到其他患者。", "保存为患者套餐", {
-      confirmButtonText: "保存",
-      cancelButtonText: "取消",
-      inputPlaceholder: "例如：检验科常规采血组合",
-      inputValidator: value => (value && value.trim() ? true : "请填写套餐名称")
-    });
-    const name = String(result.value || "").trim();
-    if (!name) return;
-    packageSaving.value = true;
-    const saved = await saveInventoryPatientPackageApi({
-      departmentKey: props.departmentKey,
-      name,
-      lines: selectedLines.value.map(line => ({
-        itemId: line.itemId,
-        itemName: line.itemName,
-        unit: line.unit,
-        quantity: line.actualQuantity,
-        source: line.source,
-        exceptionReason: line.exceptionReason
-      }))
-    });
-    patientPackages.value = saved.data?.packages ?? [];
-    ElMessage.success("患者套餐已保存");
-  } catch (error) {
-    if (error === "cancel" || error === "close") return;
-    ElMessage.error(error instanceof Error ? error.message : "保存患者套餐失败");
-  } finally {
-    packageSaving.value = false;
-  }
-};
-
 const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
-  if (!editable.value || !pkg.items.length) return;
+  if (!editable.value || !pkg.items.length) return false;
   try {
     await ElMessageBox.confirm(
       `将当前未审核耗材替换为“${pkg.name}”的 ${pkg.items.length} 项内容？已审核通过的项会保留。`,
@@ -1572,7 +1593,7 @@ const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
       { confirmButtonText: "套用", cancelButtonText: "取消", type: "warning" }
     );
   } catch {
-    return;
+    return false;
   }
   Object.keys(lineState).forEach(key => {
     if (lineState[key]?.reviewStatus !== "APPROVED") delete lineState[key];
@@ -1589,29 +1610,34 @@ const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
     };
   });
   ElMessage.success(`已套用“${pkg.name}”，当前清单已按套餐替换`);
+  return true;
 };
 
-const deletePackage = async (pkg: InventoryPatientConsumablePackage) => {
-  try {
-    await ElMessageBox.confirm(`删除套餐“${pkg.name}”？`, "删除患者套餐", {
-      confirmButtonText: "删除",
-      cancelButtonText: "取消",
-      type: "warning"
-    });
-  } catch {
-    return;
-  }
-  try {
-    const result = await deleteInventoryPatientPackageApi(pkg.id);
-    patientPackages.value = result.data?.packages ?? [];
-    ElMessage.success("套餐已删除");
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "删除患者套餐失败");
-  }
+const handleApplyPackageFromDrawer = async (pkg: InventoryPatientConsumablePackage) => {
+  if (await applyPackage(pkg)) packageDrawerVisible.value = false;
+};
+
+const handleAddPatientCommand = (command: string) => {
+  if (command === "SOURCE") void openPatientSource();
+  else if (command === "FOLLOWUP") followupVisible.value = true;
+  else if (command === "MANUAL") openManualDialog();
+};
+
+const handleReuseCommand = (command: string) => {
+  if (command === "PREVIOUS") void copyPreviousPatient();
+  else if (command === "LAST") void applyLastCombination();
+  else if (command === "PACKAGE") packageDrawerVisible.value = true;
+};
+
+const handleMoreCommand = (command: string) => {
+  if (command === "HISTORY") void openHistory();
+  else if (command === "NOTE") openNoteDialog();
 };
 
 const selectPatient = async (patient: InventoryPatientWorkbenchRow, skipSave = false) => {
   if (patient.serviceInstanceId && patient.serviceInstanceId === selectedId.value) return;
+  cancelAutoSave();
+  if (autoSavePromise) await autoSavePromise;
   if (!skipSave && detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
     await persistDraft(true);
   }
@@ -1672,6 +1698,7 @@ const applyDetail = (next: InventoryPatientDetail | undefined) => {
     };
   });
   saveState.value = next?.status === "DRAFT" ? "已保存" : "";
+  lastSavedSignature = lineSignature.value;
 };
 
 const isChecked = (item: InventoryPatientPresetItem) => Boolean(lineState[item.itemId]);
@@ -1748,12 +1775,72 @@ const persistDraft = async (silent = false, noConsumption = false, correctionRea
   }
   const result = await saveInventoryPatientDocumentApi(buildPayload(noConsumption, correctionReason));
   applyDetail(result.data);
-  saveState.value = `已保存 ${dayjs().format("HH:mm")}`;
+  lastSavedSignature = lineSignature.value;
+  saveState.value = `已自动保存 ${dayjs().format("HH:mm")}`;
   await refreshWorkbenchOnly();
   void loadRecentItems();
   void loadCalendar();
   return result.data;
 };
+
+const lineSignature = computed(() =>
+  selectedLines.value
+    .filter(line => line.reviewStatus !== "APPROVED")
+    .map(line => `${line.itemId}:${Number(line.actualQuantity || 0)}`)
+    .sort()
+    .join("|")
+);
+let lastSavedSignature = "";
+let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let autoSavePromise: Promise<void> | null = null;
+
+const canAutoSave = () =>
+  Boolean(detail.value) &&
+  editable.value &&
+  businessDate.value === todayValue &&
+  !saving.value &&
+  selectedLines.value.some(line => line.reviewStatus !== "APPROVED") &&
+  selectedLines.value.every(line => line.reviewStatus === "APPROVED" || Number(line.actualQuantity || 0) > 0);
+
+const flushAutoSave = async () => {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
+  }
+  if (!canAutoSave() || lineSignature.value === lastSavedSignature) return;
+  if (autoSavePromise) {
+    await autoSavePromise;
+    return;
+  }
+  autoSavePromise = persistDraft(true)
+    .then(() => undefined)
+    .catch(() => {
+      // 自动保存失败时保留当前编辑内容，由用户主动提交
+    })
+    .finally(() => {
+      autoSavePromise = null;
+    });
+  await autoSavePromise;
+};
+
+const cancelAutoSave = () => {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
+  }
+};
+
+const scheduleAutoSave = () => {
+  if (!canAutoSave() || lineSignature.value === lastSavedSignature) return;
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  saveState.value = "等待自动保存…";
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = undefined;
+    void flushAutoSave();
+  }, 1200);
+};
+
+watch(lineSignature, scheduleAutoSave);
 
 const promptCorrectionReason = async () => {
   if (businessDate.value >= todayValue) return "";
@@ -1767,63 +1854,6 @@ const promptCorrectionReason = async () => {
     return String(result.value || "").trim();
   } catch {
     return null;
-  }
-};
-
-const saveDraft = async () => {
-  if (!detail.value) return;
-  if (selectedLines.value.some(line => line.actualQuantity <= 0)) {
-    ElMessage.warning("已勾选耗材的数量必须大于零");
-    return;
-  }
-  const correctionReason = await promptCorrectionReason();
-  if (correctionReason === null) return;
-  saving.value = true;
-  try {
-    await persistDraft(false, false, correctionReason);
-    ElMessage.success("患者耗材清单已保存");
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "保存患者耗材清单失败");
-  } finally {
-    saving.value = false;
-  }
-};
-
-const submitDocument = async () => {
-  if (!detail.value) return;
-  if (selectedLines.value.some(line => line.actualQuantity <= 0)) {
-    ElMessage.warning("已勾选耗材的数量必须大于零");
-    return;
-  }
-  const message = selectedLines.value.length
-    ? `确认提交 ${detail.value.patientName || "该患者"} 的 ${selectedLines.value.length} 项耗材？提交后科室不能直接修改。`
-    : `确认 ${detail.value.patientName || "该患者"} 今天未使用任何耗材？`;
-  try {
-    await ElMessageBox.confirm(message, "提交审核", {
-      confirmButtonText: "确认提交",
-      cancelButtonText: "再看看",
-      type: "warning"
-    });
-  } catch {
-    return;
-  }
-  const correctionReason = await promptCorrectionReason();
-  if (correctionReason === null) return;
-  submitting.value = true;
-  try {
-    let current = detail.value;
-    if (!current.documentId || correctionReason) {
-      current = (await persistDraft(true, false, correctionReason)) ?? current;
-    }
-    const result = await submitInventoryPatientDocumentApi(current.documentId);
-    applyDetail(result.data);
-    await refreshWorkbenchOnly();
-    void loadCalendar();
-    ElMessage.success("已提交库管审核，审核通过前不会扣减库存");
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "提交患者耗材清单失败");
-  } finally {
-    submitting.value = false;
   }
 };
 
@@ -1866,13 +1896,10 @@ const selectNextPatient = async () => {
   await selectPatient(next, true);
 };
 
-const saveAndNext = async () => {
-  const result = await persistDraft(false, false);
-  if (result) await selectNextPatient();
-};
-
 const submitAndNext = async () => {
-  const result = await persistDraft(false, false);
+  const correctionReason = await promptCorrectionReason();
+  if (correctionReason === null) return;
+  const result = await persistDraft(false, false, correctionReason);
   if (!result?.documentId) return;
   try {
     await submitInventoryPatientDocumentApi(result.documentId);
@@ -2587,6 +2614,8 @@ const addFirstVisibleItem = () => {
 
 const changeDate = async (value: string) => {
   if (!value || value === businessDate.value) return;
+  cancelAutoSave();
+  if (autoSavePromise) await autoSavePromise;
   if (detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
     await persistDraft(true);
   }
@@ -2954,20 +2983,6 @@ onMounted(() => {
 
 .batch-package-select {
   min-width: 170px;
-}
-
-.summary-trigger {
-  padding: 2px 8px;
-  color: var(--hos-primary);
-  font-size: 11px;
-  cursor: pointer;
-  background: var(--hos-primary-soft);
-  border: 1px solid #cfe6da;
-  border-radius: 999px;
-}
-
-.sla-overdue {
-  color: #a33f3f;
 }
 
 .summary-dialog {
@@ -3643,31 +3658,121 @@ onMounted(() => {
   }
 }
 
-.date-strip {
+.calendar-card {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 14px;
 }
 
-.date-chip {
+.calendar-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+}
+
+.calendar-day-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   padding: 5px 10px;
   color: var(--hos-text-secondary);
-  background: var(--hos-bg-primary);
+  background: var(--hos-bg-surface);
   border: 1px solid var(--hos-border-light);
   border-radius: 999px;
   cursor: pointer;
   font-size: 12px;
 
+  .chip-count {
+    color: var(--hos-text-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+
+  &.is-filled {
+    background: var(--hos-status-success-soft);
+    border-color: #cfe6da;
+  }
+
+  &.is-suggest {
+    background: var(--hos-status-warning-soft);
+    border-color: #f0dcb4;
+  }
+
+  &.is-missing {
+    background: var(--hos-status-danger-soft);
+    border-color: #f0cfcf;
+  }
+
   &.is-active {
     color: #fff;
     background: var(--hos-primary);
     border-color: var(--hos-primary);
+
+    .chip-count {
+      color: rgb(255 255 255 / 78%);
+    }
   }
 }
 
-.date-picker-compact {
-  width: 128px;
+.calendar-month-summary {
+  margin-left: auto;
+  color: var(--hos-text-muted);
+  font-size: 12px;
+
+  b {
+    color: var(--hos-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.calendar-toggle {
+  padding: 0;
+  font-size: 12px;
+}
+
+.package-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 14px;
+}
+
+.package-summary-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+
+  strong {
+    color: var(--hos-text-primary);
+    font-size: 13px;
+  }
+
+  span {
+    overflow: hidden;
+    color: var(--hos-text-muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.package-summary-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
 }
 
 .status-strip {
@@ -3675,14 +3780,39 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
-  padding: 8px 4px 2px;
+  width: 100%;
+  padding: 8px 10px 6px;
   color: var(--hos-text-muted);
+  font: inherit;
   font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+
+  &:hover {
+    background: var(--hos-bg-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--hos-primary);
+    outline-offset: 2px;
+  }
 
   b {
     margin: 0 2px;
     color: var(--hos-text-primary);
     font-variant-numeric: tabular-nums;
+  }
+
+  .is-danger b {
+    color: var(--hos-status-danger);
+  }
+
+  .status-hint {
+    margin-left: auto;
+    color: var(--hos-primary);
   }
 }
 
@@ -3716,54 +3846,6 @@ onMounted(() => {
 .mapping-hint {
   color: var(--hos-status-warning);
   font-size: 10px;
-}
-
-.package-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  margin-top: 4px;
-  border-top: 1px solid var(--hos-border-light);
-}
-
-.package-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 220px;
-  overflow: auto;
-}
-
-.package-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 4px;
-  align-items: center;
-  padding: 7px 9px;
-  background: var(--hos-bg-surface);
-  border: 1px solid var(--hos-border-light);
-  border-radius: 9px;
-}
-
-.package-name {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  color: var(--hos-text-primary);
-  font-size: 12px;
-
-  small {
-    color: var(--hos-text-muted);
-    font-size: 10px;
-  }
-}
-
-.package-empty {
-  margin: 0;
-  color: var(--hos-text-muted);
-  font-size: 11px;
 }
 
 .drawer-mode {
