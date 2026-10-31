@@ -333,9 +333,10 @@ const refreshDetail = async () => {
   if (!selectedBatchId.value) return;
   try {
     const result = await getInventoryPatientReviewBatchApi(selectedBatchId.value);
+    const errors = result.data?.errors ?? [];
     detail.value = result.data ?? null;
-    decisionErrors.value = result.data?.errors ?? [];
     await reload(true);
+    decisionErrors.value = errors;
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "刷新审核明细失败");
   }
@@ -348,9 +349,14 @@ const decide = async (line: InventoryPatientConsumptionLine, decision: "APPROVED
     const result = await decideInventoryPatientReviewApi(detail.value.batch.batchId, {
       decisions: [{ lineId: line.lineId, decision, note }]
     });
+    const errors = result.data?.errors ?? [];
     detail.value = result.data ?? detail.value;
-    decisionErrors.value = result.data?.errors ?? [];
     await reload(true);
+    decisionErrors.value = errors;
+    if (errors.length) {
+      ElMessage.warning(errors.map(error => error.message).join("；"));
+      return;
+    }
     if (decision === "APPROVED") ElMessage.success("已通过并生成库存流水");
     else ElMessage.success("已驳回，科室可修改后重新提交");
   } catch (error) {
@@ -413,11 +419,12 @@ const submitDecisions = async (
   deciding.value = true;
   try {
     const result = await decideInventoryPatientReviewApi(detail.value.batch.batchId, { decisions });
+    const errors = result.data?.errors ?? [];
     detail.value = result.data ?? detail.value;
-    decisionErrors.value = result.data?.errors ?? [];
     await reload(true);
-    if (decisionErrors.value.length) {
-      ElMessage.warning(`已处理，但有 ${decisionErrors.value.length} 行因库存或状态问题未通过`);
+    decisionErrors.value = errors;
+    if (errors.length) {
+      ElMessage.warning(`已处理，但有 ${errors.length} 行未通过：${errors.map(error => error.message).join("；")}`);
     } else {
       ElMessage.success(successMessage);
     }
