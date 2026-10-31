@@ -7,6 +7,14 @@
           <p>按上午/下午/晚上分组；已匹配患者可直接确认到院。</p>
         </div>
         <div class="followup-actions">
+          <el-checkbox
+            :model-value="allMatchedSelected"
+            :indeterminate="selectedIds.length > 0 && !allMatchedSelected"
+            :disabled="!matchedItems.length"
+            @update:model-value="toggleAll"
+          >
+            全选已匹配
+          </el-checkbox>
           <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
           <el-button type="primary" plain @click="emit('batch')">套餐批处理</el-button>
         </div>
@@ -16,15 +24,20 @@
           <strong>{{ slot.label }}</strong>
           <span>{{ slot.items.length }} 人</span>
         </header>
-        <button
+        <div
           v-for="item in slot.items"
           :key="item.recheckId"
-          type="button"
           class="appointment-row"
-          :class="{ 'is-pending': !item.matched }"
-          :disabled="!item.matched || arrivingId === item.recheckId"
-          @click="arrive(item)"
+          :class="{ 'is-pending': !item.matched, 'is-selected': selectedIds.includes(item.recheckId) }"
+          @click="toggleItem(item)"
         >
+          <el-checkbox
+            :model-value="selectedIds.includes(item.recheckId)"
+            :disabled="!item.matched"
+            :aria-label="`选择 ${item.patientName}`"
+            @click.stop
+            @update:model-value="value => setSelected(item, Boolean(value))"
+          />
           <span class="appointment-main">
             <strong>{{ item.patientName }}</strong>
             <small>{{ item.phone || "无电话" }} · {{ item.note || "复查" }}</small>
@@ -37,24 +50,30 @@
               {{ statusLabel(item.status) }}
             </el-tag>
           </span>
-          <span class="appointment-go">{{ item.matched ? "确认已到 →" : "请搜索确认" }}</span>
-        </button>
+          <span class="appointment-go">{{ item.matched ? "勾选后批量确认" : "请搜索确认" }}</span>
+        </div>
       </div>
       <el-empty v-if="!slots.length && !loading" :image-size="70" description="今天没有复查预约" />
     </div>
+    <template #footer>
+      <span class="selected-count">已选 {{ selectedIds.length }} 人</span>
+      <el-button :disabled="!selectedIds.length || arriving" @click="selectedIds = []">清空选择</el-button>
+      <el-button type="primary" :disabled="!selectedIds.length" :loading="arriving" @click="arriveSelected">
+        确认已到并加入 {{ selectedIds.length || "" }} 位
+      </el-button>
+    </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 import {
   arriveInventoryFollowupAppointmentApi,
   getInventoryFollowupAppointmentsApi,
   type InventoryFollowupAppointment,
-  type InventoryFollowupSlot,
-  type InventoryPatientDetail
+  type InventoryFollowupSlot
 } from "@/api/modules/inventory";
 
 const props = defineProps<{
@@ -64,7 +83,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   "update:modelValue": [value: boolean];
-  arrived: [detail: InventoryPatientDetail | undefined];
+  "batch-arrived": [count: number];
   batch: [];
 }>();
 
@@ -74,7 +93,14 @@ const visible = computed({
 });
 const slots = ref<InventoryFollowupSlot[]>([]);
 const loading = ref(false);
-const arrivingId = ref("");
+const arriving = ref(false);
+const selectedIds = ref<string[]>([]);
+
+const allItems = computed(() => slots.value.flatMap(slot => slot.items));
+const matchedItems = computed(() => allItems.value.filter(item => item.matched));
+const allMatchedSelected = computed(
+  () => matchedItems.value.length > 0 && matchedItems.value.every(item => selectedIds.value.includes(item.recheckId))
+);
 
 const load = async () => {
   if (!props.departmentKey) return;
@@ -85,6 +111,7 @@ const load = async () => {
       date: props.date
     });
     slots.value = result.data?.slots ?? [];
+    selectedIds.value = [];
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "读取复诊预约失败");
   } finally {
@@ -92,21 +119,62 @@ const load = async () => {
   }
 };
 
-const arrive = async (item: InventoryFollowupAppointment) => {
+const setSelected = (item: InventoryFollowupAppointment, checked: boolean) => {
   if (!item.matched) return;
-  arrivingId.value = item.recheckId;
+  if (checked) {
+    if (!selectedIds.value.includes(item.recheckId)) selectedIds.value.push(item.recheckId);
+  } else {
+    selectedIds.value = selectedIds.value.filter(id => id !== item.recheckId);
+  }
+};
+
+const toggleItem = (item: InventoryFollowupAppointment) => {
+  if (!item.matched) return;
+  setSelected(item, !selectedIds.value.includes(item.recheckId));
+};
+
+const toggleAll = (checked: boolean | string | number) => {
+  selectedIds.value = Boolean(checked) ? matchedItems.value.map(item => item.recheckId) : [];
+};
+
+const arriveSelected = async () => {
+  const targets = allItems.value.filter(item => item.matched && selectedIds.value.includes(item.recheckId));
+  if (!targets.length) return;
   try {
-    const result = await arriveInventoryFollowupAppointmentApi(item.recheckId, {
-      departmentKey: props.departmentKey,
-      businessDate: props.date
-    });
-    ElMessage.success(`${item.patientName} 已到院并加入工作台`);
-    visible.value = false;
-    emit("arrived", result.data);
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "确认到院失败");
+    await ElMessageBox.confirm(
+      `确认 ${targets.length} 位复诊患者已到院，并加入今天的工作台？`,
+      "批量确认到院",
+      { confirmButtonText: "确认到院", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  arriving.value = true;
+  const succeeded = new Set<string>();
+  const errors: string[] = [];
+  try {
+    for (const item of targets) {
+      try {
+        await arriveInventoryFollowupAppointmentApi(item.recheckId, {
+          departmentKey: props.departmentKey,
+          businessDate: props.date
+        });
+        succeeded.add(item.recheckId);
+      } catch (error) {
+        errors.push(`${item.patientName}：${error instanceof Error ? error.message : "确认失败"}`);
+      }
+    }
+    if (succeeded.size) {
+      slots.value = slots.value
+        .map(slot => ({ ...slot, items: slot.items.filter(item => !succeeded.has(item.recheckId)) }))
+        .filter(slot => slot.items.length > 0);
+      selectedIds.value = selectedIds.value.filter(id => !succeeded.has(id));
+      emit("batch-arrived", succeeded.size);
+      ElMessage.success(`已确认 ${succeeded.size} 位患者到院`);
+    }
+    if (errors.length) ElMessage.warning(`成功 ${succeeded.size} 位，${errors.length} 位失败`);
   } finally {
-    arrivingId.value = "";
+    arriving.value = false;
   }
 };
 
@@ -176,7 +244,7 @@ watch(
 
 .appointment-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 90px;
+  grid-template-columns: auto minmax(0, 1fr) auto 90px;
   gap: 10px;
   align-items: center;
   padding: 9px 11px;
@@ -199,6 +267,17 @@ watch(
     opacity: 0.65;
     background: #f8f5ef;
   }
+
+  &.is-selected {
+    background: #edf7f1;
+    border-color: #347d68;
+  }
+}
+
+.selected-count {
+  margin-right: auto;
+  color: #6d675c;
+  font-size: 12px;
 }
 
 .appointment-main {

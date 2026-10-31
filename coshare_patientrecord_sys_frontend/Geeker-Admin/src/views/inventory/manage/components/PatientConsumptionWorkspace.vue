@@ -966,7 +966,7 @@
       v-model="followupVisible"
       :department-key="props.departmentKey"
       :date="businessDate"
-      @arrived="handleFollowupArrived"
+      @batch-arrived="handleFollowupBatchArrived"
       @batch="followupVisible = false; followupBatchVisible = true"
     />
     <FollowupBatchDialog
@@ -1467,11 +1467,8 @@ const loadFixedStatus = async () => {
 
 const existingPatientIds = computed(() => workbench.value.patients.map(patient => patient.patientId).filter(Boolean));
 
-const handleFollowupArrived = async (detail: InventoryPatientDetail | undefined) => {
+const handleFollowupBatchArrived = async () => {
   await loadWorkbench(false);
-  if (!detail?.serviceInstanceId) return;
-  const patient = workbench.value.patients.find(item => item.serviceInstanceId === detail.serviceInstanceId);
-  if (patient) await selectPatient(patient, true);
 };
 
 const handleFollowupBatchCompleted = async () => {
