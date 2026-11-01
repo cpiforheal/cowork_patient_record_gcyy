@@ -249,7 +249,10 @@
           <div class="selection-summary-head">
             <div>
               <h4>已选耗材</h4>
-              <p>{{ selectedLines.length }} 项 · 合计 {{ formatQuantity(selectedTotalQuantity) }} · 修改自动保存</p>
+              <p>
+                {{ selectedLines.length }} 项 · 合计 {{ formatQuantity(selectedTotalQuantity) }} · 修改自动保存
+                <span v-if="appliedPackageName" class="applied-package">· 已套用：{{ appliedPackageName }}</span>
+              </p>
             </div>
             <div class="selection-head-actions">
               <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
@@ -418,6 +421,29 @@
                         </div>
                       </div>
                       <el-empty v-if="!selectedLines.length" :image-size="64" description="还没有选耗材；用搜索、常用或最近使用添加" />
+                    </section>
+                    <section v-if="patientPackages.length" class="drawer-package-block">
+                      <div class="section-title">
+                        <h4>科室套餐</h4>
+                        <span>点套用并入当前清单，可再单项删除</span>
+                      </div>
+                      <div class="drawer-package-list">
+                        <div v-for="pkg in patientPackages" :key="pkg.id" class="drawer-package-row">
+                          <span>
+                            <strong>{{ pkg.name }}</strong>
+                            <small>{{ pkg.items.length }} 项</small>
+                          </span>
+                          <el-button
+                            size="small"
+                            type="primary"
+                            plain
+                            :disabled="!editable"
+                            @click="applyPackageInConsumableDrawer(pkg)"
+                          >
+                            套用
+                          </el-button>
+                        </div>
+                      </div>
                     </section>
           </section>
           <section class="drawer-right">
@@ -1007,6 +1033,7 @@ const lineState = reactive<Record<string, EditableLine>>({});
 const recentItems = ref<InventoryPatientRecentItems["items"]>([]);
 const patientPackages = ref<InventoryPatientConsumablePackage[]>([]);
 const packageDrawerVisible = ref(false);
+const appliedPackageName = ref("");
 const saveState = ref("");
 const showFullVisitNo = ref(false);
 const drawerVisible = ref(false);
@@ -1530,12 +1557,17 @@ const applyPackage = async (pkg: InventoryPatientConsumablePackage) => {
       exceptionReason: item.exceptionReason || (item.source === "MANUAL" ? "患者套餐" : undefined)
     };
   });
+  appliedPackageName.value = pkg.name;
   ElMessage.success(`已套用“${pkg.name}”，当前清单已按套餐替换`);
   return true;
 };
 
 const handleApplyPackageFromDrawer = async (pkg: InventoryPatientConsumablePackage) => {
   if (await applyPackage(pkg)) packageDrawerVisible.value = false;
+};
+
+const applyPackageInConsumableDrawer = async (pkg: InventoryPatientConsumablePackage) => {
+  await applyPackage(pkg);
 };
 
 const scrollRibbon = (direction: number) => {
@@ -1567,6 +1599,7 @@ const handleMoreCommand = (command: string) => {
 
 const selectPatient = async (patient: InventoryPatientWorkbenchRow, skipSave = false) => {
   if (patient.serviceInstanceId && patient.serviceInstanceId === selectedId.value) return;
+  appliedPackageName.value = "";
   cancelAutoSave();
   if (autoSavePromise) await autoSavePromise;
   if (!skipSave && detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
@@ -2134,6 +2167,7 @@ const applyBatchPackage = async () => {
   }
   batchBusy.value = true;
   let applied = 0;
+  const appliedInstanceIds: string[] = [];
   const errors: string[] = [];
   try {
     for (const patient of targets) {
@@ -2170,6 +2204,7 @@ const applyBatchPackage = async () => {
             exceptionReason: item.exceptionReason
           }))
         });
+        appliedInstanceIds.push(serviceInstanceId);
         applied++;
       } catch (error) {
         errors.push(`${patient.patientName}：${error instanceof Error ? error.message : "套用失败"}`);
@@ -2177,7 +2212,17 @@ const applyBatchPackage = async () => {
     }
     if (errors.length) ElMessage.warning(`已套用 ${applied} 位，${errors.length} 位失败`);
     else ElMessage.success(`已套用 ${applied} 位患者`);
-    await refreshAfterBatch();
+    selectedPatientKeys.value = [];
+    await loadWorkbench(true);
+    const appliedTarget = workbench.value.patients.find(patient =>
+      appliedInstanceIds.includes(patient.serviceInstanceId)
+    );
+    if (appliedTarget?.serviceInstanceId) {
+      selectedId.value = appliedTarget.serviceInstanceId;
+      const refreshed = await getInventoryPatientDetailApi(appliedTarget.serviceInstanceId);
+      applyDetail(refreshed.data);
+    }
+    appliedPackageName.value = pkg.name;
   } finally {
     batchBusy.value = false;
   }
@@ -2545,6 +2590,7 @@ const addFirstVisibleItem = () => {
 
 const changeDate = async (value: string) => {
   if (!value || value === businessDate.value) return;
+  appliedPackageName.value = "";
   cancelAutoSave();
   if (autoSavePromise) await autoSavePromise;
   if (detail.value && editable.value && selectedLines.value.some(line => line.reviewStatus !== "APPROVED")) {
@@ -2765,6 +2811,57 @@ onMounted(() => {
   padding: 10px;
   color: var(--hos-text-muted);
   font-size: 12px;
+}
+
+.drawer-package-block {
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--hos-border-light);
+}
+
+.drawer-package-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 210px;
+  margin-top: 6px;
+  overflow: auto;
+}
+
+.drawer-package-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 8px;
+
+  span {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  strong {
+    overflow: hidden;
+    color: var(--hos-text-primary);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--hos-text-muted);
+    font-size: 10px;
+  }
+}
+
+.applied-package {
+  color: var(--hos-primary);
+  font-weight: 600;
 }
 
 .picked-list {
