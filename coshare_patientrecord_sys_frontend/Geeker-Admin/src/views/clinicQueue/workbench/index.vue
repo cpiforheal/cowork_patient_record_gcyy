@@ -513,7 +513,7 @@
 </template>
 
 <script setup lang="ts" name="clinicQueueWorkbench">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStore } from "@/stores/modules/user";
@@ -525,7 +525,7 @@ import {
   registerAndIssuePreAiEncounterApi
 } from "@/api/modules/clinic/preAi";
 import RegistrationFormFields from "@/views/preAi/encounters/components/RegistrationFormFields.vue";
-import { preAiStages } from "@/views/preAi/encounters/fieldConfig";
+import { registrationFieldsForDirection } from "@/views/preAi/encounters/fieldConfig";
 import {
   callNextQueueApi,
   completeQueuePrintTaskApi,
@@ -568,8 +568,22 @@ const operationPending = ref("");
 const registrationVisible = ref(false);
 const registrationRequestId = ref("");
 const registrationForm = reactive<Record<string, any>>({});
-const registrationFields = (preAiStages.find(stage => stage.code === "REGISTRATION")?.fields || []).filter(
-  field => field.kind !== "repeatable"
+const registrationFields = computed(() =>
+  registrationFieldsForDirection(registrationForm.careDirection).filter(field => field.kind !== "repeatable")
+);
+watch(
+  () => registrationForm.careDirection,
+  value => {
+    if (value === "TCM_DIGESTIVE") {
+      delete registrationForm.visitPurpose;
+      delete registrationForm.registrationSymptoms;
+      registrationForm.inventoryCareType = "outpatient";
+    } else if (value) {
+      delete registrationForm.digestiveSymptoms;
+      delete registrationForm.digestiveDuration;
+      delete registrationForm.stoolPattern;
+    }
+  }
 );
 const issuanceNotice = ref<{ ticketId: string; publicNo: string; message: string; printPending: boolean }>();
 const newReceptionIds = reactive(new Set<string>());
@@ -884,6 +898,11 @@ async function recoverAndIssue() {
     recoveryVisible.value = false;
     issueVisible.value = false;
     recoveryRequestId.value = "";
+    if ("skipped" in data.queueWorkspace) {
+      ElMessage.success("补登记完成；中医科消化内科无需取号");
+      await load();
+      return;
+    }
     await finishIssuance(data.queueWorkspace, "复诊已补登记并发号");
   } catch (error: any) {
     ElMessage.error(error?.message || "补登记并发号失败");
@@ -1024,7 +1043,7 @@ async function finishIssuance(data: QueueWorkspace, prefix: string) {
   await load();
 }
 async function registerAndIssue() {
-  const missing = registrationFields.find(field => field.required && !String(registrationForm[field.key] ?? "").trim());
+  const missing = registrationFields.value.find(field => field.required && !String(registrationForm[field.key] ?? "").trim());
   if (missing) return ElMessage.warning(`请填写${missing.label}`);
   registrationRequestId.value ||= createClientRequestId();
   submitting.value = true;
@@ -1032,6 +1051,11 @@ async function registerAndIssue() {
     const { data } = await registerAndIssuePreAiEncounterApi({ ...registrationForm }, registrationRequestId.value);
     registrationVisible.value = false;
     registrationRequestId.value = "";
+    if ("skipped" in data.queueWorkspace) {
+      ElMessage.success("登记成功；中医科消化内科无需取号，已进入中医工作台");
+      await load();
+      return;
+    }
     await finishIssuance(data.queueWorkspace, "登记成功，已发号");
   } catch (error: any) {
     ElMessage.error(error?.message || "登记并发号失败，请核对信息后重试");

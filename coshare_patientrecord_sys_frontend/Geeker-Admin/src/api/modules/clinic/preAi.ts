@@ -7,6 +7,7 @@ export type PreAiStageCode = "REGISTRATION" | "INSPECTION" | "RECEPTION" | "NURS
 export type PreAiStageStatus = "DRAFT" | "PENDING_CONFIRMATION" | "COMPLETED" | "RETURNED" | "SKIPPED";
 export type PreAiEncounterStatus = "IN_PROGRESS" | "PENDING_REVIEW" | "REVIEWED" | "EXPORTED" | "CANCELLED" | "WITHDRAWN";
 export type PreAiEncounterRoute = "" | "OUTPATIENT" | "INPATIENT";
+export type CareDirection = "ANORECTAL" | "TCM_DIGESTIVE";
 export type PreAiTreatmentPath = "" | "CONSERVATIVE" | "SURGICAL";
 export type PreAiAuxiliaryTaskType = "LAB" | "ECG" | "IMAGING" | "VITAL_SIGNS" | "COLONOSCOPY" | "SURGERY_CONSENT";
 export type PreAiDutyCode =
@@ -40,6 +41,7 @@ export interface PreAiEncounterSummary {
   caseToken: string;
   route: PreAiEncounterRoute;
   inventoryCareType?: "outpatient" | "inpatient";
+  careDirection?: CareDirection;
   careSituationTags?: string;
   treatmentPath: PreAiTreatmentPath;
   status: PreAiEncounterStatus;
@@ -126,6 +128,7 @@ export interface FollowUpEncounterCreateRequest {
 
 export interface FollowUpRegisterAndIssueRequest extends FollowUpEncounterCreateRequest {
   clientRequestId: string;
+  careDirection?: CareDirection;
 }
 
 export interface PreAiStageSubmission {
@@ -284,9 +287,14 @@ export interface QueueHandoff {
   transferredAt: string;
 }
 
+export interface QueueSkippedWorkspace {
+  skipped: true;
+  reason: string;
+}
+
 export interface RegisterAndIssueResult {
   encounterWorkspace: PreAiWorkspace;
-  queueWorkspace: QueueWorkspace;
+  queueWorkspace: QueueWorkspace | QueueSkippedWorkspace;
 }
 
 export interface PreAiReviewLabMetric {
@@ -389,6 +397,50 @@ const jsonRequest = async <T>(path: string, method: "POST" | "PUT" | "DELETE", b
 export const getPreAiEncountersApi = async () => {
   const result = await clinicFetch("/pre-ai/encounters", { headers: authHeaders() });
   return clinicResponse(await parseClinicApiResponse<{ list: PreAiEncounterSummary[] }>(result));
+};
+
+export type TcmWorkbenchStatus = "WAITING" | "IN_PROGRESS" | "COMPLETED";
+
+export interface TcmWorkbenchRow {
+  encounterId: string;
+  patientCaseId: string;
+  patientName: string;
+  gender: string;
+  age: string;
+  phone: string;
+  visitNo: number;
+  visitDate: string;
+  patientSource: string;
+  registrationChiefComplaint: string;
+  digestiveSymptoms: string[];
+  digestiveDuration: string;
+  stoolPattern: string;
+  owningDepartmentName: string;
+  tcmStatus: TcmWorkbenchStatus;
+  tcmVersion: number;
+  tcmDisease: string;
+  primarySyndrome: string;
+  tcmUpdatedAt: string;
+  tcmCompletedAt: string;
+  registeredAt: string;
+}
+
+export interface TcmWorkbenchResult {
+  date: string;
+  from: string;
+  to: string;
+  counts: Record<TcmWorkbenchStatus, number>;
+  list: TcmWorkbenchRow[];
+}
+
+export const getTcmWorkbenchApi = async (params: { date?: string; from?: string; to?: string; keyword?: string }) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const result = await clinicFetch(`/pre-ai/encounters/tcm-workbench${suffix}`, { headers: authHeaders() });
+  return clinicResponse(await parseClinicApiResponse<TcmWorkbenchResult>(result));
 };
 
 export interface PreAiEncounterOverview {

@@ -78,6 +78,9 @@ public class PreAiEncounterService {
         "ECG", "心电图"
     );
     private static final Set<String> INVENTORY_CONSUMPTION_STAGES = Set.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
+    private static final String CARE_DIRECTION_ANORECTAL = "ANORECTAL";
+    private static final String CARE_DIRECTION_TCM_DIGESTIVE = "TCM_DIGESTIVE";
+    private static final Set<String> TCM_DIRECTION_STAGES = Set.of("REGISTRATION", "TCM", "REVIEW");
     private static final Set<String> READ_ROLES = Set.of("admin", "frontdesk", "inspection", "reception", "tcm", "doctor", "nurse", "nursing", "lab", "ecg", "ultrasound", "quality");
     private static final Set<String> FULL_OPERATION_ROLES = Set.of(
         "admin", "inspection", "reception", "tcm", "doctor", "nurse", "lab", "ecg", "ultrasound"
@@ -112,6 +115,7 @@ public class PreAiEncounterService {
         "REGISTRATION", Set.of(
             "patientName", "gender", "birthDate", "age", "phone", "identityType", "identityNumber", "address",
             "contactName", "contactRelation", "contactPhone", "visitDate", "visitPurpose", "patientSource", "registrationNote",
+            "careDirection", "digestiveSymptoms", "digestiveDuration", "stoolPattern",
             "registrationChiefComplaint", "registrationSymptoms", "visitProblem", "visitExpectation", "registrationPastHistory", "registrationIllnessHistory", "registrationPersonalHistory", "registrationCurrentIllness",
             "allergyHistory", "allergyHistoryNote", "personalHistory", "chronicDiseaseItems", "surgicalHistoryItems",
             "traumaHistory", "transfusionHistory", "vaccinationHistory", "medicationHistory", "maritalHistory", "familyHistory",
@@ -253,6 +257,7 @@ public class PreAiEncounterService {
     public Map<String, Object> create(CreateEncounterRequest request, SessionUser user) {
         requireEncounterCreator(user);
         ObjectNode patient = sanitizeStageData("REGISTRATION", request == null ? null : request.patient());
+        applyCareDirectionDefaults(patient);
         validateStage("REGISTRATION", patient, null);
         String sourcePatientId = createClinicPatientArchive(patient);
         String patientCaseId = createPatientCase(patient, sourcePatientId);
@@ -271,6 +276,7 @@ public class PreAiEncounterService {
         if (!existing.isEmpty()) return registerAndIssueResult(existing.get(0), user);
 
         ObjectNode patient = sanitizeStageData("REGISTRATION", request.patient());
+        applyCareDirectionDefaults(patient);
         validateStage("REGISTRATION", patient, null);
         String sourcePatientId = createClinicPatientArchive(patient);
         String patientCaseId = createPatientCase(patient, sourcePatientId);
@@ -318,8 +324,12 @@ public class PreAiEncounterService {
         ObjectNode patient = safeObject(patientCase.path("patient"));
         String visitDate = safe(request == null ? "" : request.visitDate());
         patient.put("visitDate", visitDate.isBlank() ? LocalDate.now().toString() : visitDate);
+        if (!safe(request == null ? null : request.careDirection()).isBlank()) {
+            patient.put("careDirection", normalizeCareDirection(request.careDirection()));
+        }
         if (text(patient, "inventoryCareType").isBlank()) patient.put("inventoryCareType", "outpatient");
         if (text(patient, "visitPurpose").isBlank()) patient.put("visitPurpose", "GENERAL");
+        applyCareDirectionDefaults(patient);
         validateStage("REGISTRATION", patient, null);
         List<ObjectNode> previous = jdbcTemplate.query(
             "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY visit_no DESC, created_at DESC LIMIT 1",
@@ -387,12 +397,14 @@ public class PreAiEncounterService {
                     ? objectMapper.convertValue(encounter.path("patient"), new TypeReference<Map<String, Object>>() {})
                     : request.patient()
             );
+            if (text(patient, "careDirection").isBlank()) patient.put("careDirection", text(encounter, "careDirection"));
+            applyCareDirectionDefaults(patient);
             validateStage("REGISTRATION", patient, null);
             int changed = jdbcTemplate.update("""
                 UPDATE pre_ai_encounters
-                SET patient_json = CAST(? AS JSON), registration_request_id = NULLIF(?, ''), updated_at = ?
+                SET patient_json = CAST(? AS JSON), care_direction = ?, registration_request_id = NULLIF(?, ''), updated_at = ?
                 WHERE id = ? AND (registration_request_id IS NULL OR registration_request_id = '' OR registration_request_id = ?)
-                """, toJson(patient), clientRequestId, now(), encounterId, clientRequestId);
+                """, toJson(patient), text(patient, "careDirection"), clientRequestId, now(), encounterId, clientRequestId);
             if (changed != 1) throw conflict("该复诊正在由其他终端补登记，请刷新后重试");
             updateStageVersioned(encounterId, "REGISTRATION", "COMPLETED", patient, "", user, now(),
                 request == null ? null : request.expectedVersion());
@@ -408,7 +420,11 @@ public class PreAiEncounterService {
     private Map<String, Object> registerAndIssueResult(String encounterId, SessionUser user) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("encounterWorkspace", toMap(workspace(encounterId, user)));
-        result.put("queueWorkspace", clinicQueueService.issue(new ClinicQueueService.IssueRequest(encounterId, ""), user));
+        if (isTcmDirection(loadEncounter(encounterId))) {
+            result.put("queueWorkspace", Map.of("skipped", true, "reason", "中医科消化内科无需取号"));
+        } else {
+            result.put("queueWorkspace", clinicQueueService.issue(new ClinicQueueService.IssueRequest(encounterId, ""), user));
+        }
         return result;
     }
 
@@ -499,6 +515,103 @@ public class PreAiEncounterService {
             rows.add(encounterSummary(row));
         });
         return Map.of("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
+    }
+
+    public Map<String, Object> tcmWorkbench(String date, String from, String to, String keyword, SessionUser user) {
+        requireRole(user, "tcm", "admin");
+        LocalDate anchor = parseWorkbenchDate(date, LocalDate.now());
+        LocalDate start = parseWorkbenchDate(from, null);
+        LocalDate end = parseWorkbenchDate(to, null);
+        if (start == null && end == null) {
+            start = anchor;
+            end = anchor;
+        } else if (start == null) {
+            start = end;
+        } else if (end == null) {
+            end = start;
+        }
+        if (start.isAfter(end)) {
+            LocalDate swap = start;
+            start = end;
+            end = swap;
+        }
+        String term = safe(keyword).trim();
+        String like = "%" + term + "%";
+        String[] range = {start.toString(), end.toString()};
+        ArrayNode rows = objectMapper.createArrayNode();
+        int[] counts = new int[3];
+        jdbcTemplate.query("""
+            SELECT e.id, e.patient_case_id, e.visit_no, e.patient_json, e.owning_department_name_snapshot,
+                   e.created_at, e.updated_at,
+                   COALESCE(s.status, 'DRAFT') AS tcm_status,
+                   COALESCE(s.version, 0) AS tcm_version,
+                   CASE WHEN s.data_json IS NOT NULL AND JSON_LENGTH(s.data_json) > 0 THEN 1 ELSE 0 END AS tcm_has_data,
+                   s.updated_at AS tcm_updated_at, s.completed_at AS tcm_completed_at,
+                   JSON_UNQUOTE(JSON_EXTRACT(s.data_json, '$.tcmDisease')) AS tcm_disease,
+                   JSON_UNQUOTE(JSON_EXTRACT(s.data_json, '$.primarySyndrome')) AS primary_syndrome
+            FROM pre_ai_encounters e
+            LEFT JOIN pre_ai_stage_submissions s ON s.encounter_id = e.id AND s.stage_code = 'TCM'
+            WHERE e.care_direction = 'TCM_DIGESTIVE'
+              AND e.status NOT IN ('CANCELLED', 'WITHDRAWN')
+              AND DATE(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.visitDate')), ''), e.created_at)) BETWEEN ? AND ?
+              AND (? = '' OR JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.patientName')) LIKE ?
+                   OR JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.phone')) LIKE ?)
+            ORDER BY COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.patient_json, '$.visitDate')), ''), e.created_at) DESC,
+                     e.created_at DESC
+            LIMIT 300
+            """, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                ObjectNode patient = readObject(rs.getString("patient_json"));
+                String tcmStatus = tcmWorkbenchStatus(rs.getString("tcm_status"), rs.getInt("tcm_has_data"));
+                if ("COMPLETED".equals(tcmStatus)) counts[2]++;
+                else if ("IN_PROGRESS".equals(tcmStatus)) counts[1]++;
+                else counts[0]++;
+                ObjectNode row = rows.addObject();
+                row.put("encounterId", rs.getString("id"));
+                row.put("patientCaseId", safe(rs.getString("patient_case_id")));
+                row.put("patientName", text(patient, "patientName"));
+                row.put("gender", text(patient, "gender"));
+                row.put("age", text(patient, "age"));
+                row.put("phone", text(patient, "phone"));
+                row.put("visitNo", rs.getInt("visit_no"));
+                row.put("visitDate", text(patient, "visitDate"));
+                row.put("patientSource", text(patient, "patientSource"));
+                row.put("registrationChiefComplaint", text(patient, "registrationChiefComplaint"));
+                JsonNode digestiveSymptoms = patient.path("digestiveSymptoms");
+                if (digestiveSymptoms.isArray()) row.set("digestiveSymptoms", digestiveSymptoms.deepCopy());
+                else row.putArray("digestiveSymptoms");
+                row.put("digestiveDuration", text(patient, "digestiveDuration"));
+                row.put("stoolPattern", text(patient, "stoolPattern"));
+                row.put("owningDepartmentName", safe(rs.getString("owning_department_name_snapshot")));
+                row.put("tcmStatus", tcmStatus);
+                row.put("tcmVersion", rs.getInt("tcm_version"));
+                row.put("tcmDisease", safe(rs.getString("tcm_disease")));
+                row.put("primarySyndrome", safe(rs.getString("primary_syndrome")));
+                row.put("tcmUpdatedAt", safe(rs.getString("tcm_updated_at")));
+                row.put("tcmCompletedAt", safe(rs.getString("tcm_completed_at")));
+                row.put("registeredAt", safe(rs.getString("created_at")));
+            }, range[0], range[1], term, like, like);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("date", anchor.toString());
+        result.put("from", start.toString());
+        result.put("to", end.toString());
+        result.put("counts", Map.of("WAITING", counts[0], "IN_PROGRESS", counts[1], "COMPLETED", counts[2]));
+        result.put("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
+        return result;
+    }
+
+    private LocalDate parseWorkbenchDate(String value, LocalDate fallback) {
+        String normalized = safe(value).trim();
+        if (normalized.isBlank()) return fallback;
+        try {
+            return LocalDate.parse(normalized.length() > 10 ? normalized.substring(0, 10) : normalized);
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private String tcmWorkbenchStatus(String status, int hasData) {
+        if ("COMPLETED".equals(status)) return "COMPLETED";
+        return hasData == 1 ? "IN_PROGRESS" : "WAITING";
     }
 
     public Map<String, Object> listPatientCases(SessionUser user) {
@@ -663,6 +776,7 @@ public class PreAiEncounterService {
         if (visitDate.isBlank()) visitDate = now();
         patient.put("visitDate", visitDate);
         if (text(patient, "inventoryCareType").isBlank()) patient.put("inventoryCareType", "outpatient");
+        applyCareDirectionDefaults(patient);
         validateStage("REGISTRATION", patient, null);
         List<ObjectNode> previous = jdbcTemplate.query(
             "SELECT * FROM pre_ai_encounters WHERE patient_case_id = ? ORDER BY visit_no DESC, created_at DESC LIMIT 1",
@@ -927,6 +1041,8 @@ public class PreAiEncounterService {
         syncInspectionConclusion(stage, data);
         if ("NURSING".equals(stage)) assertNursingEditable(encounterId, current);
         if ("REGISTRATION".equals(stage)) {
+            data.put("careDirection", text(encounter, "careDirection", CARE_DIRECTION_ANORECTAL));
+            applyCareDirectionDefaults(data);
             syncRegistrationCareType(encounterId, data, encounter);
             jdbcTemplate.update("UPDATE pre_ai_encounters SET patient_json = ?, updated_at = ? WHERE id = ?", toJson(data), now(), encounterId);
             String patientCaseId = text(encounter, "patientCaseId");
@@ -1113,8 +1229,10 @@ public class PreAiEncounterService {
         if ("SURGERY".equals(stage)) data.remove(List.of("physicianConfirmed", "physicianConfirmedBy", "physicianConfirmedAt"));
         syncInspectionConclusion(stage, data);
         if ("NURSING".equals(stage)) assertNursingEditable(encounterId, current);
+        if ("REGISTRATION".equals(stage)) data.put("careDirection", text(encounter, "careDirection", CARE_DIRECTION_ANORECTAL));
         validateStage(stage, data, encounter);
         if ("REGISTRATION".equals(stage)) {
+            applyCareDirectionDefaults(data);
             syncRegistrationCareType(encounterId, data, encounter);
             jdbcTemplate.update("UPDATE pre_ai_encounters SET patient_json = ?, updated_at = ? WHERE id = ?", toJson(data), now(), encounterId);
             String patientCaseId = text(encounter, "patientCaseId");
@@ -2513,6 +2631,8 @@ public class PreAiEncounterService {
         String caseToken = nextCaseToken();
         String timestamp = now();
         DepartmentIdentity owningDepartment = resolveOwningDepartment(user, text(patient, "owningDepartmentId"));
+        applyCareDirectionDefaults(patient);
+        String careDirection = text(patient, "careDirection", CARE_DIRECTION_ANORECTAL);
         String inventoryCareType = normalizeInventoryCareType(text(patient, "inventoryCareType", "outpatient"));
         String careSituationTags = careSituationTags(inventoryCareType, text(patient, "careSituationDescription"));
         patient.put("inventoryCareType", inventoryCareType);
@@ -2520,12 +2640,12 @@ public class PreAiEncounterService {
         jdbcTemplate.update("""
             INSERT INTO pre_ai_encounters (
               id, source_patient_id, patient_case_id, owning_department_id, owning_department_name_snapshot,
-              visit_no, follow_up_of_encounter_id, case_token, route, inventory_care_type, care_situation_tags, care_type_locked_at, treatment_path,
+              visit_no, follow_up_of_encounter_id, case_token, route, inventory_care_type, care_direction, care_situation_tags, care_type_locked_at, treatment_path,
               status, current_stage, patient_json, visit_meta_json, legacy_reference_json, duty_assignments_json, reviewed_at, reviewed_by,
               reviewed_by_role, registration_request_id, created_at, updated_at, created_by, created_by_role
-            ) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, '', ?, NULLIF(?, ''), ?, '', 'IN_PROGRESS', 'REGISTRATION', CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), JSON_ARRAY(), '', '', '', NULLIF(?, ''), ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, '', ?, ?, NULLIF(?, ''), ?, '', 'IN_PROGRESS', 'REGISTRATION', CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), JSON_ARRAY(), '', '', '', NULLIF(?, ''), ?, ?, ?, ?)
             """, id, sourcePatientId, patientCaseId, owningDepartment.id(), owningDepartment.name(), visitNo, followUpOfEncounterId, caseToken,
-            inventoryCareType, careSituationTags, timestamp, toJson(patient), toJson(visitMeta),
+            inventoryCareType, careDirection, careSituationTags, timestamp, toJson(patient), toJson(visitMeta),
             toJson(legacyReference), safe(registrationRequestId), timestamp, timestamp, user.name(), user.role());
         jdbcTemplate.update(
             """
@@ -2541,7 +2661,7 @@ public class PreAiEncounterService {
             ObjectNode data = "REGISTRATION".equals(stage) ? patient : objectMapper.createObjectNode();
             upsertStage(id, stage, "DRAFT", 0, data, "", user, "");
         }
-        ensureLabTask(id, user.name());
+        if (!isTcmDirection(patient)) ensureLabTask(id, user.name());
         audit(id, "encounter.create", "REGISTRATION", user, sourcePatientId.isBlank() ? "创建前置病历就诊" : "从旧患者创建前置病历就诊");
         return workspace(id, user);
     }
@@ -3117,13 +3237,17 @@ public class PreAiEncounterService {
                 required(data, missing, "gender", "性别");
                 if (text(data, "age").isBlank() && text(data, "birthDate").isBlank()) missing.add("年龄或出生日期");
                 required(data, missing, "visitDate", "就诊时间");
-                required(data, missing, "visitPurpose", "来院目的");
+                required(data, missing, "careDirection", "就诊方向");
+                boolean tcmDirection = isTcmDirection(data);
+                if (!tcmDirection) required(data, missing, "visitPurpose", "来院目的");
                 required(data, missing, "registrationChiefComplaint", "登记主诉");
                 required(data, missing, "allergyHistory", "过敏史");
                 required(data, missing, "personalHistory", "个人史");
-                required(data, missing, "inventoryCareType", "耗材统计口径（门诊/住院）");
+                if (!tcmDirection) required(data, missing, "inventoryCareType", "耗材统计口径（门诊/住院）");
+                if (tcmDirection && emptyArray(data.path("digestiveSymptoms"))) missing.add("消化症状");
                 if (!text(data, "inventoryCareType").isBlank()) normalizeInventoryCareType(text(data, "inventoryCareType"));
                 if (!text(data, "visitPurpose").isBlank()) normalizeEnum(text(data, "visitPurpose"), Set.of("GENERAL", "ENDOSCOPY_DIRECT"), "来院目的");
+                normalizeCareDirection(text(data, "careDirection"));
             }
             case "INSPECTION" -> {
                 required(data, missing, "examinationDirection", "检查方向");
@@ -3144,8 +3268,10 @@ public class PreAiEncounterService {
                 required(data, missing, "tongue", "舌象");
                 required(data, missing, "pulse", "脉象");
                 required(data, missing, "treatmentPrinciple", "治法治则");
-                required(data, missing, "preoperativeAssessment", "术前评估");
-                required(data, missing, "consultationOpinion", "会诊意见");
+                if (encounter == null || !isTcmDirection(encounter)) {
+                    required(data, missing, "preoperativeAssessment", "术前评估");
+                    required(data, missing, "consultationOpinion", "会诊意见");
+                }
             }
             case "DOCTOR" -> {
                 required(data, missing, "finalRoute", "最终门诊/住院分支");
@@ -3295,6 +3421,7 @@ public class PreAiEncounterService {
     }
 
     private void applyRegistrationPurpose(String encounterId, ObjectNode patient, SessionUser user) {
+        if (isTcmDirection(patient)) return;
         if (!"ENDOSCOPY_DIRECT".equals(text(patient, "visitPurpose"))) return;
         ObjectNode inspection = loadStage(encounterId, "INSPECTION");
         if (!Set.of("DRAFT", "RETURNED").contains(text(inspection, "status"))) return;
@@ -3761,6 +3888,7 @@ public class PreAiEncounterService {
         row.put("caseToken", rs.getString("case_token"));
         row.put("route", safe(rs.getString("route")));
         row.put("inventoryCareType", safe(rs.getString("inventory_care_type")));
+        row.put("careDirection", safe(rs.getString("care_direction")));
         row.put("careSituationTags", safe(rs.getString("care_situation_tags")));
         row.put("careTypeLockedAt", safe(rs.getString("care_type_locked_at")));
         row.put("treatmentPath", safe(rs.getString("treatment_path")));
@@ -3821,6 +3949,7 @@ public class PreAiEncounterService {
         summary.put("gender", text(patient, "gender"));
         summary.put("age", text(patient, "age"));
         summary.put("visitDate", text(patient, "visitDate"));
+        summary.put("careDirection", text(summary, "careDirection", CARE_DIRECTION_ANORECTAL));
         summary.remove(List.of("patient", "visitMeta", "legacyReference"));
         enrichEncounterWorkflow(summary);
         return summary;
@@ -4424,9 +4553,12 @@ public class PreAiEncounterService {
 
     private void requireStageEditor(ObjectNode encounter, String stage, SessionUser user) {
         requireActiveEncounter(encounter);
+        if (isTcmDirection(encounter) && !TCM_DIRECTION_STAGES.contains(stage)) {
+            throw conflict("中医科消化内科患者不走肛肠诊疗流程");
+        }
         // 中医岗按管理员对待：门诊跳过中医环节的门控对中医岗自身放行
         boolean tcmOperator = "tcm".equals(RoleCatalog.canonicalize(user == null ? "" : user.role()));
-        if ("TCM".equals(stage) && isOutpatientEncounter(encounter) && !tcmOperator) {
+        if ("TCM".equals(stage) && isOutpatientEncounter(encounter) && !tcmOperator && !isTcmDirection(encounter)) {
             throw conflict("门诊患者跳过中医环节，不能维护中医阶段");
         }
         // 护理部的开放/跳过由接诊室完成交接时的住院判定驱动（assertNursingEditable），不按前台口径拦截
@@ -4588,7 +4720,33 @@ public class PreAiEncounterService {
         throw badRequest("耗材统计口径只能选择门诊或住院");
     }
 
+    private String normalizeCareDirection(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (normalized.isBlank()) return CARE_DIRECTION_ANORECTAL;
+        if (Set.of("ANORECTAL", "肛肠", "肛肠专科").contains(normalized)) return CARE_DIRECTION_ANORECTAL;
+        if (Set.of("TCM_DIGESTIVE", "TCM", "中医", "中医科", "中医科消化内科").contains(normalized)) return CARE_DIRECTION_TCM_DIGESTIVE;
+        throw badRequest("就诊方向只能选择肛肠专科或中医科消化内科");
+    }
+
+    private void applyCareDirectionDefaults(ObjectNode patient) {
+        String direction = normalizeCareDirection(text(patient, "careDirection"));
+        patient.put("careDirection", direction);
+        if (CARE_DIRECTION_TCM_DIGESTIVE.equals(direction)) {
+            patient.put("visitPurpose", "GENERAL");
+            patient.put("inventoryCareType", "outpatient");
+        }
+    }
+
+    private boolean isTcmDirection(JsonNode node) {
+        return CARE_DIRECTION_TCM_DIGESTIVE.equals(text(node, "careDirection"));
+    }
+
+    private boolean emptyArray(JsonNode value) {
+        return value.isMissingNode() || value.isNull() || !value.isArray() || value.isEmpty();
+    }
+
     private List<String> effectiveStageOrder(ObjectNode encounter) {
+        if (isTcmDirection(encounter)) return List.of("REGISTRATION", "TCM");
         List<String> stages = new ArrayList<>(STAGE_ORDER);
         // 护理部固定保留在流程中：是否跳过由接诊室完成交接时的住院判定驱动（applyReceptionDisposition），
         // 不按前台的耗材口径预判——前台登记时未必知道患者最终是门诊还是住院。
@@ -4801,7 +4959,7 @@ public class PreAiEncounterService {
     public record ImagingNoteRequest(String note) {}
     public record VersionRequest(Integer expectedVersion) {}
     public record FollowUpEncounterCreateRequest(String visitDate, Map<String, Object> visitMeta) {}
-    public record FollowUpRegisterAndIssueRequest(String visitDate, Map<String, Object> visitMeta, String clientRequestId) {}
+    public record FollowUpRegisterAndIssueRequest(String visitDate, Map<String, Object> visitMeta, String clientRequestId, String careDirection) {}
     public record ExistingRegisterAndIssueRequest(Map<String, Object> patient, String clientRequestId, Integer expectedVersion) {}
     public record AdmissionProfileSaveRequest(Map<String, Object> data, Integer expectedVersion, boolean complete) {}
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}

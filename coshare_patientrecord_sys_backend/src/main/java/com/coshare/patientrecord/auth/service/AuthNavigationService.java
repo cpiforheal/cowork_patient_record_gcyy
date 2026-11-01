@@ -382,6 +382,7 @@ public class AuthNavigationService {
         result.add(group("/navigation/patient-collaboration", "patientCollaboration", "/patients/archive", "患者就诊", "UserFilled",
             // 随访监控台（/nursing/follow-up-monitor）仍在 staging 验证，本次不上生产
             sectionedPage("接诊作业", "/pre-ai/encounters", "preAiEncounters", "/preAi/encounters/index", "登记与事实采集", "EditPen"),
+            sectionedPage("接诊作业", "/pre-ai/tcm", "tcmWorkbench", "/preAi/tcm/index", "中医工作台", "FirstAidKit"),
             // 复查预约登记：检查室轮岗共享的复查登记表（行=日期，格=患者），交接班核对实到
             sectionedPage("接诊作业", "/patients/recheck-schedule", "recheckSchedule", "/patients/recheckSchedule/index", "复查预约登记", "Calendar"),
             sectionedPage("接诊作业", "/workbench/upload", "workbenchUpload", "/workbench/upload/index", "患者资料上传", "UploadFilled"),
@@ -503,6 +504,7 @@ public class AuthNavigationService {
         Set<String> patientFlow = paths("/welcome/index", "/home/index", "/patients/list", "/patients/detail/:id", "/patients/overview", "/patients/archive", "/dip/warning");
         Set<String> materials = paths("/workbench/upload", "/workbench/lab-report", "/templates/record");
         Set<String> preAi = paths("/pre-ai/encounters");
+        Set<String> tcmWorkbench = paths("/pre-ai/tcm");
         // 病种模板库与话术模板库已归入「系统管理 → 随访配置」，
         // 路径前缀变为 /system 之外但挂在系统分组下，需显式授予相关岗位，否则菜单会对其消失。
         Set<String> followUpConfig = paths("/pre-ai/template-manage", "/pre-ai/script-manage");
@@ -592,8 +594,9 @@ public class AuthNavigationService {
         result.put("nurse", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, opsDashboard, recheckSchedule), nursingButtons));
         result.put("nursing", role(union(patientFlow, materials, preAi, inventoryStaff, healthArchive, followUpConfig, opsDashboard, recheckSchedule), nursingButtons));
 
-        result.put("tcm", role(union(patientFlow, preAi, tcmPharmacy, followUpConfig), permissions(
-            "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read"
+        result.put("tcm", role(union(patientFlow, preAi, tcmWorkbench, tcmPharmacy, followUpConfig), permissions(
+            "home=view", "tcmPharmacyWorkbench=prescription:create,prescription:submit,pharmacy:read", "tcmPharmacyDisplayMenu=display:read",
+            "tcmWorkbench=patient:read,field:read,field:edit"
         )));
         result.put("tcm_pharmacy", role(union(paths("/welcome/index", "/home/index"), tcmPharmacy), permissions(
             "home=view", "tcmPharmacyWorkbench=pharmacy:read,charge:confirm,review:execute,dispensing:execute,decoction:execute,pickup:execute",

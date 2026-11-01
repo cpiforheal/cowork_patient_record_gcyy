@@ -51,6 +51,16 @@ public class PreAiEncounterController {
         return ApiResult.success(service.list(AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/tcm-workbench")
+    public ApiResult<Map<String, Object>> tcmWorkbench(
+        @RequestParam(defaultValue = "") String date,
+        @RequestParam(defaultValue = "") String from,
+        @RequestParam(defaultValue = "") String to,
+        @RequestParam(defaultValue = "") String keyword
+    ) {
+        return ApiResult.success(service.tcmWorkbench(date, from, to, keyword, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping
     public ApiResult<Map<String, Object>> create(@RequestBody PreAiEncounterService.CreateEncounterRequest request) {
         return ApiResult.of(200, "前置病历就诊已创建", service.create(request, AuthPermission.currentUserOrThrow()));

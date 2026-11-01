@@ -353,7 +353,8 @@ class ClinicQueueServiceMySqlIntegrationTests {
             new PreAiEncounterService.FollowUpRegisterAndIssueRequest(
                 LocalDate.now() + " 09:15:00",
                 Map.of("visitReason", "postoperative review"),
-                followUpRequestId
+                followUpRequestId,
+                "ANORECTAL"
             );
 
         Map<String, Object> first = preAiService.createFollowUpAndIssue(patientCaseId, request, ADMIN);

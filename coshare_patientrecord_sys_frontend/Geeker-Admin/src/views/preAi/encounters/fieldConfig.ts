@@ -140,6 +140,18 @@ export const preAiStages: PreAiStageConfig[] = [
     owner: "前台",
     description: "选择病种模板后自动生成主诉与现病史固定文本，仅需调整病程、加重等变量；导出的 DOCX 会自动脱敏。",
     fields: [
+      {
+        key: "careDirection",
+        label: "就诊方向",
+        kind: "select",
+        required: true,
+        span: 2,
+        options: [
+          { label: "肛肠专科", value: "ANORECTAL" },
+          { label: "中医科消化内科", value: "TCM_DIGESTIVE" }
+        ],
+        placeholder: "先确定就诊方向，再填写患者信息"
+      },
       { key: "patientName", label: "姓名", kind: "input", required: true },
       {
         key: "gender",
@@ -224,6 +236,39 @@ export const preAiStages: PreAiStageConfig[] = [
           "便不尽感"
         ]),
         creatable: true
+      },
+      {
+        key: "digestiveSymptoms",
+        label: "消化症状（点选）",
+        kind: "multi",
+        required: true,
+        span: 2,
+        options: options([
+          "腹痛",
+          "腹胀",
+          "反酸烧心",
+          "嗳气",
+          "恶心呕吐",
+          "食欲不振",
+          "腹泻",
+          "便秘",
+          "排便不畅",
+          "大便性状异常",
+          "其他"
+        ]),
+        creatable: true
+      },
+      {
+        key: "digestiveDuration",
+        label: "症状持续时间",
+        kind: "input",
+        placeholder: "例如：3 个月、反复 2 年"
+      },
+      {
+        key: "stoolPattern",
+        label: "大便情况",
+        kind: "select",
+        options: options(["正常", "干结", "稀溏", "水样", "黏滞", "便血", "未注意"])
       },
       {
         key: "registrationChiefComplaint",
@@ -1640,4 +1685,21 @@ export const auxiliaryTaskLabel: Record<PreAiAuxiliaryTaskType, string> = {
   VITAL_SIGNS: "生命体征",
   COLONOSCOPY: "肠镜",
   SURGERY_CONSENT: "手术知情同意书"
+};
+
+export type CareDirection = "ANORECTAL" | "TCM_DIGESTIVE";
+
+export const careDirectionLabel: Record<string, string> = {
+  ANORECTAL: "肛肠专科",
+  TCM_DIGESTIVE: "中医科消化内科"
+};
+
+const ANORECTAL_ONLY_KEYS = new Set(["visitPurpose", "registrationSymptoms", "inventoryCareType"]);
+const TCM_ONLY_KEYS = new Set(["digestiveSymptoms", "digestiveDuration", "stoolPattern"]);
+
+export const registrationFieldsForDirection = (direction?: string): PreAiFieldConfig[] => {
+  const tcm = direction === "TCM_DIGESTIVE";
+  return (preAiStages.find(stage => stage.code === "REGISTRATION")?.fields || []).filter(field =>
+    tcm ? !ANORECTAL_ONLY_KEYS.has(field.key) : !TCM_ONLY_KEYS.has(field.key)
+  );
 };

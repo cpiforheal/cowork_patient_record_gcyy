@@ -1564,10 +1564,16 @@
         type="info"
         :closable="false"
         show-icon
-        title="提交后将创建复诊、完成登记并直接发号；检查、诊断、图片、化验和复核状态仍从空白开始。"
+        title="提交后将创建复诊并完成登记；肛肠专科直接发号，中医科消化内科不发号并进入中医工作台。检查、诊断、图片、化验和复核状态仍从空白开始。"
       />
       <el-form label-position="top" class="follow-up-form">
         <div class="form-grid dialog-grid">
+          <el-form-item label="就诊方向" required>
+            <el-select v-model="followUpForm.careDirection" placeholder="选择本次就诊方向">
+              <el-option label="肛肠专科" value="ANORECTAL" />
+              <el-option label="中医科消化内科" value="TCM_DIGESTIVE" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="本次来访时间" required>
             <el-date-picker v-model="followUpForm.visitDate" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" />
           </el-form-item>
@@ -2096,6 +2102,7 @@ import {
   getMissingHistoryFields,
   isHistoryIntakeKey,
   preAiStages,
+  registrationFieldsForDirection,
   stageByCode,
   stageStatusLabel,
   type PreAiFieldConfig
@@ -2610,6 +2617,16 @@ const createForm = reactive<Record<string, any>>({
 const createTemplateIds = ref<string[]>([]);
 const patchCreateForm = (key: string, value: any) => {
   createForm[key] = value;
+  if (key !== "careDirection") return;
+  if (value === "TCM_DIGESTIVE") {
+    delete createForm.visitPurpose;
+    delete createForm.registrationSymptoms;
+    createForm.inventoryCareType = "outpatient";
+  } else if (value) {
+    delete createForm.digestiveSymptoms;
+    delete createForm.digestiveDuration;
+    delete createForm.stoolPattern;
+  }
 };
 
 const clinicalTemplateIds = (code: PreAiStageCode) => {
@@ -3393,8 +3410,29 @@ const activeWorkflowCard = computed(
 );
 const selectedStage = computed(() => stageByCode(selectedStageCode.value));
 const selectedStageSubmission = computed(() => stageSubmission(selectedStageCode.value)!);
+const TCM_DIRECTION_FIELD_KEYS = new Set([
+  "tcmDisease",
+  "primarySyndrome",
+  "concurrentSyndrome",
+  "inspection",
+  "auscultationOlfaction",
+  "inquiry",
+  "palpation",
+  "tongue",
+  "pulse",
+  "treatmentPrinciple"
+]);
+const selectedStageFields = computed(() => {
+  if (selectedStageCode.value === "REGISTRATION") {
+    return registrationFieldsForDirection(workspace.value?.encounter?.careDirection || stageForms.REGISTRATION.careDirection);
+  }
+  if (selectedStageCode.value === "TCM" && workspace.value?.encounter?.careDirection === "TCM_DIGESTIVE") {
+    return selectedStage.value.fields.filter(field => TCM_DIRECTION_FIELD_KEYS.has(field.key));
+  }
+  return selectedStage.value.fields;
+});
 const visibleStageFields = computed(() =>
-  selectedStage.value.fields.filter(field => !field.visible || field.visible(stageForms[selectedStageCode.value]))
+  selectedStageFields.value.filter(field => !field.visible || field.visible(stageForms[selectedStageCode.value]))
 );
 // 检查室收束视图：病种模板 + 检查记录 textarea 承载全部录入，旧槽位字段不再渲染
 const stageFormFields = computed(() => {
@@ -3475,7 +3513,9 @@ watch(selectedStageCode, code => {
 const isSecondaryStageField = (field: PreAiFieldConfig) =>
   Boolean(compactStageFieldKeys[selectedStageCode.value]?.has(field.key));
 const secondaryStageFieldsCount = computed(() => visibleStageFields.value.filter(field => isSecondaryStageField(field)).length);
-const registrationFields = computed(() => stageByCode("REGISTRATION").fields.filter(field => field.key !== "visitNo"));
+const registrationFields = computed(() =>
+  registrationFieldsForDirection(createForm.careDirection).filter(field => field.key !== "visitNo")
+);
 const registrationDialogFields = computed(() =>
   createOptionalFieldsExpanded.value
     ? registrationFields.value.filter(field => field.kind !== "repeatable")
@@ -4538,6 +4578,7 @@ const openFollowUpDialog = (patientCase: PreAiPatientCase) => {
   followUpRequestId.value = createClientRequestId();
   Object.keys(followUpForm).forEach(key => delete followUpForm[key]);
   followUpForm.visitDate = currentLocalDateTime();
+  followUpForm.careDirection = patientCase.latestEncounter?.careDirection === "TCM_DIGESTIVE" ? "TCM_DIGESTIVE" : "ANORECTAL";
   followUpDialogVisible.value = true;
 };
 
@@ -4589,11 +4630,12 @@ const createFollowUp = async () => {
     return;
   }
   await runAction(async () => {
-    const { visitDate, ...visitMeta } = deepCopy(followUpForm);
+    const { visitDate, careDirection, ...visitMeta } = deepCopy(followUpForm);
     followUpRequestId.value ||= createClientRequestId();
     const { data } = await registerAndIssuePreAiFollowUpApi(followUpPatientCase.value!.id, {
       visitDate,
       visitMeta,
+      careDirection,
       clientRequestId: followUpRequestId.value
     });
     const encounterWorkspace = data.encounterWorkspace;
@@ -4605,9 +4647,15 @@ const createFollowUp = async () => {
     selectedEncounterId.value = encounterWorkspace.encounter.id;
     hydrateWorkspace(encounterWorkspace);
     await loadEncounterHistory(encounterWorkspace.encounter.patientCaseId, encounterWorkspace.encounter.id, true);
-    selectedStageCode.value = "INSPECTION";
+    const tcmDirection = encounterWorkspace.encounter.careDirection === "TCM_DIGESTIVE";
+    selectedStageCode.value = tcmDirection ? "TCM" : "INSPECTION";
     workflowSelected.value = true;
     editorMode.value = "EDIT";
+    if ("skipped" in queueWorkspace) {
+      handoffNotice.value = "复诊已登记；中医科消化内科无需取号，已进入中医辨证";
+      ElMessage.success(handoffNotice.value);
+      return;
+    }
     const printed = queueWorkspace.newlyIssued === false ? false : await printIssuedQueueTicket(queueWorkspace.ticket.id);
     handoffNotice.value = `${queueWorkspace.ticket.publicNo} 复诊已登记并发号，当前进入检查候诊；${
       printed ? "票据已打印。" : "打印不可用或未成功，请到叫号工作台补打。"
@@ -4925,9 +4973,15 @@ const createEncounter = async () =>
     selectedPatientCaseId.value = encounterWorkspace.encounter.patientCaseId;
     selectedEncounterId.value = encounterWorkspace.encounter.id;
     hydrateWorkspace(encounterWorkspace);
-    selectedStageCode.value = "INSPECTION";
+    const tcmDirection = encounterWorkspace.encounter.careDirection === "TCM_DIGESTIVE";
+    selectedStageCode.value = tcmDirection ? "TCM" : "INSPECTION";
     workflowSelected.value = true;
     editorMode.value = "EDIT";
+    if ("skipped" in queueWorkspace) {
+      handoffNotice.value = "已登记；中医科消化内科无需取号，已进入中医辨证";
+      ElMessage.success(handoffNotice.value);
+      return;
+    }
     const printed = queueWorkspace.newlyIssued === false ? false : await printIssuedQueueTicket(queueWorkspace.ticket.id);
     handoffNotice.value = `${queueWorkspace.ticket.publicNo} 已发号，当前进入检查候诊；${
       printed ? "票据已打印。" : "打印不可用或未成功，请到叫号工作台补打。"

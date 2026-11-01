@@ -23,7 +23,7 @@ const routerMode = {
 const createHistory = routerMode[mode as keyof typeof routerMode] ?? routerMode.hash;
 const PROTECTED_BUSINESS_PATHS = [
   /^\/navigation\/(patient-collaboration|materials-documents|quality-audit)\/?$/,
-  /^\/pre-ai(?:\/encounters)?\/?$/,
+  /^\/pre-ai(?:\/(?:encounters|tcm))?\/?$/,
   /^\/patients(?:\/list|\/detail\/[^/]+)?\/?$/,
   /^\/encounters(?:\/active)?\/?$/,
   /^\/workbench(?:\/upload|\/lab-report|\/legacy)?\/?$/,

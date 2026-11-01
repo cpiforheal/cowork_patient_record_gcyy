@@ -162,6 +162,7 @@ public class ClinicQueueService {
             LEFT JOIN pre_ai_stage_submissions s ON s.encounter_id = e.id AND s.stage_code = 'REGISTRATION'
             LEFT JOIN clinic_queue_tickets q ON q.encounter_id = e.id
             WHERE e.status <> 'CANCELLED'
+              AND e.care_direction = 'ANORECTAL'
               AND q.id IS NULL
             ORDER BY CASE WHEN s.status = 'COMPLETED' THEN 0 ELSE 1 END, e.updated_at DESC
             LIMIT 300
@@ -946,7 +947,8 @@ public class ClinicQueueService {
 
     private EncounterPatient loadEncounterPatient(String encounterId) {
         List<EncounterPatient> rows = jdbcTemplate.query("""
-            SELECT e.id, e.source_patient_id, e.visit_no, e.status, e.patient_json, s.status AS registration_status
+            SELECT e.id, e.source_patient_id, e.visit_no, e.status, e.patient_json, e.care_direction,
+                   s.status AS registration_status
             FROM pre_ai_encounters e
             LEFT JOIN pre_ai_stage_submissions s ON s.encounter_id = e.id AND s.stage_code = 'REGISTRATION'
             WHERE e.id = ? LIMIT 1
@@ -955,13 +957,15 @@ public class ClinicQueueService {
                 return new EncounterPatient(
                     rs.getString("id"), safe(rs.getString("source_patient_id")),
                     text(patient, "patientName"), rs.getInt("visit_no"), rs.getString("status"),
-                    safe(rs.getString("registration_status")), text(patient, "visitDate"), text(patient, "visitPurpose")
+                    safe(rs.getString("registration_status")), text(patient, "visitDate"), text(patient, "visitPurpose"),
+                    safe(rs.getString("care_direction"))
                 );
             }, encounterId);
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "就诊记录不存在");
         EncounterPatient encounter = rows.get(0);
         if (safe(encounter.patientName()).isBlank()) throw conflict("就诊记录缺少患者姓名，无法发号");
         if ("CANCELLED".equals(encounter.status())) throw conflict("就诊记录已取消，无法发号");
+        if ("TCM_DIGESTIVE".equals(encounter.careDirection())) throw conflict("中医科消化内科患者无需取号");
         if (!"COMPLETED".equals(encounter.registrationStatus())) throw conflict("请先完成就诊登记，再进行发号");
         try {
             String visitDate = safe(encounter.visitDate());
@@ -1411,7 +1415,8 @@ public class ClinicQueueService {
     public record PrintTaskRequest(String terminalId, String reason, String clientRequestId) {}
     public record PrintResultRequest(String status, String printerName, String errorMessage, String executionToken) {}
     record EncounterPatient(String encounterId, String patientId, String patientName, int visitNo,
-                            String status, String registrationStatus, String visitDate, String visitPurpose) {}
+                            String status, String registrationStatus, String visitDate, String visitPurpose,
+                            String careDirection) {}
     public record Candidate(String taskId, String ticketId, String visitType, LocalDateTime enteredAt, boolean priorityLocked, String reason) {
         Candidate withReason(String nextReason) {
             return new Candidate(taskId, ticketId, visitType, enteredAt, priorityLocked, nextReason);
