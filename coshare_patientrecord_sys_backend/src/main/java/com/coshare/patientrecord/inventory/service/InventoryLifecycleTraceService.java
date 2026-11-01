@@ -317,7 +317,8 @@ public class InventoryLifecycleTraceService {
         List<Object> args = new ArrayList<>();
         if (!itemId.isBlank()) { sql.append(" AND il.item_id = ?"); args.add(itemId); }
         if (!batchId.isBlank()) { sql.append(" AND il.batch_id = ?"); args.add(batchId); }
-        if (!orderNo.isBlank()) { sql.append(" AND o.order_no = ?"); args.add(orderNo.trim()); }
+        String safeOrderNo = nz(orderNo);
+        if (!safeOrderNo.isBlank()) { sql.append(" AND o.order_no = ?"); args.add(safeOrderNo.trim()); }
         sql.append(" ORDER BY o.created_at DESC LIMIT 200");
         this.queryList(sql.toString(), (rs, rowNum) -> {
             ObjectNode event = baseEvent("INBOUND", "入库", rs.getString("created_at"), rs.getBigDecimal("quantity").abs());
@@ -424,16 +425,13 @@ public class InventoryLifecycleTraceService {
     private void loadPendingTasks(List<ObjectNode> events, String itemId, String batchId) {
         StringBuilder sql = new StringBuilder("""
             SELECT t.id, t.item_id, t.message, t.status, t.created_at, t.resolved_at,
-                   i.name item_name, i.unit, b.batch_no, t.line_id
+                   i.name item_name, i.unit, t.line_id
             FROM inventory_exception_tasks t
             LEFT JOIN inventory_items i ON i.id = t.item_id
-            LEFT JOIN inventory_patient_consumption_lines l ON l.id = t.line_id
-            LEFT JOIN inventory_batches b ON b.id = l.batch_id
             WHERE t.exception_type = 'REVIEW_DEDUCTION_PENDING'
             """);
         List<Object> args = new ArrayList<>();
         if (!itemId.isBlank()) { sql.append(" AND t.item_id = ?"); args.add(itemId); }
-        if (!batchId.isBlank()) { sql.append(" AND l.batch_id = ?"); args.add(batchId); }
         sql.append(" ORDER BY t.created_at DESC LIMIT 100");
         this.queryList(sql.toString(), (rs, rowNum) -> {
             ObjectNode event = baseEvent("PENDING_DEDUCTION", "待补扣", nz(rs.getString("created_at")),
@@ -442,7 +440,7 @@ public class InventoryLifecycleTraceService {
             event.put("quantity", 0);
             event.put("unit", nz(rs.getString("unit")));
             event.put("itemName", nz(rs.getString("item_name")));
-            event.put("batchNo", nz(rs.getString("batch_no")));
+            event.put("batchNo", "");
             event.put("department", "");
             event.put("operator", "");
             event.put("documentType", "REVIEW");
