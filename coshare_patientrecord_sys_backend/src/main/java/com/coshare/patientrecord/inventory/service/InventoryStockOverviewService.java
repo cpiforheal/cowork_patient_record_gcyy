@@ -83,7 +83,11 @@ public class InventoryStockOverviewService {
                    (SELECT MAX(o.created_at)
                     FROM inventory_inbound_lines il
                     JOIN inventory_inbound_orders o ON o.id = il.order_id
-                    WHERE il.item_id = i.id AND o.status = 'ACTIVE') latest_inbound_at
+                    WHERE il.item_id = i.id AND o.status = 'ACTIVE') latest_inbound_at,
+                   COALESCE((SELECT c.factor FROM inventory_unit_conversions c
+                             WHERE c.item_id = i.id AND c.status = 'active'
+                               AND c.source_unit = i.issue_unit AND c.target_unit = i.base_unit
+                             ORDER BY c.updated_at DESC LIMIT 1), 1) conversion_factor
             FROM inventory_items i
             WHERE i.enabled = 1
             ORDER BY i.name
@@ -106,6 +110,7 @@ public class InventoryStockOverviewService {
                 row.put("location", nz(resultSet.getString("location")));
                 row.put("latestInboundAt", resultSet.getTimestamp("latest_inbound_at") == null
                     ? "" : resultSet.getTimestamp("latest_inbound_at").toLocalDateTime().toString());
+                row.put("conversionFactor", scale(resultSet.getBigDecimal("conversion_factor")));
                 return row;
             }
         );

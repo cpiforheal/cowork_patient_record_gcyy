@@ -174,6 +174,7 @@ public class InventoryInboundService {
         String purchaseDateText = text(payload, "purchaseDate");
         LocalDate purchaseDate = purchaseDateText.isBlank() ? LocalDate.now() : LocalDate.parse(purchaseDateText);
         String supplier = text(payload, "supplier");
+        boolean bulkMode = payload != null && payload.path("bulkMode").asBoolean(false);
         ArrayNode mergedLines = mergeInboundLines(lines);
         String orderId = "inbound-" + UUID.randomUUID();
         String orderNo = nextOrderNo(purchaseDate);
@@ -199,15 +200,15 @@ public class InventoryInboundService {
             boolean expiryRequired = item.path("expiryRequired").asBoolean(false);
             String batchNo = text(lineNode, "batchNo");
             String expiryDate = text(lineNode, "expiryDate");
-            if (batchRequired && batchNo.isBlank()) {
+            if (!bulkMode && batchRequired && batchNo.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, item.path("name").asText() + " 必须填写批号");
             }
-            if (expiryRequired && expiryDate.isBlank()) {
+            if (!bulkMode && expiryRequired && expiryDate.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, item.path("name").asText() + " 必须填写有效期");
             }
             String location = text(lineNode, "location");
             if (location.isBlank()) location = repository.itemLocation(itemId);
-            ObjectNode batch = repository.reusableInboundBatch(itemId, batchNo, expiryDate, batchRequired);
+            ObjectNode batch = repository.reusableInboundBatch(itemId, batchNo, expiryDate, bulkMode ? false : batchRequired);
             String batchId = batch.path("id").asText();
             repository.putQuantity(batch, "quantity", repository.quantity(batch, "quantity").add(quantity));
             batch.put("batchNo", batchNo.isBlank() ? "常备库存" : batchNo);

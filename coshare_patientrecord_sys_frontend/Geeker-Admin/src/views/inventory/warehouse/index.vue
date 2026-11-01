@@ -8,6 +8,7 @@
       <div class="head-actions">
         <el-button :icon="Refresh" :loading="loading" aria-label="刷新" @click="refreshAll" />
         <el-button v-if="activeTab === 'inbound'" type="primary" :icon="Plus" @click="openInbound">新建入库</el-button>
+        <el-button v-if="activeTab === 'inbound'" plain @click="openBulk">批量补货</el-button>
         <el-button v-if="activeTab === 'inbound'" plain @click="importVisible = true">期初导入</el-button>
       </div>
     </header>
@@ -266,6 +267,64 @@
       </template>
     </el-dialog>
 
+    <el-drawer v-model="bulkVisible" title="批量补货 / 库存初始化" size="94%" append-to-body>
+      <div class="bulk-shell" v-loading="bulkLoading">
+        <div class="bulk-toolbar">
+          <el-date-picker v-model="bulkForm.purchaseDate" type="date" value-format="YYYY-MM-DD" placeholder="进货日期" />
+          <el-autocomplete v-model="bulkForm.supplier" :fetch-suggestions="querySuppliers" clearable placeholder="供应商（选填）" class="grow" />
+          <el-input v-model="bulkForm.supplierDocumentNo" clearable placeholder="供货单号（选填）" />
+          <el-input v-model="bulkForm.note" clearable placeholder="备注（选填）" />
+        </div>
+        <div class="bulk-filter">
+          <el-input v-model="bulkKeyword" clearable placeholder="搜索物资 / 规格 / 分类" />
+          <el-select v-model="bulkFilter" clearable placeholder="筛选">
+            <el-option label="近30天常用" value="COMMON" />
+            <el-option label="低库存" value="LOW" />
+            <el-option label="未填数量" value="EMPTY" />
+          </el-select>
+          <span class="bulk-summary">已填 {{ bulkFilledCount }} 项 · 共 {{ bulkRows.length }} 项；数量为 0 的行不会提交</span>
+        </div>
+        <el-table :data="bulkVisibleRows" border height="calc(100vh - 330px)" row-key="itemId">
+          <el-table-column prop="name" label="物资" min-width="180">
+            <template #default="{ row }">
+              <strong>{{ row.name }}</strong>
+              <small v-if="row.spec">（{{ row.spec }}）</small>
+              <el-tag v-if="row.lowStock" type="warning" size="small" effect="plain">低库存</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="category" label="分类" width="100" />
+          <el-table-column label="当前库存" width="110">
+            <template #default="{ row }">{{ formatNumber(row.centralQuantity) }} {{ row.baseUnit }}</template>
+          </el-table-column>
+          <el-table-column label="本次进货" width="150" label-class-name="bulk-qty-head" class-name="bulk-qty-cell">
+            <template #default="{ row }">
+              <el-input-number v-model="row.quantity" :min="0" :precision="2" :controls="false" class="bulk-qty" />
+              <small class="bulk-qty-unit">{{ row.issueUnit }}</small>
+            </template>
+          </el-table-column>
+          <el-table-column label="折算" width="100">
+            <template #default="{ row }">{{ formatNumber(Number(row.quantity || 0) * row.factor) }} {{ row.baseUnit }}</template>
+          </el-table-column>
+          <el-table-column label="批号（选填）" width="130">
+            <template #default="{ row }"><el-input v-model="row.batchNo" placeholder="批号" /></template>
+          </el-table-column>
+          <el-table-column label="有效期（选填）" width="140">
+            <template #default="{ row }"><el-input v-model="row.expiryDate" placeholder="YYYY-MM-DD" /></template>
+          </el-table-column>
+          <el-table-column label="备注（选填）" min-width="130">
+            <template #default="{ row }"><el-input v-model="row.remark" placeholder="备注" /></template>
+          </el-table-column>
+        </el-table>
+        <div class="bulk-foot">
+          <span>批号/效期留空时生成“常备库存”批次；供应商和日期也可不填。</span>
+          <el-button @click="bulkVisible = false">取消</el-button>
+          <el-button type="primary" :loading="bulkSaving" :disabled="!bulkFilledCount" @click="saveBulk">
+            保存入库（{{ bulkFilledCount }} 项）
+          </el-button>
+        </div>
+      </div>
+    </el-drawer>
+
     <el-drawer v-model="orderVisible" :title="currentOrder?.orderNo || '入库单明细'" size="58%" append-to-body>
       <template v-if="currentOrder">
         <div class="order-meta">
@@ -388,6 +447,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import dayjs from "dayjs";
 import { Plus, Refresh } from "@element-plus/icons-vue";
 import {
   commitInventoryOpeningImportApi,
@@ -485,6 +545,34 @@ const itemForm = reactive({
 const importFile = ref<File | null>(null);
 const importPreview = ref<{ rows: any[]; errors: Array<{ row: number; name: string; message: string }> } | null>(null);
 const importing = ref(false);
+const bulkVisible = ref(false);
+const bulkLoading = ref(false);
+const bulkSaving = ref(false);
+const bulkKeyword = ref("");
+const bulkFilter = ref("ALL");
+const bulkForm = reactive({
+  purchaseDate: new Date().toISOString().slice(0, 10),
+  supplier: "",
+  supplierDocumentNo: "",
+  note: ""
+});
+const bulkRows = ref<Array<{
+  itemId: string; name: string; spec: string; category: string; unit: string; baseUnit: string; issueUnit: string;
+  centralQuantity: number; lowStock: boolean; latestInboundAt: string; factor: number;
+  quantity: number; batchNo: string; expiryDate: string; remark: string;
+}>>([]);
+
+const bulkVisibleRows = computed(() => {
+  const keyword = bulkKeyword.value.trim().toLowerCase();
+  return bulkRows.value.filter(row => {
+    if (keyword && !`${row.name} ${row.spec} ${row.category}`.toLowerCase().includes(keyword)) return false;
+    if (bulkFilter.value === "COMMON") return Boolean(row.latestInboundAt && dayjs(row.latestInboundAt).isAfter(dayjs().subtract(30, "day")));
+    if (bulkFilter.value === "LOW") return row.lowStock;
+    if (bulkFilter.value === "EMPTY") return Number(row.quantity || 0) <= 0;
+    return true;
+  });
+});
+const bulkFilledCount = computed(() => bulkRows.value.filter(row => Number(row.quantity || 0) > 0).length);
 
 const categoryOptions = computed(() => Array.from(new Set(items.value.map(item => item.category).filter(Boolean))));
 const filteredRequests = computed(() => {
@@ -682,6 +770,72 @@ const onTabChange = async (name: string | number) => {
 const querySuppliers = (query: string, callback: (rows: Array<{ value: string }>) => void) => {
   const keyword = query.trim().toLowerCase();
   callback(suppliers.value.filter(name => !keyword || name.toLowerCase().includes(keyword)).map(name => ({ value: name })));
+};
+
+const openBulk = async () => {
+  bulkLoading.value = true;
+  try {
+    await loadStock();
+    bulkRows.value = stockItems.value.map(item => ({
+      itemId: item.itemId,
+      name: item.name,
+      spec: item.spec || "",
+      category: item.category || "未分类",
+      unit: item.unit || "",
+      baseUnit: item.baseUnit || item.unit || "",
+      issueUnit: item.issueUnit || item.unit || "",
+      centralQuantity: Number(item.centralQuantity || 0),
+      lowStock: Boolean(item.lowStock),
+      latestInboundAt: item.latestInboundAt || "",
+      factor: Number(item.conversionFactor || 1) || 1,
+      quantity: 0,
+      batchNo: "",
+      expiryDate: "",
+      remark: ""
+    }));
+    bulkForm.purchaseDate = new Date().toISOString().slice(0, 10);
+    bulkForm.supplier = "";
+    bulkForm.supplierDocumentNo = "";
+    bulkForm.note = "";
+    bulkKeyword.value = "";
+    bulkFilter.value = "ALL";
+    suppliers.value = (await getInventoryInboundSuppliersApi()).data ?? [];
+    bulkVisible.value = true;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "读取耗材目录失败");
+  } finally {
+    bulkLoading.value = false;
+  }
+};
+
+const saveBulk = async () => {
+  const lines = bulkRows.value.filter(row => Number(row.quantity || 0) > 0);
+  if (!lines.length) return ElMessage.warning("请至少填写一项进货数量");
+  bulkSaving.value = true;
+  try {
+    await createInventoryInboundOrderApi({
+      bulkMode: true,
+      purchaseDate: bulkForm.purchaseDate,
+      supplier: bulkForm.supplier,
+      supplierDocumentNo: bulkForm.supplierDocumentNo,
+      note: bulkForm.note || "批量补货/库存初始化",
+      lines: lines.map(row => ({
+        itemId: row.itemId,
+        issueQuantity: row.quantity,
+        conversionFactor: row.factor,
+        batchNo: row.batchNo,
+        expiryDate: row.expiryDate,
+        remark: row.remark
+      }))
+    });
+    ElMessage.success(`已批量入库 ${lines.length} 项`);
+    bulkVisible.value = false;
+    await Promise.all([loadInbound(), loadStock(), loadAlerts()]);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "批量入库失败");
+  } finally {
+    bulkSaving.value = false;
+  }
 };
 
 const openInbound = async () => {
@@ -1167,6 +1321,75 @@ onMounted(() => {
   gap: 10px;
   align-items: center;
   margin-bottom: 10px;
+}
+
+.bulk-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+
+.bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  .grow {
+    flex: 1 1 220px;
+  }
+}
+
+.bulk-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  .el-input {
+    width: 240px;
+  }
+
+  .bulk-summary {
+    margin-left: auto;
+    color: #9a9285;
+    font-size: 12px;
+  }
+}
+
+.bulk-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid #f1ebe1;
+
+  span {
+    margin-right: auto;
+    color: #9a9285;
+    font-size: 11px;
+  }
+}
+
+:deep(.bulk-qty-head) {
+  color: #fff !important;
+  background: #347d68 !important;
+}
+
+:deep(.bulk-qty-cell) {
+  background: #f2faf5;
+}
+
+.bulk-qty {
+  width: 92px;
+}
+
+.bulk-qty-unit {
+  margin-left: 4px;
+  color: #6d675c;
+  font-size: 11px;
 }
 
 .danger {
