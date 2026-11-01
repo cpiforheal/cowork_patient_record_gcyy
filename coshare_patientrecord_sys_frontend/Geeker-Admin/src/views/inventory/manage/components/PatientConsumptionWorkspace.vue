@@ -10,6 +10,9 @@
         <el-button plain @click="deptStockVisible = true">
           科室库存{{ deptLowCount ? ` · ${deptLowCount} 项预警` : "" }}
         </el-button>
+        <el-button plain @click="openUsage">
+          今日已用 {{ formatQuantity(usageTotals.totalQuantity) }}
+        </el-button>
         <el-dropdown trigger="click" @command="handleAddPatientCommand">
           <el-button type="primary" plain>加入患者 ▾</el-button>
           <template #dropdown>
@@ -876,6 +879,12 @@
     </el-dialog>
 
     <DepartmentStockDrawer v-model="deptStockVisible" @changed="loadDepartmentStock" />
+    <DepartmentUsageDrawer
+      v-model="usageVisible"
+      :department-key="props.departmentKey"
+      :department-name="departmentName"
+      :date="businessDate"
+    />
     <FixedConsumablesDialog
       v-model="fixedVisible"
       :department-key="props.departmentKey"
@@ -934,6 +943,7 @@ import FollowupAppointmentsDialog from "./FollowupAppointmentsDialog.vue";
 import FollowupBatchDialog from "./FollowupBatchDialog.vue";
 import DepartmentPackageBoard from "./DepartmentPackageBoard.vue";
 import DepartmentStockDrawer from "./DepartmentStockDrawer.vue";
+import DepartmentUsageDrawer from "./DepartmentUsageDrawer.vue";
 import {
   addInventoryManualPatientApi,
   getInventoryFixedConsumablesApi,
@@ -943,6 +953,7 @@ import {
   withdrawInventoryPatientZeroUseApi,
   getInventoryDepartmentDailyReportCalendarApi,
   getInventoryDepartmentStockApi,
+  getInventoryConsumableUsageApi,
   getInventoryPatientDetailApi,
   getInventoryPatientLastCombinationApi,
   getInventoryPatientPackagesApi,
@@ -1012,6 +1023,8 @@ const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
 const calendarExpanded = ref(false);
 const deptStockVisible = ref(false);
+const usageVisible = ref(false);
+const usageTotals = ref({ itemCount: 0, totalQuantity: 0, patientCount: 0 });
 const ribbonRef = ref<HTMLElement | null>(null);
 const deptStockMap = ref<Record<string, any>>({});
 const deptLowCount = computed(() => Object.values(deptStockMap.value).filter(item => item.lowStock).length);
@@ -1407,6 +1420,7 @@ const loadWorkbench = async (keepSelection = true) => {
     void loadCalendar();
     void loadFixedStatus();
     void loadDepartmentStock();
+    void loadUsageSummary();
     if (!keepSelection || !selectedId.value) {
       const first =
         filteredPatients.value.find(patient => patient.serviceInstanceId) ||
@@ -1465,6 +1479,23 @@ const fixedStatusLabel = computed(() => {
   if (fixedStatus.value === "RETURNED") return "已驳回";
   return "待确认";
 });
+
+const openUsage = () => {
+  usageVisible.value = true;
+  void loadUsageSummary();
+};
+
+const loadUsageSummary = async () => {
+  try {
+    const result = await getInventoryConsumableUsageApi({
+      date: businessDate.value,
+      departmentKey: props.departmentKey
+    });
+    usageTotals.value = result.data?.totals ?? { itemCount: 0, totalQuantity: 0, patientCount: 0 };
+  } catch {
+    usageTotals.value = { itemCount: 0, totalQuantity: 0, patientCount: 0 };
+  }
+};
 
 const loadDepartmentStock = async () => {
   try {

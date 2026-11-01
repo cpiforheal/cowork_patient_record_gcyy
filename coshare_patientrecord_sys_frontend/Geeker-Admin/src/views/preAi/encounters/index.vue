@@ -2130,7 +2130,7 @@ const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const currentRole = computed(() => userStore.userInfo.role || "");
-const canManageFollowUp = computed(() => ["inspection", "admin", "doctor", "tcm"].includes(currentRole.value));
+const canManageFollowUp = computed(() => ["inspection", "admin", "doctor", "tcm", "reception"].includes(currentRole.value));
 const canWithdrawFollowUp = computed(() => currentRole.value === "admin" && canCreateEncounter.value);
 const currentUser = computed(() => userStore.userInfo as typeof userStore.userInfo & { id?: string; username?: string });
 const currentUserId = computed(() => String(currentUser.value.id || ""));
