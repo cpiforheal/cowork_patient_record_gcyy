@@ -24,6 +24,7 @@
           <el-button plain>更多 ▾</el-button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="PACKAGE">科室套餐</el-dropdown-item>
               <el-dropdown-item v-if="fixedCount" command="FIXED">固定耗材 · {{ fixedStatusLabel }}</el-dropdown-item>
               <el-dropdown-item command="REFRESH">刷新工作台</el-dropdown-item>
             </el-dropdown-menu>
@@ -35,22 +36,21 @@
       </div>
     </header>
 
-    <button type="button" class="status-strip" aria-label="打开今日摘要" @click="summaryVisible = true">
-      <span class="status-progress">已录 <b>{{ summary.entered || 0 }}</b> / <b>{{ summary.expected ?? summary.total ?? 0 }}</b></span>
-      <span v-if="summary.notStarted"><b>{{ summary.notStarted }}</b> 未录</span>
-      <span v-if="summary.returned" class="is-danger"><b>{{ summary.returned }}</b> 驳回</span>
-      <span v-if="(summary.notArrived || 0) + (summary.deferred || 0)">
-        <b>{{ (summary.notArrived || 0) + (summary.deferred || 0) }}</b> 未到/暂缓
-      </span>
-      <span v-if="businessDate !== todayValue" class="backfill-badge">补录模式</span>
-      <span class="status-hint" aria-hidden="true">摘要 ›</span>
-      <span class="status-progress-bar" aria-hidden="true">
-        <span :style="{ width: `${progress}%` }"></span>
-      </span>
-    </button>
-
-    <div class="calendar-card">
-      <div class="calendar-strip">
+    <div class="status-date-row">
+      <button type="button" class="status-strip" aria-label="打开今日摘要" @click="summaryVisible = true">
+        <span class="status-progress">已录 <b>{{ summary.entered || 0 }}</b> / <b>{{ summary.expected ?? summary.total ?? 0 }}</b></span>
+        <span v-if="summary.notStarted"><b>{{ summary.notStarted }}</b> 未录</span>
+        <span v-if="summary.returned" class="is-danger"><b>{{ summary.returned }}</b> 驳回</span>
+        <span v-if="(summary.notArrived || 0) + (summary.deferred || 0)">
+          <b>{{ (summary.notArrived || 0) + (summary.deferred || 0) }}</b> 未到/暂缓
+        </span>
+        <span v-if="businessDate !== todayValue" class="backfill-badge">补录模式</span>
+        <span class="status-hint" aria-hidden="true">摘要 ›</span>
+        <span class="status-progress-bar" aria-hidden="true">
+          <span :style="{ width: `${progress}%` }"></span>
+        </span>
+      </button>
+      <div class="date-strip-inline">
         <button
           v-for="day in stripDays"
           :key="day.value"
@@ -65,14 +65,13 @@
           </span>
         </button>
         <span class="calendar-month-summary">本月已填 <b>{{ monthFilledDays }}</b>/<b>{{ monthTrackedDays }}</b> 天</span>
-        <el-button text type="primary" class="calendar-toggle" @click="calendarExpanded = !calendarExpanded">
-          {{ calendarExpanded ? "收起月历" : "展开月历" }}
-        </el-button>
+        <el-button text type="primary" class="calendar-toggle" @click="calendarExpanded = true">展开月历</el-button>
       </div>
+    </div>
+
+    <el-drawer v-model="calendarExpanded" title="填写日历" size="440px" append-to-body>
       <DepartmentFillCalendar
-        v-if="calendarExpanded"
         class="workspace-calendar"
-        wide
         :month="calendarMonth"
         :today="todayValue"
         :selected-date="businessDate"
@@ -83,137 +82,106 @@
         @update:month="changeCalendarMonth"
         @select-date="selectCalendarDate"
       />
-    </div>
+    </el-drawer>
 
-    <div class="patient-layout">
-      <aside class="patient-panel">
-        <div class="patient-panel-head">
-          <el-input
-            v-model="patientKeyword"
-            placeholder="搜索患者 / 就诊号"
-            clearable
-            :prefix-icon="Search"
-          />
-          <el-select v-model="statusFilter" class="status-filter" aria-label="筛选患者状态">
-            <el-option label="全部状态" value="ALL" />
-            <el-option label="未录入" value="NOT_STARTED" />
-            <el-option label="草稿" value="DRAFT" />
-            <el-option label="待审核" value="SUBMITTED" />
-            <el-option label="已驳回" value="RETURNED" />
-            <el-option label="已通过" value="APPROVED" />
-            <el-option label="未到" value="NOT_ARRIVED" />
-            <el-option label="暂缓" value="DEFERRED" />
+    <section class="patient-ribbon">
+      <div class="ribbon-tools">
+        <el-input v-model="patientKeyword" placeholder="搜索患者 / 就诊号" clearable :prefix-icon="Search" />
+        <el-select v-model="statusFilter" class="status-filter" aria-label="筛选患者状态">
+          <el-option label="全部状态" value="ALL" />
+          <el-option label="未录入" value="NOT_STARTED" />
+          <el-option label="草稿" value="DRAFT" />
+          <el-option label="待审核" value="SUBMITTED" />
+          <el-option label="已驳回" value="RETURNED" />
+          <el-option label="已通过" value="APPROVED" />
+          <el-option label="未到" value="NOT_ARRIVED" />
+          <el-option label="暂缓" value="DEFERRED" />
+        </el-select>
+        <el-checkbox :model-value="allVisibleSelected" @update:model-value="value => toggleAllVisible(Boolean(value))">
+          全选当前
+        </el-checkbox>
+        <span class="ribbon-count">{{ filteredPatients.length }} 人</span>
+      </div>
+      <div class="ribbon-body">
+        <button type="button" class="ribbon-arrow" aria-label="向左滚动患者" @click="scrollRibbon(-1)">‹</button>
+        <div ref="ribbonRef" class="ribbon-scroll" role="list">
+          <div
+            v-for="patient in filteredPatients"
+            :key="patientKey(patient)"
+            class="patient-pill"
+            :class="{
+              'is-active': selectedId === patient.serviceInstanceId,
+              [`tone-${statusTone(patient.status)}`]: true
+            }"
+            role="listitem"
+          >
+            <el-checkbox
+              class="pill-select"
+              :model-value="selectedPatientKeys.includes(patientKey(patient))"
+              :aria-label="`选择 ${patient.patientName || '患者'}`"
+              @update:model-value="value => togglePatientSelection(patient, Boolean(value))"
+              @click.stop
+            />
+            <button type="button" class="pill-body" @click="selectPatient(patient)">
+              <span class="pill-name">{{ patient.patientName || "未命名患者" }}</span>
+              <span class="pill-time">{{ arrivalLabel(patient) }}</span>
+              <span class="pill-status">
+                <i aria-hidden="true" />
+                {{ statusLabel(patient.status) }}
+              </span>
+            </button>
+          </div>
+          <span v-if="!filteredPatients.length" class="ribbon-empty">当前筛选下没有患者；可手动补录</span>
+        </div>
+        <button type="button" class="ribbon-arrow" aria-label="向右滚动患者" @click="scrollRibbon(1)">›</button>
+      </div>
+
+      <div v-if="selectedPatientKeys.length" class="batch-bar">
+        <div class="batch-bar-head">
+          <strong>已选 {{ selectedPatientKeys.length }} 人</strong>
+          <el-checkbox :model-value="allVisibleSelected" @update:model-value="value => toggleAllVisible(Boolean(value))">
+            全选当前
+          </el-checkbox>
+        </div>
+        <div class="batch-bar-actions">
+          <el-button size="small" :loading="batchBusy" @click="runBatchStatus('NOT_ARRIVED')">未到</el-button>
+          <el-button size="small" :loading="batchBusy" @click="runBatchStatus('DEFERRED')">暂缓</el-button>
+          <el-button size="small" :loading="batchBusy" @click="restoreBatchStatus">恢复待录</el-button>
+          <el-button size="small" type="warning" plain :loading="batchBusy" @click="runBatchZeroUse">零使用</el-button>
+          <el-button size="small" type="danger" text :loading="batchBusy" @click="withdrawBatchZeroUse">撤回零使用</el-button>
+          <el-button size="small" type="primary" :loading="batchBusy" @click="batchSubmitSelected">提交草稿</el-button>
+        </div>
+        <div class="batch-package">
+          <el-checkbox v-model="batchPackageEnabled">套用科室套餐</el-checkbox>
+          <el-select
+            v-if="batchPackageEnabled"
+            v-model="batchPackageId"
+            size="small"
+            filterable
+            placeholder="选择本科室套餐"
+            class="batch-package-select"
+          >
+            <el-option
+              v-for="pkg in patientPackages"
+              :key="pkg.id"
+              :label="`${pkg.name}（${pkg.items.length} 项）`"
+              :value="pkg.id"
+            />
           </el-select>
-          <div class="patient-panel-tools">
-            <el-checkbox :model-value="allVisibleSelected" @update:model-value="value => toggleAllVisible(Boolean(value))">
-              全选当前筛选
-            </el-checkbox>
-            <span>{{ filteredPatients.length }} 人</span>
-          </div>
+          <el-button
+            v-if="batchPackageEnabled"
+            size="small"
+            type="primary"
+            plain
+            :disabled="!batchPackageId"
+            :loading="batchBusy"
+            @click="applyBatchPackage"
+          >
+            套用到已选
+          </el-button>
         </div>
-
-        <div class="patient-list" role="list">
-          <template v-for="(patient, index) in filteredPatients" :key="patientKey(patient)">
-            <div v-if="showTimeGroup(index)" class="timeline-mark" aria-hidden="true">
-              <span>{{ timeGroupLabel(patient.arrivalAt || patient.serviceStartedAt) }}</span>
-              <i />
-            </div>
-            <div
-              class="patient-card"
-              :class="{
-                'is-active': selectedId === patient.serviceInstanceId,
-                [`tone-${statusTone(patient.status)}`]: true,
-                'is-not-arrived': patient.patientState === 'NOT_ARRIVED',
-                'is-deferred': patient.patientState === 'DEFERRED'
-              }"
-              role="listitem"
-            >
-              <el-checkbox
-                class="patient-select"
-                :model-value="selectedPatientKeys.includes(patientKey(patient))"
-                :aria-label="`选择 ${patient.patientName || '患者'}`"
-                @update:model-value="value => togglePatientSelection(patient, Boolean(value))"
-                @click.stop
-              />
-              <button type="button" class="patient-card-body" @click="selectPatient(patient)">
-                <span class="patient-card-main">
-                  <span class="patient-name">{{ patient.patientName || "未命名患者" }}</span>
-                  <span class="patient-meta">
-                    {{ arrivalLabel(patient) }}
-                    <i aria-hidden="true">·</i>
-                    {{ patient.serviceName || "服务" }}
-                    <i aria-hidden="true">·</i>
-                    {{ maskVisitNo(patient.visitNo) }}
-                  </span>
-                  <span v-if="slaLabel(patient)" class="sla-label" :class="`is-${slaTone(patient)}`">
-                    {{ slaLabel(patient) }}
-                  </span>
-                </span>
-                <span class="patient-card-side">
-                  <el-tag v-if="patient.attentionFlag" type="danger" size="small" effect="plain">重点</el-tag>
-                  <el-tag v-if="patient.patientState === 'NOT_ARRIVED'" type="info" size="small" effect="plain">未到</el-tag>
-                  <el-tag v-else-if="patient.patientState === 'DEFERRED'" type="warning" size="small" effect="plain">暂缓</el-tag>
-                  <el-tag v-if="patient.noConsumption" type="info" size="small" effect="plain">未使用</el-tag>
-                  <el-tag :type="statusType(patient.status)" size="small" effect="plain">
-                    {{ statusLabel(patient.status) }}
-                  </el-tag>
-                  <small>{{ patient.lineCount || 0 }} 项</small>
-                </span>
-              </button>
-            </div>
-          </template>
-          <el-empty
-            v-if="!filteredPatients.length"
-            :image-size="70"
-            description="当前筛选下没有患者；可手动补录"
-          />
-        </div>
-        <div v-if="selectedPatientKeys.length" class="batch-bar">
-          <div class="batch-bar-head">
-            <strong>已选 {{ selectedPatientKeys.length }} 人</strong>
-            <el-checkbox :model-value="allVisibleSelected" @update:model-value="value => toggleAllVisible(Boolean(value))">
-              全选当前
-            </el-checkbox>
-          </div>
-          <div class="batch-bar-actions">
-            <el-button size="small" :loading="batchBusy" @click="runBatchStatus('NOT_ARRIVED')">未到</el-button>
-            <el-button size="small" :loading="batchBusy" @click="runBatchStatus('DEFERRED')">暂缓</el-button>
-            <el-button size="small" :loading="batchBusy" @click="restoreBatchStatus">恢复待录</el-button>
-            <el-button size="small" type="warning" plain :loading="batchBusy" @click="runBatchZeroUse">零使用</el-button>
-            <el-button size="small" type="danger" text :loading="batchBusy" @click="withdrawBatchZeroUse">撤回零使用</el-button>
-            <el-button size="small" type="primary" :loading="batchBusy" @click="batchSubmitSelected">提交草稿</el-button>
-          </div>
-          <div class="batch-package">
-            <el-checkbox v-model="batchPackageEnabled">套用科室套餐</el-checkbox>
-            <el-select
-              v-if="batchPackageEnabled"
-              v-model="batchPackageId"
-              size="small"
-              filterable
-              placeholder="选择本科室套餐"
-              class="batch-package-select"
-            >
-              <el-option
-                v-for="pkg in patientPackages"
-                :key="pkg.id"
-                :label="`${pkg.name}（${pkg.items.length} 项）`"
-                :value="pkg.id"
-              />
-            </el-select>
-            <el-button
-              v-if="batchPackageEnabled"
-              size="small"
-              type="primary"
-              plain
-              :disabled="!batchPackageId"
-              :loading="batchBusy"
-              @click="applyBatchPackage"
-            >
-              套用到已选
-            </el-button>
-          </div>
-        </div>
-      </aside>
+      </div>
+    </section>
 
       <main v-if="detail" class="detail-panel">
         <header class="detail-head">
@@ -277,146 +245,58 @@
           :description="rejectedSummary"
         />
 
-        <section class="selection-summary">
+        <section class="selection-summary compact">
           <div class="selection-summary-head">
             <div>
               <h4>已选耗材</h4>
-              <p>{{ selectedLines.length }} 项 · 数量默认取预设，可改</p>
+              <p>{{ selectedLines.length }} 项 · 合计 {{ formatQuantity(selectedTotalQuantity) }} · 修改自动保存</p>
             </div>
-            <el-button type="primary" size="large" :icon="Plus" :disabled="!editable" @click="openConsumableDrawer">
-              选择耗材
-            </el-button>
+            <div class="selection-head-actions">
+              <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
+              <el-button type="primary" size="large" :icon="Plus" :disabled="!editable" @click="openConsumableDrawer">
+                选择耗材
+              </el-button>
+            </div>
           </div>
-          <div v-if="selectedLines.length" class="selection-board">
-            <div class="board-head">
-              <div class="board-summary">
-                <strong>{{ selectedLines.length }}</strong>
-                <span>项已选</span>
-                <span class="board-total">合计 {{ formatQuantity(selectedTotalQuantity) }}</span>
-                <span v-if="selectedFilterOptions[2].count" class="board-rejected">
-                  {{ selectedFilterOptions[2].count }} 项需处理
-                </span>
-              </div>
-              <el-input
-                v-model="selectedQuery"
-                class="board-search"
-                placeholder="在已选中查找耗材"
-                clearable
-                :prefix-icon="Search"
-              />
-            </div>
-            <div class="board-filters" role="tablist" aria-label="已选耗材状态筛选">
-              <button
-                v-for="option in selectedFilterOptions"
-                :key="option.key"
-                type="button"
-                role="tab"
-                class="board-filter"
-                :class="{ 'is-active': selectedFilter === option.key }"
-                :aria-selected="selectedFilter === option.key"
-                @click="selectedFilter = option.key"
-              >
-                {{ option.label }}
-                <b v-if="option.count">{{ option.count }}</b>
-              </button>
-            </div>
 
-            <div class="selected-grid">
-              <article
-                v-for="line in visibleSelectedLines"
-                :key="line.itemId"
-                class="selected-card"
-                :class="`tone-${selectedTone(line)}`"
+          <div v-if="selectedLines.length" class="picked-list">
+            <div v-for="line in selectedLines" :key="line.itemId" class="picked-row" :class="`tone-${selectedTone(line)}`">
+              <span class="picked-name">
+                <strong>{{ line.itemName }}</strong>
+                <small>{{ line.unit }} · {{ selectedSourceLabel(line.source) }}</small>
+              </span>
+              <el-tag
+                size="small"
+                effect="plain"
+                :type="line.reviewStatus === 'APPROVED' ? 'success' : line.reviewStatus === 'REJECTED' ? 'danger' : 'warning'"
               >
-                <div class="card-line">
-                  <span class="state-dot" aria-hidden="true" />
-                  <div class="card-copy">
-                    <div class="card-title">
-                      <strong>{{ line.itemName }}</strong>
-                      <el-tag v-if="line.reviewStatus === 'REJECTED'" type="danger" size="small" effect="plain">
-                        已驳回
-                      </el-tag>
-                      <el-tag v-else-if="line.reviewStatus === 'APPROVED'" type="success" size="small" effect="plain">
-                        已通过
-                      </el-tag>
-                    </div>
-                    <small>
-                      {{ line.unit }} · {{ selectedSourceLabel(line.source) }}
-                      <template v-if="line.exceptionReason"> · {{ line.exceptionReason }}</template>
-                    </small>
-                    <p v-if="line.reviewNote" class="review-note">{{ line.reviewNote }}</p>
-                  </div>
-                  <button
-                    type="button"
-                    class="card-remove"
-                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                    :aria-label="`移除 ${line.itemName}`"
-                    @click="removeLine(line.itemId)"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div class="card-quantity">
-                  <button
-                    type="button"
-                    class="qty-step"
-                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                    :aria-label="`减少 ${line.itemName}`"
-                    @click="adjustLineQuantity(line, -1)"
-                  >
-                    −
-                  </button>
-                  <el-input-number
-                    :model-value="line.actualQuantity"
-                    :min="0.01"
-                    :precision="2"
-                    :step="1"
-                    :controls="false"
-                    size="small"
-                    class="board-number"
-                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                    @update:model-value="value => setLineQuantity(line, value)"
-                  />
-                  <button
-                    type="button"
-                    class="qty-step"
-                    :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                    :aria-label="`增加 ${line.itemName}`"
-                    @click="adjustLineQuantity(line, 1)"
-                  >
-                    +
-                  </button>
-                  <div class="quick-set" aria-label="快捷数量">
-                    <button
-                      v-for="quick in [1, 2, 3]"
-                      :key="quick"
-                      type="button"
-                      :disabled="!editable || line.reviewStatus === 'APPROVED'"
-                      @click="setLineQuantity(line, quick)"
-                    >
-                      {{ quick }}
-                    </button>
-                  </div>
-                  <span class="card-unit">{{ line.unit }}</span>
-                </div>
-              </article>
+                {{ line.reviewStatus === "APPROVED" ? "已通过" : line.reviewStatus === "REJECTED" ? "已驳回" : "待审核" }}
+              </el-tag>
+              <span class="picked-qty">
+                <button type="button" :disabled="!editable || line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, -1)">−</button>
+                <el-input-number
+                  :model-value="line.actualQuantity"
+                  :min="0.01"
+                  :precision="2"
+                  :step="1"
+                  :controls="false"
+                  size="small"
+                  :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                  @update:model-value="value => setLineQuantity(line, value)"
+                />
+                <button type="button" :disabled="!editable || line.reviewStatus === 'APPROVED'" @click="adjustLineQuantity(line, 1)">+</button>
+              </span>
+              <button
+                type="button"
+                class="picked-remove"
+                :disabled="!editable || line.reviewStatus === 'APPROVED'"
+                :aria-label="`移除 ${line.itemName}`"
+                @click="removeLine(line.itemId)"
+              >×</button>
+              <p v-if="line.reviewNote" class="picked-note">{{ line.reviewNote }}</p>
             </div>
-            <p v-if="!visibleSelectedLines.length" class="board-empty">当前筛选下没有耗材</p>
           </div>
-          <el-empty
-            v-else
-            :image-size="72"
-            description="还没有选耗材；点“选择耗材”从常用、最近或全部预设中添加"
-          />
-          <div class="selection-hints">
-            <span v-if="commonItems.length">常用 {{ commonItems.length }} 项</span>
-            <span v-if="recentItems.length">最近使用 {{ recentItems.length }} 项</span>
-            <span v-if="dedupedPresetItems.length">全部预设 {{ dedupedPresetItems.length }} 项</span>
-            <span v-if="detail.noConsumption" class="is-muted">已标记未使用耗材</span>
-          </div>
-          <div class="selection-actions">
-            <el-button text :disabled="!editable || !selectedLines.length" @click="clearUnapproved">全部未使用</el-button>
-          </div>
+          <el-empty v-else :image-size="56" description="还没有选耗材；点“选择耗材”从常用、最近或全部预设中添加" />
         </section>
 
         <footer class="sticky-actions">
@@ -443,21 +323,8 @@
       </main>
 
       <main v-else class="detail-panel detail-empty">
-        <el-empty :image-size="96" description="选择左侧患者开始填写耗材清单" />
+        <el-empty :image-size="96" description="选择上方患者开始填写耗材清单" />
       </main>
-    </div>
-
-    <div class="package-summary">
-      <div class="package-summary-copy">
-        <strong>科室套餐</strong>
-        <span v-if="patientPackages.length">{{ patientPackages.length }} 个 · {{ packagePreview }}</span>
-        <span v-else>暂无套餐，可把常用组合存为套餐</span>
-      </div>
-      <div class="package-summary-actions">
-        <el-button @click="packageDrawerVisible = true">管理</el-button>
-        <el-button type="primary" plain @click="followupBatchVisible = true">复诊批处理</el-button>
-      </div>
-    </div>
 
     <el-drawer v-model="packageDrawerVisible" title="科室套餐" size="60%" append-to-body>
       <DepartmentPackageBoard
@@ -1119,6 +986,7 @@ const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
 const calendarExpanded = ref(false);
 const deptStockVisible = ref(false);
+const ribbonRef = ref<HTMLElement | null>(null);
 const deptStockMap = ref<Record<string, any>>({});
 const deptLowCount = computed(() => Object.values(deptStockMap.value).filter(item => item.lowStock).length);
 const fixedVisible = ref(false);
@@ -1670,8 +1538,13 @@ const handleApplyPackageFromDrawer = async (pkg: InventoryPatientConsumablePacka
   if (await applyPackage(pkg)) packageDrawerVisible.value = false;
 };
 
+const scrollRibbon = (direction: number) => {
+  ribbonRef.value?.scrollBy({ left: direction * 320, behavior: "smooth" });
+};
+
 const handleWorkspaceMore = (command: string) => {
-  if (command === "FIXED") fixedVisible.value = true;
+  if (command === "PACKAGE") packageDrawerVisible.value = true;
+  else if (command === "FIXED") fixedVisible.value = true;
   else if (command === "REFRESH") reload();
 };
 
@@ -2727,6 +2600,251 @@ onMounted(() => {
     radial-gradient(circle at 8% 0%, rgb(237 247 241 / 85%), transparent 32%),
     radial-gradient(circle at 96% 8%, rgb(255 247 232 / 60%), transparent 26%),
     var(--hos-bg-surface);
+}
+
+
+.status-date-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 12px;
+
+  .status-strip {
+    flex: 1 1 340px;
+    width: auto;
+    padding: 0;
+    border-radius: 0;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+}
+
+.date-strip-inline {
+  display: flex;
+  flex: 0 1 auto;
+  gap: 5px;
+  align-items: center;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.patient-ribbon {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--hos-bg-primary);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 12px;
+}
+
+.ribbon-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  .el-input {
+    width: 220px;
+  }
+
+  .status-filter {
+    width: 140px;
+  }
+}
+
+.ribbon-count {
+  margin-left: auto;
+  color: var(--hos-text-muted);
+  font-size: 11px;
+}
+
+.ribbon-body {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.ribbon-scroll {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding: 2px;
+}
+
+.ribbon-arrow {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  color: var(--hos-text-secondary);
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 50%;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.patient-pill {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+  padding: 5px 9px 5px 5px;
+  background: var(--hos-bg-surface);
+  border: 1px solid var(--hos-border-light);
+  border-radius: 999px;
+
+  &.is-active {
+    background: var(--hos-primary-soft);
+    border-color: var(--hos-primary);
+  }
+
+  .pill-select {
+    margin-right: 0;
+    opacity: 0.25;
+    transition: opacity 120ms ease;
+  }
+
+  &:hover .pill-select,
+  &.is-active .pill-select {
+    opacity: 1;
+  }
+
+  .pill-body {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    padding: 0;
+    color: var(--hos-text-primary);
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .pill-name {
+    font-weight: 600;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .pill-time,
+  .pill-status {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .pill-status i {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 3px;
+    background: #94a3b8;
+    border-radius: 50%;
+    vertical-align: 1px;
+  }
+
+  &.tone-approved .pill-status i { background: var(--hos-status-success); }
+  &.tone-draft .pill-status i,
+  &.tone-submitted .pill-status i { background: var(--hos-status-warning); }
+  &.tone-returned .pill-status i { background: var(--hos-status-danger); }
+}
+
+.ribbon-empty {
+  padding: 10px;
+  color: var(--hos-text-muted);
+  font-size: 12px;
+}
+
+.picked-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--hos-border-light);
+}
+
+.picked-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--hos-border-light);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  .picked-name {
+    display: flex;
+    flex: 1 1 180px;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+
+    strong {
+      overflow: hidden;
+      color: var(--hos-text-primary);
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    small {
+      color: var(--hos-text-muted);
+      font-size: 10px;
+    }
+  }
+
+  .picked-qty {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+
+    button {
+      width: 24px;
+      height: 24px;
+      color: var(--hos-text-secondary);
+      background: var(--hos-bg-surface);
+      border: 1px solid var(--hos-border-light);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .el-input-number {
+      width: 74px;
+    }
+
+    :deep(.el-input__inner) {
+      text-align: center;
+    }
+  }
+
+  .picked-remove {
+    width: 24px;
+    height: 24px;
+    color: var(--hos-text-muted);
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .picked-note {
+    flex: 1 0 100%;
+    margin: 0;
+    color: var(--hos-status-danger);
+    font-size: 10px;
+  }
 }
 
 .patient-toolbar {
