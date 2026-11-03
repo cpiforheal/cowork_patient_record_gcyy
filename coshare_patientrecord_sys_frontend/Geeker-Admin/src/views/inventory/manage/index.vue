@@ -259,6 +259,9 @@
           <template v-else-if="activeTab === 'patientReview'">
             <PatientConsumptionReviewPanel :today="today()" />
           </template>
+          <template v-else-if="activeTab === 'quotaExceptions'">
+            <QuotaExceptionReviewPanel />
+          </template>
 
           <template v-else-if="activeTab === 'patientTrace'">
             <PatientConsumptionTracePanel />
@@ -626,6 +629,7 @@ import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWo
 import PatientConsumptionWorkspace from "./components/PatientConsumptionWorkspace.vue";
 import DepartmentDailyReportPanel from "./components/DepartmentDailyReportPanel.vue";
 import PatientConsumptionReviewPanel from "./components/PatientConsumptionReviewPanel.vue";
+import QuotaExceptionReviewPanel from "./components/QuotaExceptionReviewPanel.vue";
 import PatientConsumptionTracePanel from "./components/PatientConsumptionTracePanel.vue";
 import ConsumableUsageWorkbenchPanel from "./components/ConsumableUsageWorkbenchPanel.vue";
 import AdminReviewPanel from "./components/AdminReviewPanel.vue";
@@ -799,6 +803,7 @@ const tabRoutePathMap: Record<string, string> = {
   trace: "/inventory/trace",
   daily: "/inventory/daily",
   patientReview: "/inventory/patient-review",
+  quotaExceptions: "/inventory/quota-exceptions",
   patientTrace: "/inventory/patient-trace",
   consumableWorkbench: "/inventory/consumable-workbench",
   adminReview: "/inventory/admin-review",
@@ -816,6 +821,7 @@ const inventorySystemTabRoutePathMap: Record<string, string> = {
   trace: "/inventory-system/trace",
   daily: "/inventory-system/daily-verification",
   patientReview: "/inventory-system/patient-review",
+  quotaExceptions: "/inventory-system/quota-exceptions",
   patientTrace: "/inventory-system/patient-trace",
   consumableWorkbench: "/inventory-system/consumable-workbench",
   adminReview: "/inventory-system/admin-review",
@@ -861,6 +867,7 @@ const tabRouteNameMap: Record<string, string> = {
   trace: "inventoryTrace",
   daily: "inventoryDaily",
   patientReview: "inventoryPatientReview",
+  quotaExceptions: "inventoryQuotaExceptions",
   patientTrace: "inventoryPatientTrace",
   consumableWorkbench: "inventoryConsumableWorkbench",
   adminReview: "inventoryAdminReview",
@@ -880,6 +887,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory/trace": "trace",
   "/inventory/daily": "daily",
   "/inventory/patient-review": "patientReview",
+  "/inventory/quota-exceptions": "quotaExceptions",
   "/inventory/patient-trace": "patientTrace",
   "/inventory/consumable-workbench": "consumableWorkbench",
   "/inventory/admin-review": "adminReview",
@@ -897,6 +905,7 @@ const routeTabMap: Record<string, string> = {
   "/inventory-system/trace": "trace",
   "/inventory-system/daily-verification": "daily",
   "/inventory-system/patient-review": "patientReview",
+  "/inventory-system/quota-exceptions": "quotaExceptions",
   "/inventory-system/patient-trace": "patientTrace",
   "/inventory-system/consumable-workbench": "consumableWorkbench",
   "/inventory-system/admin-review": "adminReview",
@@ -928,6 +937,7 @@ const tabNavItems = [
   { tab: "items", title: "物资目录" },
   { tab: "daily", title: "每日核对与导出" },
   { tab: "patientReview", title: "患者耗材审核" },
+  { tab: "quotaExceptions", title: "定额例外审核" },
   { tab: "patientTrace", title: "患者耗材追溯" },
   { tab: "consumableWorkbench", title: "耗材工作台" },
   { tab: "adminReview", title: "管理审查" },
@@ -1165,6 +1175,7 @@ const tabAuthMap: Record<string, readonly string[]> = {
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
   patientReview: ["inventory:approve"],
+  quotaExceptions: ["inventory:approve"],
   patientTrace: ["inventory:read"],
   consumableWorkbench: ["inventory:read"],
   adminReview: ["inventory:role:manage"],

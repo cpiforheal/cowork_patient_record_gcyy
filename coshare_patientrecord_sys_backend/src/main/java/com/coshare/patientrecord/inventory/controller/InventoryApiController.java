@@ -21,6 +21,7 @@ import com.coshare.patientrecord.inventory.service.InventoryOpeningImportService
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionReviewService;
 import com.coshare.patientrecord.inventory.service.InventoryPatientConsumptionService;
 import com.coshare.patientrecord.inventory.service.InventoryQuotaGovernanceService;
+import com.coshare.patientrecord.inventory.service.InventoryQuotaConsumptionService;
 import com.coshare.patientrecord.inventory.service.InventoryStockOverviewService;
 import com.coshare.patientrecord.security.InventoryPermission;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,6 +34,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -56,6 +58,7 @@ public class InventoryApiController {
     private final InventoryPortalAccountAdminService portalAccountAdminService;
     private final InventoryMessageBoardService messageBoardService;
     private final InventoryQuotaGovernanceService quotaGovernanceService;
+    private final InventoryQuotaConsumptionService quotaConsumptionService;
     private final InventoryDepartmentDraftService departmentDraftService;
     private final InventoryPatientConsumptionService patientConsumptionService;
     private final InventoryPatientConsumptionReviewService patientConsumptionReviewService;
@@ -79,6 +82,7 @@ public class InventoryApiController {
         InventoryPortalAccountAdminService portalAccountAdminService,
         InventoryMessageBoardService messageBoardService,
         InventoryQuotaGovernanceService quotaGovernanceService,
+        InventoryQuotaConsumptionService quotaConsumptionService,
         InventoryDepartmentDraftService departmentDraftService,
         InventoryPatientConsumptionService patientConsumptionService,
         InventoryPatientConsumptionReviewService patientConsumptionReviewService,
@@ -101,6 +105,7 @@ public class InventoryApiController {
         this.portalAccountAdminService = portalAccountAdminService;
         this.messageBoardService = messageBoardService;
         this.quotaGovernanceService = quotaGovernanceService;
+        this.quotaConsumptionService = quotaConsumptionService;
         this.departmentDraftService = departmentDraftService;
         this.patientConsumptionService = patientConsumptionService;
         this.patientConsumptionReviewService = patientConsumptionReviewService;
@@ -242,6 +247,112 @@ public class InventoryApiController {
     ) {
         SessionUser user = requireCapability("inventory:read");
         return ApiResult.of(200, "零使用日已撤回", asMap(departmentDailyReportService.withdrawZeroUse(reportId, user)));
+    }
+
+    @GetMapping("/inventory-api/quota-mode")
+    public ApiResult<Map<String, Object>> quotaMode() {
+        requireCapability("inventory:read");
+        return ApiResult.success(asMap(quotaConsumptionService.modeState()));
+    }
+
+    @PostMapping("/inventory-api/quota-mode/switch")
+    public ApiResult<Map<String, Object>> switchQuotaMode(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "定额模式已切换", asMap(quotaConsumptionService.switchMode(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/quota-mode/completeness")
+    public ApiResult<Map<String, Object>> quotaCompleteness(
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String departmentKey
+    ) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(quotaConsumptionService.completeness(date, departmentKey)));
+    }
+
+    @GetMapping("/inventory-api/quota-mode/tolerances")
+    public ApiResult<Map<String, Object>> quotaTolerances(@RequestParam(required = false) String departmentKey) {
+        requireCapability("inventory:role:manage");
+        return ApiResult.success(asMap(quotaConsumptionService.tolerances(departmentKey)));
+    }
+
+    @PostMapping("/inventory-api/quota-mode/tolerance")
+    public ApiResult<Map<String, Object>> updateQuotaTolerance(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:role:manage");
+        return ApiResult.of(200, "免审上浮已保存", asMap(quotaConsumptionService.updateTolerance(toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/department-daily-reports/{reportId}/headcount-correction")
+    public ApiResult<Map<String, Object>> correctQuotaHeadcount(
+        @org.springframework.web.bind.annotation.PathVariable String reportId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "人数已修正并按差额补扣/冲回", asMap(quotaConsumptionService.correctHeadcount(reportId, toJson(payload), user)));
+    }
+
+    @PostMapping("/inventory-api/quota-exceptions")
+    public ApiResult<Map<String, Object>> reportQuotaException(@RequestBody Map<String, Object> payload) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(201, "例外已上报，等待管理员审核", asMap(quotaConsumptionService.reportException(toJson(payload), user)));
+    }
+
+    @GetMapping("/inventory-api/quota-exceptions")
+    public ApiResult<Map<String, Object>> quotaExceptions(
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) LocalDate date,
+        @RequestParam(required = false) String departmentKey
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.success(asMap(quotaConsumptionService.exceptions(status, date, departmentKey, user)));
+    }
+
+    @GetMapping("/inventory-api/quota-exceptions/{exceptionId}")
+    public ApiResult<Map<String, Object>> quotaExceptionDetail(
+        @org.springframework.web.bind.annotation.PathVariable String exceptionId
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.success(asMap(quotaConsumptionService.exceptionDetail(exceptionId, user)));
+    }
+
+    @PostMapping("/inventory-api/quota-exceptions/{exceptionId}/decide")
+    public ApiResult<Map<String, Object>> decideQuotaException(
+        @org.springframework.web.bind.annotation.PathVariable String exceptionId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:approve");
+        return ApiResult.of(200, "例外审核已完成", asMap(quotaConsumptionService.decideException(exceptionId, toJson(payload), user)));
+    }
+
+    @PostMapping(path = "/inventory-api/quota-exceptions/{exceptionId}/photos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<Map<String, Object>> uploadQuotaExceptionPhoto(
+        @org.springframework.web.bind.annotation.PathVariable String exceptionId,
+        @RequestParam("file") MultipartFile file
+    ) throws java.io.IOException {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(quotaConsumptionService.uploadPhoto(exceptionId, file, user)));
+    }
+
+    @GetMapping("/inventory-api/quota-exceptions/photos/{photoId}")
+    public ResponseEntity<Resource> quotaExceptionPhoto(
+        @org.springframework.web.bind.annotation.PathVariable String photoId
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        InventoryQuotaConsumptionService.PhotoFile file = quotaConsumptionService.photo(photoId, user);
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(file.contentType().isBlank() ? "application/octet-stream" : file.contentType()))
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.inline().filename(file.originalName(), java.nio.charset.StandardCharsets.UTF_8).build().toString())
+            .body(file.resource());
+    }
+
+    @GetMapping("/inventory-api/patient-evidence")
+    public ApiResult<Map<String, Object>> patientEvidence(
+        @RequestParam String departmentKey,
+        @RequestParam(required = false) LocalDate date
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.success(asMap(quotaConsumptionService.patientEvidence(departmentKey, date, user)));
     }
 
     @GetMapping("/inventory-api/department-daily-reports/{reportId}/export/{format}")

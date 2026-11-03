@@ -1,5 +1,6 @@
 <template>
   <section class="quota-console" aria-label="每人次定额总控制台">
+    <QuotaModePanel />
     <div class="console-status">
       <div class="version-info">
         <div class="version-item">
@@ -306,6 +307,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Download, Plus, Refresh } from "@element-plus/icons-vue";
+import QuotaModePanel from "./QuotaModePanel.vue";
 import {
   consoleSaveInventoryQuotaApi,
   downloadInventoryQuotaGovernanceXlsxApi,

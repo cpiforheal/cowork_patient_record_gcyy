@@ -4,15 +4,18 @@
       <div>
         <span class="eyebrow">科室日报 · {{ draft?.departmentName || departmentName }}</span>
         <h2>科室耗材日报</h2>
-        <p>固定模板自动带出，可按当天实际使用修改数量或追加耗材；提交后进入库管审核。</p>
+        <p v-if="!isQuotaMode">固定模板自动带出，可按当天实际使用修改数量或追加耗材；提交后进入库管审核。</p>
+        <p v-else>院方已核定每人次定额。科室只需确认接诊人数；定额由系统自动计算并扣库，超量请单独上报例外。</p>
       </div>
       <div class="report-actions">
         <el-date-picker v-model="businessDate" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="load" />
         <el-tag :type="statusType(draft?.status)" effect="plain">{{ statusLabel(draft?.status) }}</el-tag>
-        <el-button :disabled="!editable" :loading="saving" @click="save">保存草稿</el-button>
-        <el-button type="primary" :disabled="!editable" :loading="submitting" @click="submit">提交审核</el-button>
-        <el-button v-if="editable && !draft?.zeroUsage" :loading="submitting" @click="submitZeroUse">今日无使用</el-button>
-        <el-button v-if="draft?.zeroUsage" :loading="submitting" @click="withdrawZeroUse">撤回零使用</el-button>
+        <el-button :disabled="!editable" :loading="saving" @click="save">{{ isQuotaMode ? "保存人数" : "保存草稿" }}</el-button>
+        <el-button type="primary" :disabled="!editable" :loading="submitting" @click="submit">
+          {{ isQuotaMode ? "提交并扣库" : "提交审核" }}
+        </el-button>
+        <el-button v-if="!isQuotaMode && editable && !draft?.zeroUsage" :loading="submitting" @click="submitZeroUse">今日无使用</el-button>
+        <el-button v-if="!isQuotaMode && draft?.zeroUsage" :loading="submitting" @click="withdrawZeroUse">撤回零使用</el-button>
         <el-button v-if="draft?.id" :disabled="exporting" :loading="exporting" @click="exportReport">导出</el-button>
       </div>
     </header>
@@ -21,9 +24,37 @@
       <div class="report-main">
         <div class="report-summary">
           <span>耗材行 <b>{{ lines.length }}</b></span>
-          <span>实际总量 <b>{{ totalQuantity }}</b></span>
+          <template v-if="isQuotaMode">
+            <span>接诊人次 <b>{{ headcountTotal }}</b></span>
+            <span>应耗 <b>{{ quotaComputedTotal }}</b></span>
+            <span>待审例外 <b>{{ draft?.pendingExceptions || 0 }}</b></span>
+          </template>
+          <span v-else>实际总量 <b>{{ totalQuantity }}</b></span>
           <span v-if="draft?.locked" class="locked">已锁定</span>
           <span v-else-if="draft?.closure?.submittedAt" class="submitted">提交于 {{ formatDateTime(draft.closure.submittedAt) }}</span>
+        </div>
+
+        <div v-if="isQuotaMode" class="quota-headcount">
+          <div class="quota-headcount-title">
+            <strong>接诊人数</strong>
+            <small v-if="draft?.entryMode === 'PATIENT'">按当日未取消就诊记录自动统计，同一患者多次就诊算多次</small>
+            <small v-else>本科室无临床接诊记录，请手工填写今日服务人次</small>
+          </div>
+          <div class="quota-headcount-fields">
+            <template v-if="draft?.entryMode === 'PATIENT'">
+              <label>门诊 <el-input-number v-model="headcountForm.outpatient" :min="0" :precision="0" size="small" :disabled="!headcountEditing" /></label>
+              <label>住院 <el-input-number v-model="headcountForm.inpatient" :min="0" :precision="0" size="small" :disabled="!headcountEditing" /></label>
+              <el-button v-if="!headcountEditing" size="small" :disabled="!canCorrectHeadcount" @click="startHeadcountEdit">修正人数</el-button>
+              <template v-else>
+                <el-input v-model="headcountForm.reason" size="small" placeholder="修正原因（必填）" style="width: 220px" />
+                <el-button v-if="draft?.status !== 'DRAFT'" size="small" type="primary" :loading="saving" @click="save">保存修正</el-button>
+                <el-button size="small" @click="cancelHeadcountEdit">取消</el-button>
+              </template>
+            </template>
+            <template v-else>
+              <label>服务人次 <el-input-number v-model="headcountForm.manual" :min="0" :precision="0" size="small" :disabled="!editable" /></label>
+            </template>
+          </div>
         </div>
 
         <el-alert
@@ -36,46 +67,81 @@
         />
 
         <el-table :data="lines" class="report-table" height="calc(100vh - 340px)">
-          <el-table-column prop="itemName" label="耗材" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="unit" label="单位" width="90" />
-          <el-table-column label="模板数量" width="110" align="right">
-            <template #default="{ row }">{{ formatQuantity(row.presetQuantity) }}</template>
-          </el-table-column>
-          <el-table-column label="实际使用" width="150">
-            <template #default="{ row }">
-              <el-input-number
-                v-model="row.actualQuantity"
-                :min="0"
-                :precision="2"
-                :step="1"
-                size="small"
-                controls-position="right"
-                :disabled="!editable"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="来源" width="90">
-            <template #default="{ row }">
-              <el-tag size="small" effect="plain" :type="row.source === 'MANUAL' ? 'warning' : 'info'">
-                {{ row.source === "MANUAL" ? "追加" : "模板" }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="说明" min-width="200">
-            <template #default="{ row }">
-              <el-input v-model="row.exceptionReason" size="small" :disabled="!editable" placeholder="选填" />
-            </template>
-          </el-table-column>
-          <el-table-column width="70" align="center">
-            <template #default="{ $index }">
-              <el-button text type="danger" :disabled="!editable" @click="removeLine($index)">删除</el-button>
-            </template>
-          </el-table-column>
+          <el-table-column prop="itemName" label="耗材" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="unit" label="单位" width="80" />
+          <template v-if="isQuotaMode">
+            <el-table-column label="应耗（定额）" width="120" align="right">
+              <template #default="{ row }">{{ formatQuantity(row.quotaQuantity ?? row.presetQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="免审上浮" width="110" align="right">
+              <template #default="{ row }">{{ formatQuantity(row.toleranceQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="已扣 / 已通过" width="130" align="right">
+              <template #default="{ row }">{{ formatQuantity(row.actualQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="上报超量" width="100" align="right">
+              <template #default="{ row }">{{ formatQuantity(row.extraQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="例外状态" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain" :type="exceptionTagType(row.exceptionStatus)">{{ exceptionLabel(row.exceptionStatus) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  size="small"
+                  type="warning"
+                  plain
+                  :disabled="!canReportException"
+                  @click="openExceptionRow(row)"
+                >上报例外</el-button>
+              </template>
+            </el-table-column>
+          </template>
+          <template v-else>
+            <el-table-column label="模板数量" width="110" align="right">
+              <template #default="{ row }">{{ formatQuantity(row.presetQuantity) }}</template>
+            </el-table-column>
+            <el-table-column label="实际使用" width="150">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="row.actualQuantity"
+                  :min="0"
+                  :precision="2"
+                  :step="1"
+                  size="small"
+                  controls-position="right"
+                  :disabled="!editable"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="来源" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain" :type="row.source === 'MANUAL' ? 'warning' : 'info'">
+                  {{ row.source === "MANUAL" ? "追加" : "模板" }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="说明" min-width="200">
+              <template #default="{ row }">
+                <el-input v-model="row.exceptionReason" size="small" :disabled="!editable" placeholder="选填" />
+              </template>
+            </el-table-column>
+            <el-table-column width="70" align="center">
+              <template #default="{ $index }">
+                <el-button text type="danger" :disabled="!editable" @click="removeLine($index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </template>
         </el-table>
 
         <div class="report-footer">
-          <el-button :icon="Plus" :disabled="!editable" @click="addDialogVisible = true">追加耗材</el-button>
-          <span>模板按当前定额规则带出；追加耗材请填写说明。</span>
+          <template v-if="!isQuotaMode">
+            <el-button :icon="Plus" :disabled="!editable" @click="addDialogVisible = true">追加耗材</el-button>
+            <span>模板按当前定额规则带出；追加耗材请填写说明。</span>
+          </template>
+          <span v-else>科室不能修改定额或已扣数量；超量请上报例外，由管理员审核确定补扣量。</span>
         </div>
       </div>
 
@@ -117,21 +183,67 @@
         <el-button type="primary" @click="addLine">加入日报</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="exceptionVisible" title="上报定额例外" width="560px" destroy-on-close>
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="科室只能上报事实，不能修改定额或已扣数量；最终补扣量由管理员审核确定。"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-position="top">
+        <el-form-item label="耗材">
+          <span>{{ exceptionLine?.itemName }}（每日定额 {{ formatQuantity(exceptionLine?.quotaQuantity) }}{{ exceptionLine?.unit }}）</span>
+        </el-form-item>
+        <el-form-item label="当日实际上报总量" required>
+          <el-input-number
+            v-model="exceptionForm.reportedActualQuantity"
+            :min="Number(exceptionLine?.quotaQuantity || 0) + 0.001"
+            :precision="2"
+            :step="1"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item label="原因说明" required>
+          <el-input v-model="exceptionForm.reason" type="textarea" :rows="3" placeholder="请说明超量原因，例如：急诊加台、术中污染更换" />
+        </el-form-item>
+        <el-form-item label="现场照片（选填，最多 3 张）">
+          <el-upload
+            v-model:file-list="exceptionFileList"
+            list-type="picture-card"
+            accept="image/*"
+            :auto-upload="false"
+            :limit="3"
+          >
+            <el-icon><Plus /></el-icon>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="exceptionVisible = false">取消</el-button>
+        <el-button type="primary" :loading="exceptionSubmitting" @click="submitException">上报例外</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
 import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
 import {
+  correctInventoryQuotaHeadcountApi,
   downloadInventoryDepartmentDailyReportApi,
   getInventoryDepartmentDailyReportApi,
   getInventoryDepartmentDailyReportCalendarApi,
+  reportInventoryQuotaExceptionApi,
   saveInventoryDepartmentDailyReportApi,
+  saveInventoryQuotaDailyReportApi,
   submitInventoryDepartmentDailyReportApi,
+  uploadInventoryQuotaExceptionPhotoApi,
   withdrawInventoryDepartmentZeroUseApi,
   type InventoryDepartmentDailyReport,
   type InventoryDepartmentDailyReportCalendarDay,
@@ -164,9 +276,29 @@ const calendarLoading = ref(false);
 const calendarToday = computed(() => props.today || dayjs().format("YYYY-MM-DD"));
 
 const editable = computed(() => {
+  if (isQuotaMode.value) return Boolean(draft.value && !draft.value.locked && draft.value.status === "DRAFT");
   const status = draft.value?.status;
   return Boolean(draft.value && !draft.value.locked && ["DRAFT", "RETURNED"].includes(status || ""));
 });
+const isQuotaMode = computed(() => draft.value?.reportMode === "QUOTA");
+const headcountEditing = ref(false);
+const headcountForm = reactive({
+  outpatient: 0,
+  inpatient: 0,
+  manual: 0,
+  reason: ""
+});
+const headcountTotal = computed(() => headcountForm.outpatient + headcountForm.inpatient + headcountForm.manual);
+const quotaComputedTotal = computed(() => Number(draft.value?.quotaComputedTotal || 0).toFixed(2));
+const canCorrectHeadcount = computed(() => isQuotaMode.value && Boolean(draft.value?.id) && !draft.value?.locked);
+const canReportException = computed(
+  () => isQuotaMode.value && Boolean(draft.value?.id) && !draft.value?.locked && draft.value?.status !== "DRAFT"
+);
+const exceptionVisible = ref(false);
+const exceptionSubmitting = ref(false);
+const exceptionLine = ref<InventoryDepartmentDailyReportLine>();
+const exceptionForm = reactive({ reportedActualQuantity: 0, reason: "" });
+const exceptionFileList = ref<any[]>([]);
 const totalQuantity = computed(() =>
   lines.value.reduce((sum, line) => sum + Number(line.actualQuantity || 0), 0).toFixed(2)
 );
@@ -181,6 +313,11 @@ const load = async () => {
     });
     draft.value = result.data ?? null;
     lines.value = (result.data?.lines ?? []).map(line => ({ ...line, actualQuantity: Number(line.actualQuantity || 0) }));
+    headcountForm.outpatient = Number(result.data?.headcount?.outpatient || 0);
+    headcountForm.inpatient = Number(result.data?.headcount?.inpatient || 0);
+    headcountForm.manual = Number(result.data?.headcount?.manual || 0);
+    headcountForm.reason = "";
+    headcountEditing.value = false;
     calendarMonth.value = dayjs(businessDate.value).startOf("month").format("YYYY-MM-01");
     void loadCalendar();
   } catch (error) {
@@ -216,8 +353,71 @@ const selectCalendarDate = (date: string) => {
   void load();
 };
 
+const applyReportData = (data?: InventoryDepartmentDailyReport) => {
+  draft.value = data ?? null;
+  lines.value = (data?.lines ?? []).map(line => ({ ...line, actualQuantity: Number(line.actualQuantity || 0) }));
+  headcountForm.outpatient = Number(data?.headcount?.outpatient || 0);
+  headcountForm.inpatient = Number(data?.headcount?.inpatient || 0);
+  headcountForm.manual = Number(data?.headcount?.manual || 0);
+  headcountForm.reason = "";
+  headcountEditing.value = false;
+};
+
+const startHeadcountEdit = () => {
+  if (!canCorrectHeadcount.value) return;
+  headcountEditing.value = true;
+};
+
+const cancelHeadcountEdit = () => {
+  headcountForm.outpatient = Number(draft.value?.headcount?.outpatient || 0);
+  headcountForm.inpatient = Number(draft.value?.headcount?.inpatient || 0);
+  headcountForm.manual = Number(draft.value?.headcount?.manual || 0);
+  headcountForm.reason = "";
+  headcountEditing.value = false;
+};
+
+const saveQuota = async () => {
+  if (!draft.value) return null;
+  if (headcountEditing.value && !headcountForm.reason.trim()) {
+    ElMessage.warning("修正人数必须填写原因");
+    return null;
+  }
+  saving.value = true;
+  try {
+    const result =
+      draft.value.id && draft.value.status !== "DRAFT"
+        ? await correctInventoryQuotaHeadcountApi(draft.value.id, {
+            headcountOutpatient: headcountForm.outpatient,
+            headcountInpatient: headcountForm.inpatient,
+            headcountManual: headcountForm.manual,
+            reason: headcountForm.reason
+          })
+        : await saveInventoryQuotaDailyReportApi({
+            departmentKey: props.departmentKey,
+            businessDate: businessDate.value,
+            revision: draft.value.revision || 0,
+            note: draft.value.note || "",
+            headcountOverride: headcountEditing.value,
+            headcountOutpatient: headcountForm.outpatient,
+            headcountInpatient: headcountForm.inpatient,
+            headcountManual: headcountForm.manual,
+            headcountReason: headcountForm.reason
+          });
+    applyReportData(result.data);
+    ElMessage.success(draft.value?.status === "DRAFT" ? "人数与应耗已更新" : "人数已修正，差额已补扣/冲回");
+    void loadCalendar();
+    return result.data ?? null;
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "保存定额日报失败");
+    return null;
+  } finally {
+    saving.value = false;
+  }
+};
+
 const save = async () => {
   if (!draft.value) return null;
+  if (isQuotaMode.value) return saveQuota();
   saving.value = true;
   try {
     const result = await saveInventoryDepartmentDailyReportApi({
@@ -259,9 +459,8 @@ const submit = async () => {
   submitting.value = true;
   try {
     const result = await submitInventoryDepartmentDailyReportApi(current.id);
-    draft.value = result.data ?? draft.value;
-    lines.value = (result.data?.lines ?? lines.value).map(line => ({ ...line, actualQuantity: Number(line.actualQuantity || 0) }));
-    ElMessage.success("科室日报已提交库管审核");
+    applyReportData(result.data ?? draft.value);
+    ElMessage.success(isQuotaMode.value ? "已提交，定额部分已扣库" : "科室日报已提交库管审核");
     void loadCalendar();
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "提交科室日报失败");
@@ -406,6 +605,65 @@ watch(
   () => load()
 );
 
+const exceptionLabel = (status?: string) => {
+  switch (status) {
+    case "PENDING":
+      return "待审核";
+    case "APPROVED":
+      return "已通过";
+    case "PARTIALLY_APPROVED":
+      return "部分通过";
+    case "REJECTED":
+      return "已驳回";
+    default:
+      return "无";
+  }
+};
+const exceptionTagType = (status?: string) => {
+  if (status === "APPROVED") return "success";
+  if (status === "PARTIALLY_APPROVED") return "warning";
+  if (status === "REJECTED") return "danger";
+  if (status === "PENDING") return "primary";
+  return "info";
+};
+
+const openException = (line: InventoryDepartmentDailyReportLine) => {
+  exceptionLine.value = line;
+  exceptionForm.reportedActualQuantity = Number(line.quotaQuantity || line.presetQuantity || 0) + 1;
+  exceptionForm.reason = "";
+  exceptionFileList.value = [];
+  exceptionVisible.value = true;
+};
+const openExceptionRow = (row: any) => openException(row as InventoryDepartmentDailyReportLine);
+
+const submitException = async () => {
+  if (!exceptionLine.value || !draft.value) return;
+  if (!exceptionForm.reason.trim()) {
+    ElMessage.warning("请填写例外原因");
+    return;
+  }
+  exceptionSubmitting.value = true;
+  try {
+    const result = await reportInventoryQuotaExceptionApi({
+      departmentKey: props.departmentKey,
+      businessDate: businessDate.value,
+      itemId: exceptionLine.value.itemId,
+      reportedActualQuantity: exceptionForm.reportedActualQuantity,
+      reason: exceptionForm.reason.trim()
+    });
+    for (const file of exceptionFileList.value) {
+      if (file.raw) await uploadInventoryQuotaExceptionPhotoApi(result.data.id, file.raw);
+    }
+    exceptionVisible.value = false;
+    ElMessage.success("例外已上报，等待管理员审核");
+    await load();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "例外上报失败");
+  } finally {
+    exceptionSubmitting.value = false;
+  }
+};
+
 onMounted(() => {
   void load();
 });
@@ -520,6 +778,40 @@ onMounted(() => {
   align-items: center;
   color: var(--hos-text-muted);
   font-size: 11px;
+}
+
+.quota-headcount {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--hos-border-light);
+  border-radius: 12px;
+  background: var(--hos-bg-subtle, var(--el-fill-color-lighter));
+}
+
+.quota-headcount-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  small {
+    color: var(--hos-text-muted);
+    font-size: 11px;
+  }
+}
+
+.quota-headcount-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--hos-text-secondary);
+    font-size: 12px;
+  }
 }
 
 .add-item-select {

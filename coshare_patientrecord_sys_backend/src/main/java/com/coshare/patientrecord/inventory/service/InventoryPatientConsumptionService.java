@@ -208,6 +208,7 @@ public class InventoryPatientConsumptionService {
     public ObjectNode saveDraft(JsonNode payload, SessionUser user) {
         String serviceInstanceId = text(payload, "serviceInstanceId");
         Instance instance = requireInstance(serviceInstanceId, user);
+        requireLegacyPatientMode(instance.departmentKey(), instance.businessDate());
         Document document = loadDocument(instance.id());
         int expectedRevision = Math.max(payload.path("revision").asInt(0), 0);
         if (document != null) {
@@ -307,6 +308,7 @@ public class InventoryPatientConsumptionService {
     public ObjectNode submit(String documentId, SessionUser user) {
         Document document = requireDocument(documentId, user);
         Instance instance = requireInstance(document.serviceInstanceId(), user);
+        requireLegacyPatientMode(instance.departmentKey(), instance.businessDate());
         if (!EDITABLE_DOCUMENT_STATUSES.contains(document.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该患者耗材清单已提交或已审核，不能重复提交");
         }
@@ -356,6 +358,7 @@ public class InventoryPatientConsumptionService {
     public ObjectNode submitBatch(String departmentKey, LocalDate businessDate, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
+        requireLegacyPatientMode(departmentKey, date);
         List<BatchPatient> patients = jdbcTemplate.query(
             """
             SELECT si.id service_instance_id, si.patient_name,
@@ -2018,8 +2021,29 @@ public class InventoryPatientConsumptionService {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "患者或就诊记录不存在：" + encounterId);
     }
 
-    private Department requireDepartment(String departmentKey, SessionUser user) {
-        Department department = DEPARTMENTS.get(departmentKey == null ? "" : departmentKey.trim());
+    private void requireLegacyPatientMode(String departmentKey, LocalDate date) {
+        String mode = jdbcTemplate.query(
+            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'inventory_quota_mode'",
+            resultSet -> resultSet.next() ? resultSet.getString(1) : ""
+        );
+        if (!"QUOTA".equalsIgnoreCase(mode)) return;
+        String effective = jdbcTemplate.query(
+            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'inventory_quota_mode_effective_date'",
+            resultSet -> resultSet.next() ? resultSet.getString(1) : ""
+        );
+        if (effective == null || effective.isBlank()) return;
+        LocalDate start;
+        try {
+            start = LocalDate.parse(effective.length() > 10 ? effective.substring(0, 10) : effective);
+        } catch (RuntimeException ignored) {
+            return;
+        }
+        if (!date.isBefore(start)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该业务日已启用定额模式，患者工作台只读");
+        }
+    }
+
+    private Department requireDepartment(String departmentKey, SessionUser user) {        Department department = DEPARTMENTS.get(departmentKey == null ? "" : departmentKey.trim());
         if (department == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未知科室");
         if (!inventoryAccess.canViewAllDepartments(user) && !sameDepartment(user.department(), department.name())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问其他科室的患者耗材清单");

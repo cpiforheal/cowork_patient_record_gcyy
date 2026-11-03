@@ -449,10 +449,27 @@ export interface InventoryDepartmentDailyReportLine {
   unit: string;
   presetQuantity?: number | null;
   actualQuantity: number;
+  quotaQuantity?: number | null;
+  quotaDeductedQuantity?: number | null;
+  extraQuantity?: number | null;
+  toleranceMode?: string;
+  toleranceValue?: number | null;
+  toleranceQuantity?: number | null;
+  exceptionStatus?: string;
+  exceptionApprovedQuantity?: number | null;
+  headcountBasis?: string;
   source: "TEMPLATE" | "MANUAL";
   exceptionReason?: string;
   reviewStatus?: string;
   reviewNote?: string;
+}
+
+export interface InventoryQuotaHeadcount {
+  outpatient: number;
+  inpatient: number;
+  manual: number;
+  total: number;
+  source: string;
 }
 
 export interface InventoryDepartmentDailyReport {
@@ -462,6 +479,7 @@ export interface InventoryDepartmentDailyReport {
   departmentName: string;
   businessDate: string;
   entryMode: "PATIENT" | "DAILY";
+  reportMode?: "LEGACY" | "QUOTA";
   status: string;
   revision: number;
   note: string;
@@ -469,6 +487,11 @@ export interface InventoryDepartmentDailyReport {
   submittedAt?: string;
   zeroUsage?: boolean;
   locked: boolean;
+  headcount?: InventoryQuotaHeadcount;
+  quotaComputedTotal?: number;
+  quotaDeductedTotal?: number;
+  exceptionTotal?: number;
+  pendingExceptions?: number;
   closure?: { status: string; submittedBy?: string; submittedAt?: string; lockedAt?: string };
   lines: InventoryDepartmentDailyReportLine[];
 }
@@ -3414,3 +3437,174 @@ export const getInventoryOpsHealthApi = async () =>
 
 export const getInventoryOpsExceptionsApi = async (params: Record<string, unknown> = {}) =>
   getInventoryData<InventoryOpsException[]>("/ops/exceptions", params);
+
+// ---------- 定额消耗模式 ----------
+
+export interface InventoryQuotaModeState {
+  mode: "LEGACY" | "QUOTA";
+  effectiveDate: string;
+  active: boolean;
+  confirmedBy: string;
+  changedAt: string;
+  completeness: { date: string; total: number; items: InventoryQuotaMissingItem[] };
+  readyToSwitch: boolean;
+}
+
+export interface InventoryQuotaMissingItem {
+  departmentKey: string;
+  departmentName: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  reason: string;
+}
+
+export interface InventoryQuotaException {
+  id: string;
+  reportId: string;
+  lineId?: string;
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  quotaQuantity: number;
+  reportedActualQuantity: number;
+  extraQuantity: number;
+  toleranceQuantity: number;
+  status: "PENDING" | "APPROVED" | "PARTIALLY_APPROVED" | "REJECTED";
+  approvedQuantity: number;
+  reason: string;
+  reviewNote?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  photoCount?: number;
+  createdAt?: string;
+}
+
+export interface InventoryQuotaExceptionPhoto {
+  id: string;
+  contentType: string;
+  size: number;
+  originalName: string;
+  uploadedBy: string;
+  url: string;
+}
+
+export interface InventoryQuotaExceptionDetail extends InventoryQuotaException {
+  photos: InventoryQuotaExceptionPhoto[];
+}
+
+export interface InventoryPatientEvidence {
+  departmentKey: string;
+  departmentName: string;
+  businessDate: string;
+  headcount: InventoryQuotaHeadcount;
+  lines: InventoryDepartmentDailyReportLine[];
+  patients: Array<{ patientId: string; patientName: string; visitCount: number; careType: string }>;
+  exceptions: InventoryQuotaException[];
+}
+
+export const getInventoryQuotaModeApi = async () =>
+  getInventoryData<InventoryQuotaModeState>("/quota-mode");
+
+export const switchInventoryQuotaModeApi = async (payload: { mode: "LEGACY" | "QUOTA"; effectiveDate: string }) =>
+  postInventoryData<InventoryQuotaModeState, typeof payload>("/quota-mode/switch", payload);
+
+export const getInventoryQuotaCompletenessApi = async (params: { date?: string; departmentKey?: string }) =>
+  getInventoryData<{ date: string; total: number; items: InventoryQuotaMissingItem[] }>("/quota-mode/completeness", params);
+
+export const saveInventoryQuotaDailyReportApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  revision?: number;
+  note?: string;
+  headcountOverride?: boolean;
+  headcountOutpatient?: number;
+  headcountInpatient?: number;
+  headcountManual?: number;
+  headcountReason?: string;
+}) =>
+  putInventoryData<InventoryDepartmentDailyReport, typeof payload>("/department-daily-reports", payload);
+
+export const correctInventoryQuotaHeadcountApi = async (
+  reportId: string,
+  payload: { headcountOutpatient: number; headcountInpatient: number; headcountManual: number; reason: string }
+) =>
+  postInventoryData<InventoryDepartmentDailyReport, typeof payload>(
+    `/department-daily-reports/${encodeURIComponent(reportId)}/headcount-correction`,
+    payload
+  );
+
+export const reportInventoryQuotaExceptionApi = async (payload: {
+  departmentKey: string;
+  businessDate: string;
+  itemId: string;
+  reportedActualQuantity: number;
+  reason: string;
+  patientId?: string;
+  encounterId?: string;
+}) => postInventoryData<InventoryQuotaExceptionDetail, typeof payload>("/quota-exceptions", payload);
+
+export const getInventoryQuotaExceptionsApi = async (params: {
+  status?: string;
+  date?: string;
+  departmentKey?: string;
+}) => getInventoryData<{ list: InventoryQuotaException[] }>("/quota-exceptions", params);
+
+export const getInventoryQuotaExceptionDetailApi = async (exceptionId: string) =>
+  getInventoryData<InventoryQuotaExceptionDetail>(`/quota-exceptions/${encodeURIComponent(exceptionId)}`);
+
+export const decideInventoryQuotaExceptionApi = async (
+  exceptionId: string,
+  payload: { status: "APPROVED" | "REJECTED"; approvedExtraQuantity: number; reviewNote?: string }
+) =>
+  postInventoryData<InventoryQuotaExceptionDetail, typeof payload>(
+    `/quota-exceptions/${encodeURIComponent(exceptionId)}/decide`,
+    payload
+  );
+
+export const uploadInventoryQuotaExceptionPhotoApi = async (exceptionId: string, file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  const result = await fetch(
+    `${INVENTORY_API_BASE_URL}/quota-exceptions/${encodeURIComponent(exceptionId)}/photos`,
+    { method: "POST", headers: authHeaders(), body: form }
+  );
+  return response(await parseInventoryDataResponse<InventoryQuotaExceptionPhoto>(result));
+};
+
+export const getInventoryPatientEvidenceApi = async (params: { departmentKey: string; date?: string }) =>
+  getInventoryData<InventoryPatientEvidence>("/patient-evidence", params);
+
+export interface InventoryQuotaToleranceRow {
+  ruleId: string;
+  departmentKey: string;
+  departmentName: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  standardQuantity: number | null;
+  bindingType: string;
+  toleranceMode: "NONE" | "PERCENT" | "ABSOLUTE";
+  toleranceValue: number;
+}
+
+export const getInventoryQuotaTolerancesApi = async (departmentKey?: string) =>
+  getInventoryData<{ list: InventoryQuotaToleranceRow[] }>("/quota-mode/tolerances", { departmentKey });
+
+export const updateInventoryQuotaToleranceApi = async (payload: {
+  ruleId: string;
+  toleranceMode: "NONE" | "PERCENT" | "ABSOLUTE";
+  toleranceValue: number;
+}) => postInventoryData<{ list: InventoryQuotaToleranceRow[] }, typeof payload>("/quota-mode/tolerance", payload);
+
+export const fetchInventoryQuotaExceptionPhotoApi = async (photoId: string) => {
+  const result = await fetch(`${INVENTORY_API_BASE_URL}/quota-exceptions/photos/${encodeURIComponent(photoId)}`, {
+    headers: authHeaders()
+  });
+  if (result.status === 401) handleUnauthorizedResponse();
+  if (!result.ok) throw new Error("照片加载失败");
+  return URL.createObjectURL(await result.blob());
+};

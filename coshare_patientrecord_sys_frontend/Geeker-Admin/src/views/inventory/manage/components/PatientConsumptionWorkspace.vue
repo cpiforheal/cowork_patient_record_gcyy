@@ -1,5 +1,6 @@
 <template>
-  <section class="patient-workspace" v-loading="loading">
+  <PatientEvidencePanel v-if="quotaModeActive" :department-key="props.departmentKey" :today="props.today" />
+  <section v-else class="patient-workspace" v-loading="loading">
     <header class="patient-toolbar">
       <div class="toolbar-copy">
         <span class="eyebrow">患者耗材 · {{ departmentName || "本科室" }}</span>
@@ -938,6 +939,7 @@ import { Close, Plus, Refresh, Search } from "@element-plus/icons-vue";
 import dayjs from "dayjs";
 import { pinyin } from "pinyin-pro";
 import DepartmentFillCalendar from "./DepartmentFillCalendar.vue";
+import PatientEvidencePanel from "./PatientEvidencePanel.vue";
 import FixedConsumablesDialog from "./FixedConsumablesDialog.vue";
 import FollowupAppointmentsDialog from "./FollowupAppointmentsDialog.vue";
 import FollowupBatchDialog from "./FollowupBatchDialog.vue";
@@ -961,6 +963,7 @@ import {
   getInventoryPatientSourceApi,
   getInventoryPatientTraceApi,
   getInventoryPatientWorkbenchApi,
+  getInventoryQuotaModeApi,
   saveInventoryPatientDocumentApi,
   saveInventoryPatientNoteApi,
   searchInventoryPatientsApi,
@@ -1005,6 +1008,7 @@ const props = defineProps<{
   departmentKey: string;
   today?: string;
 }>();
+const quotaModeActive = ref(false);
 
 const emptyWorkbench = (): InventoryPatientWorkbench => ({
   departmentKey: props.departmentKey,
@@ -2646,7 +2650,15 @@ watch(
 );
 
 onMounted(() => {
-  void loadWorkbench(false);
+  void (async () => {
+    try {
+      const result = await getInventoryQuotaModeApi();
+      quotaModeActive.value = result.data.active && result.data.mode === "QUOTA";
+    } catch {
+      quotaModeActive.value = false;
+    }
+    if (!quotaModeActive.value) void loadWorkbench(false);
+  })();
 });
 </script>
 

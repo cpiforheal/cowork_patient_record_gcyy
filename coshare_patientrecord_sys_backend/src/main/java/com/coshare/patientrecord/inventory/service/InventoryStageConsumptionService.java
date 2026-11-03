@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,9 +23,11 @@ public class InventoryStageConsumptionService {
     private static final List<String> SUPPORTED_STAGES = List.of("INSPECTION", "TCM", "DOCTOR", "SURGERY");
 
     private final InventoryLedgerRepository ledger;
+    private final JdbcTemplate jdbcTemplate;
 
-    public InventoryStageConsumptionService(InventoryLedgerRepository ledger) {
+    public InventoryStageConsumptionService(InventoryLedgerRepository ledger, JdbcTemplate jdbcTemplate) {
         this.ledger = ledger;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -38,8 +41,42 @@ public class InventoryStageConsumptionService {
         LocalDate visitDate,
         String requestedBy
     ) {
+        if (quotaModeActive(owningDepartmentId, visitDate)) {
+            return ledger.mapper().createObjectNode();
+        }
         return enqueue(encounterId, stage, completionVersion, "CONSUME", owningDepartmentId,
             caseToken, route, visitDate, requestedBy, null, null);
+    }
+
+    private boolean quotaModeActive(String owningDepartmentId, LocalDate visitDate) {
+        if (visitDate == null) visitDate = LocalDate.now();
+        List<String> departmentKeys = jdbcTemplate.query(
+            """
+            SELECT d.department_key
+            FROM inventory_departments d
+            WHERE d.status = 'ACTIVE'
+              AND (d.clinic_department_id = ? OR d.name = (SELECT name FROM clinic_departments WHERE id = ?))
+            LIMIT 1
+            """,
+            (rs, rowNum) -> rs.getString(1), owningDepartmentId, owningDepartmentId
+        );
+        if (departmentKeys.isEmpty()) return false;
+        List<String> mode = jdbcTemplate.query(
+            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'inventory_quota_mode'",
+            (rs, rowNum) -> rs.getString(1)
+        );
+        List<String> effective = jdbcTemplate.query(
+            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'inventory_quota_mode_effective_date'",
+            (rs, rowNum) -> rs.getString(1)
+        );
+        if (mode.isEmpty() || !"QUOTA".equalsIgnoreCase(mode.get(0))) return false;
+        if (effective.isEmpty() || effective.get(0) == null || effective.get(0).isBlank()) return false;
+        try {
+            LocalDate start = LocalDate.parse(effective.get(0).length() > 10 ? effective.get(0).substring(0, 10) : effective.get(0));
+            return !visitDate.isBefore(start);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     @Transactional

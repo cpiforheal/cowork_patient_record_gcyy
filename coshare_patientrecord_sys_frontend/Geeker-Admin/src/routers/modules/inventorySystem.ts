@@ -16,6 +16,7 @@ export const INVENTORY_TAB_ROUTE_NAMES: Record<string, string> = {
   trace: "inventoryTrace",
   daily: "inventoryDaily",
   patientReview: "inventoryPatientReview",
+  quotaExceptions: "inventoryQuotaExceptions",
   patientTrace: "inventoryPatientTrace",
   consumableWorkbench: "inventoryConsumableWorkbench",
   adminReview: "inventoryAdminReview",
@@ -44,6 +45,7 @@ export const INVENTORY_TAB_CAPABILITIES: Record<string, readonly string[]> = {
   trace: ["inventory:read", "inventory:export", "inventory:issue", "inventory:count"],
   daily: ["inventory:read"],
   patientReview: ["inventory:approve"],
+  quotaExceptions: ["inventory:approve"],
   patientTrace: ["inventory:read"],
   consumableWorkbench: ["inventory:read"],
   adminReview: ["inventory:role:manage"],
@@ -126,6 +128,11 @@ export const getInventorySystemMenu = (
         path: `${INVENTORY_SYSTEM_PREFIX}/patient-review`,
         name: "inventorySystemPatientReview",
         meta: meta("患者耗材审核", "CircleCheck")
+      },
+      {
+        path: `${INVENTORY_SYSTEM_PREFIX}/quota-exceptions`,
+        name: "inventorySystemQuotaExceptions",
+        meta: meta("定额例外审核", "Warning")
       },
       {
         path: `${INVENTORY_SYSTEM_PREFIX}/patient-trace`,

@@ -62,19 +62,22 @@ public class InventoryDepartmentDraftService {
     private final InventoryAccessService inventoryAccess;
     private final InventoryRepository repository;
     private final InventoryQuotaGovernanceService quotaGovernanceService;
+    private final InventoryQuotaConsumptionService quotaConsumptionService;
 
     public InventoryDepartmentDraftService(
         JdbcTemplate jdbcTemplate,
         ObjectMapper objectMapper,
         InventoryAccessService inventoryAccess,
         InventoryRepository repository,
-        InventoryQuotaGovernanceService quotaGovernanceService
+        InventoryQuotaGovernanceService quotaGovernanceService,
+        InventoryQuotaConsumptionService quotaConsumptionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.inventoryAccess = inventoryAccess;
         this.repository = repository;
         this.quotaGovernanceService = quotaGovernanceService;
+        this.quotaConsumptionService = quotaConsumptionService;
     }
 
     @Transactional(readOnly = true)
@@ -1018,6 +1021,16 @@ public class InventoryDepartmentDraftService {
         String departmentKey = text(payload, "departmentKey");
         String departmentName = requireDepartment(departmentKey, user);
         LocalDate businessDate = parseDate(text(payload, "businessDate"));
+        if (quotaConsumptionService.isQuotaMode(businessDate)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该业务日已启用定额模式，旧实耗草稿只读");
+        }
+        List<Integer> frozen = jdbcTemplate.query(
+            "SELECT frozen FROM inventory_department_daily_drafts WHERE department_key = ? AND business_date = ? LIMIT 1",
+            (rs, rowNum) -> rs.getInt(1), departmentKey, businessDate
+        );
+        if (!frozen.isEmpty() && frozen.get(0) == 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该实耗草稿已冻结，不能再修改");
+        }
         JsonNode lines = payload == null ? null : payload.path("lines");
         if (!lines.isArray() || lines.size() > 400) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "耗材明细格式不正确");
