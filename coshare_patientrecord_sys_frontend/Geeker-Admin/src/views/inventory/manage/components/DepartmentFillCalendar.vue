@@ -78,7 +78,7 @@
             </template>
             <div v-else><dt>状态</dt><dd>{{ date < today ? "这天还没有填写记录" : "等待今天填写" }}</dd></div>
           </dl>
-          <p v-if="!isFuture(date)">{{ reviewMode && date < today ? "点击查看当日回执" : "点击日期可切换到这天查看或补录" }}</p>
+          <p v-if="!isFuture(date)">{{ reviewMode ? "点击查看当日详情" : "点击日期可切换到这天查看或补录" }}</p>
         </div>
       </el-popover>
     </div>
@@ -95,7 +95,7 @@
         <strong>{{ selectedTitle }}</strong>
         <small>{{ stateLabel(selectedDate) }}</small>
       </span>
-      <el-button size="small" text type="primary" @click="select(selectedDate)">打开这天</el-button>
+      <el-button size="small" text type="primary" @click="emit('select-date', selectedDate)">打开这天</el-button>
     </div>
   </aside>
 </template>
@@ -117,6 +117,7 @@ const props = defineProps<{
   compact?: boolean;
   heading?: string;
   reviewMode?: boolean;
+  workingDate?: string;
 }>();
 
 const emit = defineEmits<{
@@ -211,7 +212,8 @@ const cellClass = (date: string) => ({
   [`is-${stateOf(date)}`]: true,
   "is-outside": date.slice(0, 7) !== props.month.slice(0, 7),
   "is-today": date === props.today,
-  "is-selected": date === props.selectedDate
+  "is-selected": date === props.selectedDate,
+  "is-working": date === props.workingDate
 });
 
 const badge = (date: string) => {
@@ -225,7 +227,6 @@ const badge = (date: string) => {
     return state === "due" ? "待填" : "";
   }
   if (day) {
-    if (props.mode === "DAILY" && Number(day.headcountTotal || 0) > 0) return `${day.headcountTotal}人`;
     if (Number(day.lineCount || 0) > 0) return `${day.lineCount}项`;
     return "已填";
   }
@@ -253,6 +254,7 @@ const focusCell = (date: string) => {
   const cell = gridRef.value?.querySelector<HTMLButtonElement>(`[data-date="${date}"]`);
   cell?.focus();
 };
+defineExpose({ focusDate: focusCell });
 
 const moveCellFocus = (from: string, step: number) => {
   const current = grid.value.indexOf(from);
@@ -325,7 +327,7 @@ const dateTitle = (date: string) => {
 
 const selectedTitle = computed(() => dateTitle(props.selectedDate));
 const ariaLabel = (date: string) => {
-  const suffix = props.reviewMode && date < props.today ? "，点击查看回执" : "";
+  const suffix = props.reviewMode ? "，点击查看当日详情" : "";
   return `${dateTitle(date)}，${stateLabel(date)}${badge(date) ? `，${badge(date)}` : ""}${suffix}`;
 };
 const formatDateTime = (value?: string) => (value ? dayjs(value).format("MM-DD HH:mm") : "");
@@ -339,7 +341,7 @@ const select = (date: string) => {
   if (date.slice(0, 7) !== props.month.slice(0, 7)) {
     emit("update:month", dayjs(date).startOf("month").format("YYYY-MM-01"));
   }
-  if (props.reviewMode && date < props.today) {
+  if (props.reviewMode) {
     emit("review-date", date);
     return;
   }
@@ -576,6 +578,10 @@ const select = (date: string) => {
 
   &.is-selected {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--fill-brand) 26%, transparent);
+  }
+
+  &.is-working:not(.is-selected) {
+    border-color: #b9cfc3;
   }
 }
 

@@ -1,6 +1,5 @@
 import type {
   InventoryDepartmentDailyReport,
-  InventoryDepartmentDailyReportCalendarDay,
   InventoryDepartmentDailyReportLine
 } from "@/api/modules/inventory";
 
@@ -19,18 +18,6 @@ export interface ReceiptCounts {
   onDemand: number;
   exceptions: number;
 }
-
-export interface MonthReviewStats {
-  submittedDays: number;
-  averageHeadcount: number | null;
-  deductedLines: number;
-  exceptions: number;
-  pendingExceptions: number;
-  draftDays: number;
-  state: "ok" | "future" | "before";
-}
-
-const SUBMITTED_STATUSES = new Set(["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED"]);
 
 export const formatReceiptQuantity = (value?: number | null) => Number(value || 0).toFixed(2);
 
@@ -64,40 +51,6 @@ export const receiptCounts = (report?: InventoryDepartmentDailyReport): ReceiptC
   };
 };
 
-export const monthReviewStats = (
-  days: InventoryDepartmentDailyReportCalendarDay[],
-  month: string,
-  today: string,
-  expectedFrom?: string
-): MonthReviewStats => {
-  const monthKey = month.slice(0, 7);
-  const inMonth = days.filter(day => day.date.slice(0, 7) === monthKey);
-  const inScope = inMonth.filter(
-    day => (!expectedFrom || day.date >= expectedFrom) && day.date <= today
-  );
-  const submitted = inScope.filter(
-    day => day.reportMode === "QUOTA" && SUBMITTED_STATUSES.has(day.status)
-  );
-  const headcountDays = submitted.filter(day => Number(day.headcountTotal || 0) > 0);
-  const headcountTotal = headcountDays.reduce((sum, day) => sum + Number(day.headcountTotal || 0), 0);
-  return {
-    submittedDays: submitted.length,
-    averageHeadcount: headcountDays.length ? Math.round(headcountTotal / headcountDays.length) : null,
-    deductedLines: submitted.reduce((sum, day) => sum + Number(day.lineCount || 0), 0),
-    exceptions: submitted.reduce((sum, day) => sum + Number(day.exceptionCount || 0), 0),
-    pendingExceptions: submitted.reduce((sum, day) => sum + Number(day.pendingExceptionCount || 0), 0),
-    draftDays: inScope.filter(
-      day => day.reportMode === "QUOTA" && ["DRAFT", "RETURNED"].includes(day.status)
-    ).length,
-    state:
-      monthKey > today.slice(0, 7)
-        ? "future"
-        : expectedFrom && monthKey < expectedFrom.slice(0, 7)
-          ? "before"
-          : "ok"
-  };
-};
-
 export const deductionStatus = (line: InventoryDepartmentDailyReportLine) => {
   const quota = Number(line.quotaQuantity || 0);
   const deducted = Number(line.quotaDeductedQuantity || 0);
@@ -123,84 +76,13 @@ export const exceptionStatusTone = (status?: string | null) => {
   return "info";
 };
 
-export type CalendarTone = "ok" | "warm" | "draft" | "muted" | "off";
-
-export interface CalendarStatusMeta {
-  label: string;
-  glyph: string;
-  tone: CalendarTone;
-  disabled: boolean;
-}
-
-export const calendarStatusMeta = (
-  day: InventoryDepartmentDailyReportCalendarDay | undefined,
-  date: string,
-  today: string,
-  expectedFrom?: string
-): CalendarStatusMeta => {
-  if (expectedFrom && date < expectedFrom) {
-    return { label: "未启用", glyph: "–", tone: "off", disabled: true };
-  }
-  if (date > today) {
-    return { label: "", glyph: "", tone: "off", disabled: true };
-  }
-  if (!day || !day.reportId) {
-    return { label: "待填", glyph: "○", tone: "warm", disabled: false };
-  }
-  if (day.reportMode && day.reportMode !== "QUOTA") {
-    return { label: "旧口径", glyph: "·", tone: "muted", disabled: false };
-  }
-  if (day.status === "DRAFT" || day.status === "RETURNED") {
-    return { label: "草稿", glyph: "◌", tone: "draft", disabled: false };
-  }
-  if (day.status === "SUBMITTED") {
-    return { label: "已提交", glyph: "✓", tone: "ok", disabled: false };
-  }
-  if (day.status === "APPROVED" || day.status === "PARTIALLY_APPROVED") {
-    return { label: "已确认", glyph: "✓", tone: "ok", disabled: false };
-  }
-  return { label: "待填", glyph: "○", tone: "warm", disabled: false };
-};
-
-export interface CalendarCapsule {
-  text: string;
-  full: string;
-  tone: CalendarTone;
-}
-
-export const calendarThirdCapsule = (
-  day: InventoryDepartmentDailyReportCalendarDay | undefined
-): CalendarCapsule | null => {
-  if (!day || day.reportMode !== "QUOTA") return null;
-  const pending = Number(day.pendingExceptionCount || 0);
-  if (pending > 0) {
-    return { text: `例外${pending}`, full: `待审例外 ${pending} 条`, tone: "warm" };
-  }
-  const shortage = Number(day.shortageCount || 0);
-  if (shortage > 0) {
-    return { text: `未足额${shortage}`, full: `${shortage} 项未足额扣减`, tone: "warm" };
-  }
-  const per = Number(day.perPersonCount || 0);
-  const fixed = Number(day.fixedCount || 0);
-  const period = Number(day.periodCount || 0);
-  const onDemand = Number(day.onDemandCount || 0);
-  const parts: string[] = [];
-  if (fixed) parts.push(`固${fixed}`);
-  if (period) parts.push(`周${period}`);
-  if (onDemand) parts.push(`按${onDemand}`);
-  if (parts.length) {
-    return {
-      text: parts.join("·"),
-      full: `按人次 ${per} 项，每日固定 ${fixed} 项，周期摊消 ${period} 项，按需 ${onDemand} 项`,
-      tone: "muted"
-    };
-  }
-  if (per > 0) {
-    return { text: `人次${per}`, full: `按人次计 ${per} 项`, tone: "muted" };
-  }
-  if (Number(day.lineCount || 0) > 0) {
-    return { text: `${day.lineCount}项`, full: `当日 ${day.lineCount} 项耗材`, tone: "muted" };
-  }
-  return null;
+export const quotaDayStatus = (report?: InventoryDepartmentDailyReport) => {
+  if (!report?.id) return { label: "未填报", tone: "draft" };
+  if (report.locked) return { label: "已锁定", tone: "locked" };
+  if (report.status === "DRAFT") return { label: "草稿", tone: "draft" };
+  if (report.status === "APPROVED") return { label: "已确认", tone: "success" };
+  if (report.status === "SUBMITTED") return { label: "已提交", tone: "success" };
+  if (report.status === "PARTIALLY_APPROVED") return { label: "部分确认", tone: "warning" };
+  return { label: report.status || "未填报", tone: "info" };
 };
 
