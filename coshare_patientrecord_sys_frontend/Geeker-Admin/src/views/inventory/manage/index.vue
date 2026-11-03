@@ -922,7 +922,8 @@ const isStandaloneConsumableEntry = computed(
   () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
 );
 const focusedDepartment = computed(() => inventoryDepartmentRouteMap[route.path] || "");
-const quotaWorkstationKeys = [
+// 试点：11-03 只让后勤进入新工作台；11-04 起 10 个科室全部切换。
+const allQuotaWorkstationKeys = [
   "inspection",
   "operating",
   "laboratory",
@@ -934,6 +935,9 @@ const quotaWorkstationKeys = [
   "western-pharmacy",
   "tcm-pharmacy"
 ];
+const quotaWorkstationKeys = computed(() =>
+  today() >= "2026-11-04" ? allQuotaWorkstationKeys : ["logistics"]
+);
 const isDailyDepartment = computed(() =>
   ["logistics", "cashier", "western-pharmacy", "tcm-pharmacy"].includes(focusedDepartmentKey.value)
 );
