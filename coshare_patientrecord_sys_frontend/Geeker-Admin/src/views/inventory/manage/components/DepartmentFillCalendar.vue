@@ -1,8 +1,8 @@
 <template>
-  <aside class="fill-calendar" :class="{ 'is-wide': wide }" aria-label="填写日历">
+  <aside class="fill-calendar" :class="{ 'is-wide': wide, 'is-compact': compact }" aria-label="填写日历">
     <header class="calendar-head">
       <div class="calendar-title">
-        <span class="eyebrow">填写日历</span>
+        <span class="eyebrow">{{ heading || "填写日历" }}</span>
         <strong>{{ monthTitle }}</strong>
       </div>
       <div class="calendar-nav">
@@ -12,7 +12,7 @@
       </div>
     </header>
 
-    <div class="calendar-summary">
+    <div v-if="!compact" class="calendar-summary">
       <span><b>{{ filledDays }}</b> 天已填完</span>
       <span v-if="mode === 'PATIENT'"><b>{{ monthExpected }}</b> 人应填</span>
       <span v-else><b>{{ monthLines }}</b> 项已填</span>
@@ -21,7 +21,7 @@
       <span v-if="suggestDays" class="is-suggest"><b>{{ suggestDays }}</b> 天待补</span>
     </div>
 
-    <div v-loading="loading" class="calendar-grid" role="grid">
+    <div ref="gridRef" v-loading="loading" class="calendar-grid" role="grid">
       <span v-for="weekday in weekdays" :key="weekday" class="weekday" role="columnheader">{{ weekday }}</span>
       <el-popover
         v-for="date in grid"
@@ -37,11 +37,16 @@
             type="button"
             class="calendar-cell"
             :class="cellClass(date)"
+            :data-date="date"
+            :tabindex="cellTabIndex(date)"
             :disabled="isFuture(date)"
             :aria-label="ariaLabel(date)"
             :aria-pressed="date === selectedDate"
+            @focus="tabDate = date"
+            @keydown="onCellKeydown($event, date)"
             @click="select(date)"
           >
+            <span v-if="cellGlyph(date)" class="cell-glyph" aria-hidden="true">{{ cellGlyph(date) }}</span>
             <span class="cell-number">{{ Number(date.slice(8)) }}</span>
             <span v-if="badge(date)" class="cell-badge">{{ badge(date) }}</span>
           </button>
@@ -58,12 +63,22 @@
               <div v-if="Number(dayOf(date)?.returned || 0)"><dt>被驳回</dt><dd>{{ dayOf(date)?.returned }} 人</dd></div>
             </template>
             <template v-else-if="dayOf(date)">
+              <div v-if="Number(dayOf(date)?.headcountTotal || 0)"><dt>服务人次</dt><dd>{{ dayOf(date)?.headcountTotal }} 人</dd></div>
               <div><dt>耗材项</dt><dd>{{ dayOf(date)?.lineCount || 0 }} 项</dd></div>
+              <div v-if="Number(dayOf(date)?.exceptionCount || 0)">
+                <dt>例外</dt>
+                <dd>
+                  {{ dayOf(date)?.exceptionCount }} 条
+                  <span v-if="Number(dayOf(date)?.pendingExceptionCount || 0)">
+                    （待审 {{ dayOf(date)?.pendingExceptionCount }}）
+                  </span>
+                </dd>
+              </div>
               <div v-if="dayOf(date)?.submittedAt"><dt>提交时间</dt><dd>{{ formatDateTime(dayOf(date)?.submittedAt) }}</dd></div>
             </template>
             <div v-else><dt>状态</dt><dd>{{ date < today ? "这天还没有填写记录" : "等待今天填写" }}</dd></div>
           </dl>
-          <p v-if="!isFuture(date)">点击日期可切换到这天查看或补录</p>
+          <p v-if="!isFuture(date)">{{ reviewMode && date < today ? "点击查看当日回执" : "点击日期可切换到这天查看或补录" }}</p>
         </div>
       </el-popover>
     </div>
@@ -75,7 +90,7 @@
       <span><i class="is-suggest" />建议补充</span>
     </div>
 
-    <div class="calendar-selected">
+    <div class="calendar-selected" v-if="!compact">
       <span>
         <strong>{{ selectedTitle }}</strong>
         <small>{{ stateLabel(selectedDate) }}</small>
@@ -86,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import dayjs from "dayjs";
 import type { InventoryDepartmentDailyReportCalendarDay } from "@/api/modules/inventory";
 
@@ -99,11 +114,15 @@ const props = defineProps<{
   expectedFrom?: string;
   loading?: boolean;
   wide?: boolean;
+  compact?: boolean;
+  heading?: string;
+  reviewMode?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:month": [month: string];
   "select-date": [date: string];
+  "review-date": [date: string];
 }>();
 
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
@@ -117,6 +136,20 @@ const grid = computed(() => {
   const start = first.subtract((first.day() + 6) % 7, "day");
   return Array.from({ length: 42 }, (_, index) => start.add(index, "day").format("YYYY-MM-DD"));
 });
+const gridRef = ref<HTMLElement>();
+const tabDate = ref(props.selectedDate);
+watch(
+  () => props.selectedDate,
+  date => {
+    if (grid.value.includes(date)) tabDate.value = date;
+  }
+);
+watch(
+  () => props.month,
+  () => {
+    tabDate.value = grid.value.includes(props.selectedDate) ? props.selectedDate : grid.value[0];
+  }
+);
 
 const byDate = computed(() => new Map(props.days.map(day => [day.date, day])));
 const dayOf = (date: string) => byDate.value.get(date);
@@ -192,10 +225,76 @@ const badge = (date: string) => {
     return state === "due" ? "待填" : "";
   }
   if (day) {
+    if (props.mode === "DAILY" && Number(day.headcountTotal || 0) > 0) return `${day.headcountTotal}人`;
     if (Number(day.lineCount || 0) > 0) return `${day.lineCount}项`;
     return "已填";
   }
   return state === "due" ? "待填" : "未填";
+};
+
+const cellGlyph = (date: string) => {
+  switch (stateOf(date)) {
+    case "filled":
+      return "✓";
+    case "suggest":
+      return "·";
+    case "due":
+      return "○";
+    case "missing":
+      return "!";
+    default:
+      return "";
+  }
+};
+
+const cellTabIndex = (date: string) => (date === tabDate.value ? 0 : -1);
+
+const focusCell = (date: string) => {
+  const cell = gridRef.value?.querySelector<HTMLButtonElement>(`[data-date="${date}"]`);
+  cell?.focus();
+};
+
+const moveCellFocus = (from: string, step: number) => {
+  const current = grid.value.indexOf(from);
+  if (current < 0) return;
+  let target = current + step;
+  while (target >= 0 && target < grid.value.length && isFuture(grid.value[target])) {
+    target += step > 0 ? 1 : -1;
+  }
+  if (target < 0 || target >= grid.value.length) return;
+  tabDate.value = grid.value[target];
+  nextTick(() => focusCell(grid.value[target]));
+};
+
+const focusGridIndex = (target: number) => {
+  while (target >= 0 && target < grid.value.length && isFuture(grid.value[target])) target -= 1;
+  if (target < 0 || target >= grid.value.length) return;
+  tabDate.value = grid.value[target];
+  nextTick(() => focusCell(grid.value[target]));
+};
+
+const onCellKeydown = (event: KeyboardEvent, date: string) => {
+  const index = grid.value.indexOf(date);
+  if (index < 0) return;
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    moveCellFocus(date, -1);
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    moveCellFocus(date, 1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveCellFocus(date, -7);
+  } else if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveCellFocus(date, 7);
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    focusGridIndex(index - (index % 7));
+  } else if (event.key === "End") {
+    event.preventDefault();
+    focusGridIndex(index - (index % 7) + 6);
+  }
 };
 
 const stateLabel = (date: string) => {
@@ -225,7 +324,10 @@ const dateTitle = (date: string) => {
 };
 
 const selectedTitle = computed(() => dateTitle(props.selectedDate));
-const ariaLabel = (date: string) => `${dateTitle(date)}，${stateLabel(date)}${badge(date) ? `，${badge(date)}` : ""}`;
+const ariaLabel = (date: string) => {
+  const suffix = props.reviewMode && date < props.today ? "，点击查看回执" : "";
+  return `${dateTitle(date)}，${stateLabel(date)}${badge(date) ? `，${badge(date)}` : ""}${suffix}`;
+};
 const formatDateTime = (value?: string) => (value ? dayjs(value).format("MM-DD HH:mm") : "");
 
 const shiftMonth = (offset: number) => {
@@ -236,6 +338,10 @@ const select = (date: string) => {
   if (isFuture(date)) return;
   if (date.slice(0, 7) !== props.month.slice(0, 7)) {
     emit("update:month", dayjs(date).startOf("month").format("YYYY-MM-01"));
+  }
+  if (props.reviewMode && date < props.today) {
+    emit("review-date", date);
+    return;
   }
   emit("select-date", date);
 };
@@ -300,6 +406,18 @@ const select = (date: string) => {
 
   .calendar-selected {
     grid-area: selected;
+  }
+}
+
+.fill-calendar.is-compact {
+  gap: 10px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+
+  .calendar-grid {
+    min-height: 210px;
   }
 }
 
@@ -388,6 +506,7 @@ const select = (date: string) => {
 }
 
 .calendar-cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -464,6 +583,15 @@ const select = (date: string) => {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 16px;
+}
+
+.cell-glyph {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.72;
 }
 
 .cell-badge {
@@ -551,7 +679,6 @@ const select = (date: string) => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-
   strong {
     color: #2f2d27;
     font-size: 13px;

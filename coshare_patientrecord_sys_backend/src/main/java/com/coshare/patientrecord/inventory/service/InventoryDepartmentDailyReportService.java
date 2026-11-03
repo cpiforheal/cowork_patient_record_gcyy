@@ -358,8 +358,43 @@ public class InventoryDepartmentDailyReportService {
         ArrayNode days = jdbcTemplate.query(
             """
             SELECT r.id, r.business_date, r.status, r.submitted_at, r.submitted_by,
+                   r.report_mode, r.headcount_outpatient, r.headcount_inpatient, r.headcount_manual,
                    (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
-                    WHERE l.report_id = r.id AND l.actual_quantity > 0) line_count
+                    WHERE l.report_id = r.id AND l.actual_quantity > 0) line_count,
+                   (SELECT COUNT(*) FROM inventory_quota_exceptions e
+                    WHERE e.report_id = r.id) exception_count,
+                   (SELECT COUNT(*) FROM inventory_quota_exceptions e
+                    WHERE e.report_id = r.id AND e.status = 'PENDING') pending_exception_count,
+                   (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
+                    LEFT JOIN inventory_quota_rules q ON q.id = l.quota_rule_id
+                    WHERE l.report_id = r.id AND q.binding_type = 'PER_PERSON'
+                      AND COALESCE(l.quota_quantity, 0) > 0) per_person_count,
+                   (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
+                    LEFT JOIN inventory_quota_rules q ON q.id = l.quota_rule_id
+                    WHERE l.report_id = r.id
+                      AND COALESCE(q.binding_type, '') NOT IN ('PER_PERSON', 'ON_DEMAND')
+                      AND COALESCE(q.period_days, 1) <= 1
+                      AND COALESCE(q.included_in_quota, 1) = 1
+                      AND COALESCE(l.quota_quantity, 0) > 0) fixed_count,
+                   (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
+                    LEFT JOIN inventory_quota_rules q ON q.id = l.quota_rule_id
+                    WHERE l.report_id = r.id
+                      AND COALESCE(q.binding_type, '') NOT IN ('PER_PERSON', 'ON_DEMAND')
+                      AND COALESCE(q.period_days, 1) > 1
+                      AND COALESCE(q.included_in_quota, 1) = 1
+                      AND COALESCE(l.quota_quantity, 0) > 0) period_count,
+                   (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
+                    LEFT JOIN inventory_quota_rules q ON q.id = l.quota_rule_id
+                    WHERE l.report_id = r.id
+                      AND (q.binding_type = 'ON_DEMAND' OR COALESCE(q.included_in_quota, 1) = 0)) on_demand_count,
+                   (SELECT COUNT(*) FROM inventory_department_daily_report_lines l
+                    LEFT JOIN inventory_quota_rules q ON q.id = l.quota_rule_id
+                    WHERE l.report_id = r.id
+                      AND COALESCE(q.binding_type, '') <> 'ON_DEMAND'
+                      AND COALESCE(q.included_in_quota, 1) = 1
+                      AND COALESCE(l.quota_quantity, 0) > 0
+                      AND l.quota_deducted_quantity IS NOT NULL
+                      AND l.quota_deducted_quantity < l.quota_quantity) shortage_count
             FROM inventory_department_daily_reports r
             WHERE r.department_key = ? AND r.business_date BETWEEN ? AND ?
             ORDER BY r.business_date
@@ -375,6 +410,22 @@ public class InventoryDepartmentDailyReportService {
                     Timestamp submittedAt = resultSet.getTimestamp("submitted_at");
                     row.put("submittedAt", submittedAt == null ? "" : submittedAt.toLocalDateTime().toString());
                     row.put("submittedBy", resultSet.getString("submitted_by"));
+                    String reportMode = resultSet.getString("report_mode");
+                    row.put("reportMode", reportMode == null || reportMode.isBlank() ? "LEGACY" : reportMode);
+                    int outpatient = resultSet.getInt("headcount_outpatient");
+                    int inpatient = resultSet.getInt("headcount_inpatient");
+                    int manual = resultSet.getInt("headcount_manual");
+                    row.put("headcountOutpatient", outpatient);
+                    row.put("headcountInpatient", inpatient);
+                    row.put("headcountManual", manual);
+                    row.put("headcountTotal", outpatient + inpatient + manual);
+                    row.put("exceptionCount", resultSet.getInt("exception_count"));
+                    row.put("pendingExceptionCount", resultSet.getInt("pending_exception_count"));
+                    row.put("perPersonCount", resultSet.getInt("per_person_count"));
+                    row.put("fixedCount", resultSet.getInt("fixed_count"));
+                    row.put("periodCount", resultSet.getInt("period_count"));
+                    row.put("onDemandCount", resultSet.getInt("on_demand_count"));
+                    row.put("shortageCount", resultSet.getInt("shortage_count"));
                 }
                 return list;
             },
@@ -448,6 +499,18 @@ public class InventoryDepartmentDailyReportService {
             if (!row.has("returned")) row.put("returned", 0);
             if (!row.has("missing")) row.put("missing", 0);
             if (!row.has("noConsumption")) row.put("noConsumption", 0);
+            if (!row.has("reportMode")) row.put("reportMode", "");
+            if (!row.has("headcountOutpatient")) row.put("headcountOutpatient", 0);
+            if (!row.has("headcountInpatient")) row.put("headcountInpatient", 0);
+            if (!row.has("headcountManual")) row.put("headcountManual", 0);
+            if (!row.has("headcountTotal")) row.put("headcountTotal", 0);
+            if (!row.has("exceptionCount")) row.put("exceptionCount", 0);
+            if (!row.has("pendingExceptionCount")) row.put("pendingExceptionCount", 0);
+            if (!row.has("perPersonCount")) row.put("perPersonCount", 0);
+            if (!row.has("fixedCount")) row.put("fixedCount", 0);
+            if (!row.has("periodCount")) row.put("periodCount", 0);
+            if (!row.has("onDemandCount")) row.put("onDemandCount", 0);
+            if (!row.has("shortageCount")) row.put("shortageCount", 0);
             calendarDays.add(row);
         }
         days = calendarDays;

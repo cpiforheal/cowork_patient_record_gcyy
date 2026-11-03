@@ -1938,6 +1938,18 @@ export interface InventoryDepartmentDailyReportCalendarDay {
   reportId: string;
   status: string;
   lineCount: number;
+  reportMode?: string;
+  headcountOutpatient?: number;
+  headcountInpatient?: number;
+  headcountManual?: number;
+  headcountTotal?: number;
+  exceptionCount?: number;
+  pendingExceptionCount?: number;
+  perPersonCount?: number;
+  fixedCount?: number;
+  periodCount?: number;
+  onDemandCount?: number;
+  shortageCount?: number;
   patientCount: number;
   patientTotal?: number;
   entered?: number;

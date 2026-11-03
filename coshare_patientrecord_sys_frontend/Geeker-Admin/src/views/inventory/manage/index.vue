@@ -179,6 +179,7 @@
                 :department-key="focusedDepartmentKey"
                 :department-name="focusedDepartment"
                 :today="today()"
+                :can-export="hasInventoryAuth('inventory:export')"
               />
               <DepartmentDailyReportPanel
                 v-else-if="isDailyDepartment"
