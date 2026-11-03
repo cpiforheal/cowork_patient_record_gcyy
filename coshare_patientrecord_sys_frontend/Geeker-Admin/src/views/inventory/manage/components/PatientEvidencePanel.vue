@@ -7,7 +7,7 @@
         <p>定额由系统按接诊人数生成并扣库；本页只读展示患者、人次与每人次定额，不能修改任何耗材数量。</p>
       </div>
       <div class="pe-actions">
-        <el-date-picker v-model="businessDate" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="load" />
+        <el-date-picker v-if="!embedded" v-model="businessDate" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="load" />
         <el-button :loading="loading" @click="load">刷新</el-button>
       </div>
     </header>
@@ -53,14 +53,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import dayjs from "dayjs";
 import { getInventoryPatientEvidenceApi, type InventoryPatientEvidence } from "@/api/modules/inventory";
 
-const props = defineProps<{ departmentKey: string; today?: string }>();
+const props = defineProps<{ departmentKey: string; today?: string; date?: string; embedded?: boolean }>();
 
-const businessDate = ref(props.today || dayjs().format("YYYY-MM-DD"));
+const businessDate = ref(props.date || props.today || dayjs().format("YYYY-MM-DD"));
+watch(
+  () => props.date,
+  value => {
+    if (value && value !== businessDate.value) {
+      businessDate.value = value;
+      void load();
+    }
+  }
+);
 const loading = ref(false);
 const evidence = ref<InventoryPatientEvidence>();
 const headcount = computed(() => evidence.value?.headcount || { outpatient: 0, inpatient: 0, manual: 0, total: 0, source: "" });

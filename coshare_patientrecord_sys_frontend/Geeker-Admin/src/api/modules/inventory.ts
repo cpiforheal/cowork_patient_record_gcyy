@@ -444,6 +444,8 @@ export interface InventoryPatientConsumptionDraftList {
 
 export interface InventoryDepartmentDailyReportLine {
   lineId?: string;
+  quotaRuleId?: string;
+  sourceRowKey?: string;
   itemId: string;
   itemName: string;
   unit: string;
@@ -458,6 +460,11 @@ export interface InventoryDepartmentDailyReportLine {
   exceptionStatus?: string;
   exceptionApprovedQuantity?: number | null;
   headcountBasis?: string;
+  bindingType?: string;
+  exceptionOnly?: boolean;
+  sourceText?: string;
+  periodDays?: number;
+  includedInQuota?: boolean;
   source: "TEMPLATE" | "MANUAL";
   exceptionReason?: string;
   reviewStatus?: string;
@@ -488,6 +495,9 @@ export interface InventoryDepartmentDailyReport {
   zeroUsage?: boolean;
   locked: boolean;
   headcount?: InventoryQuotaHeadcount;
+  previousHeadcount?: InventoryQuotaHeadcount | null;
+  previousHeadcountDate?: string;
+  headcountReason?: string;
   quotaComputedTotal?: number;
   quotaDeductedTotal?: number;
   exceptionTotal?: number;
@@ -3551,6 +3561,8 @@ export const reportInventoryQuotaExceptionApi = async (payload: {
   departmentKey: string;
   businessDate: string;
   itemId: string;
+  lineId?: string;
+  quotaRuleId?: string;
   reportedActualQuantity: number;
   reason: string;
   patientId?: string;

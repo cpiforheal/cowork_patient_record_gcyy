@@ -174,8 +174,14 @@
 
           <template v-else-if="activeTab === 'packages'">
             <template v-if="focusedDepartmentKey">
+              <QuotaHeadcountWorkstation
+                v-if="quotaWorkstationKeys.includes(focusedDepartmentKey)"
+                :department-key="focusedDepartmentKey"
+                :department-name="focusedDepartment"
+                :today="today()"
+              />
               <DepartmentDailyReportPanel
-                v-if="isDailyDepartment"
+                v-else-if="isDailyDepartment"
                 :department-key="focusedDepartmentKey"
                 :department-name="focusedDepartment"
                 :today="today()"
@@ -628,6 +634,7 @@ import DepartmentConsumptionSummary from "./components/DepartmentConsumptionSumm
 import DepartmentConsumptionWorkspace from "./components/DepartmentConsumptionWorkspace.vue";
 import PatientConsumptionWorkspace from "./components/PatientConsumptionWorkspace.vue";
 import DepartmentDailyReportPanel from "./components/DepartmentDailyReportPanel.vue";
+import QuotaHeadcountWorkstation from "./components/quota/QuotaHeadcountWorkstation.vue";
 import PatientConsumptionReviewPanel from "./components/PatientConsumptionReviewPanel.vue";
 import QuotaExceptionReviewPanel from "./components/QuotaExceptionReviewPanel.vue";
 import PatientConsumptionTracePanel from "./components/PatientConsumptionTracePanel.vue";
@@ -915,6 +922,18 @@ const isStandaloneConsumableEntry = computed(
   () => route.path === "/inventory-system/consumable-entry" || Boolean(inventoryDepartmentRouteMap[route.path])
 );
 const focusedDepartment = computed(() => inventoryDepartmentRouteMap[route.path] || "");
+const quotaWorkstationKeys = [
+  "inspection",
+  "operating",
+  "laboratory",
+  "physiotherapy",
+  "nursing",
+  "endoscopy",
+  "logistics",
+  "cashier",
+  "western-pharmacy",
+  "tcm-pharmacy"
+];
 const isDailyDepartment = computed(() =>
   ["logistics", "cashier", "western-pharmacy", "tcm-pharmacy"].includes(focusedDepartmentKey.value)
 );
