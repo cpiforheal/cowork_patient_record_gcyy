@@ -64,7 +64,7 @@ public class InventoryDepartmentDailyReportService {
     public ObjectNode read(String departmentKey, LocalDate businessDate, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
-        if (quotaConsumption.isQuotaMode(date)) return quotaConsumption.read(departmentKey, date, user);
+        if (quotaConsumption.isQuotaMode(departmentKey, date)) return quotaConsumption.read(departmentKey, date, user);
         Report report = loadReport(department.id(), date);
         ObjectNode result = objectMapper.createObjectNode();
         result.put("departmentKey", department.key());
@@ -98,7 +98,7 @@ public class InventoryDepartmentDailyReportService {
     public ObjectNode save(JsonNode payload, SessionUser user) {
         Department department = requireDepartment(text(payload, "departmentKey"), user);
         LocalDate date = parseDate(text(payload, "businessDate"));
-        if (quotaConsumption.isQuotaMode(date)) return quotaConsumption.save(payload, user);
+        if (quotaConsumption.isQuotaMode(department.key(), date)) return quotaConsumption.save(payload, user);
         Report current = loadReport(department.id(), date);
         ensureEditable(department, date, current);
         int expectedRevision = Math.max(payload.path("revision").asInt(0), 0);
@@ -181,7 +181,7 @@ public class InventoryDepartmentDailyReportService {
         Report report = loadReportById(reportId);
         if (report == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室日报不存在");
         Department department = requireDepartment(report.departmentKey(), user);
-        if (quotaConsumption.isQuotaMode(report.businessDate())) return quotaConsumption.submit(reportId, user);
+        if (quotaConsumption.isQuotaMode(report.departmentKey(), report.businessDate())) return quotaConsumption.submit(reportId, user);
         ensureEditable(department, report.businessDate(), report);
         Integer positiveLines = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM inventory_department_daily_report_lines WHERE report_id = ? AND actual_quantity > 0",

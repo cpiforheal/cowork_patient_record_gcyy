@@ -50,29 +50,23 @@ public class InventoryStageConsumptionService {
 
     private boolean quotaModeActive(String owningDepartmentId, LocalDate visitDate) {
         if (visitDate == null) visitDate = LocalDate.now();
-        List<String> departmentKeys = jdbcTemplate.query(
+        List<String> modes = jdbcTemplate.query(
             """
-            SELECT d.department_key
+            SELECT d.quota_mode, d.quota_mode_effective_date
             FROM inventory_departments d
             WHERE d.status = 'ACTIVE'
               AND (d.clinic_department_id = ? OR d.name = (SELECT name FROM clinic_departments WHERE id = ?))
             LIMIT 1
             """,
-            (rs, rowNum) -> rs.getString(1), owningDepartmentId, owningDepartmentId
+            (rs, rowNum) -> rs.getString("quota_mode") + "|"
+                + (rs.getDate("quota_mode_effective_date") == null ? "" : rs.getDate("quota_mode_effective_date").toString()),
+            owningDepartmentId, owningDepartmentId
         );
-        if (departmentKeys.isEmpty()) return false;
-        List<String> mode = jdbcTemplate.query(
-            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'inventory_quota_mode'",
-            (rs, rowNum) -> rs.getString(1)
-        );
-        List<String> effective = jdbcTemplate.query(
-            "SELECT setting_value FROM inventory_runtime_settings WHERE setting_key = 'inventory_quota_mode_effective_date'",
-            (rs, rowNum) -> rs.getString(1)
-        );
-        if (mode.isEmpty() || !"QUOTA".equalsIgnoreCase(mode.get(0))) return false;
-        if (effective.isEmpty() || effective.get(0) == null || effective.get(0).isBlank()) return false;
+        if (modes.isEmpty()) return false;
+        String[] parts = modes.get(0).split("\\|", -1);
+        if (!"QUOTA".equalsIgnoreCase(parts[0]) || parts.length < 2 || parts[1].isBlank()) return false;
         try {
-            LocalDate start = LocalDate.parse(effective.get(0).length() > 10 ? effective.get(0).substring(0, 10) : effective.get(0));
+            LocalDate start = LocalDate.parse(parts[1]);
             return !visitDate.isBefore(start);
         } catch (RuntimeException ignored) {
             return false;

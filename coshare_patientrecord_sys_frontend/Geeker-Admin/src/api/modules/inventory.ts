@@ -3448,6 +3448,13 @@ export interface InventoryQuotaModeState {
   changedAt: string;
   completeness: { date: string; total: number; items: InventoryQuotaMissingItem[] };
   readyToSwitch: boolean;
+  departments?: Array<{
+    departmentKey: string;
+    departmentName: string;
+    entryMode: string;
+    quotaMode: "LEGACY" | "QUOTA";
+    effectiveDate: string;
+  }>;
 }
 
 export interface InventoryQuotaMissingItem {
@@ -3509,8 +3516,11 @@ export interface InventoryPatientEvidence {
 export const getInventoryQuotaModeApi = async () =>
   getInventoryData<InventoryQuotaModeState>("/quota-mode");
 
-export const switchInventoryQuotaModeApi = async (payload: { mode: "LEGACY" | "QUOTA"; effectiveDate: string }) =>
-  postInventoryData<InventoryQuotaModeState, typeof payload>("/quota-mode/switch", payload);
+export const switchInventoryQuotaModeApi = async (payload: {
+  mode: "LEGACY" | "QUOTA";
+  effectiveDate: string;
+  departmentKey?: string;
+}) => postInventoryData<InventoryQuotaModeState, typeof payload>("/quota-mode/switch", payload);
 
 export const getInventoryQuotaCompletenessApi = async (params: { date?: string; departmentKey?: string }) =>
   getInventoryData<{ date: string; total: number; items: InventoryQuotaMissingItem[] }>("/quota-mode/completeness", params);

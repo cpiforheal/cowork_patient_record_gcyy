@@ -52,7 +52,14 @@
               </template>
             </template>
             <template v-else>
-              <label>服务人次 <el-input-number v-model="headcountForm.manual" :min="0" :precision="0" size="small" :disabled="!editable" /></label>
+              <label>门诊人次 <el-input-number v-model="headcountForm.outpatient" :min="0" :precision="0" size="small" :disabled="!editable && !headcountEditing" /></label>
+              <label>住院人次 <el-input-number v-model="headcountForm.inpatient" :min="0" :precision="0" size="small" :disabled="!editable && !headcountEditing" /></label>
+              <el-button v-if="canCorrectHeadcount && !headcountEditing" size="small" @click="startHeadcountEdit">修正人数</el-button>
+              <template v-if="headcountEditing">
+                <el-input v-model="headcountForm.reason" size="small" placeholder="修正原因（必填）" style="width: 220px" />
+                <el-button v-if="draft?.status !== 'DRAFT'" size="small" type="primary" :loading="saving" @click="save">保存修正</el-button>
+                <el-button size="small" @click="cancelHeadcountEdit">取消</el-button>
+              </template>
             </template>
           </div>
         </div>
@@ -70,6 +77,9 @@
           <el-table-column prop="itemName" label="耗材" min-width="200" show-overflow-tooltip />
           <el-table-column prop="unit" label="单位" width="80" />
           <template v-if="isQuotaMode">
+            <el-table-column label="原用量" width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.sourceText || "—" }}</template>
+            </el-table-column>
             <el-table-column label="应耗（定额）" width="120" align="right">
               <template #default="{ row }">{{ formatQuantity(row.quotaQuantity ?? row.presetQuantity) }}</template>
             </el-table-column>

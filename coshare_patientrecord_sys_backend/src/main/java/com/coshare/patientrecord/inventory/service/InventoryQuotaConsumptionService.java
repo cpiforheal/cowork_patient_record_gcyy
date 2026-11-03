@@ -88,34 +88,86 @@ public class InventoryQuotaConsumptionService {
         ObjectNode completeness = completeness(null, null);
         result.set("completeness", completeness);
         result.put("readyToSwitch", completeness.path("total").asInt(0) == 0);
+        ArrayNode departments = result.putArray("departments");
+        jdbcTemplate.query(
+            """
+            SELECT department_key, name, entry_mode, quota_mode, quota_mode_effective_date
+            FROM inventory_departments WHERE status = 'ACTIVE' ORDER BY display_order, name
+            """,
+            rs -> {
+                ObjectNode row = departments.addObject();
+                row.put("departmentKey", rs.getString("department_key"));
+                row.put("departmentName", rs.getString("name"));
+                row.put("entryMode", rs.getString("entry_mode"));
+                row.put("quotaMode", rs.getString("quota_mode"));
+                row.put("effectiveDate", rs.getDate("quota_mode_effective_date") == null
+                    ? "" : rs.getDate("quota_mode_effective_date").toString());
+            }
+        );
         return result;
     }
 
     @Transactional
-    public ObjectNode switchMode(JsonNode payload, SessionUser user) {
+    public ObjectNode switchDepartmentMode(String departmentKey, JsonNode payload, SessionUser user) {
         String mode = text(payload, "mode").toUpperCase(Locale.ROOT);
         if (!MODES.contains(mode)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "模式只能为 LEGACY 或 QUOTA");
         LocalDate effective = parseDate(text(payload, "effectiveDate"));
         if (effective == null) effective = LocalDate.now().plusDays(1);
         if (MODE_QUOTA.equals(mode)) {
-            if (effective.isBefore(LocalDate.now())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "生效日不能早于今天");
-            ObjectNode completeness = completeness(effective, null);
+            ObjectNode completeness = completeness(effective, departmentKey);
             if (completeness.path("total").asInt(0) > 0) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "仍有 " + completeness.path("total").asInt() + " 项耗材未核定定额，请先在待核定清单补齐");
+                    "仍有 " + completeness.path("total").asInt() + " 项耗材未核定定额，请先补齐");
             }
         }
-        upsertSetting("inventory_quota_mode", mode, user.name());
-        upsertSetting("inventory_quota_mode_effective_date", effective.toString(), user.name());
-        upsertSetting("inventory_quota_mode_confirmed_by", user.name(), user.name());
-        upsertSetting("inventory_quota_mode_changed_at", LocalDateTime.now().toString(), user.name());
+        int updated = jdbcTemplate.update(
+            """
+            UPDATE inventory_departments
+            SET quota_mode = ?, quota_mode_effective_date = ?, quota_mode_enabled_by = ?, quota_mode_enabled_at = CURRENT_TIMESTAMP(3)
+            WHERE department_key = ? AND status = 'ACTIVE'
+            """,
+            mode, effective, user.name(), departmentKey
+        );
+        if (updated == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室不存在");
         if (MODE_QUOTA.equals(mode)) {
             LocalDate cutoff = effective.isBefore(LocalDate.now()) ? effective : LocalDate.now();
             jdbcTemplate.update("UPDATE inventory_department_daily_drafts SET frozen = 1 WHERE business_date < ?", cutoff);
         }
-        repository.log(user.name(), MODE_QUOTA.equals(mode) ? "启用定额消耗模式" : "回退实耗模式",
-            "inventory_quota_mode", effective.toString(), "定额模式变更；历史数据不重算");
+        repository.log(user.name(), MODE_QUOTA.equals(mode) ? "启用科室定额模式" : "回退科室实耗模式",
+            "inventory_department", departmentKey, "生效日 " + effective);
         return modeState();
+    }
+
+    @Transactional
+    public ObjectNode switchMode(JsonNode payload, SessionUser user) {
+        String departmentKey = text(payload, "departmentKey");
+        if (!departmentKey.isBlank()) return switchDepartmentMode(departmentKey, payload, user);
+        for (Department department : departments(null)) {
+            switchDepartmentMode(department.key(), payload, user);
+        }
+        return modeState();
+    }
+
+    public boolean isQuotaMode(String departmentKey, LocalDate date) {
+        if (departmentKey == null || departmentKey.isBlank()) return isQuotaMode(date);
+        List<String> values = jdbcTemplate.query(
+            """
+            SELECT quota_mode, quota_mode_effective_date
+            FROM inventory_departments WHERE department_key = ? AND status = 'ACTIVE'
+            """,
+            (rs, rowNum) -> rs.getString("quota_mode") + "|" + (rs.getDate("quota_mode_effective_date") == null
+                ? "" : rs.getDate("quota_mode_effective_date").toString()),
+            departmentKey
+        );
+        if (values.isEmpty()) return false;
+        String[] parts = values.get(0).split("\\|", -1);
+        if (!MODE_QUOTA.equals(parts[0]) || parts.length < 2 || parts[1].isBlank()) return false;
+        try {
+            LocalDate start = LocalDate.parse(parts[1]);
+            return date == null || !date.isBefore(start);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     public boolean isQuotaMode(LocalDate date) {
@@ -134,6 +186,34 @@ public class InventoryQuotaConsumptionService {
         for (Department department : departments) {
             if (activeVersion.isBlank()) {
                 items.add(missingDepartment(department, "未配置生效定额版本"));
+                continue;
+            }
+            Integer ruleCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM inventory_quota_rules WHERE version_id = ? AND department_key = ? AND enabled = 1",
+                Integer.class, activeVersion, department.key()
+            );
+            if (ruleCount != null && ruleCount > 0) {
+                List<MissingItem> invalid = jdbcTemplate.query(
+                    """
+                    SELECT item_id, material_name item_name, unit item_unit
+                    FROM inventory_quota_rules
+                    WHERE version_id = ? AND department_key = ? AND enabled = 1
+                      AND included_in_quota = 1 AND binding_type <> 'ON_DEMAND'
+                      AND (source_numerator IS NULL OR source_numerator <= 0)
+                      AND (standard_quantity IS NULL OR standard_quantity <= 0)
+                    """,
+                    (rs, rowNum) -> new MissingItem(rs.getString("item_id"), rs.getString("item_name"), rs.getString("item_unit")),
+                    activeVersion, department.key()
+                );
+                for (MissingItem item : invalid) {
+                    ObjectNode row = items.addObject();
+                    row.put("departmentKey", department.key());
+                    row.put("departmentName", department.name());
+                    row.put("itemId", item.itemId());
+                    row.put("itemName", item.itemName());
+                    row.put("unit", item.unit());
+                    row.put("reason", "定额规则数量为 0，需院方补齐");
+                }
                 continue;
             }
             List<MissingItem> missing = jdbcTemplate.query(
@@ -159,9 +239,13 @@ public class InventoryQuotaConsumptionService {
                   WHERE b.location_id = ? AND b.quantity > 0
                 ) x
                 JOIN inventory_items i ON i.id = x.item_id AND i.enabled = 1
-                LEFT JOIN inventory_quota_rules r
-                  ON r.version_id = ? AND r.department_key = ? AND r.item_id = x.item_id AND r.enabled = 1
-                WHERE r.id IS NULL OR r.standard_quantity IS NULL OR r.standard_quantity <= 0
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM inventory_quota_rules r
+                  WHERE r.version_id = ? AND r.department_key = ? AND r.item_id = x.item_id
+                    AND r.enabled = 1 AND r.included_in_quota = 1
+                    AND r.binding_type <> 'ON_DEMAND'
+                    AND (r.source_numerator > 0 OR r.standard_quantity > 0)
+                )
                 ORDER BY i.name
                 """,
                 (rs, rowNum) -> new MissingItem(rs.getString("item_id"), rs.getString("item_name"), rs.getString("item_unit")),
@@ -248,7 +332,7 @@ public class InventoryQuotaConsumptionService {
     public ObjectNode read(String departmentKey, LocalDate businessDate, SessionUser user) {
         Department department = requireDepartment(departmentKey, user);
         LocalDate date = businessDate == null ? LocalDate.now() : businessDate;
-        if (!isQuotaMode(date)) {
+        if (!isQuotaMode(department.key(), date)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "当前业务日未启用定额模式");
         }
         ReportRow report = loadReport(department.id(), date);
@@ -289,7 +373,7 @@ public class InventoryQuotaConsumptionService {
         Department department = requireDepartment(text(payload, "departmentKey"), user);
         LocalDate date = parseDate(text(payload, "businessDate"));
         if (date == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "业务日不能为空");
-        if (!isQuotaMode(date)) throw new ResponseStatusException(HttpStatus.CONFLICT, "当前业务日未启用定额模式");
+        if (!isQuotaMode(department.key(), date)) throw new ResponseStatusException(HttpStatus.CONFLICT, "当前科室未启用定额模式");
         ReportRow current = loadReport(department.id(), date);
         if (current != null && locked(current, date)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该业务日已锁定，不能直接修改");
@@ -315,7 +399,7 @@ public class InventoryQuotaConsumptionService {
         if (locked(report, report.businessDate())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该业务日已锁定，不能重复提交");
         }
-        if (!isQuotaMode(report.businessDate())) throw new ResponseStatusException(HttpStatus.CONFLICT, "当前业务日未启用定额模式");
+        if (!isQuotaMode(report.departmentKey(), report.businessDate())) throw new ResponseStatusException(HttpStatus.CONFLICT, "当前科室未启用定额模式");
         ObjectNode missing = completeness(report.businessDate(), department.key());
         if (missing.path("total").asInt(0) > 0) {
             String names = String.join("、", firstNames(missing.path("items"), 5));
@@ -374,14 +458,17 @@ public class InventoryQuotaConsumptionService {
         Headcount before = headcount(report);
         Headcount after = resolveHeadcount(department, report.businessDate(), payload);
         List<LineRow> oldLines = loadLineRows(report.id());
-        Map<String, LineRow> oldByItem = new LinkedHashMap<>();
-        for (LineRow line : oldLines) oldByItem.put(line.itemId(), line);
+        Map<String, LineRow> oldByRule = new LinkedHashMap<>();
+        for (LineRow line : oldLines) {
+            oldByRule.put(firstNonBlank(line.quotaRuleId(), line.sourceRowKey(), line.id()), line);
+        }
         ArrayNode nextLines = computeLines(department, report.businessDate(), after);
         BigDecimal computed = BigDecimal.ZERO;
         BigDecimal deducted = BigDecimal.ZERO;
+        int lineNo = 0;
         for (JsonNode node : nextLines) {
-            String itemId = text(node, "itemId");
-            LineRow old = oldByItem.get(itemId);
+            String ruleKey = text(node, "quotaRuleId");
+            LineRow old = oldByRule.get(ruleKey);
             BigDecimal quota = decimal(node, "quotaQuantity");
             computed = computed.add(quota);
             BigDecimal already = old == null ? BigDecimal.ZERO : scale(old.quotaDeductedQuantity());
@@ -399,7 +486,7 @@ public class InventoryQuotaConsumptionService {
             }
             deducted = deducted.add(lineDeducted);
             if (old == null) {
-                insertLine(report.id(), nextLines.size(), node, quota, lineDeducted, eventId, approvedExtra);
+                insertLine(report.id(), ++lineNo, node, quota, lineDeducted, eventId, approvedExtra);
             } else {
                 jdbcTemplate.update(
                     """
@@ -452,7 +539,13 @@ public class InventoryQuotaConsumptionService {
         }
         if (locked(report, date)) throw new ResponseStatusException(HttpStatus.CONFLICT, "该业务日已锁定，不能追加例外");
         String itemId = text(payload, "itemId");
-        LineRow line = loadLineRows(report.id()).stream().filter(row -> row.itemId().equals(itemId)).findFirst()
+        String lineId = text(payload, "lineId");
+        String quotaRuleId = text(payload, "quotaRuleId");
+        LineRow line = loadLineRows(report.id()).stream()
+            .filter(row -> (!lineId.isBlank() && row.id().equals(lineId))
+                || (!quotaRuleId.isBlank() && safe(row.quotaRuleId()).equals(quotaRuleId))
+                || (lineId.isBlank() && quotaRuleId.isBlank() && row.itemId().equals(itemId)))
+            .findFirst()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "该耗材不在当日定额明细中"));
         String reason = text(payload, "reason");
         if (reason.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请填写例外原因");
@@ -470,13 +563,13 @@ public class InventoryQuotaConsumptionService {
             """
             INSERT INTO inventory_quota_exceptions
               (id, report_id, line_id, department_id, department_key, department_name, business_date,
-               item_id, item_name_snapshot, unit_snapshot, quota_quantity, actual_quantity, extra_quantity,
-               tolerance_quantity, status, reason, revision, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+               item_id, quota_rule_id, source_row_key, item_name_snapshot, unit_snapshot, quota_quantity,
+               actual_quantity, extra_quantity, tolerance_quantity, status, reason, revision, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
             """,
             id, report.id(), line.id(), department.id(), department.key(), department.name(), date,
-            itemId, line.itemName(), line.unit(), line.quotaQuantity(), reported, extra,
-            line.toleranceQuantity(), reason, revision, user.name()
+            itemId, line.quotaRuleId(), line.sourceRowKey(), line.itemName(), line.unit(), line.quotaQuantity(),
+            reported, extra, line.toleranceQuantity(), reason, revision, user.name()
         );
         jdbcTemplate.update(
             """
@@ -762,13 +855,14 @@ public class InventoryQuotaConsumptionService {
         jdbcTemplate.update(
             """
             INSERT INTO inventory_department_daily_report_lines
-              (id, report_id, line_no, item_id, item_name_snapshot, unit_snapshot, preset_quantity, actual_quantity,
-               quota_quantity, quota_deducted_quantity, extra_quantity, tolerance_mode, tolerance_value,
-               tolerance_quantity, exception_status, exception_approved_quantity, quota_event_id, source,
-               review_status, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, ?, 'TEMPLATE', 'APPROVED', CAST(? AS JSON))
+              (id, report_id, line_no, item_id, quota_rule_id, source_row_key, item_name_snapshot, unit_snapshot,
+               preset_quantity, actual_quantity, quota_quantity, quota_deducted_quantity, extra_quantity,
+               tolerance_mode, tolerance_value, tolerance_quantity, exception_status, exception_approved_quantity,
+               quota_event_id, source, review_status, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, ?, 'TEMPLATE', 'APPROVED', CAST(? AS JSON))
             """,
             "department-daily-line-" + UUID.randomUUID(), reportId, lineNo, text(node, "itemId"),
+            blankToNull(text(node, "quotaRuleId")), blankToNull(text(node, "sourceRowKey")),
             text(node, "itemName"), text(node, "unit"), quota, quota.add(approvedExtra), quota, deducted,
             decimal(node, "extraQuantity"), text(node, "toleranceMode"), decimal(node, "toleranceValue"),
             decimal(node, "toleranceQuantity"), approvedExtra, eventId, json(raw)
@@ -777,7 +871,6 @@ public class InventoryQuotaConsumptionService {
 
     private ArrayNode computeLines(Department department, LocalDate date, Headcount headcount) {
         String versionId = activeVersionId(date);
-        Map<String, ObjectNode> byItem = new LinkedHashMap<>();
         List<QuotaRuleRow> rules = jdbcTemplate.query(
             """
             SELECT r.*, COALESCE(i.name, r.material_name) item_name, COALESCE(i.unit, r.unit) item_unit
@@ -790,70 +883,81 @@ public class InventoryQuotaConsumptionService {
                 rs.getString("id"), rs.getString("item_id"), rs.getString("item_name"), rs.getString("item_unit"),
                 rs.getString("binding_type"), rs.getString("care_type"), rs.getString("measurement_scope"),
                 rs.getBigDecimal("standard_quantity"), rs.getBigDecimal("fixed_adjustment"),
-                rs.getString("tolerance_mode"), rs.getBigDecimal("tolerance_value")
+                rs.getString("tolerance_mode"), rs.getBigDecimal("tolerance_value"),
+                rs.getString("source_row_key"), rs.getBigDecimal("source_numerator"),
+                rs.getBigDecimal("source_denominator"), rs.getInt("period_days"),
+                rs.getString("source_unit"), rs.getString("source_text"), rs.getBoolean("included_in_quota")
             ),
             versionId.isBlank() ? "" : versionId, department.key()
         );
+        ArrayNode lines = objectMapper.createArrayNode();
         for (QuotaRuleRow rule : rules) {
-            BigDecimal standard = scale(rule.standardQuantity());
-            BigDecimal adjustment = scale(rule.fixedAdjustment());
-            BigDecimal volume;
-            String basis;
-            if (PER_PERSON.contains(rule.bindingType())) {
-                String scope = rule.measurementScope() == null ? "" : rule.measurementScope().toUpperCase(Locale.ROOT);
-                if ("OUTPATIENT".equals(scope) || "outpatient".equalsIgnoreCase(rule.careType())) {
-                    volume = BigDecimal.valueOf(headcount.outpatient());
-                    basis = "OUTPATIENT";
-                } else if ("INPATIENT".equals(scope) || "inpatient".equalsIgnoreCase(rule.careType())) {
-                    volume = BigDecimal.valueOf(headcount.inpatient());
-                    basis = "INPATIENT";
-                } else if ("COMBINED".equals(scope)) {
-                    volume = BigDecimal.valueOf(headcount.total());
-                    basis = "COMBINED";
-                } else {
-                    volume = BigDecimal.valueOf(headcount.manual());
-                    basis = "MANUAL";
+            boolean exceptionOnly = !rule.includedInQuota() || "ON_DEMAND".equalsIgnoreCase(rule.bindingType());
+            BigDecimal quota = BigDecimal.ZERO;
+            String basis = "DAILY";
+            if (!exceptionOnly) {
+                BigDecimal volume = BigDecimal.ONE;
+                if (PER_PERSON.contains(rule.bindingType())) {
+                    String scope = rule.measurementScope() == null ? "" : rule.measurementScope().toUpperCase(Locale.ROOT);
+                    if ("OUTPATIENT".equals(scope) || "outpatient".equalsIgnoreCase(rule.careType())) {
+                        volume = BigDecimal.valueOf(headcount.outpatient());
+                        basis = "OUTPATIENT";
+                    } else if ("INPATIENT".equals(scope) || "inpatient".equalsIgnoreCase(rule.careType())) {
+                        volume = BigDecimal.valueOf(headcount.inpatient());
+                        basis = "INPATIENT";
+                    } else if ("COMBINED".equals(scope)) {
+                        volume = BigDecimal.valueOf(headcount.total());
+                        basis = "COMBINED";
+                    } else {
+                        volume = BigDecimal.valueOf(headcount.manual());
+                        basis = "MANUAL";
+                    }
                 }
-            } else {
-                volume = BigDecimal.ONE;
-                basis = "DAILY";
+                quota = ruleQuantity(rule, volume);
             }
-            BigDecimal quota = scale(standard.multiply(volume).add(adjustment));
             if (quota.signum() < 0) quota = BigDecimal.ZERO;
             BigDecimal tolerance = tolerance(rule, quota);
-            ObjectNode row = byItem.get(rule.itemId());
-            if (row == null) {
-                row = objectMapper.createObjectNode();
-                row.put("itemId", rule.itemId());
-                row.put("itemName", rule.itemName());
-                row.put("unit", rule.itemUnit());
-                row.put("bindingType", rule.bindingType());
-                row.put("quotaQuantity", BigDecimal.ZERO);
-                row.put("extraQuantity", BigDecimal.ZERO);
-                row.put("toleranceMode", rule.toleranceMode());
-                row.put("toleranceValue", scale(rule.toleranceValue()));
-                row.put("toleranceQuantity", BigDecimal.ZERO);
-                row.put("headcountBasis", basis);
-                row.put("exceptionStatus", "NONE");
-                byItem.put(rule.itemId(), row);
-            }
-            row.put("quotaQuantity", scale(row.path("quotaQuantity").decimalValue().add(quota)));
-            if (tolerance.compareTo(row.path("toleranceQuantity").decimalValue()) > 0) {
-                row.put("toleranceQuantity", tolerance);
-                row.put("toleranceMode", rule.toleranceMode());
-                row.put("toleranceValue", scale(rule.toleranceValue()));
-            }
-        }
-        ArrayNode lines = objectMapper.createArrayNode();
-        byItem.values().forEach(row -> {
-            BigDecimal quota = row.path("quotaQuantity").decimalValue();
-            row.put("presetQuantity", quota);
-            row.put("actualQuantity", quota);
+            ObjectNode row = lines.addObject();
+            row.put("quotaRuleId", rule.id());
+            row.put("sourceRowKey", safe(rule.sourceRowKey()));
+            row.put("itemId", rule.itemId());
+            row.put("itemName", rule.itemName());
+            row.put("unit", rule.itemUnit());
+            row.put("bindingType", rule.bindingType());
+            row.put("sourceText", safe(rule.sourceText()));
+            row.put("sourceUnit", safe(rule.sourceUnit()));
+            row.put("periodDays", rule.periodDays());
+            row.put("includedInQuota", rule.includedInQuota());
+            row.put("exceptionOnly", exceptionOnly);
+            row.put("quotaQuantity", scale(quota));
+            row.put("extraQuantity", BigDecimal.ZERO);
+            row.put("toleranceMode", rule.toleranceMode());
+            row.put("toleranceValue", scale(rule.toleranceValue()));
+            row.put("toleranceQuantity", tolerance);
+            row.put("headcountBasis", basis);
+            row.put("exceptionStatus", "NONE");
+            row.put("presetQuantity", scale(quota));
+            row.put("actualQuantity", scale(quota));
             row.put("source", "TEMPLATE");
             row.put("reviewStatus", "APPROVED");
-            lines.add(row);
-        });
+        }
         return lines;
+    }
+
+    private BigDecimal ruleQuantity(QuotaRuleRow rule, BigDecimal volume) {
+        BigDecimal adjustment = scale(rule.fixedAdjustment());
+        int days = Math.max(rule.periodDays(), 1);
+        BigDecimal numerator = rule.sourceNumerator() == null ? rule.standardQuantity() : rule.sourceNumerator();
+        BigDecimal denominator = rule.sourceDenominator() == null ? BigDecimal.ONE : rule.sourceDenominator();
+        if (numerator == null || denominator.signum() <= 0) return BigDecimal.ZERO;
+        BigDecimal base;
+        if (PER_PERSON.contains(rule.bindingType())) {
+            base = numerator.multiply(volume).divide(denominator, 6, RoundingMode.HALF_UP);
+        } else {
+            base = numerator.divide(denominator, 6, RoundingMode.HALF_UP);
+        }
+        base = base.divide(BigDecimal.valueOf(days), 6, RoundingMode.HALF_UP);
+        return scale(base.add(adjustment));
     }
 
     private BigDecimal tolerance(QuotaRuleRow rule, BigDecimal quota) {
@@ -867,8 +971,13 @@ public class InventoryQuotaConsumptionService {
     private Headcount resolveHeadcount(Department department, LocalDate date, JsonNode payload) {
         boolean override = payload.path("headcountOverride").asBoolean(false);
         if ("DAILY".equals(department.entryMode())) {
-            int manual = payload.path("headcountManual").asInt(0);
-            return new Headcount(0, 0, Math.max(0, manual), "MANUAL");
+            int outpatient = Math.max(0, payload.path("headcountOutpatient").asInt(0));
+            int inpatient = Math.max(0, payload.path("headcountInpatient").asInt(0));
+            int manual = Math.max(0, payload.path("headcountManual").asInt(0));
+            if (outpatient == 0 && inpatient == 0 && manual > 0) {
+                return new Headcount(0, 0, manual, "MANUAL");
+            }
+            return new Headcount(outpatient, inpatient, 0, "MANUAL");
         }
         Headcount auto = autoHeadcount(department, date);
         if (!override) return auto;
@@ -1121,6 +1230,8 @@ public class InventoryQuotaConsumptionService {
         for (LineRow line : loadLineRows(reportId)) {
             ObjectNode row = rows.addObject();
             row.put("lineId", line.id());
+            row.put("quotaRuleId", safe(line.quotaRuleId()));
+            row.put("sourceRowKey", safe(line.sourceRowKey()));
             row.put("itemId", line.itemId());
             row.put("itemName", line.itemName());
             row.put("unit", line.unit());
@@ -1137,6 +1248,9 @@ public class InventoryQuotaConsumptionService {
             row.put("quotaEventId", line.quotaEventId());
             row.put("exceptionEventId", line.exceptionEventId());
             row.put("headcountBasis", line.headcountBasis());
+            row.put("sourceText", safe(line.sourceText()));
+            row.put("periodDays", line.periodDays());
+            row.put("includedInQuota", line.includedInQuota());
             row.put("source", "TEMPLATE");
             row.put("reviewStatus", "APPROVED");
         }
@@ -1145,14 +1259,21 @@ public class InventoryQuotaConsumptionService {
 
     private List<LineRow> loadLineRows(String reportId) {
         return jdbcTemplate.query(
-            "SELECT * FROM inventory_department_daily_report_lines WHERE report_id = ? ORDER BY line_no",
+            """
+            SELECT l.*, r.source_text, r.period_days, r.included_in_quota
+            FROM inventory_department_daily_report_lines l
+            LEFT JOIN inventory_quota_rules r ON r.id = l.quota_rule_id
+            WHERE l.report_id = ? ORDER BY l.line_no
+            """,
             (rs, rowNum) -> new LineRow(
-                rs.getString("id"), rs.getString("item_id"), rs.getString("item_name_snapshot"), rs.getString("unit_snapshot"),
+                rs.getString("id"), rs.getString("quota_rule_id"), rs.getString("source_row_key"),
+                rs.getString("item_id"), rs.getString("item_name_snapshot"), rs.getString("unit_snapshot"),
                 rs.getBigDecimal("quota_quantity"), rs.getBigDecimal("actual_quantity"), rs.getBigDecimal("quota_deducted_quantity"),
                 rs.getBigDecimal("extra_quantity"), rs.getString("tolerance_mode"), rs.getBigDecimal("tolerance_value"),
                 rs.getBigDecimal("tolerance_quantity"), rs.getString("exception_status"),
                 rs.getBigDecimal("exception_approved_quantity"), rs.getString("quota_event_id"),
-                rs.getString("exception_event_id"), rs.getString("headcount_basis")
+                rs.getString("exception_event_id"), rs.getString("headcount_basis"),
+                rs.getString("source_text"), rs.getInt("period_days"), rs.getBoolean("included_in_quota")
             ),
             reportId
         );
@@ -1161,14 +1282,21 @@ public class InventoryQuotaConsumptionService {
     private LineRow loadLineRow(String lineId) {
         if (lineId == null || lineId.isBlank()) return null;
         List<LineRow> rows = jdbcTemplate.query(
-            "SELECT * FROM inventory_department_daily_report_lines WHERE id = ?",
+            """
+            SELECT l.*, r.source_text, r.period_days, r.included_in_quota
+            FROM inventory_department_daily_report_lines l
+            LEFT JOIN inventory_quota_rules r ON r.id = l.quota_rule_id
+            WHERE l.id = ?
+            """,
             (rs, rowNum) -> new LineRow(
-                rs.getString("id"), rs.getString("item_id"), rs.getString("item_name_snapshot"), rs.getString("unit_snapshot"),
+                rs.getString("id"), rs.getString("quota_rule_id"), rs.getString("source_row_key"),
+                rs.getString("item_id"), rs.getString("item_name_snapshot"), rs.getString("unit_snapshot"),
                 rs.getBigDecimal("quota_quantity"), rs.getBigDecimal("actual_quantity"), rs.getBigDecimal("quota_deducted_quantity"),
                 rs.getBigDecimal("extra_quantity"), rs.getString("tolerance_mode"), rs.getBigDecimal("tolerance_value"),
                 rs.getBigDecimal("tolerance_quantity"), rs.getString("exception_status"),
                 rs.getBigDecimal("exception_approved_quantity"), rs.getString("quota_event_id"),
-                rs.getString("exception_event_id"), rs.getString("headcount_basis")
+                rs.getString("exception_event_id"), rs.getString("headcount_basis"),
+                rs.getString("source_text"), rs.getInt("period_days"), rs.getBoolean("included_in_quota")
             ),
             lineId
         );
@@ -1254,9 +1382,10 @@ public class InventoryQuotaConsumptionService {
 
     private Department requireDepartment(String departmentKey, SessionUser user) {
         List<Department> rows = jdbcTemplate.query(
-            "SELECT id, department_key, name, clinic_department_id, entry_mode FROM inventory_departments WHERE department_key = ? AND status = 'ACTIVE'",
+            "SELECT id, department_key, name, clinic_department_id, entry_mode, quota_mode, quota_mode_effective_date FROM inventory_departments WHERE department_key = ? AND status = 'ACTIVE'",
             (rs, rowNum) -> new Department(rs.getString("department_key"), rs.getString("id"), rs.getString("name"),
-                rs.getString("clinic_department_id"), rs.getString("entry_mode")),
+                rs.getString("clinic_department_id"), rs.getString("entry_mode"), rs.getString("quota_mode"),
+                rs.getDate("quota_mode_effective_date") == null ? "" : rs.getDate("quota_mode_effective_date").toString()),
             departmentKey == null ? "" : departmentKey.trim()
         );
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未知科室");
@@ -1268,7 +1397,7 @@ public class InventoryQuotaConsumptionService {
     }
 
     private List<Department> departments(String departmentKey) {
-        String sql = "SELECT id, department_key, name, clinic_department_id, entry_mode FROM inventory_departments WHERE status = 'ACTIVE'";
+        String sql = "SELECT id, department_key, name, clinic_department_id, entry_mode, quota_mode, quota_mode_effective_date FROM inventory_departments WHERE status = 'ACTIVE'";
         Object[] args = {};
         if (departmentKey != null && !departmentKey.isBlank()) {
             sql += " AND department_key = ?";
@@ -1277,7 +1406,8 @@ public class InventoryQuotaConsumptionService {
         sql += " ORDER BY display_order, name";
         return jdbcTemplate.query(sql, (rs, rowNum) -> new Department(
             rs.getString("department_key"), rs.getString("id"), rs.getString("name"),
-            rs.getString("clinic_department_id"), rs.getString("entry_mode")
+            rs.getString("clinic_department_id"), rs.getString("entry_mode"), rs.getString("quota_mode"),
+            rs.getDate("quota_mode_effective_date") == null ? "" : rs.getDate("quota_mode_effective_date").toString()
         ), args);
     }
 
@@ -1394,6 +1524,10 @@ public class InventoryQuotaConsumptionService {
         return value == null ? "" : value.trim();
     }
 
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     private static String firstNonBlank(String... values) {
         for (String value : values) if (value != null && !value.isBlank()) return value;
         return "";
@@ -1422,23 +1556,27 @@ public class InventoryQuotaConsumptionService {
             report.headcountSource());
     }
 
-    private record Department(String key, String id, String name, String clinicDepartmentId, String entryMode) {}
+    private record Department(String key, String id, String name, String clinicDepartmentId, String entryMode,
+                              String quotaMode, String quotaEffectiveDate) {}
     private record Headcount(int outpatient, int inpatient, int manual, String source) {
         int total() { return outpatient + inpatient + manual; }
     }
     private record MissingItem(String itemId, String itemName, String unit) {}
     private record QuotaRuleRow(String id, String itemId, String itemName, String itemUnit, String bindingType,
                                 String careType, String measurementScope, BigDecimal standardQuantity,
-                                BigDecimal fixedAdjustment, String toleranceMode, BigDecimal toleranceValue) {}
+                                BigDecimal fixedAdjustment, String toleranceMode, BigDecimal toleranceValue,
+                                String sourceRowKey, BigDecimal sourceNumerator, BigDecimal sourceDenominator,
+                                int periodDays, String sourceUnit, String sourceText, boolean includedInQuota) {}
     private record ReportRow(String id, String departmentId, String departmentKey, String departmentName, LocalDate businessDate,
                              String reportMode, String status, int revision, String note, int headcountOutpatient,
                              int headcountInpatient, int headcountManual, String headcountSource,
                              BigDecimal quotaComputedTotal, BigDecimal quotaDeductedTotal, BigDecimal exceptionTotal) {}
-    private record LineRow(String id, String itemId, String itemName, String unit, BigDecimal quotaQuantity,
-                           BigDecimal actualQuantity, BigDecimal quotaDeductedQuantity, BigDecimal extraQuantity,
-                           String toleranceMode, BigDecimal toleranceValue, BigDecimal toleranceQuantity,
-                           String exceptionStatus, BigDecimal exceptionApprovedQuantity, String quotaEventId,
-                           String exceptionEventId, String headcountBasis) {}
+    private record LineRow(String id, String quotaRuleId, String sourceRowKey, String itemId, String itemName, String unit,
+                           BigDecimal quotaQuantity, BigDecimal actualQuantity, BigDecimal quotaDeductedQuantity,
+                           BigDecimal extraQuantity, String toleranceMode, BigDecimal toleranceValue,
+                           BigDecimal toleranceQuantity, String exceptionStatus, BigDecimal exceptionApprovedQuantity,
+                           String quotaEventId, String exceptionEventId, String headcountBasis,
+                           String sourceText, int periodDays, boolean includedInQuota) {}
     private record ExceptionRow(String id, String reportId, String lineId, String departmentKey, String departmentName,
                                 LocalDate businessDate, String itemId, String itemName, String unit,
                                 BigDecimal quotaQuantity, BigDecimal actualQuantity, BigDecimal extraQuantity,
