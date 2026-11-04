@@ -465,6 +465,10 @@ export interface InventoryDepartmentDailyReportLine {
   sourceText?: string;
   periodDays?: number;
   includedInQuota?: boolean;
+  sourceNumerator?: number | null;
+  sourceDenominator?: number | null;
+  standardQuantity?: number | null;
+  fixedAdjustment?: number | null;
   source: "TEMPLATE" | "MANUAL";
   exceptionReason?: string;
   reviewStatus?: string;

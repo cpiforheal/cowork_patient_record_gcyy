@@ -962,6 +962,10 @@ public class InventoryQuotaConsumptionService {
             row.put("sourceUnit", safe(rule.sourceUnit()));
             row.put("periodDays", rule.periodDays());
             row.put("includedInQuota", rule.includedInQuota());
+            row.put("sourceNumerator", rule.sourceNumerator());
+            row.put("sourceDenominator", rule.sourceDenominator());
+            row.put("standardQuantity", rule.standardQuantity());
+            row.put("fixedAdjustment", rule.fixedAdjustment());
             row.put("exceptionOnly", exceptionOnly);
             row.put("quotaQuantity", scale(quota));
             row.put("extraQuantity", BigDecimal.ZERO);
@@ -978,8 +982,21 @@ public class InventoryQuotaConsumptionService {
         return lines;
     }
 
-    private BigDecimal ruleQuantity(QuotaRuleRow rule, BigDecimal volume) {
-        BigDecimal adjustment = scale(rule.fixedAdjustment());
+    private static String basisForLine(LineRow line) {
+        String basis = safe(line.headcountBasis());
+        if (!basis.isBlank()) return basis;
+        return deriveBasis(line.measurementScope(), line.careType());
+    }
+
+    private static String deriveBasis(String scope, String careType) {
+        String normalized = scope == null ? "" : scope.toUpperCase(Locale.ROOT);
+        if ("OUTPATIENT".equals(normalized) || "outpatient".equalsIgnoreCase(careType)) return "OUTPATIENT";
+        if ("INPATIENT".equals(normalized) || "inpatient".equalsIgnoreCase(careType)) return "INPATIENT";
+        if ("COMBINED".equals(normalized)) return "COMBINED";
+        return "MANUAL";
+    }
+
+    private BigDecimal ruleQuantity(QuotaRuleRow rule, BigDecimal volume) {        BigDecimal adjustment = scale(rule.fixedAdjustment());
         int days = Math.max(rule.periodDays(), 1);
         BigDecimal numerator = rule.sourceNumerator() == null ? rule.standardQuantity() : rule.sourceNumerator();
         BigDecimal denominator = rule.sourceDenominator() == null ? BigDecimal.ONE : rule.sourceDenominator();
@@ -1281,11 +1298,15 @@ public class InventoryQuotaConsumptionService {
             row.put("exceptionApprovedQuantity", line.exceptionApprovedQuantity());
             row.put("quotaEventId", line.quotaEventId());
             row.put("exceptionEventId", line.exceptionEventId());
-            row.put("headcountBasis", line.headcountBasis());
+            row.put("headcountBasis", basisForLine(line));
             row.put("sourceText", safe(line.sourceText()));
             row.put("periodDays", line.periodDays());
             row.put("includedInQuota", line.includedInQuota());
             row.put("bindingType", safe(line.bindingType()));
+            row.put("sourceNumerator", line.sourceNumerator());
+            row.put("sourceDenominator", line.sourceDenominator());
+            row.put("standardQuantity", line.standardQuantity());
+            row.put("fixedAdjustment", line.fixedAdjustment());
             row.put("exceptionOnly", !line.includedInQuota() || "ON_DEMAND".equalsIgnoreCase(line.bindingType()));
             row.put("source", "TEMPLATE");
             row.put("reviewStatus", "APPROVED");
@@ -1296,7 +1317,9 @@ public class InventoryQuotaConsumptionService {
     private List<LineRow> loadLineRows(String reportId) {
         return jdbcTemplate.query(
             """
-            SELECT l.*, r.source_text, r.period_days, r.included_in_quota, r.binding_type
+            SELECT l.*, r.source_text, r.period_days, r.included_in_quota, r.binding_type,
+                   r.source_numerator, r.source_denominator, r.standard_quantity, r.fixed_adjustment,
+                   r.measurement_scope, r.care_type
             FROM inventory_department_daily_report_lines l
             LEFT JOIN inventory_quota_rules r ON r.id = l.quota_rule_id
             WHERE l.report_id = ? ORDER BY l.line_no
@@ -1310,7 +1333,9 @@ public class InventoryQuotaConsumptionService {
                 rs.getBigDecimal("exception_approved_quantity"), rs.getString("quota_event_id"),
                 rs.getString("exception_event_id"), rs.getString("headcount_basis"),
                 rs.getString("source_text"), rs.getInt("period_days"), rs.getBoolean("included_in_quota"),
-                rs.getString("binding_type")
+                rs.getString("binding_type"), rs.getBigDecimal("source_numerator"),
+                rs.getBigDecimal("source_denominator"), rs.getBigDecimal("standard_quantity"),
+                rs.getBigDecimal("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("care_type")
             ),
             reportId
         );
@@ -1320,7 +1345,9 @@ public class InventoryQuotaConsumptionService {
         if (lineId == null || lineId.isBlank()) return null;
         List<LineRow> rows = jdbcTemplate.query(
             """
-            SELECT l.*, r.source_text, r.period_days, r.included_in_quota, r.binding_type
+            SELECT l.*, r.source_text, r.period_days, r.included_in_quota, r.binding_type,
+                   r.source_numerator, r.source_denominator, r.standard_quantity, r.fixed_adjustment,
+                   r.measurement_scope, r.care_type
             FROM inventory_department_daily_report_lines l
             LEFT JOIN inventory_quota_rules r ON r.id = l.quota_rule_id
             WHERE l.id = ?
@@ -1334,7 +1361,9 @@ public class InventoryQuotaConsumptionService {
                 rs.getBigDecimal("exception_approved_quantity"), rs.getString("quota_event_id"),
                 rs.getString("exception_event_id"), rs.getString("headcount_basis"),
                 rs.getString("source_text"), rs.getInt("period_days"), rs.getBoolean("included_in_quota"),
-                rs.getString("binding_type")
+                rs.getString("binding_type"), rs.getBigDecimal("source_numerator"),
+                rs.getBigDecimal("source_denominator"), rs.getBigDecimal("standard_quantity"),
+                rs.getBigDecimal("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("care_type")
             ),
             lineId
         );
@@ -1615,7 +1644,10 @@ public class InventoryQuotaConsumptionService {
                            BigDecimal extraQuantity, String toleranceMode, BigDecimal toleranceValue,
                            BigDecimal toleranceQuantity, String exceptionStatus, BigDecimal exceptionApprovedQuantity,
                            String quotaEventId, String exceptionEventId, String headcountBasis,
-                           String sourceText, int periodDays, boolean includedInQuota, String bindingType) {}
+                           String sourceText, int periodDays, boolean includedInQuota, String bindingType,
+                           BigDecimal sourceNumerator, BigDecimal sourceDenominator,
+                           BigDecimal standardQuantity, BigDecimal fixedAdjustment,
+                           String measurementScope, String careType) {}
     private record ExceptionRow(String id, String reportId, String lineId, String departmentKey, String departmentName,
                                 LocalDate businessDate, String itemId, String itemName, String unit,
                                 BigDecimal quotaQuantity, BigDecimal actualQuantity, BigDecimal extraQuantity,

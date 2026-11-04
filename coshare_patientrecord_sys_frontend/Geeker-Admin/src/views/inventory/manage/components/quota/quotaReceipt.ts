@@ -21,6 +21,39 @@ export interface ReceiptCounts {
 
 export const formatReceiptQuantity = (value?: number | null) => Number(value || 0).toFixed(2);
 
+const round3 = (value: number) => Math.round(value * 1000) / 1000;
+
+export interface QuotaHeadcountInput {
+  outpatient: number;
+  inpatient: number;
+  manual: number;
+  total: number;
+}
+
+const headcountForBasis = (basis: string | undefined, headcount: QuotaHeadcountInput) => {
+  if (basis === "OUTPATIENT") return headcount.outpatient;
+  if (basis === "INPATIENT") return headcount.inpatient;
+  if (basis === "COMBINED") return headcount.total;
+  return headcount.manual;
+};
+
+export const liveQuotaQuantity = (
+  line: InventoryDepartmentDailyReportLine,
+  headcount: QuotaHeadcountInput
+) => {
+  if (line.exceptionOnly || line.includedInQuota === false) return 0;
+  const numerator = line.sourceNumerator ?? line.standardQuantity;
+  const denominator = Number(line.sourceDenominator ?? 1);
+  if (numerator == null || denominator <= 0) return Number(line.quotaQuantity || 0);
+  const days = Math.max(Number(line.periodDays || 1), 1);
+  const isPerPerson = line.bindingType === "PER_PERSON";
+  const volume = isPerPerson ? headcountForBasis(line.headcountBasis, headcount) : 1;
+  const base = isPerPerson
+    ? (Number(numerator) * volume) / denominator
+    : Number(numerator) / denominator;
+  return Math.max(0, round3(base / days + Number(line.fixedAdjustment || 0)));
+};
+
 export const groupReceiptLines = (lines?: InventoryDepartmentDailyReportLine[]): ReceiptGroup[] => {
   const groups: ReceiptGroup[] = [
     { key: "per", label: "按人次计", lines: [] },

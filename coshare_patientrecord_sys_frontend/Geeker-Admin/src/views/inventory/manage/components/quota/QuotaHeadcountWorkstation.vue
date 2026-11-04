@@ -112,8 +112,23 @@
                 <el-table-column label="原用量" width="120" show-overflow-tooltip>
                   <template #default="{ row }">{{ row.sourceText || "—" }}</template>
                 </el-table-column>
-                <el-table-column label="应耗（定额）" width="110" align="right">
-                  <template #default="{ row }">{{ formatQuantity(row.quotaQuantity) }}</template>
+                <el-table-column width="132" align="right">
+                  <template #header>
+                    <span class="qhw-quota-head" title="按当前人数实时折算，提交后锁定">
+                      应耗（定额）
+                      <span v-if="!completed" class="qhw-live-pill">实时</span>
+                    </span>
+                  </template>
+                  <template #default="{ row }">
+                    <span
+                      :key="liveQuotaOf(row)"
+                      class="qhw-quota-value"
+                      :class="{ 'is-live': !completed, 'is-zero': !liveQuotaOf(row) }"
+                      :title="!completed ? '按当前人数实时折算，提交后锁定' : ''"
+                    >
+                      {{ formatQuantity(liveQuotaOf(row)) }}
+                    </span>
+                  </template>
                 </el-table-column>
                 <el-table-column label="实扣" width="100" align="right">
                   <template #default="{ row }">
@@ -234,7 +249,7 @@
             <strong>{{ exceptionLine.itemName }}</strong>
             <span v-if="exceptionLine.sourceText">· {{ exceptionLine.sourceText }}</span>
           </div>
-          <span>应耗 {{ formatQuantity(exceptionLine.quotaQuantity) }} {{ exceptionLine.unit }}</span>
+          <span>每日定额 {{ formatQuotaExact(exceptionLine.quotaQuantity) }} {{ exceptionLine.unit }}</span>
         </div>
         <el-alert
           type="warning"
@@ -244,14 +259,23 @@
           style="margin-bottom: 16px"
         />
         <el-form label-position="top">
-          <el-form-item label="当日实际上报总量" required>
+          <el-form-item :label="`多用了多少（${exceptionLine?.unit || ''}）`" required>
             <el-input-number
-              v-model="exceptionForm.reportedActualQuantity"
-              :min="0.001"
-              :precision="2"
+              v-model="exceptionExtraQuantity"
+              :min="1"
+              :step="1"
+              :precision="0"
               controls-position="right"
             />
+            <span class="qhw-exception-hint">填实物整数，系统自动折算成上报总量</span>
           </el-form-item>
+          <div class="qhw-exception-calc" v-if="exceptionLine">
+            <span>定额 <b>{{ formatQuotaExact(exceptionQuota) }}</b> {{ exceptionLine.unit }}</span>
+            <span>+</span>
+            <span>多用 <b>{{ exceptionExtraQuantity }}</b> {{ exceptionLine.unit }}</span>
+            <span>=</span>
+            <span>上报总量 <b>{{ formatQuotaExact(exceptionReportedTotal) }}</b> {{ exceptionLine.unit }}</span>
+          </div>
           <el-form-item label="原因说明" required>
             <el-input
               v-model="exceptionForm.reason"
@@ -298,6 +322,7 @@ import {
   exceptionStatusLabel,
   exceptionStatusTone,
   formatReceiptQuantity,
+  liveQuotaQuantity,
   receiptCounts
 } from "./quotaReceipt";
 import {
@@ -340,7 +365,8 @@ const headcountReason = ref("");
 const prefillDate = ref("");
 const headcountForm = reactive({ outpatient: 0, inpatient: 0 });
 const exceptionLineId = ref("");
-const exceptionForm = reactive({ reportedActualQuantity: 0, reason: "" });
+const exceptionExtraQuantity = ref(1);
+const exceptionForm = reactive({ reason: "" });
 const exceptionFiles = ref<any[]>([]);
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
 let suppressAutosave = false;
@@ -378,6 +404,15 @@ const canReportException = computed(() => completed.value && !locked.value);
 const exceptionLine = computed(() =>
   allLines.value.find(line => line.lineId === exceptionLineId.value)
 );
+const exceptionQuota = computed(() => Number(exceptionLine.value?.quotaQuantity || 0));
+const exceptionReportedTotal = computed(() =>
+  Math.round((exceptionQuota.value + Number(exceptionExtraQuantity.value || 0)) * 1000) / 1000
+);
+const headcountInputs = computed(() => {
+  const outpatient = Number(headcountForm.outpatient || 0);
+  const inpatient = Number(headcountForm.inpatient || 0);
+  return { outpatient, inpatient, manual: 0, total: outpatient + inpatient };
+});
 const summaryStatus = computed(() => {
   if (locked.value) return { label: "已锁定", tone: "locked" };
   if (completed.value) {
@@ -399,8 +434,13 @@ const calendarExpectedFrom = ref("");
 const calendarLoading = ref(false);
 
 const formatQuantity = (value?: number | null) => Number(value || 0).toFixed(2);
+const formatQuotaExact = (value?: number | null) => Number(value || 0).toFixed(3);
 const formatDate = (value: string) => dayjs(value).format("M月D日 dddd");
 const rowKey = (row: any) => row.lineId || row.quotaRuleId || row.itemId;
+const liveQuotaOf = (row: any) => {
+  const line = row as InventoryDepartmentDailyReportLine;
+  return completed.value ? Number(line.quotaQuantity || 0) : liveQuotaQuantity(line, headcountInputs.value);
+};
 const deductionOf = (row: any) => deductionStatus(row as InventoryDepartmentDailyReportLine);
 const deductionTagType = (row: any) => {
   const tone = deductionOf(row).tone;
@@ -584,7 +624,7 @@ const submitReport = async () => {
 const openExceptionFor = (row: any) => {
   const line = row as InventoryDepartmentDailyReportLine;
   exceptionLineId.value = line.lineId || "";
-  exceptionForm.reportedActualQuantity = Number(line.quotaQuantity || 0) + 0.01;
+  exceptionExtraQuantity.value = 1;
   exceptionForm.reason = "";
   exceptionFiles.value = [];
   exceptionVisible.value = true;
@@ -604,7 +644,7 @@ const submitException = async () => {
       itemId: line.itemId,
       lineId: line.lineId,
       quotaRuleId: line.quotaRuleId,
-      reportedActualQuantity: exceptionForm.reportedActualQuantity,
+      reportedActualQuantity: exceptionReportedTotal.value,
       reason: exceptionForm.reason.trim()
     });
     for (const file of exceptionFiles.value) {
@@ -865,6 +905,87 @@ onBeforeUnmount(() => {
 .qhw-item-name {
   color: var(--qhw-ink);
   font-weight: 500;
+}
+
+.qhw-quota-head {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.qhw-live-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 5px;
+  color: var(--qhw-accent);
+  font-size: 9px;
+  font-weight: 600;
+  background: var(--qhw-accent-soft);
+  border: 1px solid #d5e5dc;
+  border-radius: 999px;
+}
+
+.qhw-quota-value {
+  display: inline-block;
+  min-width: 52px;
+  padding: 2px 5px;
+  color: var(--qhw-ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  border-radius: 5px;
+
+  &.is-live {
+    color: var(--qhw-accent);
+    background: var(--qhw-accent-soft);
+    animation: qhw-quota-flash 220ms ease-out;
+  }
+
+  &.is-zero {
+    color: var(--qhw-muted);
+    font-weight: 500;
+    background: transparent;
+  }
+}
+
+@keyframes qhw-quota-flash {
+  from {
+    background: var(--qhw-warm-soft);
+  }
+
+  to {
+    background: var(--qhw-accent-soft);
+  }
+}
+
+.qhw-exception-hint {
+  margin-left: 8px;
+  color: var(--qhw-muted);
+  font-size: 11px;
+}
+
+.qhw-exception-calc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  padding: 9px 12px;
+  margin: -4px 0 16px;
+  color: var(--qhw-muted);
+  font-size: 12px;
+  background: var(--qhw-accent-soft);
+  border: 1px solid #d5e5dc;
+  border-radius: 9px;
+
+  b {
+    color: var(--qhw-accent);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 .qhw-muted {
