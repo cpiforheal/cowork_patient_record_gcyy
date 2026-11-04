@@ -226,9 +226,9 @@ public class RecheckScheduleService {
         String newId = newId();
         String now = now();
         jdbcTemplate.update(
-            "INSERT INTO clinic_recheck_schedule (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, '', ?, NULL, ?, ?, ?, ?)",
-            newId, newDate.toString(), existing.patientName(), existing.phone(), existing.note(), PLANNED, id,
-            user.name(), now, user.name(), now);
+            "INSERT INTO clinic_recheck_schedule (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, NULL, ?, ?, ?, ?)",
+            newId, newDate.toString(), existing.timeSlot(), existing.patientName(), existing.phone(), existing.note(),
+            PLANNED, id, user.name(), now, user.name(), now);
         jdbcTemplate.update(
             "UPDATE clinic_recheck_schedule SET status = ?, status_note = ?, rescheduled_to = ?, updated_by = ?, updated_at = ? WHERE id = ?",
             RESCHEDULED, reason, newDate.toString(), user.name(), now, id);
