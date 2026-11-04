@@ -1109,6 +1109,61 @@ public class PreAiEncounterService {
     }
 
     @Transactional
+    public Map<String, Object> correctCareDirection(String encounterId, CareDirectionCorrectionRequest request, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
+        if (user == null || !navigationService.canCorrectStage(user.role(), "REGISTRATION")) {
+            throw forbidden("当前岗位无权更正就诊方向");
+        }
+        String direction = normalizeCareDirection(request == null ? null : request.careDirection());
+        String reason = safe(request == null ? null : request.reason());
+        if (reason.isBlank()) throw badRequest("请填写就诊方向更正原因");
+        String previous = text(encounter, "careDirection", CARE_DIRECTION_ANORECTAL);
+        if (previous.equals(direction)) throw badRequest("新方向与原方向相同");
+        Integer activeConsumptionCount = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM inventory_consumption_events e
+            WHERE e.encounter_id = ? AND e.status = 'succeeded' AND e.event_kind = 'CONSUMPTION'
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_consumption_events r
+                WHERE r.reversal_of_event_id = e.id AND r.status = 'succeeded' AND r.event_kind = 'REVERSAL'
+              )
+            """,
+            Integer.class,
+            encounterId
+        );
+        if (activeConsumptionCount != null && activeConsumptionCount > 0) {
+            throw conflict("该病历仍有未冲销的患者耗用，必须先退回相关阶段完成冲销，再更正就诊方向");
+        }
+        ObjectNode registration = loadStage(encounterId, "REGISTRATION");
+        ObjectNode data = safeObject(registration.path("data")).deepCopy();
+        data.put("careDirection", direction);
+        String patientJson = toJson(data);
+        jdbcTemplate.update(
+            "UPDATE pre_ai_encounters SET care_direction = ?, patient_json = ?, updated_at = ? WHERE id = ?",
+            direction, patientJson, now(), encounterId
+        );
+        String patientCaseId = text(encounter, "patientCaseId");
+        if (!patientCaseId.isBlank()) {
+            jdbcTemplate.update(
+                "UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?",
+                patientJson, now(), patientCaseId
+            );
+        }
+        jdbcTemplate.update(
+            "UPDATE pre_ai_stage_submissions SET data_json = CAST(? AS JSON), version = version + 1, updated_at = ? "
+                + "WHERE encounter_id = ? AND stage_code = 'REGISTRATION'",
+            patientJson, now(), encounterId
+        );
+        invalidateReview(encounterId, user, "就诊方向更正：" + reason);
+        refreshProgress(encounterId);
+        auditCareDirectionCorrection(encounterId, user, reason, previous, direction);
+        return toMap(workspace(encounterId, user));
+    }
+
+    @Transactional
     public Map<String, Object> updateEncounterGrant(String encounterId, EncounterGrantRequest request, SessionUser user) {
         requireRole(user, "admin", "tcm");
         requireEncounterAccess(encounterId, user);
@@ -4330,6 +4385,23 @@ public class PreAiEncounterService {
         );
     }
 
+    private void auditCareDirectionCorrection(String encounterId, SessionUser user, String reason, String beforeDirection, String afterDirection) {
+        ObjectNode before = objectMapper.createObjectNode();
+        before.put("careDirection", beforeDirection);
+        ObjectNode after = objectMapper.createObjectNode();
+        after.put("careDirection", afterDirection);
+        jdbcTemplate.update(
+            """
+            INSERT INTO pre_ai_audit_logs (
+              id, encounter_id, action, stage_code, operator, operator_role, operator_id, operator_username, operator_department, detail,
+              reason, before_json, after_json, created_at
+            ) VALUES (?, ?, 'encounter.care-direction.correct', 'REGISTRATION', ?, ?, ?, ?, ?, '更正就诊方向', ?, CAST(? AS JSON), CAST(? AS JSON), ?)
+            """,
+            "preaudit-" + UUID.randomUUID(), encounterId, user.name(), user.role(), user.id(), user.username(), user.department(),
+            reason, toJson(before), toJson(after), now()
+        );
+    }
+
     private void requireReadRole(SessionUser user) {
         if (user != null && READ_ROLES.contains(RoleCatalog.canonicalize(user.role()))) return;
         if (user == null || !READ_ROLES.contains(user.role())) throw forbidden("当前账号无权查看前置病历");
@@ -4964,6 +5036,7 @@ public class PreAiEncounterService {
     public record AdmissionProfileSaveRequest(Map<String, Object> data, Integer expectedVersion, boolean complete) {}
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}
     public record DepartmentCorrectionRequest(String departmentId, String reason) {}
+    public record CareDirectionCorrectionRequest(String careDirection, String reason) {}
     public record EncounterGrantRequest(String accountId, String status, String reason) {}
     private record DepartmentIdentity(String id, String name) {}
     private record DutyAccount(String id, String name, String role) {}

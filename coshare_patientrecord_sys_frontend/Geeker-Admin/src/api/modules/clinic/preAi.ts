@@ -707,6 +707,12 @@ export const confirmPreAiSurgeryApi = (encounterId: string, expectedVersion: num
     expectedVersion
   });
 
+export const correctPreAiCareDirectionApi = (encounterId: string, careDirection: CareDirection, reason: string) =>
+  jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/care-direction/correct`, "POST", {
+    careDirection,
+    reason
+  });
+
 export const correctPreAiStageApi = (
   encounterId: string,
   stageCode: PreAiStageCode,

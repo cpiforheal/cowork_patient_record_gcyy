@@ -524,6 +524,7 @@ import {
   registerAndIssueExistingPreAiEncounterApi,
   registerAndIssuePreAiEncounterApi
 } from "@/api/modules/clinic/preAi";
+import { confirmTcmDirection } from "../../preAi/encounters/directionGuard";
 import RegistrationFormFields from "@/views/preAi/encounters/components/RegistrationFormFields.vue";
 import { registrationFieldsForDirection } from "@/views/preAi/encounters/fieldConfig";
 import {
@@ -1045,6 +1046,7 @@ async function finishIssuance(data: QueueWorkspace, prefix: string) {
 async function registerAndIssue() {
   const missing = registrationFields.value.find(field => field.required && !String(registrationForm[field.key] ?? "").trim());
   if (missing) return ElMessage.warning(`请填写${missing.label}`);
+  if (!(await confirmTcmDirection(registrationForm.careDirection))) return;
   registrationRequestId.value ||= createClientRequestId();
   submitting.value = true;
   try {

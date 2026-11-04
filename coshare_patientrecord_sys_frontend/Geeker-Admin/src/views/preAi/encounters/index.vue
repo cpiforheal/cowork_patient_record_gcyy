@@ -293,6 +293,16 @@
                   <el-tag :type="encounterStatusType(workspace.encounter.status)">
                     {{ encounterStatusLabel[workspace.encounter.status] || workspace.encounter.status }}
                   </el-tag>
+                  <el-tag
+                    size="small"
+                    effect="plain"
+                    :type="workspace.encounter.careDirection === 'TCM_DIGESTIVE' ? 'warning' : 'success'"
+                  >
+                    {{ careDirectionLabel[workspace.encounter.careDirection || ""] || workspace.encounter.careDirection || "—" }}
+                  </el-tag>
+                  <el-button v-if="canCorrectCareDirection" link type="primary" size="small" @click="openCareDirectionDialog">
+                    更正方向
+                  </el-button>
                   <span>{{ routeLabel(workspace.encounter.route) }}</span>
                   <span>{{ treatmentPathLabel(workspace.encounter.treatmentPath) }}</span>
                   <el-button size="small" type="primary" plain @click="openHealthArchiveDrawer">健康档案</el-button>
@@ -703,6 +713,14 @@
                         :closable="false"
                         show-icon
                         :title="`当前有 ${missingReceptionHistory.length} 项病史未记录：${missingReceptionHistory.map(item => item.label).join('、')}`"
+                      />
+                      <el-alert
+                        v-if="selectedStageCode === 'REGISTRATION' && canCorrectSelectedStage"
+                        class="direction-correction-hint"
+                        type="info"
+                        :closable="false"
+                        show-icon
+                        title="就诊方向请使用患者头部「更正方向」修改；登记纠错不再直接改方向。"
                       />
                       <el-form
                         v-if="selectedStageCode !== 'INSPECTION' || inspectionView === 'CURRENT'"
@@ -1611,6 +1629,36 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="careDirectionDialogVisible" title="更正就诊方向" width="440px" destroy-on-close>
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="原方向已完成的阶段会保留为历史，不再参与新方向流程；存在未冲销患者耗用时不能更正。"
+        style="margin-bottom: 14px"
+      />
+      <el-form label-width="76px">
+        <el-form-item label="当前方向">
+          <el-tag effect="plain">
+            {{ careDirectionLabel[workspace?.encounter?.careDirection || ""] || workspace?.encounter?.careDirection }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="新方向" required>
+          <el-select v-model="careDirectionDraft" style="width: 100%">
+            <el-option label="肛肠专科" value="ANORECTAL" />
+            <el-option label="中医科消化内科" value="TCM_DIGESTIVE" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="更正原因" required>
+          <el-input v-model="careDirectionReason" type="textarea" :rows="3" placeholder="例如：登记方向错误，实际为肛肠患者" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="careDirectionDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="careDirectionSaving" @click="submitCareDirection">确认更正</el-button>
+      </template>
+    </el-dialog>
+
     <RecordAiChat
       v-model="recordChatVisible"
       :encounter-id="selectedEncounterId"
@@ -2015,6 +2063,7 @@ import { completeQueuePrintTaskApi, createQueuePrintTaskApi } from "@/api/module
 import {
   completePreAiStageApi,
   confirmPreAiSurgeryApi,
+  correctPreAiCareDirectionApi,
   correctPreAiStageApi,
   completePreAiLabApi,
   confirmPreAiReviewApi,
@@ -2098,6 +2147,7 @@ import ImagingSupplementEditor from "./components/ImagingSupplementEditor.vue";
 import { getLocalPrintAgentStatus, printQueueTicketLocally } from "../../clinicQueue/printAgent";
 import {
   auxiliaryTaskLabel,
+  careDirectionLabel,
   encounterStatusLabel,
   getMissingHistoryFields,
   isHistoryIntakeKey,
@@ -2105,8 +2155,10 @@ import {
   registrationFieldsForDirection,
   stageByCode,
   stageStatusLabel,
+  type CareDirection,
   type PreAiFieldConfig
 } from "./fieldConfig";
+import { confirmTcmDirection } from "./directionGuard";
 import { groupAttachments, isImageAttachment } from "./utils/attachment";
 import { isLabMetricAbnormal, labMetricAbnormalLabel } from "./utils/labResult";
 import { buildDocumentPreviewSections, humanValue, nonEmptyEntries } from "./utils/previewBuilder";
@@ -3595,6 +3647,48 @@ const canCorrectSelectedStage = computed(
     selectedStageCode.value !== "REVIEW"
 );
 const canModifySelectedStage = computed(() => canEditSelectedStage.value || canCorrectSelectedStage.value);
+const canCorrectCareDirection = computed(() => {
+  const submission = stageSubmission("REGISTRATION");
+  return Boolean(workspace.value) &&
+    Boolean(authStore.stagePermissions.REGISTRATION?.correctable) &&
+    ["COMPLETED", "SKIPPED"].includes(String(submission?.status || "")) &&
+    !["CANCELLED", "WITHDRAWN"].includes(workspace.value?.encounter.status || "");
+});
+const careDirectionDialogVisible = ref(false);
+const careDirectionDraft = ref<CareDirection>("ANORECTAL");
+const careDirectionReason = ref("");
+const careDirectionSaving = ref(false);
+const openCareDirectionDialog = () => {
+  if (!workspace.value) return;
+  careDirectionDraft.value = workspace.value.encounter.careDirection === "TCM_DIGESTIVE" ? "TCM_DIGESTIVE" : "ANORECTAL";
+  careDirectionReason.value = "";
+  careDirectionDialogVisible.value = true;
+};
+const submitCareDirection = async () => {
+  if (!workspace.value) return;
+  const reason = careDirectionReason.value.trim();
+  if (!reason) return ElMessage.warning("请填写就诊方向更正原因");
+  if (careDirectionDraft.value === workspace.value.encounter.careDirection) {
+    return ElMessage.warning("新方向与原方向相同");
+  }
+  careDirectionSaving.value = true;
+  try {
+    const { data } = await correctPreAiCareDirectionApi(
+      selectedEncounterId.value,
+      careDirectionDraft.value,
+      reason
+    );
+    hydrateWorkspace(data);
+    await loadEncounterList();
+    selectedStageCode.value = (data.encounter.currentStage || "REGISTRATION") as PreAiStageCode;
+    careDirectionDialogVisible.value = false;
+    ElMessage.success("就诊方向已更正，已按新方向重新进入流程");
+  } catch (error: any) {
+    ElMessage.error(error?.message || "就诊方向更正失败");
+  } finally {
+    careDirectionSaving.value = false;
+  }
+};
 const canEditEcgWorkbench = computed(
   () =>
     Boolean(authStore.auxiliaryPermissions.ECG?.editable) || canOpenLabWorkbench.value || canModifySelectedStage.value
@@ -3930,6 +4024,9 @@ const applyQuickTemplate = (fieldKey: string, value: string) => {
 };
 const isStageFieldDisabled = (field: PreAiFieldConfig) =>
   !canModifySelectedStage.value ||
+  (selectedStageCode.value === "REGISTRATION" &&
+    canCorrectSelectedStage.value &&
+    field.key === "careDirection") ||
   (selectedStageCode.value === "SURGERY" && field.key === "physicianConfirmed" && !canConfirmSurgery.value);
 const fieldOptions = (field: PreAiFieldConfig) => field.optionsFor?.(stageForms[selectedStageCode.value]) || field.options || [];
 const routeLabel = (route?: string) => (route === "OUTPATIENT" ? "门诊" : route === "INPATIENT" ? "住院" : "分支待确认");
@@ -4629,6 +4726,7 @@ const createFollowUp = async () => {
     ElMessage.warning("请选择本次来访时间");
     return;
   }
+  if (!(await confirmTcmDirection(followUpForm.careDirection))) return;
   await runAction(async () => {
     const { visitDate, careDirection, ...visitMeta } = deepCopy(followUpForm);
     followUpRequestId.value ||= createClientRequestId();
@@ -4801,8 +4899,21 @@ const correctSelectedStage = async () => {
       }
     );
     await runAction(async () => {
-      if (["REGISTRATION", "INSPECTION"].includes(selectedStageCode.value))
-        await persistReceptionHistoryFromStage(selectedStageCode.value);
+      if (selectedStageCode.value === "REGISTRATION") {
+        if (workspace.value?.encounter.careDirection !== "TCM_DIGESTIVE") {
+          try {
+            await persistReceptionHistoryFromStage("REGISTRATION");
+          } catch {
+            ElMessage.warning("病史采集数据同步至接诊室草稿失败，已继续保存纠错");
+          }
+        }
+      } else if (selectedStageCode.value === "INSPECTION") {
+        try {
+          await persistReceptionHistoryFromStage("INSPECTION");
+        } catch {
+          ElMessage.warning("病史采集数据同步至接诊室草稿失败，已继续保存纠错");
+        }
+      }
       if (selectedStageCode.value === "NURSING") await persistNursingHistoryFromStage();
       const { data } = await correctPreAiStageApi(
         selectedEncounterId.value,
@@ -4957,6 +5068,7 @@ const returnStage = async (code: PreAiStageCode) => {
 
 const createEncounter = async () =>
   runAction(async () => {
+    if (!(await confirmTcmDirection(createForm.careDirection))) return;
     createRequestId.value ||= createClientRequestId();
     const { data } = await registerAndIssuePreAiEncounterApi(deepCopy(createForm), createRequestId.value);
     const encounterWorkspace = data.encounterWorkspace;

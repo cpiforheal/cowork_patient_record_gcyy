@@ -137,6 +137,15 @@ public class PreAiEncounterController {
             service.correctOwningDepartment(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/{encounterId}/care-direction/correct")
+    public ApiResult<Map<String, Object>> correctCareDirection(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.CareDirectionCorrectionRequest request
+    ) {
+        return ApiResult.of(200, "就诊方向已更正",
+            service.correctCareDirection(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/{encounterId}/department-grants")
     public ApiResult<Map<String, Object>> updateEncounterGrant(
         @PathVariable String encounterId,
