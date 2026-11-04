@@ -11,6 +11,7 @@
       @click="!readonly && $emit('open-detail', group.key)"
     >
       <span class="receipt-group-head">
+        <i class="receipt-group-dot" :class="group.key === 'per' ? 'is-per' : 'is-fixed'" aria-hidden="true" />
         <strong>{{ group.label }}</strong>
         <small>{{ group.lines.length }} 项</small>
       </span>
@@ -118,6 +119,21 @@ const isShort = (line: InventoryDepartmentDailyReportLine) =>
     color: var(--qhw-muted, #7b7064);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
+  }
+}
+
+.receipt-group-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+
+  &.is-per {
+    background: #9cc6b5;
+  }
+
+  &.is-fixed {
+    background: #d9a86c;
   }
 }
 

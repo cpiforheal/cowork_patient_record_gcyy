@@ -82,6 +82,12 @@
               </div>
               <div class="qhw-headcount-actions">
                 <span class="qhw-headcount-total">合计 <b>{{ headcountTotal }}</b> 人</span>
+                <el-button v-if="canReportException" plain type="warning" size="small" @click="openExceptionFor()">
+                  上报例外
+                </el-button>
+                <el-button v-if="completed" text type="primary" size="small" @click="openTodayReceipt">
+                  查看今日回执
+                </el-button>
                 <el-button
                   v-if="!completed && !locked"
                   type="primary"
@@ -99,13 +105,19 @@
               <el-table
                 :data="allLines"
                 :row-key="rowKey"
+                :row-class-name="rowClassName"
                 height="calc(100vh - 340px)"
                 class="qhw-table"
                 empty-text="今日没有应扣耗材"
               >
                 <el-table-column label="耗材" min-width="200" show-overflow-tooltip>
                   <template #default="{ row }">
-                    <span class="qhw-item-name">{{ row.itemName }}</span>
+                    <span class="qhw-item-cell">
+                      <span class="qhw-item-name">{{ row.itemName }}</span>
+                      <span class="qhw-billing-tag" :class="`is-${billingOf(row).key}`">
+                        {{ billingOf(row).label }}
+                      </span>
+                    </span>
                   </template>
                 </el-table-column>
                 <el-table-column prop="unit" label="单位" width="70" />
@@ -210,13 +222,85 @@
         @open-day="openDayFromDrawer"
       />
 
-      <el-dialog v-model="confirmVisible" title="确认提交今日人数？" width="440px" class="qhw-modal">
-        <div class="qhw-confirm">
-          <div><span>接诊人次</span><strong>{{ headcountTotal }} 人</strong></div>
-          <div><span>自动计算耗材</span><strong>{{ autoItemCount }} 项</strong></div>
-          <div><span>库存处理</span><strong>将扣减 {{ autoItemCount }} 项耗材库存</strong></div>
+      <el-dialog v-model="confirmVisible" title="确认提交今日人数？" width="780px" style="max-width: 92vw" class="qhw-modal qhw-confirm-dialog">
+        <div class="qhw-confirm-summary">
+          <div>
+            <span>接诊人次</span>
+            <strong>{{ headcountTotal }} 人</strong>
+            <small v-if="confirmComposition">{{ confirmComposition }}</small>
+          </div>
+          <div>
+            <span>应扣耗材</span>
+            <strong>{{ autoItemCount }} 项</strong>
+            <small>提交后扣减库存</small>
+          </div>
+          <div>
+            <span>按需 / 未纳入</span>
+            <strong>{{ onDemandLines.length }} 项</strong>
+            <small>不参与自动扣库</small>
+          </div>
         </div>
-        <p class="qhw-confirm-note">提交后人数仍可修正，耗材数量不可修改。</p>
+
+        <div class="qhw-confirm-columns">
+          <section class="qhw-confirm-col">
+            <header>
+              <span class="qhw-billing-tag is-per">按人次</span>
+              <strong>按人次消耗</strong>
+              <small>{{ confirmPerLines.length }} 项</small>
+            </header>
+            <p class="qhw-confirm-sub">随门诊、住院人数变化</p>
+            <div v-for="line in confirmPerLines" :key="line.lineId || line.quotaRuleId" class="qhw-confirm-item">
+              <span>
+                {{ line.itemName }}
+                <small v-if="line.sourceText">· {{ line.sourceText }}</small>
+              </span>
+              <strong>{{ formatQuantity(liveQuotaOf(line)) }} {{ line.unit }}</strong>
+            </div>
+            <p v-if="!confirmPerLines.length" class="qhw-confirm-empty">无</p>
+          </section>
+
+          <section class="qhw-confirm-col">
+            <header>
+              <span class="qhw-billing-tag is-fixed">固定/周期</span>
+              <strong>固定与周期消耗</strong>
+              <small>{{ confirmDailyLines.length + confirmPeriodLines.length }} 项</small>
+            </header>
+            <p class="qhw-confirm-sub">不随人数变化</p>
+            <div v-if="confirmDailyLines.length" class="qhw-confirm-subhead">每日固定</div>
+            <div v-for="line in confirmDailyLines" :key="line.lineId || line.quotaRuleId" class="qhw-confirm-item">
+              <span>
+                {{ line.itemName }}
+                <small v-if="line.sourceText">· {{ line.sourceText }}</small>
+              </span>
+              <strong>{{ formatQuantity(liveQuotaOf(line)) }} {{ line.unit }}</strong>
+            </div>
+            <div v-if="confirmPeriodLines.length" class="qhw-confirm-subhead">周期摊消</div>
+            <div v-for="line in confirmPeriodLines" :key="line.lineId || line.quotaRuleId" class="qhw-confirm-item">
+              <span>
+                {{ line.itemName }}
+                <small v-if="line.sourceText">· {{ line.sourceText }}</small>
+              </span>
+              <strong>{{ formatQuantity(liveQuotaOf(line)) }} {{ line.unit }}</strong>
+            </div>
+            <p v-if="!confirmDailyLines.length && !confirmPeriodLines.length" class="qhw-confirm-empty">无</p>
+          </section>
+        </div>
+
+        <div v-if="onDemandLines.length" class="qhw-confirm-ondemand">
+          <header>
+            <span class="qhw-billing-tag is-ondemand">按需</span>
+            <strong>按需 / 未纳入 {{ onDemandLines.length }} 项</strong>
+            <small>不参与自动扣库，实际使用请提交后上报例外</small>
+          </header>
+          <div v-for="line in onDemandLines" :key="line.lineId || line.quotaRuleId" class="qhw-confirm-item">
+            <span>
+              {{ line.itemName }}
+              <small v-if="line.sourceText">· {{ line.sourceText }}</small>
+            </span>
+          </div>
+        </div>
+
+        <p class="qhw-confirm-note">提交后人数仍可修正，耗材数量不可修改；提交后可在“查看今日回执”查看完整回顾。</p>
         <template #footer>
           <el-button @click="confirmVisible = false">取消</el-button>
           <el-button type="primary" :loading="submitting" @click="submitReport">确认提交</el-button>
@@ -243,14 +327,7 @@
         </template>
       </el-dialog>
 
-      <el-dialog v-model="exceptionVisible" title="上报定额例外" width="560px" destroy-on-close>
-        <div class="qhw-exception-target" v-if="exceptionLine">
-          <div>
-            <strong>{{ exceptionLine.itemName }}</strong>
-            <span v-if="exceptionLine.sourceText">· {{ exceptionLine.sourceText }}</span>
-          </div>
-          <span>每日定额 {{ formatQuotaExact(exceptionLine.quotaQuantity) }} {{ exceptionLine.unit }}</span>
-        </div>
+      <el-dialog v-model="exceptionVisible" title="上报定额例外" width="580px" destroy-on-close>
         <el-alert
           type="warning"
           :closable="false"
@@ -259,47 +336,72 @@
           style="margin-bottom: 16px"
         />
         <el-form label-position="top">
-          <el-form-item :label="`多用了多少（${exceptionLine?.unit || ''}）`" required>
-            <el-input-number
-              v-model="exceptionExtraQuantity"
-              :min="1"
-              :step="1"
-              :precision="0"
-              controls-position="right"
-            />
-            <span class="qhw-exception-hint">填实物整数，系统自动折算成上报总量</span>
-          </el-form-item>
-          <div class="qhw-exception-calc" v-if="exceptionLine">
-            <span>定额 <b>{{ formatQuotaExact(exceptionQuota) }}</b> {{ exceptionLine.unit }}</span>
-            <span>+</span>
-            <span>多用 <b>{{ exceptionExtraQuantity }}</b> {{ exceptionLine.unit }}</span>
-            <span>=</span>
-            <span>上报总量 <b>{{ formatQuotaExact(exceptionReportedTotal) }}</b> {{ exceptionLine.unit }}</span>
-          </div>
-          <el-form-item label="原因说明" required>
-            <el-input
-              v-model="exceptionForm.reason"
-              type="textarea"
-              :rows="3"
-              placeholder="例如：急诊加台、术中污染更换、未列入定额的临时耗材"
-            />
-          </el-form-item>
-          <el-form-item label="现场照片（选填，最多 3 张）">
-            <el-upload
-              v-model:file-list="exceptionFiles"
-              list-type="picture-card"
-              accept="image/*"
-              :auto-upload="false"
-              :limit="3"
+          <el-form-item label="耗材" required>
+            <el-select
+              v-model="exceptionLineId"
+              filterable
+              placeholder="搜索当日耗材或按需/未纳入项"
+              style="width: 100%"
             >
-              <el-icon><Plus /></el-icon>
-            </el-upload>
+              <el-option
+                v-for="line in exceptionOptions"
+                :key="line.lineId || line.quotaRuleId || line.itemId"
+                :label="`${line.itemName}${line.sourceText ? ` · ${line.sourceText}` : ''} · 定额 ${formatQuotaExact(line.quotaQuantity)} ${line.unit}`"
+                :value="line.lineId || ''"
+              />
+            </el-select>
           </el-form-item>
+          <template v-if="exceptionLine">
+            <div class="qhw-exception-target">
+              <div>
+                <strong>{{ exceptionLine.itemName }}</strong>
+                <span v-if="exceptionLine.sourceText">· {{ exceptionLine.sourceText }}</span>
+              </div>
+              <span>每日定额 {{ formatQuotaExact(exceptionLine.quotaQuantity) }} {{ exceptionLine.unit }}</span>
+            </div>
+            <el-form-item :label="`多用了多少（${exceptionLine.unit}）`" required>
+              <el-input-number
+                v-model="exceptionExtraQuantity"
+                :min="1"
+                :step="1"
+                :precision="0"
+                controls-position="right"
+              />
+              <span class="qhw-exception-hint">填实物整数，系统自动折算成上报总量</span>
+            </el-form-item>
+            <div class="qhw-exception-calc">
+              <span>定额 <b>{{ formatQuotaExact(exceptionQuota) }}</b> {{ exceptionLine.unit }}</span>
+              <span>+</span>
+              <span>多用 <b>{{ exceptionExtraQuantity }}</b> {{ exceptionLine.unit }}</span>
+              <span>=</span>
+              <span>上报总量 <b>{{ formatQuotaExact(exceptionReportedTotal) }}</b> {{ exceptionLine.unit }}</span>
+            </div>
+            <el-form-item label="原因说明" required>
+              <el-input
+                v-model="exceptionForm.reason"
+                type="textarea"
+                :rows="3"
+                placeholder="例如：急诊加台、术中污染更换、未列入定额的临时耗材"
+              />
+            </el-form-item>
+            <el-form-item label="现场照片（选填，最多 3 张）">
+              <el-upload
+                v-model:file-list="exceptionFiles"
+                list-type="picture-card"
+                accept="image/*"
+                :auto-upload="false"
+                :limit="3"
+              >
+                <el-icon><Plus /></el-icon>
+              </el-upload>
+            </el-form-item>
+          </template>
         </el-form>
+        <p v-if="!exceptionLine" class="qhw-exception-empty">请选择耗材后填写多用数量。</p>
         <template #footer>
           <div class="qhw-drawer-footer">
             <el-button @click="exceptionVisible = false">取消</el-button>
-            <el-button type="primary" :loading="exceptionSubmitting" @click="submitException">上报例外</el-button>
+            <el-button type="primary" :loading="exceptionSubmitting" :disabled="!exceptionLine" @click="submitException">上报例外</el-button>
           </div>
         </template>
       </el-dialog>
@@ -318,10 +420,12 @@ import PatientEvidencePanel from "../PatientEvidencePanel.vue";
 import DepartmentFillCalendar from "../DepartmentFillCalendar.vue";
 import QuotaDayDetailDrawer from "./QuotaDayDetailDrawer.vue";
 import {
+  billingCategory,
   deductionStatus,
   exceptionStatusLabel,
   exceptionStatusTone,
   formatReceiptQuantity,
+  groupReceiptLines,
   liveQuotaQuantity,
   receiptCounts
 } from "./quotaReceipt";
@@ -413,6 +517,24 @@ const headcountInputs = computed(() => {
   const inpatient = Number(headcountForm.inpatient || 0);
   return { outpatient, inpatient, manual: 0, total: outpatient + inpatient };
 });
+const exceptionOptions = computed(() => allLines.value);
+const confirmGroups = computed(() => groupReceiptLines(allLines.value));
+const confirmPerLines = computed(() => confirmGroups.value.find(group => group.key === "per")?.lines || []);
+const confirmDailyLines = computed(() => confirmGroups.value.find(group => group.key === "daily")?.lines || []);
+const confirmPeriodLines = computed(() => confirmGroups.value.find(group => group.key === "period")?.lines || []);
+const onDemandLines = computed(() => allLines.value.filter(line => line.exceptionOnly));
+const confirmComposition = computed(() => {
+  const source =
+    draft.value?.status === "DRAFT"
+      ? { outpatient: headcountForm.outpatient, inpatient: headcountForm.inpatient, manual: 0 }
+      : draft.value?.headcount;
+  if (!source) return "";
+  const parts: string[] = [];
+  if (Number(source.outpatient || 0)) parts.push(`门诊 ${source.outpatient}`);
+  if (Number(source.inpatient || 0)) parts.push(`住院 ${source.inpatient}`);
+  if (Number((source as { manual?: number }).manual || 0)) parts.push(`手工 ${(source as { manual?: number }).manual}`);
+  return parts.join(" · ");
+});
 const summaryStatus = computed(() => {
   if (locked.value) return { label: "已锁定", tone: "locked" };
   if (completed.value) {
@@ -441,6 +563,8 @@ const liveQuotaOf = (row: any) => {
   const line = row as InventoryDepartmentDailyReportLine;
   return completed.value ? Number(line.quotaQuantity || 0) : liveQuotaQuantity(line, headcountInputs.value);
 };
+const billingOf = (row: any) => billingCategory(row as InventoryDepartmentDailyReportLine);
+const rowClassName = ({ row }: { row: any }) => `is-${billingOf(row).key}`;
 const deductionOf = (row: any) => deductionStatus(row as InventoryDepartmentDailyReportLine);
 const deductionTagType = (row: any) => {
   const tone = deductionOf(row).tone;
@@ -527,6 +651,10 @@ const openDayDetail = (date: string) => {
 const openDayFromDrawer = (date: string) => {
   dayDetailVisible.value = false;
   changeWorkingDate(date);
+};
+const openTodayReceipt = () => {
+  calendarDate.value = businessDate.value;
+  dayDetailVisible.value = true;
 };
 
 watch(dayDetailVisible, visible => {
@@ -621,9 +749,13 @@ const submitReport = async () => {
   }
 };
 
-const openExceptionFor = (row: any) => {
-  const line = row as InventoryDepartmentDailyReportLine;
-  exceptionLineId.value = line.lineId || "";
+const openExceptionFor = (row?: any) => {
+  if (row) {
+    const line = row as InventoryDepartmentDailyReportLine;
+    exceptionLineId.value = line.lineId || "";
+  } else {
+    exceptionLineId.value = "";
+  }
   exceptionExtraQuantity.value = 1;
   exceptionForm.reason = "";
   exceptionFiles.value = [];
@@ -632,7 +764,11 @@ const openExceptionFor = (row: any) => {
 
 const submitException = async () => {
   const line = exceptionLine.value;
-  if (!line || !exceptionForm.reason.trim()) {
+  if (!line) {
+    ElMessage.warning("请选择耗材");
+    return;
+  }
+  if (!exceptionForm.reason.trim()) {
     ElMessage.warning("请填写原因");
     return;
   }
@@ -864,8 +1000,10 @@ onBeforeUnmount(() => {
 
 .qhw-headcount-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .qhw-headcount-total {
@@ -900,11 +1038,62 @@ onBeforeUnmount(() => {
   :deep(.el-table__row td) {
     font-size: 13px;
   }
+
+  :deep(.el-table__row.is-per td:first-child) {
+    box-shadow: inset 3px 0 0 #9cc6b5;
+  }
+
+  :deep(.el-table__row.is-fixed td:first-child) {
+    box-shadow: inset 3px 0 0 #d9a86c;
+  }
+
+  :deep(.el-table__row.is-ondemand td:first-child) {
+    box-shadow: inset 3px 0 0 #cfc6b8;
+  }
+}
+
+.qhw-item-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 
 .qhw-item-name {
+  min-width: 0;
+  overflow: hidden;
   color: var(--qhw-ink);
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qhw-billing-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 999px;
+
+  &.is-per {
+    color: var(--qhw-accent);
+    background: var(--qhw-accent-soft);
+    border-color: #d5e5dc;
+  }
+
+  &.is-fixed {
+    color: #8a5a13;
+    background: var(--qhw-warm-soft);
+    border-color: #ebd8bd;
+  }
+
+  &.is-ondemand {
+    color: var(--qhw-muted);
+    background: var(--qhw-surface-2);
+    border-color: var(--qhw-line);
+  }
 }
 
 .qhw-quota-head {
@@ -1029,21 +1218,168 @@ onBeforeUnmount(() => {
   }
 }
 
-.qhw-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.qhw-confirm-dialog {
+  max-width: 92vw;
+}
 
-  div {
+.qhw-confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+
+  > div {
     display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    font-size: 14px;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 9px 11px;
+    background: var(--qhw-surface-2);
+    border: 1px solid var(--qhw-line);
+    border-radius: 9px;
   }
 
   span {
     color: var(--qhw-muted);
+    font-size: 11px;
   }
+
+  strong {
+    color: var(--qhw-ink);
+    font-size: 17px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  small {
+    overflow: hidden;
+    color: var(--qhw-muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.qhw-confirm-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.qhw-confirm-col {
+  min-width: 0;
+  padding: 12px;
+  background: var(--qhw-surface-2);
+  border: 1px solid var(--qhw-line);
+  border-radius: 10px;
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+
+    strong {
+      color: var(--qhw-ink);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    small {
+      margin-left: auto;
+      color: var(--qhw-muted);
+      font-size: 11px;
+    }
+  }
+}
+
+.qhw-confirm-sub {
+  margin: 5px 0 8px;
+  color: var(--qhw-muted);
+  font-size: 11px;
+}
+
+.qhw-confirm-subhead {
+  margin: 10px 0 2px;
+  color: var(--qhw-muted);
+  font-size: 11px;
+  font-weight: 600;
+
+  &:first-of-type {
+    margin-top: 2px;
+  }
+}
+
+.qhw-confirm-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-top: 1px dashed var(--qhw-line);
+  color: var(--qhw-ink);
+  font-size: 12px;
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--qhw-muted);
+    font-size: 10px;
+  }
+
+  strong {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+}
+
+.qhw-confirm-empty {
+  margin: 8px 0 0;
+  color: var(--qhw-muted);
+  font-size: 12px;
+}
+
+.qhw-confirm-ondemand {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--qhw-surface-2);
+  border: 1px dashed var(--qhw-line);
+  border-radius: 10px;
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 2px;
+
+    strong {
+      color: var(--qhw-ink);
+      font-size: 12px;
+    }
+
+    small {
+      color: var(--qhw-muted);
+      font-size: 10px;
+    }
+  }
+}
+
+.qhw-exception-empty {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  color: var(--qhw-muted);
+  font-size: 12px;
+  background: var(--qhw-surface-2);
+  border-radius: 9px;
 }
 
 .qhw-confirm-note {
@@ -1077,6 +1413,11 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .qhw {
     padding: 14px;
+  }
+
+  .qhw-confirm-summary,
+  .qhw-confirm-columns {
+    grid-template-columns: 1fr;
   }
 
   .qhw-head {

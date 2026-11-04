@@ -21,6 +21,16 @@ export interface ReceiptCounts {
 
 export const formatReceiptQuantity = (value?: number | null) => Number(value || 0).toFixed(2);
 
+export const billingCategory = (line: InventoryDepartmentDailyReportLine) => {
+  if (line.exceptionOnly || line.includedInQuota === false) {
+    return { key: "ondemand" as const, label: "按需" };
+  }
+  if (line.bindingType === "PER_PERSON") {
+    return { key: "per" as const, label: "按人次" };
+  }
+  return { key: "fixed" as const, label: "固定/周期" };
+};
+
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 
 export interface QuotaHeadcountInput {
