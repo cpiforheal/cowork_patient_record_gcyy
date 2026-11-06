@@ -291,6 +291,15 @@ public class InventoryApiController {
         return ApiResult.of(200, "人数已修正并按差额补扣/冲回", asMap(quotaConsumptionService.correctHeadcount(reportId, toJson(payload), user)));
     }
 
+    @PostMapping("/inventory-api/department-daily-reports/{reportId}/fixed-usage-confirmations")
+    public ApiResult<Map<String, Object>> confirmFixedUsage(
+        @org.springframework.web.bind.annotation.PathVariable String reportId,
+        @RequestBody Map<String, Object> payload
+    ) {
+        SessionUser user = requireCapability("inventory:read");
+        return ApiResult.of(200, "固定耗材已确认", asMap(quotaConsumptionService.confirmFixedUsage(reportId, toJson(payload), user)));
+    }
+
     @PostMapping("/inventory-api/quota-exceptions")
     public ApiResult<Map<String, Object>> reportQuotaException(@RequestBody Map<String, Object> payload) {
         SessionUser user = requireCapability("inventory:read");

@@ -49,6 +49,8 @@ public class InventoryQuotaConsumptionService {
     private static final Set<String> MODES = Set.of(MODE_LEGACY, MODE_QUOTA);
     private static final Set<String> PER_PERSON = Set.of("PER_PERSON");
     private static final Set<String> DAILY_FIXED = Set.of("FIXED_DAILY", "ON_DEMAND", "EQUIPMENT");
+    private static final Set<String> USAGE_STATUSES = Set.of("AS_QUOTA", "NOT_USED", "SHORT_USE");
+    private static final Set<String> FIXED_USAGE_PILOT_DEPARTMENTS = Set.of("tcm-pharmacy");
     private static final BigDecimal THREE = BigDecimal.valueOf(3);
 
     private final JdbcTemplate jdbcTemplate;
@@ -419,7 +421,8 @@ public class InventoryQuotaConsumptionService {
         if ("DAILY".equals(department.entryMode()) && headcount.source().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请填写本科室今日服务人次");
         }
-        ObjectNode result = persistReport(department, date, current, headcount, text(payload, "note"), user);
+        ObjectNode result = persistReport(department, date, current, headcount, text(payload, "note"),
+            text(payload, "headcountReason"), user);
         repository.log(user.name(), "保存定额日报", "department_daily_report", department.name() + " " + date,
             "人数 " + headcount.total() + "；应耗 " + result.path("quotaComputedTotal").asText());
         return result;
@@ -444,14 +447,15 @@ public class InventoryQuotaConsumptionService {
         BigDecimal deducted = BigDecimal.ZERO;
         for (LineRow line : lines) {
             BigDecimal quota = scale(line.quotaQuantity());
+            BigDecimal deductQuantity = deductionFor(line, quota);
             computed = computed.add(quota);
             String eventId = null;
             BigDecimal lineDeducted = BigDecimal.ZERO;
-            if (quota.signum() > 0) {
-                eventId = deduct(report, line, quota, "QUOTA_DAILY_LINE", "定额日报扣减", null, report.revision());
+            if (deductQuantity.signum() > 0) {
+                eventId = deduct(report, line, deductQuantity, "QUOTA_DAILY_LINE", "定额日报扣减", null, report.revision());
                 if (eventId != null) {
-                    lineDeducted = quota;
-                    deducted = deducted.add(quota);
+                    lineDeducted = deductQuantity;
+                    deducted = deducted.add(deductQuantity);
                 }
             }
             jdbcTemplate.update(
@@ -461,7 +465,7 @@ public class InventoryQuotaConsumptionService {
                     extra_quantity = 0, exception_status = 'NONE', exception_approved_quantity = 0
                 WHERE id = ?
                 """,
-                quota, lineDeducted, eventId, line.id()
+                deductQuantity, lineDeducted, eventId, line.id()
             );
         }
         jdbcTemplate.update(
@@ -522,6 +526,7 @@ public class InventoryQuotaConsumptionService {
             if (old == null) {
                 insertLine(report.id(), ++lineNo, node, quota, lineDeducted, eventId, approvedExtra);
             } else {
+                BigDecimal actualQuantity = isFixedUsageLine(old) ? deductionFor(old, quota) : quota.add(approvedExtra);
                 jdbcTemplate.update(
                     """
                     UPDATE inventory_department_daily_report_lines
@@ -530,7 +535,7 @@ public class InventoryQuotaConsumptionService {
                         exception_approved_quantity = ?, quota_event_id = ?, headcount_basis = ?
                     WHERE id = ?
                     """,
-                    quota, quota.add(approvedExtra), quota, lineDeducted, decimal(node, "extraQuantity"),
+                    quota, actualQuantity, quota, lineDeducted, decimal(node, "extraQuantity"),
                     text(node, "toleranceMode"), decimal(node, "toleranceValue"), decimal(node, "toleranceQuantity"),
                     approvedExtra, firstNonBlank(eventId, old.quotaEventId()), text(node, "headcountBasis"), old.id()
                 );
@@ -559,6 +564,83 @@ public class InventoryQuotaConsumptionService {
         );
         repository.log(user.name(), "修正定额日报人数", "department_daily_report", department.name() + " " + report.businessDate(),
             "原因：" + reason + "；人数 " + before.total() + " → " + after.total());
+        return read(department.key(), report.businessDate(), user);
+    }
+
+    @Transactional
+    public ObjectNode confirmFixedUsage(String reportId, JsonNode payload, SessionUser user) {
+        ReportRow report = loadReportById(reportId);
+        if (report == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "科室日报不存在");
+        Department department = requireDepartment(report.departmentKey(), user);
+        if (!FIXED_USAGE_PILOT_DEPARTMENTS.contains(department.key())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "固定耗材确认暂未在本科室开放");
+        }
+        if (locked(report, report.businessDate())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "该业务日已锁定，不能确认固定耗材");
+        }
+        if (!"DRAFT".equals(report.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "日报已提交，不能再调整固定耗材确认");
+        }
+        Map<String, LineRow> byLine = new LinkedHashMap<>();
+        for (LineRow line : loadLineRows(report.id())) byLine.put(line.id(), line);
+        JsonNode items = payload.path("items");
+        if (!items.isArray() || items.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请至少确认一项固定耗材");
+        }
+        for (JsonNode item : items) {
+            LineRow line = byLine.get(text(item, "lineId"));
+            if (line == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "日报中不存在该耗材明细");
+            if (!isFixedUsageLine(line)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, line.itemName() + " 不是固定或周期耗材");
+            }
+            String status = text(item, "status").toUpperCase(Locale.ROOT);
+            if (!USAGE_STATUSES.contains(status)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "确认状态只能为按定额、未使用或少用");
+            }
+            BigDecimal quota = scale(line.quotaQuantity());
+            BigDecimal reported = null;
+            String reportedUnit = "";
+            BigDecimal confirmed;
+            if ("AS_QUOTA".equals(status)) {
+                confirmed = quota;
+            } else if ("NOT_USED".equals(status)) {
+                confirmed = BigDecimal.ZERO;
+            } else {
+                BigDecimal quantity = decimalOrNull(item, "reportedQuantity");
+                if (quantity == null || quantity.signum() < 0) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, line.itemName() + " 少用需填写实际使用数量");
+                }
+                BigDecimal factor = line.countPerUnit();
+                String countUnit = safe(line.countUnit());
+                if (!countUnit.isBlank() && factor != null && factor.signum() > 0) {
+                    reportedUnit = countUnit;
+                    confirmed = scale(quantity.divide(factor, 6, RoundingMode.HALF_UP));
+                } else {
+                    reportedUnit = line.unit();
+                    confirmed = scale(quantity);
+                }
+                reported = quantity;
+                if (confirmed.compareTo(quota) >= 0) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        line.itemName() + " 少用数量必须小于今日定额；如已用满请选择按定额使用");
+                }
+            }
+            jdbcTemplate.update(
+                """
+                UPDATE inventory_department_daily_report_lines
+                SET usage_status = ?, reported_quantity = ?, reported_unit = ?, confirmed_quantity = ?,
+                    usage_confirmed_by = ?, usage_confirmed_at = ?
+                WHERE id = ?
+                """,
+                status, reported, blankToNull(reportedUnit), confirmed, user.name(), LocalDateTime.now().toString(),
+                line.id()
+            );
+            repository.log(user.name(), "确认固定耗材", "department_daily_report_line",
+                department.name() + " " + report.businessDate(),
+                line.itemName() + "：" + usageStatusLabel(status)
+                    + (reported == null ? "" : "，实际 " + plain(reported) + safe(reportedUnit))
+                    + "，计入 " + plain(confirmed) + safe(line.unit()));
+        }
         return read(department.key(), report.businessDate(), user);
     }
 
@@ -836,9 +918,11 @@ public class InventoryQuotaConsumptionService {
     // ---------- report ----------
 
     private ObjectNode persistReport(Department department, LocalDate date, ReportRow current, Headcount headcount,
-                                     String note, SessionUser user) {
+                                     String note, String headcountReason, SessionUser user) {
         String reportId = current == null ? "department-daily-report-" + UUID.randomUUID() : current.id();
         int revision = current == null ? 1 : current.revision() + 1;
+        Map<String, UsageConfirmation> confirmations = current == null
+            ? Map.of() : loadUsageConfirmations(reportId);
         ObjectNode raw = objectMapper.createObjectNode();
         raw.put("departmentKey", department.key());
         raw.put("businessDate", date.toString());
@@ -849,22 +933,23 @@ public class InventoryQuotaConsumptionService {
                 """
                 INSERT INTO inventory_department_daily_reports
                   (id, department_id, department_key, department_name, business_date, report_mode, status, revision, note,
-                   headcount_outpatient, headcount_inpatient, headcount_manual, headcount_source, raw_json)
-                VALUES (?, ?, ?, ?, ?, 'QUOTA', 'DRAFT', ?, ?, ?, ?, ?, ?, CAST(? AS JSON))
+                   headcount_outpatient, headcount_inpatient, headcount_manual, headcount_source, headcount_reason, raw_json)
+                VALUES (?, ?, ?, ?, ?, 'QUOTA', 'DRAFT', ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON))
                 """,
                 reportId, department.id(), department.key(), department.name(), date, revision, note == null ? "" : note,
-                headcount.outpatient(), headcount.inpatient(), headcount.manual(), headcount.source(), json(raw)
+                headcount.outpatient(), headcount.inpatient(), headcount.manual(), headcount.source(),
+                blankToNull(headcountReason), json(raw)
             );
         } else {
             jdbcTemplate.update(
                 """
                 UPDATE inventory_department_daily_reports
                 SET revision = ?, note = ?, status = 'DRAFT', headcount_outpatient = ?, headcount_inpatient = ?,
-                    headcount_manual = ?, headcount_source = ?, raw_json = CAST(? AS JSON)
+                    headcount_manual = ?, headcount_source = ?, headcount_reason = ?, raw_json = CAST(? AS JSON)
                 WHERE id = ?
                 """,
                 revision, note == null ? "" : note, headcount.outpatient(), headcount.inpatient(),
-                headcount.manual(), headcount.source(), json(raw), reportId
+                headcount.manual(), headcount.source(), blankToNull(headcountReason), json(raw), reportId
             );
             jdbcTemplate.update("DELETE FROM inventory_department_daily_report_lines WHERE report_id = ?", reportId);
         }
@@ -874,6 +959,7 @@ public class InventoryQuotaConsumptionService {
         for (JsonNode node : lines) {
             BigDecimal quota = decimal(node, "quotaQuantity");
             total = total.add(quota);
+            applyUsageConfirmation((ObjectNode) node, confirmations.get(lineUsageKey(node)));
             insertLine(reportId, ++lineNo, node, quota, BigDecimal.ZERO, null, BigDecimal.ZERO);
         }
         jdbcTemplate.update(
@@ -892,14 +978,19 @@ public class InventoryQuotaConsumptionService {
               (id, report_id, line_no, item_id, quota_rule_id, source_row_key, item_name_snapshot, unit_snapshot,
                preset_quantity, actual_quantity, quota_quantity, quota_deducted_quantity, extra_quantity,
                tolerance_mode, tolerance_value, tolerance_quantity, exception_status, exception_approved_quantity,
+               usage_status, reported_quantity, reported_unit, confirmed_quantity, usage_confirmed_by, usage_confirmed_at,
                quota_event_id, source, review_status, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, ?, 'TEMPLATE', 'APPROVED', CAST(? AS JSON))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, ?, ?, ?, ?, ?, ?, ?, 'TEMPLATE', 'APPROVED', CAST(? AS JSON))
             """,
             "department-daily-line-" + UUID.randomUUID(), reportId, lineNo, text(node, "itemId"),
             blankToNull(text(node, "quotaRuleId")), blankToNull(text(node, "sourceRowKey")),
             text(node, "itemName"), text(node, "unit"), quota, quota.add(approvedExtra), quota, deducted,
             decimal(node, "extraQuantity"), text(node, "toleranceMode"), decimal(node, "toleranceValue"),
-            decimal(node, "toleranceQuantity"), approvedExtra, eventId, json(raw)
+            decimal(node, "toleranceQuantity"), approvedExtra,
+            normalizeUsageStatus(text(node, "usageStatus")), decimalOrNull(node, "reportedQuantity"),
+            blankToNull(text(node, "reportedUnit")), decimalOrNull(node, "confirmedQuantity"),
+            blankToNull(text(node, "usageConfirmedBy")), blankToNull(text(node, "usageConfirmedAt")),
+            eventId, json(raw)
         );
     }
 
@@ -907,7 +998,8 @@ public class InventoryQuotaConsumptionService {
         String versionId = activeVersionId(date);
         List<QuotaRuleRow> rules = jdbcTemplate.query(
             """
-            SELECT r.*, COALESCE(i.name, r.material_name) item_name, COALESCE(i.unit, r.unit) item_unit
+            SELECT r.*, COALESCE(i.name, r.material_name) item_name, COALESCE(i.unit, r.unit) item_unit,
+                   i.count_unit, i.count_per_unit
             FROM inventory_quota_rules r
             LEFT JOIN inventory_items i ON i.id = r.item_id
             WHERE r.version_id = ? AND r.department_key = ? AND r.enabled = 1 AND r.item_id IS NOT NULL
@@ -915,6 +1007,7 @@ public class InventoryQuotaConsumptionService {
             """,
             (rs, rowNum) -> new QuotaRuleRow(
                 rs.getString("id"), rs.getString("item_id"), rs.getString("item_name"), rs.getString("item_unit"),
+                rs.getString("count_unit"), rs.getBigDecimal("count_per_unit"),
                 rs.getString("binding_type"), rs.getString("care_type"), rs.getString("measurement_scope"),
                 rs.getBigDecimal("standard_quantity"), rs.getBigDecimal("fixed_adjustment"),
                 rs.getString("tolerance_mode"), rs.getBigDecimal("tolerance_value"),
@@ -957,6 +1050,8 @@ public class InventoryQuotaConsumptionService {
             row.put("itemId", rule.itemId());
             row.put("itemName", rule.itemName());
             row.put("unit", rule.itemUnit());
+            row.put("countUnit", safe(rule.countUnit()));
+            row.put("countPerUnit", rule.countPerUnit());
             row.put("bindingType", rule.bindingType());
             row.put("sourceText", safe(rule.sourceText()));
             row.put("sourceUnit", safe(rule.sourceUnit()));
@@ -968,6 +1063,12 @@ public class InventoryQuotaConsumptionService {
             row.put("fixedAdjustment", rule.fixedAdjustment());
             row.put("exceptionOnly", exceptionOnly);
             row.put("quotaQuantity", scale(quota));
+            row.put("usageStatus", "AS_QUOTA");
+            row.putNull("reportedQuantity");
+            row.put("reportedUnit", "");
+            row.put("confirmedQuantity", scale(quota));
+            row.putNull("usageConfirmedBy");
+            row.putNull("usageConfirmedAt");
             row.put("extraQuantity", BigDecimal.ZERO);
             row.put("toleranceMode", rule.toleranceMode());
             row.put("toleranceValue", scale(rule.toleranceValue()));
@@ -980,6 +1081,82 @@ public class InventoryQuotaConsumptionService {
             row.put("reviewStatus", "APPROVED");
         }
         return lines;
+    }
+
+    private static boolean isFixedUsageLine(LineRow line) {
+        return line.includedInQuota() && !PER_PERSON.contains(safe(line.bindingType()).toUpperCase(Locale.ROOT));
+    }
+
+    private static String normalizeUsageStatus(String status) {
+        String value = safe(status).toUpperCase(Locale.ROOT);
+        return "NOT_USED".equals(value) || "SHORT_USE".equals(value) ? value : "AS_QUOTA";
+    }
+
+    private static String usageStatusLabel(String status) {
+        return switch (normalizeUsageStatus(status)) {
+            case "NOT_USED" -> "今日未使用";
+            case "SHORT_USE" -> "少用";
+            default -> "按定额使用";
+        };
+    }
+
+    private static String lineUsageKey(JsonNode node) {
+        return firstNonBlank(text(node, "quotaRuleId"), text(node, "sourceRowKey"), text(node, "itemId"));
+    }
+
+    private Map<String, UsageConfirmation> loadUsageConfirmations(String reportId) {
+        Map<String, UsageConfirmation> confirmations = new LinkedHashMap<>();
+        for (LineRow line : loadLineRows(reportId)) {
+            if (!isFixedUsageLine(line)) continue;
+            if (line.usageConfirmedAt() == null && "AS_QUOTA".equals(normalizeUsageStatus(line.usageStatus()))) continue;
+            confirmations.put(firstNonBlank(line.quotaRuleId(), line.sourceRowKey(), line.itemId()),
+                new UsageConfirmation(line.usageStatus(), line.reportedQuantity(), line.reportedUnit(),
+                    line.confirmedQuantity(), line.usageConfirmedBy(), line.usageConfirmedAt()));
+        }
+        return confirmations;
+    }
+
+    private static void applyUsageConfirmation(ObjectNode node, UsageConfirmation confirmation) {
+        if (confirmation == null) return;
+        BigDecimal quota = decimal(node, "quotaQuantity");
+        String status = normalizeUsageStatus(confirmation.status());
+        BigDecimal confirmed;
+        if ("NOT_USED".equals(status)) {
+            confirmed = BigDecimal.ZERO;
+        } else if ("SHORT_USE".equals(status)) {
+            confirmed = scale(confirmation.confirmedQuantity());
+            if (confirmed.signum() < 0 || confirmed.compareTo(quota) >= 0) {
+                status = "AS_QUOTA";
+                confirmed = quota;
+            }
+        } else {
+            confirmed = quota;
+        }
+        node.put("usageStatus", status);
+        if ("AS_QUOTA".equals(status) && !"AS_QUOTA".equals(normalizeUsageStatus(confirmation.status()))) {
+            node.putNull("reportedQuantity");
+            node.put("reportedUnit", "");
+        } else {
+            if (confirmation.reportedQuantity() == null) node.putNull("reportedQuantity");
+            else node.put("reportedQuantity", confirmation.reportedQuantity());
+            node.put("reportedUnit", safe(confirmation.reportedUnit()));
+        }
+        node.put("confirmedQuantity", scale(confirmed));
+        if (confirmation.confirmedBy() == null) node.putNull("usageConfirmedBy");
+        else node.put("usageConfirmedBy", confirmation.confirmedBy());
+        if (confirmation.confirmedAt() == null) node.putNull("usageConfirmedAt");
+        else node.put("usageConfirmedAt", confirmation.confirmedAt());
+    }
+
+    private static BigDecimal deductionFor(LineRow line, BigDecimal quota) {
+        String status = normalizeUsageStatus(line.usageStatus());
+        if ("NOT_USED".equals(status)) return BigDecimal.ZERO;
+        if ("SHORT_USE".equals(status)) {
+            BigDecimal confirmed = scale(line.confirmedQuantity());
+            if (confirmed.signum() <= 0) return BigDecimal.ZERO;
+            return confirmed.min(quota);
+        }
+        return quota;
     }
 
     private static String basisForLine(LineRow line) {
@@ -1307,6 +1484,14 @@ public class InventoryQuotaConsumptionService {
             row.put("sourceDenominator", line.sourceDenominator());
             row.put("standardQuantity", line.standardQuantity());
             row.put("fixedAdjustment", line.fixedAdjustment());
+            row.put("usageStatus", safe(line.usageStatus()));
+            row.put("reportedQuantity", line.reportedQuantity());
+            row.put("reportedUnit", safe(line.reportedUnit()));
+            row.put("confirmedQuantity", line.confirmedQuantity());
+            row.put("usageConfirmedBy", safe(line.usageConfirmedBy()));
+            row.put("usageConfirmedAt", safe(line.usageConfirmedAt()));
+            row.put("countUnit", safe(line.countUnit()));
+            row.put("countPerUnit", line.countPerUnit());
             row.put("exceptionOnly", !line.includedInQuota() || "ON_DEMAND".equalsIgnoreCase(line.bindingType()));
             row.put("source", "TEMPLATE");
             row.put("reviewStatus", "APPROVED");
@@ -1319,9 +1504,10 @@ public class InventoryQuotaConsumptionService {
             """
             SELECT l.*, r.source_text, r.period_days, r.included_in_quota, r.binding_type,
                    r.source_numerator, r.source_denominator, r.standard_quantity, r.fixed_adjustment,
-                   r.measurement_scope, r.care_type
+                   r.measurement_scope, r.care_type, i.count_unit, i.count_per_unit
             FROM inventory_department_daily_report_lines l
             LEFT JOIN inventory_quota_rules r ON r.id = l.quota_rule_id
+            LEFT JOIN inventory_items i ON i.id = l.item_id
             WHERE l.report_id = ? ORDER BY l.line_no
             """,
             (rs, rowNum) -> new LineRow(
@@ -1335,7 +1521,10 @@ public class InventoryQuotaConsumptionService {
                 rs.getString("source_text"), rs.getInt("period_days"), rs.getBoolean("included_in_quota"),
                 rs.getString("binding_type"), rs.getBigDecimal("source_numerator"),
                 rs.getBigDecimal("source_denominator"), rs.getBigDecimal("standard_quantity"),
-                rs.getBigDecimal("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("care_type")
+                rs.getBigDecimal("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("care_type"),
+                rs.getString("usage_status"), rs.getBigDecimal("reported_quantity"), rs.getString("reported_unit"),
+                rs.getBigDecimal("confirmed_quantity"), rs.getString("usage_confirmed_by"),
+                rs.getString("usage_confirmed_at"), rs.getString("count_unit"), rs.getBigDecimal("count_per_unit")
             ),
             reportId
         );
@@ -1347,9 +1536,10 @@ public class InventoryQuotaConsumptionService {
             """
             SELECT l.*, r.source_text, r.period_days, r.included_in_quota, r.binding_type,
                    r.source_numerator, r.source_denominator, r.standard_quantity, r.fixed_adjustment,
-                   r.measurement_scope, r.care_type
+                   r.measurement_scope, r.care_type, i.count_unit, i.count_per_unit
             FROM inventory_department_daily_report_lines l
             LEFT JOIN inventory_quota_rules r ON r.id = l.quota_rule_id
+            LEFT JOIN inventory_items i ON i.id = l.item_id
             WHERE l.id = ?
             """,
             (rs, rowNum) -> new LineRow(
@@ -1363,7 +1553,10 @@ public class InventoryQuotaConsumptionService {
                 rs.getString("source_text"), rs.getInt("period_days"), rs.getBoolean("included_in_quota"),
                 rs.getString("binding_type"), rs.getBigDecimal("source_numerator"),
                 rs.getBigDecimal("source_denominator"), rs.getBigDecimal("standard_quantity"),
-                rs.getBigDecimal("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("care_type")
+                rs.getBigDecimal("fixed_adjustment"), rs.getString("measurement_scope"), rs.getString("care_type"),
+                rs.getString("usage_status"), rs.getBigDecimal("reported_quantity"), rs.getString("reported_unit"),
+                rs.getBigDecimal("confirmed_quantity"), rs.getString("usage_confirmed_by"),
+                rs.getString("usage_confirmed_at"), rs.getString("count_unit"), rs.getBigDecimal("count_per_unit")
             ),
             lineId
         );
@@ -1575,6 +1768,18 @@ public class InventoryQuotaConsumptionService {
         }
     }
 
+    private static BigDecimal decimalOrNull(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.path(field);
+        if (value == null || value.isMissingNode() || value.isNull()) return null;
+        String text = value.asText("").trim();
+        if (text.isEmpty()) return null;
+        try {
+            return new BigDecimal(text);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
     private static BigDecimal scale(BigDecimal value) {
         return (value == null ? BigDecimal.ZERO : value).setScale(3, RoundingMode.HALF_UP);
     }
@@ -1629,7 +1834,9 @@ public class InventoryQuotaConsumptionService {
         int total() { return outpatient + inpatient + manual; }
     }
     private record MissingItem(String itemId, String itemName, String unit) {}
-    private record QuotaRuleRow(String id, String itemId, String itemName, String itemUnit, String bindingType,
+    private record QuotaRuleRow(String id, String itemId, String itemName, String itemUnit,
+                                String countUnit, BigDecimal countPerUnit,
+                                String bindingType,
                                 String careType, String measurementScope, BigDecimal standardQuantity,
                                 BigDecimal fixedAdjustment, String toleranceMode, BigDecimal toleranceValue,
                                 String sourceRowKey, BigDecimal sourceNumerator, BigDecimal sourceDenominator,
@@ -1647,7 +1854,10 @@ public class InventoryQuotaConsumptionService {
                            String sourceText, int periodDays, boolean includedInQuota, String bindingType,
                            BigDecimal sourceNumerator, BigDecimal sourceDenominator,
                            BigDecimal standardQuantity, BigDecimal fixedAdjustment,
-                           String measurementScope, String careType) {}
+                           String measurementScope, String careType,
+                           String usageStatus, BigDecimal reportedQuantity, String reportedUnit,
+                           BigDecimal confirmedQuantity, String usageConfirmedBy, String usageConfirmedAt,
+                           String countUnit, BigDecimal countPerUnit) {}
     private record ExceptionRow(String id, String reportId, String lineId, String departmentKey, String departmentName,
                                 LocalDate businessDate, String itemId, String itemName, String unit,
                                 BigDecimal quotaQuantity, BigDecimal actualQuantity, BigDecimal extraQuantity,
@@ -1657,5 +1867,7 @@ public class InventoryQuotaConsumptionService {
     private record PhotoRow(String id, String exceptionId, String storagePath, String contentType, String originalName,
                             String departmentKey) {}
     private record Allocation(Balance balance, BigDecimal quantity) {}
+    private record UsageConfirmation(String status, BigDecimal reportedQuantity, String reportedUnit,
+                                     BigDecimal confirmedQuantity, String confirmedBy, String confirmedAt) {}
     public record PhotoFile(String id, String contentType, String originalName, FileSystemResource resource) {}
 }

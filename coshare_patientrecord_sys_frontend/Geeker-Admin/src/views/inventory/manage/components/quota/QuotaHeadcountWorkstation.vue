@@ -82,6 +82,15 @@
               </div>
               <div class="qhw-headcount-actions">
                 <span class="qhw-headcount-total">合计 <b>{{ headcountTotal }}</b> 人</span>
+                <el-button
+                  v-if="fixedUsagePilot && !completed && !locked"
+                  plain
+                  type="primary"
+                  size="small"
+                  @click="openFixedUsage"
+                >
+                  确认固定耗材<template v-if="fixedUsageSummary"> · {{ fixedUsageSummary }}</template>
+                </el-button>
                 <el-button v-if="canReportException" plain type="warning" size="small" @click="openExceptionFor()">
                   上报例外
                 </el-button>
@@ -117,6 +126,13 @@
                       <span class="qhw-billing-tag" :class="`is-${billingOf(row).key}`">
                         {{ billingOf(row).label }}
                       </span>
+                      <span
+                        v-if="showUsageTag(row)"
+                        class="qhw-usage-tag"
+                        :class="`is-${usageTone(row)}`"
+                      >
+                        {{ usageLabel(row) }}
+                      </span>
                     </span>
                   </template>
                 </el-table-column>
@@ -140,6 +156,9 @@
                     >
                       {{ formatQuantity(liveQuotaOf(row)) }}
                     </span>
+                    <small v-if="approxCountOf(row)" class="qhw-count-approx">
+                      ≈ {{ approxCountOf(row) }} {{ row.countUnit }}
+                    </small>
                   </template>
                 </el-table-column>
                 <el-table-column label="实扣" width="100" align="right">
@@ -222,6 +241,16 @@
         @open-day="openDayFromDrawer"
       />
 
+      <QuotaFixedUsageDrawer
+        v-if="fixedUsagePilot"
+        v-model="fixedUsageVisible"
+        :report-id="draft?.id || ''"
+        :department-name="departmentName"
+        :business-date="businessDate"
+        :lines="allLines"
+        @saved="onFixedUsageSaved"
+      />
+
       <el-dialog v-model="confirmVisible" title="确认提交今日人数？" width="780px" style="max-width: 92vw" class="qhw-modal qhw-confirm-dialog">
         <div class="qhw-confirm-summary">
           <div>
@@ -268,19 +297,21 @@
             <p class="qhw-confirm-sub">不随人数变化</p>
             <div v-if="confirmDailyLines.length" class="qhw-confirm-subhead">每日固定</div>
             <div v-for="line in confirmDailyLines" :key="line.lineId || line.quotaRuleId" class="qhw-confirm-item">
-              <span>
+              <span class="qhw-confirm-name">
                 {{ line.itemName }}
                 <small v-if="line.sourceText">· {{ line.sourceText }}</small>
+                <small v-if="usageDetail(line)" class="qhw-confirm-usage">{{ usageDetail(line) }}</small>
               </span>
-              <strong>{{ formatQuantity(liveQuotaOf(line)) }} {{ line.unit }}</strong>
+              <strong>{{ formatQuantity(confirmQuantityOf(line)) }} {{ line.unit }}</strong>
             </div>
             <div v-if="confirmPeriodLines.length" class="qhw-confirm-subhead">周期摊消</div>
             <div v-for="line in confirmPeriodLines" :key="line.lineId || line.quotaRuleId" class="qhw-confirm-item">
-              <span>
+              <span class="qhw-confirm-name">
                 {{ line.itemName }}
                 <small v-if="line.sourceText">· {{ line.sourceText }}</small>
+                <small v-if="usageDetail(line)" class="qhw-confirm-usage">{{ usageDetail(line) }}</small>
               </span>
-              <strong>{{ formatQuantity(liveQuotaOf(line)) }} {{ line.unit }}</strong>
+              <strong>{{ formatQuantity(confirmQuantityOf(line)) }} {{ line.unit }}</strong>
             </div>
             <p v-if="!confirmDailyLines.length && !confirmPeriodLines.length" class="qhw-confirm-empty">无</p>
           </section>
@@ -419,6 +450,7 @@ import PatientConsumptionWorkspace from "../PatientConsumptionWorkspace.vue";
 import PatientEvidencePanel from "../PatientEvidencePanel.vue";
 import DepartmentFillCalendar from "../DepartmentFillCalendar.vue";
 import QuotaDayDetailDrawer from "./QuotaDayDetailDrawer.vue";
+import QuotaFixedUsageDrawer from "./QuotaFixedUsageDrawer.vue";
 import {
   billingCategory,
   deductionStatus,
@@ -462,6 +494,7 @@ const confirmVisible = ref(false);
 const correctionVisible = ref(false);
 const exceptionVisible = ref(false);
 const dayDetailVisible = ref(false);
+const fixedUsageVisible = ref(false);
 const dayDetailRef = ref<InstanceType<typeof QuotaDayDetailDrawer>>();
 const fillCalendarRef = ref<InstanceType<typeof DepartmentFillCalendar>>();
 const savedAt = ref("");
@@ -523,6 +556,25 @@ const confirmPerLines = computed(() => confirmGroups.value.find(group => group.k
 const confirmDailyLines = computed(() => confirmGroups.value.find(group => group.key === "daily")?.lines || []);
 const confirmPeriodLines = computed(() => confirmGroups.value.find(group => group.key === "period")?.lines || []);
 const onDemandLines = computed(() => allLines.value.filter(line => line.exceptionOnly));
+const fixedUsagePilot = computed(() => props.departmentKey === "tcm-pharmacy");
+const fixedLines = computed(() =>
+  allLines.value.filter(
+    line =>
+      !line.exceptionOnly &&
+      line.includedInQuota !== false &&
+      line.bindingType !== "PER_PERSON" &&
+      Number(line.quotaQuantity || 0) > 0
+  )
+);
+const fixedUsageSummary = computed(() => {
+  if (!fixedUsagePilot.value) return "";
+  const notUsed = fixedLines.value.filter(line => line.usageStatus === "NOT_USED").length;
+  const short = fixedLines.value.filter(line => line.usageStatus === "SHORT_USE").length;
+  const parts: string[] = [];
+  if (notUsed) parts.push(`未使用${notUsed}`);
+  if (short) parts.push(`少用${short}`);
+  return parts.join(" / ");
+});
 const confirmComposition = computed(() => {
   const source =
     draft.value?.status === "DRAFT"
@@ -564,6 +616,47 @@ const liveQuotaOf = (row: any) => {
   return completed.value ? Number(line.quotaQuantity || 0) : liveQuotaQuantity(line, headcountInputs.value);
 };
 const billingOf = (row: any) => billingCategory(row as InventoryDepartmentDailyReportLine);
+const isFixedUsageLine = (line: InventoryDepartmentDailyReportLine) =>
+  !line.exceptionOnly &&
+  line.includedInQuota !== false &&
+  line.bindingType !== "PER_PERSON" &&
+  Number(line.quotaQuantity || 0) > 0;
+const showUsageTag = (row: any) =>
+  fixedUsagePilot.value && isFixedUsageLine(row as InventoryDepartmentDailyReportLine) && Boolean(row.usageStatus);
+const usageLabel = (row: any) => {
+  if (row.usageStatus === "NOT_USED") return "未使用";
+  if (row.usageStatus === "SHORT_USE") return "少用";
+  return "按定额";
+};
+const usageTone = (row: any) => {
+  if (row.usageStatus === "NOT_USED") return "not-used";
+  if (row.usageStatus === "SHORT_USE") return "short";
+  return "quota";
+};
+const usageDetail = (line: InventoryDepartmentDailyReportLine) => {
+  if (!fixedUsagePilot.value || !isFixedUsageLine(line)) return "";
+  if (line.usageStatus === "NOT_USED") return "今日未使用";
+  if (line.usageStatus === "SHORT_USE") {
+    const reported = Number(line.reportedQuantity || 0);
+    const confirmed = Number(line.confirmedQuantity || 0).toFixed(3);
+    return `少用 ${reported} ${line.reportedUnit || line.unit} = ${confirmed} ${line.unit}`;
+  }
+  return "";
+};
+const confirmQuantityOf = (line: InventoryDepartmentDailyReportLine) => {
+  if (fixedUsagePilot.value && isFixedUsageLine(line)) {
+    if (line.usageStatus === "NOT_USED") return 0;
+    if (line.usageStatus === "SHORT_USE") return Number(line.confirmedQuantity || 0);
+  }
+  return liveQuotaOf(line);
+};
+const approxCountOf = (row: any) => {
+  if (!fixedUsagePilot.value) return "";
+  const line = row as InventoryDepartmentDailyReportLine;
+  const factor = Number(line.countPerUnit || 0);
+  if (!line.countUnit || factor <= 0) return "";
+  return (Math.round(Number(liveQuotaOf(line)) * factor * 10) / 10).toFixed(1);
+};
 const rowClassName = ({ row }: { row: any }) => `is-${billingOf(row).key}`;
 const deductionOf = (row: any) => deductionStatus(row as InventoryDepartmentDailyReportLine);
 const deductionTagType = (row: any) => {
@@ -727,13 +820,34 @@ const openConfirm = async () => {
   confirmVisible.value = true;
 };
 
+const openFixedUsage = async () => {
+  if (!draft.value?.id) {
+    const saved = await saveHeadcount();
+    if (!saved?.id) return;
+  }
+  fixedUsageVisible.value = true;
+};
+
+const onFixedUsageSaved = (report: InventoryDepartmentDailyReport) => {
+  applyDraft(report);
+};
+
 const submitReport = async () => {
   if (!draft.value?.id) return;
   submitting.value = true;
   try {
-    if (draft.value.status === "DRAFT") {
+    if (draft.value.status === "DRAFT" && entryMode.value === "DAILY") {
       const saved = await saveHeadcount();
       if (!saved?.id) return;
+    }
+    if (fixedUsagePilot.value) {
+      const invalid = allLines.value.find(
+        line => line.usageStatus === "SHORT_USE" && (line.reportedQuantity == null || line.confirmedQuantity == null)
+      );
+      if (invalid) {
+        ElMessage.warning(`${invalid.itemName} 已选择少用，请先填写实际使用数量`);
+        return;
+      }
     }
     const result = await submitInventoryDepartmentDailyReportApi(draft.value.id);
     applyDraft(result.data);
@@ -1096,6 +1210,42 @@ onBeforeUnmount(() => {
   }
 }
 
+.qhw-usage-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 999px;
+
+  &.is-quota {
+    color: var(--qhw-muted);
+    background: var(--qhw-surface-2);
+    border-color: var(--qhw-line);
+  }
+
+  &.is-not-used {
+    color: #8a5a13;
+    background: var(--qhw-warm-soft);
+    border-color: #ebd8bd;
+  }
+
+  &.is-short {
+    color: #2f6b58;
+    background: var(--qhw-accent-soft);
+    border-color: #d5e5dc;
+  }
+}
+
+.qhw-count-approx {
+  display: block;
+  color: var(--qhw-muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-align: right;
+}
+
 .qhw-quota-head {
   display: inline-flex;
   gap: 5px;
@@ -1327,6 +1477,16 @@ onBeforeUnmount(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  > .qhw-confirm-name {
+    white-space: normal;
+  }
+
+  .qhw-confirm-usage {
+    display: block;
+    margin-top: 2px;
+    color: var(--qhw-warm);
   }
 
   small {

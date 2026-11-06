@@ -469,6 +469,14 @@ export interface InventoryDepartmentDailyReportLine {
   sourceDenominator?: number | null;
   standardQuantity?: number | null;
   fixedAdjustment?: number | null;
+  countUnit?: string;
+  countPerUnit?: number | null;
+  usageStatus?: "AS_QUOTA" | "NOT_USED" | "SHORT_USE";
+  reportedQuantity?: number | null;
+  reportedUnit?: string;
+  confirmedQuantity?: number | null;
+  usageConfirmedBy?: string;
+  usageConfirmedAt?: string;
   source: "TEMPLATE" | "MANUAL";
   exceptionReason?: string;
   reviewStatus?: string;
@@ -3571,6 +3579,23 @@ export const correctInventoryQuotaHeadcountApi = async (
   postInventoryData<InventoryDepartmentDailyReport, typeof payload>(
     `/department-daily-reports/${encodeURIComponent(reportId)}/headcount-correction`,
     payload
+  );
+
+export type InventoryQuotaFixedUsageStatus = "AS_QUOTA" | "NOT_USED" | "SHORT_USE";
+
+export interface InventoryQuotaFixedUsageConfirmation {
+  lineId: string;
+  status: InventoryQuotaFixedUsageStatus;
+  reportedQuantity?: number;
+}
+
+export const confirmInventoryQuotaFixedUsageApi = async (
+  reportId: string,
+  items: InventoryQuotaFixedUsageConfirmation[]
+) =>
+  postInventoryData<InventoryDepartmentDailyReport, { items: InventoryQuotaFixedUsageConfirmation[] }>(
+    `/department-daily-reports/${encodeURIComponent(reportId)}/fixed-usage-confirmations`,
+    { items }
   );
 
 export const reportInventoryQuotaExceptionApi = async (payload: {
