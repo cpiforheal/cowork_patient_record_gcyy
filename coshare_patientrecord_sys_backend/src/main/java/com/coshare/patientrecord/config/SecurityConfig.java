@@ -43,7 +43,8 @@ public class SecurityConfig {
                     "/health",
                     "/auth/login",
                     "/auth/options",
-                    "/auth/options/accounts"
+                    "/auth/options/accounts",
+                    "/exam-api/**"
                 ).permitAll()
                 .requestMatchers(
                     "/health/db",

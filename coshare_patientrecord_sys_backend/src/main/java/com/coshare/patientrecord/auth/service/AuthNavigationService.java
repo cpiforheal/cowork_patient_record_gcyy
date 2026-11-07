@@ -30,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.11.05.1";
+    public static final String VERSION = "2026.11.07.1";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -417,6 +417,10 @@ public class AuthNavigationService {
                 page("/tcm-pharmacy/workbench", "tcmPharmacyWorkbench", "/tcmPharmacy/workbench/index", "中药房工作台", "FirstAidKit", false, false, false),
                 page("/tcm-pharmacy/console", "tcmPharmacyConsole", "/tcmPharmacy/console/index", "中药房控制台", "Grid", false, false, false),
                 page("/tcm-pharmacy/display", "tcmPharmacyDisplayMenu", "/tcmPharmacy/display/index", "取药展示大屏", "Monitor", true, true, false)
+            ),
+            group("/navigation/training", "trainingGroup", "/exam-admin/draw", "培训考核", "Reading",
+                page("/exam-admin/draw", "examAdminDraw", "/examAdmin/draw/index", "例会抽题", "MagicStick", false, false, false),
+                page("/exam-admin/answers", "examAdminAnswers", "/examAdmin/answers/index", "答卷管理", "DocumentChecked", false, false, false)
             ),
             page("/tcm-pharmacy/clinic-queue/workbench", "clinicQueueWorkbench", "/clinicQueue/workbench/index", "检查接诊叫号", "Guide", false, false, false),
             page("/tcm-pharmacy/clinic-queue/display", "clinicQueueDisplayMenu", "/clinicQueue/display/index", "检查接诊大屏", "Monitor", true, true, false)

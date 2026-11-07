@@ -19,6 +19,17 @@ export const staticRouter: RouteRecordRaw[] = [
     }
   },
   {
+    path: "/exam",
+    name: "clinicExam",
+    component: () => import("@/views/exam/index.vue"),
+    meta: {
+      title: "医保合规与DIP考核",
+      isHide: true,
+      isFull: true,
+      isKeepAlive: false
+    }
+  },
+  {
     path: "/layout",
     name: "layout",
     component: () => import("@/layouts/index.vue"),
