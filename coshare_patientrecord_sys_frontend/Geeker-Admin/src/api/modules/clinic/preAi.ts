@@ -451,6 +451,16 @@ export interface TcmWorkbenchResult {
   list: TcmWorkbenchRow[];
 }
 
+export interface PendingRoutingRecord extends RoutingRecord {
+  patientName: string;
+  visitNo: number;
+}
+
+export const getPendingRoutingRecordsApi = async () => {
+  const result = await clinicFetch(`/pre-ai/encounters/routing-records`, { headers: authHeaders() });
+  return clinicResponse(await parseClinicApiResponse<{ list: PendingRoutingRecord[] }>(result));
+};
+
 export const getRoutingRecordsApi = async (encounterId: string) => {
   const result = await clinicFetch(`/pre-ai/encounters/${encounterId}/routing-records`, { headers: authHeaders() });
   return clinicResponse(await parseClinicApiResponse<{ list: RoutingRecord[] }>(result));

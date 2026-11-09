@@ -39,6 +39,42 @@
       </article>
     </section>
 
+    <section v-if="canHandleRouting && pendingRoutings.length" class="routing-pending">
+      <header>
+        <strong>待处理转诊 / 会诊</strong>
+        <small>{{ pendingRoutings.length }} 条 · 来自中医科消化内科</small>
+      </header>
+      <div v-for="row in pendingRoutings" :key="row.id" class="routing-pending-row">
+        <div class="routing-pending-main">
+          <el-tag size="small" :type="row.recordType === 'REFERRAL' ? 'warning' : 'primary'" effect="light">
+            {{ row.recordType === "REFERRAL" ? "转肛肠" : "会诊" }}
+          </el-tag>
+          <strong>{{ row.patientName || "未命名患者" }}</strong>
+          <span>第 {{ row.visitNo }} 次就诊</span>
+          <small>{{ row.reason }}</small>
+          <small class="routing-pending-time">{{ row.requestedAt }}</small>
+        </div>
+        <div class="routing-pending-actions">
+          <el-button
+            size="small"
+            type="success"
+            plain
+            :loading="routingPendingId === row.id"
+            @click="handlePendingRouting(row, 'ACCEPT')"
+            >接收</el-button
+          >
+          <el-button
+            size="small"
+            type="danger"
+            plain
+            :disabled="routingPendingId === row.id"
+            @click="handlePendingRouting(row, 'REJECT')"
+            >拒绝</el-button
+          >
+        </div>
+      </div>
+    </section>
+
     <section class="room-grid">
       <article
         v-for="room in dashboard.rooms"
@@ -519,10 +555,14 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStore } from "@/stores/modules/user";
 import { getPatientListApi, type PatientRow } from "@/api/modules/clinic";
 import {
+  getPendingRoutingRecordsApi,
   getPreAiWorkspaceApi,
+  handleConsultationApi,
+  handleReferralApi,
   importLegacyPreAiEncounterApi,
   registerAndIssueExistingPreAiEncounterApi,
-  registerAndIssuePreAiEncounterApi
+  registerAndIssuePreAiEncounterApi,
+  type PendingRoutingRecord
 } from "@/api/modules/clinic/preAi";
 import { confirmTcmDirection } from "../../preAi/encounters/directionGuard";
 import RegistrationFormFields from "@/views/preAi/encounters/components/RegistrationFormFields.vue";
@@ -563,6 +603,9 @@ import {
 const router = useRouter();
 const userStore = useUserStore();
 const role = computed(() => userStore.userInfo.role || "frontdesk");
+const canHandleRouting = computed(() => ["admin", "frontdesk", "reception", "doctor"].includes(role.value));
+const pendingRoutings = ref<PendingRoutingRecord[]>([]);
+const routingPendingId = ref("");
 const loading = ref(false);
 const submitting = ref(false);
 const operationPending = ref("");
@@ -785,10 +828,39 @@ async function refreshAfterFailure() {
     ElMessage.warning("最新队列状态刷新失败，请稍后手动刷新");
   }
 }
+async function loadPendingRoutings() {
+  if (!canHandleRouting.value) return;
+  try {
+    const { data } = await getPendingRoutingRecordsApi();
+    pendingRoutings.value = data.list;
+  } catch {
+    // 转诊待办属于辅助信息，加载失败不阻断叫号主流程。
+  }
+}
+async function handlePendingRouting(row: PendingRoutingRecord, action: "ACCEPT" | "REJECT") {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      action === "ACCEPT" ? "接收后患者将转入肛肠分支，请填写接收说明" : "请填写拒绝原因",
+      `${row.recordType === "REFERRAL" ? "转诊" : "会诊"} · ${row.patientName || "患者"}`,
+      { inputValidator: value => !!value?.trim() || "原因不能为空" }
+    );
+    routingPendingId.value = row.id;
+    if (row.recordType === "REFERRAL") await handleReferralApi(row.id, action, value.trim());
+    else await handleConsultationApi(row.id, action === "ACCEPT" ? "ACCEPT" : "REJECT", value.trim());
+    ElMessage.success(action === "ACCEPT" ? "已接收" : "已拒绝");
+    await Promise.all([loadPendingRoutings(), load(true)]);
+  } catch (error: any) {
+    if (error === "cancel" || error === "close") return;
+    ElMessage.error(error?.message || "处理失败");
+  } finally {
+    routingPendingId.value = "";
+  }
+}
 async function load(silent = false) {
   const requestSeq = ++dashboardRequestSeq;
   ++workspaceRequestSeq;
   if (!silent) loading.value = true;
+  void loadPendingRoutings();
   try {
     const { data } = await getQueueDashboardApi(keyword.value);
     if (requestSeq !== dashboardRequestSeq) return;
@@ -1376,6 +1448,57 @@ onBeforeUnmount(() => {
   display: block;
   margin: 7px 0;
   font-size: 30px;
+}
+.routing-pending {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #e6d9c2;
+  border-radius: 10px;
+  background: #fdf9f1;
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+    small {
+      color: #8a7a5e;
+    }
+  }
+}
+.routing-pending-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px dashed #eadfcc;
+  &:first-of-type {
+    border-top: 0;
+  }
+}
+.routing-pending-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  span {
+    color: #6b6255;
+    font-size: 12px;
+  }
+  small {
+    color: #8a7a5e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.routing-pending-time {
+  margin-left: auto;
+}
+.routing-pending-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .room-grid {
   display: grid;

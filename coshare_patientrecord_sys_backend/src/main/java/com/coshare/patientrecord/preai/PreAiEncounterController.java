@@ -154,6 +154,11 @@ public class PreAiEncounterController {
         return ApiResult.of(200, "转诊申请已提交", service.createReferral(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @GetMapping("/routing-records")
+    public ApiResult<Map<String, Object>> pendingRoutingRecords() {
+        return ApiResult.success(service.pendingRoutingRecords(AuthPermission.currentUserOrThrow()));
+    }
+
     @GetMapping("/{encounterId}/routing-records")
     public ApiResult<Map<String, Object>> routingRecords(@PathVariable String encounterId) {
         return ApiResult.success(service.routingRecords(encounterId, AuthPermission.currentUserOrThrow()));

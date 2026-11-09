@@ -1215,6 +1215,25 @@ public class PreAiEncounterService {
         return routingRecord(routingId);
     }
 
+    public Map<String, Object> pendingRoutingRecords(SessionUser user) {
+        requireRole(user, "admin", "frontdesk", "reception", "doctor");
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query("""
+            SELECT r.*, e.visit_no, e.patient_json
+            FROM pre_ai_encounter_routing_records r
+            JOIN pre_ai_encounters e ON e.id = r.encounter_id
+            WHERE r.status = 'REQUESTED'
+            ORDER BY r.requested_at ASC LIMIT 50
+            """, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                ObjectNode row = readRoutingRecord(rs);
+                ObjectNode patient = readObject(rs.getString("patient_json"));
+                row.put("patientName", text(patient, "patientName"));
+                row.put("visitNo", rs.getInt("visit_no"));
+                rows.add(row);
+            });
+        return Map.of("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
+    }
+
     public Map<String, Object> routingRecords(String encounterId, SessionUser user) {
         requireEncounterAccess(encounterId, user);
         ArrayNode rows = objectMapper.createArrayNode();
