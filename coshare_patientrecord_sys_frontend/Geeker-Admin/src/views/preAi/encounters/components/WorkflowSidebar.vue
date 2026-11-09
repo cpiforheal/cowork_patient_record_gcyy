@@ -23,7 +23,7 @@
           <span>退回项</span>
         </div>
         <div>
-          <strong>{{ cards.length - completedCount }}</strong>
+          <strong>{{ flowCards.length - completedCount }}</strong>
           <span>待流转</span>
         </div>
       </div>
@@ -49,20 +49,24 @@
               current: isCurrent(card),
               pending: isPending(card),
               mine: card.editable,
-              skipped: statusOf(card) === 'SKIPPED'
+              skipped: statusOf(card) === 'SKIPPED',
+              route: card.kind === 'ROUTE',
+              inactive: card.inactive
             }"
             :aria-pressed="isActive(card)"
             :aria-current="isCurrent(card) ? 'step' : undefined"
-            :title="`${card.order}. ${card.title} · ${card.owner}`"
+            :title="card.inactive ? `${card.title} · 本方向不经过` : `${card.order}. ${card.title} · ${card.owner}`"
             @click="$emit('select', card)"
           >
-            <span class="workflow-order">{{ card.order }}</span>
+            <span class="workflow-order">{{ card.kind === "ROUTE" ? "↳" : card.order }}</span>
             <div class="workflow-card-main">
               <strong>{{ card.title }}</strong>
               <small>{{ card.owner }}</small>
               <em v-if="cardFlag(card)">{{ cardFlag(card) }}</em>
             </div>
-            <el-tag size="small" :type="statusType(statusOf(card))">
+            <el-tag v-if="card.inactive" size="small" type="info">本方向不经过</el-tag>
+            <el-tag v-else-if="card.kind === 'ROUTE'" size="small" type="warning">{{ card.note || "本方向" }}</el-tag>
+            <el-tag v-else size="small" :type="statusType(statusOf(card))">
               {{ statusLabel(card) }}
             </el-tag>
           </button>
@@ -79,11 +83,15 @@ import type { PreAiEncounterStatus, PreAiStageCode, PreAiStageStatus, PreAiWorks
 export interface WorkflowCard {
   key: string;
   order: number;
-  kind: "STAGE" | "AUX";
+  kind: "STAGE" | "AUX" | "ROUTE";
   title: string;
   owner: string;
   editable: boolean;
   stageCode?: PreAiStageCode;
+  /** 路由卡说明，如“本方向” */
+  note?: string;
+  /** 当前就诊方向不经过该节点 */
+  inactive?: boolean;
 }
 
 const props = defineProps<{
@@ -101,11 +109,13 @@ const props = defineProps<{
   isPending: (card: WorkflowCard) => boolean;
 }>();
 
-const completedCount = computed(() => props.cards.filter(card => ["COMPLETED", "SKIPPED"].includes(props.statusOf(card))).length);
-const returnedCount = computed(() => props.cards.filter(card => props.statusOf(card) === "RETURNED").length);
+const flowCards = computed(() => props.cards.filter(card => card.kind !== "ROUTE"));
+const completedCount = computed(() => flowCards.value.filter(card => ["COMPLETED", "SKIPPED"].includes(props.statusOf(card))).length);
+const returnedCount = computed(() => flowCards.value.filter(card => props.statusOf(card) === "RETURNED").length);
 
 // 卡片左下角只展示“语义状态”，选中反馈交给蓝环，避免两种高亮互相干扰
 const cardFlag = (card: WorkflowCard) => {
+  if (card.inactive || card.kind === "ROUTE") return "";
   if (props.isCurrent(card)) return "当前环节";
   if (props.isPending(card)) return "待补化验";
   if (card.editable) return "当前岗位可办理";
@@ -367,6 +377,28 @@ defineEmits<{
 }
 .workflow-card.skipped {
   opacity: 0.58;
+}
+/* 内科路由卡：虚线分叉，提示与中医辨证并列的另一条就诊流向 */
+.workflow-card.route {
+  border-style: dashed;
+  border-color: var(--el-color-warning-light-5);
+  background: color-mix(in srgb, var(--el-color-warning) 5%, var(--el-bg-color));
+}
+.workflow-card.route .workflow-order {
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+}
+/* 当前方向不经过的节点：整体降噪，不可继续办理 */
+.workflow-card.inactive {
+  opacity: 0.5;
+  filter: grayscale(1);
+  cursor: default;
+}
+.workflow-card.inactive:hover {
+  transform: none;
+  border-color: var(--el-border-color-light);
+  background: var(--el-bg-color);
+  box-shadow: none;
 }
 .workflow-order {
   width: 34px;

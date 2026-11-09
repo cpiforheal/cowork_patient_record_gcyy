@@ -3444,10 +3444,28 @@ const workflowCards = computed<WorkflowCard[]>(() => {
       editable: canReview.value
     }
   ];
+  if (workspace.value?.encounter.careDirection === "TCM_DIGESTIVE") {
+    // 化验及之前与肛肠流程一致；分叉后仅保留内科与复核，医生方案、手术节点置灰
+    const digestiveSkipped = new Set<PreAiStageCode>(["DOCTOR", "SURGERY"]);
+    cards.forEach(card => {
+      if (card.kind === "STAGE" && card.stageCode && digestiveSkipped.has(card.stageCode)) card.inactive = true;
+    });
+    const tcmIndex = cards.findIndex(card => card.key === "TCM");
+    cards.splice(tcmIndex, 0, {
+      key: "INTERNAL_ROUTE",
+      order: 6,
+      kind: "ROUTE",
+      stageCode: "TCM",
+      title: "内科 · 消化内科",
+      owner: "消化内科接诊",
+      editable: false,
+      note: "本方向"
+    });
+  }
   return cards;
 });
 const workflowProgress = computed(() => {
-  const statuses = workflowCards.value.map(card => workflowCardStatus(card));
+  const statuses = workflowCards.value.filter(card => card.kind !== "ROUTE").map(card => workflowCardStatus(card));
   return {
     total: statuses.length,
     completed: statuses.filter(status => ["COMPLETED", "SKIPPED"].includes(status)).length,
@@ -3867,10 +3885,11 @@ const runWithConcurrency = async <T,>(items: T[], limit: number, worker: (item: 
 };
 const stageSubmission = (code: PreAiStageCode) => workspace.value?.stages.find(item => item.stageCode === code);
 const workflowCardStatus = (card: WorkflowCard): PreAiStageStatus => {
-  if (card.kind === "STAGE" && card.stageCode) return stageSubmission(card.stageCode)?.status || "DRAFT";
+  if (card.stageCode) return stageSubmission(card.stageCode)?.status || "DRAFT";
   return (labTask.value?.status as PreAiStageStatus) || "DRAFT";
 };
 const workflowCardStatusLabel = (card: WorkflowCard) => {
+  if (card.kind === "ROUTE") return card.note || "本方向";
   if (card.kind === "AUX") {
     if (labTask.value?.status === "COMPLETED") return `${workspace.value?.labReports.length || 0} 份 · 已完成`;
     if (labTask.value?.status === "RETURNED") return "已退回";
@@ -4763,6 +4782,10 @@ const createFollowUp = async () => {
 };
 
 const selectWorkflowCard = async (card: WorkflowCard) => {
+  if (card.inactive) {
+    ElMessage.info(`${card.title}不属于当前就诊方向，无需填写`);
+    return;
+  }
   const alreadyActive = isWorkflowCardActive(card);
   if (
     alreadyActive &&
