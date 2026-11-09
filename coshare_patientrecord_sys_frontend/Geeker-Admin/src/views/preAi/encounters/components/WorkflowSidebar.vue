@@ -40,37 +40,82 @@
 
     <el-scrollbar class="workflow-scrollbar">
       <div class="workflow-flow">
-        <div v-for="card in cards" :key="card.key" class="workflow-card-wrap">
-          <button
-            type="button"
-            class="workflow-card"
-            :class="{
-              active: isActive(card),
-              current: isCurrent(card),
-              pending: isPending(card),
-              mine: card.editable,
-              skipped: statusOf(card) === 'SKIPPED',
-              route: card.kind === 'ROUTE',
-              inactive: card.inactive
-            }"
-            :aria-pressed="isActive(card)"
-            :aria-current="isCurrent(card) ? 'step' : undefined"
-            :title="card.inactive ? `${card.title} · 本方向不经过` : `${card.order}. ${card.title} · ${card.owner}`"
-            @click="$emit('select', card)"
-          >
-            <span class="workflow-order">{{ card.kind === "ROUTE" ? "↳" : card.order }}</span>
-            <div class="workflow-card-main">
-              <strong>{{ card.title }}</strong>
-              <small>{{ card.owner }}</small>
-              <em v-if="cardFlag(card)">{{ cardFlag(card) }}</em>
+        <template v-for="group in renderGroups" :key="group.key">
+          <div v-if="group.type === 'single'" class="workflow-card-wrap">
+            <button
+              type="button"
+              class="workflow-card"
+              :class="{
+                active: isActive(group.card),
+                current: isCurrent(group.card),
+                pending: isPending(group.card),
+                mine: group.card.editable,
+                skipped: statusOf(group.card) === 'SKIPPED',
+                route: group.card.kind === 'ROUTE',
+                inactive: group.card.inactive
+              }"
+              :aria-pressed="isActive(group.card)"
+              :aria-current="isCurrent(group.card) ? 'step' : undefined"
+              :title="
+                group.card.inactive
+                  ? `${group.card.title} · 本方向不经过`
+                  : `${group.card.order}. ${group.card.title} · ${group.card.owner}`
+              "
+              @click="$emit('select', group.card)"
+            >
+              <span class="workflow-order">{{ group.card.kind === "ROUTE" ? "↳" : group.card.order }}</span>
+              <div class="workflow-card-main">
+                <strong>{{ group.card.title }}</strong>
+                <small>{{ group.card.owner }}</small>
+                <em v-if="cardFlag(group.card)">{{ cardFlag(group.card) }}</em>
+              </div>
+              <el-tag v-if="group.card.inactive" size="small" type="info">本方向不经过</el-tag>
+              <el-tag v-else-if="group.card.kind === 'ROUTE'" size="small" type="warning">{{
+                group.card.note || "本方向"
+              }}</el-tag>
+              <el-tag v-else size="small" :type="statusType(statusOf(group.card))">
+                {{ statusLabel(group.card) }}
+              </el-tag>
+            </button>
+          </div>
+          <div v-else class="workflow-fork">
+            <div v-for="lane in group.lanes" :key="lane.key" class="workflow-lane" :class="{ inactive: lane.inactive }">
+              <div class="workflow-lane-cards">
+                <div v-for="card in lane.cards" :key="card.key" class="workflow-card-wrap">
+                  <button
+                    type="button"
+                    class="workflow-card"
+                    :class="{
+                      active: isActive(card),
+                      current: isCurrent(card),
+                      pending: isPending(card),
+                      mine: card.editable,
+                      skipped: statusOf(card) === 'SKIPPED',
+                      route: card.kind === 'ROUTE',
+                      inactive: card.inactive
+                    }"
+                    :aria-pressed="isActive(card)"
+                    :aria-current="isCurrent(card) ? 'step' : undefined"
+                    :title="card.inactive ? `${card.title} · 本方向不经过` : `${card.order}. ${card.title} · ${card.owner}`"
+                    @click="$emit('select', card)"
+                  >
+                    <span class="workflow-order">{{ card.kind === "ROUTE" ? "↳" : card.order }}</span>
+                    <div class="workflow-card-main">
+                      <strong>{{ card.title }}</strong>
+                      <small>{{ card.owner }}</small>
+                      <em v-if="cardFlag(card)">{{ cardFlag(card) }}</em>
+                    </div>
+                    <el-tag v-if="card.inactive" size="small" type="info">本方向不经过</el-tag>
+                    <el-tag v-else-if="card.kind === 'ROUTE'" size="small" type="warning">{{ card.note || "本方向" }}</el-tag>
+                    <el-tag v-else size="small" :type="statusType(statusOf(card))">
+                      {{ statusLabel(card) }}
+                    </el-tag>
+                  </button>
+                </div>
+              </div>
             </div>
-            <el-tag v-if="card.inactive" size="small" type="info">本方向不经过</el-tag>
-            <el-tag v-else-if="card.kind === 'ROUTE'" size="small" type="warning">{{ card.note || "本方向" }}</el-tag>
-            <el-tag v-else size="small" :type="statusType(statusOf(card))">
-              {{ statusLabel(card) }}
-            </el-tag>
-          </button>
-        </div>
+          </div>
+        </template>
       </div>
     </el-scrollbar>
   </section>
@@ -92,7 +137,13 @@ export interface WorkflowCard {
   note?: string;
   /** 当前就诊方向不经过该节点 */
   inactive?: boolean;
+  /** 分叉后所属支路：内科消化 / 肛肠常规 */
+  lane?: "DIGESTIVE" | "ANORECTAL";
 }
+
+type RenderGroup =
+  | { type: "single"; key: string; card: WorkflowCard }
+  | { type: "fork"; key: string; lanes: Array<{ key: "DIGESTIVE" | "ANORECTAL"; inactive: boolean; cards: WorkflowCard[] }> };
 
 const props = defineProps<{
   workspace: PreAiWorkspace;
@@ -109,7 +160,26 @@ const props = defineProps<{
   isPending: (card: WorkflowCard) => boolean;
 }>();
 
-const flowCards = computed(() => props.cards.filter(card => card.kind !== "ROUTE"));
+const flowCards = computed(() => props.cards.filter(card => card.kind !== "ROUTE" && !card.inactive));
+const renderGroups = computed<RenderGroup[]>(() => {
+  const cards = props.cards;
+  const firstLane = cards.findIndex(card => card.lane);
+  if (firstLane < 0) return cards.map<RenderGroup>(card => ({ type: "single", key: card.key, card }));
+  let lastLane = firstLane;
+  cards.forEach((card, index) => {
+    if (card.lane) lastLane = index;
+  });
+  const groups: RenderGroup[] = cards
+    .slice(0, firstLane)
+    .map<RenderGroup>(card => ({ type: "single", key: card.key, card }));
+  const lanes = (["DIGESTIVE", "ANORECTAL"] as const)
+    .map(lane => ({ key: lane, cards: cards.filter(card => card.lane === lane) }))
+    .filter(lane => lane.cards.length)
+    .map(lane => ({ ...lane, inactive: lane.cards.every(card => card.inactive) }));
+  groups.push({ type: "fork", key: "FORK", lanes });
+  cards.slice(lastLane + 1).forEach(card => groups.push({ type: "single", key: card.key, card }));
+  return groups;
+});
 const completedCount = computed(() => flowCards.value.filter(card => ["COMPLETED", "SKIPPED"].includes(props.statusOf(card))).length);
 const returnedCount = computed(() => flowCards.value.filter(card => props.statusOf(card) === "RETURNED").length);
 
@@ -268,6 +338,32 @@ defineEmits<{
 .workflow-sidebar.compact .workflow-flow {
   gap: 12px;
   padding-bottom: 6px;
+}
+/* 分叉：内科消化在上、肛肠常规在下，上下两条支路 */
+.workflow-fork {
+  display: grid;
+  gap: 8px;
+  align-self: center;
+  padding: 6px 10px;
+  border-left: 1px dashed var(--el-color-primary-light-5);
+  border-radius: 12px;
+}
+.workflow-lane {
+  display: flex;
+  align-items: center;
+  border-radius: 14px;
+}
+.workflow-lane-cards {
+  display: flex;
+  gap: 18px;
+}
+/* 支路最后一张卡不向外伸箭头，避免指向空白 */
+.workflow-lane-cards > .workflow-card-wrap:last-child::after,
+.workflow-lane-cards > .workflow-card-wrap:last-child::before {
+  display: none;
+}
+.workflow-sidebar.compact .workflow-lane-cards {
+  gap: 12px;
 }
 .workflow-card-wrap {
   position: relative;

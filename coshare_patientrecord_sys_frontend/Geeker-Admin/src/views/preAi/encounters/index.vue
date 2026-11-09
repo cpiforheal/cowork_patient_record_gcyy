@@ -3445,10 +3445,13 @@ const workflowCards = computed<WorkflowCard[]>(() => {
     }
   ];
   if (workspace.value?.encounter.careDirection === "TCM_DIGESTIVE") {
-    // 化验及之前与肛肠流程一致；分叉后仅保留内科与复核，医生方案、手术节点置灰
-    const digestiveSkipped = new Set<PreAiStageCode>(["DOCTOR", "SURGERY"]);
+    // 化验及之前与肛肠流程一致；此后分上下两支：内科消化在上，肛肠常规在下并置灰
     cards.forEach(card => {
-      if (card.kind === "STAGE" && card.stageCode && digestiveSkipped.has(card.stageCode)) card.inactive = true;
+      if (card.key === "TCM") card.lane = "DIGESTIVE";
+      if (card.key === "DOCTOR" || card.key === "SURGERY") {
+        card.lane = "ANORECTAL";
+        card.inactive = true;
+      }
     });
     const tcmIndex = cards.findIndex(card => card.key === "TCM");
     cards.splice(tcmIndex, 0, {
@@ -3459,13 +3462,27 @@ const workflowCards = computed<WorkflowCard[]>(() => {
       title: "内科 · 消化内科",
       owner: "消化内科接诊",
       editable: false,
-      note: "本方向"
+      note: "本方向",
+      lane: "DIGESTIVE"
+    });
+    const doctorIndex = cards.findIndex(card => card.key === "DOCTOR");
+    cards.splice(doctorIndex, 0, {
+      key: "ANORECTAL_ROUTE",
+      order: 7,
+      kind: "ROUTE",
+      title: "肛肠常规流程",
+      owner: "肛肠专科",
+      editable: false,
+      inactive: true,
+      lane: "ANORECTAL"
     });
   }
   return cards;
 });
 const workflowProgress = computed(() => {
-  const statuses = workflowCards.value.filter(card => card.kind !== "ROUTE").map(card => workflowCardStatus(card));
+  const statuses = workflowCards.value
+    .filter(card => card.kind !== "ROUTE" && !card.inactive)
+    .map(card => workflowCardStatus(card));
   return {
     total: statuses.length,
     completed: statuses.filter(status => ["COMPLETED", "SKIPPED"].includes(status)).length,
