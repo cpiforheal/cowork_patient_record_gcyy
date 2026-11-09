@@ -3445,44 +3445,33 @@ const workflowCards = computed<WorkflowCard[]>(() => {
     }
   ];
   if (workspace.value?.encounter.careDirection === "TCM_DIGESTIVE") {
-    // 化验及之前与肛肠流程一致；此后分上下两支：内科消化在上，肛肠常规在下并置灰
-    cards.forEach(card => {
-      if (card.key === "TCM") card.lane = "DIGESTIVE";
-      if (card.key === "DOCTOR" || card.key === "SURGERY") {
-        card.lane = "ANORECTAL";
-        card.inactive = true;
-      }
-    });
+    // 全流程与肛肠共用；仅在中医辨证下方纵向并列一张消化内科登记信息卡
+    const registrationForm = stageForms.REGISTRATION;
+    const symptomText = Array.isArray(registrationForm.digestiveSymptoms)
+      ? registrationForm.digestiveSymptoms.filter(Boolean).join("、")
+      : String(registrationForm.digestiveSymptoms || "");
+    const summary = [registrationForm.registrationChiefComplaint, symptomText, registrationForm.digestiveDuration]
+      .map(value => String(value || "").trim())
+      .filter(Boolean)
+      .join(" · ");
     const tcmIndex = cards.findIndex(card => card.key === "TCM");
-    cards.splice(tcmIndex, 0, {
-      key: "INTERNAL_ROUTE",
+    cards.splice(tcmIndex + 1, 0, {
+      key: "DIGESTIVE_INFO",
       order: 6,
       kind: "ROUTE",
-      stageCode: "TCM",
-      title: "内科 · 消化内科",
-      owner: "消化内科接诊",
-      editable: false,
-      note: "本方向",
-      lane: "DIGESTIVE"
-    });
-    const doctorIndex = cards.findIndex(card => card.key === "DOCTOR");
-    cards.splice(doctorIndex, 0, {
-      key: "ANORECTAL_ROUTE",
-      order: 7,
-      kind: "ROUTE",
-      title: "肛肠常规流程",
-      owner: "肛肠专科",
-      editable: false,
-      inactive: true,
-      lane: "ANORECTAL"
+      stageCode: "REGISTRATION",
+      title: "消化内科",
+      owner: "登记信息",
+      editable: canHandleStage("REGISTRATION", "FRONT_DESK"),
+      note: stageSubmission("REGISTRATION")?.status === "COMPLETED" ? "已登记" : "待登记",
+      summary: summary || "暂无消化症状记录",
+      stacked: true
     });
   }
   return cards;
 });
 const workflowProgress = computed(() => {
-  const statuses = workflowCards.value
-    .filter(card => card.kind !== "ROUTE" && !card.inactive)
-    .map(card => workflowCardStatus(card));
+  const statuses = workflowCards.value.filter(card => card.kind !== "ROUTE").map(card => workflowCardStatus(card));
   return {
     total: statuses.length,
     completed: statuses.filter(status => ["COMPLETED", "SKIPPED"].includes(status)).length,
@@ -4799,10 +4788,6 @@ const createFollowUp = async () => {
 };
 
 const selectWorkflowCard = async (card: WorkflowCard) => {
-  if (card.inactive) {
-    ElMessage.info(`${card.title}不属于当前就诊方向，无需填写`);
-    return;
-  }
   const alreadyActive = isWorkflowCardActive(card);
   if (
     alreadyActive &&

@@ -51,68 +51,54 @@
                 pending: isPending(group.card),
                 mine: group.card.editable,
                 skipped: statusOf(group.card) === 'SKIPPED',
-                route: group.card.kind === 'ROUTE',
-                inactive: group.card.inactive
+                route: group.card.kind === 'ROUTE'
               }"
               :aria-pressed="isActive(group.card)"
               :aria-current="isCurrent(group.card) ? 'step' : undefined"
-              :title="
-                group.card.inactive
-                  ? `${group.card.title} · 本方向不经过`
-                  : `${group.card.order}. ${group.card.title} · ${group.card.owner}`
-              "
+              :title="`${group.card.order}. ${group.card.title} · ${group.card.owner}`"
               @click="$emit('select', group.card)"
             >
               <span class="workflow-order">{{ group.card.kind === "ROUTE" ? "↳" : group.card.order }}</span>
               <div class="workflow-card-main">
                 <strong>{{ group.card.title }}</strong>
                 <small>{{ group.card.owner }}</small>
+                <span v-if="group.card.summary" class="workflow-card-summary">{{ group.card.summary }}</span>
                 <em v-if="cardFlag(group.card)">{{ cardFlag(group.card) }}</em>
               </div>
-              <el-tag v-if="group.card.inactive" size="small" type="info">本方向不经过</el-tag>
-              <el-tag v-else-if="group.card.kind === 'ROUTE'" size="small" type="warning">{{
-                group.card.note || "本方向"
-              }}</el-tag>
+              <el-tag v-if="group.card.kind === 'ROUTE'" size="small" type="warning">{{ group.card.note || "登记信息" }}</el-tag>
               <el-tag v-else size="small" :type="statusType(statusOf(group.card))">
                 {{ statusLabel(group.card) }}
               </el-tag>
             </button>
           </div>
-          <div v-else class="workflow-fork">
-            <div v-for="lane in group.lanes" :key="lane.key" class="workflow-lane" :class="{ inactive: lane.inactive }">
-              <div class="workflow-lane-cards">
-                <div v-for="card in lane.cards" :key="card.key" class="workflow-card-wrap">
-                  <button
-                    type="button"
-                    class="workflow-card"
-                    :class="{
-                      active: isActive(card),
-                      current: isCurrent(card),
-                      pending: isPending(card),
-                      mine: card.editable,
-                      skipped: statusOf(card) === 'SKIPPED',
-                      route: card.kind === 'ROUTE',
-                      inactive: card.inactive
-                    }"
-                    :aria-pressed="isActive(card)"
-                    :aria-current="isCurrent(card) ? 'step' : undefined"
-                    :title="card.inactive ? `${card.title} · 本方向不经过` : `${card.order}. ${card.title} · ${card.owner}`"
-                    @click="$emit('select', card)"
-                  >
-                    <span class="workflow-order">{{ card.kind === "ROUTE" ? "↳" : card.order }}</span>
-                    <div class="workflow-card-main">
-                      <strong>{{ card.title }}</strong>
-                      <small>{{ card.owner }}</small>
-                      <em v-if="cardFlag(card)">{{ cardFlag(card) }}</em>
-                    </div>
-                    <el-tag v-if="card.inactive" size="small" type="info">本方向不经过</el-tag>
-                    <el-tag v-else-if="card.kind === 'ROUTE'" size="small" type="warning">{{ card.note || "本方向" }}</el-tag>
-                    <el-tag v-else size="small" :type="statusType(statusOf(card))">
-                      {{ statusLabel(card) }}
-                    </el-tag>
-                  </button>
+          <div v-else class="workflow-card-stack">
+            <div v-for="card in group.cards" :key="card.key" class="workflow-card-wrap">
+              <button
+                type="button"
+                class="workflow-card"
+                :class="{
+                  active: isActive(card),
+                  current: isCurrent(card),
+                  pending: isPending(card),
+                  mine: card.editable,
+                  skipped: statusOf(card) === 'SKIPPED',
+                  route: card.kind === 'ROUTE'
+                }"
+                :aria-pressed="isActive(card)"
+                :aria-current="isCurrent(card) ? 'step' : undefined"
+                :title="`${card.order}. ${card.title} · ${card.owner}`"
+                @click="$emit('select', card)"
+              >
+                <span class="workflow-order">{{ card.kind === "ROUTE" ? "↳" : card.order }}</span>
+                <div class="workflow-card-main">
+                  <strong>{{ card.title }}</strong>
+                  <small>{{ card.owner }}</small>
+                  <span v-if="card.summary" class="workflow-card-summary">{{ card.summary }}</span>
+                  <em v-if="cardFlag(card)">{{ cardFlag(card) }}</em>
                 </div>
-              </div>
+                <el-tag v-if="card.kind === 'ROUTE'" size="small" type="warning">{{ card.note || "登记信息" }}</el-tag>
+                <el-tag v-else size="small" :type="statusType(statusOf(card))">{{ statusLabel(card) }}</el-tag>
+              </button>
             </div>
           </div>
         </template>
@@ -133,17 +119,17 @@ export interface WorkflowCard {
   owner: string;
   editable: boolean;
   stageCode?: PreAiStageCode;
-  /** 路由卡说明，如“本方向” */
+  /** 附加卡说明，如“已登记” */
   note?: string;
-  /** 当前就诊方向不经过该节点 */
-  inactive?: boolean;
-  /** 分叉后所属支路：内科消化 / 肛肠常规 */
-  lane?: "DIGESTIVE" | "ANORECTAL";
+  /** 与上一张卡纵向并列 */
+  stacked?: boolean;
+  /** 附加卡摘要（如消化症状） */
+  summary?: string;
 }
 
 type RenderGroup =
   | { type: "single"; key: string; card: WorkflowCard }
-  | { type: "fork"; key: string; lanes: Array<{ key: "DIGESTIVE" | "ANORECTAL"; inactive: boolean; cards: WorkflowCard[] }> };
+  | { type: "stack"; key: string; cards: WorkflowCard[] };
 
 const props = defineProps<{
   workspace: PreAiWorkspace;
@@ -160,24 +146,18 @@ const props = defineProps<{
   isPending: (card: WorkflowCard) => boolean;
 }>();
 
-const flowCards = computed(() => props.cards.filter(card => card.kind !== "ROUTE" && !card.inactive));
+const flowCards = computed(() => props.cards.filter(card => card.kind !== "ROUTE"));
 const renderGroups = computed<RenderGroup[]>(() => {
-  const cards = props.cards;
-  const firstLane = cards.findIndex(card => card.lane);
-  if (firstLane < 0) return cards.map<RenderGroup>(card => ({ type: "single", key: card.key, card }));
-  let lastLane = firstLane;
-  cards.forEach((card, index) => {
-    if (card.lane) lastLane = index;
+  const groups: RenderGroup[] = [];
+  props.cards.forEach(card => {
+    const last = groups[groups.length - 1];
+    if (card.stacked && last) {
+      if (last.type === "stack") last.cards.push(card);
+      else groups[groups.length - 1] = { type: "stack", key: last.key, cards: [last.card, card] };
+      return;
+    }
+    groups.push({ type: "single", key: card.key, card });
   });
-  const groups: RenderGroup[] = cards
-    .slice(0, firstLane)
-    .map<RenderGroup>(card => ({ type: "single", key: card.key, card }));
-  const lanes = (["DIGESTIVE", "ANORECTAL"] as const)
-    .map(lane => ({ key: lane, cards: cards.filter(card => card.lane === lane) }))
-    .filter(lane => lane.cards.length)
-    .map(lane => ({ ...lane, inactive: lane.cards.every(card => card.inactive) }));
-  groups.push({ type: "fork", key: "FORK", lanes });
-  cards.slice(lastLane + 1).forEach(card => groups.push({ type: "single", key: card.key, card }));
   return groups;
 });
 const completedCount = computed(() => flowCards.value.filter(card => ["COMPLETED", "SKIPPED"].includes(props.statusOf(card))).length);
@@ -185,7 +165,7 @@ const returnedCount = computed(() => flowCards.value.filter(card => props.status
 
 // 卡片左下角只展示“语义状态”，选中反馈交给蓝环，避免两种高亮互相干扰
 const cardFlag = (card: WorkflowCard) => {
-  if (card.inactive || card.kind === "ROUTE") return "";
+  if (card.kind === "ROUTE") return "";
   if (props.isCurrent(card)) return "当前环节";
   if (props.isPending(card)) return "待补化验";
   if (card.editable) return "当前岗位可办理";
@@ -339,31 +319,42 @@ defineEmits<{
   gap: 12px;
   padding-bottom: 6px;
 }
-/* 分叉：内科消化在上、肛肠常规在下，上下两条支路 */
-.workflow-fork {
+/* 中医辨证与消化内科纵向并列，其余节点仍保持单行流程 */
+.workflow-card-stack {
+  position: relative;
   display: grid;
   gap: 8px;
+  width: 186px;
   align-self: center;
-  padding: 6px 10px;
-  border-left: 1px dashed var(--el-color-primary-light-5);
-  border-radius: 12px;
 }
-.workflow-lane {
-  display: flex;
-  align-items: center;
-  border-radius: 14px;
+.workflow-sidebar.compact .workflow-card-stack {
+  width: 154px;
 }
-.workflow-lane-cards {
-  display: flex;
-  gap: 18px;
-}
-/* 支路最后一张卡不向外伸箭头，避免指向空白 */
-.workflow-lane-cards > .workflow-card-wrap:last-child::after,
-.workflow-lane-cards > .workflow-card-wrap:last-child::before {
+/* 纵向并列内部不画横向箭头，支路整体向右接续 */
+.workflow-card-stack > .workflow-card-wrap::after,
+.workflow-card-stack > .workflow-card-wrap::before {
   display: none;
 }
-.workflow-sidebar.compact .workflow-lane-cards {
-  gap: 12px;
+.workflow-card-stack::after {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 4px);
+  width: 10px;
+  height: 2px;
+  content: "";
+  background: linear-gradient(90deg, var(--el-border-color), var(--el-color-primary-light-7));
+}
+.workflow-card-stack::before {
+  position: absolute;
+  z-index: 2;
+  top: calc(50% - 4px);
+  left: calc(100% + 11px);
+  width: 8px;
+  height: 8px;
+  content: "";
+  border-top: 2px solid var(--el-color-primary-light-5);
+  border-right: 2px solid var(--el-color-primary-light-5);
+  transform: rotate(45deg);
 }
 .workflow-card-wrap {
   position: relative;
@@ -474,7 +465,7 @@ defineEmits<{
 .workflow-card.skipped {
   opacity: 0.58;
 }
-/* 内科路由卡：虚线分叉，提示与中医辨证并列的另一条就诊流向 */
+/* 消化内科登记卡：与中医辨证同列的补充卡片 */
 .workflow-card.route {
   border-style: dashed;
   border-color: var(--el-color-warning-light-5);
@@ -484,17 +475,13 @@ defineEmits<{
   color: var(--el-color-warning-dark-2);
   background: var(--el-color-warning-light-9);
 }
-/* 当前方向不经过的节点：整体降噪，不可继续办理 */
-.workflow-card.inactive {
-  opacity: 0.5;
-  filter: grayscale(1);
-  cursor: default;
-}
-.workflow-card.inactive:hover {
-  transform: none;
-  border-color: var(--el-border-color-light);
-  background: var(--el-bg-color);
-  box-shadow: none;
+.workflow-card-summary {
+  display: block;
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .workflow-order {
   width: 34px;
