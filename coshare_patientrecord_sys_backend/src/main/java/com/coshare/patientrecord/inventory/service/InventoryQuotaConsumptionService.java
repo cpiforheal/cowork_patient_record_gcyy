@@ -49,7 +49,7 @@ public class InventoryQuotaConsumptionService {
     private static final Set<String> MODES = Set.of(MODE_LEGACY, MODE_QUOTA);
     private static final Set<String> PER_PERSON = Set.of("PER_PERSON");
     private static final Set<String> DAILY_FIXED = Set.of("FIXED_DAILY", "ON_DEMAND", "EQUIPMENT");
-    private static final Set<String> USAGE_STATUSES = Set.of("AS_QUOTA", "NOT_USED", "SHORT_USE");
+    private static final Set<String> USAGE_STATUSES = Set.of("AS_QUOTA", "NOT_USED", "SHORT_USE", "MORE_USE");
     private static final Set<String> FIXED_USAGE_PILOT_DEPARTMENTS = Set.of("tcm-pharmacy");
     private static final BigDecimal THREE = BigDecimal.valueOf(3);
 
@@ -462,10 +462,10 @@ public class InventoryQuotaConsumptionService {
                 """
                 UPDATE inventory_department_daily_report_lines
                 SET actual_quantity = ?, quota_deducted_quantity = ?, quota_event_id = ?,
-                    extra_quantity = 0, exception_status = 'NONE', exception_approved_quantity = 0
+                    extra_quantity = ?, exception_status = 'NONE', exception_approved_quantity = 0
                 WHERE id = ?
                 """,
-                deductQuantity, lineDeducted, eventId, line.id()
+                deductQuantity, lineDeducted, eventId, deductQuantity.subtract(quota).max(BigDecimal.ZERO), line.id()
             );
         }
         jdbcTemplate.update(
@@ -600,12 +600,13 @@ public class InventoryQuotaConsumptionService {
             }
             String status = text(item, "status").toUpperCase(Locale.ROOT);
             if (!USAGE_STATUSES.contains(status)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "确认状态只能为按定额、未使用或少用");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "确认状态只能为按定额、未使用、少用或多用");
             }
             BigDecimal quota = scale(line.quotaQuantity());
             BigDecimal reported = null;
             String reportedUnit = "";
             BigDecimal confirmed;
+            BigDecimal extra = BigDecimal.ZERO;
             if ("AS_QUOTA".equals(status)) {
                 confirmed = quota;
             } else if ("NOT_USED".equals(status)) {
@@ -613,7 +614,7 @@ public class InventoryQuotaConsumptionService {
             } else {
                 BigDecimal quantity = decimalOrNull(item, "reportedQuantity");
                 if (quantity == null || quantity.signum() < 0) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, line.itemName() + " 少用需填写实际使用数量");
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, line.itemName() + " 需填写实际使用数量");
                 }
                 BigDecimal factor = line.countPerUnit();
                 String countUnit = safe(line.countUnit());
@@ -625,20 +626,27 @@ public class InventoryQuotaConsumptionService {
                     confirmed = scale(quantity);
                 }
                 reported = quantity;
-                if (confirmed.compareTo(quota) >= 0) {
+                if ("SHORT_USE".equals(status)) {
+                    if (confirmed.compareTo(quota) >= 0) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            line.itemName() + " 少用数量必须小于今日定额；如已用满请选择按定额使用，超出定额请选择多用");
+                    }
+                } else if (confirmed.compareTo(quota) <= 0) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        line.itemName() + " 少用数量必须小于今日定额；如已用满请选择按定额使用");
+                        line.itemName() + " 多用数量必须大于今日定额；未超出定额请选择少用或按定额使用");
+                } else {
+                    extra = scale(confirmed.subtract(quota));
                 }
             }
             jdbcTemplate.update(
                 """
                 UPDATE inventory_department_daily_report_lines
                 SET usage_status = ?, reported_quantity = ?, reported_unit = ?, confirmed_quantity = ?,
-                    usage_confirmed_by = ?, usage_confirmed_at = ?
+                    extra_quantity = ?, usage_confirmed_by = ?, usage_confirmed_at = ?
                 WHERE id = ?
                 """,
-                status, reported, blankToNull(reportedUnit), confirmed, user.name(), LocalDateTime.now().toString(),
-                line.id()
+                status, reported, blankToNull(reportedUnit), confirmed, extra, user.name(),
+                LocalDateTime.now().toString(), line.id()
             );
             repository.log(user.name(), "确认固定耗材", "department_daily_report_line",
                 department.name() + " " + report.businessDate(),
@@ -1094,13 +1102,14 @@ public class InventoryQuotaConsumptionService {
 
     private static String normalizeUsageStatus(String status) {
         String value = safe(status).toUpperCase(Locale.ROOT);
-        return "NOT_USED".equals(value) || "SHORT_USE".equals(value) ? value : "AS_QUOTA";
+        return "NOT_USED".equals(value) || "SHORT_USE".equals(value) || "MORE_USE".equals(value) ? value : "AS_QUOTA";
     }
 
     private static String usageStatusLabel(String status) {
         return switch (normalizeUsageStatus(status)) {
             case "NOT_USED" -> "今日未使用";
             case "SHORT_USE" -> "少用";
+            case "MORE_USE" -> "多用";
             default -> "按定额使用";
         };
     }
@@ -1134,6 +1143,12 @@ public class InventoryQuotaConsumptionService {
                 status = "AS_QUOTA";
                 confirmed = quota;
             }
+        } else if ("MORE_USE".equals(status)) {
+            confirmed = scale(confirmation.confirmedQuantity());
+            if (confirmed.compareTo(quota) <= 0) {
+                status = "AS_QUOTA";
+                confirmed = quota;
+            }
         } else {
             confirmed = quota;
         }
@@ -1160,6 +1175,10 @@ public class InventoryQuotaConsumptionService {
             BigDecimal confirmed = scale(line.confirmedQuantity());
             if (confirmed.signum() <= 0) return BigDecimal.ZERO;
             return confirmed.min(quota);
+        }
+        if ("MORE_USE".equals(status)) {
+            BigDecimal confirmed = scale(line.confirmedQuantity());
+            return confirmed.signum() <= 0 ? quota : confirmed.max(quota);
         }
         return quota;
     }

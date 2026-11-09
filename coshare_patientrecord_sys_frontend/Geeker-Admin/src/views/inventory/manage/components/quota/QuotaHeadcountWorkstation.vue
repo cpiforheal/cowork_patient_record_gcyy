@@ -570,9 +570,11 @@ const fixedUsageSummary = computed(() => {
   if (!fixedUsagePilot.value) return "";
   const notUsed = fixedLines.value.filter(line => line.usageStatus === "NOT_USED").length;
   const short = fixedLines.value.filter(line => line.usageStatus === "SHORT_USE").length;
+  const more = fixedLines.value.filter(line => line.usageStatus === "MORE_USE").length;
   const parts: string[] = [];
   if (notUsed) parts.push(`未使用${notUsed}`);
   if (short) parts.push(`少用${short}`);
+  if (more) parts.push(`多用${more}`);
   return parts.join(" / ");
 });
 const confirmComposition = computed(() => {
@@ -626,27 +628,30 @@ const showUsageTag = (row: any) =>
 const usageLabel = (row: any) => {
   if (row.usageStatus === "NOT_USED") return "未使用";
   if (row.usageStatus === "SHORT_USE") return "少用";
+  if (row.usageStatus === "MORE_USE") return "多用";
   return "按定额";
 };
 const usageTone = (row: any) => {
   if (row.usageStatus === "NOT_USED") return "not-used";
   if (row.usageStatus === "SHORT_USE") return "short";
+  if (row.usageStatus === "MORE_USE") return "more";
   return "quota";
 };
 const usageDetail = (line: InventoryDepartmentDailyReportLine) => {
   if (!fixedUsagePilot.value || !isFixedUsageLine(line)) return "";
   if (line.usageStatus === "NOT_USED") return "今日未使用";
-  if (line.usageStatus === "SHORT_USE") {
+  if (line.usageStatus === "SHORT_USE" || line.usageStatus === "MORE_USE") {
     const reported = Number(line.reportedQuantity || 0);
     const confirmed = Number(line.confirmedQuantity || 0).toFixed(3);
-    return `少用 ${reported} ${line.reportedUnit || line.unit} = ${confirmed} ${line.unit}`;
+    const prefix = line.usageStatus === "MORE_USE" ? "多用" : "少用";
+    return `${prefix} ${reported} ${line.reportedUnit || line.unit} = ${confirmed} ${line.unit}`;
   }
   return "";
 };
 const confirmQuantityOf = (line: InventoryDepartmentDailyReportLine) => {
   if (fixedUsagePilot.value && isFixedUsageLine(line)) {
     if (line.usageStatus === "NOT_USED") return 0;
-    if (line.usageStatus === "SHORT_USE") return Number(line.confirmedQuantity || 0);
+    if (line.usageStatus === "SHORT_USE" || line.usageStatus === "MORE_USE") return Number(line.confirmedQuantity || 0);
   }
   return liveQuotaOf(line);
 };
@@ -842,10 +847,12 @@ const submitReport = async () => {
     }
     if (fixedUsagePilot.value) {
       const invalid = allLines.value.find(
-        line => line.usageStatus === "SHORT_USE" && (line.reportedQuantity == null || line.confirmedQuantity == null)
+        line =>
+          (line.usageStatus === "SHORT_USE" || line.usageStatus === "MORE_USE") &&
+          (line.reportedQuantity == null || line.confirmedQuantity == null)
       );
       if (invalid) {
-        ElMessage.warning(`${invalid.itemName} 已选择少用，请先填写实际使用数量`);
+        ElMessage.warning(`${invalid.itemName} 已选择${invalid.usageStatus === "MORE_USE" ? "多用" : "少用"}，请先填写实际使用数量`);
         return;
       }
     }
@@ -1235,6 +1242,12 @@ onBeforeUnmount(() => {
     color: #2f6b58;
     background: var(--qhw-accent-soft);
     border-color: #d5e5dc;
+  }
+
+  &.is-more {
+    color: #a8452f;
+    background: #fbeee9;
+    border-color: #f0d4ca;
   }
 }
 

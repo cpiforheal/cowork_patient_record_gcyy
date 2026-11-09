@@ -13,7 +13,7 @@
         :closable="false"
         show-icon
         title="默认全部按定额使用"
-        description="今日确实没用就选“未使用”；少于定额就选“少用”并填实际数量。确认后按确认量扣库。"
+        description="今日确实没用就选“未使用”；少于定额选“少用”、超出定额选“多用”，填实际用量即可，系统按计数单位自动折算。"
       />
 
       <p v-if="!rows.length" class="qfud-empty">今日没有需要确认的固定或周期耗材。</p>
@@ -34,9 +34,10 @@
           <el-radio-button value="AS_QUOTA">按定额使用</el-radio-button>
           <el-radio-button value="NOT_USED">今日未使用</el-radio-button>
           <el-radio-button value="SHORT_USE">少用</el-radio-button>
+          <el-radio-button value="MORE_USE">多用</el-radio-button>
         </el-radio-group>
 
-        <div v-if="stateOf(line).status === 'SHORT_USE'" class="qfud-short">
+        <div v-if="needsQuantity(line)" class="qfud-short">
           <label>
             实际使用
             <el-input-number
@@ -50,7 +51,7 @@
             />
             <span class="qfud-unit">{{ countUnitOf(line) }}</span>
           </label>
-          <span class="qfud-convert" :class="{ 'is-invalid': shortInvalid(line) }">
+          <span class="qfud-convert" :class="{ 'is-invalid': quantityInvalid(line) }">
             <template v-if="!hasReported(line)">填写数量后自动折算成 {{ line.unit }}</template>
             <template v-else-if="hasCountUnit(line)">
               {{ Number(stateOf(line).reportedQuantity || 0) }} {{ line.countUnit }} = {{ exact(confirmedOf(line)) }} {{ line.unit }}
@@ -59,8 +60,8 @@
               计入 {{ exact(confirmedOf(line)) }} {{ line.unit }}
             </template>
           </span>
-          <small v-if="shortInvalid(line)" class="qfud-invalid">
-            少用数量必须小于定额 {{ exact(line.quotaQuantity) }} {{ line.unit }}；用满请选“按定额使用”
+          <small v-if="quantityInvalid(line)" class="qfud-invalid">
+            {{ invalidHint(line) }}
           </small>
         </div>
 
@@ -141,22 +142,35 @@ const exact = (value?: number | null) => Number(value || 0).toFixed(3);
 const approxQuota = (line: InventoryDepartmentDailyReportLine) =>
   (Math.round(Number(line.quotaQuantity || 0) * factorOf(line) * 10) / 10).toFixed(1);
 
+const needsQuantity = (line: InventoryDepartmentDailyReportLine) => {
+  const status = stateOf(line).status;
+  return status === "SHORT_USE" || status === "MORE_USE";
+};
+
 const confirmedOf = (line: InventoryDepartmentDailyReportLine) => {
   const state = stateOf(line);
   if (state.status === "NOT_USED") return 0;
-  if (state.status === "SHORT_USE") {
+  if (needsQuantity(line)) {
     const quantity = Number(state.reportedQuantity || 0);
     return round3(hasCountUnit(line) ? quantity / factorOf(line) : quantity);
   }
   return Number(line.quotaQuantity || 0);
 };
 
-const shortInvalid = (line: InventoryDepartmentDailyReportLine) => {
+const quantityInvalid = (line: InventoryDepartmentDailyReportLine) => {
   const state = stateOf(line);
-  if (state.status !== "SHORT_USE" || !hasReported(line)) return false;
+  if (!needsQuantity(line) || !hasReported(line)) return false;
   const quantity = Number(state.reportedQuantity);
   if (!Number.isFinite(quantity) || quantity < 0) return true;
-  return confirmedOf(line) >= Number(line.quotaQuantity || 0);
+  const quota = Number(line.quotaQuantity || 0);
+  return state.status === "SHORT_USE" ? confirmedOf(line) >= quota : confirmedOf(line) <= quota;
+};
+
+const invalidHint = (line: InventoryDepartmentDailyReportLine) => {
+  if (stateOf(line).status === "MORE_USE") {
+    return `多用数量必须大于定额 ${exact(line.quotaQuantity)} ${line.unit}${hasCountUnit(line) ? `（≈ ${approxQuota(line)} ${line.countUnit}）` : ""}；未超出请改选少用或按定额`;
+  }
+  return `少用数量必须小于定额 ${exact(line.quotaQuantity)} ${line.unit}；用满请选“按定额使用”，超出请选“多用”`;
 };
 
 const hasReported = (line: InventoryDepartmentDailyReportLine) => {
@@ -184,14 +198,14 @@ const resetAll = () => {
 };
 
 const save = async () => {
-  const missing = rows.value.filter(line => stateOf(line).status === "SHORT_USE" && !hasReported(line));
+  const missing = rows.value.filter(line => needsQuantity(line) && !hasReported(line));
   if (missing.length) {
-    ElMessage.warning(`${missing[0].itemName} 已选择少用，请填写实际使用数量`);
+    ElMessage.warning(`${missing[0].itemName} 已选择${stateOf(missing[0]).status === "MORE_USE" ? "多用" : "少用"}，请填写实际使用数量`);
     return;
   }
-  const invalid = rows.value.filter(shortInvalid);
+  const invalid = rows.value.filter(quantityInvalid);
   if (invalid.length) {
-    ElMessage.warning(`${invalid[0].itemName} 的少用数量不正确，请检查`);
+    ElMessage.warning(invalidHint(invalid[0]));
     return;
   }
   if (!props.reportId) {
@@ -202,7 +216,7 @@ const save = async () => {
   try {
     const items = rows.value.map(line => {
       const state = stateOf(line);
-      if (state.status === "SHORT_USE") {
+      if (needsQuantity(line)) {
         return { lineId: keyOf(line), status: state.status, reportedQuantity: Number(state.reportedQuantity || 0) };
       }
       return { lineId: keyOf(line), status: state.status };

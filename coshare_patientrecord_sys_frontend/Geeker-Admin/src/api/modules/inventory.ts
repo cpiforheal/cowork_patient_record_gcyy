@@ -471,7 +471,7 @@ export interface InventoryDepartmentDailyReportLine {
   fixedAdjustment?: number | null;
   countUnit?: string;
   countPerUnit?: number | null;
-  usageStatus?: "AS_QUOTA" | "NOT_USED" | "SHORT_USE";
+  usageStatus?: "AS_QUOTA" | "NOT_USED" | "SHORT_USE" | "MORE_USE";
   reportedQuantity?: number | null;
   reportedUnit?: string;
   confirmedQuantity?: number | null;
@@ -3581,7 +3581,7 @@ export const correctInventoryQuotaHeadcountApi = async (
     payload
   );
 
-export type InventoryQuotaFixedUsageStatus = "AS_QUOTA" | "NOT_USED" | "SHORT_USE";
+export type InventoryQuotaFixedUsageStatus = "AS_QUOTA" | "NOT_USED" | "SHORT_USE" | "MORE_USE";
 
 export interface InventoryQuotaFixedUsageConfirmation {
   lineId: string;
