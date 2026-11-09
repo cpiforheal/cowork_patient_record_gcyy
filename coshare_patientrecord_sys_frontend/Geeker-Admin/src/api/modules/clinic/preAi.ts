@@ -401,6 +401,24 @@ export const getPreAiEncountersApi = async () => {
 
 export type TcmWorkbenchStatus = "WAITING" | "IN_PROGRESS" | "COMPLETED";
 
+export interface RoutingRecord {
+  id: string;
+  encounterId: string;
+  recordType: "REFERRAL" | "CONSULTATION";
+  status: "REQUESTED" | "ACCEPTED" | "REJECTED" | "COMPLETED";
+  sourceDirection: string;
+  targetDirection: string;
+  sourceWorkbench: string;
+  targetWorkbench: string;
+  reason: string;
+  requestedBy: string;
+  requestedByRole: string;
+  acceptedBy: string;
+  requestedAt: string;
+  acceptedAt: string;
+  completedAt: string;
+}
+
 export interface TcmWorkbenchRow {
   encounterId: string;
   patientCaseId: string;
@@ -432,6 +450,47 @@ export interface TcmWorkbenchResult {
   counts: Record<TcmWorkbenchStatus, number>;
   list: TcmWorkbenchRow[];
 }
+
+export const getRoutingRecordsApi = async (encounterId: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encounterId}/routing-records`, { headers: authHeaders() });
+  return clinicResponse(await parseClinicApiResponse<{ list: RoutingRecord[] }>(result));
+};
+
+export const createReferralApi = async (encounterId: string, reason: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encounterId}/referrals`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reason })
+  });
+  return clinicResponse(await parseClinicApiResponse<RoutingRecord>(result));
+};
+
+export const createConsultationApi = async (encounterId: string, reason: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/${encounterId}/consultations`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reason })
+  });
+  return clinicResponse(await parseClinicApiResponse<RoutingRecord>(result));
+};
+
+export const handleReferralApi = async (routingId: string, action: "ACCEPT" | "REJECT", reason: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/routing-records/${routingId}/referral-action`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action, reason })
+  });
+  return clinicResponse(await parseClinicApiResponse<RoutingRecord>(result));
+};
+
+export const handleConsultationApi = async (routingId: string, action: "ACCEPT" | "REJECT" | "COMPLETE", reason: string) => {
+  const result = await clinicFetch(`/pre-ai/encounters/routing-records/${routingId}/consultation-action`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action, reason })
+  });
+  return clinicResponse(await parseClinicApiResponse<RoutingRecord>(result));
+};
 
 export const getTcmWorkbenchApi = async (params: { date?: string; from?: string; to?: string; keyword?: string }) => {
   const query = new URLSearchParams();

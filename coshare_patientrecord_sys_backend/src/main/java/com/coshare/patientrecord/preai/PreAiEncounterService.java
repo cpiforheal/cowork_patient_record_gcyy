@@ -1164,6 +1164,195 @@ public class PreAiEncounterService {
     }
 
     @Transactional
+    public Map<String, Object> createReferral(String encounterId, RoutingRequest request, SessionUser user) {
+        requireRole(user, "tcm", "admin");
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
+        String reason = safe(request == null ? null : request.reason());
+        if (reason.isBlank()) throw badRequest("请填写转诊原因");
+        String current = text(encounter, "careDirection", CARE_DIRECTION_ANORECTAL);
+        if (!CARE_DIRECTION_TCM_DIGESTIVE.equals(current)) throw conflict("当前患者不在中医消化分支");
+        ensureNoActiveConsumption(encounterId, "该病历仍有未冲销的患者耗用，必须先冲销后再转诊");
+        Map<String, Object> existing = findRoutingRecord(encounterId, "REFERRAL", Set.of("REQUESTED", "ACCEPTED"));
+        if (existing != null) return existing;
+        String id = "routing-" + UUID.randomUUID();
+        String timestamp = now();
+        jdbcTemplate.update("""
+            INSERT INTO pre_ai_encounter_routing_records
+              (id, encounter_id, record_type, status, source_direction, target_direction,
+               source_workbench, target_workbench, reason, requested_by, requested_by_role,
+               requested_at, updated_at)
+            VALUES (?, ?, 'REFERRAL', 'REQUESTED', ?, 'ANORECTAL', 'TCM', 'ANORECTAL', ?, ?, ?, ?, ?)
+            """, id, encounterId, current, reason, user.name(), user.role(), timestamp, timestamp);
+        audit(encounterId, "encounter.referral.request", "TCM", user, "申请转入肛肠分支：" + reason);
+        return routingRecord(id);
+    }
+
+    @Transactional
+    public Map<String, Object> handleReferral(String routingId, RoutingActionRequest request, SessionUser user) {
+        requireRole(user, "admin", "frontdesk", "reception", "doctor");
+        Map<String, Object> record = routingRecord(routingId);
+        String status = String.valueOf(record.get("status"));
+        if (!"REQUESTED".equals(status)) throw conflict("当前转诊记录已处理，不能重复操作");
+        String action = safe(request == null ? null : request.action()).toUpperCase(Locale.ROOT);
+        String reason = safe(request == null ? null : request.reason());
+        if (!Set.of("ACCEPT", "REJECT").contains(action)) throw badRequest("转诊操作只能为 ACCEPT 或 REJECT");
+        if (reason.isBlank()) throw badRequest("请填写转诊处理原因");
+        String encounterId = String.valueOf(record.get("encounterId"));
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
+        String nextStatus = "ACCEPT".equals(action) ? "ACCEPTED" : "REJECTED";
+        String timestamp = now();
+        int changed = jdbcTemplate.update("UPDATE pre_ai_encounter_routing_records SET status = ?, accepted_by = ?, accepted_by_role = ?, accepted_at = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'REQUESTED'",
+            nextStatus, user.name(), user.role(), timestamp, "ACCEPTED".equals(nextStatus) ? timestamp : null, timestamp, routingId);
+        if (changed == 0) throw conflict("转诊记录已被其他人处理，请刷新后重试");
+        if ("ACCEPTED".equals(nextStatus)) {
+            applyCareDirection(encounterId, encounter, CARE_DIRECTION_ANORECTAL, "中医转肛肠：" + reason, user);
+        }
+        audit(encounterId, "encounter.referral." + action.toLowerCase(Locale.ROOT), "TCM", user, reason);
+        return routingRecord(routingId);
+    }
+
+    public Map<String, Object> routingRecords(String encounterId, SessionUser user) {
+        requireEncounterAccess(encounterId, user);
+        ArrayNode rows = objectMapper.createArrayNode();
+        jdbcTemplate.query("SELECT * FROM pre_ai_encounter_routing_records WHERE encounter_id = ? ORDER BY requested_at DESC", (org.springframework.jdbc.core.RowCallbackHandler) rs -> rows.add(readRoutingRecord(rs)), encounterId);
+        return Map.of("list", objectMapper.convertValue(rows, new TypeReference<List<Map<String, Object>>>() {}));
+    }
+
+    @Transactional
+    public Map<String, Object> createConsultation(String encounterId, RoutingRequest request, SessionUser user) {
+        requireRole(user, "tcm", "admin");
+        requireEncounterAccess(encounterId, user);
+        ObjectNode encounter = loadEncounter(encounterId);
+        requireActiveEncounter(encounter);
+        String reason = safe(request == null ? null : request.reason());
+        if (reason.isBlank()) throw badRequest("请填写会诊原因");
+        ensureNoActiveConsumption(encounterId, "该病历仍有未冲销的患者耗用，必须先冲销后再申请会诊");
+        Map<String, Object> existing = findRoutingRecord(encounterId, "CONSULTATION", Set.of("REQUESTED", "ACCEPTED"));
+        if (existing != null) return existing;
+        String id = "routing-" + UUID.randomUUID();
+        String timestamp = now();
+        jdbcTemplate.update("""
+            INSERT INTO pre_ai_encounter_routing_records
+              (id, encounter_id, record_type, status, source_direction, target_direction,
+               source_workbench, target_workbench, reason, requested_by, requested_by_role,
+               requested_at, updated_at)
+            VALUES (?, ?, 'CONSULTATION', 'REQUESTED', ?, ?, 'TCM', 'ANORECTAL', ?, ?, ?, ?, ?)
+            """, id, encounterId, text(encounter, "careDirection", CARE_DIRECTION_ANORECTAL),
+            CARE_DIRECTION_ANORECTAL, reason, user.name(), user.role(), timestamp, timestamp);
+        audit(encounterId, "encounter.consultation.request", "TCM", user, "申请肛肠会诊：" + reason);
+        return routingRecord(id);
+    }
+
+    @Transactional
+    public Map<String, Object> handleConsultation(String routingId, RoutingActionRequest request, SessionUser user) {
+        requireRole(user, "admin", "reception", "doctor");
+        Map<String, Object> record = routingRecord(routingId);
+        String status = String.valueOf(record.get("status"));
+        if (!"REQUESTED".equals(status) && !"ACCEPTED".equals(status)) throw conflict("当前会诊记录不允许此操作");
+        String action = safe(request == null ? null : request.action()).toUpperCase(Locale.ROOT);
+        String reason = safe(request == null ? null : request.reason());
+        if (!Set.of("ACCEPT", "REJECT", "COMPLETE").contains(action)) throw badRequest("会诊操作不合法");
+        if (reason.isBlank()) throw badRequest("请填写会诊处理原因");
+        String nextStatus = switch (action) { case "ACCEPT" -> "ACCEPTED"; case "COMPLETE" -> "COMPLETED"; default -> "REJECTED"; };
+        String timestamp = now();
+        String encounterId = String.valueOf(record.get("encounterId"));
+        requireEncounterAccess(encounterId, user);
+        int changed = jdbcTemplate.update("UPDATE pre_ai_encounter_routing_records SET status = ?, accepted_by = COALESCE(accepted_by, ?), accepted_by_role = COALESCE(accepted_by_role, ?), accepted_at = COALESCE(accepted_at, ?), completed_at = ?, updated_at = ? WHERE id = ? AND status = ?",
+            nextStatus, user.name(), user.role(), timestamp, "COMPLETED".equals(nextStatus) ? timestamp : null, timestamp, routingId, status);
+        if (changed == 0) throw conflict("会诊记录已被其他人处理，请刷新后重试");
+        audit(encounterId, "encounter.consultation." + action.toLowerCase(Locale.ROOT), "TCM", user, reason);
+        return routingRecord(routingId);
+    }
+
+    private void ensureNoActiveConsumption(String encounterId, String message) {
+        Integer count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*) FROM inventory_consumption_events e
+            WHERE e.encounter_id = ? AND e.status = 'succeeded' AND e.event_kind = 'CONSUMPTION'
+              AND NOT EXISTS (SELECT 1 FROM inventory_consumption_events r
+                WHERE r.reversal_of_event_id = e.id AND r.status = 'succeeded' AND r.event_kind = 'REVERSAL')
+            """, Integer.class, encounterId);
+        if (count != null && count > 0) throw conflict(message);
+    }
+
+    private void applyCareDirection(String encounterId, ObjectNode encounter, String direction, String reason, SessionUser user) {
+        String previous = text(encounter, "careDirection", CARE_DIRECTION_ANORECTAL);
+        if (previous.equals(direction)) return;
+        ObjectNode registration = loadStage(encounterId, "REGISTRATION");
+        ObjectNode data = safeObject(registration.path("data")).deepCopy();
+        data.put("careDirection", direction);
+        String patientJson = toJson(data);
+        jdbcTemplate.update("UPDATE pre_ai_encounters SET care_direction = ?, patient_json = ?, updated_at = ? WHERE id = ?", direction, patientJson, now(), encounterId);
+        String patientCaseId = text(encounter, "patientCaseId");
+        if (!patientCaseId.isBlank()) jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", patientJson, now(), patientCaseId);
+        jdbcTemplate.update("UPDATE pre_ai_stage_submissions SET data_json = CAST(? AS JSON), version = version + 1, updated_at = ? WHERE encounter_id = ? AND stage_code = 'REGISTRATION'", patientJson, now(), encounterId);
+        invalidateReview(encounterId, user, reason);
+        refreshProgress(encounterId);
+        auditCareDirectionCorrection(encounterId, user, reason, previous, direction);
+    }
+
+    private Map<String, Object> findRoutingRecord(String encounterId, String type, Set<String> statuses) {
+        String placeholders = String.join(",", statuses.stream().map(value -> "?").toList());
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("SELECT * FROM pre_ai_encounter_routing_records WHERE encounter_id = ? AND record_type = ? AND status IN (" + placeholders + ") ORDER BY requested_at DESC LIMIT 1",
+            concatArgs(encounterId, type, statuses));
+        return rows.isEmpty() ? null : normalizeRoutingRecord(rows.get(0));
+    }
+
+    private Object[] concatArgs(String encounterId, String type, Set<String> statuses) {
+        List<Object> args = new ArrayList<>();
+        args.add(encounterId); args.add(type); args.addAll(statuses);
+        return args.toArray();
+    }
+
+    private Map<String, Object> routingRecord(String id) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("SELECT * FROM pre_ai_encounter_routing_records WHERE id = ?", id);
+        if (rows.isEmpty()) throw notFound("转诊或会诊记录不存在");
+        return normalizeRoutingRecord(rows.get(0));
+    }
+
+    private Map<String, Object> normalizeRoutingRecord(Map<String, Object> row) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        row.forEach((key, value) -> result.put(key, value == null ? "" : value));
+        result.put("encounterId", result.remove("encounter_id"));
+        result.put("recordType", result.remove("record_type"));
+        result.put("sourceDirection", result.remove("source_direction"));
+        result.put("targetDirection", result.remove("target_direction"));
+        result.put("sourceWorkbench", result.remove("source_workbench"));
+        result.put("targetWorkbench", result.remove("target_workbench"));
+        result.put("requestedBy", result.remove("requested_by"));
+        result.put("requestedByRole", result.remove("requested_by_role"));
+        result.put("acceptedBy", result.remove("accepted_by"));
+        result.put("acceptedByRole", result.remove("accepted_by_role"));
+        result.put("requestedAt", result.remove("requested_at"));
+        result.put("acceptedAt", result.remove("accepted_at"));
+        result.put("completedAt", result.remove("completed_at"));
+        result.put("updatedAt", result.remove("updated_at"));
+        return result;
+    }
+
+    private ObjectNode readRoutingRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("id", rs.getString("id"));
+        row.put("encounterId", rs.getString("encounter_id"));
+        row.put("recordType", rs.getString("record_type"));
+        row.put("status", rs.getString("status"));
+        row.put("sourceDirection", rs.getString("source_direction"));
+        row.put("targetDirection", rs.getString("target_direction"));
+        row.put("sourceWorkbench", rs.getString("source_workbench"));
+        row.put("targetWorkbench", rs.getString("target_workbench"));
+        row.put("reason", rs.getString("reason"));
+        row.put("requestedBy", rs.getString("requested_by"));
+        row.put("requestedAt", rs.getString("requested_at"));
+        row.put("acceptedBy", safe(rs.getString("accepted_by")));
+        row.put("acceptedAt", safe(rs.getString("accepted_at")));
+        row.put("completedAt", safe(rs.getString("completed_at")));
+        return row;
+    }
+
+    @Transactional
     public Map<String, Object> updateEncounterGrant(String encounterId, EncounterGrantRequest request, SessionUser user) {
         requireRole(user, "admin", "tcm");
         requireEncounterAccess(encounterId, user);
@@ -5037,6 +5226,8 @@ public class PreAiEncounterService {
     public record VisitMetaRequest(Map<String, Object> visitMeta) {}
     public record DepartmentCorrectionRequest(String departmentId, String reason) {}
     public record CareDirectionCorrectionRequest(String careDirection, String reason) {}
+    public record RoutingRequest(String reason) {}
+    public record RoutingActionRequest(String action, String reason) {}
     public record EncounterGrantRequest(String accountId, String status, String reason) {}
     private record DepartmentIdentity(String id, String name) {}
     private record DutyAccount(String id, String name, String role) {}

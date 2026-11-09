@@ -146,6 +146,43 @@ public class PreAiEncounterController {
             service.correctCareDirection(encounterId, request, AuthPermission.currentUserOrThrow()));
     }
 
+    @PostMapping("/{encounterId}/referrals")
+    public ApiResult<Map<String, Object>> createReferral(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.RoutingRequest request
+    ) {
+        return ApiResult.of(200, "转诊申请已提交", service.createReferral(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @GetMapping("/{encounterId}/routing-records")
+    public ApiResult<Map<String, Object>> routingRecords(@PathVariable String encounterId) {
+        return ApiResult.success(service.routingRecords(encounterId, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/routing-records/{routingId}/referral-action")
+    public ApiResult<Map<String, Object>> handleReferral(
+        @PathVariable String routingId,
+        @RequestBody PreAiEncounterService.RoutingActionRequest request
+    ) {
+        return ApiResult.of(200, "转诊处理已保存", service.handleReferral(routingId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/{encounterId}/consultations")
+    public ApiResult<Map<String, Object>> createConsultation(
+        @PathVariable String encounterId,
+        @RequestBody PreAiEncounterService.RoutingRequest request
+    ) {
+        return ApiResult.of(200, "会诊申请已提交", service.createConsultation(encounterId, request, AuthPermission.currentUserOrThrow()));
+    }
+
+    @PostMapping("/routing-records/{routingId}/consultation-action")
+    public ApiResult<Map<String, Object>> handleConsultation(
+        @PathVariable String routingId,
+        @RequestBody PreAiEncounterService.RoutingActionRequest request
+    ) {
+        return ApiResult.of(200, "会诊处理已保存", service.handleConsultation(routingId, request, AuthPermission.currentUserOrThrow()));
+    }
+
     @PostMapping("/{encounterId}/department-grants")
     public ApiResult<Map<String, Object>> updateEncounterGrant(
         @PathVariable String encounterId,

@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS pre_ai_encounter_routing_records (
+  id VARCHAR(64) PRIMARY KEY,
+  encounter_id VARCHAR(64) NOT NULL,
+  record_type VARCHAR(16) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  source_direction VARCHAR(24) NOT NULL,
+  target_direction VARCHAR(24) NOT NULL,
+  source_workbench VARCHAR(32) NOT NULL,
+  target_workbench VARCHAR(32) NOT NULL,
+  reason VARCHAR(1000) NOT NULL,
+  requested_by VARCHAR(100) NOT NULL,
+  requested_by_role VARCHAR(32) NOT NULL,
+  accepted_by VARCHAR(100) NULL,
+  accepted_by_role VARCHAR(32) NULL,
+  requested_at DATETIME(3) NOT NULL,
+  accepted_at DATETIME(3) NULL,
+  completed_at DATETIME(3) NULL,
+  updated_at DATETIME(3) NOT NULL,
+  UNIQUE KEY uk_pre_ai_routing_active (encounter_id, record_type, status),
+  KEY idx_pre_ai_routing_encounter (encounter_id, requested_at),
+  KEY idx_pre_ai_routing_target (target_workbench, status, requested_at),
+  CONSTRAINT fk_pre_ai_routing_encounter FOREIGN KEY (encounter_id) REFERENCES pre_ai_encounters(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

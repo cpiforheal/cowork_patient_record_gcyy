@@ -96,8 +96,27 @@
         <section class="tw-summary">
           <div class="tw-summary-head">
             <span class="tw-pill" :class="`is-${statusTone(currentRow.tcmStatus)}`">{{ statusLabel(currentRow.tcmStatus) }}</span>
-            <small>{{ currentRow.owningDepartmentName || "—" }} · 第 {{ currentRow.visitNo }} 次就诊</small>
+            <el-tag type="warning" effect="light">中医科消化内科</el-tag>
+            <small>{{ currentRow.owningDepartmentName || "当前归属未设置" }} · 第 {{ currentRow.visitNo }} 次就诊</small>
             <el-button v-if="currentRow.patientCaseId" link type="primary" size="small" @click="openFullRecord">查看完整病历</el-button>
+          </div>
+          <div class="tw-routing-bar">
+            <div>
+              <span class="tw-routing-label">分支流转</span>
+              <span v-if="routingRecords.length" class="tw-routing-state">{{ routingSummary }}</span>
+              <span v-else class="tw-muted">暂无转诊或会诊记录</span>
+            </div>
+            <div class="tw-routing-actions">
+              <el-button size="small" type="warning" plain :disabled="readOnly || routingBusy" @click="requestReferral">转肛肠</el-button>
+              <el-button size="small" type="primary" plain :disabled="readOnly || routingBusy" @click="requestConsultation">请求会诊</el-button>
+            </div>
+          </div>
+          <div v-if="routingRecords.length" class="tw-routing-history">
+            <div v-for="item in routingRecords" :key="item.id" class="tw-routing-item">
+              <span>{{ routingTypeLabel(item.recordType) }}</span>
+              <strong>{{ routingStatusLabel(item.status) }}</strong>
+              <small>{{ item.reason }} · {{ shortTime(item.requestedAt) }}</small>
+            </div>
           </div>
           <div class="tw-summary-grid">
             <div><label>主诉</label><span>{{ currentRow.registrationChiefComplaint || "—" }}</span></div>
@@ -139,7 +158,10 @@ import RegistrationFormFields from "@/views/preAi/encounters/components/Registra
 import { preAiStages, type PreAiFieldConfig } from "@/views/preAi/encounters/fieldConfig";
 import {
   completePreAiStageApi,
+  createConsultationApi,
+  createReferralApi,
   getPreAiWorkspaceApi,
+  getRoutingRecordsApi,
   getTcmWorkbenchApi,
   savePreAiStageApi,
   type PreAiWorkspace,
@@ -231,7 +253,14 @@ const workspace = ref<PreAiWorkspace>();
 const form = reactive<Record<string, any>>({});
 const registration = computed<Record<string, any>>(() => workspace.value?.encounter?.patient || {});
 const tcmSubmission = computed(() => workspace.value?.stages.find(stage => stage.stageCode === "TCM"));
+const routingRecords = ref<import("@/api/modules/clinic/preAi").RoutingRecord[]>([]);
+const routingBusy = ref(false);
 const readOnly = computed(() => tcmSubmission.value?.status === "COMPLETED");
+const routingSummary = computed(() => {
+  const latest = routingRecords.value[0];
+  if (!latest) return "";
+  return `${routingTypeLabel(latest.recordType)} · ${routingStatusLabel(latest.status)}`;
+});
 const completedAt = computed(() => tcmSubmission.value?.completedAt || "");
 const tcmFields = computed<PreAiFieldConfig[]>(() => {
   const stage = preAiStages.find(item => item.code === "TCM");
@@ -257,8 +286,9 @@ const openRecord = async (row: TcmWorkbenchRow) => {
   drawerVisible.value = true;
   detailLoading.value = true;
   try {
-    const { data } = await getPreAiWorkspaceApi(row.encounterId);
+    const [{ data }, routing] = await Promise.all([getPreAiWorkspaceApi(row.encounterId), getRoutingRecordsApi(row.encounterId)]);
     workspace.value = data;
+    routingRecords.value = routing.data.list;
     const stage = data.stages.find(item => item.stageCode === "TCM");
     Object.assign(form, clone(stage?.data || {}));
   } catch (error: any) {
@@ -313,6 +343,66 @@ const completeRecord = async () => {
     completing.value = false;
   }
 };
+
+const askRoutingReason = async (title: string) => {
+  try {
+    const { value } = await ElMessageBox.prompt("原因会写入流转记录和审计日志", title, {
+      confirmButtonText: "提交",
+      cancelButtonText: "取消",
+      inputPlaceholder: "请填写原因",
+      inputValidator: value => Boolean(value?.trim()) || "请填写原因"
+    });
+    return value.trim();
+  } catch {
+    return "";
+  }
+};
+
+const reloadRouting = async () => {
+  if (!currentRow.value) return;
+  const { data } = await getRoutingRecordsApi(currentRow.value.encounterId);
+  routingRecords.value = data.list;
+};
+
+const requestReferral = async () => {
+  if (!currentRow.value) return;
+  const reason = await askRoutingReason("申请转入肛肠分支");
+  if (!reason) return;
+  routingBusy.value = true;
+  try {
+    await createReferralApi(currentRow.value.encounterId, reason);
+    await reloadRouting();
+    ElMessage.success("转诊申请已提交");
+  } catch (error: any) {
+    ElMessage.error(error?.message || "转诊申请失败");
+  } finally {
+    routingBusy.value = false;
+  }
+};
+
+const requestConsultation = async () => {
+  if (!currentRow.value) return;
+  const reason = await askRoutingReason("请求肛肠会诊");
+  if (!reason) return;
+  routingBusy.value = true;
+  try {
+    await createConsultationApi(currentRow.value.encounterId, reason);
+    await reloadRouting();
+    ElMessage.success("会诊申请已提交");
+  } catch (error: any) {
+    ElMessage.error(error?.message || "会诊申请失败");
+  } finally {
+    routingBusy.value = false;
+  }
+};
+
+const routingTypeLabel = (type: string) => type === "REFERRAL" ? "转诊" : "会诊";
+const routingStatusLabel = (status: string) => ({
+  REQUESTED: "待处理",
+  ACCEPTED: "已接收",
+  REJECTED: "已拒绝",
+  COMPLETED: "已完成"
+}[status] || status);
 
 const openFullRecord = () => {
   if (!currentRow.value) return;
@@ -480,6 +570,51 @@ onMounted(load);
   }
   .el-button {
     margin-left: auto;
+  }
+}
+.tw-routing-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+}
+.tw-routing-label {
+  margin-right: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.tw-routing-state {
+  color: var(--el-color-primary);
+  font-size: 13px;
+}
+.tw-routing-actions {
+  display: flex;
+  gap: 6px;
+}
+.tw-routing-history {
+  display: grid;
+  gap: 6px;
+  margin: -4px 0 12px;
+}
+.tw-routing-item {
+  display: grid;
+  grid-template-columns: 48px 52px 1fr;
+  gap: 8px;
+  align-items: center;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  strong {
+    color: var(--el-text-color-primary);
+  }
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 .tw-summary-grid {
