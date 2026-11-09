@@ -518,7 +518,7 @@ public class InventoryQuotaConsumptionService {
                 String extraEvent = old == null ? null : deduct(report, old, delta, "QUOTA_HEADCOUNT_DELTA", "人数修正补扣", null, report.revision() + 1L);
                 if (extraEvent != null) {
                     lineDeducted = already.add(delta);
-                    eventId = extraEvent;
+                    if (eventId == null) eventId = extraEvent;
                 }
             } else if (delta.signum() < 0 && old != null && old.quotaEventId() != null) {
                 BigDecimal reverseQuantity = delta.abs().min(already.max(BigDecimal.ZERO));
