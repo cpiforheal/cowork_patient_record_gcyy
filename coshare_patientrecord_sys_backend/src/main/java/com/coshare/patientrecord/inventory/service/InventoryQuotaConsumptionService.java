@@ -494,7 +494,7 @@ public class InventoryQuotaConsumptionService {
         String reason = text(payload, "reason");
         if (reason.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "修正人数必须填写原因");
         Headcount before = headcount(report);
-        Headcount after = resolveHeadcount(department, report.businessDate(), payload);
+        Headcount after = correctedHeadcount(department, report, payload);
         List<LineRow> oldLines = loadLineRows(report.id());
         Map<String, LineRow> oldByRule = new LinkedHashMap<>();
         for (LineRow line : oldLines) {
@@ -516,11 +516,16 @@ public class InventoryQuotaConsumptionService {
             String eventId = old == null ? null : old.quotaEventId();
             if (delta.signum() > 0) {
                 String extraEvent = old == null ? null : deduct(report, old, delta, "QUOTA_HEADCOUNT_DELTA", "人数修正补扣", null, report.revision() + 1L);
-                if (extraEvent != null) lineDeducted = already.add(delta);
+                if (extraEvent != null) {
+                    lineDeducted = already.add(delta);
+                    eventId = extraEvent;
+                }
             } else if (delta.signum() < 0 && old != null && old.quotaEventId() != null) {
-                reverseQuota(report, old, delta.abs(), user, "人数修正冲回", report.revision() + 1L);
-                lineDeducted = already.add(delta);
-                if (lineDeducted.signum() < 0) lineDeducted = BigDecimal.ZERO;
+                BigDecimal reverseQuantity = delta.abs().min(already.max(BigDecimal.ZERO));
+                if (reverseQuantity.signum() > 0) {
+                    reverseQuota(report, old, reverseQuantity, user, "人数修正冲回", report.revision() + 1L);
+                    lineDeducted = already.subtract(reverseQuantity);
+                }
             }
             deducted = deducted.add(lineDeducted);
             if (old == null) {
@@ -1194,6 +1199,24 @@ public class InventoryQuotaConsumptionService {
         if ("PERCENT".equals(mode)) return scale(quota.multiply(value).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP));
         if ("ABSOLUTE".equals(mode)) return value.max(BigDecimal.ZERO);
         return BigDecimal.ZERO;
+    }
+
+    /**
+     * 人数修正入口以提交的修正值为准：门诊/住院字段缺省时沿用当日已存人数，
+     * 不再回退到系统自动统计，否则自动统计为 0 的科室（如手术室）将永远修正不动。
+     */
+    private Headcount correctedHeadcount(Department department, ReportRow report, JsonNode payload) {
+        if ("DAILY".equals(department.entryMode())) {
+            return resolveHeadcount(department, report.businessDate(), payload);
+        }
+        Headcount current = headcount(report);
+        int outpatient = payload.has("headcountOutpatient")
+            ? Math.max(0, payload.path("headcountOutpatient").asInt(current.outpatient()))
+            : current.outpatient();
+        int inpatient = payload.has("headcountInpatient")
+            ? Math.max(0, payload.path("headcountInpatient").asInt(current.inpatient()))
+            : current.inpatient();
+        return new Headcount(outpatient, inpatient, 0, "MIXED");
     }
 
     private Headcount resolveHeadcount(Department department, LocalDate date, JsonNode payload) {
