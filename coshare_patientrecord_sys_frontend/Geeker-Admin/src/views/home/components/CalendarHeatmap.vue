@@ -4,7 +4,7 @@
       <div>
         <span class="scope-eyebrow">主控区 · 月历热力</span>
         <h2>{{ monthTitle }}</h2>
-        <p>本月收录 {{ monthTotal }} 人，单日峰值 {{ peakCount }} 人</p>
+        <p>本月收录 {{ monthTotal }} {{ unit }}，单日峰值 {{ peakCount }} {{ unit }}</p>
       </div>
       <div class="calendar-actions">
         <el-button :icon="ArrowLeft" circle aria-label="上个月" @click="$emit('shiftMonth', -1)" />
@@ -37,14 +37,14 @@
         @click="$emit('selectDate', day)"
       >
         <span class="day-number">{{ day.day || "" }}</span>
-        <span v-if="!day.isBlank" class="day-count">{{ day.count ? `${day.count} 人` : "空" }}</span>
+        <span v-if="!day.isBlank" class="day-count">{{ day.count ? `${day.count} ${unit}` : "空" }}</span>
       </button>
     </div>
     <div class="heatmap-legend" aria-label="热力图颜色说明">
-      <span class="legend-anchor">0 人</span>
+      <span class="legend-anchor">0 {{ unit }}</span>
       <i v-for="level in [0, 1, 2, 3, 4]" :key="level" :class="`is-level-${level}`" />
       <span class="legend-anchor">低 → 高（按当月峰值分级）</span>
-      <span class="legend-anchor">峰值 {{ peakCount }} 人</span>
+      <span class="legend-anchor">峰值 {{ peakCount }} {{ unit }}</span>
     </div>
   </div>
 </template>
@@ -65,13 +65,17 @@ type CalendarDayCell = {
   hoverColor: string;
 };
 
-defineProps<{
-  monthTitle: string;
-  monthTotal: number;
-  peakCount: number;
-  weekdayLabels: string[];
-  cells: CalendarDayCell[];
-}>();
+withDefaults(
+  defineProps<{
+    monthTitle: string;
+    monthTotal: number;
+    peakCount: number;
+    weekdayLabels: string[];
+    cells: CalendarDayCell[];
+    unit?: string;
+  }>(),
+  { unit: "人" }
+);
 
 defineEmits<{
   shiftMonth: [offset: number];

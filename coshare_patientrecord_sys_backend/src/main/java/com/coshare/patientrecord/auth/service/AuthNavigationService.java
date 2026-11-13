@@ -30,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("mysql")
 public class AuthNavigationService {
 
-    public static final String VERSION = "2026.11.07.1";
+    public static final String VERSION = "2026.11.10.1";
     public static final String POLICY_VERSION = VERSION;
     private static final Logger log = LoggerFactory.getLogger(AuthNavigationService.class);
     private static final List<String> STAGES = List.of(
@@ -430,6 +430,10 @@ public class AuthNavigationService {
             page("/documents/recycle", "documentRecycle", "/documents/recycle/index", "作废资料恢复", "RefreshLeft", false, false, false),
             page("/audit/log", "auditLog", "/audit/log/index", "操作记录查询", "Search", false, false, false)
         ));
+        // 个人工具：仅管理员本人使用的健康记录入口，不进入患者业务数据
+        result.add(group("/navigation/personal-tools", "personalTools", "/personal-tools/eye-drops", "个人工具", "FirstAidKit",
+            page("/personal-tools/eye-drops", "eyeDropsManage", "/personalTools/eyeDrops/index", "眼药水管理", "FirstAidKit", false, false, false)
+        ));
         result.add(group("/system", "system", "/system/accountManage", "系统管理", "Tools",
             group("/system/organization", "systemOrganization", "/system/accountManage", "组织与账号", "OfficeBuilding",
                 page("/system/accountManage", "accountManage", "/system/accountManage/index", "账号管理", "User", false, false, false),
@@ -504,7 +508,8 @@ public class AuthNavigationService {
             "inventoryControls=inventory:read,inventory:export",
             "inventoryTrace=inventory:read,inventory:export",
             "inventoryDaily=inventory:read,inventory:export",
-            "inventoryRoles=inventory:read,inventory:role:manage"
+            "inventoryRoles=inventory:read,inventory:role:manage",
+            "eyeDropsManage=eyedrops:read,eyedrops:write,eyedrops:export"
         );
         result.put("admin", new RolePolicy(Set.of("*"), administratorButtons));
 
