@@ -100,7 +100,15 @@
         退回检验报告
       </el-button>
       <div></div>
-      <el-button v-if="canPublish" type="success" plain @click="publishVisible = true">发布给患者</el-button>
+      <el-button
+        v-if="isPublisherRole"
+        type="success"
+        plain
+        :disabled="!canPublish"
+        :title="publishHint"
+        @click="publishVisible = true"
+        >发布给患者</el-button
+      >
       <el-button
         v-if="canComplete"
         type="primary"
@@ -156,12 +164,15 @@ const publishVisible = ref(false);
 const activeReport = computed(
   () => props.workspace.labReports.find(report => report.id === props.activeReportId) || props.workspace.labReports[0]
 );
+const isPublisherRole = computed(() => ["admin", "doctor"].includes(userStore.userInfo.role || ""));
 const canPublish = computed(
-  () =>
-    ["admin", "doctor"].includes(userStore.userInfo.role || "") &&
-    props.labTask?.status === "COMPLETED" &&
-    Boolean(activeReport.value)
+  () => isPublisherRole.value && props.labTask?.status === "COMPLETED" && Boolean(activeReport.value)
 );
+const publishHint = computed(() => {
+  if (!activeReport.value) return "暂无有效化验报告";
+  if (props.labTask?.status !== "COMPLETED") return "化验报告完成并交接后可发布给患者";
+  return "生成患者二维码，24 小时内可查看";
+});
 </script>
 
 <style scoped lang="scss">
