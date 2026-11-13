@@ -866,6 +866,48 @@ export const savePreAiLabReportApi = (
   }
 ) => jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports`, "POST", payload);
 
+export interface LabPortalPublicationResult {
+  publicationId: string;
+  token: string;
+  url: string;
+  expiresAt: string;
+  pushStatus: string;
+}
+
+export interface LabPortalPublicationRow {
+  id: string;
+  reportId: string;
+  reportVersion: number;
+  expiresAt: string;
+  revokedAt: string | null;
+  pushStatus: string;
+  attempts: number;
+  lastError: string | null;
+  publishedBy: string;
+  publishedAt: string;
+}
+
+export const publishLabReportApi = (encounterId: string, reportId: string) =>
+  jsonRequest<LabPortalPublicationResult>(
+    `/lab-portal/encounters/${encodeURIComponent(encounterId)}/reports/${encodeURIComponent(reportId)}/publish`,
+    "POST",
+    {}
+  );
+
+export const revokeLabPortalPublicationApi = (publicationId: string) =>
+  jsonRequest<{ publicationId: string; revoked: boolean }>(
+    `/lab-portal/publications/${encodeURIComponent(publicationId)}/revoke`,
+    "POST",
+    {}
+  );
+
+export const getLabPortalPublicationsApi = async (encounterId: string) => {
+  const result = await clinicFetch(`/lab-portal/encounters/${encodeURIComponent(encounterId)}/publications`, {
+    headers: authHeaders()
+  });
+  return clinicResponse(await parseClinicApiResponse<{ list: LabPortalPublicationRow[] }>(result));
+};
+
 export interface PreAiLabOcrItem {
   key?: string;
   name: string;

@@ -100,6 +100,7 @@
         退回检验报告
       </el-button>
       <div></div>
+      <el-button v-if="canPublish" type="success" plain @click="publishVisible = true">发布给患者</el-button>
       <el-button
         v-if="canComplete"
         type="primary"
@@ -109,14 +110,23 @@
         >完成并交接</el-button
       >
     </footer>
+    <LabReportPublishDialog
+      v-model="publishVisible"
+      :encounter-id="workspace.encounter.id"
+      :report-id="activeReport?.id || ''"
+      :report-label="activeReport ? `${activeReport.templateName} · ${activeReport.reportDate}` : ''"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import type { LabReportMetricSnapshot, PreAiAuxiliaryTask, PreAiWorkspace } from "@/api/modules/clinic";
 import { materializeLabMetrics } from "@/views/workbench/labReport/templates";
+import { useUserStore } from "@/stores/modules/user";
+import LabReportPublishDialog from "./LabReportPublishDialog.vue";
 
-defineProps<{
+const props = defineProps<{
   workspace: PreAiWorkspace;
   labTask?: PreAiAuxiliaryTask;
   legacyTasks: PreAiAuxiliaryTask[];
@@ -140,6 +150,18 @@ const emit = defineEmits<{
   "delete-report": [reportId: string];
   complete: [];
 }>();
+
+const userStore = useUserStore();
+const publishVisible = ref(false);
+const activeReport = computed(
+  () => props.workspace.labReports.find(report => report.id === props.activeReportId) || props.workspace.labReports[0]
+);
+const canPublish = computed(
+  () =>
+    ["admin", "doctor"].includes(userStore.userInfo.role || "") &&
+    props.labTask?.status === "COMPLETED" &&
+    Boolean(activeReport.value)
+);
 </script>
 
 <style scoped lang="scss">

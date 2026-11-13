@@ -2,6 +2,7 @@ package com.coshare.patientrecord.config;
 
 import com.coshare.patientrecord.security.AuthTokenFilter;
 import com.coshare.patientrecord.security.InventoryPortalBoundaryFilter;
+import com.coshare.patientrecord.security.LabPortalBoundaryFilter;
 import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,7 +17,7 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectProvider<AuthTokenFilter> authTokenFilter, ObjectProvider<InventoryPortalBoundaryFilter> inventoryPortalBoundaryFilter) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectProvider<AuthTokenFilter> authTokenFilter, ObjectProvider<InventoryPortalBoundaryFilter> inventoryPortalBoundaryFilter, ObjectProvider<LabPortalBoundaryFilter> labPortalBoundaryFilter) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
@@ -44,7 +45,8 @@ public class SecurityConfig {
                     "/auth/login",
                     "/auth/options",
                     "/auth/options/accounts",
-                    "/exam-api/**"
+                    "/exam-api/**",
+                    "/lab-api/**"
                 ).permitAll()
                 .requestMatchers(
                     "/health/db",
@@ -59,6 +61,7 @@ public class SecurityConfig {
             .httpBasic(httpBasic -> httpBasic.disable())
             .formLogin(formLogin -> formLogin.disable());
         inventoryPortalBoundaryFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
+        labPortalBoundaryFilter.ifAvailable(filter -> http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class));
         authTokenFilter.ifAvailable(filter -> http.addFilterAfter(filter, InventoryPortalBoundaryFilter.class));
         return http.build();
     }

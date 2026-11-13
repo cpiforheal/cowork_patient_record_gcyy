@@ -14,4 +14,8 @@ public class PortalMode {
     public boolean isInventoryPortal() {
         return "inventory".equalsIgnoreCase(value);
     }
+
+    public boolean isLabPortal() {
+        return "lab".equalsIgnoreCase(value);
+    }
 }
