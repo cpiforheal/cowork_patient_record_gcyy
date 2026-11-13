@@ -14,28 +14,21 @@ import org.springframework.web.bind.annotation.RestController;
 @Profile("mysql")
 @RequestMapping("/clinic-api/lab-portal")
 public class LabPortalPublishController {
-
     private final LabReportPublishService service;
+    public LabPortalPublishController(LabReportPublishService service) { this.service = service; }
 
-    public LabPortalPublishController(LabReportPublishService service) {
-        this.service = service;
+    @GetMapping("/encounters/{encounterId}/status")
+    public ApiResult<Map<String, Object>> status(@PathVariable String encounterId) {
+        return ApiResult.success(service.status(encounterId, AuthPermission.currentUserOrThrow()));
     }
 
-    @PostMapping("/encounters/{encounterId}/reports/{reportId}/publish")
-    public ApiResult<Map<String, Object>> publish(
-        @PathVariable String encounterId,
-        @PathVariable String reportId
-    ) {
-        return ApiResult.of(200, "已发布给患者", service.publish(encounterId, reportId, AuthPermission.currentUserOrThrow()));
+    @PostMapping("/encounters/{encounterId}/revoke")
+    public ApiResult<Map<String, Object>> revoke(@PathVariable String encounterId) {
+        return ApiResult.of(200, "已撤回患者可见报告", service.revoke(encounterId, AuthPermission.currentUserOrThrow()));
     }
 
-    @PostMapping("/publications/{publicationId}/revoke")
-    public ApiResult<Map<String, Object>> revoke(@PathVariable String publicationId) {
-        return ApiResult.of(200, "已撤销患者访问", service.revoke(publicationId, AuthPermission.currentUserOrThrow()));
-    }
-
-    @GetMapping("/encounters/{encounterId}/publications")
-    public ApiResult<Map<String, Object>> publications(@PathVariable String encounterId) {
-        return ApiResult.success(service.publications(encounterId, AuthPermission.currentUserOrThrow()));
+    @PostMapping("/encounters/{encounterId}/resync")
+    public ApiResult<Map<String, Object>> resync(@PathVariable String encounterId) {
+        return ApiResult.of(200, "已重新同步", service.syncEncounter(encounterId, AuthPermission.currentUserOrThrow()));
     }
 }

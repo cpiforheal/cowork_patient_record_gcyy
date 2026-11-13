@@ -220,6 +220,7 @@ public class PreAiEncounterService {
     private final InventoryPatientConsumptionService inventoryPatientConsumptionService;
     private final AuthNavigationService navigationService;
     private final ClinicAiConfigService aiConfigService;
+    private final LabReportPublishService labReportPublishService;
     private final Path generatedDir;
     private static final String LAB_OCR_MODEL = "glm-5.3-flash";
     private static final int LAB_OCR_MAX_TOKENS = 4096;
@@ -237,6 +238,7 @@ public class PreAiEncounterService {
         InventoryPatientConsumptionService inventoryPatientConsumptionService,
         AuthNavigationService navigationService,
         ClinicAiConfigService aiConfigService,
+        LabReportPublishService labReportPublishService,
         @Value("${clinic.generated-pre-ai-dir:${clinic.attachment-dir}/../generated-pre-ai}") String generatedDir
     ) {
         this.jdbcTemplate = jdbcTemplate;
@@ -250,6 +252,7 @@ public class PreAiEncounterService {
         this.inventoryPatientConsumptionService = inventoryPatientConsumptionService;
         this.navigationService = navigationService;
         this.aiConfigService = aiConfigService;
+        this.labReportPublishService = labReportPublishService;
         this.generatedDir = Path.of(generatedDir).toAbsolutePath().normalize();
     }
 
@@ -858,6 +861,7 @@ public class PreAiEncounterService {
         if (!originalVisitDate.isBlank()) patient.put("visitDate", originalVisitDate);
         jdbcTemplate.update("UPDATE pre_ai_patient_cases SET patient_json = CAST(? AS JSON), updated_at = ? WHERE id = ?", toJson(patient), now(), patientCaseId);
         audit(encounterId, "encounter.followup.withdraw", "REGISTRATION", user, "撤回第 " + visitNo + " 次来访复诊，流程回到第 " + (visitNo - 1) + " 次");
+        labReportPublishService.removeEncounter(encounterId);
         return toMap(workspace(previousId, user));
     }
 
@@ -1546,6 +1550,7 @@ public class PreAiEncounterService {
         jdbcTemplate.update("UPDATE pre_ai_care_encounters SET status = 'CANCELLED', ended_at = CURRENT_TIMESTAMP(3) WHERE clinical_encounter_id = ? AND status = 'ACTIVE'", encounterId);
         jdbcTemplate.update("UPDATE pre_ai_encounters SET status = 'CANCELLED', current_stage = 'RECEPTION', updated_at = ? WHERE id = ?", now(), encounterId);
         audit(encounterId, "encounter.terminate", "RECEPTION", user, "患者离院未治疗：" + reason);
+        labReportPublishService.removeEncounter(encounterId);
         return toMap(workspace(encounterId, user));
     }
 
@@ -1584,6 +1589,7 @@ public class PreAiEncounterService {
         audit(encounterId, "encounter.resume", "RECEPTION", user,
             reason.isBlank() ? "患者折返，离院病历恢复继续" : "患者折返，离院病历恢复继续：" + reason);
         refreshProgress(encounterId);
+        labReportPublishService.syncEncounterInternal(encounterId);
         return toMap(workspace(encounterId, user));
     }
 
@@ -1795,6 +1801,7 @@ public class PreAiEncounterService {
         invalidateReview(encounterId, user, "辅助检查退回：" + reason);
         audit(encounterId, "aux.return", null, user, text(task, "taskType") + "：" + reason);
         refreshProgress(encounterId);
+        if ("LAB".equals(text(task, "taskType"))) labReportPublishService.syncEncounterInternal(encounterId);
         return toMap(workspace(encounterId, user));
     }
 
@@ -1940,6 +1947,7 @@ public class PreAiEncounterService {
         invalidateReview(encounterId, user, "化验报告发生修改");
         audit(encounterId, "lab.report.save", null, user, templateName + "（" + reportDate + "）");
         refreshProgress(encounterId);
+        labReportPublishService.syncEncounterInternal(encounterId);
         return toMap(workspace(encounterId, user));
     }
 
@@ -1968,6 +1976,7 @@ public class PreAiEncounterService {
         audit(encounterId, "lab.report.delete", null, user, templateName + "（" + reportDate + "）已删除");
         invalidateReview(encounterId, user, "化验报告被删除");
         refreshProgress(encounterId);
+        labReportPublishService.syncEncounterInternal(encounterId);
         return toMap(workspace(encounterId, user));
     }
 
@@ -1991,6 +2000,7 @@ public class PreAiEncounterService {
         invalidateReview(encounterId, user, "化验室完成交接");
         audit(encounterId, "lab.complete", null, user, "化验报告已确认完成");
         refreshProgress(encounterId);
+        labReportPublishService.syncEncounterInternal(encounterId);
         return toMap(workspace(encounterId, user));
     }
 

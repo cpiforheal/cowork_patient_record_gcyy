@@ -16,283 +16,94 @@
         --danger: #b91c1c;
         --bg: #f4f7f6;
       }
-      * {
-        box-sizing: border-box;
-        -webkit-tap-highlight-color: transparent;
-      }
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        background: var(--bg);
-        color: var(--text);
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body {
+        margin: 0; padding: 0; background: var(--bg); color: var(--text);
         font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-        font-size: 16px;
-        line-height: 1.55;
-        -webkit-text-size-adjust: 100%;
+        font-size: 16px; line-height: 1.55; -webkit-text-size-adjust: 100%;
       }
-      body {
-        min-height: 100vh;
-        padding-bottom: env(safe-area-inset-bottom);
-        user-select: none;
-        -webkit-user-select: none;
+      body { min-height: 100vh; padding-bottom: env(safe-area-inset-bottom); user-select: none; -webkit-user-select: none; }
+      .page { max-width: 640px; margin: 0 auto; background: #fff; min-height: 100vh; padding-bottom: 28px; position: relative; }
+      .brand { display: flex; align-items: center; gap: 12px; padding: 18px 18px 14px; background: linear-gradient(135deg, var(--brand) 0%, #14876f 100%); color: #fff; }
+      .brand img { width: 52px; height: 52px; border-radius: 12px; background: #fff; object-fit: contain; padding: 4px; flex: 0 0 auto; }
+      .brand h1 { margin: 0; font-size: 19px; line-height: 1.3; letter-spacing: 0.5px; }
+      .brand p { margin: 2px 0 0; font-size: 12px; opacity: 0.86; }
+      .sensitive { padding: 8px 18px; background: #fff4e5; color: #8a4b00; font-size: 12px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #f2dcb8; }
+      .sensitive::before { content: "!"; width: 16px; height: 16px; border-radius: 50%; background: #d97706; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+      .insecure { padding: 8px 18px; background: #fdecec; color: #9b1c1c; font-size: 12px; border-bottom: 1px solid #f5c6c6; }
+      .content { padding: 16px 16px 0; }
+      .card { border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; background: #fff; }
+      .card h2 { margin: 0 0 4px; font-size: 18px; }
+      .card > p.hint { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+      .field { margin-bottom: 14px; }
+      .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
+      .field input {
+        width: 100%; height: 48px; padding: 0 14px; font-size: 17px; color: var(--text);
+        border: 1px solid var(--line); border-radius: 10px; background: #fff; outline: none;
       }
-      .page {
-        max-width: 640px;
-        margin: 0 auto;
-        background: #fff;
-        min-height: 100vh;
-        padding-bottom: 28px;
-        position: relative;
+      .field input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(11, 110, 91, 0.12); }
+      .mode-switch { margin: -4px 0 16px; padding: 0; border: 0; background: none; color: var(--brand); font-size: 13px; text-decoration: underline; cursor: pointer; }
+      .submit {
+        width: 100%; height: 48px; border: 0; border-radius: 10px; background: var(--brand);
+        color: #fff; font-size: 17px; font-weight: 600; cursor: pointer;
       }
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 18px 18px 14px;
-        background: linear-gradient(135deg, var(--brand) 0%, #14876f 100%);
-        color: #fff;
+      .submit:disabled { opacity: 0.6; cursor: default; }
+      .form-error { min-height: 20px; margin: 10px 0 0; color: var(--danger); font-size: 13px; }
+      .welcome { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+      .welcome strong { font-size: 18px; }
+      .welcome button { border: 0; background: none; color: var(--brand); font-size: 13px; text-decoration: underline; cursor: pointer; }
+      .critical { margin: 0 0 14px; padding: 12px 14px; border: 1px solid #f0b4b4; background: #fff1f1; color: var(--danger); border-radius: 12px; font-size: 14px; font-weight: 600; }
+      .visit { border: 1px solid var(--line); border-radius: 14px; margin-bottom: 12px; overflow: hidden; }
+      .visit-head {
+        width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 14px 16px; border: 0; background: #fff; text-align: left; cursor: pointer;
       }
-      .brand img {
-        width: 52px;
-        height: 52px;
-        border-radius: 12px;
-        background: #fff;
-        object-fit: contain;
-        padding: 4px;
-        flex: 0 0 auto;
+      .visit-head .date { font-size: 16px; font-weight: 600; }
+      .visit-head .meta { color: var(--muted); font-size: 12px; }
+      .visit-head .chevron { color: var(--muted); font-size: 14px; transition: transform 0.18s ease; }
+      .visit.open .visit-head .chevron { transform: rotate(90deg); }
+      .visit-body { display: none; padding: 0 12px 12px; }
+      .visit.open .visit-body { display: block; }
+      .report { border-top: 1px solid var(--line); }
+      .report:first-child { border-top: 0; }
+      .report-head {
+        width: 100%; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+        padding: 13px 4px; border: 0; background: none; text-align: left; cursor: pointer;
       }
-      .brand h1 {
-        margin: 0;
-        font-size: 19px;
-        line-height: 1.3;
-        letter-spacing: 0.5px;
-      }
-      .brand p {
-        margin: 2px 0 0;
-        font-size: 12px;
-        opacity: 0.86;
-      }
-      .sensitive {
-        padding: 8px 18px;
-        background: #fff4e5;
-        color: #8a4b00;
-        font-size: 12px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        border-bottom: 1px solid #f2dcb8;
-      }
-      .sensitive::before {
-        content: "!";
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: #d97706;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 700;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex: 0 0 auto;
-      }
-      .insecure {
-        padding: 8px 18px;
-        background: #fdecec;
-        color: #9b1c1c;
-        font-size: 12px;
-        border-bottom: 1px solid #f5c6c6;
-      }
-      .content {
-        padding: 14px 16px 0;
-      }
-      .critical {
-        margin: 0 0 14px;
-        padding: 12px 14px;
-        border: 1px solid #f0b4b4;
-        background: #fff1f1;
-        color: var(--danger);
-        border-radius: 12px;
-        font-size: 14px;
-        font-weight: 600;
-      }
-      .card {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 14px;
-        margin-bottom: 14px;
-        background: #fff;
-      }
-      .card h2 {
-        margin: 0 0 10px;
-        font-size: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .card h2 span {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 400;
-      }
-      .patient-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px 12px;
-        font-size: 14px;
-      }
-      .patient-grid label {
-        color: var(--muted);
-        font-size: 12px;
-        display: block;
-      }
-      .metric {
-        display: grid;
-        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
-        gap: 8px;
-        padding: 11px 0;
-        border-top: 1px solid var(--line);
-        align-items: center;
-        font-size: 14px;
-      }
-      .metric:first-of-type {
-        border-top: 0;
-      }
-      .metric .name {
-        font-weight: 500;
-        word-break: break-word;
-      }
-      .metric .value {
-        font-weight: 700;
-        font-size: 16px;
-        white-space: nowrap;
-      }
-      .metric .value em {
-        font-style: normal;
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--muted);
-        margin-left: 3px;
-      }
-      .metric .ref {
-        color: var(--muted);
-        font-size: 12px;
-        text-align: right;
-        white-space: nowrap;
-      }
-      .metric.abnormal .value {
-        color: var(--warn);
-      }
-      .metric.abnormal .ref {
-        color: var(--warn);
-      }
-      .metric.critical .value {
-        color: var(--danger);
-      }
-      .metric.critical .ref {
-        color: var(--danger);
-      }
-      .badge {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 1px 7px;
-        border-radius: 999px;
-        font-size: 11px;
-        vertical-align: middle;
-      }
-      .badge.warn {
-        background: #fdf0e3;
-        color: var(--warn);
-      }
-      .badge.danger {
-        background: #fdecec;
-        color: var(--danger);
-      }
-      .arrow {
-        margin-left: 2px;
-        font-size: 13px;
-      }
-      .footer {
-        padding: 4px 18px 24px;
-        color: var(--muted);
-        font-size: 12px;
-        text-align: center;
-        line-height: 1.7;
-      }
-      .footer strong {
-        color: var(--text);
-      }
-      .state {
-        min-height: 70vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 24px;
-        text-align: center;
-      }
-      .state .icon {
-        width: 56px;
-        height: 56px;
-        border-radius: 50%;
-        background: var(--brand-soft);
-        color: var(--brand);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 26px;
-        margin-bottom: 14px;
-      }
-      .state h2 {
-        margin: 0 0 8px;
-        font-size: 18px;
-      }
-      .state p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 14px;
-        max-width: 300px;
-      }
-      .watermark {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 9;
-        overflow: hidden;
-        opacity: 0.07;
-      }
-      .watermark span {
-        position: absolute;
-        transform: rotate(-28deg);
-        white-space: nowrap;
-        font-size: 15px;
-        color: #0b3d33;
-      }
+      .report-title { font-size: 15px; font-weight: 500; }
+      .report-sub { margin-top: 2px; color: var(--muted); font-size: 12px; }
+      .badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+      .badge.warn { background: #fdf0e3; color: var(--warn); }
+      .badge.danger { background: #fdecec; color: var(--danger); }
+      .badge.info { background: var(--brand-soft); color: var(--brand); }
+      .report-body { display: none; padding: 2px 4px 12px; }
+      .report.open .report-body { display: block; }
+      .metric { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 11px 0; border-top: 1px solid var(--line); align-items: center; font-size: 15px; }
+      .metric .name { font-weight: 500; word-break: break-word; }
+      .metric .value { font-weight: 700; font-size: 17px; white-space: nowrap; }
+      .metric .value em { font-style: normal; font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+      .metric .ref { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+      .metric.abnormal .value, .metric.abnormal .ref { color: var(--warn); }
+      .metric.critical .value, .metric.critical .ref { color: var(--danger); }
+      .arrow { margin-left: 2px; font-size: 13px; }
+      .empty-state { padding: 42px 20px; text-align: center; color: var(--muted); }
+      .empty-state strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 17px; }
+      .footer { padding: 8px 18px 24px; color: var(--muted); font-size: 12px; text-align: center; line-height: 1.7; }
+      .watermark { position: fixed; inset: 0; pointer-events: none; z-index: 9; overflow: hidden; opacity: 0.07; }
+      .watermark span { position: absolute; transform: rotate(-28deg); white-space: nowrap; font-size: 15px; color: #0b3d33; }
       @media (max-width: 380px) {
-        .brand h1 {
-          font-size: 17px;
-        }
-        .metric {
-          grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
-          font-size: 13px;
-        }
-        .metric .value {
-          font-size: 15px;
-        }
+        .brand h1 { font-size: 17px; }
+        .metric { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); font-size: 14px; }
+        .metric .value { font-size: 16px; }
       }
-      @media print {
-        body {
-          display: none !important;
-        }
-      }
+      @media print { body { display: none !important; } }
     </style>
   </head>
   <body>
     <div class="page">
       <header class="brand">
-        <img src="logo.png" alt="医院标识" onerror="this.style.display='none'" />
+        <img src="data:image/png;base64,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" alt="医院标识" />
         <div>
           <h1>固始中医肛肠医院</h1>
           <p>检验报告查询 · 患者本人查阅</p>
@@ -300,7 +111,7 @@
       </header>
       <div class="sensitive">本页含敏感医疗信息，请勿截图或转发</div>
       <div id="insecure" class="insecure" hidden>当前为非加密连接，请勿在公共网络查看</div>
-      <main id="content" class="content"></main>
+      <main id="app" class="content"></main>
       <footer class="footer">
         <div>检验结果仅供参考，请以医生解释为准。</div>
         <div>如需帮助，请联系检验科或您的接诊医生。</div>
@@ -310,171 +121,251 @@
 
     <script>
       (function () {
-        var content = document.getElementById("content");
+        var app = document.getElementById("app");
         var watermark = document.getElementById("watermark");
         if (location.protocol !== "https:") document.getElementById("insecure").hidden = false;
 
-        function escapeHtml(value) {
+        function esc(value) {
           return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
             return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
           });
         }
 
-        function renderWatermark(text) {
-          var block = text + "　";
+        function api(path, options) {
+          return fetch(path, Object.assign({ headers: { Accept: "application/json" } }, options || {}))
+            .then(function (response) {
+              return response.text().then(function (text) {
+                var payload = null;
+                try { payload = JSON.parse(text); } catch (error) { payload = null; }
+                return { status: response.status, payload: payload };
+              });
+            });
+        }
+
+        function messageOf(result, fallback) {
+          return (result.payload && result.payload.msg) || fallback;
+        }
+
+        function renderWatermark(name) {
+          var stamp = new Date();
+          var pad = function (n) { return String(n).padStart(2, "0"); };
+          var time = (stamp.getMonth() + 1) + "-" + pad(stamp.getDate()) + " " + pad(stamp.getHours()) + ":" + pad(stamp.getMinutes());
+          var text = (name || "患者") + " · " + time + " · 仅供本人查阅　";
           var html = "";
-          for (var row = -2; row < 22; row++) {
+          for (var row = -2; row < 26; row++) {
             for (var col = -2; col < 6; col++) {
-              html +=
-                '<span style="top:' +
-                row * 96 +
-                "px;left:" +
-                col * 260 +
-                'px">' +
-                escapeHtml(block) +
-                "</span>";
+              html += '<span style="top:' + row * 96 + "px;left:" + col * 280 + 'px">' + esc(text) + "</span>";
             }
           }
           watermark.innerHTML = html;
         }
 
-        function showState(icon, title, message) {
-          content.innerHTML =
-            '<div class="state"><div class="icon">' +
-            icon +
-            "</div><h2>" +
-            escapeHtml(title) +
-            "</h2><p>" +
-            escapeHtml(message) +
-            "</p></div>";
+        function clearWatermark() { watermark.innerHTML = ""; }
+
+        function renderLogin(message) {
+          clearWatermark();
+          app.innerHTML =
+            '<section class="card">' +
+              "<h2>查询检验报告</h2>" +
+              '<p class="hint">请输入登记时使用的姓名和证件信息，验证后可查看近 6 个月的报告。</p>' +
+              '<form id="login-form" autocomplete="off">' +
+                '<div class="field"><label for="name">姓名</label>' +
+                  '<input id="name" name="name" type="text" maxlength="30" enterkeyhint="next" placeholder="请输入姓名" />' +
+                "</div>" +
+                '<div class="field"><label id="digits-label" for="digits">证件号后六位</label>' +
+                  '<input id="digits" name="digits" type="tel" maxlength="6" inputmode="numeric" enterkeyhint="done" placeholder="请输入证件号后六位" />' +
+                "</div>" +
+                '<button id="mode-switch" class="mode-switch" type="button">没有登记身份证？用手机号后四位</button>' +
+                '<button id="submit" class="submit" type="submit">查询报告</button>' +
+                '<p id="form-error" class="form-error">' + esc(message || "") + "</p>" +
+              "</form>" +
+            "</section>";
+          var mode = "ID";
+          var form = document.getElementById("login-form");
+          var digits = document.getElementById("digits");
+          var label = document.getElementById("digits-label");
+          var toggle = document.getElementById("mode-switch");
+          var error = document.getElementById("form-error");
+          var submit = document.getElementById("submit");
+          toggle.addEventListener("click", function () {
+            if (mode === "ID") {
+              mode = "PHONE";
+              label.textContent = "手机号后四位";
+              digits.maxLength = 4;
+              digits.placeholder = "请输入手机号后四位";
+              toggle.textContent = "改用证件号后六位查询";
+            } else {
+              mode = "ID";
+              label.textContent = "证件号后六位";
+              digits.maxLength = 6;
+              digits.placeholder = "请输入证件号后六位";
+              toggle.textContent = "没有登记身份证？用手机号后四位";
+            }
+            digits.value = "";
+            error.textContent = "";
+          });
+          form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var name = document.getElementById("name").value.trim();
+            var value = digits.value.trim();
+            if (!name) { error.textContent = "请填写姓名"; return; }
+            if (!value) { error.textContent = mode === "ID" ? "请填写证件号后六位" : "请填写手机号后四位"; return; }
+            submit.disabled = true;
+            submit.textContent = "查询中…";
+            error.textContent = "";
+            api("/lab-api/lookup", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ name: name, mode: mode, lastDigits: value })
+            }).then(function (result) {
+              if (result.status === 200 && result.payload && result.payload.data) {
+                renderList(result.payload.data);
+                return;
+              }
+              error.textContent = messageOf(result, "查询失败，请稍后再试");
+              submit.disabled = false;
+              submit.textContent = "查询报告";
+            }).catch(function () {
+              error.textContent = "网络异常，请检查网络后重试";
+              submit.disabled = false;
+              submit.textContent = "查询报告";
+            });
+          });
+        }
+
+        function renderList(data) {
+          var name = (data.patient && data.patient.name) || "";
+          var groups = data.groups || [];
+          if (!groups.length) {
+            renderEmpty(name);
+            return;
+          }
+          renderWatermark(name);
+          var criticalTotal = 0;
+          groups.forEach(function (group) {
+            (group.reports || []).forEach(function (report) { criticalTotal += Number(report.criticalCount || 0); });
+          });
+          var html = '<div class="welcome"><span>您好，<strong>' + esc(name) + "</strong></span>" +
+            '<button id="logout" type="button">切换查询</button></div>';
+          if (criticalTotal > 0) {
+            html += '<div class="critical">您有 ' + criticalTotal + " 项危急值结果，请尽快联系医生。</div>";
+          }
+          html += '<div id="visits"></div>';
+          app.innerHTML = html;
+          var visits = document.getElementById("visits");
+          groups.forEach(function (group, groupIndex) {
+            var visit = document.createElement("section");
+            visit.className = "visit";
+            var reportCount = (group.reports || []).length;
+            visit.innerHTML =
+              '<button class="visit-head" type="button">' +
+                '<span><span class="date">' + esc(group.visitDate) + " 就诊</span>" +
+                '<div class="meta">' + reportCount + ' 份报告</div></span>' +
+                '<span class="chevron">›</span>' +
+              "</button>" +
+              '<div class="visit-body"></div>';
+            var head = visit.querySelector(".visit-head");
+            var body = visit.querySelector(".visit-body");
+            head.addEventListener("click", function () {
+              visit.classList.toggle("open");
+              if (visit.classList.contains("open") && !body.dataset.rendered) {
+                body.dataset.rendered = "1";
+                (group.reports || []).forEach(function (report) { body.appendChild(reportCard(report)); });
+              }
+            });
+            visits.appendChild(visit);
+          });
+          document.getElementById("logout").addEventListener("click", logout);
+        }
+
+        function reportCard(report) {
+          var card = document.createElement("article");
+          card.className = "report";
+          var critical = Number(report.criticalCount || 0);
+          var abnormal = Number(report.abnormalCount || 0);
+          var badges = "";
+          if (critical > 0) badges += '<span class="badge danger">危急 ' + critical + "</span>";
+          if (abnormal > 0) badges += '<span class="badge warn">异常 ' + abnormal + "</span>";
+          if (!badges) badges = '<span class="badge info">未见异常</span>';
+          card.innerHTML =
+            '<button class="report-head" type="button">' +
+              '<span><div class="report-title">' + esc(report.templateName || "检验报告") + "</div>" +
+              '<div class="report-sub">' + esc(report.reportDate || "") + "</div></span>" +
+              '<span class="badges">' + badges + "</span>" +
+            "</button>" +
+            '<div class="report-body"></div>';
+          var head = card.querySelector(".report-head");
+          var body = card.querySelector(".report-body");
+          head.addEventListener("click", function () {
+            card.classList.toggle("open");
+            if (!card.classList.contains("open") || body.dataset.loaded) return;
+            body.dataset.loaded = "1";
+            body.innerHTML = '<p style="color:#5f6f73;font-size:13px">加载中…</p>';
+            api("/lab-api/reports/" + encodeURIComponent(report.reportId)).then(function (result) {
+              if (result.status === 200 && result.payload && result.payload.data) {
+                body.innerHTML = (result.payload.data.metrics || []).map(metricRow).join("") ||
+                  '<p style="color:#5f6f73;font-size:13px">暂无指标</p>';
+                return;
+              }
+              body.dataset.loaded = "";
+              body.innerHTML = '<p style="color:#b91c1c;font-size:13px">' + esc(messageOf(result, "报告加载失败")) + "</p>";
+            }).catch(function () {
+              body.dataset.loaded = "";
+              body.innerHTML = '<p style="color:#b91c1c;font-size:13px">网络异常，请稍后重试</p>';
+            });
+          });
+          return card;
         }
 
         function parseRange(reference) {
           var match = String(reference || "").match(/(-?\d+(?:\.\d+)?)\s*[-~至]\s*(-?\d+(?:\.\d+)?)/);
-          if (match) return { low: Number(match[1]), high: Number(match[2]) };
-          return null;
+          return match ? { low: Number(match[1]), high: Number(match[2]) } : null;
         }
 
         function metricRow(metric) {
           var severity = metric.severity || "NORMAL";
           var critical = metric.critical === true || severity === "CRITICAL";
-          var abnormal = !critical && (severity === "ABNORMAL" || severity === "LOW" || severity === "HIGH");
+          var abnormal = !critical && severity === "ABNORMAL";
           var numeric = parseFloat(String(metric.value).replace(/[^\d.\-]/g, ""));
           var range = parseRange(metric.reference);
           var arrow = "";
           if (!critical && !abnormal && range && !isNaN(numeric)) {
-            if (numeric < range.low) {
-              abnormal = true;
-              arrow = '<span class="arrow">↓</span>';
-            } else if (numeric > range.high) {
-              abnormal = true;
-              arrow = '<span class="arrow">↑</span>';
-            }
+            if (numeric < range.low) { abnormal = true; arrow = '<span class="arrow">↓</span>'; }
+            else if (numeric > range.high) { abnormal = true; arrow = '<span class="arrow">↑</span>'; }
           }
-          if (critical) arrow = "";
-          var badge = critical
-            ? '<span class="badge danger">危急值</span>'
-            : abnormal
-              ? '<span class="badge warn">异常</span>'
-              : "";
           return (
-            '<div class="metric ' +
-            (critical ? "critical" : abnormal ? "abnormal" : "") +
-            '">' +
-            '<div class="name">' +
-            escapeHtml(metric.name) +
-            "</div>" +
-            '<div class="value">' +
-            escapeHtml(metric.value) +
-            (metric.unit ? "<em>" + escapeHtml(metric.unit) + "</em>" : "") +
-            arrow +
-            badge +
-            "</div>" +
-            '<div class="ref">' +
-            (metric.reference ? "参考 " + escapeHtml(metric.reference) : "") +
-            "</div>" +
+            '<div class="metric ' + (critical ? "critical" : abnormal ? "abnormal" : "") + '">' +
+              '<div class="name">' + esc(metric.name) + "</div>" +
+              '<div class="value">' + esc(metric.value) +
+                (metric.unit ? "<em>" + esc(metric.unit) + "</em>" : "") + arrow +
+                (critical ? '<span class="badge danger" style="margin-left:6px">危急值</span>' : "") +
+              "</div>" +
+              '<div class="ref">' + (metric.reference ? "参考 " + esc(metric.reference) : "") + "</div>" +
             "</div>"
           );
         }
 
-        function render(data) {
-          var patient = data.patient || {};
-          var report = data.report || {};
-          var metrics = Array.isArray(report.metrics) ? report.metrics : [];
-          var criticalCount = Number(report.criticalCount || 0);
-          var criticalHtml = criticalCount
-            ? '<div class="critical">本报告存在 ' +
-              criticalCount +
-              " 项危急值，请尽快联系医生处理。</div>"
-            : "";
-          var patientHtml =
-            '<section class="card"><h2>患者信息<span>' +
-            escapeHtml(report.templateName || "") +
-            "</span></h2>" +
-            '<div class="patient-grid">' +
-            "<div><label>姓名</label>" +
-            escapeHtml(patient.name || "") +
-            "</div>" +
-            "<div><label>性别 / 年龄</label>" +
-            escapeHtml((patient.gender || "—") + " / " + (patient.age || "—")) +
-            "</div>" +
-            "<div><label>门诊号</label>" +
-            escapeHtml(patient.caseTokenMasked || "—") +
-            "</div>" +
-            "<div><label>报告日期</label>" +
-            escapeHtml(report.reportDate || "—") +
-            "</div>" +
-            "</div></section>";
-          var metricsHtml =
-            '<section class="card"><h2>检验指标<span>共 ' +
-            metrics.length +
-            " 项</span></h2>" +
-            (metrics.length ? metrics.map(metricRow).join("") : '<p style="color:#5f6f73">暂无指标</p>') +
-            "</section>";
-          content.innerHTML = criticalHtml + patientHtml + metricsHtml;
-          renderWatermark(
-            (patient.name || "患者") +
-              " · " +
-              (data.viewedAt || "").slice(5, 16) +
-              " · 仅供本人查阅"
-          );
+        function renderEmpty(name) {
+          renderWatermark(name);
+          app.innerHTML =
+            '<div class="welcome"><span>您好，<strong>' + esc(name) + "</strong></span>" +
+            '<button id="logout" type="button">切换查询</button></div>' +
+            '<section class="card empty-state"><strong>暂无可查看报告</strong>' +
+            "<div>报告完成后会自动同步，请以医院通知为准。</div></section>";
+          document.getElementById("logout").addEventListener("click", logout);
         }
 
-        var token = new URLSearchParams(location.search).get("token");
-        if (!token) {
-          showState("!", "链接不完整", "请重新扫描医院提供的二维码，或联系检验科。");
-          return;
+        function logout() {
+          api("/lab-api/logout", { method: "POST" }).then(function () { renderLogin(""); });
         }
-        fetch("/lab-api/reports/" + encodeURIComponent(token), { headers: { Accept: "application/json" } })
-          .then(function (response) {
-            return response.text().then(function (text) {
-              var payload = null;
-              try {
-                payload = JSON.parse(text);
-              } catch (error) {
-                payload = null;
-              }
-              return { status: response.status, payload: payload };
-            });
-          })
-          .then(function (result) {
-            if (result.status === 200 && result.payload && result.payload.data) {
-              render(result.payload.data);
-              return;
-            }
-            if (result.status === 410) {
-              showState("⏱", "链接已失效", "该报告已撤销或超过 24 小时有效期，请重新扫码或联系医院。");
-              return;
-            }
-            if (result.status === 429) {
-              showState("!", "访问过于频繁", "请稍后再试，或联系检验科协助查询。");
-              return;
-            }
-            showState("?", "未找到报告", "链接无效，请确认二维码来自本院，或联系检验科。");
-          })
-          .catch(function () {
-            showState("!", "网络异常", "请检查网络后重试，或联系检验科。");
-          });
+
+        api("/lab-api/reports").then(function (result) {
+          if (result.status === 200 && result.payload && result.payload.data) {
+            renderList(result.payload.data);
+            return;
+          }
+          renderLogin("");
+        }).catch(function () { renderLogin(""); });
       })();
     </script>
   </body>

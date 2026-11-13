@@ -866,47 +866,28 @@ export const savePreAiLabReportApi = (
   }
 ) => jsonRequest<PreAiWorkspace>(`/pre-ai/encounters/${encodeURIComponent(encounterId)}/lab-reports`, "POST", payload);
 
-export interface LabPortalPublicationResult {
-  publicationId: string;
-  token: string;
-  url: string;
-  expiresAt: string;
-  pushStatus: string;
-}
-
-export interface LabPortalPublicationRow {
-  id: string;
-  reportId: string;
-  reportVersion: number;
-  expiresAt: string;
-  revokedAt: string | null;
-  pushStatus: string;
+export interface LabPortalSyncStatus {
+  encounterId: string;
+  identityType?: string;
+  status: "NOT_SYNCED" | "WAITING" | "PENDING" | "SENT" | "FAILED" | "NO_IDENTITY";
+  reportCount: number;
   attempts: number;
-  lastError: string | null;
-  publishedBy: string;
-  publishedAt: string;
+  lastError: string;
+  updatedAt: string;
 }
 
-export const publishLabReportApi = (encounterId: string, reportId: string) =>
-  jsonRequest<LabPortalPublicationResult>(
-    `/lab-portal/encounters/${encodeURIComponent(encounterId)}/reports/${encodeURIComponent(reportId)}/publish`,
-    "POST",
-    {}
-  );
-
-export const revokeLabPortalPublicationApi = (publicationId: string) =>
-  jsonRequest<{ publicationId: string; revoked: boolean }>(
-    `/lab-portal/publications/${encodeURIComponent(publicationId)}/revoke`,
-    "POST",
-    {}
-  );
-
-export const getLabPortalPublicationsApi = async (encounterId: string) => {
-  const result = await clinicFetch(`/lab-portal/encounters/${encodeURIComponent(encounterId)}/publications`, {
+export const getLabPortalSyncApi = async (encounterId: string) => {
+  const result = await clinicFetch(`/lab-portal/encounters/${encodeURIComponent(encounterId)}/status`, {
     headers: authHeaders()
   });
-  return clinicResponse(await parseClinicApiResponse<{ list: LabPortalPublicationRow[] }>(result));
+  return clinicResponse(await parseClinicApiResponse<LabPortalSyncStatus>(result));
 };
+
+export const revokeLabPortalSyncApi = (encounterId: string) =>
+  jsonRequest<LabPortalSyncStatus>(`/lab-portal/encounters/${encodeURIComponent(encounterId)}/revoke`, "POST", {});
+
+export const resyncLabPortalApi = (encounterId: string) =>
+  jsonRequest<LabPortalSyncStatus>(`/lab-portal/encounters/${encodeURIComponent(encounterId)}/resync`, "POST", {});
 
 export interface PreAiLabOcrItem {
   key?: string;

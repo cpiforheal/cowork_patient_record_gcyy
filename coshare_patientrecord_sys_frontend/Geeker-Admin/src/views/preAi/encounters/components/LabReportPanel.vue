@@ -100,15 +100,13 @@
         退回检验报告
       </el-button>
       <div></div>
-      <el-button
-        v-if="isPublisherRole"
-        type="success"
-        plain
-        :disabled="!canPublish"
-        :title="publishHint"
-        @click="publishVisible = true"
-        >发布给患者</el-button
-      >
+      <span v-if="isPublisherRole" class="lab-portal-sync">
+        患者端：
+        <el-tag size="small" :type="syncTone">{{ syncLabel }}</el-tag>
+        <el-button link size="small" @click="loadSync">刷新</el-button>
+        <el-button link size="small" @click="resync">重新同步</el-button>
+        <el-button v-if="canRevoke" link size="small" type="danger" @click="revokeSync">撤回</el-button>
+      </span>
       <el-button
         v-if="canComplete"
         type="primary"
@@ -118,21 +116,16 @@
         >完成并交接</el-button
       >
     </footer>
-    <LabReportPublishDialog
-      v-model="publishVisible"
-      :encounter-id="workspace.encounter.id"
-      :report-id="activeReport?.id || ''"
-      :report-label="activeReport ? `${activeReport.templateName} · ${activeReport.reportDate}` : ''"
-    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { LabReportMetricSnapshot, PreAiAuxiliaryTask, PreAiWorkspace } from "@/api/modules/clinic";
 import { materializeLabMetrics } from "@/views/workbench/labReport/templates";
 import { useUserStore } from "@/stores/modules/user";
-import LabReportPublishDialog from "./LabReportPublishDialog.vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { getLabPortalSyncApi, revokeLabPortalSyncApi, resyncLabPortalApi, type LabPortalSyncStatus } from "@/api/modules/clinic/preAi";
 
 const props = defineProps<{
   workspace: PreAiWorkspace;
@@ -160,19 +153,85 @@ const emit = defineEmits<{
 }>();
 
 const userStore = useUserStore();
-const publishVisible = ref(false);
 const activeReport = computed(
   () => props.workspace.labReports.find(report => report.id === props.activeReportId) || props.workspace.labReports[0]
 );
 const isPublisherRole = computed(() => ["admin", "doctor"].includes(userStore.userInfo.role || ""));
-const canPublish = computed(
-  () => isPublisherRole.value && props.labTask?.status === "COMPLETED" && Boolean(activeReport.value)
-);
-const publishHint = computed(() => {
-  if (!activeReport.value) return "暂无有效化验报告";
-  if (props.labTask?.status !== "COMPLETED") return "化验报告完成并交接后可发布给患者";
-  return "生成患者二维码，24 小时内可查看";
+const syncStatus = ref<LabPortalSyncStatus>();
+const syncLoading = ref(false);
+const syncLabel = computed(() => {
+  if (syncLoading.value) return "加载中";
+  const status = syncStatus.value?.status;
+  return (
+    {
+      NOT_SYNCED: "待化验完成",
+      WAITING: "待化验完成",
+      PENDING: "待推送",
+      SENT: `已同步${syncStatus.value?.reportCount ? ` ${syncStatus.value.reportCount} 份` : ""}`,
+      FAILED: "推送失败",
+      NO_IDENTITY: "缺少身份证和手机号"
+    }[status || "NOT_SYNCED"] || "待化验完成"
+  );
 });
+const syncTone = computed<"success" | "warning" | "danger" | "info">(() => {
+  const status = syncStatus.value?.status;
+  if (status === "SENT") return "success";
+  if (status === "FAILED" || status === "NO_IDENTITY") return "danger";
+  if (status === "PENDING") return "warning";
+  return "info";
+});
+const canRevoke = computed(() => ["SENT", "PENDING", "FAILED"].includes(syncStatus.value?.status || ""));
+
+const loadSync = async () => {
+  const encounterId = props.workspace.encounter.id;
+  if (!encounterId || !isPublisherRole.value) return;
+  syncLoading.value = true;
+  try {
+    const { data } = await getLabPortalSyncApi(encounterId);
+    syncStatus.value = data;
+  } catch {
+    syncStatus.value = undefined;
+  } finally {
+    syncLoading.value = false;
+  }
+};
+
+const revokeSync = async () => {
+  const encounterId = props.workspace.encounter.id;
+  try {
+    await ElMessageBox.confirm("撤回后患者将立即无法查看本次报告，是否继续？", "撤回患者可见", {
+      type: "warning",
+      confirmButtonText: "撤回",
+      cancelButtonText: "取消"
+    });
+  } catch {
+    return;
+  }
+  try {
+    await revokeLabPortalSyncApi(encounterId);
+    ElMessage.success("已撤回患者可见报告");
+    await loadSync();
+  } catch (error: any) {
+    ElMessage.error(error?.message || "撤回失败");
+  }
+};
+
+const resync = async () => {
+  const encounterId = props.workspace.encounter.id;
+  try {
+    await resyncLabPortalApi(encounterId);
+    ElMessage.success("已重新同步，稍后自动推送");
+    await loadSync();
+  } catch (error: any) {
+    ElMessage.error(error?.message || "重新同步失败");
+  }
+};
+
+watch(
+  () => [props.workspace.encounter.id, props.labTask?.status, props.workspace.labReports.length] as const,
+  () => void loadSync(),
+  { immediate: true }
+);
 </script>
 
 <style scoped lang="scss">
@@ -209,6 +268,13 @@ const publishHint = computed(() => {
 }
 .panel-actions :deep(.el-button) {
   margin-left: 0;
+}
+.lab-portal-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 .compact-actions {
   flex: 0 0 auto;
